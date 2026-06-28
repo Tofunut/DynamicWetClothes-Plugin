@@ -4,52 +4,51 @@
 
 namespace
 {
-	TArray<TPair<FDelegateHandle, FDWCSourceAutoBindingProvider>>& GetDynamicWetSourceAutoBindingProviders()
-	{
-		static TArray<TPair<FDelegateHandle, FDWCSourceAutoBindingProvider>> Providers;
-		return Providers;
-	}
-}
+    TArray<TPair<FDelegateHandle, FDWCSourceAutoBindingProvider>>& GetDynamicWetSourceAutoBindingProviders()
+    {
+        static TArray<TPair<FDelegateHandle, FDWCSourceAutoBindingProvider>> Providers;
+        return Providers;
+    }
+} // namespace
 
 FDelegateHandle FDynamicWetSourceAutoBindingRegistry::RegisterProvider(FDWCSourceAutoBindingProvider Provider)
 {
-	if (!Provider.IsBound())
-	{
-		return FDelegateHandle();
-	}
+    if (!Provider.IsBound())
+    {
+        return FDelegateHandle();
+    }
 
-	FDelegateHandle ProviderHandle(FDelegateHandle::GenerateNewHandle);
-	GetDynamicWetSourceAutoBindingProviders().Emplace(ProviderHandle, MoveTemp(Provider));
-	return ProviderHandle;
+    FDelegateHandle ProviderHandle(FDelegateHandle::GenerateNewHandle);
+    GetDynamicWetSourceAutoBindingProviders().Emplace(ProviderHandle, MoveTemp(Provider));
+    return ProviderHandle;
 }
 
 void FDynamicWetSourceAutoBindingRegistry::UnregisterProvider(FDelegateHandle ProviderHandle)
 {
-	if (!ProviderHandle.IsValid())
-	{
-		return;
-	}
+    if (!ProviderHandle.IsValid())
+    {
+        return;
+    }
 
-	TArray<TPair<FDelegateHandle, FDWCSourceAutoBindingProvider>>& Providers =
-		GetDynamicWetSourceAutoBindingProviders();
+    TArray<TPair<FDelegateHandle, FDWCSourceAutoBindingProvider>>& Providers =
+        GetDynamicWetSourceAutoBindingProviders();
 
-	Providers.RemoveAll(
-		[ProviderHandle](const TPair<FDelegateHandle, FDWCSourceAutoBindingProvider>& Provider)
-		{
-			return Provider.Key == ProviderHandle;
-		}
-	);
+    Providers.RemoveAll(
+        [ProviderHandle](const TPair<FDelegateHandle, FDWCSourceAutoBindingProvider>& Provider)
+        {
+            return Provider.Key == ProviderHandle;
+        });
 }
 
 bool FDynamicWetSourceAutoBindingRegistry::ApplyAutoBindings(UDynamicWetSourceComponent& SourceComponent)
 {
-	for (const TPair<FDelegateHandle, FDWCSourceAutoBindingProvider>& Provider : GetDynamicWetSourceAutoBindingProviders())
-	{
-		if (Provider.Value.IsBound() && Provider.Value.Execute(SourceComponent))
-		{
-			return true;
-		}
-	}
+    for (const TPair<FDelegateHandle, FDWCSourceAutoBindingProvider>& Provider : GetDynamicWetSourceAutoBindingProviders())
+    {
+        if (Provider.Value.IsBound() && Provider.Value.Execute(SourceComponent))
+        {
+            return true;
+        }
+    }
 
-	return false;
+    return false;
 }

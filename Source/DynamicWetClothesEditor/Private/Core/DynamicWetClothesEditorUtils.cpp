@@ -12,101 +12,101 @@
 
 namespace
 {
-	bool ConvertDirectoryToContentPath(const FString& Directory, FString& OutContentPath)
-	{
-		FString ProjectContentDirectory = FPaths::ConvertRelativePathToFull(FPaths::ProjectContentDir());
-		FString NormalizedProjectContentDirectory = ProjectContentDirectory;
-		FString NormalizedDirectory = Directory;
-		FPaths::NormalizeDirectoryName(NormalizedProjectContentDirectory);
-		FPaths::NormalizeDirectoryName(NormalizedDirectory);
+    bool ConvertDirectoryToContentPath(const FString& Directory, FString& OutContentPath)
+    {
+        FString ProjectContentDirectory = FPaths::ConvertRelativePathToFull(FPaths::ProjectContentDir());
+        FString NormalizedProjectContentDirectory = ProjectContentDirectory;
+        FString NormalizedDirectory = Directory;
+        FPaths::NormalizeDirectoryName(NormalizedProjectContentDirectory);
+        FPaths::NormalizeDirectoryName(NormalizedDirectory);
 
-		if (!NormalizedDirectory.StartsWith(NormalizedProjectContentDirectory))
-		{
-			return false;
-		}
+        if (!NormalizedDirectory.StartsWith(NormalizedProjectContentDirectory))
+        {
+            return false;
+        }
 
-		FString RelativeDirectory = NormalizedDirectory.RightChop(NormalizedProjectContentDirectory.Len());
-		RelativeDirectory.RemoveFromStart(TEXT("/"));
-		RelativeDirectory.RemoveFromStart(TEXT("\\"));
-		RelativeDirectory.ReplaceInline(TEXT("\\"), TEXT("/"));
+        FString RelativeDirectory = NormalizedDirectory.RightChop(NormalizedProjectContentDirectory.Len());
+        RelativeDirectory.RemoveFromStart(TEXT("/"));
+        RelativeDirectory.RemoveFromStart(TEXT("\\"));
+        RelativeDirectory.ReplaceInline(TEXT("\\"), TEXT("/"));
 
-		OutContentPath = RelativeDirectory.IsEmpty()
-			? TEXT("/Game")
-			: FString::Printf(TEXT("/Game/%s"), *RelativeDirectory);
-		return true;
-	}
-}
+        OutContentPath = RelativeDirectory.IsEmpty()
+                             ? TEXT("/Game")
+                             : FString::Printf(TEXT("/Game/%s"), *RelativeDirectory);
+        return true;
+    }
+} // namespace
 
 TArray<FString> DynamicWetClothesEditorUtils::BuildUniqueProfileSearchPaths(const TArray<FString>& AdditionalPaths)
 {
-	TArray<FString> Result;
-	Result.Add(DefaultWetnessProfileLibraryPath);
+    TArray<FString> Result;
+    Result.Add(DefaultWetnessProfileLibraryPath);
 
-	for (const FString& AdditionalPath : AdditionalPaths)
-	{
-		if (AdditionalPath.IsEmpty())
-		{
-			continue;
-		}
+    for (const FString& AdditionalPath : AdditionalPaths)
+    {
+        if (AdditionalPath.IsEmpty())
+        {
+            continue;
+        }
 
-		if (!Result.Contains(AdditionalPath))
-		{
-			Result.Add(AdditionalPath);
-		}
-	}
+        if (!Result.Contains(AdditionalPath))
+        {
+            Result.Add(AdditionalPath);
+        }
+    }
 
-	return Result;
+    return Result;
 }
 
 bool DynamicWetClothesEditorUtils::PromptForContentFolder(FString& OutContentPath)
 {
-	IDesktopPlatform* DesktopPlatform = FDesktopPlatformModule::Get();
-	if (DesktopPlatform == nullptr)
-	{
-		return false;
-	}
+    IDesktopPlatform* DesktopPlatform = FDesktopPlatformModule::Get();
+    if (DesktopPlatform == nullptr)
+    {
+        return false;
+    }
 
-	const void* ParentWindowHandle = FSlateApplication::IsInitialized()
-		? FSlateApplication::Get().FindBestParentWindowHandleForDialogs(nullptr)
-		: nullptr;
+    const void* ParentWindowHandle = FSlateApplication::IsInitialized()
+                                         ? FSlateApplication::Get().FindBestParentWindowHandleForDialogs(nullptr)
+                                         : nullptr;
 
-	FString SelectedDirectory;
-	const bool bFolderSelected = DesktopPlatform->OpenDirectoryDialog(
-		ParentWindowHandle,
-		TEXT("Choose a folder inside this project's Content directory"),
-		FPaths::ConvertRelativePathToFull(FPaths::ProjectContentDir()),
-		SelectedDirectory);
+    FString    SelectedDirectory;
+    const bool bFolderSelected = DesktopPlatform->OpenDirectoryDialog(
+        ParentWindowHandle,
+        TEXT("Choose a folder inside this project's Content directory"),
+        FPaths::ConvertRelativePathToFull(FPaths::ProjectContentDir()),
+        SelectedDirectory);
 
-	if (!bFolderSelected)
-	{
-		return false;
-	}
+    if (!bFolderSelected)
+    {
+        return false;
+    }
 
-	if (!ConvertDirectoryToContentPath(SelectedDirectory, OutContentPath))
-	{
-		FMessageDialog::Open(
-			EAppMsgType::Ok,
-			FText::FromString(TEXT("Please choose a folder inside this project's Content directory.")));
-		return false;
-	}
+    if (!ConvertDirectoryToContentPath(SelectedDirectory, OutContentPath))
+    {
+        FMessageDialog::Open(
+            EAppMsgType::Ok,
+            FText::FromString(TEXT("Please choose a folder inside this project's Content directory.")));
+        return false;
+    }
 
-	return true;
+    return true;
 }
 
 bool DynamicWetClothesEditorUtils::SaveAsset(UObject* Asset)
 {
-	if (Asset == nullptr)
-	{
-		return false;
-	}
+    if (Asset == nullptr)
+    {
+        return false;
+    }
 
-	UPackage* Package = Asset->GetOutermost();
-	if (Package == nullptr)
-	{
-		return false;
-	}
+    UPackage* Package = Asset->GetOutermost();
+    if (Package == nullptr)
+    {
+        return false;
+    }
 
-	TArray<UPackage*> PackagesToSave;
-	PackagesToSave.Add(Package);
-	return FEditorFileUtils::PromptForCheckoutAndSave(PackagesToSave, false, false) == FEditorFileUtils::PR_Success;
+    TArray<UPackage*> PackagesToSave;
+    PackagesToSave.Add(Package);
+    return FEditorFileUtils::PromptForCheckoutAndSave(PackagesToSave, false, false) == FEditorFileUtils::PR_Success;
 }

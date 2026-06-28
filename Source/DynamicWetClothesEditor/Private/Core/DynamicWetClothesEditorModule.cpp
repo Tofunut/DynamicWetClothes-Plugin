@@ -3,16 +3,16 @@
 
 class FDynamicWetClothesEditorModule : public IModuleInterface
 {
-public:
-	virtual void StartupModule() override
-	{
-		FDynamicWetClothesEditorStyle::Initialize();
-	}
+  public:
+    virtual void StartupModule() override
+    {
+        FDynamicWetClothesEditorStyle::Initialize();
+    }
 
-	virtual void ShutdownModule() override
-	{
-		FDynamicWetClothesEditorStyle::Shutdown();
-	}
+    virtual void ShutdownModule() override
+    {
+        FDynamicWetClothesEditorStyle::Shutdown();
+    }
 };
 
 IMPLEMENT_MODULE(FDynamicWetClothesEditorModule, DynamicWetClothesEditor)

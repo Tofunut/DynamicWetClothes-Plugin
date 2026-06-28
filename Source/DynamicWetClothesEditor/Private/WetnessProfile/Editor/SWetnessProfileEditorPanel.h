@@ -9,20 +9,20 @@ class UWetnessProfile;
 
 class SWetnessProfileEditorPanel : public SCompoundWidget
 {
-public:
-	SLATE_BEGIN_ARGS(SWetnessProfileEditorPanel) {}
-		SLATE_ARGUMENT(UWetnessProfile*, WetnessProfile)
-		SLATE_ARGUMENT(TSharedPtr<IDetailsView>, DetailsView)
-	SLATE_END_ARGS()
+  public:
+    SLATE_BEGIN_ARGS(SWetnessProfileEditorPanel) {}
+    SLATE_ARGUMENT(UWetnessProfile*, WetnessProfile)
+    SLATE_ARGUMENT(TSharedPtr<IDetailsView>, DetailsView)
+    SLATE_END_ARGS()
 
-	void Construct(const FArguments& InArgs);
-	void RefreshFromProfile();
+    void Construct(const FArguments& InArgs);
+    void RefreshFromProfile();
 
-private:
-	FReply HandleSaveClicked();
+  private:
+    FReply HandleSaveClicked();
 
-private:
-	TWeakObjectPtr<UWetnessProfile> WetnessProfile;
-	TSharedPtr<IDetailsView> DetailsView;
-	TSharedPtr<SWetnessProfileViewport> PreviewViewport;
+  private:
+    TWeakObjectPtr<UWetnessProfile>     WetnessProfile;
+    TSharedPtr<IDetailsView>            DetailsView;
+    TSharedPtr<SWetnessProfileViewport> PreviewViewport;
 };

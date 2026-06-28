@@ -8,14 +8,14 @@ class ISlateStyle;
 
 class FDynamicWetClothesEditorStyle
 {
-public:
-	static void Initialize();
-	static void Shutdown();
+  public:
+    static void Initialize();
+    static void Shutdown();
 
-	static FName GetStyleSetName();
-	static const ISlateStyle& Get();
-	static const FSlateBrush* GetBrush(const FName BrushName);
+    static FName              GetStyleSetName();
+    static const ISlateStyle& Get();
+    static const FSlateBrush* GetBrush(const FName BrushName);
 
-private:
-	static TSharedPtr<FSlateStyleSet> StyleSet;
+  private:
+    static TSharedPtr<FSlateStyleSet> StyleSet;
 };

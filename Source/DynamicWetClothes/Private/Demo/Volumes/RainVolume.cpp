@@ -8,41 +8,41 @@
 
 ARainVolume::ARainVolume()
 {
-	PrimaryActorTick.bCanEverTick = false;
+    PrimaryActorTick.bCanEverTick = false;
 
-	RainBounds = CreateDefaultSubobject<UBoxComponent>(TEXT("RainBounds"));
-	SetRootComponent(RainBounds);
+    RainBounds = CreateDefaultSubobject<UBoxComponent>(TEXT("RainBounds"));
+    SetRootComponent(RainBounds);
 
-	RainBounds->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
-	RainBounds->SetCollisionObjectType(ECC_WorldDynamic);
-	RainBounds->SetCollisionResponseToAllChannels(ECR_Ignore);
-	RainBounds->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
-	RainBounds->SetGenerateOverlapEvents(true);
-	RainBounds->SetBoxExtent(FVector(500.0f, 500.0f, 500.0f));
+    RainBounds->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+    RainBounds->SetCollisionObjectType(ECC_WorldDynamic);
+    RainBounds->SetCollisionResponseToAllChannels(ECR_Ignore);
+    RainBounds->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
+    RainBounds->SetGenerateOverlapEvents(true);
+    RainBounds->SetBoxExtent(FVector(500.0f, 500.0f, 500.0f));
 
-	RainNiagara = CreateDefaultSubobject<UNiagaraComponent>(TEXT("RainNiagara"));
-	RainNiagara->SetupAttachment(RootComponent);
+    RainNiagara = CreateDefaultSubobject<UNiagaraComponent>(TEXT("RainNiagara"));
+    RainNiagara->SetupAttachment(RootComponent);
 
-	DynamicWetSource = CreateDefaultSubobject<UDynamicWetSourceComponent>(TEXT("DynamicWetSource"));
+    DynamicWetSource = CreateDefaultSubobject<UDynamicWetSourceComponent>(TEXT("DynamicWetSource"));
 }
 
 void ARainVolume::BeginPlay()
 {
-	Super::BeginPlay();
+    Super::BeginPlay();
 
-	if (DynamicWetSource)
-	{
-		DynamicWetSource->InitializeRainVolume(RainBounds, RainNiagara);
-	}
+    if (DynamicWetSource)
+    {
+        DynamicWetSource->InitializeRainVolume(RainBounds, RainNiagara);
+    }
 }
 
 void ARainVolume::OnConstruction(const FTransform& Transform)
 {
-	Super::OnConstruction(Transform);
+    Super::OnConstruction(Transform);
 
-	if (DynamicWetSource)
-	{
-		DynamicWetSource->InitializeRainVolume(RainBounds, RainNiagara);
-		DynamicWetSource->ApplyRainNiagaraParameters();
-	}
+    if (DynamicWetSource)
+    {
+        DynamicWetSource->InitializeRainVolume(RainBounds, RainNiagara);
+        DynamicWetSource->ApplyRainNiagaraParameters();
+    }
 }

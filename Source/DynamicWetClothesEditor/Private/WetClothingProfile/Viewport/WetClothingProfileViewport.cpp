@@ -16,764 +16,759 @@
 
 namespace
 {
-	struct FQuantizedLocalVertex
-	{
-		int32 X = 0;
-		int32 Y = 0;
-		int32 Z = 0;
+    struct FQuantizedLocalVertex
+    {
+        int32 X = 0;
+        int32 Y = 0;
+        int32 Z = 0;
 
-		bool operator==(const FQuantizedLocalVertex& Other) const
-		{
-			return X == Other.X && Y == Other.Y && Z == Other.Z;
-		}
-	};
+        bool operator==(const FQuantizedLocalVertex& Other) const
+        {
+            return X == Other.X && Y == Other.Y && Z == Other.Z;
+        }
+    };
 
-	uint32 GetTypeHash(const FQuantizedLocalVertex& Vertex)
-	{
-		return HashCombine(HashCombine(::GetTypeHash(Vertex.X), ::GetTypeHash(Vertex.Y)), ::GetTypeHash(Vertex.Z));
-	}
+    uint32 GetTypeHash(const FQuantizedLocalVertex& Vertex)
+    {
+        return HashCombine(HashCombine(::GetTypeHash(Vertex.X), ::GetTypeHash(Vertex.Y)), ::GetTypeHash(Vertex.Z));
+    }
 
-	bool operator<(const FQuantizedLocalVertex& A, const FQuantizedLocalVertex& B)
-	{
-		if (A.X != B.X)
-		{
-			return A.X < B.X;
-		}
+    bool operator<(const FQuantizedLocalVertex& A, const FQuantizedLocalVertex& B)
+    {
+        if (A.X != B.X)
+        {
+            return A.X < B.X;
+        }
 
-		if (A.Y != B.Y)
-		{
-			return A.Y < B.Y;
-		}
+        if (A.Y != B.Y)
+        {
+            return A.Y < B.Y;
+        }
 
-		return A.Z < B.Z;
-	}
+        return A.Z < B.Z;
+    }
 
-	struct FQuantizedLocalEdge
-	{
-		FQuantizedLocalVertex A;
-		FQuantizedLocalVertex B;
+    struct FQuantizedLocalEdge
+    {
+        FQuantizedLocalVertex A;
+        FQuantizedLocalVertex B;
 
-		bool operator==(const FQuantizedLocalEdge& Other) const
-		{
-			return A == Other.A && B == Other.B;
-		}
-	};
+        bool operator==(const FQuantizedLocalEdge& Other) const
+        {
+            return A == Other.A && B == Other.B;
+        }
+    };
 
-	uint32 GetTypeHash(const FQuantizedLocalEdge& Edge)
-	{
-		return HashCombine(GetTypeHash(Edge.A), GetTypeHash(Edge.B));
-	}
+    uint32 GetTypeHash(const FQuantizedLocalEdge& Edge)
+    {
+        return HashCombine(GetTypeHash(Edge.A), GetTypeHash(Edge.B));
+    }
 
-	struct FWetClothingProfileSelectionEdge
-	{
-		FVector LocalStart = FVector::ZeroVector;
-		FVector LocalEnd = FVector::ZeroVector;
-		FVector LocalNormal = FVector::UpVector;
-	};
+    struct FWetClothingProfileSelectionEdge
+    {
+        FVector LocalStart = FVector::ZeroVector;
+        FVector LocalEnd = FVector::ZeroVector;
+        FVector LocalNormal = FVector::UpVector;
+    };
 
-	FVector MakeWetPartOverlayNormal(const FVector& A, const FVector& B, const FVector& C)
-	{
-		FVector Normal = FVector::CrossProduct(C - A, B - A).GetSafeNormal();
-		if (Normal.IsNearlyZero())
-		{
-			Normal = FVector::UpVector;
-		}
-		return Normal;
-	}
+    FVector MakeWetPartOverlayNormal(const FVector& A, const FVector& B, const FVector& C)
+    {
+        FVector Normal = FVector::CrossProduct(C - A, B - A).GetSafeNormal();
+        if (Normal.IsNearlyZero())
+        {
+            Normal = FVector::UpVector;
+        }
+        return Normal;
+    }
 
-	float CalculateWetPartOverlayOffset(const USkeletalMeshComponent* MeshComponent)
-	{
-		if (MeshComponent == nullptr)
-		{
-			return 0.02f;
-		}
+    float CalculateWetPartOverlayOffset(const USkeletalMeshComponent* MeshComponent)
+    {
+        if (MeshComponent == nullptr)
+        {
+            return 0.02f;
+        }
 
-		return FMath::Clamp(static_cast<float>(MeshComponent->Bounds.SphereRadius) * 0.0012f, 0.02f, 0.12f);
-	}
+        return FMath::Clamp(static_cast<float>(MeshComponent->Bounds.SphereRadius) * 0.0012f, 0.02f, 0.12f);
+    }
 
-	float CalculateSelectionOverlayHalfThickness(const USkeletalMeshComponent* MeshComponent)
-	{
-		if (MeshComponent == nullptr)
-		{
-			return 0.08f;
-		}
+    float CalculateSelectionOverlayHalfThickness(const USkeletalMeshComponent* MeshComponent)
+    {
+        if (MeshComponent == nullptr)
+        {
+            return 0.08f;
+        }
 
-		return FMath::Clamp(static_cast<float>(MeshComponent->Bounds.SphereRadius) * 0.001f, 0.025f, 0.16f);
-	}
+        return FMath::Clamp(static_cast<float>(MeshComponent->Bounds.SphereRadius) * 0.001f, 0.025f, 0.16f);
+    }
 
-	FQuantizedLocalVertex MakeQuantizedLocalVertex(const FVector& Position)
-	{
-		constexpr double QuantizeScale = 1000.0;
+    FQuantizedLocalVertex MakeQuantizedLocalVertex(const FVector& Position)
+    {
+        constexpr double QuantizeScale = 1000.0;
 
-		return FQuantizedLocalVertex{
-			static_cast<int32>(FMath::RoundToInt(Position.X * QuantizeScale)),
-			static_cast<int32>(FMath::RoundToInt(Position.Y * QuantizeScale)),
-			static_cast<int32>(FMath::RoundToInt(Position.Z * QuantizeScale))
-		};
-	}
+        return FQuantizedLocalVertex{
+            static_cast<int32>(FMath::RoundToInt(Position.X * QuantizeScale)),
+            static_cast<int32>(FMath::RoundToInt(Position.Y * QuantizeScale)),
+            static_cast<int32>(FMath::RoundToInt(Position.Z * QuantizeScale))
+        };
+    }
 
-	FQuantizedLocalEdge MakeQuantizedLocalEdge(const FVector& Start, const FVector& End)
-	{
-		FQuantizedLocalVertex QuantizedStart = MakeQuantizedLocalVertex(Start);
-		FQuantizedLocalVertex QuantizedEnd = MakeQuantizedLocalVertex(End);
+    FQuantizedLocalEdge MakeQuantizedLocalEdge(const FVector& Start, const FVector& End)
+    {
+        FQuantizedLocalVertex QuantizedStart = MakeQuantizedLocalVertex(Start);
+        FQuantizedLocalVertex QuantizedEnd = MakeQuantizedLocalVertex(End);
 
-		if (QuantizedEnd < QuantizedStart)
-		{
-			Swap(QuantizedStart, QuantizedEnd);
-		}
+        if (QuantizedEnd < QuantizedStart)
+        {
+            Swap(QuantizedStart, QuantizedEnd);
+        }
 
-		return FQuantizedLocalEdge{ QuantizedStart, QuantizedEnd };
-	}
+        return FQuantizedLocalEdge{ QuantizedStart, QuantizedEnd };
+    }
 
-	FVector MakeAnyPerpendicular(const FVector& Direction)
-	{
-		FVector Perpendicular = FVector::CrossProduct(Direction, FVector::UpVector).GetSafeNormal();
-		if (Perpendicular.IsNearlyZero())
-		{
-			Perpendicular = FVector::CrossProduct(Direction, FVector::RightVector).GetSafeNormal();
-		}
+    FVector MakeAnyPerpendicular(const FVector& Direction)
+    {
+        FVector Perpendicular = FVector::CrossProduct(Direction, FVector::UpVector).GetSafeNormal();
+        if (Perpendicular.IsNearlyZero())
+        {
+            Perpendicular = FVector::CrossProduct(Direction, FVector::RightVector).GetSafeNormal();
+        }
 
-		return Perpendicular.IsNearlyZero() ? FVector::ForwardVector : Perpendicular;
-	}
+        return Perpendicular.IsNearlyZero() ? FVector::ForwardVector : Perpendicular;
+    }
 
-	void AddSelectionOverlayVertex(
-		TArray<FVector>& Vertices,
-		TArray<FVector>& Normals,
-		TArray<FVector2D>& UVs,
-		TArray<FLinearColor>& VertexColors,
-		const FVector& Position,
-		const FVector& Normal,
-		const FLinearColor& Color)
-	{
-		Vertices.Add(Position);
-		Normals.Add(Normal);
-		UVs.Add(FVector2D::ZeroVector);
-		VertexColors.Add(Color);
-	}
+    void AddSelectionOverlayVertex(
+        TArray<FVector>&      Vertices,
+        TArray<FVector>&      Normals,
+        TArray<FVector2D>&    UVs,
+        TArray<FLinearColor>& VertexColors,
+        const FVector&        Position,
+        const FVector&        Normal,
+        const FLinearColor&   Color)
+    {
+        Vertices.Add(Position);
+        Normals.Add(Normal);
+        UVs.Add(FVector2D::ZeroVector);
+        VertexColors.Add(Color);
+    }
 
-	void AddSelectionOverlayQuad(
-		TArray<int32>& Indices,
-		int32 A,
-		int32 B,
-		int32 C,
-		int32 D)
-	{
-		Indices.Add(A);
-		Indices.Add(B);
-		Indices.Add(C);
-		Indices.Add(C);
-		Indices.Add(B);
-		Indices.Add(A);
+    void AddSelectionOverlayQuad(
+        TArray<int32>& Indices,
+        int32          A,
+        int32          B,
+        int32          C,
+        int32          D)
+    {
+        Indices.Add(A);
+        Indices.Add(B);
+        Indices.Add(C);
+        Indices.Add(C);
+        Indices.Add(B);
+        Indices.Add(A);
 
-		Indices.Add(A);
-		Indices.Add(C);
-		Indices.Add(D);
-		Indices.Add(D);
-		Indices.Add(C);
-		Indices.Add(A);
-	}
+        Indices.Add(A);
+        Indices.Add(C);
+        Indices.Add(D);
+        Indices.Add(D);
+        Indices.Add(C);
+        Indices.Add(A);
+    }
 
-	void AddSelectionOverlayEdgeMesh(
-		TArray<FVector>& Vertices,
-		TArray<int32>& Indices,
-		TArray<FVector>& Normals,
-		TArray<FVector2D>& UVs,
-		TArray<FLinearColor>& VertexColors,
-		const FWetClothingProfileSelectionEdge& Edge,
-		float HalfThickness,
-		const FLinearColor& Color)
-	{
-		const FVector EdgeDirection = (Edge.LocalEnd - Edge.LocalStart).GetSafeNormal();
-		if (EdgeDirection.IsNearlyZero())
-		{
-			return;
-		}
+    void AddSelectionOverlayEdgeMesh(
+        TArray<FVector>&                        Vertices,
+        TArray<int32>&                          Indices,
+        TArray<FVector>&                        Normals,
+        TArray<FVector2D>&                      UVs,
+        TArray<FLinearColor>&                   VertexColors,
+        const FWetClothingProfileSelectionEdge& Edge,
+        float                                   HalfThickness,
+        const FLinearColor&                     Color)
+    {
+        const FVector EdgeDirection = (Edge.LocalEnd - Edge.LocalStart).GetSafeNormal();
+        if (EdgeDirection.IsNearlyZero())
+        {
+            return;
+        }
 
-		FVector Normal = Edge.LocalNormal.GetSafeNormal();
-		if (Normal.IsNearlyZero())
-		{
-			Normal = MakeAnyPerpendicular(EdgeDirection);
-		}
+        FVector Normal = Edge.LocalNormal.GetSafeNormal();
+        if (Normal.IsNearlyZero())
+        {
+            Normal = MakeAnyPerpendicular(EdgeDirection);
+        }
 
-		FVector Side = FVector::CrossProduct(EdgeDirection, Normal).GetSafeNormal();
-		if (Side.IsNearlyZero())
-		{
-			Side = MakeAnyPerpendicular(EdgeDirection);
-			Normal = FVector::CrossProduct(Side, EdgeDirection).GetSafeNormal();
-		}
+        FVector Side = FVector::CrossProduct(EdgeDirection, Normal).GetSafeNormal();
+        if (Side.IsNearlyZero())
+        {
+            Side = MakeAnyPerpendicular(EdgeDirection);
+            Normal = FVector::CrossProduct(Side, EdgeDirection).GetSafeNormal();
+        }
 
-		const FVector CenterOffset = Normal * (HalfThickness * 1.5f);
-		const FVector Start = Edge.LocalStart + CenterOffset;
-		const FVector End = Edge.LocalEnd + CenterOffset;
-		const int32 BaseIndex = Vertices.Num();
+        const FVector CenterOffset = Normal * (HalfThickness * 1.5f);
+        const FVector Start = Edge.LocalStart + CenterOffset;
+        const FVector End = Edge.LocalEnd + CenterOffset;
+        const int32   BaseIndex = Vertices.Num();
 
-		const FVector Corners[8] =
-		{
-			Start + Side * HalfThickness + Normal * HalfThickness,
-			Start - Side * HalfThickness + Normal * HalfThickness,
-			Start - Side * HalfThickness - Normal * HalfThickness,
-			Start + Side * HalfThickness - Normal * HalfThickness,
-			End + Side * HalfThickness + Normal * HalfThickness,
-			End - Side * HalfThickness + Normal * HalfThickness,
-			End - Side * HalfThickness - Normal * HalfThickness,
-			End + Side * HalfThickness - Normal * HalfThickness
-		};
+        const FVector Corners[8] = {
+            Start + Side * HalfThickness + Normal * HalfThickness,
+            Start - Side * HalfThickness + Normal * HalfThickness,
+            Start - Side * HalfThickness - Normal * HalfThickness,
+            Start + Side * HalfThickness - Normal * HalfThickness,
+            End + Side * HalfThickness + Normal * HalfThickness,
+            End - Side * HalfThickness + Normal * HalfThickness,
+            End - Side * HalfThickness - Normal * HalfThickness,
+            End + Side * HalfThickness - Normal * HalfThickness
+        };
 
-		for (int32 CornerIndex = 0; CornerIndex < 8; ++CornerIndex)
-		{
-			FVector VertexNormal = (Corners[CornerIndex] - ((CornerIndex < 4) ? Start : End)).GetSafeNormal();
-			if (VertexNormal.IsNearlyZero())
-			{
-				VertexNormal = Normal;
-			}
+        for (int32 CornerIndex = 0; CornerIndex < 8; ++CornerIndex)
+        {
+            FVector VertexNormal = (Corners[CornerIndex] - ((CornerIndex < 4) ? Start : End)).GetSafeNormal();
+            if (VertexNormal.IsNearlyZero())
+            {
+                VertexNormal = Normal;
+            }
 
-			AddSelectionOverlayVertex(Vertices, Normals, UVs, VertexColors, Corners[CornerIndex], VertexNormal, Color);
-		}
+            AddSelectionOverlayVertex(Vertices, Normals, UVs, VertexColors, Corners[CornerIndex], VertexNormal, Color);
+        }
 
-		AddSelectionOverlayQuad(Indices, BaseIndex + 0, BaseIndex + 4, BaseIndex + 5, BaseIndex + 1);
-		AddSelectionOverlayQuad(Indices, BaseIndex + 1, BaseIndex + 5, BaseIndex + 6, BaseIndex + 2);
-		AddSelectionOverlayQuad(Indices, BaseIndex + 2, BaseIndex + 6, BaseIndex + 7, BaseIndex + 3);
-		AddSelectionOverlayQuad(Indices, BaseIndex + 3, BaseIndex + 7, BaseIndex + 4, BaseIndex + 0);
-		AddSelectionOverlayQuad(Indices, BaseIndex + 0, BaseIndex + 1, BaseIndex + 2, BaseIndex + 3);
-		AddSelectionOverlayQuad(Indices, BaseIndex + 4, BaseIndex + 7, BaseIndex + 6, BaseIndex + 5);
-	}
-}
+        AddSelectionOverlayQuad(Indices, BaseIndex + 0, BaseIndex + 4, BaseIndex + 5, BaseIndex + 1);
+        AddSelectionOverlayQuad(Indices, BaseIndex + 1, BaseIndex + 5, BaseIndex + 6, BaseIndex + 2);
+        AddSelectionOverlayQuad(Indices, BaseIndex + 2, BaseIndex + 6, BaseIndex + 7, BaseIndex + 3);
+        AddSelectionOverlayQuad(Indices, BaseIndex + 3, BaseIndex + 7, BaseIndex + 4, BaseIndex + 0);
+        AddSelectionOverlayQuad(Indices, BaseIndex + 0, BaseIndex + 1, BaseIndex + 2, BaseIndex + 3);
+        AddSelectionOverlayQuad(Indices, BaseIndex + 4, BaseIndex + 7, BaseIndex + 6, BaseIndex + 5);
+    }
+} // namespace
 
 void SWetClothingProfileViewport::Construct(const FArguments& InArgs)
 {
-	WetClothingProfile = InArgs._WetClothingProfile;
-	OnIslandPicked = InArgs._OnIslandPicked;
-	PreviewScene = MakeShared<FAdvancedPreviewScene>(FPreviewScene::ConstructionValues());
+    WetClothingProfile = InArgs._WetClothingProfile;
+    OnIslandPicked = InArgs._OnIslandPicked;
+    PreviewScene = MakeShared<FAdvancedPreviewScene>(FPreviewScene::ConstructionValues());
 
-	SEditorViewport::Construct(SEditorViewport::FArguments());
+    SEditorViewport::Construct(SEditorViewport::FArguments());
 
-	PreviewMeshComponent = NewObject<USkeletalMeshComponent>(GetTransientPackage(), NAME_None, RF_Transient);
-	PreviewMeshComponent->SetMobility(EComponentMobility::Movable);
-	PreviewMeshComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	PreviewScene->AddComponent(PreviewMeshComponent, FTransform::Identity);
+    PreviewMeshComponent = NewObject<USkeletalMeshComponent>(GetTransientPackage(), NAME_None, RF_Transient);
+    PreviewMeshComponent->SetMobility(EComponentMobility::Movable);
+    PreviewMeshComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    PreviewScene->AddComponent(PreviewMeshComponent, FTransform::Identity);
 
-	WetPartOverlayComponent = NewObject<UProceduralMeshComponent>(GetTransientPackage(), NAME_None, RF_Transient);
-	WetPartOverlayComponent->SetMobility(EComponentMobility::Movable);
-	WetPartOverlayComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	WetPartOverlayComponent->SetCastShadow(false);
-	WetPartOverlayComponent->bUseAsyncCooking = false;
-	WetPartOverlayComponent->SetMaterial(0, ResolveWetPartOverlayMaterial());
-	PreviewScene->AddComponent(WetPartOverlayComponent, FTransform::Identity);
+    WetPartOverlayComponent = NewObject<UProceduralMeshComponent>(GetTransientPackage(), NAME_None, RF_Transient);
+    WetPartOverlayComponent->SetMobility(EComponentMobility::Movable);
+    WetPartOverlayComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    WetPartOverlayComponent->SetCastShadow(false);
+    WetPartOverlayComponent->bUseAsyncCooking = false;
+    WetPartOverlayComponent->SetMaterial(0, ResolveWetPartOverlayMaterial());
+    PreviewScene->AddComponent(WetPartOverlayComponent, FTransform::Identity);
 
-	SelectionOverlayComponent = NewObject<UProceduralMeshComponent>(GetTransientPackage(), NAME_None, RF_Transient);
-	SelectionOverlayComponent->SetMobility(EComponentMobility::Movable);
-	SelectionOverlayComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	SelectionOverlayComponent->SetCastShadow(false);
-	SelectionOverlayComponent->bUseAsyncCooking = false;
-	SelectionOverlayComponent->SetMaterial(0, ResolveWetPartOverlayMaterial());
-	PreviewScene->AddComponent(SelectionOverlayComponent, FTransform::Identity);
+    SelectionOverlayComponent = NewObject<UProceduralMeshComponent>(GetTransientPackage(), NAME_None, RF_Transient);
+    SelectionOverlayComponent->SetMobility(EComponentMobility::Movable);
+    SelectionOverlayComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    SelectionOverlayComponent->SetCastShadow(false);
+    SelectionOverlayComponent->bUseAsyncCooking = false;
+    SelectionOverlayComponent->SetMaterial(0, ResolveWetPartOverlayMaterial());
+    PreviewScene->AddComponent(SelectionOverlayComponent, FTransform::Identity);
 
-	RefreshPreviewMesh();
+    RefreshPreviewMesh();
 }
 
 SWetClothingProfileViewport::~SWetClothingProfileViewport()
 {
-	if (PreviewScene.IsValid() && SelectionOverlayComponent != nullptr)
-	{
-		PreviewScene->RemoveComponent(SelectionOverlayComponent);
-	}
+    if (PreviewScene.IsValid() && SelectionOverlayComponent != nullptr)
+    {
+        PreviewScene->RemoveComponent(SelectionOverlayComponent);
+    }
 
-	if (PreviewScene.IsValid() && WetPartOverlayComponent != nullptr)
-	{
-		PreviewScene->RemoveComponent(WetPartOverlayComponent);
-	}
+    if (PreviewScene.IsValid() && WetPartOverlayComponent != nullptr)
+    {
+        PreviewScene->RemoveComponent(WetPartOverlayComponent);
+    }
 
-	if (PreviewScene.IsValid() && PreviewMeshComponent != nullptr)
-	{
-		PreviewScene->RemoveComponent(PreviewMeshComponent);
-	}
+    if (PreviewScene.IsValid() && PreviewMeshComponent != nullptr)
+    {
+        PreviewScene->RemoveComponent(PreviewMeshComponent);
+    }
 
-	if (ViewportClient.IsValid())
-	{
-		ViewportClient->Viewport = nullptr;
-	}
+    if (ViewportClient.IsValid())
+    {
+        ViewportClient->Viewport = nullptr;
+    }
 }
 
 void SWetClothingProfileViewport::AddReferencedObjects(FReferenceCollector& Collector)
 {
-	Collector.AddReferencedObject(PreviewMeshComponent);
-	Collector.AddReferencedObject(WetPartOverlayComponent);
-	Collector.AddReferencedObject(SelectionOverlayComponent);
-	Collector.AddReferencedObject(WetPartOverlayMaterial);
-	Collector.AddReferencedObjects(OriginalPreviewMaterials);
+    Collector.AddReferencedObject(PreviewMeshComponent);
+    Collector.AddReferencedObject(WetPartOverlayComponent);
+    Collector.AddReferencedObject(SelectionOverlayComponent);
+    Collector.AddReferencedObject(WetPartOverlayMaterial);
+    Collector.AddReferencedObjects(OriginalPreviewMaterials);
 }
 
 void SWetClothingProfileViewport::RefreshPreviewMesh()
 {
-	if (PreviewMeshComponent == nullptr)
-	{
-		return;
-	}
+    if (PreviewMeshComponent == nullptr)
+    {
+        return;
+    }
 
-	USkeletalMesh* TargetMesh = nullptr;
-	if (UWetClothingProfile* Profile = WetClothingProfile.Get())
-	{
-		TargetMesh = Profile->TargetMesh;
-	}
+    USkeletalMesh* TargetMesh = nullptr;
+    if (UWetClothingProfile* Profile = WetClothingProfile.Get())
+    {
+        TargetMesh = Profile->TargetMesh;
+    }
 
-	PreviewMeshComponent->SetSkeletalMeshAsset(TargetMesh);
-	PreviewMeshComponent->ShowAllMaterialSections(0);
-	if (WetPartOverlayComponent != nullptr)
-	{
-		WetPartOverlayComponent->ClearAllMeshSections();
-		WetPartOverlayComponent->SetMaterial(0, ResolveWetPartOverlayMaterial());
-	}
-	if (SelectionOverlayComponent != nullptr)
-	{
-		SelectionOverlayComponent->ClearAllMeshSections();
-		SelectionOverlayComponent->SetMaterial(0, ResolveWetPartOverlayMaterial());
-	}
-	CacheOriginalMaterials();
-	CurrentHighlightedMaterialSlot = INDEX_NONE;
-	CurrentHighlightedIslandIDs.Reset();
-	ClearHighlightedIsland();
-	ClearWetPartIslandColors();
+    PreviewMeshComponent->SetSkeletalMeshAsset(TargetMesh);
+    PreviewMeshComponent->ShowAllMaterialSections(0);
+    if (WetPartOverlayComponent != nullptr)
+    {
+        WetPartOverlayComponent->ClearAllMeshSections();
+        WetPartOverlayComponent->SetMaterial(0, ResolveWetPartOverlayMaterial());
+    }
+    if (SelectionOverlayComponent != nullptr)
+    {
+        SelectionOverlayComponent->ClearAllMeshSections();
+        SelectionOverlayComponent->SetMaterial(0, ResolveWetPartOverlayMaterial());
+    }
+    CacheOriginalMaterials();
+    CurrentHighlightedMaterialSlot = INDEX_NONE;
+    CurrentHighlightedIslandIDs.Reset();
+    ClearHighlightedIsland();
+    ClearWetPartIslandColors();
 
-	if (TargetMesh != nullptr)
-	{
-		const FBoxSphereBounds Bounds = PreviewMeshComponent->CalcBounds(FTransform::Identity);
-		PreviewScene->SetFloorOffset(-Bounds.Origin.Z + Bounds.BoxExtent.Z);
-	}
-	else
-	{
-		PreviewScene->SetFloorOffset(0.0f);
-	}
+    if (TargetMesh != nullptr)
+    {
+        const FBoxSphereBounds Bounds = PreviewMeshComponent->CalcBounds(FTransform::Identity);
+        PreviewScene->SetFloorOffset(-Bounds.Origin.Z + Bounds.BoxExtent.Z);
+    }
+    else
+    {
+        PreviewScene->SetFloorOffset(0.0f);
+    }
 
-	if (OverlayText.IsValid())
-	{
-		OverlayText->SetText(GetViewportHintText());
-	}
+    if (OverlayText.IsValid())
+    {
+        OverlayText->SetText(GetViewportHintText());
+    }
 
-	if (ViewportClient.IsValid())
-	{
-		ViewportClient->SetPreviewMeshComponent(PreviewMeshComponent);
-		ViewportClient->FocusOnPreviewMesh(PreviewMeshComponent, true);
-		ViewportClient->RequestFocusOnPreviewMeshNextTick(PreviewMeshComponent);
-		ViewportClient->Invalidate();
-	}
-	else
-	{
-		Invalidate();
-	}
+    if (ViewportClient.IsValid())
+    {
+        ViewportClient->SetPreviewMeshComponent(PreviewMeshComponent);
+        ViewportClient->FocusOnPreviewMesh(PreviewMeshComponent, true);
+        ViewportClient->RequestFocusOnPreviewMeshNextTick(PreviewMeshComponent);
+        ViewportClient->Invalidate();
+    }
+    else
+    {
+        Invalidate();
+    }
 }
 
 void SWetClothingProfileViewport::SetHighlightedMaterialSlot(int32 SlotIndex)
 {
-	if (PreviewMeshComponent == nullptr)
-	{
-		return;
-	}
+    if (PreviewMeshComponent == nullptr)
+    {
+        return;
+    }
 
-	PreviewMeshComponent->ShowAllMaterialSections(0);
+    PreviewMeshComponent->ShowAllMaterialSections(0);
 
-	const int32 MaterialCount = PreviewMeshComponent->GetNumMaterials();
-	if (SlotIndex < 0 || SlotIndex >= MaterialCount || !OriginalPreviewMaterials.IsValidIndex(SlotIndex))
-	{
-		CurrentHighlightedMaterialSlot = INDEX_NONE;
-		if (OverlayText.IsValid())
-		{
-			OverlayText->SetText(GetViewportHintText());
-		}
-		return;
-	}
+    const int32 MaterialCount = PreviewMeshComponent->GetNumMaterials();
+    if (SlotIndex < 0 || SlotIndex >= MaterialCount || !OriginalPreviewMaterials.IsValidIndex(SlotIndex))
+    {
+        CurrentHighlightedMaterialSlot = INDEX_NONE;
+        if (OverlayText.IsValid())
+        {
+            OverlayText->SetText(GetViewportHintText());
+        }
+        return;
+    }
 
-	for (int32 MaterialIndex = 0; MaterialIndex < MaterialCount; ++MaterialIndex)
-	{
-		PreviewMeshComponent->ShowMaterialSection(MaterialIndex, MaterialIndex, MaterialIndex == SlotIndex, 0);
-	}
+    for (int32 MaterialIndex = 0; MaterialIndex < MaterialCount; ++MaterialIndex)
+    {
+        PreviewMeshComponent->ShowMaterialSection(MaterialIndex, MaterialIndex, MaterialIndex == SlotIndex, 0);
+    }
 
-	CurrentHighlightedMaterialSlot = SlotIndex;
+    CurrentHighlightedMaterialSlot = SlotIndex;
 
-	if (OverlayText.IsValid())
-	{
-		OverlayText->SetText(GetViewportHintText());
-	}
+    if (OverlayText.IsValid())
+    {
+        OverlayText->SetText(GetViewportHintText());
+    }
 
-	Invalidate();
+    Invalidate();
 }
 
 void SWetClothingProfileViewport::ClearMaterialSlotHighlight()
 {
-	if (PreviewMeshComponent != nullptr)
-	{
-		PreviewMeshComponent->ShowAllMaterialSections(0);
-	}
+    if (PreviewMeshComponent != nullptr)
+    {
+        PreviewMeshComponent->ShowAllMaterialSections(0);
+    }
 
-	CurrentHighlightedMaterialSlot = INDEX_NONE;
+    CurrentHighlightedMaterialSlot = INDEX_NONE;
 
-	if (OverlayText.IsValid())
-	{
-		OverlayText->SetText(GetViewportHintText());
-	}
+    if (OverlayText.IsValid())
+    {
+        OverlayText->SetText(GetViewportHintText());
+    }
 
-	Invalidate();
+    Invalidate();
 }
 
 void SWetClothingProfileViewport::SetSelectableIslands(const TArray<TSharedPtr<FWetClothingProfileUVIsland>>& InIslands)
 {
-	CurrentSelectableIslands.Reset();
+    CurrentSelectableIslands.Reset();
 
-	for (const TSharedPtr<FWetClothingProfileUVIsland>& Island : InIslands)
-	{
-		if (Island.IsValid())
-		{
-			CurrentSelectableIslands.Add(*Island);
-		}
-	}
+    for (const TSharedPtr<FWetClothingProfileUVIsland>& Island : InIslands)
+    {
+        if (Island.IsValid())
+        {
+            CurrentSelectableIslands.Add(*Island);
+        }
+    }
 
-	if (ViewportClient.IsValid())
-	{
-		ViewportClient->SetPickableIslands(CurrentSelectableIslands);
-	}
+    if (ViewportClient.IsValid())
+    {
+        ViewportClient->SetPickableIslands(CurrentSelectableIslands);
+    }
 
-	RefreshWetPartOverlayMesh();
-	SetHighlightedIslandIDs(CurrentHighlightedIslandIDs);
+    RefreshWetPartOverlayMesh();
+    SetHighlightedIslandIDs(CurrentHighlightedIslandIDs);
 }
 
 void SWetClothingProfileViewport::SetHighlightedIslandIDs(const TSet<int32>& InIslandIDs)
 {
-	CurrentHighlightedIslandIDs = InIslandIDs;
-	RefreshSelectionOverlayMesh();
+    CurrentHighlightedIslandIDs = InIslandIDs;
+    RefreshSelectionOverlayMesh();
 }
 
 void SWetClothingProfileViewport::SetSelectionOverlayThicknessScale(float InThicknessScale)
 {
-	const float NewThicknessScale = FMath::Clamp(InThicknessScale, 0.25f, 4.0f);
-	if (!FMath::IsNearlyEqual(SelectionOverlayThicknessScale, NewThicknessScale))
-	{
-		SelectionOverlayThicknessScale = NewThicknessScale;
-		RefreshSelectionOverlayMesh();
-	}
+    const float NewThicknessScale = FMath::Clamp(InThicknessScale, 0.25f, 4.0f);
+    if (!FMath::IsNearlyEqual(SelectionOverlayThicknessScale, NewThicknessScale))
+    {
+        SelectionOverlayThicknessScale = NewThicknessScale;
+        RefreshSelectionOverlayMesh();
+    }
 }
 
 void SWetClothingProfileViewport::ClearHighlightedIsland()
 {
-	CurrentHighlightedIslandIDs.Reset();
-	if (SelectionOverlayComponent != nullptr)
-	{
-		SelectionOverlayComponent->ClearAllMeshSections();
-	}
+    CurrentHighlightedIslandIDs.Reset();
+    if (SelectionOverlayComponent != nullptr)
+    {
+        SelectionOverlayComponent->ClearAllMeshSections();
+    }
 }
 
 void SWetClothingProfileViewport::SetWetPartIslandAssignments(const TMap<int32, int32>& InIslandToWetPartID, const TMap<int32, FLinearColor>& InIslandColors)
 {
-	CurrentWetPartIslandAssignments = InIslandToWetPartID;
-	CurrentWetPartIslandColors = InIslandColors;
-	RefreshWetPartOverlayMesh();
+    CurrentWetPartIslandAssignments = InIslandToWetPartID;
+    CurrentWetPartIslandColors = InIslandColors;
+    RefreshWetPartOverlayMesh();
 }
 
 void SWetClothingProfileViewport::ClearWetPartIslandColors()
 {
-	CurrentWetPartIslandAssignments.Reset();
-	CurrentWetPartIslandColors.Reset();
+    CurrentWetPartIslandAssignments.Reset();
+    CurrentWetPartIslandColors.Reset();
 
-	if (WetPartOverlayComponent != nullptr)
-	{
-		WetPartOverlayComponent->ClearAllMeshSections();
-	}
+    if (WetPartOverlayComponent != nullptr)
+    {
+        WetPartOverlayComponent->ClearAllMeshSections();
+    }
 }
 
 void SWetClothingProfileViewport::RefreshWetPartOverlayMesh()
 {
-	if (WetPartOverlayComponent == nullptr)
-	{
-		return;
-	}
+    if (WetPartOverlayComponent == nullptr)
+    {
+        return;
+    }
 
-	WetPartOverlayComponent->ClearAllMeshSections();
-	WetPartOverlayComponent->SetMaterial(0, ResolveWetPartOverlayMaterial());
+    WetPartOverlayComponent->ClearAllMeshSections();
+    WetPartOverlayComponent->SetMaterial(0, ResolveWetPartOverlayMaterial());
 
-	TArray<FVector> Vertices;
-	TArray<int32> Indices;
-	TArray<FVector> Normals;
-	TArray<FVector2D> UVs;
-	TArray<FLinearColor> VertexColors;
-	TArray<FProcMeshTangent> Tangents;
+    TArray<FVector>          Vertices;
+    TArray<int32>            Indices;
+    TArray<FVector>          Normals;
+    TArray<FVector2D>        UVs;
+    TArray<FLinearColor>     VertexColors;
+    TArray<FProcMeshTangent> Tangents;
 
-	const float NormalOffset = CalculateWetPartOverlayOffset(PreviewMeshComponent);
+    const float NormalOffset = CalculateWetPartOverlayOffset(PreviewMeshComponent);
 
-	for (const FWetClothingProfileUVIsland& Island : CurrentSelectableIslands)
-	{
-		const int32* WetPartID = CurrentWetPartIslandAssignments.Find(Island.IslandID);
-		const FLinearColor* IslandColor = CurrentWetPartIslandColors.Find(Island.IslandID);
-		if (WetPartID == nullptr || *WetPartID == 0 || IslandColor == nullptr)
-		{
-			continue;
-		}
+    for (const FWetClothingProfileUVIsland& Island : CurrentSelectableIslands)
+    {
+        const int32*        WetPartID = CurrentWetPartIslandAssignments.Find(Island.IslandID);
+        const FLinearColor* IslandColor = CurrentWetPartIslandColors.Find(Island.IslandID);
+        if (WetPartID == nullptr || *WetPartID == 0 || IslandColor == nullptr)
+        {
+            continue;
+        }
 
-		for (const FWetClothingProfileUVTriangle& UVTriangle : Island.UVTriangles)
-		{
-			const FVector Normal = MakeWetPartOverlayNormal(UVTriangle.LocalPositions[0], UVTriangle.LocalPositions[1], UVTriangle.LocalPositions[2]);
+        for (const FWetClothingProfileUVTriangle& UVTriangle : Island.UVTriangles)
+        {
+            const FVector Normal = MakeWetPartOverlayNormal(UVTriangle.LocalPositions[0], UVTriangle.LocalPositions[1], UVTriangle.LocalPositions[2]);
 
-			for (float OffsetSign : { 1.0f, -1.0f })
-			{
-				const FVector OffsetNormal = Normal * OffsetSign;
-				const int32 BaseVertexIndex = Vertices.Num();
+            for (float OffsetSign : { 1.0f, -1.0f })
+            {
+                const FVector OffsetNormal = Normal * OffsetSign;
+                const int32   BaseVertexIndex = Vertices.Num();
 
-				for (int32 CornerIndex = 0; CornerIndex < 3; ++CornerIndex)
-				{
-					Vertices.Add(UVTriangle.LocalPositions[CornerIndex] + OffsetNormal * NormalOffset);
-					Normals.Add(OffsetNormal);
-					UVs.Add(UVTriangle.UVs[CornerIndex]);
-					VertexColors.Add(*IslandColor);
-				}
+                for (int32 CornerIndex = 0; CornerIndex < 3; ++CornerIndex)
+                {
+                    Vertices.Add(UVTriangle.LocalPositions[CornerIndex] + OffsetNormal * NormalOffset);
+                    Normals.Add(OffsetNormal);
+                    UVs.Add(UVTriangle.UVs[CornerIndex]);
+                    VertexColors.Add(*IslandColor);
+                }
 
-				Indices.Add(BaseVertexIndex);
-				Indices.Add(BaseVertexIndex + 1);
-				Indices.Add(BaseVertexIndex + 2);
+                Indices.Add(BaseVertexIndex);
+                Indices.Add(BaseVertexIndex + 1);
+                Indices.Add(BaseVertexIndex + 2);
 
-				Indices.Add(BaseVertexIndex + 2);
-				Indices.Add(BaseVertexIndex + 1);
-				Indices.Add(BaseVertexIndex);
-			}
-		}
-	}
+                Indices.Add(BaseVertexIndex + 2);
+                Indices.Add(BaseVertexIndex + 1);
+                Indices.Add(BaseVertexIndex);
+            }
+        }
+    }
 
-	if (Vertices.Num() > 0)
-	{
-		WetPartOverlayComponent->CreateMeshSection_LinearColor(
-			0,
-			Vertices,
-			Indices,
-			Normals,
-			UVs,
-			VertexColors,
-			Tangents,
-			false,
-			false);
-	}
+    if (Vertices.Num() > 0)
+    {
+        WetPartOverlayComponent->CreateMeshSection_LinearColor(
+            0,
+            Vertices,
+            Indices,
+            Normals,
+            UVs,
+            VertexColors,
+            Tangents,
+            false,
+            false);
+    }
 }
 
 void SWetClothingProfileViewport::RefreshSelectionOverlayMesh()
 {
-	if (SelectionOverlayComponent == nullptr)
-	{
-		return;
-	}
+    if (SelectionOverlayComponent == nullptr)
+    {
+        return;
+    }
 
-	SelectionOverlayComponent->ClearAllMeshSections();
-	SelectionOverlayComponent->SetMaterial(0, ResolveWetPartOverlayMaterial());
+    SelectionOverlayComponent->ClearAllMeshSections();
+    SelectionOverlayComponent->SetMaterial(0, ResolveWetPartOverlayMaterial());
 
-	if (CurrentHighlightedIslandIDs.Num() == 0)
-	{
-		return;
-	}
+    if (CurrentHighlightedIslandIDs.Num() == 0)
+    {
+        return;
+    }
 
-	struct FEdgeAccumulatorWithNormal
-	{
-		int32 Count = 0;
-		FVector Start = FVector::ZeroVector;
-		FVector End = FVector::ZeroVector;
-		FVector NormalSum = FVector::ZeroVector;
-	};
+    struct FEdgeAccumulatorWithNormal
+    {
+        int32   Count = 0;
+        FVector Start = FVector::ZeroVector;
+        FVector End = FVector::ZeroVector;
+        FVector NormalSum = FVector::ZeroVector;
+    };
 
-	TMap<FQuantizedLocalEdge, FEdgeAccumulatorWithNormal> EdgeMap;
-	auto AccumulateEdge = [&EdgeMap](const FVector& Start, const FVector& End, const FVector& TriangleNormal)
-	{
-		const FQuantizedLocalEdge EdgeKey = MakeQuantizedLocalEdge(Start, End);
-		FEdgeAccumulatorWithNormal& Accumulator = EdgeMap.FindOrAdd(EdgeKey);
-		if (Accumulator.Count == 0)
-		{
-			Accumulator.Start = Start;
-			Accumulator.End = End;
-		}
-		++Accumulator.Count;
-		Accumulator.NormalSum += TriangleNormal;
-	};
+    TMap<FQuantizedLocalEdge, FEdgeAccumulatorWithNormal> EdgeMap;
+    auto                                                  AccumulateEdge = [&EdgeMap](const FVector& Start, const FVector& End, const FVector& TriangleNormal)
+    {
+        const FQuantizedLocalEdge   EdgeKey = MakeQuantizedLocalEdge(Start, End);
+        FEdgeAccumulatorWithNormal& Accumulator = EdgeMap.FindOrAdd(EdgeKey);
+        if (Accumulator.Count == 0)
+        {
+            Accumulator.Start = Start;
+            Accumulator.End = End;
+        }
+        ++Accumulator.Count;
+        Accumulator.NormalSum += TriangleNormal;
+    };
 
-	for (const FWetClothingProfileUVIsland& Island : CurrentSelectableIslands)
-	{
-		if (!CurrentHighlightedIslandIDs.Contains(Island.IslandID))
-		{
-			continue;
-		}
+    for (const FWetClothingProfileUVIsland& Island : CurrentSelectableIslands)
+    {
+        if (!CurrentHighlightedIslandIDs.Contains(Island.IslandID))
+        {
+            continue;
+        }
 
-		for (const FWetClothingProfileUVTriangle& Triangle : Island.UVTriangles)
-		{
-			const FVector TriangleNormal = MakeWetPartOverlayNormal(Triangle.LocalPositions[0], Triangle.LocalPositions[1], Triangle.LocalPositions[2]);
-			AccumulateEdge(Triangle.LocalPositions[0], Triangle.LocalPositions[1], TriangleNormal);
-			AccumulateEdge(Triangle.LocalPositions[1], Triangle.LocalPositions[2], TriangleNormal);
-			AccumulateEdge(Triangle.LocalPositions[2], Triangle.LocalPositions[0], TriangleNormal);
-		}
-	}
+        for (const FWetClothingProfileUVTriangle& Triangle : Island.UVTriangles)
+        {
+            const FVector TriangleNormal = MakeWetPartOverlayNormal(Triangle.LocalPositions[0], Triangle.LocalPositions[1], Triangle.LocalPositions[2]);
+            AccumulateEdge(Triangle.LocalPositions[0], Triangle.LocalPositions[1], TriangleNormal);
+            AccumulateEdge(Triangle.LocalPositions[1], Triangle.LocalPositions[2], TriangleNormal);
+            AccumulateEdge(Triangle.LocalPositions[2], Triangle.LocalPositions[0], TriangleNormal);
+        }
+    }
 
-	TArray<FVector> Vertices;
-	TArray<int32> Indices;
-	TArray<FVector> Normals;
-	TArray<FVector2D> UVs;
-	TArray<FLinearColor> VertexColors;
-	TArray<FProcMeshTangent> Tangents;
+    TArray<FVector>          Vertices;
+    TArray<int32>            Indices;
+    TArray<FVector>          Normals;
+    TArray<FVector2D>        UVs;
+    TArray<FLinearColor>     VertexColors;
+    TArray<FProcMeshTangent> Tangents;
 
-	const float HalfThickness = CalculateSelectionOverlayHalfThickness(PreviewMeshComponent) * SelectionOverlayThicknessScale;
-	const FLinearColor SelectionColor(1.0f, 0.58f, 0.02f, 1.0f);
+    const float        HalfThickness = CalculateSelectionOverlayHalfThickness(PreviewMeshComponent) * SelectionOverlayThicknessScale;
+    const FLinearColor SelectionColor(1.0f, 0.58f, 0.02f, 1.0f);
 
-	for (const TPair<FQuantizedLocalEdge, FEdgeAccumulatorWithNormal>& Pair : EdgeMap)
-	{
-		FWetClothingProfileSelectionEdge SelectionEdge;
-		SelectionEdge.LocalStart = Pair.Value.Start;
-		SelectionEdge.LocalEnd = Pair.Value.End;
-		SelectionEdge.LocalNormal = Pair.Value.NormalSum.GetSafeNormal();
-		if (SelectionEdge.LocalNormal.IsNearlyZero())
-		{
-			SelectionEdge.LocalNormal = FVector::UpVector;
-		}
+    for (const TPair<FQuantizedLocalEdge, FEdgeAccumulatorWithNormal>& Pair : EdgeMap)
+    {
+        FWetClothingProfileSelectionEdge SelectionEdge;
+        SelectionEdge.LocalStart = Pair.Value.Start;
+        SelectionEdge.LocalEnd = Pair.Value.End;
+        SelectionEdge.LocalNormal = Pair.Value.NormalSum.GetSafeNormal();
+        if (SelectionEdge.LocalNormal.IsNearlyZero())
+        {
+            SelectionEdge.LocalNormal = FVector::UpVector;
+        }
 
-		AddSelectionOverlayEdgeMesh(
-			Vertices,
-			Indices,
-			Normals,
-			UVs,
-			VertexColors,
-			SelectionEdge,
-			HalfThickness,
-			SelectionColor);
-	}
+        AddSelectionOverlayEdgeMesh(
+            Vertices,
+            Indices,
+            Normals,
+            UVs,
+            VertexColors,
+            SelectionEdge,
+            HalfThickness,
+            SelectionColor);
+    }
 
-	if (Vertices.Num() > 0)
-	{
-		SelectionOverlayComponent->CreateMeshSection_LinearColor(
-			0,
-			Vertices,
-			Indices,
-			Normals,
-			UVs,
-			VertexColors,
-			Tangents,
-			false,
-			false);
-	}
+    if (Vertices.Num() > 0)
+    {
+        SelectionOverlayComponent->CreateMeshSection_LinearColor(
+            0,
+            Vertices,
+            Indices,
+            Normals,
+            UVs,
+            VertexColors,
+            Tangents,
+            false,
+            false);
+    }
 }
 
 void SWetClothingProfileViewport::FocusOnPreviewMesh(bool bInstant)
 {
-	if (ViewportClient.IsValid())
-	{
-		ViewportClient->FocusOnPreviewMesh(PreviewMeshComponent, bInstant);
-	}
+    if (ViewportClient.IsValid())
+    {
+        ViewportClient->FocusOnPreviewMesh(PreviewMeshComponent, bInstant);
+    }
 }
 
 TSharedRef<FEditorViewportClient> SWetClothingProfileViewport::MakeEditorViewportClient()
 {
-	check(PreviewScene.IsValid());
-	ViewportClient = MakeShared<FWetClothingProfileViewportClient>(PreviewScene.Get(), SharedThis(this));
+    check(PreviewScene.IsValid());
+    ViewportClient = MakeShared<FWetClothingProfileViewportClient>(PreviewScene.Get(), SharedThis(this));
 
-	if (PreviewMeshComponent != nullptr)
-	{
-		ViewportClient->SetPreviewMeshComponent(PreviewMeshComponent);
-		ViewportClient->RequestFocusOnPreviewMeshNextTick(PreviewMeshComponent);
-	}
+    if (PreviewMeshComponent != nullptr)
+    {
+        ViewportClient->SetPreviewMeshComponent(PreviewMeshComponent);
+        ViewportClient->RequestFocusOnPreviewMeshNextTick(PreviewMeshComponent);
+    }
 
-	return ViewportClient.ToSharedRef();
+    return ViewportClient.ToSharedRef();
 }
 
 void SWetClothingProfileViewport::HandleIslandPickedFromClient(int32 IslandID, bool bAppendSelection)
 {
-	if (OnIslandPicked.IsBound())
-	{
-		OnIslandPicked.Execute(IslandID, bAppendSelection);
-	}
+    if (OnIslandPicked.IsBound())
+    {
+        OnIslandPicked.Execute(IslandID, bAppendSelection);
+    }
 }
 
 void SWetClothingProfileViewport::PopulateViewportOverlays(TSharedRef<SOverlay> Overlay)
 {
-	SEditorViewport::PopulateViewportOverlays(Overlay);
+    SEditorViewport::PopulateViewportOverlays(Overlay);
 
-	Overlay->AddSlot()
-		.VAlign(VAlign_Top)
-		.HAlign(HAlign_Left)
-		.Padding(8.0f)
-		[
-			SNew(SBorder)
-			.BorderImage(FAppStyle::Get().GetBrush("FloatingBorder"))
-			.Padding(6.0f)
-			[
-				SAssignNew(OverlayText, SRichTextBlock)
-				.Text(GetViewportHintText())
-			]
-		];
+    Overlay->AddSlot()
+        .VAlign(VAlign_Top)
+        .HAlign(HAlign_Left)
+        .Padding(8.0f)
+            [SNew(SBorder)
+                 .BorderImage(FAppStyle::Get().GetBrush("FloatingBorder"))
+                 .Padding(6.0f)
+                     [SAssignNew(OverlayText, SRichTextBlock)
+                          .Text(GetViewportHintText())]];
 }
 
 void SWetClothingProfileViewport::OnFocusViewportToSelection()
 {
-	FocusOnPreviewMesh(false);
+    FocusOnPreviewMesh(false);
 }
 
 void SWetClothingProfileViewport::CacheOriginalMaterials()
 {
-	OriginalPreviewMaterials.Reset();
+    OriginalPreviewMaterials.Reset();
 
-	if (PreviewMeshComponent == nullptr)
-	{
-		return;
-	}
+    if (PreviewMeshComponent == nullptr)
+    {
+        return;
+    }
 
-	const int32 MaterialCount = PreviewMeshComponent->GetNumMaterials();
-	OriginalPreviewMaterials.Reserve(MaterialCount);
+    const int32 MaterialCount = PreviewMeshComponent->GetNumMaterials();
+    OriginalPreviewMaterials.Reserve(MaterialCount);
 
-	for (int32 MaterialIndex = 0; MaterialIndex < MaterialCount; ++MaterialIndex)
-	{
-		OriginalPreviewMaterials.Add(PreviewMeshComponent->GetMaterial(MaterialIndex));
-	}
+    for (int32 MaterialIndex = 0; MaterialIndex < MaterialCount; ++MaterialIndex)
+    {
+        OriginalPreviewMaterials.Add(PreviewMeshComponent->GetMaterial(MaterialIndex));
+    }
 }
 
 void SWetClothingProfileViewport::RestoreOriginalMaterials()
 {
-	if (PreviewMeshComponent == nullptr)
-	{
-		return;
-	}
+    if (PreviewMeshComponent == nullptr)
+    {
+        return;
+    }
 
-	for (int32 MaterialIndex = 0; MaterialIndex < OriginalPreviewMaterials.Num(); ++MaterialIndex)
-	{
-		PreviewMeshComponent->SetMaterial(MaterialIndex, OriginalPreviewMaterials[MaterialIndex]);
-	}
+    for (int32 MaterialIndex = 0; MaterialIndex < OriginalPreviewMaterials.Num(); ++MaterialIndex)
+    {
+        PreviewMeshComponent->SetMaterial(MaterialIndex, OriginalPreviewMaterials[MaterialIndex]);
+    }
 }
 
 UMaterialInterface* SWetClothingProfileViewport::ResolveWetPartOverlayMaterial()
 {
-	if (WetPartOverlayMaterial != nullptr)
-	{
-		return WetPartOverlayMaterial;
-	}
+    if (WetPartOverlayMaterial != nullptr)
+    {
+        return WetPartOverlayMaterial;
+    }
 
-	if (GEngine != nullptr)
-	{
-		if (GEngine->VertexColorMaterial != nullptr)
-		{
-			WetPartOverlayMaterial = GEngine->VertexColorMaterial;
-			return WetPartOverlayMaterial;
-		}
+    if (GEngine != nullptr)
+    {
+        if (GEngine->VertexColorMaterial != nullptr)
+        {
+            WetPartOverlayMaterial = GEngine->VertexColorMaterial;
+            return WetPartOverlayMaterial;
+        }
 
-		if (GEngine->VertexColorViewModeMaterial_ColorOnly != nullptr)
-		{
-			WetPartOverlayMaterial = GEngine->VertexColorViewModeMaterial_ColorOnly;
-			return WetPartOverlayMaterial;
-		}
-	}
+        if (GEngine->VertexColorViewModeMaterial_ColorOnly != nullptr)
+        {
+            WetPartOverlayMaterial = GEngine->VertexColorViewModeMaterial_ColorOnly;
+            return WetPartOverlayMaterial;
+        }
+    }
 
-	WetPartOverlayMaterial = LoadObject<UMaterialInterface>(nullptr, TEXT("/Engine/EngineDebugMaterials/VertexColorMaterial.VertexColorMaterial"));
-	return WetPartOverlayMaterial;
+    WetPartOverlayMaterial = LoadObject<UMaterialInterface>(nullptr, TEXT("/Engine/EngineDebugMaterials/VertexColorMaterial.VertexColorMaterial"));
+    return WetPartOverlayMaterial;
 }
 
 FText SWetClothingProfileViewport::GetViewportHintText() const
 {
-	FString Hint = TEXT("Left click islands in the preview to select them. Hold Shift to add to the current island selection.");
+    FString Hint = TEXT("Left click islands in the preview to select them. Hold Shift to add to the current island selection.");
 
-	if (CurrentHighlightedMaterialSlot != INDEX_NONE)
-	{
-		Hint += FString::Printf(TEXT("\nShowing only material slot %d."), CurrentHighlightedMaterialSlot);
-	}
-	else
-	{
-		Hint += TEXT("\nSelect a material slot from the list to isolate it.");
-	}
+    if (CurrentHighlightedMaterialSlot != INDEX_NONE)
+    {
+        Hint += FString::Printf(TEXT("\nShowing only material slot %d."), CurrentHighlightedMaterialSlot);
+    }
+    else
+    {
+        Hint += TEXT("\nSelect a material slot from the list to isolate it.");
+    }
 
-	return FText::FromString(Hint);
+    return FText::FromString(Hint);
 }
 
 #undef LOCTEXT_NAMESPACE

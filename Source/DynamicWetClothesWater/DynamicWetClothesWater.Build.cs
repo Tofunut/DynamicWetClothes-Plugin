@@ -12,13 +12,13 @@ public class DynamicWetClothesWater : ModuleRules
 				"Core",
 				"CoreUObject",
 				"Engine",
-				"DynamicWetClothes"
+				"DynamicWetClothes",
+				"Water"
 			});
 
 		PrivateDependencyModuleNames.AddRange(
 			new string[]
 			{
-				"Water"
 			});
 	}
 }

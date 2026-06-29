@@ -5,7 +5,9 @@
 #include "WaterVolume.generated.h"
 
 class UBoxComponent;
-class UDynamicWetSourceComponent;
+class UDynamicWetReceiverComponent;
+class UPrimitiveComponent;
+struct FDWCWetSurfaceData;
 
 UCLASS()
 class DYNAMICWETCLOTHES_API AWaterVolume : public AActor
@@ -19,12 +21,46 @@ public:
 protected:
 	// Called when the game starts or when spawned
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void OnConstruction(const FTransform& Transform) override;
 
 private:
+	void RefreshExistingOverlaps();
+	void ApplyWetnessTick();
+	void AddReceiverFromActor(AActor* OtherActor);
+	void RemoveReceiverFromActor(AActor* OtherActor);
+	bool BuildSurfaceDataForReceiver(const UDynamicWetReceiverComponent& Receiver, FDWCWetSurfaceData& OutSurfaceData) const;
+
+	UFUNCTION()
+	void OnVolumeBeginOverlap(
+		UPrimitiveComponent* OverlappedComponent,
+		AActor* OtherActor,
+		UPrimitiveComponent* OtherComp,
+		int32 OtherBodyIndex,
+		bool bFromSweep,
+		const FHitResult& SweepResult
+	);
+
+	UFUNCTION()
+	void OnVolumeEndOverlap(
+		UPrimitiveComponent* OverlappedComponent,
+		AActor* OtherActor,
+		UPrimitiveComponent* OtherComp,
+		int32 OtherBodyIndex
+	);
+
 	UPROPERTY(VisibleAnywhere, Category = "Water Volume")
 	UBoxComponent* VolumeBox;
 
-	UPROPERTY(VisibleAnywhere, Category = "Water Volume")
-	UDynamicWetSourceComponent* DynamicWetSource;
+	UPROPERTY(EditAnywhere, Category = "Water Volume", meta = (ClampMin = "0.0"))
+	float WetAmountPerSecond = 0.5f;
+
+	UPROPERTY(EditAnywhere, Category = "Water Volume", meta = (ClampMin = "0.01"))
+	float UpdateInterval = 0.1f;
+
+	UPROPERTY(EditAnywhere, Category = "Water Volume", meta = (ClampMin = "2", ClampMax = "64"))
+	int32 SurfaceSampleResolution = 8;
+
+	TMap<TWeakObjectPtr<UDynamicWetReceiverComponent>, int32> ReceiverOverlapCounts;
+	FTimerHandle WetnessTimer;
 };

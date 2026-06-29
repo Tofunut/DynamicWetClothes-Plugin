@@ -11,7 +11,6 @@
 #include "Engine/EngineTypes.h"
 #include "Engine/SkeletalMesh.h"
 #include "Materials/MaterialInstanceDynamic.h"
-#include "DynamicWet/DynamicWetSourceComponent.h"
 #include "WetClothingProfile.h"
 #include "WetnessProfile.h"
 
@@ -546,6 +545,85 @@ float UDynamicWetReceiverComponent::GetGravityFlowStrength() const
     return MaterialPreset ? MaterialPreset->GetGravityFlowStrength() : 0.0f;
 }
 
+>>>> ORIGINAL //depot/Tofunut_EPIC/Plugins/DynamicWetClothes/Source/DynamicWetClothes/Private/DynamicWet/DynamicWetReceiverComponent.cpp#3
+void UDynamicWetReceiverComponent::SetWetSourceData(UObject* SourceId, const FDWCWetSourceData& SourceData)
+{
+    FDWCWetSourceData NormalizedSourceData;
+    if (!NormalizeWetSourceData(SourceId, SourceData, NormalizedSourceData))
+    {
+        ClearWetSource(SourceId);
+        return;
+    }
+
+    ActiveWetSources.Add(SourceId, MoveTemp(NormalizedSourceData));
+}
+
+bool UDynamicWetReceiverComponent::NormalizeWetSourceData(
+    UObject*                 SourceId,
+    const FDWCWetSourceData& SourceData,
+    FDWCWetSourceData&       OutSourceData) const
+{
+    if (!IsValid(SourceId) || !SourceData.bIsValid || SourceData.Intensity <= 0.0f)
+    {
+        return false;
+    }
+
+    OutSourceData = SourceData;
+    OutSourceData.Intensity = FMath::Max(0.0f, SourceData.Intensity);
+
+    switch (SourceData.InfluenceType)
+    {
+    case EDWCInfluenceType::Volume:
+        if (SourceData.bUseSourceSurfaceHeightQuery)
+        {
+            if (!IsValid(Cast<UDynamicWetSourceComponent>(SourceId)))
+            {
+                return false;
+            }
+        }
+        return true;
+
+    case EDWCInfluenceType::Directional:
+        OutSourceData.Direction =
+            SourceData.Direction.IsNearlyZero()
+                ? FVector(0.0f, 0.0f, -1.0f)
+                : SourceData.Direction.GetSafeNormal();
+        return true;
+
+    case EDWCInfluenceType::Spray:
+    case EDWCInfluenceType::Stream:
+    case EDWCInfluenceType::Burst:
+        OutSourceData.Direction =
+            SourceData.Direction.IsNearlyZero()
+                ? FVector(0.0f, 0.0f, -1.0f)
+                : SourceData.Direction.GetSafeNormal();
+        OutSourceData.Radius = FMath::Max(0.0f, SourceData.Radius);
+        OutSourceData.Range = FMath::Max(0.0f, SourceData.Range);
+        OutSourceData.Falloff = FMath::Max(0.0f, SourceData.Falloff);
+        return true;
+
+    default:
+        return false;
+    }
+}
+
+void UDynamicWetReceiverComponent::ClearWetSource(UObject* SourceId)
+{
+    if (!SourceId)
+    {
+        return;
+    }
+
+    for (auto It = ActiveWetSources.CreateIterator(); It; ++It)
+    {
+        if (It.Key().Get() == SourceId)
+        {
+            It.RemoveCurrent();
+        }
+    }
+}
+
+==== THEIRS //depot/Tofunut_EPIC/Plugins/DynamicWetClothes/Source/DynamicWetClothes/Private/DynamicWet/DynamicWetReceiverComponent.cpp#4
 float UDynamicWetReceiverComponent::GetAbsorptionMultiplierForVertex(const int32 VertexIndex) const
 {
     return VertexWetnessProfileParameters.IsValidIndex(VertexIndex)
@@ -651,6 +729,8 @@ void UDynamicWetReceiverComponent::ClearWetSource(UObject* SourceId)
     }
 }
 
+==== YOURS //DotCho_WorkSpace/Tofunut_EPIC/Plugins/DynamicWetClothes/Source/DynamicWetClothes/Private/DynamicWet/DynamicWetReceiverComponent.cpp
+<<<<
 void UDynamicWetReceiverComponent::EnsureWetnessBufferSize(const int32 VertexCount)
 {
     if (VertexCount <= 0)
@@ -1134,61 +1214,8 @@ void UDynamicWetReceiverComponent::UpdateWetness()
     bool        bDirty = false;
     const float EffectiveDryRatePerSecond = GetDryRatePerSecond();
     const float EffectiveSpreadRatePerSecond = GetSpreadRatePerSecond();
-    bool        bHasActiveWetnessSource = false;
 
-    for (auto It = ActiveWetSources.CreateIterator(); It; ++It)
-    {
-        if (!It.Key().IsValid())
-        {
-            It.RemoveCurrent();
-            continue;
-        }
-
-        const FDWCWetSourceData& SourceData = It.Value();
-        if (SourceData.Intensity <= 0.0f)
-        {
-            continue;
-        }
-
-        const float TickAmount = SourceData.Intensity * WetnessUpdateInterval;
-        switch (SourceData.InfluenceType)
-        {
-        case EDWCInfluenceType::Volume:
-            bHasActiveWetnessSource = true;
-            bDirty |= ApplyWetnessWithSourceData(
-                It.Key().Get(),
-                SourceData,
-                TickAmount,
-                false);
-            break;
-
-        case EDWCInfluenceType::Directional:
-            if (!SourceData.Direction.IsNearlyZero())
-            {
-                bHasActiveWetnessSource = true;
-                bDirty |= ApplyRainWetness(
-                    SourceData.Direction,
-                    TickAmount,
-                    false);
-            }
-            break;
-
-        case EDWCInfluenceType::Spray:
-        case EDWCInfluenceType::Stream:
-        case EDWCInfluenceType::Burst:
-            bHasActiveWetnessSource = true;
-            bDirty |= ApplyLocalizedWetnessWithSourceData(
-                SourceData,
-                TickAmount,
-                false);
-            break;
-
-        default:
-            break;
-        }
-    }
-
-    if (bHasActiveWetnessSource || Updating_Pending_Wetness_Vertex_IndexQueue.Num() > 0)
+    if (Updating_Pending_Wetness_Vertex_IndexQueue.Num() > 0)
     {
         ProcessPendingWetness(bDirty, EffectiveSpreadRatePerSecond);
     }
@@ -1477,82 +1504,137 @@ void UDynamicWetReceiverComponent::ApplyWetnessGlobal(float Amount)
 
 void UDynamicWetReceiverComponent::ApplyWetnessBelowHeight(float WaterSurfaceZ, float Amount)
 {
-    FDWCWetSourceData SourceData;
-    SourceData.InfluenceType = EDWCInfluenceType::Volume;
-    SourceData.Intensity = FMath::Abs(Amount);
-    SourceData.WaterLevel = WaterSurfaceZ;
-    SourceData.bIsValid = !FMath::IsNearlyZero(Amount);
+    if (!TargetSkeletalMesh || FMath::IsNearlyZero(Amount))
+    {
+        return;
+    }
 
-    ApplyWetnessWithSourceData(this, SourceData, Amount);
+    const float EffectiveAmount =
+        Amount > 0.0f ? Amount * GetAbsorptionMultiplier() : Amount;
+
+    if (FMath::IsNearlyZero(EffectiveAmount) || !UpdateSkinnedPositions())
+    {
+        return;
+    }
+
+    if (WetnessPerVertex.Num() != CachedSkinnedPositions.Num())
+    {
+        EnsureWetnessBufferSize(CachedSkinnedPositions.Num());
+    }
+
+    bool bDirty = false;
+    const FTransform ComponentTransform = TargetSkeletalMesh->GetComponentTransform();
+
+    for (int32 VertexIndex = 0; VertexIndex < CachedSkinnedPositions.Num(); ++VertexIndex)
+    {
+        const FVector WorldPosition =
+            ComponentTransform.TransformPosition(
+                FVector(CachedSkinnedPositions[VertexIndex]));
+
+        if (WorldPosition.Z > WaterSurfaceZ)
+        {
+            continue;
+        }
+
+        if (EffectiveAmount > 0.0f)
+        {
+            QueuePendingWetness(VertexIndex, EffectiveAmount);
+        }
+        else
+        {
+            if (WetnessPerVertex[VertexIndex] <= 0.0f)
+            {
+                continue;
+            }
+
+            AbsorbWetnessAtVertex(VertexIndex, EffectiveAmount, bDirty);
+        }
+    }
+
+    if (bDirty)
+    {
+        ApplyWetnessToMaterial();
+    }
 }
 
-bool UDynamicWetReceiverComponent::ApplyRainWetness(
-    const FVector& RainDirection,
-    float          Amount,
-    bool           bApplyMaterial)
+bool UDynamicWetReceiverComponent::ApplyWetSurface(
+    const FDWCWetSurfaceData& SurfaceData,
+    const float              Amount,
+    const bool               bApplyMaterial)
 {
     if (!TargetSkeletalMesh ||
-        RainDirection.IsNearlyZero() ||
-        FMath::IsNearlyZero(Amount))
+        FMath::IsNearlyZero(Amount) ||
+        SurfaceData.SizeX < 2 ||
+        SurfaceData.SizeY < 2 ||
+        !SurfaceData.Bounds.IsValid)
     {
         return false;
     }
 
+>>>> ORIGINAL //depot/Tofunut_EPIC/Plugins/DynamicWetClothes/Source/DynamicWetClothes/Private/DynamicWet/DynamicWetReceiverComponent.cpp#3
+    const float EffectiveAmount =
+        Amount > 0.0f ? Amount * GetAbsorptionMultiplier() : Amount;
+
+    if (FMath::IsNearlyZero(EffectiveAmount) || !UpdateSkinnedNormals())
+==== THEIRS //depot/Tofunut_EPIC/Plugins/DynamicWetClothes/Source/DynamicWetClothes/Private/DynamicWet/DynamicWetReceiverComponent.cpp#4
     const float EffectiveAmount = Amount;
 
     if (FMath::IsNearlyZero(EffectiveAmount) || !UpdateSkinnedNormals())
+==== YOURS //DotCho_WorkSpace/Tofunut_EPIC/Plugins/DynamicWetClothes/Source/DynamicWetClothes/Private/DynamicWet/DynamicWetReceiverComponent.cpp
+    const int32 ExpectedSampleCount = SurfaceData.SizeX * SurfaceData.SizeY;
+    if (SurfaceData.SurfaceZ.Num() != ExpectedSampleCount ||
+        SurfaceData.Valid.Num() != ExpectedSampleCount)
+<<<<
     {
         return false;
     }
 
-    const int32 VertexCount = CachedSkinnedNormals.Num();
-    if (VertexCount <= 0)
+    const float EffectiveAmount =
+        Amount > 0.0f ? Amount * GetAbsorptionMultiplier() : Amount;
+
+    if (FMath::IsNearlyZero(EffectiveAmount) || !UpdateSkinnedPositions())
     {
         return false;
     }
 
-    if (WetnessPerVertex.Num() != VertexCount)
+    if (WetnessPerVertex.Num() != CachedSkinnedPositions.Num())
     {
-        EnsureWetnessBufferSize(VertexCount);
+        EnsureWetnessBufferSize(CachedSkinnedPositions.Num());
     }
 
-    const FVector    IncomingRainDirection = -RainDirection.GetSafeNormal();
+    bool             bDirty = false;
+    bool             bQueuedWetness = false;
     const FTransform ComponentTransform = TargetSkeletalMesh->GetComponentTransform();
 
-    const float ExposureMin = FMath::Min(RainExposureMin, RainExposureMax - KINDA_SMALL_NUMBER);
-    const float ExposureMax = FMath::Max(RainExposureMax, ExposureMin + KINDA_SMALL_NUMBER);
-
-    bool bDirty = false;
-    bool bQueuedWetness = false;
-
-    for (int32 VertexIndex = 0; VertexIndex < VertexCount; ++VertexIndex)
+    for (int32 VertexIndex = 0; VertexIndex < CachedSkinnedPositions.Num(); ++VertexIndex)
     {
         if (!WetnessPerVertex.IsValidIndex(VertexIndex))
         {
             continue;
         }
 
-        if ((EffectiveAmount > 0.0f && WetnessPerVertex[VertexIndex] >= MaxStoredWetness) ||
-            (EffectiveAmount < 0.0f && WetnessPerVertex[VertexIndex] <= 0.0f))
+        const FVector WorldPosition =
+            ComponentTransform.TransformPosition(
+                FVector(CachedSkinnedPositions[VertexIndex]));
+
+        float SurfaceZ = 0.0f;
+        if (!QueryWetSurfaceData(SurfaceData, WorldPosition, SurfaceZ) ||
+            WorldPosition.Z > SurfaceZ)
         {
             continue;
         }
 
-        const FVector WorldNormal =
-            ComponentTransform.TransformVectorNoScale(
-                                  FVector(CachedSkinnedNormals[VertexIndex]))
-                .GetSafeNormal();
-
-        if (WorldNormal.IsNearlyZero())
+        if (EffectiveAmount > 0.0f)
         {
+>>>> ORIGINAL //depot/Tofunut_EPIC/Plugins/DynamicWetClothes/Source/DynamicWetClothes/Private/DynamicWet/DynamicWetReceiverComponent.cpp#3
             continue;
         }
 
-        const float Facing = FVector::DotProduct(WorldNormal, IncomingRainDirection);
-        const float Exposure = FMath::SmoothStep(ExposureMin, ExposureMax, Facing);
-
-        if (Exposure <= KINDA_SMALL_NUMBER)
+        const float VertexAmount = EffectiveAmount * Exposure;
+        if (VertexAmount > 0.0f)
         {
+            QueuePendingWetness(VertexIndex, VertexAmount);
+==== THEIRS //depot/Tofunut_EPIC/Plugins/DynamicWetClothes/Source/DynamicWetClothes/Private/DynamicWet/DynamicWetReceiverComponent.cpp#4
             continue;
         }
 
@@ -1564,11 +1646,19 @@ bool UDynamicWetReceiverComponent::ApplyRainWetness(
         if (VertexAmount > 0.0f)
         {
             QueuePendingWetness(VertexIndex, VertexAmount);
+==== YOURS //DotCho_WorkSpace/Tofunut_EPIC/Plugins/DynamicWetClothes/Source/DynamicWetClothes/Private/DynamicWet/DynamicWetReceiverComponent.cpp
+            QueuePendingWetness(VertexIndex, EffectiveAmount);
+<<<<
             bQueuedWetness = true;
         }
         else
         {
-            AbsorbWetnessAtVertex(VertexIndex, VertexAmount, bDirty);
+            if (WetnessPerVertex[VertexIndex] <= 0.0f)
+            {
+                continue;
+            }
+
+            AbsorbWetnessAtVertex(VertexIndex, EffectiveAmount, bDirty);
         }
     }
 
@@ -1580,24 +1670,44 @@ bool UDynamicWetReceiverComponent::ApplyRainWetness(
     return bDirty || bQueuedWetness;
 }
 
-bool UDynamicWetReceiverComponent::ApplyLocalizedWetnessWithSourceData(
-    const FDWCWetSourceData& SourceData,
-    float                    Amount,
-    bool                     bApplyMaterial)
+bool UDynamicWetReceiverComponent::ApplyRainWetness(
+    const FVector& RainDirection,
+    float          Amount,
+    bool           bApplyMaterial)
 {
-    if (!TargetSkeletalMesh || FMath::IsNearlyZero(Amount))
+    FDWCWetContact Contact;
+    Contact.Amount = Amount;
+    Contact.Location = TargetSkeletalMesh ? TargetSkeletalMesh->Bounds.Origin : FVector::ZeroVector;
+    Contact.Radius = TargetSkeletalMesh ? TargetSkeletalMesh->Bounds.SphereRadius : 0.0f;
+    Contact.Direction = RainDirection;
+    Contact.Normal = -RainDirection.GetSafeNormal();
+
+    return ApplyWetContact(Contact, bApplyMaterial);
+}
+
+bool UDynamicWetReceiverComponent::ApplyWetContact(const FDWCWetContact& Contact, bool bApplyMaterial)
+{
+    if (!TargetSkeletalMesh || FMath::IsNearlyZero(Contact.Amount))
     {
         return false;
     }
 
+>>>> ORIGINAL //depot/Tofunut_EPIC/Plugins/DynamicWetClothes/Source/DynamicWetClothes/Private/DynamicWet/DynamicWetReceiverComponent.cpp#3
+    const float EffectiveAmount =
+        Amount > 0.0f ? Amount * GetAbsorptionMultiplier() : Amount;
+==== THEIRS //depot/Tofunut_EPIC/Plugins/DynamicWetClothes/Source/DynamicWetClothes/Private/DynamicWet/DynamicWetReceiverComponent.cpp#4
     const float EffectiveAmount = Amount;
+==== YOURS //DotCho_WorkSpace/Tofunut_EPIC/Plugins/DynamicWetClothes/Source/DynamicWetClothes/Private/DynamicWet/DynamicWetReceiverComponent.cpp
+    const float EffectiveAmount =
+        Contact.Amount > 0.0f ? Contact.Amount * GetAbsorptionMultiplier() : Contact.Amount;
+<<<<
 
     if (FMath::IsNearlyZero(EffectiveAmount) || !UpdateSkinnedPositions())
     {
         return false;
     }
 
-    const bool bUseNormalExposure = SourceData.bUseNormalExposure && UpdateSkinnedNormals();
+    const bool bHasNormals = UpdateSkinnedNormals();
 
     if (WetnessPerVertex.Num() != CachedSkinnedPositions.Num())
     {
@@ -1605,21 +1715,25 @@ bool UDynamicWetReceiverComponent::ApplyLocalizedWetnessWithSourceData(
     }
 
     const FTransform ComponentTransform = TargetSkeletalMesh->GetComponentTransform();
-    const FVector    SafeDirection =
-        SourceData.Direction.IsNearlyZero()
-               ? FVector::DownVector
-               : SourceData.Direction.GetSafeNormal();
-
-    const float SafeRadius = FMath::Max(SourceData.Radius, KINDA_SMALL_NUMBER);
-    const float SafeRange = FMath::Max(SourceData.Range, SafeRadius);
-    const float SafeFalloff = FMath::Max(SourceData.Falloff, KINDA_SMALL_NUMBER);
+    const FVector SafeDirection =
+        Contact.Direction.IsNearlyZero()
+            ? FVector::ZeroVector
+            : Contact.Direction.GetSafeNormal();
+    const FVector SafeNormal =
+        Contact.Normal.IsNearlyZero()
+            ? FVector::ZeroVector
+            : Contact.Normal.GetSafeNormal();
+    const float SafeRadius = FMath::Max(Contact.Radius, KINDA_SMALL_NUMBER);
+    const float ExposureMin = FMath::Min(RainExposureMin, RainExposureMax - KINDA_SMALL_NUMBER);
+    const float ExposureMax = FMath::Max(RainExposureMax, ExposureMin + KINDA_SMALL_NUMBER);
 
     bool bDirty = false;
     bool bQueuedWetness = false;
 
     for (int32 VertexIndex = 0; VertexIndex < CachedSkinnedPositions.Num(); ++VertexIndex)
     {
-        if (!WetnessPerVertex.IsValidIndex(VertexIndex))
+        if (!WetnessPerVertex.IsValidIndex(VertexIndex) ||
+            !DoesVertexMatchBoneName(VertexIndex, Contact.BoneName))
         {
             continue;
         }
@@ -1633,61 +1747,15 @@ bool UDynamicWetReceiverComponent::ApplyLocalizedWetnessWithSourceData(
         const FVector WorldPosition =
             ComponentTransform.TransformPosition(
                 FVector(CachedSkinnedPositions[VertexIndex]));
-
-        const FVector SourceToVertex = WorldPosition - SourceData.WorldLocation;
-        float         Influence = 0.0f;
-
-        switch (SourceData.InfluenceType)
+        const float Distance = FVector::Dist(WorldPosition, Contact.Location);
+        if (Distance > SafeRadius)
         {
-        case EDWCInfluenceType::Burst:
-        {
-            const float Distance = SourceToVertex.Length();
-            if (Distance > SafeRadius)
-            {
-                continue;
-            }
-
-            const float NormalizedDistance = Distance / SafeRadius;
-            Influence = FMath::Pow(1.0f - NormalizedDistance, SafeFalloff);
-            break;
-        }
-
-        case EDWCInfluenceType::Spray:
-        case EDWCInfluenceType::Stream:
-        {
-            const float AlongDirection = FVector::DotProduct(SourceToVertex, SafeDirection);
-            if (AlongDirection < 0.0f || AlongDirection > SafeRange)
-            {
-                continue;
-            }
-
-            const FVector ClosestPointOnStream =
-                SourceData.WorldLocation + SafeDirection * AlongDirection;
-            const float RadialDistance = FVector::Dist(WorldPosition, ClosestPointOnStream);
-            const float RangeAlpha = AlongDirection / SafeRange;
-            const float EffectiveRadius =
-                SourceData.InfluenceType == EDWCInfluenceType::Spray
-                    ? FMath::Max(SafeRadius * FMath::Max(RangeAlpha, 0.15f), KINDA_SMALL_NUMBER)
-                    : SafeRadius;
-
-            if (RadialDistance > EffectiveRadius)
-            {
-                continue;
-            }
-
-            const float RadialAlpha = RadialDistance / EffectiveRadius;
-            const float RangeInfluence = FMath::Pow(1.0f - RangeAlpha, SafeFalloff);
-            const float RadialInfluence = FMath::Pow(1.0f - RadialAlpha, SafeFalloff);
-            Influence = RangeInfluence * RadialInfluence;
-            break;
-        }
-
-        default:
             continue;
         }
 
-        if (bUseNormalExposure &&
-            CachedSkinnedNormals.IsValidIndex(VertexIndex))
+        float Influence = 1.0f - (Distance / SafeRadius);
+
+        if (bHasNormals && CachedSkinnedNormals.IsValidIndex(VertexIndex))
         {
             const FVector WorldNormal =
                 ComponentTransform.TransformVectorNoScale(
@@ -1696,14 +1764,16 @@ bool UDynamicWetReceiverComponent::ApplyLocalizedWetnessWithSourceData(
 
             if (!WorldNormal.IsNearlyZero())
             {
-                const FVector IncomingDirection =
-                    SourceData.InfluenceType == EDWCInfluenceType::Burst
-                        ? (SourceData.WorldLocation - WorldPosition).GetSafeNormal()
-                        : -SafeDirection;
+                if (!SafeDirection.IsNearlyZero())
+                {
+                    const float Facing = FVector::DotProduct(WorldNormal, -SafeDirection);
+                    Influence *= FMath::SmoothStep(ExposureMin, ExposureMax, Facing);
+                }
 
-                const float Facing = FVector::DotProduct(WorldNormal, IncomingDirection);
-                const float Exposure = FMath::SmoothStep(RainExposureMin, RainExposureMax, Facing);
-                Influence *= Exposure;
+                if (!SafeNormal.IsNearlyZero())
+                {
+                    Influence *= FMath::Clamp(FVector::DotProduct(WorldNormal, SafeNormal), 0.0f, 1.0f);
+                }
             }
         }
 
@@ -1736,48 +1806,91 @@ bool UDynamicWetReceiverComponent::ApplyLocalizedWetnessWithSourceData(
     return bDirty || bQueuedWetness;
 }
 
-bool UDynamicWetReceiverComponent::ApplyWetnessWithSourceData(
-    UObject*                 SourceId,
-    const FDWCWetSourceData& SourceData,
-    float                    Amount,
-    bool                     bApplyMaterial)
+bool UDynamicWetReceiverComponent::ApplyWetContacts(const TArray<FDWCWetContact>& Contacts, bool bApplyMaterial)
 {
-    if (!IsValid(SourceId) || FMath::IsNearlyZero(Amount))
+    bool bAppliedAny = false;
+
+    for (const FDWCWetContact& Contact : Contacts)
     {
-        return false;
+        bAppliedAny |= ApplyWetContact(Contact, false);
     }
 
+    if (bAppliedAny && bApplyMaterial)
+    {
+        ApplyWetnessToMaterial();
+    }
+
+>>>> ORIGINAL //depot/Tofunut_EPIC/Plugins/DynamicWetClothes/Source/DynamicWetClothes/Private/DynamicWet/DynamicWetReceiverComponent.cpp#3
+    const float EffectiveAmount =
+        Amount > 0.0f ? Amount * GetAbsorptionMultiplier() : Amount;
+==== THEIRS //depot/Tofunut_EPIC/Plugins/DynamicWetClothes/Source/DynamicWetClothes/Private/DynamicWet/DynamicWetReceiverComponent.cpp#4
     const float EffectiveAmount = Amount;
+==== YOURS //DotCho_WorkSpace/Tofunut_EPIC/Plugins/DynamicWetClothes/Source/DynamicWetClothes/Private/DynamicWet/DynamicWetReceiverComponent.cpp
+    return bAppliedAny;
+}
 
-    if (FMath::IsNearlyZero(EffectiveAmount) || !UpdateSkinnedPositions())
+bool UDynamicWetReceiverComponent::GetWetnessWorldBounds(FBox& OutBounds) const
+{
+    OutBounds = FBox(ForceInit);
+<<<<
+
+    if (!TargetSkeletalMesh)
     {
         return false;
     }
 
-    if (WetnessPerVertex.Num() != CachedSkinnedPositions.Num())
-    {
-        EnsureWetnessBufferSize(CachedSkinnedPositions.Num());
-    }
+    OutBounds = TargetSkeletalMesh->Bounds.GetBox();
+    return OutBounds.IsValid && !OutBounds.GetExtent().IsNearlyZero();
+}
 
-    FWetSurfaceGridSample WetSurfaceGrid[WetSurfaceGridSize][WetSurfaceGridSize];
-    FBox                  SurfaceGridBounds;
+bool UDynamicWetReceiverComponent::QueryWetSurfaceData(
+    const FDWCWetSurfaceData& SurfaceData,
+    const FVector&            WorldPosition,
+    float&                    OutSurfaceZ) const
+{
+    OutSurfaceZ = 0.0f;
 
-    const bool bSurfaceGridValid = BuildWetSurfaceGrid(SourceId, SourceData, WetSurfaceGrid, SurfaceGridBounds);
-    if (!bSurfaceGridValid)
+    if (SurfaceData.SizeX < 2 ||
+        SurfaceData.SizeY < 2 ||
+        !SurfaceData.Bounds.IsValid)
     {
         return false;
     }
 
-    bool             bDirty = false;
-    bool             bQueuedWetness = false;
-    const FTransform ComponentTransform = TargetSkeletalMesh->GetComponentTransform();
+    const FVector BoundsMin = SurfaceData.Bounds.Min;
+    const FVector BoundsMax = SurfaceData.Bounds.Max;
+    const float   BoundsSizeX = BoundsMax.X - BoundsMin.X;
+    const float   BoundsSizeY = BoundsMax.Y - BoundsMin.Y;
 
-    for (int32 VertexIndex = 0; VertexIndex < CachedSkinnedPositions.Num(); ++VertexIndex)
+    if (BoundsSizeX <= KINDA_SMALL_NUMBER ||
+        BoundsSizeY <= KINDA_SMALL_NUMBER)
     {
-        const FVector WorldPosition =
-            ComponentTransform.TransformPosition(
-                FVector(CachedSkinnedPositions[VertexIndex]));
+        return false;
+    }
 
+    const float NormalizedX = FMath::Clamp((WorldPosition.X - BoundsMin.X) / BoundsSizeX, 0.0f, 1.0f);
+    const float NormalizedY = FMath::Clamp((WorldPosition.Y - BoundsMin.Y) / BoundsSizeY, 0.0f, 1.0f);
+
+    const float GridX = NormalizedX * static_cast<float>(SurfaceData.SizeX - 1);
+    const float GridY = NormalizedY * static_cast<float>(SurfaceData.SizeY - 1);
+
+>>>> ORIGINAL //depot/Tofunut_EPIC/Plugins/DynamicWetClothes/Source/DynamicWetClothes/Private/DynamicWet/DynamicWetReceiverComponent.cpp#3
+        float SurfaceZ = 0.0f;
+        if (QueryWetSurfaceGrid(WetSurfaceGrid, SurfaceGridBounds, WorldPosition, SurfaceZ) &&
+            WorldPosition.Z <= SurfaceZ)
+        {
+            if (EffectiveAmount > 0.0f)
+            {
+                QueuePendingWetness(VertexIndex, EffectiveAmount);
+                bQueuedWetness = true;
+            }
+            else
+            {
+                if (WetnessPerVertex[VertexIndex] <= 0.0f)
+                {
+                    continue;
+                }
+==== THEIRS //depot/Tofunut_EPIC/Plugins/DynamicWetClothes/Source/DynamicWetClothes/Private/DynamicWet/DynamicWetReceiverComponent.cpp#4
         float SurfaceZ = 0.0f;
         if (QueryWetSurfaceGrid(WetSurfaceGrid, SurfaceGridBounds, WorldPosition, SurfaceZ) &&
             WorldPosition.Z <= SurfaceZ)
@@ -1793,118 +1906,17 @@ bool UDynamicWetReceiverComponent::ApplyWetnessWithSourceData(
                 {
                     continue;
                 }
+==== YOURS //DotCho_WorkSpace/Tofunut_EPIC/Plugins/DynamicWetClothes/Source/DynamicWetClothes/Private/DynamicWet/DynamicWetReceiverComponent.cpp
+    const int32 X0 = FMath::Clamp(FMath::FloorToInt(GridX), 0, SurfaceData.SizeX - 1);
+    const int32 Y0 = FMath::Clamp(FMath::FloorToInt(GridY), 0, SurfaceData.SizeY - 1);
+    const int32 X1 = FMath::Clamp(X0 + 1, 0, SurfaceData.SizeX - 1);
+    const int32 Y1 = FMath::Clamp(Y0 + 1, 0, SurfaceData.SizeY - 1);
+<<<<
 
-                AbsorbWetnessAtVertex(VertexIndex, EffectiveAmount, bDirty);
-            }
-        }
-    }
-
-    if (bDirty && bApplyMaterial)
-    {
-        ApplyWetnessToMaterial();
-    }
-
-    return bDirty || bQueuedWetness;
-}
-
-bool UDynamicWetReceiverComponent::QuerySurfaceZForSource(
-    UObject*                 SourceId,
-    const FDWCWetSourceData& SourceData,
-    const FVector&           WorldPosition,
-    float&                   OutSurfaceZ) const
-{
-    if (SourceData.bUseSourceSurfaceHeightQuery)
-    {
-        const UDynamicWetSourceComponent* SourceComponent = Cast<UDynamicWetSourceComponent>(SourceId);
-        return IsValid(SourceComponent) && SourceComponent->QueryWetSurfaceZ(WorldPosition, OutSurfaceZ);
-    }
-
-    OutSurfaceZ = SourceData.WaterLevel;
-    return true;
-}
-
-void UDynamicWetReceiverComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
-{
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-}
-
-// Wetness Grid
-
-bool UDynamicWetReceiverComponent::BuildWetSurfaceGrid(
-    UObject*                 SourceId,
-    const FDWCWetSourceData& SourceData,
-    FWetSurfaceGridSample (&OutGrid)[WetSurfaceGridSize][WetSurfaceGridSize],
-    FBox& OutBounds) const
-{
-    if (!TargetSkeletalMesh || !IsValid(SourceId))
-    {
-        return false;
-    }
-
-    OutBounds = TargetSkeletalMesh->Bounds.GetBox();
-
-    const FVector BoundsMin = OutBounds.Min;
-    const FVector BoundsMax = OutBounds.Max;
-    const float   SampleZ = OutBounds.GetCenter().Z;
-
-    bool bAllValid = true;
-
-    for (int32 Y = 0; Y < WetSurfaceGridSize; ++Y)
-    {
-        const float YAlpha = static_cast<float>(Y) / static_cast<float>(WetSurfaceGridSize - 1);
-
-        for (int32 X = 0; X < WetSurfaceGridSize; ++X)
-        {
-            const float XAlpha = static_cast<float>(X) / static_cast<float>(WetSurfaceGridSize - 1);
-
-            const FVector SamplePosition(
-                FMath::Lerp(BoundsMin.X, BoundsMax.X, XAlpha),
-                FMath::Lerp(BoundsMin.Y, BoundsMax.Y, YAlpha),
-                SampleZ);
-
-            OutGrid[Y][X].bValid = QuerySurfaceZForSource(
-                SourceId,
-                SourceData,
-                SamplePosition,
-                OutGrid[Y][X].SurfaceZ);
-
-            bAllValid &= OutGrid[Y][X].bValid;
-        }
-    }
-
-    return bAllValid;
-}
-
-bool UDynamicWetReceiverComponent::QueryWetSurfaceGrid(const FWetSurfaceGridSample (&Grid)[WetSurfaceGridSize][WetSurfaceGridSize], const FBox& Bounds, const FVector& WorldPosition, float& OutSurfaceZ) const
-{
-    const FVector BoundsMin = Bounds.Min;
-    const FVector BoundsMax = Bounds.Max;
-
-    const float BoundsSizeX = BoundsMax.X - BoundsMin.X;
-    const float BoundsSizeY = BoundsMax.Y - BoundsMin.Y;
-
-    const float NormalizedX =
-        BoundsSizeX > KINDA_SMALL_NUMBER
-            ? FMath::Clamp((WorldPosition.X - BoundsMin.X) / BoundsSizeX, 0.0f, 1.0f)
-            : 0.0f;
-
-    const float NormalizedY =
-        BoundsSizeY > KINDA_SMALL_NUMBER
-            ? FMath::Clamp((WorldPosition.Y - BoundsMin.Y) / BoundsSizeY, 0.0f, 1.0f)
-            : 0.0f;
-
-    const float GridX = NormalizedX * static_cast<float>(WetSurfaceGridSize - 1);
-    const float GridY = NormalizedY * static_cast<float>(WetSurfaceGridSize - 1);
-
-    const int32 X0 = FMath::Clamp(FMath::FloorToInt(GridX), 0, WetSurfaceGridSize - 1);
-    const int32 Y0 = FMath::Clamp(FMath::FloorToInt(GridY), 0, WetSurfaceGridSize - 1);
-    const int32 X1 = FMath::Clamp(X0 + 1, 0, WetSurfaceGridSize - 1);
-    const int32 Y1 = FMath::Clamp(Y0 + 1, 0, WetSurfaceGridSize - 1);
-
-    if (!Grid[Y0][X0].bValid ||
-        !Grid[Y0][X1].bValid ||
-        !Grid[Y1][X0].bValid ||
-        !Grid[Y1][X1].bValid)
+    if (!SurfaceData.IsValidSampleIndex(X0, Y0) ||
+        !SurfaceData.IsValidSampleIndex(X1, Y0) ||
+        !SurfaceData.IsValidSampleIndex(X0, Y1) ||
+        !SurfaceData.IsValidSampleIndex(X1, Y1))
     {
         return false;
     }
@@ -1912,9 +1924,67 @@ bool UDynamicWetReceiverComponent::QueryWetSurfaceGrid(const FWetSurfaceGridSamp
     const float AlphaX = GridX - static_cast<float>(X0);
     const float AlphaY = GridY - static_cast<float>(Y0);
 
-    const float Z0 = FMath::Lerp(Grid[Y0][X0].SurfaceZ, Grid[Y0][X1].SurfaceZ, AlphaX);
-    const float Z1 = FMath::Lerp(Grid[Y1][X0].SurfaceZ, Grid[Y1][X1].SurfaceZ, AlphaX);
+    const float Z00 = SurfaceData.SurfaceZ[SurfaceData.GetSampleIndex(X0, Y0)];
+    const float Z10 = SurfaceData.SurfaceZ[SurfaceData.GetSampleIndex(X1, Y0)];
+    const float Z01 = SurfaceData.SurfaceZ[SurfaceData.GetSampleIndex(X0, Y1)];
+    const float Z11 = SurfaceData.SurfaceZ[SurfaceData.GetSampleIndex(X1, Y1)];
+
+    const float Z0 = FMath::Lerp(Z00, Z10, AlphaX);
+    const float Z1 = FMath::Lerp(Z01, Z11, AlphaX);
 
     OutSurfaceZ = FMath::Lerp(Z0, Z1, AlphaY);
     return true;
+}
+
+bool UDynamicWetReceiverComponent::DoesVertexMatchBoneName(const int32 VertexIndex, const FName BoneName) const
+{
+    if (BoneName.IsNone())
+    {
+        return true;
+    }
+
+    if (!TargetSkeletalMesh)
+    {
+        return false;
+    }
+
+    const USkeletalMesh* SkeletalMesh = TargetSkeletalMesh->GetSkeletalMeshAsset();
+    if (!SkeletalMesh)
+    {
+        return false;
+    }
+
+    const int32 BoneIndex = SkeletalMesh->GetRefSkeleton().FindBoneIndex(BoneName);
+    if (BoneIndex == INDEX_NONE)
+    {
+        return false;
+    }
+
+    const FSkinWeightVertexBuffer* SkinWeightBuffer =
+        TargetSkeletalMesh->GetSkinWeightBuffer(0);
+    if (!SkinWeightBuffer)
+    {
+        return false;
+    }
+
+    const uint32 MaxInfluences = SkinWeightBuffer->GetMaxBoneInfluences();
+    for (uint32 InfluenceIndex = 0; InfluenceIndex < MaxInfluences; ++InfluenceIndex)
+    {
+        if (SkinWeightBuffer->GetBoneWeight(VertexIndex, InfluenceIndex) == 0)
+        {
+            continue;
+        }
+
+        if (static_cast<int32>(SkinWeightBuffer->GetBoneIndex(VertexIndex, InfluenceIndex)) == BoneIndex)
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+void UDynamicWetReceiverComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+{
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 }

@@ -3,8 +3,10 @@
 #include "Demo/Volumes/RainVolume.h"
 
 #include "Components/BoxComponent.h"
-#include "DynamicWet/DynamicWetSourceComponent.h"
+#include "DynamicWet/DynamicWetReceiverComponent.h"
+#include "Engine/World.h"
 #include "NiagaraComponent.h"
+#include "TimerManager.h"
 
 ARainVolume::ARainVolume()
 {
@@ -23,26 +25,200 @@ ARainVolume::ARainVolume()
     RainNiagara = CreateDefaultSubobject<UNiagaraComponent>(TEXT("RainNiagara"));
     RainNiagara->SetupAttachment(RootComponent);
 
-    DynamicWetSource = CreateDefaultSubobject<UDynamicWetSourceComponent>(TEXT("DynamicWetSource"));
 }
 
 void ARainVolume::BeginPlay()
 {
     Super::BeginPlay();
 
-    if (DynamicWetSource)
+    if (!RainBounds)
     {
-        DynamicWetSource->InitializeRainVolume(RainBounds, RainNiagara);
+        return;
     }
+
+    RainBounds->OnComponentBeginOverlap.AddUniqueDynamic(
+        this,
+        &ARainVolume::OnRainBeginOverlap);
+
+    RainBounds->OnComponentEndOverlap.AddUniqueDynamic(
+        this,
+        &ARainVolume::OnRainEndOverlap);
+
+    RefreshExistingOverlaps();
+
+    if (GetWorld() && UpdateInterval > 0.0f)
+    {
+        GetWorldTimerManager().SetTimer(
+            WetnessTimer,
+            this,
+            &ARainVolume::ApplyWetnessTick,
+            UpdateInterval,
+            true);
+    }
+
+    ApplyRainNiagaraParameters();
+}
+
+void ARainVolume::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+    if (GetWorld())
+    {
+        GetWorldTimerManager().ClearTimer(WetnessTimer);
+    }
+
+    if (RainBounds)
+    {
+        RainBounds->OnComponentBeginOverlap.RemoveDynamic(
+            this,
+            &ARainVolume::OnRainBeginOverlap);
+
+        RainBounds->OnComponentEndOverlap.RemoveDynamic(
+            this,
+            &ARainVolume::OnRainEndOverlap);
+    }
+
+    ReceiverOverlapCounts.Reset();
+
+    Super::EndPlay(EndPlayReason);
 }
 
 void ARainVolume::OnConstruction(const FTransform& Transform)
 {
     Super::OnConstruction(Transform);
 
-    if (DynamicWetSource)
+    ApplyRainNiagaraParameters();
+}
+
+void ARainVolume::RefreshExistingOverlaps()
+{
+    if (!RainBounds)
     {
-        DynamicWetSource->InitializeRainVolume(RainBounds, RainNiagara);
-        DynamicWetSource->ApplyRainNiagaraParameters();
+        return;
     }
+
+    RainBounds->UpdateOverlaps();
+
+    TArray<AActor*> OverlappingActors;
+    RainBounds->GetOverlappingActors(OverlappingActors);
+    for (AActor* OverlappingActor : OverlappingActors)
+    {
+        AddReceiverFromActor(OverlappingActor);
+    }
+}
+
+void ARainVolume::ApplyWetnessTick()
+{
+    if (ReceiverOverlapCounts.Num() == 0)
+    {
+        return;
+    }
+
+    for (auto It = ReceiverOverlapCounts.CreateIterator(); It; ++It)
+    {
+        UDynamicWetReceiverComponent* Receiver = It.Key().Get();
+        if (!IsValid(Receiver) || It.Value() <= 0)
+        {
+            It.RemoveCurrent();
+            continue;
+        }
+
+        ApplyWetContactToReceiver(*Receiver);
+    }
+}
+
+void ARainVolume::AddReceiverFromActor(AActor* OtherActor)
+{
+    if (!IsValid(OtherActor) || OtherActor == this)
+    {
+        return;
+    }
+
+    UDynamicWetReceiverComponent* Receiver = OtherActor->FindComponentByClass<UDynamicWetReceiverComponent>();
+    if (!IsValid(Receiver))
+    {
+        return;
+    }
+
+    int32& OverlapCount = ReceiverOverlapCounts.FindOrAdd(Receiver);
+    ++OverlapCount;
+}
+
+void ARainVolume::RemoveReceiverFromActor(AActor* OtherActor)
+{
+    if (!IsValid(OtherActor))
+    {
+        return;
+    }
+
+    UDynamicWetReceiverComponent* Receiver = OtherActor->FindComponentByClass<UDynamicWetReceiverComponent>();
+    if (!IsValid(Receiver))
+    {
+        return;
+    }
+
+    int32* OverlapCount = ReceiverOverlapCounts.Find(Receiver);
+    if (!OverlapCount)
+    {
+        return;
+    }
+
+    --(*OverlapCount);
+    if (*OverlapCount <= 0)
+    {
+        ReceiverOverlapCounts.Remove(Receiver);
+    }
+}
+
+void ARainVolume::ApplyWetContactToReceiver(UDynamicWetReceiverComponent& Receiver) const
+{
+    if (!RainBounds || WetAmountPerSecond <= 0.0f || UpdateInterval <= 0.0f)
+    {
+        return;
+    }
+
+    const FVector SafeRainDirection =
+        RainDirection.IsNearlyZero()
+            ? FVector::DownVector
+            : GetActorTransform().TransformVectorNoScale(RainDirection).GetSafeNormal();
+
+    FDWCWetContact Contact;
+    Contact.Amount = WetAmountPerSecond * UpdateInterval;
+    Contact.Location = RainBounds->Bounds.Origin;
+    Contact.Normal = -SafeRainDirection;
+    Contact.Radius = RainBounds->Bounds.SphereRadius;
+    Contact.Direction = SafeRainDirection;
+
+    Receiver.ApplyWetContact(Contact, false);
+}
+
+void ARainVolume::ApplyRainNiagaraParameters() const
+{
+    if (!IsValid(RainNiagara) || !IsValid(RainBounds))
+    {
+        return;
+    }
+
+    RainNiagara->SetVariableVec3(RainDirectionParameterName, RainDirection);
+    RainNiagara->SetVariableVec3(RainBoundsExtentParameterName, RainBounds->GetScaledBoxExtent() * 2.0f);
+    RainNiagara->SetVariableFloat(RainIntensityParameterName, WetAmountPerSecond);
+}
+
+void ARainVolume::OnRainBeginOverlap(
+    UPrimitiveComponent* OverlappedComponent,
+    AActor*              OtherActor,
+    UPrimitiveComponent* OtherComp,
+    int32                OtherBodyIndex,
+    bool                 bFromSweep,
+    const FHitResult&    SweepResult)
+{
+    AddReceiverFromActor(OtherActor);
+}
+
+void ARainVolume::OnRainEndOverlap(
+    UPrimitiveComponent* OverlappedComponent,
+    AActor*              OtherActor,
+    UPrimitiveComponent* OtherComp,
+    int32                OtherBodyIndex)
+{
+    RemoveReceiverFromActor(OtherActor);
 }

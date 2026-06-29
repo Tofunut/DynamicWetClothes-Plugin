@@ -7,7 +7,8 @@
 #include "RainVolume.generated.h"
 
 class UBoxComponent;
-class UDynamicWetSourceComponent;
+class UDynamicWetReceiverComponent;
+class UPrimitiveComponent;
 class UNiagaraComponent;
 
 UCLASS()
@@ -20,15 +21,59 @@ public:
 
 protected:
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void OnConstruction(const FTransform& Transform) override;
 
 private:
+	void RefreshExistingOverlaps();
+	void ApplyWetnessTick();
+	void AddReceiverFromActor(AActor* OtherActor);
+	void RemoveReceiverFromActor(AActor* OtherActor);
+	void ApplyWetContactToReceiver(UDynamicWetReceiverComponent& Receiver) const;
+	void ApplyRainNiagaraParameters() const;
+
+	UFUNCTION()
+	void OnRainBeginOverlap(
+		UPrimitiveComponent* OverlappedComponent,
+		AActor* OtherActor,
+		UPrimitiveComponent* OtherComp,
+		int32 OtherBodyIndex,
+		bool bFromSweep,
+		const FHitResult& SweepResult
+	);
+
+	UFUNCTION()
+	void OnRainEndOverlap(
+		UPrimitiveComponent* OverlappedComponent,
+		AActor* OtherActor,
+		UPrimitiveComponent* OtherComp,
+		int32 OtherBodyIndex
+	);
+
 	UPROPERTY(VisibleAnywhere)
 	UBoxComponent* RainBounds;
 
 	UPROPERTY(VisibleAnywhere)
 	UNiagaraComponent* RainNiagara;
 
-	UPROPERTY(VisibleAnywhere)
-	UDynamicWetSourceComponent* DynamicWetSource;
+	UPROPERTY(EditAnywhere, Category = "Rain Volume", meta = (ClampMin = "0.0"))
+	float WetAmountPerSecond = 0.5f;
+
+	UPROPERTY(EditAnywhere, Category = "Rain Volume", meta = (ClampMin = "0.01"))
+	float UpdateInterval = 0.1f;
+
+	UPROPERTY(EditAnywhere, Category = "Rain Volume")
+	FVector RainDirection = FVector(0.0f, 0.0f, -1.0f);
+
+	UPROPERTY(EditAnywhere, Category = "Rain Volume")
+	FName RainDirectionParameterName = TEXT("User.RainDirection");
+
+	UPROPERTY(EditAnywhere, Category = "Rain Volume")
+	FName RainBoundsExtentParameterName = TEXT("User.RainBoundsExtent");
+
+	UPROPERTY(EditAnywhere, Category = "Rain Volume")
+	FName RainIntensityParameterName = TEXT("User.RainIntensity");
+
+	TMap<TWeakObjectPtr<UDynamicWetReceiverComponent>, int32> ReceiverOverlapCounts;
+	FTimerHandle WetnessTimer;
 };

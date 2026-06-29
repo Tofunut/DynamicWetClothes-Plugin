@@ -4,8 +4,14 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
+>>>> ORIGINAL //depot/Tofunut_EPIC/Plugins/DynamicWetClothes/Source/DynamicWetClothes/Public/DynamicWet/DynamicWetReceiverComponent.h#3
+#include "DynamicWetSourceTypes.h"
+==== THEIRS //depot/Tofunut_EPIC/Plugins/DynamicWetClothes/Source/DynamicWetClothes/Public/DynamicWet/DynamicWetReceiverComponent.h#4
 #include "DynamicWetSourceTypes.h"
 #include "WetnessProfile.h"
+==== YOURS //DotCho_WorkSpace/Tofunut_EPIC/Plugins/DynamicWetClothes/Source/DynamicWetClothes/Public/DynamicWet/DynamicWetReceiverComponent.h
+#include "DynamicWetContactTypes.h"
+<<<<
 
 #include "DynamicWetReceiverComponent.generated.h"
 
@@ -37,8 +43,12 @@ public:
 	void ApplyWetnessGlobal(float Amount);
 	void ApplyWetnessBelowHeight(float WaterSurfaceZ, float Amount);
 	UFUNCTION(BlueprintCallable, Category = "Wetness")
-	void SetWetSourceData(UObject* SourceId, const FDWCWetSourceData& SourceData);
-	void ClearWetSource(UObject* SourceId);
+	bool ApplyWetContact(const FDWCWetContact& Contact, bool bApplyMaterial = true);
+	UFUNCTION(BlueprintCallable, Category = "Wetness")
+	bool ApplyWetContacts(const TArray<FDWCWetContact>& Contacts, bool bApplyMaterial = true);
+	UFUNCTION(BlueprintCallable, Category = "Wetness")
+	bool ApplyWetSurface(const FDWCWetSurfaceData& SurfaceData, float Amount, bool bApplyMaterial = true);
+	bool GetWetnessWorldBounds(FBox& OutBounds) const;
 	void DryOutWetness(bool& bDirty, float EffectiveDryRatePerSecond);
 	void ProcessPendingWetness(bool& bDirty, float EffectiveSpreadRatePerSecond);
 
@@ -60,11 +70,16 @@ private:
 	float GetDryRatePerSecond() const;
 	float GetSpreadRatePerSecond() const;
 	float GetGravityFlowStrength() const;
+>>>> ORIGINAL //depot/Tofunut_EPIC/Plugins/DynamicWetClothes/Source/DynamicWetClothes/Public/DynamicWet/DynamicWetReceiverComponent.h#3
+	bool NormalizeWetSourceData(UObject* SourceId, const FDWCWetSourceData& SourceData, FDWCWetSourceData& OutSourceData) const;
+==== THEIRS //depot/Tofunut_EPIC/Plugins/DynamicWetClothes/Source/DynamicWetClothes/Public/DynamicWet/DynamicWetReceiverComponent.h#4
 	float GetAbsorptionMultiplierForVertex(int32 VertexIndex) const;
 	float GetDryRatePerSecondForVertex(int32 VertexIndex) const;
 	float GetSpreadRatePerSecondForVertex(int32 VertexIndex) const;
 	float GetGravityFlowStrengthForVertex(int32 VertexIndex) const;
 	bool NormalizeWetSourceData(UObject* SourceId, const FDWCWetSourceData& SourceData, FDWCWetSourceData& OutSourceData) const;
+==== YOURS //DotCho_WorkSpace/Tofunut_EPIC/Plugins/DynamicWetClothes/Source/DynamicWetClothes/Public/DynamicWet/DynamicWetReceiverComponent.h
+<<<<
 	void EnsureWetnessBufferSize(int32 VertexCount);
 	float AbsorbWetnessAtVertex(int32 VertexIndex, float Amount, bool& bDirty);
 	void QueuePendingWetness(int32 VertexIndex, float Amount);
@@ -104,10 +119,9 @@ private:
 
 	void UpdateWetness();
 	void ApplyWetnessToMaterial();
-	bool ApplyWetnessWithSourceData(UObject* SourceId, const FDWCWetSourceData& SourceData, float Amount, bool bApplyMaterial = true);
-	bool ApplyLocalizedWetnessWithSourceData(const FDWCWetSourceData& SourceData, float Amount, bool bApplyMaterial = true);
 	bool ApplyRainWetness(const FVector& RainDirection, float Amount, bool bApplyMaterial = true);
-	bool QuerySurfaceZForSource(UObject* SourceId, const FDWCWetSourceData& SourceData, const FVector& WorldPosition, float& OutSurfaceZ) const;
+	bool QueryWetSurfaceData(const FDWCWetSurfaceData& SurfaceData, const FVector& WorldPosition, float& OutSurfaceZ) const;
+	bool DoesVertexMatchBoneName(int32 VertexIndex, FName BoneName) const;
 
 	USkeletalMeshComponent* ResolveTargetSkeletalMesh() const;
 	bool UpdateSkinnedPositions();
@@ -190,34 +204,8 @@ private:
 
 	FTimerHandle WetnessUpdateTimer;
 
-	TMap<TWeakObjectPtr<UObject>, FDWCWetSourceData> ActiveWetSources;
-
 	//Skinning cache for vertex positions
 	TArray<FVector3f> CachedSkinnedPositions;
 	TArray<FVector3f> CachedSkinnedNormals;
 	TArray<FMatrix44f> CachedRefToLocalMatrices;
-
-//Temp Grid
-private:
-	static constexpr int32 WetSurfaceGridSize = 16;
-
-	struct FWetSurfaceGridSample
-	{
-		float SurfaceZ = 0.0f;
-		bool bValid = false;
-	};
-
-	bool BuildWetSurfaceGrid(
-		UObject* SourceId,
-		const FDWCWetSourceData& SourceData,
-		FWetSurfaceGridSample(&OutGrid)[WetSurfaceGridSize][WetSurfaceGridSize],
-		FBox& OutBounds
-	) const;
-
-	bool QueryWetSurfaceGrid(
-		const FWetSurfaceGridSample(&Grid)[WetSurfaceGridSize][WetSurfaceGridSize],
-		const FBox& Bounds,
-		const FVector& WorldPosition,
-		float& OutSurfaceZ
-	) const;
 };

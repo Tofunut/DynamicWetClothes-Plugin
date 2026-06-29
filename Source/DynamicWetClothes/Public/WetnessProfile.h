@@ -32,6 +32,46 @@ struct FWetnessProfileParameters
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wet Rendering")
     float TransparencyStrength = 0.0f;
+
+    float GetAbsorptionMultiplier() const
+    {
+        return FMath::Max(0.0f, Absorption);
+    }
+
+    float GetSpreadRatePerSecond() const
+    {
+        return FMath::Max(0.0f, SpreadRate);
+    }
+
+    float GetDryRatePerSecond() const
+    {
+        return FMath::Max(0.0f, DryRate);
+    }
+
+    float GetGravityFlowStrength() const
+    {
+        return FMath::Max(0.0f, GravityFlowStrength);
+    }
+
+    float GetSurfaceWaterStrength() const
+    {
+        return FMath::Max(0.0f, SurfaceWaterStrength);
+    }
+
+    float GetRunoffStrength() const
+    {
+        return FMath::Max(0.0f, RunoffStrength);
+    }
+
+    float GetWetVisualStrength() const
+    {
+        return FMath::Max(0.0f, WetVisualStrength);
+    }
+
+    float GetTransparencyStrength() const
+    {
+        return FMath::Max(0.0f, TransparencyStrength);
+    }
 };
 
 UCLASS(BlueprintType)
@@ -42,6 +82,59 @@ class DYNAMICWETCLOTHES_API UWetnessProfile : public UDataAsset
   public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness Profile", meta = (ShowOnlyInnerProperties))
     FWetnessProfileParameters Parameters;
+
+    const FWetnessProfileParameters& GetParameters() const
+    {
+        return Parameters;
+    }
+
+    UFUNCTION(BlueprintPure, Category = "Wetness Profile")
+    float GetAbsorptionMultiplier() const
+    {
+        return Parameters.GetAbsorptionMultiplier();
+    }
+
+    UFUNCTION(BlueprintPure, Category = "Wetness Profile")
+    float GetSpreadRatePerSecond() const
+    {
+        return Parameters.GetSpreadRatePerSecond();
+    }
+
+    UFUNCTION(BlueprintPure, Category = "Wetness Profile")
+    float GetDryRatePerSecond() const
+    {
+        return Parameters.GetDryRatePerSecond();
+    }
+
+    UFUNCTION(BlueprintPure, Category = "Wetness Profile")
+    float GetGravityFlowStrength() const
+    {
+        return Parameters.GetGravityFlowStrength();
+    }
+
+    UFUNCTION(BlueprintPure, Category = "Wetness Profile")
+    float GetSurfaceWaterStrength() const
+    {
+        return Parameters.GetSurfaceWaterStrength();
+    }
+
+    UFUNCTION(BlueprintPure, Category = "Wetness Profile")
+    float GetRunoffStrength() const
+    {
+        return Parameters.GetRunoffStrength();
+    }
+
+    UFUNCTION(BlueprintPure, Category = "Wetness Profile")
+    float GetWetVisualStrength() const
+    {
+        return Parameters.GetWetVisualStrength();
+    }
+
+    UFUNCTION(BlueprintPure, Category = "Wetness Profile")
+    float GetTransparencyStrength() const
+    {
+        return Parameters.GetTransparencyStrength();
+    }
 
 #if WITH_EDITORONLY_DATA
     UPROPERTY(EditAnywhere, Category = "Wetness Profile")

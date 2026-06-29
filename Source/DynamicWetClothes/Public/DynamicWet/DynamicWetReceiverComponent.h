@@ -10,7 +10,7 @@
 
 class USkeletalMeshComponent;
 class UMaterialInstanceDynamic;
-class UWetMaterialPresetDataAsset;
+class UWetnessProfile;
 
 class FSkeletalMeshLODRenderData;
 
@@ -52,7 +52,7 @@ private:
 	void InitializeWetMaterialInstance();
 	void ApplyWetMaterialParameters();
 	void AddNeighbor(int32 VertexIndex, int32 NeighborIndex);
-	const UWetMaterialPresetDataAsset* GetActiveMaterialPreset() const;
+	const UWetnessProfile* GetActiveMaterialProfile() const;
 	float GetAbsorptionMultiplier() const;
 	float GetDryRatePerSecond() const;
 	float GetSpreadRatePerSecond() const;
@@ -115,7 +115,7 @@ public:
 	TObjectPtr<USkeletalMeshComponent> TargetSkeletalMesh;
 
 	UPROPERTY(EditAnywhere)
-	TArray<UWetMaterialPresetDataAsset*> MaterialPresets;
+	TArray<UWetnessProfile*> MaterialProfiles;
 
 	UPROPERTY(EditAnywhere, Category = "Wetness|Visual")
 	FLinearColor FallbackUnderColor = FLinearColor(0.8f, 0.55f, 0.42f, 1.0f);

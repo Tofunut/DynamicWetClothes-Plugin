@@ -11,7 +11,7 @@
 #include "Engine/EngineTypes.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "DynamicWet/DynamicWetSourceComponent.h"
-#include "DynamicWet/WetMaterialPresetDataAsset.h"
+#include "WetnessProfile.h"
 
 // Sets default values for this component's properties
 UDynamicWetReceiverComponent::UDynamicWetReceiverComponent()
@@ -183,9 +183,9 @@ void UDynamicWetReceiverComponent::AddNeighbor(int32 VertexIndex, int32 Neighbor
     }
 }
 
-const UWetMaterialPresetDataAsset* UDynamicWetReceiverComponent::GetActiveMaterialPreset() const
+const UWetnessProfile* UDynamicWetReceiverComponent::GetActiveMaterialProfile() const
 {
-    for (const UWetMaterialPresetDataAsset* MaterialPreset : MaterialPresets)
+    for (const UWetnessProfile* MaterialPreset : MaterialProfiles)
     {
         if (MaterialPreset)
         {
@@ -198,26 +198,26 @@ const UWetMaterialPresetDataAsset* UDynamicWetReceiverComponent::GetActiveMateri
 
 float UDynamicWetReceiverComponent::GetAbsorptionMultiplier() const
 {
-    const UWetMaterialPresetDataAsset* MaterialPreset = GetActiveMaterialPreset();
-    return MaterialPreset ? FMath::Max(0.0f, MaterialPreset->Absorption) : 1.0f;
+    const UWetnessProfile* MaterialPreset = GetActiveMaterialProfile();
+    return MaterialPreset ? MaterialPreset->GetAbsorptionMultiplier() : 1.0f;
 }
 
 float UDynamicWetReceiverComponent::GetDryRatePerSecond() const
 {
-    const UWetMaterialPresetDataAsset* MaterialPreset = GetActiveMaterialPreset();
-    return MaterialPreset ? MaterialPreset->GetDryRateCoefficientPerSecond() : 1.0f;
+    const UWetnessProfile* MaterialPreset = GetActiveMaterialProfile();
+    return MaterialPreset ? MaterialPreset->GetDryRatePerSecond() : 1.0f;
 }
 
 float UDynamicWetReceiverComponent::GetSpreadRatePerSecond() const
 {
-    const UWetMaterialPresetDataAsset* MaterialPreset = GetActiveMaterialPreset();
-    return MaterialPreset ? FMath::Max(0.0f, MaterialPreset->SpreadRate) : 0.0f;
+    const UWetnessProfile* MaterialPreset = GetActiveMaterialProfile();
+    return MaterialPreset ? MaterialPreset->GetSpreadRatePerSecond() : 0.0f;
 }
 
 float UDynamicWetReceiverComponent::GetGravityFlowStrength() const
 {
-    const UWetMaterialPresetDataAsset* MaterialPreset = GetActiveMaterialPreset();
-    return MaterialPreset ? MaterialPreset->GravityFlowStrength : 0.0f;
+    const UWetnessProfile* MaterialPreset = GetActiveMaterialProfile();
+    return MaterialPreset ? MaterialPreset->GetGravityFlowStrength() : 0.0f;
 }
 
 void UDynamicWetReceiverComponent::SetWetSourceData(UObject* SourceId, const FDWCWetSourceData& SourceData)

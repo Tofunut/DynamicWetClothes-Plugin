@@ -9,9 +9,243 @@
 #include "Rendering/SkinWeightVertexBuffer.h"
 
 #include "Engine/EngineTypes.h"
+#include "Engine/SkeletalMesh.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "DynamicWet/DynamicWetSourceComponent.h"
+#include "WetClothingProfile.h"
 #include "WetnessProfile.h"
+
+namespace DynamicWetReceiverRuntime
+{
+    static constexpr double UVQuantizeScale = 100000.0;
+
+    struct FQuantizedUV
+    {
+        int64 U = 0;
+        int64 V = 0;
+
+        FQuantizedUV() = default;
+
+        explicit FQuantizedUV(const FVector2D& InUV)
+            : U(FMath::RoundToInt64(InUV.X * UVQuantizeScale))
+            , V(FMath::RoundToInt64(InUV.Y * UVQuantizeScale))
+        {
+        }
+
+        bool operator==(const FQuantizedUV& Other) const
+        {
+            return U == Other.U && V == Other.V;
+        }
+    };
+
+    static uint32 HashInt64(const int64 Value)
+    {
+        const uint64 UnsignedValue = static_cast<uint64>(Value);
+        return HashCombine(
+            ::GetTypeHash(static_cast<uint32>(UnsignedValue & 0xFFFFFFFFull)),
+            ::GetTypeHash(static_cast<uint32>((UnsignedValue >> 32) & 0xFFFFFFFFull)));
+    }
+
+    static uint32 GetTypeHash(const FQuantizedUV& Value)
+    {
+        return HashCombine(HashInt64(Value.U), HashInt64(Value.V));
+    }
+
+    static bool LessUV(const FQuantizedUV& A, const FQuantizedUV& B)
+    {
+        return A.U != B.U ? A.U < B.U : A.V < B.V;
+    }
+
+    struct FUVEdgeKey
+    {
+        FQuantizedUV A;
+        FQuantizedUV B;
+
+        FUVEdgeKey() = default;
+
+        FUVEdgeKey(const FVector2D& InA, const FVector2D& InB)
+        {
+            FQuantizedUV QuantizedA(InA);
+            FQuantizedUV QuantizedB(InB);
+
+            if (LessUV(QuantizedB, QuantizedA))
+            {
+                A = QuantizedB;
+                B = QuantizedA;
+            }
+            else
+            {
+                A = QuantizedA;
+                B = QuantizedB;
+            }
+        }
+
+        bool operator==(const FUVEdgeKey& Other) const
+        {
+            return A == Other.A && B == Other.B;
+        }
+    };
+
+    static uint32 GetTypeHash(const FUVEdgeKey& Key)
+    {
+        return HashCombine(GetTypeHash(Key.A), GetTypeHash(Key.B));
+    }
+
+    struct FRuntimeUVTriangle
+    {
+        int32 TriangleID = INDEX_NONE;
+        int32 VertexIndices[3] = { INDEX_NONE, INDEX_NONE, INDEX_NONE };
+        FVector2D UVs[3];
+    };
+
+    static int32 FindParent(TArray<int32>& Parents, const int32 Index)
+    {
+        if (Parents[Index] == Index)
+        {
+            return Index;
+        }
+
+        Parents[Index] = FindParent(Parents, Parents[Index]);
+        return Parents[Index];
+    }
+
+    static void UnionParents(TArray<int32>& Parents, const int32 A, const int32 B)
+    {
+        const int32 RootA = FindParent(Parents, A);
+        const int32 RootB = FindParent(Parents, B);
+
+        if (RootA != RootB)
+        {
+            Parents[RootB] = RootA;
+        }
+    }
+
+    static bool BuildRuntimeIslandVertexMap(
+        const FSkeletalMeshLODRenderData& LODData,
+        const int32 UVChannelIndex,
+        const int32 MaterialSlotIndex,
+        TMap<int32, TArray<int32>>& OutIslandVertices)
+    {
+        OutIslandVertices.Reset();
+
+        if (UVChannelIndex < 0 || UVChannelIndex >= static_cast<int32>(LODData.GetNumTexCoords()))
+        {
+            return false;
+        }
+
+        TArray<uint32> IndexBuffer;
+        LODData.MultiSizeIndexContainer.GetIndexBuffer(IndexBuffer);
+        if (IndexBuffer.Num() == 0)
+        {
+            return false;
+        }
+
+        const int32 VertexCount = LODData.GetNumVertices();
+        TArray<FRuntimeUVTriangle> Triangles;
+
+        for (const FSkelMeshRenderSection& Section : LODData.RenderSections)
+        {
+            if (!Section.IsValid() || Section.MaterialIndex != MaterialSlotIndex)
+            {
+                continue;
+            }
+
+            const int32 FirstIndex = static_cast<int32>(Section.BaseIndex);
+            const int32 LastIndex = FMath::Min(FirstIndex + static_cast<int32>(Section.NumTriangles * 3), IndexBuffer.Num());
+
+            for (int32 Index = FirstIndex; Index + 2 < LastIndex; Index += 3)
+            {
+                const uint32 Index0 = IndexBuffer[Index];
+                const uint32 Index1 = IndexBuffer[Index + 1];
+                const uint32 Index2 = IndexBuffer[Index + 2];
+
+                if (Index0 >= static_cast<uint32>(VertexCount) ||
+                    Index1 >= static_cast<uint32>(VertexCount) ||
+                    Index2 >= static_cast<uint32>(VertexCount))
+                {
+                    continue;
+                }
+
+                FRuntimeUVTriangle Triangle;
+                Triangle.TriangleID = Triangles.Num();
+                Triangle.VertexIndices[0] = static_cast<int32>(Index0);
+                Triangle.VertexIndices[1] = static_cast<int32>(Index1);
+                Triangle.VertexIndices[2] = static_cast<int32>(Index2);
+                Triangle.UVs[0] = FVector2D(LODData.StaticVertexBuffers.StaticMeshVertexBuffer.GetVertexUV(Index0, UVChannelIndex));
+                Triangle.UVs[1] = FVector2D(LODData.StaticVertexBuffers.StaticMeshVertexBuffer.GetVertexUV(Index1, UVChannelIndex));
+                Triangle.UVs[2] = FVector2D(LODData.StaticVertexBuffers.StaticMeshVertexBuffer.GetVertexUV(Index2, UVChannelIndex));
+                Triangles.Add(Triangle);
+            }
+        }
+
+        if (Triangles.Num() == 0)
+        {
+            return true;
+        }
+
+        TArray<int32> Parents;
+        Parents.SetNum(Triangles.Num());
+        for (int32 TriangleIndex = 0; TriangleIndex < Triangles.Num(); ++TriangleIndex)
+        {
+            Parents[TriangleIndex] = TriangleIndex;
+        }
+
+        TMap<FUVEdgeKey, TArray<int32>> EdgeToTriangles;
+        for (int32 TriangleIndex = 0; TriangleIndex < Triangles.Num(); ++TriangleIndex)
+        {
+            const FRuntimeUVTriangle& Triangle = Triangles[TriangleIndex];
+            EdgeToTriangles.FindOrAdd(FUVEdgeKey(Triangle.UVs[0], Triangle.UVs[1])).Add(TriangleIndex);
+            EdgeToTriangles.FindOrAdd(FUVEdgeKey(Triangle.UVs[1], Triangle.UVs[2])).Add(TriangleIndex);
+            EdgeToTriangles.FindOrAdd(FUVEdgeKey(Triangle.UVs[2], Triangle.UVs[0])).Add(TriangleIndex);
+        }
+
+        for (const TPair<FUVEdgeKey, TArray<int32>>& Pair : EdgeToTriangles)
+        {
+            const TArray<int32>& ConnectedTriangles = Pair.Value;
+            if (ConnectedTriangles.Num() <= 1)
+            {
+                continue;
+            }
+
+            const int32 FirstTriangle = ConnectedTriangles[0];
+            for (int32 ConnectedIndex = 1; ConnectedIndex < ConnectedTriangles.Num(); ++ConnectedIndex)
+            {
+                UnionParents(Parents, FirstTriangle, ConnectedTriangles[ConnectedIndex]);
+            }
+        }
+
+        TMap<int32, int32> RootToIslandID;
+        TMap<int32, TSet<int32>> IslandVertexSets;
+        for (int32 TriangleIndex = 0; TriangleIndex < Triangles.Num(); ++TriangleIndex)
+        {
+            const int32 Root = FindParent(Parents, TriangleIndex);
+            int32* ExistingIslandID = RootToIslandID.Find(Root);
+            if (ExistingIslandID == nullptr)
+            {
+                RootToIslandID.Add(Root, RootToIslandID.Num());
+                ExistingIslandID = RootToIslandID.Find(Root);
+            }
+
+            TSet<int32>& VertexSet = IslandVertexSets.FindOrAdd(*ExistingIslandID);
+            const FRuntimeUVTriangle& Triangle = Triangles[TriangleIndex];
+            VertexSet.Add(Triangle.VertexIndices[0]);
+            VertexSet.Add(Triangle.VertexIndices[1]);
+            VertexSet.Add(Triangle.VertexIndices[2]);
+        }
+
+        for (const TPair<int32, TSet<int32>>& Pair : IslandVertexSets)
+        {
+            TArray<int32>& IslandVertices = OutIslandVertices.FindOrAdd(Pair.Key);
+            IslandVertices.Reserve(Pair.Value.Num());
+            for (const int32 VertexIndex : Pair.Value)
+            {
+                IslandVertices.Add(VertexIndex);
+            }
+        }
+
+        return true;
+    }
+} // namespace DynamicWetReceiverRuntime
 
 // Sets default values for this component's properties
 UDynamicWetReceiverComponent::UDynamicWetReceiverComponent()
@@ -35,6 +269,7 @@ void UDynamicWetReceiverComponent::BeginPlay()
     }
 
     InitializeWetnessData();
+    InitializeWetPartVertexData();
     BuildNeighborGraph();
     InitializeWetMaterialInstance();
     ApplyWetMaterialParameters();
@@ -69,6 +304,97 @@ void UDynamicWetReceiverComponent::InitializeWetnessData()
 
     TargetSkeletalMesh->SetVertexColorOverride_LinearColor(0, CachedWetVertexColors);
     TargetSkeletalMesh->MarkRenderStateDirty();
+}
+
+void UDynamicWetReceiverComponent::InitializeWetPartVertexData()
+{
+    FSkeletalMeshLODRenderData* LODData = nullptr;
+    if (!GetLODRenderData(0, LODData))
+    {
+        return;
+    }
+
+    const int32 VertexCount = LODData->GetNumVertices();
+    VertexWetPartIDs.Init(INDEX_NONE, VertexCount);
+    VertexWetnessProfileParameters.SetNum(VertexCount);
+
+    FWetnessProfileParameters DefaultParameters;
+    if (const UWetnessProfile* MaterialPreset = GetActiveMaterialProfile())
+    {
+        DefaultParameters = MaterialPreset->GetParameters();
+    }
+
+    for (FWetnessProfileParameters& VertexParameters : VertexWetnessProfileParameters)
+    {
+        VertexParameters = DefaultParameters;
+    }
+
+    if (!WetClothingProfile)
+    {
+        return;
+    }
+
+    USkeletalMesh* SkeletalMesh = TargetSkeletalMesh ? TargetSkeletalMesh->GetSkeletalMeshAsset() : nullptr;
+    if (WetClothingProfile->TargetMesh && WetClothingProfile->TargetMesh != SkeletalMesh)
+    {
+        UE_LOG(
+            LogTemp,
+            Warning,
+            TEXT("DynamicWetReceiverComponent: WetClothingProfile TargetMesh does not match the receiver mesh on %s."),
+            *GetNameSafe(GetOwner()));
+    }
+
+    TMap<FIntPoint, TMap<int32, TArray<int32>>> IslandVertexMapCache;
+    for (const FWetClothingProfileWetPartEntry& WetPartEntry : WetClothingProfile->WetPartEntries)
+    {
+        if (WetPartEntry.MaterialSlotIndex == INDEX_NONE ||
+            WetPartEntry.UVChannelIndex < 0 ||
+            WetPartEntry.AssignedIslandIDs.Num() == 0)
+        {
+            continue;
+        }
+
+        const FIntPoint CacheKey(WetPartEntry.MaterialSlotIndex, WetPartEntry.UVChannelIndex);
+        TMap<int32, TArray<int32>>* IslandVertexMap = IslandVertexMapCache.Find(CacheKey);
+        if (IslandVertexMap == nullptr)
+        {
+            TMap<int32, TArray<int32>> NewIslandVertexMap;
+            DynamicWetReceiverRuntime::BuildRuntimeIslandVertexMap(
+                *LODData,
+                WetPartEntry.UVChannelIndex,
+                WetPartEntry.MaterialSlotIndex,
+                NewIslandVertexMap);
+
+            IslandVertexMapCache.Add(CacheKey, MoveTemp(NewIslandVertexMap));
+            IslandVertexMap = IslandVertexMapCache.Find(CacheKey);
+        }
+
+        if (IslandVertexMap == nullptr)
+        {
+            continue;
+        }
+
+        for (const int32 IslandID : WetPartEntry.AssignedIslandIDs)
+        {
+            const TArray<int32>* IslandVertices = IslandVertexMap->Find(IslandID);
+            if (IslandVertices == nullptr)
+            {
+                continue;
+            }
+
+            for (const int32 VertexIndex : *IslandVertices)
+            {
+                if (!VertexWetPartIDs.IsValidIndex(VertexIndex) ||
+                    !VertexWetnessProfileParameters.IsValidIndex(VertexIndex))
+                {
+                    continue;
+                }
+
+                VertexWetPartIDs[VertexIndex] = WetPartEntry.WetPartID;
+                VertexWetnessProfileParameters[VertexIndex] = WetPartEntry.ProfileAssignment.Parameters;
+            }
+        }
+    }
 }
 
 void UDynamicWetReceiverComponent::BuildNeighborGraph()
@@ -220,6 +546,34 @@ float UDynamicWetReceiverComponent::GetGravityFlowStrength() const
     return MaterialPreset ? MaterialPreset->GetGravityFlowStrength() : 0.0f;
 }
 
+float UDynamicWetReceiverComponent::GetAbsorptionMultiplierForVertex(const int32 VertexIndex) const
+{
+    return VertexWetnessProfileParameters.IsValidIndex(VertexIndex)
+               ? VertexWetnessProfileParameters[VertexIndex].GetAbsorptionMultiplier()
+               : GetAbsorptionMultiplier();
+}
+
+float UDynamicWetReceiverComponent::GetDryRatePerSecondForVertex(const int32 VertexIndex) const
+{
+    return VertexWetnessProfileParameters.IsValidIndex(VertexIndex)
+               ? VertexWetnessProfileParameters[VertexIndex].GetDryRatePerSecond()
+               : GetDryRatePerSecond();
+}
+
+float UDynamicWetReceiverComponent::GetSpreadRatePerSecondForVertex(const int32 VertexIndex) const
+{
+    return VertexWetnessProfileParameters.IsValidIndex(VertexIndex)
+               ? VertexWetnessProfileParameters[VertexIndex].GetSpreadRatePerSecond()
+               : GetSpreadRatePerSecond();
+}
+
+float UDynamicWetReceiverComponent::GetGravityFlowStrengthForVertex(const int32 VertexIndex) const
+{
+    return VertexWetnessProfileParameters.IsValidIndex(VertexIndex)
+               ? VertexWetnessProfileParameters[VertexIndex].GetGravityFlowStrength()
+               : GetGravityFlowStrength();
+}
+
 void UDynamicWetReceiverComponent::SetWetSourceData(UObject* SourceId, const FDWCWetSourceData& SourceData)
 {
     FDWCWetSourceData NormalizedSourceData;
@@ -302,6 +656,8 @@ void UDynamicWetReceiverComponent::EnsureWetnessBufferSize(const int32 VertexCou
     if (VertexCount <= 0)
     {
         WetnessPerVertex.Reset();
+        VertexWetPartIDs.Reset();
+        VertexWetnessProfileParameters.Reset();
         Updating_Pending_Wetness_Amounts.Reset();
         WetnessDryHoldTimePerVertex.Reset();
         Updating_Pending_Wetness_Vertex_IndexQueue.Reset();
@@ -314,6 +670,12 @@ void UDynamicWetReceiverComponent::EnsureWetnessBufferSize(const int32 VertexCou
     if (WetnessPerVertex.Num() != VertexCount)
     {
         WetnessPerVertex.SetNumZeroed(VertexCount);
+    }
+
+    if (VertexWetPartIDs.Num() != VertexCount ||
+        VertexWetnessProfileParameters.Num() != VertexCount)
+    {
+        InitializeWetPartVertexData();
     }
 
     if (Updating_Pending_Wetness_Amounts.Num() != VertexCount)
@@ -416,9 +778,6 @@ void UDynamicWetReceiverComponent::ClearPendingWetness()
 
 void UDynamicWetReceiverComponent::DryOutWetness(bool& bDirty, const float EffectiveDryRatePerSecond)
 {
-    const float DryMultiplier = FMath::Exp(
-        -FMath::Max(0.0f, EffectiveDryRatePerSecond) * WetnessUpdateInterval);
-
     for (int32 VertexIndex = 0; VertexIndex < WetnessPerVertex.Num(); ++VertexIndex)
     {
         if (WetnessDryHoldTimePerVertex.IsValidIndex(VertexIndex) &&
@@ -433,6 +792,11 @@ void UDynamicWetReceiverComponent::DryOutWetness(bool& bDirty, const float Effec
         float& Wetness = WetnessPerVertex[VertexIndex];
         if (Wetness > 0.0f)
         {
+            const float VertexDryRate = VertexWetnessProfileParameters.IsValidIndex(VertexIndex)
+                                            ? GetDryRatePerSecondForVertex(VertexIndex)
+                                            : EffectiveDryRatePerSecond;
+            const float DryMultiplier = FMath::Exp(
+                -FMath::Max(0.0f, VertexDryRate) * WetnessUpdateInterval);
             const float OldWetness = Wetness;
             Wetness *= DryMultiplier;
             if (Wetness <= MinPendingWetnessAmount)
@@ -474,9 +838,19 @@ bool UDynamicWetReceiverComponent::PreparePendingWetnessProcessing(
 
     OutGravityFlowStrength = GetGravityFlowStrength();
     bOutUseGravityBias = OutGravityFlowStrength > 0.0f;
+    if (!bOutUseGravityBias)
+    {
+        for (const int32 VertexIndex : Updating_Pending_Wetness_Vertex_IndexQueue)
+        {
+            if (GetGravityFlowStrengthForVertex(VertexIndex) > 0.0f)
+            {
+                bOutUseGravityBias = true;
+                break;
+            }
+        }
+    }
 
     bOutCanSpread =
-        EffectiveSpreadRatePerSecond > 0.0f &&
         NeighborGraph.Num() == WetnessPerVertex.Num();
 
     if (bOutUseGravityBias)
@@ -526,6 +900,9 @@ int32 UDynamicWetReceiverComponent::ProcessCurrentPendingWetness(
     const bool  bUseGravityBias,
     const bool  bCanSpread)
 {
+    (void)SpreadAlpha;
+    (void)GravityFlowStrength;
+
     int32 QueueReadIndex = 0;
     int32 ProcessedVertices = 0;
 
@@ -559,9 +936,14 @@ int32 UDynamicWetReceiverComponent::ProcessCurrentPendingWetness(
         const float OverflowWetness = FMath::Max(0.0f, DesiredAbsorption - AbsorbedWetness); // MaxStored를 넘어서 흡수하지 못하고 나온 양
         const float CapillaryWetness = FMath::Max(0.0f, PendingWater - DesiredAbsorption);   // MaxStored를 넘지는 않았지만 흡수력이 딸려서 흡수하지 못한 양
         const float SpreadableWetness = CapillaryWetness + OverflowWetness;
+        const float VertexSpreadAlpha = FMath::Clamp(
+            GetSpreadRatePerSecondForVertex(VertexIndex) * WetnessUpdateInterval,
+            0.0f,
+            1.0f);
+        const float VertexGravityFlowStrength = GetGravityFlowStrengthForVertex(VertexIndex);
 
         if (!bCanSpread ||
-            SpreadAlpha <= 0.0f ||
+            VertexSpreadAlpha <= 0.0f ||
             SpreadableWetness <= MinPendingWetnessAmount)
         {
             continue;
@@ -570,9 +952,9 @@ int32 UDynamicWetReceiverComponent::ProcessCurrentPendingWetness(
         SpreadPendingWetnessToNeighbors(
             VertexIndex,
             SpreadableWetness,
-            SpreadAlpha,
-            GravityFlowStrength,
-            bUseGravityBias);
+            VertexSpreadAlpha,
+            VertexGravityFlowStrength,
+            bUseGravityBias && VertexGravityFlowStrength > 0.0f);
     }
 
     return QueueReadIndex;
@@ -627,7 +1009,15 @@ void UDynamicWetReceiverComponent::SpreadPendingWetnessToNeighbors(
                       GravityDirection)
                 : 1.0f;
 
-        const float Weight = TargetCapacity * GravityBias;
+        float PartBoundaryScale = 1.0f;
+        if (VertexWetPartIDs.IsValidIndex(VertexIndex) &&
+            VertexWetPartIDs.IsValidIndex(NeighborIndex) &&
+            VertexWetPartIDs[VertexIndex] != VertexWetPartIDs[NeighborIndex])
+        {
+            PartBoundaryScale = FMath::Clamp(CrossWetPartSpreadScale, 0.0f, 1.0f);
+        }
+
+        const float Weight = TargetCapacity * GravityBias * PartBoundaryScale;
         if (Weight <= KINDA_SMALL_NUMBER)
         {
             continue;
@@ -807,10 +1197,7 @@ void UDynamicWetReceiverComponent::UpdateWetness()
         ClearPendingWetness();
     }
 
-    if (EffectiveDryRatePerSecond > 0.0f)
-    {
-        DryOutWetness(bDirty, EffectiveDryRatePerSecond);
-    }
+    DryOutWetness(bDirty, EffectiveDryRatePerSecond);
 
     if (bDirty)
     {
@@ -1062,8 +1449,7 @@ void UDynamicWetReceiverComponent::ApplyWetnessGlobal(float Amount)
         return;
     }
 
-    const float EffectiveAmount =
-        Amount > 0.0f ? Amount * GetAbsorptionMultiplier() : Amount;
+    const float EffectiveAmount = Amount;
     if (FMath::IsNearlyZero(EffectiveAmount))
     {
         return;
@@ -1075,7 +1461,7 @@ void UDynamicWetReceiverComponent::ApplyWetnessGlobal(float Amount)
     {
         if (EffectiveAmount > 0.0f)
         {
-            QueuePendingWetness(VertexIndex, EffectiveAmount);
+            QueuePendingWetness(VertexIndex, EffectiveAmount * GetAbsorptionMultiplierForVertex(VertexIndex));
         }
         else
         {
@@ -1112,8 +1498,7 @@ bool UDynamicWetReceiverComponent::ApplyRainWetness(
         return false;
     }
 
-    const float EffectiveAmount =
-        Amount > 0.0f ? Amount * GetAbsorptionMultiplier() : Amount;
+    const float EffectiveAmount = Amount;
 
     if (FMath::IsNearlyZero(EffectiveAmount) || !UpdateSkinnedNormals())
     {
@@ -1171,7 +1556,11 @@ bool UDynamicWetReceiverComponent::ApplyRainWetness(
             continue;
         }
 
-        const float VertexAmount = EffectiveAmount * Exposure;
+        const float VertexAmount =
+            (EffectiveAmount > 0.0f
+                 ? EffectiveAmount * GetAbsorptionMultiplierForVertex(VertexIndex)
+                 : EffectiveAmount) *
+            Exposure;
         if (VertexAmount > 0.0f)
         {
             QueuePendingWetness(VertexIndex, VertexAmount);
@@ -1201,8 +1590,7 @@ bool UDynamicWetReceiverComponent::ApplyLocalizedWetnessWithSourceData(
         return false;
     }
 
-    const float EffectiveAmount =
-        Amount > 0.0f ? Amount * GetAbsorptionMultiplier() : Amount;
+    const float EffectiveAmount = Amount;
 
     if (FMath::IsNearlyZero(EffectiveAmount) || !UpdateSkinnedPositions())
     {
@@ -1324,7 +1712,11 @@ bool UDynamicWetReceiverComponent::ApplyLocalizedWetnessWithSourceData(
             continue;
         }
 
-        const float VertexAmount = EffectiveAmount * Influence;
+        const float VertexAmount =
+            (EffectiveAmount > 0.0f
+                 ? EffectiveAmount * GetAbsorptionMultiplierForVertex(VertexIndex)
+                 : EffectiveAmount) *
+            Influence;
         if (VertexAmount > 0.0f)
         {
             QueuePendingWetness(VertexIndex, VertexAmount);
@@ -1355,8 +1747,7 @@ bool UDynamicWetReceiverComponent::ApplyWetnessWithSourceData(
         return false;
     }
 
-    const float EffectiveAmount =
-        Amount > 0.0f ? Amount * GetAbsorptionMultiplier() : Amount;
+    const float EffectiveAmount = Amount;
 
     if (FMath::IsNearlyZero(EffectiveAmount) || !UpdateSkinnedPositions())
     {
@@ -1393,7 +1784,7 @@ bool UDynamicWetReceiverComponent::ApplyWetnessWithSourceData(
         {
             if (EffectiveAmount > 0.0f)
             {
-                QueuePendingWetness(VertexIndex, EffectiveAmount);
+                QueuePendingWetness(VertexIndex, EffectiveAmount * GetAbsorptionMultiplierForVertex(VertexIndex));
                 bQueuedWetness = true;
             }
             else

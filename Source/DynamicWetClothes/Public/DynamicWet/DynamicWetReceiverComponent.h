@@ -5,11 +5,13 @@
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "DynamicWetSourceTypes.h"
+#include "WetnessProfile.h"
 
 #include "DynamicWetReceiverComponent.generated.h"
 
 class USkeletalMeshComponent;
 class UMaterialInstanceDynamic;
+class UWetClothingProfile;
 class UWetnessProfile;
 
 class FSkeletalMeshLODRenderData;
@@ -48,6 +50,7 @@ protected:
 
 private:	
 	void InitializeWetnessData();
+	void InitializeWetPartVertexData();
 	void BuildNeighborGraph();
 	void InitializeWetMaterialInstance();
 	void ApplyWetMaterialParameters();
@@ -57,6 +60,10 @@ private:
 	float GetDryRatePerSecond() const;
 	float GetSpreadRatePerSecond() const;
 	float GetGravityFlowStrength() const;
+	float GetAbsorptionMultiplierForVertex(int32 VertexIndex) const;
+	float GetDryRatePerSecondForVertex(int32 VertexIndex) const;
+	float GetSpreadRatePerSecondForVertex(int32 VertexIndex) const;
+	float GetGravityFlowStrengthForVertex(int32 VertexIndex) const;
 	bool NormalizeWetSourceData(UObject* SourceId, const FDWCWetSourceData& SourceData, FDWCWetSourceData& OutSourceData) const;
 	void EnsureWetnessBufferSize(int32 VertexCount);
 	float AbsorbWetnessAtVertex(int32 VertexIndex, float Amount, bool& bDirty);
@@ -117,6 +124,9 @@ public:
 	UPROPERTY(EditAnywhere)
 	TArray<UWetnessProfile*> MaterialProfiles;
 
+	UPROPERTY(EditAnywhere, Category = "Wetness")
+	TObjectPtr<UWetClothingProfile> WetClothingProfile = nullptr;
+
 	UPROPERTY(EditAnywhere, Category = "Wetness|Visual")
 	FLinearColor FallbackUnderColor = FLinearColor(0.8f, 0.55f, 0.42f, 1.0f);
 
@@ -129,6 +139,8 @@ public:
 private:
 	UPROPERTY(VisibleAnywhere, Category = "Wetness")
 	TArray<float> WetnessPerVertex;
+	TArray<int32> VertexWetPartIDs;
+	TArray<FWetnessProfileParameters> VertexWetnessProfileParameters;
 	TArray<float> Updating_Pending_Wetness_Amounts;
 	TArray<float> WetnessDryHoldTimePerVertex;
 	
@@ -158,6 +170,9 @@ private:
 
 	UPROPERTY(EditAnywhere, Category = "Wetness|Capillary", meta = (ClampMin = "0.0", ClampMax = "1.0"))
 	float CapillaryImmediateAbsorptionFraction = 0.65f;
+
+	UPROPERTY(EditAnywhere, Category = "Wetness|Capillary", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float CrossWetPartSpreadScale = 1.0f;
 
 	UPROPERTY(EditAnywhere, Category = "Wetness|Rain", meta = (ClampMin = "-1.0", ClampMax = "1.0"))
 	float RainExposureMin = 0.5f;

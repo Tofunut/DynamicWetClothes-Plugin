@@ -1655,19 +1655,27 @@ void SWetClothingProfileEditorPanel::RefreshAvailableWetnessProfiles()
     Filter.ClassPaths.Add(UWetnessProfile::StaticClass()->GetClassPathName());
     Filter.bRecursivePaths = true;
 
-    for (const FString& SearchPath : GetProfileSearchPaths())
+    const TArray<FString> SearchPaths = GetProfileSearchPaths();
+    for (const FString& SearchPath : SearchPaths)
     {
         Filter.PackagePaths.Add(*SearchPath);
     }
 
     TArray<FAssetData>    AssetDataList;
     FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
+    AssetRegistryModule.Get().ScanPathsSynchronous(SearchPaths, false);
     AssetRegistryModule.Get().GetAssets(Filter, AssetDataList);
 
     AssetDataList.Sort([](const FAssetData& A, const FAssetData& B)
                        {
-		const bool bADefault = A.PackagePath.ToString().StartsWith(DynamicWetClothesEditorUtils::DefaultWetnessProfileLibraryPath);
-		const bool bBDefault = B.PackagePath.ToString().StartsWith(DynamicWetClothesEditorUtils::DefaultWetnessProfileLibraryPath);
+		const FString APath = A.PackagePath.ToString();
+		const FString BPath = B.PackagePath.ToString();
+		const bool bADefault =
+			APath.StartsWith(DynamicWetClothesEditorUtils::DefaultWetnessProfileLibraryPath) ||
+			APath.StartsWith(DynamicWetClothesEditorUtils::PluginWetnessProfileLibraryPath);
+		const bool bBDefault =
+			BPath.StartsWith(DynamicWetClothesEditorUtils::DefaultWetnessProfileLibraryPath) ||
+			BPath.StartsWith(DynamicWetClothesEditorUtils::PluginWetnessProfileLibraryPath);
 		if (bADefault != bBDefault)
 		{
 			return bADefault;

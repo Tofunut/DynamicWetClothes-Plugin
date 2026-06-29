@@ -4,6 +4,7 @@
 #include "FileHelpers.h"
 #include "Framework/Application/SlateApplication.h"
 #include "IDesktopPlatform.h"
+#include "Interfaces/IPluginManager.h"
 #include "Misc/MessageDialog.h"
 #include "Misc/PackageName.h"
 #include "Misc/Paths.h"
@@ -12,28 +13,57 @@
 
 namespace
 {
-    bool ConvertDirectoryToContentPath(const FString& Directory, FString& OutContentPath)
+    bool ConvertDirectoryUnderRootToContentPath(
+        const FString& Directory,
+        const FString& RootDirectory,
+        const FString& RootContentPath,
+        FString&       OutContentPath)
     {
-        FString ProjectContentDirectory = FPaths::ConvertRelativePathToFull(FPaths::ProjectContentDir());
-        FString NormalizedProjectContentDirectory = ProjectContentDirectory;
+        FString NormalizedRootDirectory = RootDirectory;
         FString NormalizedDirectory = Directory;
-        FPaths::NormalizeDirectoryName(NormalizedProjectContentDirectory);
+        FPaths::NormalizeDirectoryName(NormalizedRootDirectory);
         FPaths::NormalizeDirectoryName(NormalizedDirectory);
 
-        if (!NormalizedDirectory.StartsWith(NormalizedProjectContentDirectory))
+        if (!NormalizedDirectory.StartsWith(NormalizedRootDirectory))
         {
             return false;
         }
 
-        FString RelativeDirectory = NormalizedDirectory.RightChop(NormalizedProjectContentDirectory.Len());
+        FString RelativeDirectory = NormalizedDirectory.RightChop(NormalizedRootDirectory.Len());
         RelativeDirectory.RemoveFromStart(TEXT("/"));
         RelativeDirectory.RemoveFromStart(TEXT("\\"));
         RelativeDirectory.ReplaceInline(TEXT("\\"), TEXT("/"));
 
         OutContentPath = RelativeDirectory.IsEmpty()
-                             ? TEXT("/Game")
-                             : FString::Printf(TEXT("/Game/%s"), *RelativeDirectory);
+                             ? RootContentPath
+                             : FString::Printf(TEXT("%s/%s"), *RootContentPath, *RelativeDirectory);
         return true;
+    }
+
+    bool ConvertDirectoryToContentPath(const FString& Directory, FString& OutContentPath)
+    {
+        const FString ProjectContentDirectory = FPaths::ConvertRelativePathToFull(FPaths::ProjectContentDir());
+        if (ConvertDirectoryUnderRootToContentPath(Directory, ProjectContentDirectory, TEXT("/Game"), OutContentPath))
+        {
+            return true;
+        }
+
+        for (const TSharedRef<IPlugin>& Plugin : IPluginManager::Get().GetEnabledPlugins())
+        {
+            if (!Plugin->CanContainContent())
+            {
+                continue;
+            }
+
+            const FString PluginContentDirectory = FPaths::ConvertRelativePathToFull(Plugin->GetContentDir());
+            const FString PluginRootContentPath = FString::Printf(TEXT("/%s"), *Plugin->GetName());
+            if (ConvertDirectoryUnderRootToContentPath(Directory, PluginContentDirectory, PluginRootContentPath, OutContentPath))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 } // namespace
 
@@ -41,6 +71,7 @@ TArray<FString> DynamicWetClothesEditorUtils::BuildUniqueProfileSearchPaths(cons
 {
     TArray<FString> Result;
     Result.Add(DefaultWetnessProfileLibraryPath);
+    Result.Add(PluginWetnessProfileLibraryPath);
 
     for (const FString& AdditionalPath : AdditionalPaths)
     {
@@ -73,7 +104,7 @@ bool DynamicWetClothesEditorUtils::PromptForContentFolder(FString& OutContentPat
     FString    SelectedDirectory;
     const bool bFolderSelected = DesktopPlatform->OpenDirectoryDialog(
         ParentWindowHandle,
-        TEXT("Choose a folder inside this project's Content directory"),
+        TEXT("Choose a folder inside this project's Content directory or an enabled plugin Content directory"),
         FPaths::ConvertRelativePathToFull(FPaths::ProjectContentDir()),
         SelectedDirectory);
 
@@ -86,7 +117,7 @@ bool DynamicWetClothesEditorUtils::PromptForContentFolder(FString& OutContentPat
     {
         FMessageDialog::Open(
             EAppMsgType::Ok,
-            FText::FromString(TEXT("Please choose a folder inside this project's Content directory.")));
+            FText::FromString(TEXT("Please choose a folder inside this project's Content directory or an enabled plugin Content directory.")));
         return false;
     }
 

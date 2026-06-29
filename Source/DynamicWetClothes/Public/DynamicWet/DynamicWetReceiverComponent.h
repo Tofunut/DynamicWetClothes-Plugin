@@ -4,14 +4,8 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
->>>> ORIGINAL //depot/Tofunut_EPIC/Plugins/DynamicWetClothes/Source/DynamicWetClothes/Public/DynamicWet/DynamicWetReceiverComponent.h#3
-#include "DynamicWetSourceTypes.h"
-==== THEIRS //depot/Tofunut_EPIC/Plugins/DynamicWetClothes/Source/DynamicWetClothes/Public/DynamicWet/DynamicWetReceiverComponent.h#4
-#include "DynamicWetSourceTypes.h"
-#include "WetnessProfile.h"
-==== YOURS //DotCho_WorkSpace/Tofunut_EPIC/Plugins/DynamicWetClothes/Source/DynamicWetClothes/Public/DynamicWet/DynamicWetReceiverComponent.h
 #include "DynamicWetContactTypes.h"
-<<<<
+#include "WetnessProfile.h"
 
 #include "DynamicWetReceiverComponent.generated.h"
 
@@ -70,16 +64,10 @@ private:
 	float GetDryRatePerSecond() const;
 	float GetSpreadRatePerSecond() const;
 	float GetGravityFlowStrength() const;
->>>> ORIGINAL //depot/Tofunut_EPIC/Plugins/DynamicWetClothes/Source/DynamicWetClothes/Public/DynamicWet/DynamicWetReceiverComponent.h#3
-	bool NormalizeWetSourceData(UObject* SourceId, const FDWCWetSourceData& SourceData, FDWCWetSourceData& OutSourceData) const;
-==== THEIRS //depot/Tofunut_EPIC/Plugins/DynamicWetClothes/Source/DynamicWetClothes/Public/DynamicWet/DynamicWetReceiverComponent.h#4
 	float GetAbsorptionMultiplierForVertex(int32 VertexIndex) const;
 	float GetDryRatePerSecondForVertex(int32 VertexIndex) const;
 	float GetSpreadRatePerSecondForVertex(int32 VertexIndex) const;
 	float GetGravityFlowStrengthForVertex(int32 VertexIndex) const;
-	bool NormalizeWetSourceData(UObject* SourceId, const FDWCWetSourceData& SourceData, FDWCWetSourceData& OutSourceData) const;
-==== YOURS //DotCho_WorkSpace/Tofunut_EPIC/Plugins/DynamicWetClothes/Source/DynamicWetClothes/Public/DynamicWet/DynamicWetReceiverComponent.h
-<<<<
 	void EnsureWetnessBufferSize(int32 VertexCount);
 	float AbsorbWetnessAtVertex(int32 VertexIndex, float Amount, bool& bDirty);
 	void QueuePendingWetness(int32 VertexIndex, float Amount);

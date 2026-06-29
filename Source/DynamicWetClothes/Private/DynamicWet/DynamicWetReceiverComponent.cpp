@@ -13,6 +13,7 @@
 #include "Materials/MaterialInstanceDynamic.h"
 #include "WetClothingProfile.h"
 #include "WetnessProfile.h"
+#include "UObject/UnrealType.h"
 
 namespace DynamicWetReceiverRuntime
 {
@@ -281,6 +282,56 @@ void UDynamicWetReceiverComponent::BeginPlay()
         true);
 }
 
+void UDynamicWetReceiverComponent::SetWetPartDebugVertexColorsEnabled(const bool bEnabled)
+{
+    if (bEnableWetPartDebugVertexColors == bEnabled)
+    {
+        return;
+    }
+
+    bEnableWetPartDebugVertexColors = bEnabled;
+    ApplyWetMaterialParameters();
+    RefreshWetVertexColors();
+}
+
+void UDynamicWetReceiverComponent::RefreshWetVertexColors()
+{
+    if (!TargetSkeletalMesh)
+    {
+        TargetSkeletalMesh = ResolveTargetSkeletalMesh();
+    }
+
+    FSkeletalMeshLODRenderData* LODData = nullptr;
+    if (!TargetSkeletalMesh || !GetLODRenderData(0, LODData))
+    {
+        return;
+    }
+
+    EnsureWetnessBufferSize(LODData->GetNumVertices());
+    InitializeWetPartVertexData();
+    MarkAllWetVertexColorsDirty();
+    ApplyWetnessToMaterial();
+}
+
+#if WITH_EDITOR
+void UDynamicWetReceiverComponent::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
+{
+    Super::PostEditChangeProperty(PropertyChangedEvent);
+
+    const FName PropertyName = PropertyChangedEvent.GetPropertyName();
+    if (PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetReceiverComponent, bEnableWetPartDebugVertexColors) ||
+        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetReceiverComponent, bWetPartDebugUseWetnessMask) ||
+        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetReceiverComponent, WetPartDebugStrengthParameterName) ||
+        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetReceiverComponent, WetPartDebugUseWetnessMaskParameterName) ||
+        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetReceiverComponent, UnassignedWetPartDebugColor) ||
+        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetReceiverComponent, WetClothingProfile))
+    {
+        ApplyWetMaterialParameters();
+        RefreshWetVertexColors();
+    }
+}
+#endif
+
 void UDynamicWetReceiverComponent::InitializeWetnessData()
 {
     FSkeletalMeshLODRenderData* LODData = nullptr;
@@ -316,6 +367,7 @@ void UDynamicWetReceiverComponent::InitializeWetPartVertexData()
     const int32 VertexCount = LODData->GetNumVertices();
     VertexWetPartIDs.Init(INDEX_NONE, VertexCount);
     VertexWetnessProfileParameters.SetNum(VertexCount);
+    VertexWetPartDebugColors.Init(UnassignedWetPartDebugColor, VertexCount);
 
     FWetnessProfileParameters DefaultParameters;
     if (const UWetnessProfile* MaterialPreset = GetActiveMaterialProfile())
@@ -391,6 +443,7 @@ void UDynamicWetReceiverComponent::InitializeWetPartVertexData()
 
                 VertexWetPartIDs[VertexIndex] = WetPartEntry.WetPartID;
                 VertexWetnessProfileParameters[VertexIndex] = WetPartEntry.ProfileAssignment.Parameters;
+                VertexWetPartDebugColors[VertexIndex] = WetPartEntry.Color;
             }
         }
     }
@@ -480,6 +533,20 @@ void UDynamicWetReceiverComponent::ApplyWetMaterialParameters()
         MID->SetScalarParameterValue(
             TEXT("WetUnderColorBlendStrength"),
             WetUnderColorBlendStrength);
+
+        if (!WetPartDebugStrengthParameterName.IsNone())
+        {
+            MID->SetScalarParameterValue(
+                WetPartDebugStrengthParameterName,
+                bEnableWetPartDebugVertexColors ? 1.0f : 0.0f);
+        }
+
+        if (!WetPartDebugUseWetnessMaskParameterName.IsNone())
+        {
+            MID->SetScalarParameterValue(
+                WetPartDebugUseWetnessMaskParameterName,
+                bWetPartDebugUseWetnessMask ? 1.0f : 0.0f);
+        }
     }
 }
 
@@ -580,6 +647,7 @@ void UDynamicWetReceiverComponent::EnsureWetnessBufferSize(const int32 VertexCou
         WetnessPerVertex.Reset();
         VertexWetPartIDs.Reset();
         VertexWetnessProfileParameters.Reset();
+        VertexWetPartDebugColors.Reset();
         Updating_Pending_Wetness_Amounts.Reset();
         WetnessDryHoldTimePerVertex.Reset();
         Updating_Pending_Wetness_Vertex_IndexQueue.Reset();
@@ -595,7 +663,8 @@ void UDynamicWetReceiverComponent::EnsureWetnessBufferSize(const int32 VertexCou
     }
 
     if (VertexWetPartIDs.Num() != VertexCount ||
-        VertexWetnessProfileParameters.Num() != VertexCount)
+        VertexWetnessProfileParameters.Num() != VertexCount ||
+        VertexWetPartDebugColors.Num() != VertexCount)
     {
         InitializeWetPartVertexData();
     }
@@ -1051,6 +1120,33 @@ void UDynamicWetReceiverComponent::ProcessPendingWetness(bool& bDirty, const flo
     Current_Pending_Wetness_Amounts.Reset();
 }
 
+void UDynamicWetReceiverComponent::MarkAllWetVertexColorsDirty()
+{
+    DirtyWetVertexIndices.Reset();
+    for (int32 VertexIndex = 0; VertexIndex < WetnessPerVertex.Num(); ++VertexIndex)
+    {
+        DirtyWetVertexIndices.Add(VertexIndex);
+    }
+}
+
+FLinearColor UDynamicWetReceiverComponent::MakeWetVertexColor(const int32 VertexIndex, const float Wetness) const
+{
+    if (!bEnableWetPartDebugVertexColors)
+    {
+        return FLinearColor(Wetness, 0.0f, 0.0f, 1.0f);
+    }
+
+    const FLinearColor DebugColor = VertexWetPartDebugColors.IsValidIndex(VertexIndex)
+                                        ? VertexWetPartDebugColors[VertexIndex]
+                                        : UnassignedWetPartDebugColor;
+
+    return FLinearColor(
+        Wetness,
+        FMath::Clamp(DebugColor.R, 0.0f, 1.0f),
+        FMath::Clamp(DebugColor.G, 0.0f, 1.0f),
+        FMath::Clamp(DebugColor.B, 0.0f, 1.0f));
+}
+
 void UDynamicWetReceiverComponent::UpdateWetness()
 {
     bool        bDirty = false;
@@ -1123,11 +1219,7 @@ void UDynamicWetReceiverComponent::ApplyWetnessToMaterial()
             0.0f,
             1.0f);
 
-        CachedWetVertexColors[VertexIndex] = FLinearColor(
-            Wetness,
-            0.0f,
-            0.0f,
-            1.0f);
+        CachedWetVertexColors[VertexIndex] = MakeWetVertexColor(VertexIndex, Wetness);
     }
 
     DirtyWetVertexIndices.Reset();

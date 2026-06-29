@@ -48,6 +48,16 @@ public:
 
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
+	UFUNCTION(BlueprintCallable, Category = "Wetness|Debug")
+	void SetWetPartDebugVertexColorsEnabled(bool bEnabled);
+
+	UFUNCTION(BlueprintCallable, Category = "Wetness|Debug")
+	void RefreshWetVertexColors();
+
+#if WITH_EDITOR
+	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
+#endif
+
 protected:
 	// Called when the game starts
 	virtual void BeginPlay() override;
@@ -107,6 +117,8 @@ private:
 
 	void UpdateWetness();
 	void ApplyWetnessToMaterial();
+	void MarkAllWetVertexColorsDirty();
+	FLinearColor MakeWetVertexColor(int32 VertexIndex, float Wetness) const;
 	bool ApplyRainWetness(const FVector& RainDirection, float Amount, bool bApplyMaterial = true);
 	bool QueryWetSurfaceData(const FDWCWetSurfaceData& SurfaceData, const FVector& WorldPosition, float& OutSurfaceZ) const;
 	bool DoesVertexMatchBoneName(int32 VertexIndex, FName BoneName) const;
@@ -135,6 +147,21 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Wetness|Visual", meta = (ClampMin = "0.0", ClampMax = "1.0"))
 	float WetUnderColorBlendStrength  = 0.3f;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Debug")
+	bool bEnableWetPartDebugVertexColors = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Debug")
+	bool bWetPartDebugUseWetnessMask = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Debug")
+	FLinearColor UnassignedWetPartDebugColor = FLinearColor(0.25f, 0.25f, 0.25f, 1.0f);
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Debug")
+	FName WetPartDebugStrengthParameterName = TEXT("DWC_WetPartDebugStrength");
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Debug")
+	FName WetPartDebugUseWetnessMaskParameterName = TEXT("DWC_WetPartDebugUseWetnessMask");
+
 	
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UMaterialInstanceDynamic>> WetMaterialInstances;
@@ -143,6 +170,7 @@ private:
 	TArray<float> WetnessPerVertex;
 	TArray<int32> VertexWetPartIDs;
 	TArray<FWetnessProfileParameters> VertexWetnessProfileParameters;
+	TArray<FLinearColor> VertexWetPartDebugColors;
 	TArray<float> Updating_Pending_Wetness_Amounts;
 	TArray<float> WetnessDryHoldTimePerVertex;
 	

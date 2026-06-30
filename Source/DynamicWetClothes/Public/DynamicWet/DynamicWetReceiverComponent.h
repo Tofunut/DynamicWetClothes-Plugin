@@ -66,6 +66,7 @@ private:
 	bool InitializeReceiverRuntime();
 	void StartWetnessTimer();
 	void UpdateWetness();
+	bool FlushPendingWetContacts();
 
 	USkeletalMeshComponent* ResolveTargetSkeletalMesh() const;
 
@@ -84,6 +85,12 @@ public:
 
 	UPROPERTY(EditAnywhere, Category = "Wetness", meta = (ShowOnlyInnerProperties))
 	FDynamicWetReceiverSettings WetnessSettings;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Contact", meta = (AllowPrivateAccess = "true"))
+	bool bBatchWetContactsPerFrame = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Contact", meta = (ClampMin = "1", AllowPrivateAccess = "true"))
+	int32 MaxBatchedWetContactsPerFrame = 64;
 
 	UPROPERTY(EditAnywhere, Category = "Wetness|Visual")
 	FLinearColor FallbackUnderColor = FLinearColor(0.8f, 0.55f, 0.42f, 1.0f);
@@ -121,4 +128,6 @@ private:
 	
 
 	FTimerHandle WetnessUpdateTimer;
+	TArray<FDWCWetContact> PendingWetContacts;
+	bool bPendingWetContactsApplyMaterial = false;
 };

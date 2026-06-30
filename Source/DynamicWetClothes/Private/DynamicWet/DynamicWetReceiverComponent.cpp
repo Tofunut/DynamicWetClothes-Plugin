@@ -15,8 +15,9 @@
 
 UDynamicWetReceiverComponent::UDynamicWetReceiverComponent()
 {
-    // Wetness is updated by timer; per-frame ticking is too expensive while in water.
-    PrimaryComponentTick.bCanEverTick = false;
+    // Wetness simulation is timer-driven; tick is enabled only to flush batched contacts.
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.bStartWithTickEnabled = false;
 
     RuntimeData = MakeUnique<FDynamicWetReceiverRuntimeData>();
     RuntimeDataBuilder = MakeUnique<FDynamicWetReceiverRuntimeDataBuilder>();
@@ -143,12 +144,28 @@ void UDynamicWetReceiverComponent::ApplyWetnessBelowHeight(const float WaterSurf
 
 bool UDynamicWetReceiverComponent::ApplyWetContact(const FDWCWetContact& Contact, const bool bApplyMaterial)
 {
+    if (bBatchWetContactsPerFrame)
+    {
+        const int32 MaxQueuedContacts = FMath::Max(1, MaxBatchedWetContactsPerFrame);
+        if (FMath::IsNearlyZero(Contact.Amount) || PendingWetContacts.Num() >= MaxQueuedContacts)
+        {
+            return false;
+        }
+
+        PendingWetContacts.Add(Contact);
+        bPendingWetContactsApplyMaterial |= bApplyMaterial;
+        SetComponentTickEnabled(true);
+        return true;
+    }
+
     FDynamicWetReceiverContext Context = MakeContext();
     return InputApplicator->ApplyWetContact(Context, Contact, bApplyMaterial);
 }
 
 bool UDynamicWetReceiverComponent::ApplyWetContacts(const TArray<FDWCWetContact>& Contacts, const bool bApplyMaterial)
 {
+    FlushPendingWetContacts();
+
     FDynamicWetReceiverContext Context = MakeContext();
     return InputApplicator->ApplyWetContacts(Context, Contacts, bApplyMaterial);
 }
@@ -216,8 +233,34 @@ bool UDynamicWetReceiverComponent::GetWetnessWorldBounds(FBox& OutBounds) const
     return OutBounds.IsValid && !OutBounds.GetExtent().IsNearlyZero();
 }
 
+bool UDynamicWetReceiverComponent::FlushPendingWetContacts()
+{
+    if (PendingWetContacts.IsEmpty())
+    {
+        bPendingWetContactsApplyMaterial = false;
+        return false;
+    }
+
+    TArray<FDWCWetContact> ContactsToApply;
+    ContactsToApply.Reserve(PendingWetContacts.Num());
+    Swap(ContactsToApply, PendingWetContacts);
+
+    const bool bApplyMaterial = bPendingWetContactsApplyMaterial;
+    bPendingWetContactsApplyMaterial = false;
+
+    if (!TargetSkeletalMesh && !InitializeReceiverRuntime())
+    {
+        return false;
+    }
+
+    FDynamicWetReceiverContext Context = MakeContext();
+    return InputApplicator->ApplyWetContacts(Context, ContactsToApply, bApplyMaterial);
+}
+
 void UDynamicWetReceiverComponent::UpdateWetness()
 {
+    FlushPendingWetContacts();
+
     FDynamicWetReceiverContext Context = MakeContext();
     SimulationSolver->UpdateWetness(Context);
 }
@@ -225,6 +268,9 @@ void UDynamicWetReceiverComponent::UpdateWetness()
 void UDynamicWetReceiverComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+
+    FlushPendingWetContacts();
+    SetComponentTickEnabled(false);
 }
 
 #if WITH_EDITOR

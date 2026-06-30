@@ -11,13 +11,13 @@ public class DynamicWetClothes : ModuleRules
 			{
 				"Core",
 				"CoreUObject",
-				"Engine"
+				"Engine",
+				"Niagara"
 			});
 
 		PrivateDependencyModuleNames.AddRange(
 			new string[]
 			{
-				"Niagara",
 				"RHI",
 				"RenderCore",
 				"Water"

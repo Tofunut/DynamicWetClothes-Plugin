@@ -247,8 +247,8 @@ int32 FDynamicWetReceiverSimulationSolver::ProcessCurrentPendingWetness(FDynamic
 
         const float DesiredAbsorption = PendingWater * SafeImmediateAbsorptionFraction;
         const float AbsorbedWetness = AbsorbWetnessAtVertex(Receiver, VertexIndex, DesiredAbsorption, bDirty);
-        const float OverflowWetness = FMath::Max(0.0f, DesiredAbsorption - AbsorbedWetness); // MaxStoredë¥??˜ì–´???¡ìˆ˜?˜ì? ëª»í•˜ê³??˜ì˜¨ ??
-        const float CapillaryWetness = FMath::Max(0.0f, PendingWater - DesiredAbsorption);   // MaxStoredë¥??˜ì????Šì•˜ì§€ë§??¡ìˆ˜?¥ì´ ?¸ë ¤???¡ìˆ˜?˜ì? ëª»í•œ ??
+        const float OverflowWetness = FMath::Max(0.0f, DesiredAbsorption - AbsorbedWetness); // MaxStoredï¿½??ï¿½ì–´???ï¿½ìˆ˜?ï¿½ï¿½? ëª»í•˜ï¿½??ï¿½ì˜¨ ??
+        const float CapillaryWetness = FMath::Max(0.0f, PendingWater - DesiredAbsorption);   // MaxStoredï¿½??ï¿½ï¿½????ï¿½ì•˜ì§€ï¿½??ï¿½ìˆ˜?ï¿½ì´ ?ï¿½ë ¤???ï¿½ìˆ˜?ï¿½ï¿½? ëª»í•œ ??
         const float SpreadableWetness = CapillaryWetness + OverflowWetness;
         const float VertexSpreadAlpha = FMath::Clamp(
             Receiver.GetSpreadRatePerSecondForVertex(VertexIndex) * Receiver.WetnessSettings.WetnessUpdateInterval,
@@ -303,10 +303,10 @@ void FDynamicWetReceiverSimulationSolver::SpreadPendingWetnessToNeighbors(FDynam
         }
 
         const float TargetCapacity = Receiver.WetnessSettings.MaxStoredWetness - Receiver.SimulationState.WetnessPerVertex[NeighborIndex];
-        if (TargetCapacity <= Receiver.WetnessSettings.MinPendingWetnessAmount)
-        {
-            continue;
-        }
+        // if (TargetCapacity <= Receiver.WetnessSettings.MinPendingWetnessAmount)
+        // {
+        //     continue;
+        // }
 
         const float GravityBias =
             bUseGravityBias

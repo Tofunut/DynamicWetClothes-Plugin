@@ -12,13 +12,13 @@ struct DYNAMICWETCLOTHES_API FDynamicWetReceiverSettings
     float WetnessUpdateInterval = 0.1f;
 
     UPROPERTY(EditAnywhere, Category = "Wetness", meta = (ClampMin = "0.0"))
-    float MaxStoredWetness = 1.0f;
+    float MaxStoredWetness = 1.15f;
 
     UPROPERTY(EditAnywhere, Category = "Wetness|Visual", meta = (ClampMin = "0.001"))
     float VisualSaturationWetness = 1.0f;
 
     UPROPERTY(EditAnywhere, Category = "Wetness", meta = (ClampMin = "0.0"))
-    float WetnessDryHoldDuration = 0.3f;
+    float WetnessDryHoldDuration = 0.15f;
 
     UPROPERTY(EditAnywhere, Category = "Wetness|Capillary", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float CapillaryImmediateAbsorptionFraction = 0.65f;

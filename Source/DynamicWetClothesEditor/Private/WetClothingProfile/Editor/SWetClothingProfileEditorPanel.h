@@ -79,6 +79,8 @@ class SWetClothingProfileEditorPanel : public SCompoundWidget
     void RefreshPreviewWetPartOverlay();
     void RefreshWetPartWidgets();
     void RefreshAvailableWetnessProfiles();
+    void RebuildRuntimeDataAndMarkDirty();
+    void RebuildRuntimeDataIfStale();
 
     void                                   EnsureDefaultWetPartForSelectedScope();
     int32                                  GetSelectedUVChannelIndex() const;

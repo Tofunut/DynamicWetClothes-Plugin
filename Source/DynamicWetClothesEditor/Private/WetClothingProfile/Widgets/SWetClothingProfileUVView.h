@@ -9,38 +9,6 @@
 
 class UTexture;
 
-struct FQuantizedUVPoint
-{
-    int64 X = 0;
-    int64 Y = 0;
-
-    bool operator==(const FQuantizedUVPoint& Other) const
-    {
-        return X == Other.X && Y == Other.Y;
-    }
-};
-
-FORCEINLINE uint32 GetTypeHash(const FQuantizedUVPoint& Point)
-{
-    return HashCombine(::GetTypeHash(Point.X), ::GetTypeHash(Point.Y));
-}
-
-struct FQuantizedUVEdge
-{
-    FQuantizedUVPoint A;
-    FQuantizedUVPoint B;
-
-    bool operator==(const FQuantizedUVEdge& Other) const
-    {
-        return A == Other.A && B == Other.B;
-    }
-};
-
-FORCEINLINE uint32 GetTypeHash(const FQuantizedUVEdge& Edge)
-{
-    return HashCombine(::GetTypeHash(Edge.A), ::GetTypeHash(Edge.B));
-}
-
 enum class EWetClothingProfileUVSelectionTool : uint8
 {
     Select,

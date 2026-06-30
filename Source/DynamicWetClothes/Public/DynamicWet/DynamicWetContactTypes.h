@@ -54,20 +54,6 @@ struct DYNAMICWETCLOTHES_API FDWCWetSurfaceData
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wet Surface")
     TArray<uint8> Valid;
 
-    int32 GetSampleIndex(const int32 X, const int32 Y) const
-    {
-        return Y * SizeX + X;
-    }
-
-    bool IsValidSampleIndex(const int32 X, const int32 Y) const
-    {
-        const int32 SampleIndex = GetSampleIndex(X, Y);
-        return X >= 0 &&
-               Y >= 0 &&
-               X < SizeX &&
-               Y < SizeY &&
-               SurfaceZ.IsValidIndex(SampleIndex) &&
-               Valid.IsValidIndex(SampleIndex) &&
-               Valid[SampleIndex] != 0;
-    }
+    int32 GetSampleIndex(int32 X, int32 Y) const;
+    bool IsValidSampleIndex(int32 X, int32 Y) const;
 };

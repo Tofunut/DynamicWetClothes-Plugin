@@ -1239,6 +1239,7 @@ void SWetClothingProfileEditorPanel::Construct(const FArguments& InArgs)
 
 void SWetClothingProfileEditorPanel::RefreshFromProfile()
 {
+    RebuildRuntimeDataIfStale();
     RefreshAvailableWetnessProfiles();
     RefreshMaterialSlotItems();
     RefreshUVChannels();
@@ -1260,6 +1261,61 @@ void SWetClothingProfileEditorPanel::RefreshFromProfile()
 
     RefreshPreviewIslandHighlight();
     RefreshPreviewWetPartOverlay();
+}
+
+void SWetClothingProfileEditorPanel::RebuildRuntimeDataAndMarkDirty()
+{
+    UWetClothingProfile* Profile = WetClothingProfile.Get();
+    if (Profile == nullptr)
+    {
+        return;
+    }
+
+    FString ErrorMessage;
+    if (Profile->TargetMesh != nullptr)
+    {
+        if (!Profile->RebuildRuntimeData(&ErrorMessage))
+        {
+            UE_LOG(
+                LogTemp,
+                Warning,
+                TEXT("WetClothingProfileEditor: Failed to rebuild runtime data for %s: %s"),
+                *GetNameSafe(Profile),
+                *ErrorMessage);
+        }
+    }
+    else
+    {
+        Profile->ClearRuntimeData();
+    }
+
+    Profile->MarkPackageDirty();
+}
+
+void SWetClothingProfileEditorPanel::RebuildRuntimeDataIfStale()
+{
+    UWetClothingProfile* Profile = WetClothingProfile.Get();
+    if (Profile == nullptr)
+    {
+        return;
+    }
+
+    if (Profile->TargetMesh == nullptr)
+    {
+        if (Profile->GetBakedRuntimeData().bIsValid)
+        {
+            Profile->Modify();
+            Profile->ClearRuntimeData();
+            Profile->MarkPackageDirty();
+        }
+        return;
+    }
+
+    if (!Profile->IsRuntimeDataValidForMesh(Profile->TargetMesh, 0))
+    {
+        Profile->Modify();
+        RebuildRuntimeDataAndMarkDirty();
+    }
 }
 
 void SWetClothingProfileEditorPanel::RefreshMaterialSlotItems()
@@ -1709,7 +1765,7 @@ void SWetClothingProfileEditorPanel::EnsureDefaultWetPartForSelectedScope()
             Entry.Name = GetDefaultWetPartName(0);
             Entry.Color = GetDefaultWetPartColor(0);
             Entry.bViewEnabled = true;
-            Profile->MarkPackageDirty();
+            RebuildRuntimeDataAndMarkDirty();
             if (DetailsView.IsValid())
             {
                 DetailsView->ForceRefresh();
@@ -1727,7 +1783,7 @@ void SWetClothingProfileEditorPanel::EnsureDefaultWetPartForSelectedScope()
     NewEntry.Color = GetDefaultWetPartColor(NewEntry.WetPartID);
     NewEntry.bViewEnabled = true;
     Profile->WetPartEntries.Add(NewEntry);
-    Profile->MarkPackageDirty();
+    RebuildRuntimeDataAndMarkDirty();
     if (DetailsView.IsValid())
     {
         DetailsView->ForceRefresh();
@@ -2682,7 +2738,7 @@ FReply SWetClothingProfileEditorPanel::HandleAddWetPartClicked()
     NewEntry.bViewEnabled = true;
 
     Profile->WetPartEntries.Add(NewEntry);
-    Profile->MarkPackageDirty();
+    RebuildRuntimeDataAndMarkDirty();
     SelectedWetPartID = INDEX_NONE;
     SelectedAssignWetPartID = NewWetPartID;
 
@@ -2721,7 +2777,7 @@ FReply SWetClothingProfileEditorPanel::HandleRemoveWetPartClicked()
     {
         SelectedAssignWetPartID = INDEX_NONE;
     }
-    Profile->MarkPackageDirty();
+    RebuildRuntimeDataAndMarkDirty();
     if (DetailsView.IsValid())
     {
         DetailsView->ForceRefresh();
@@ -2887,7 +2943,7 @@ FReply SWetClothingProfileEditorPanel::HandleAutoPartitionClicked()
         Profile->WetPartEntries.Add(NewEntry);
     }
 
-    Profile->MarkPackageDirty();
+    RebuildRuntimeDataAndMarkDirty();
 
     if (DetailsView.IsValid())
     {
@@ -2936,7 +2992,7 @@ FReply SWetClothingProfileEditorPanel::HandleAssignSelectedIslandToWetPartClicke
             }
         }
     }
-    Profile->MarkPackageDirty();
+    RebuildRuntimeDataAndMarkDirty();
     if (DetailsView.IsValid())
     {
         DetailsView->ForceRefresh();

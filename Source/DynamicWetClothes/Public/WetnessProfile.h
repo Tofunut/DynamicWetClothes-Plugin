@@ -15,8 +15,8 @@ struct FWetnessProfileParameters
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wet Simulation")
     float SpreadRate = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wet Simulation")
-    float DryRate = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wet Simulation", meta = (ClampMin = "0.0", ClampMax = "100.0", UIMin = "0.0", UIMax = "100.0", Units = "Percent", DisplayName = "Dry Rate"))
+    float DryRate = 10.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wet Simulation")
     float GravityFlowStrength = 1.0f;
@@ -45,7 +45,9 @@ struct FWetnessProfileParameters
 
     float GetDryRatePerSecond() const
     {
-        return FMath::Max(0.0f, DryRate);
+        const float DryPercentPerSecond = FMath::Clamp(DryRate, 0.0f, 100.0f);
+        const float RemainingFraction = FMath::Max(1.0f - DryPercentPerSecond * 0.01f, KINDA_SMALL_NUMBER);
+        return -FMath::Loge(RemainingFraction);
     }
 
     float GetGravityFlowStrength() const

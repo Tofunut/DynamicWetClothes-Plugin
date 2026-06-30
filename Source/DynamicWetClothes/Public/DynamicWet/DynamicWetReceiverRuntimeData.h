@@ -1,0 +1,47 @@
+#pragma once
+
+#include "CoreMinimal.h"
+#include "WetnessProfile.h"
+
+struct FWetnessProfileParameters;
+class USkeletalMeshComponent;
+class UWetClothingProfile;
+struct FDynamicWetReceiverContext;
+class FSkeletalMeshLODRenderData;
+
+struct FDynamicWetReceiverVertexNeighbors
+{
+    TArray<int32> Neighbors;
+};
+
+class FDynamicWetReceiverRuntimeData
+{
+public:
+    void ResetWetPartData();
+    void ResetNeighborGraph();
+
+    TArray<int32> VertexWetPartIDs;
+    TArray<FWetnessProfileParameters> VertexWetnessProfileParameters;
+    TArray<FLinearColor> VertexWetPartDebugColors;
+    TArray<FDynamicWetReceiverVertexNeighbors> NeighborGraph;
+};
+
+class FDynamicWetReceiverRuntimeDataBuilder
+{
+public:
+    void InitializeWetnessData(FDynamicWetReceiverContext& Receiver);
+    void InitializeWetPartVertexData(FDynamicWetReceiverContext& Receiver);
+    bool InitializeWetPartVertexDataFromBakedProfile(
+        FDynamicWetReceiverContext& Receiver,
+        int32 VertexCount,
+        const FWetnessProfileParameters& DefaultParameters);
+    void BuildNeighborGraph(FDynamicWetReceiverContext& Receiver);
+    bool BuildNeighborGraphFromBakedProfile(FDynamicWetReceiverContext& Receiver, int32 VertexCount);
+    void AddNeighbor(FDynamicWetReceiverContext& Receiver, int32 VertexIndex, int32 NeighborIndex);
+    void EnsureWetnessBufferSize(FDynamicWetReceiverContext& Receiver, int32 VertexCount);
+    bool GetLODRenderData(
+        const FDynamicWetReceiverContext& Receiver,
+        int32 LODIndex,
+        FSkeletalMeshLODRenderData*& OutLODData);
+    bool DoesVertexMatchBoneName(const FDynamicWetReceiverContext& Receiver, int32 VertexIndex, FName BoneName);
+};

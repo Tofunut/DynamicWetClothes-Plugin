@@ -1,29 +1,13 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "DynamicWet/DynamicWetMeshAnalysis.h"
 
 class USkeletalMesh;
 class UTexture;
 
-struct FWetClothingProfileUVTriangle
-{
-    int32     TriangleID = INDEX_NONE;
-    int32     MaterialSlotIndex = INDEX_NONE;
-    int32     IslandID = INDEX_NONE;
-    FVector2D UVs[3];
-    FVector   LocalPositions[3];
-};
-
-struct FWetClothingProfileUVIsland
-{
-    int32                                 MaterialSlotIndex = INDEX_NONE;
-    int32                                 IslandID = INDEX_NONE;
-    int32                                 TriangleCount = 0;
-    FBox2D                                UVBounds;
-    double                                UVArea = 0.0;
-    TArray<int32>                         TriangleIDs;
-    TArray<FWetClothingProfileUVTriangle> UVTriangles;
-};
+using FWetClothingProfileUVTriangle = FDynamicWetUVTriangle;
+using FWetClothingProfileUVIsland = FDynamicWetUVIsland;
 
 class FWetClothingProfileMeshAnalyzer
 {

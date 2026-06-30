@@ -78,12 +78,71 @@ struct FWetClothingProfileWetPartEntry
     FWetClothingPartProfileAssignment ProfileAssignment;
 };
 
+USTRUCT(BlueprintType)
+struct FWetClothingProfileBakedVertexData
+{
+    GENERATED_BODY()
+
+    UPROPERTY(VisibleAnywhere, Category = "Runtime Data")
+    int32 WetPartID = INDEX_NONE;
+
+    UPROPERTY(VisibleAnywhere, Category = "Runtime Data")
+    int32 WetPartEntryIndex = INDEX_NONE;
+
+    UPROPERTY(VisibleAnywhere, Category = "Runtime Data")
+    int32 MaterialSlotIndex = INDEX_NONE;
+
+    UPROPERTY(VisibleAnywhere, Category = "Runtime Data")
+    int32 UVChannelIndex = INDEX_NONE;
+
+    UPROPERTY(VisibleAnywhere, Category = "Runtime Data")
+    int32 IslandID = INDEX_NONE;
+};
+
+USTRUCT(BlueprintType)
+struct FWetClothingProfileBakedVertexNeighbors
+{
+    GENERATED_BODY()
+
+    UPROPERTY(VisibleAnywhere, Category = "Runtime Data")
+    TArray<int32> Neighbors;
+};
+
+USTRUCT(BlueprintType)
+struct FWetClothingProfileBakedRuntimeData
+{
+    GENERATED_BODY()
+
+    UPROPERTY(VisibleAnywhere, Category = "Runtime Data")
+    bool bIsValid = false;
+
+    UPROPERTY(VisibleAnywhere, Category = "Runtime Data")
+    int32 LODIndex = 0;
+
+    UPROPERTY(VisibleAnywhere, Category = "Runtime Data")
+    int32 VertexCount = 0;
+
+    UPROPERTY(VisibleAnywhere, Category = "Runtime Data")
+    FString MeshBuildSignature;
+
+    UPROPERTY(VisibleAnywhere, Category = "Runtime Data")
+    TArray<FWetClothingProfileBakedVertexData> Vertices;
+
+    UPROPERTY(VisibleAnywhere, Category = "Runtime Data")
+    TArray<FWetClothingProfileBakedVertexNeighbors> NeighborGraph;
+};
+
 UCLASS(BlueprintType)
 class DYNAMICWETCLOTHES_API UWetClothingProfile : public UDataAsset
 {
     GENERATED_BODY()
 
   public:
+    bool RebuildRuntimeData(FString* OutErrorMessage = nullptr, int32 LODIndex = 0);
+    void ClearRuntimeData();
+    bool IsRuntimeDataValidForMesh(const USkeletalMesh* SkeletalMesh, int32 LODIndex = 0) const;
+    const FWetClothingProfileBakedRuntimeData& GetBakedRuntimeData() const { return BakedRuntimeData; }
+
     UPROPERTY(EditAnywhere, Category = "Wet Clothing")
     TObjectPtr<USkeletalMesh> TargetMesh = nullptr;
 
@@ -92,6 +151,9 @@ class DYNAMICWETCLOTHES_API UWetClothingProfile : public UDataAsset
 
     UPROPERTY()
     TArray<FWetClothingProfileWetPartEntry> WetPartEntries;
+
+    UPROPERTY(VisibleAnywhere, Category = "Wet Clothing|Runtime Data")
+    FWetClothingProfileBakedRuntimeData BakedRuntimeData;
 
 #if WITH_EDITORONLY_DATA
     UPROPERTY(EditAnywhere, Category = "Wet Clothing")

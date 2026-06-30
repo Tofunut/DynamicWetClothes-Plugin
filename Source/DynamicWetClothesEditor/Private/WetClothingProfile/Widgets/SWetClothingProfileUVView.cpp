@@ -13,8 +13,6 @@
 
 namespace
 {
-    constexpr double UVEdgeQuantizeScale = 100000.0;
-
     struct FUVOutlineEdgeDrawData
     {
         int32 ForwardCount = 0;
@@ -22,27 +20,9 @@ namespace
         TPair<FVector2D, FVector2D> Points;
     };
 
-    FQuantizedUVPoint QuantizeUVPoint(const FVector2D& UV)
+    bool IsForwardCanonicalEdge(const FVector2D& Start, const FVector2D& End, const FDynamicWetUVEdgeKey& CanonicalEdge)
     {
-        return FQuantizedUVPoint{
-            static_cast<int64>(FMath::RoundToDouble(UV.X * UVEdgeQuantizeScale)),
-            static_cast<int64>(FMath::RoundToDouble(UV.Y * UVEdgeQuantizeScale))
-        };
-    }
-
-    FQuantizedUVEdge MakeCanonicalUVEdge(const FVector2D& A, const FVector2D& B)
-    {
-        const FQuantizedUVPoint QuantizedA = QuantizeUVPoint(A);
-        const FQuantizedUVPoint QuantizedB = QuantizeUVPoint(B);
-        const bool              bSwap = QuantizedB.X < QuantizedA.X || (QuantizedB.X == QuantizedA.X && QuantizedB.Y < QuantizedA.Y);
-        return bSwap
-                   ? FQuantizedUVEdge{ QuantizedB, QuantizedA }
-                   : FQuantizedUVEdge{ QuantizedA, QuantizedB };
-    }
-
-    bool IsForwardCanonicalEdge(const FVector2D& Start, const FVector2D& End, const FQuantizedUVEdge& CanonicalEdge)
-    {
-        return QuantizeUVPoint(Start) == CanonicalEdge.A && QuantizeUVPoint(End) == CanonicalEdge.B;
+        return FDynamicWetQuantizedUV(Start) == CanonicalEdge.A && FDynamicWetQuantizedUV(End) == CanonicalEdge.B;
     }
 } // namespace
 
@@ -286,7 +266,7 @@ int32 SWetClothingProfileUVView::OnPaint(
 
         if (bOutlineOnly)
         {
-            TMap<FQuantizedUVEdge, FUVOutlineEdgeDrawData> OutlineEdges;
+            TMap<FDynamicWetUVEdgeKey, FUVOutlineEdgeDrawData> OutlineEdges;
             OutlineEdges.Reserve(Island.UVTriangles.Num() * 3);
 
             for (const FWetClothingProfileUVTriangle& Triangle : Island.UVTriangles)
@@ -296,7 +276,7 @@ int32 SWetClothingProfileUVView::OnPaint(
                     const int32            NextIndex = (EdgeIndex + 1) % 3;
                     const FVector2D        StartUV = Triangle.UVs[EdgeIndex];
                     const FVector2D        EndUV = Triangle.UVs[NextIndex];
-                    const FQuantizedUVEdge EdgeKey = MakeCanonicalUVEdge(StartUV, EndUV);
+                    const FDynamicWetUVEdgeKey EdgeKey(StartUV, EndUV);
 
                     FUVOutlineEdgeDrawData& EdgeData = OutlineEdges.FindOrAdd(EdgeKey);
                     if (EdgeData.ForwardCount == 0 && EdgeData.ReverseCount == 0)
@@ -315,7 +295,7 @@ int32 SWetClothingProfileUVView::OnPaint(
                 }
             }
 
-            for (const TPair<FQuantizedUVEdge, FUVOutlineEdgeDrawData>& EdgePair : OutlineEdges)
+            for (const TPair<FDynamicWetUVEdgeKey, FUVOutlineEdgeDrawData>& EdgePair : OutlineEdges)
             {
                 const FUVOutlineEdgeDrawData& EdgeData = EdgePair.Value;
                 if (EdgeData.ForwardCount == EdgeData.ReverseCount)

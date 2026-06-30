@@ -50,6 +50,7 @@ void FDynamicWetClothesEditorStyle::Initialize()
     SetSvgBrush(*StyleSet, TEXT("DynamicWetClothesEditor.UVTool.BoxSelect"), TEXT("EditorIcons/SelectBox_20"), Icon20x20);
     SetSvgBrush(*StyleSet, TEXT("DynamicWetClothesEditor.UVTool.EllipseSelect"), TEXT("EditorIcons/SelectEllipse_20"), Icon20x20);
     SetSvgBrush(*StyleSet, TEXT("DynamicWetClothesEditor.UVTool.LassoSelect"), TEXT("EditorIcons/SelectLasso_20"), Icon20x20);
+    SetSvgBrush(*StyleSet, TEXT("DynamicWetClothesEditor.AutoPartitioning"), TEXT("EditorIcons/AutoPartitioning"), Icon20x20);
 
     FSlateStyleRegistry::RegisterSlateStyle(*StyleSet);
 }

@@ -10,6 +10,7 @@
 #include "WetClothing/Texture/WetClothingMaterialTextureResolver.h"
 #include "WetClothing/Texture/WetClothingTextureReadback.h"
 #include "WetClothing/Widgets/SWetClothingAssetUVView.h"
+#include "WetClothing/Widgets/SWetClothingAutoPartitionControls.h"
 #include "WetClothing/Widgets/SWetClothingMaterialSlotPreview.h"
 #include "WetClothingAsset.h"
 #include "WetClothing/Analysis/WetClothingAssetMeshAnalyzer.h"
@@ -18,6 +19,7 @@
 #include "Engine/SkeletalMesh.h"
 #include "Engine/Texture.h"
 #include "Engine/Texture2D.h"
+#include "Framework/Application/SlateApplication.h"
 #include "IDetailsView.h"
 #include "Materials/Material.h"
 #include "Materials/MaterialInterface.h"
@@ -41,10 +43,12 @@
 #include "Widgets/Layout/SSeparator.h"
 #include "Widgets/Layout/SSplitter.h"
 #include "Widgets/SBoxPanel.h"
+#include "Widgets/SNullWidget.h"
 #include "Widgets/Text/SInlineEditableTextBlock.h"
 #include "Widgets/Text/STextBlock.h"
 #include "Widgets/Views/SListView.h"
 #include "Widgets/Views/STableRow.h"
+#include "Widgets/SWindow.h"
 
 #define LOCTEXT_NAMESPACE "WetClothingAssetEditorPanel"
 
@@ -248,10 +252,9 @@ void SWetClothingAssetEditorPanel::Construct(const FArguments& InArgs)
                                                              + SHorizontalBox::Slot()
                                                                    .AutoWidth()
                                                                    .VAlign(VAlign_Center)
-                                                                        [SNew(SButton)
-                                                                             .Text(LOCTEXT("AutoPartitionButton", "Auto-Partitioning"))
-                                                                             .IsEnabled(this, &SWetClothingAssetEditorPanel::IsAutoPartitionEnabled)
-                                                                             .OnClicked(this, &SWetClothingAssetEditorPanel::HandleAutoPartitionClicked)]
+                                                                        [SNew(SWetClothingAutoPartitionControls)
+                                                                             .IsAutoPartitionEnabled(this, &SWetClothingAssetEditorPanel::IsAutoPartitionEnabled)
+                                                                             .OnAutoPartitionClicked(this, &SWetClothingAssetEditorPanel::HandleAutoPartitionClicked)]
 
                                                               + SHorizontalBox::Slot()
                                                                     .AutoWidth()
@@ -261,31 +264,7 @@ void SWetClothingAssetEditorPanel::Construct(const FArguments& InArgs)
                                                                              .Text(LOCTEXT("ApplyMaterialSetupButton", "Apply Material Setup"))
                                                                              .ToolTipText(LOCTEXT("ApplyMaterialSetupTooltip", "Duplicate the selected material slot material, insert DWC material functions into the copy, then assign the copy to this material slot."))
                                                                              .IsEnabled(this, &SWetClothingAssetEditorPanel::IsApplyMaterialSetupEnabled)
-                                                                             .OnClicked(this, &SWetClothingAssetEditorPanel::HandleApplyMaterialSetupClicked)]
-
-                                                              + SHorizontalBox::Slot()
-                                                                    .FillWidth(1.0f)
-                                                                    .Padding(10.0f, 0.0f, 0.0f, 0.0f)
-                                                                    .VAlign(VAlign_Center)
-                                                                        [SNew(SHorizontalBox)
-
-                                                                         + SHorizontalBox::Slot()
-                                                                               .AutoWidth()
-                                                                               .VAlign(VAlign_Center)
-                                                                               .Padding(0.0f, 0.0f, 8.0f, 0.0f)
-                                                                                   [SNew(STextBlock)
-                                                                                        .Text(LOCTEXT("AutoPartitionToleranceLabel", "Color Tolerance"))]
-
-                                                                         + SHorizontalBox::Slot()
-                                                                               .FillWidth(1.0f)
-                                                                                   [SNew(SSpinBox<float>)
-                                                                                        .MinValue(0.0f)
-                                                                                        .MaxValue(100.0f)
-                                                                                        .MinSliderValue(0.0f)
-                                                                                        .MaxSliderValue(100.0f)
-                                                                                        .Delta(0.1f)
-                                                                                        .Value(this, &SWetClothingAssetEditorPanel::GetAutoPartitionTolerance)
-                                                                                        .OnValueChanged(this, &SWetClothingAssetEditorPanel::HandleAutoPartitionToleranceChanged)]]]
+                                                                             .OnClicked(this, &SWetClothingAssetEditorPanel::HandleApplyMaterialSetupClicked)]]
 
                                                    + SVerticalBox::Slot()
                                                          .FillHeight(1.0f)
@@ -1203,7 +1182,7 @@ FLinearColor SWetClothingAssetEditorPanel::GetDefaultWetPartColor(int32 WetPartI
 {
     if (WetPartID == 0)
     {
-        return FLinearColor(0.62f, 0.62f, 0.62f, 1.0f);
+        return FLinearColor::White;
     }
 
     static const FLinearColor Palette[] = {
@@ -1302,12 +1281,9 @@ TMap<int32, FLinearColor> SWetClothingAssetEditorPanel::BuildIslandColorMap() co
 
         if (const FWetClothingAssetWetPartEntry* Entry = FindEffectiveWetPartEntryForIsland(IslandItem->IslandID))
         {
-            if (Entry->WetPartID == 0)
-            {
-                continue;
-            }
-
-            FLinearColor Color = Entry->bViewEnabled ? Entry->Color : HiddenColor;
+            FLinearColor Color = Entry->WetPartID == 0
+                                     ? FLinearColor::White
+                                     : (Entry->bViewEnabled ? Entry->Color : HiddenColor);
             Color.A = 1.0f;
             Result.Add(IslandItem->IslandID, Color);
         }
@@ -2316,19 +2292,7 @@ FReply SWetClothingAssetEditorPanel::HandleAutoPartitionClicked()
         return FReply::Handled();
     }
 
-    if (HasAutoPartitionDataToReplace())
-    {
-        const EAppReturnType::Type Response = FMessageDialog::Open(
-            EAppMsgType::YesNo,
-            LOCTEXT("ConfirmAutoPartitionReplace", "This material slot already has authored part data. Delete it all and regenerate parts automatically?"));
-
-        if (Response != EAppReturnType::Yes)
-        {
-            return FReply::Handled();
-        }
-    }
-
-    UTexture2D*                 PartitionTexture = Cast<UTexture2D>(ResolveSelectedMaterialTexture());
+    UTexture2D*                 PartitionTexture = ResolveAutoPartitionTexture();
     FWetClothingTextureReadback TextureData;
     FString                     TextureErrorMessage;
     if (!FWetClothingTextureReadbackUtils::TryReadTextureSourceData(PartitionTexture, TextureData, TextureErrorMessage))
@@ -2337,12 +2301,230 @@ FReply SWetClothingAssetEditorPanel::HandleAutoPartitionClicked()
         return FReply::Handled();
     }
 
-    TArray<FWetClothingAutoPartitionCluster> Clusters;
-    FString                                  AutoPartitionErrorMessage;
-    if (!FWetClothingAutoPartitioner::BuildClusters(UVIslandItems, TextureData, AutoPartitionTolerancePercent, Clusters, &AutoPartitionErrorMessage))
+    TSharedRef<TArray<FWetClothingAutoPartitionCluster>> PreviewClusters = MakeShared<TArray<FWetClothingAutoPartitionCluster>>();
+    FString                                              AutoPartitionErrorMessage;
+    if (!FWetClothingAutoPartitioner::BuildClusters(UVIslandItems, TextureData, AutoPartitionTolerancePercent, *PreviewClusters, &AutoPartitionErrorMessage))
     {
         FMessageDialog::Open(EAppMsgType::Ok, FText::FromString(AutoPartitionErrorMessage));
         return FReply::Handled();
+    }
+
+    TSharedRef<FWetClothingTextureReadback> PreviewTextureData = MakeShared<FWetClothingTextureReadback>(TextureData);
+    TSharedPtr<SWetClothingAssetUVView> BeforePreviewView;
+    TSharedPtr<SWetClothingAssetUVView> AfterPreviewView;
+
+    const TSharedRef<SWindow> PreviewWindow = SNew(SWindow)
+        .Title(LOCTEXT("AutoPartitionPreviewTitle", "Auto Partition Preview"))
+        .ClientSize(FVector2D(980.0f, 680.0f))
+        .SupportsMinimize(false)
+        .SupportsMaximize(false);
+
+    TWeakPtr<SWindow> WeakPreviewWindow = PreviewWindow.ToSharedPtr();
+    TSharedRef<TWeakPtr<SWetClothingAssetUVView>> WeakAfterPreviewView = MakeShared<TWeakPtr<SWetClothingAssetUVView>>();
+
+    PreviewWindow->SetContent(
+        SNew(SBorder)
+            .Padding(12.0f)
+            [SNew(SVerticalBox)
+
+             + SVerticalBox::Slot()
+                   .AutoHeight()
+                   .Padding(0.0f, 0.0f, 0.0f, 10.0f)
+                       [SNew(SHorizontalBox)
+
+                        + SHorizontalBox::Slot()
+                              .FillWidth(1.0f)
+                              .VAlign(VAlign_Center)
+                                  [SNew(STextBlock)
+                                       .Text_Lambda(
+                                           [PreviewClusters]()
+                                           {
+                                               return FText::Format(
+                                                   LOCTEXT("AutoPartitionPreviewClusterCount", "{0} parts will be generated."),
+                                                   FText::AsNumber(PreviewClusters->Num()));
+                                           })]
+
+                        + SHorizontalBox::Slot()
+                              .AutoWidth()
+                              .VAlign(VAlign_Center)
+                              .Padding(0.0f, 0.0f, 8.0f, 0.0f)
+                                  [SNew(STextBlock)
+                                       .Text(LOCTEXT("AutoPartitionPreviewToleranceLabel", "Color Tolerance"))]
+
+                        + SHorizontalBox::Slot()
+                              .AutoWidth()
+                              .VAlign(VAlign_Center)
+                                  [SNew(SBox)
+                                       .WidthOverride(140.0f)
+                                           [SNew(SSpinBox<float>)
+                                                .MinValue(0.0f)
+                                                .MaxValue(100.0f)
+                                                .MinSliderValue(0.0f)
+                                                .MaxSliderValue(100.0f)
+                                                .Delta(0.1f)
+                                                .Value(this, &SWetClothingAssetEditorPanel::GetAutoPartitionTolerance)
+                                                .OnValueChanged_Lambda(
+                                                    [this, PreviewTextureData, PreviewClusters, WeakAfterPreviewView](float InValue)
+                                                    {
+                                                        HandleAutoPartitionToleranceChanged(InValue);
+                                                        FString PreviewErrorMessage;
+                                                        if (FWetClothingAutoPartitioner::BuildClusters(UVIslandItems, *PreviewTextureData, AutoPartitionTolerancePercent, *PreviewClusters, &PreviewErrorMessage))
+                                                        {
+                                                            if (TSharedPtr<SWetClothingAssetUVView> PinnedAfterView = WeakAfterPreviewView->Pin())
+                                                            {
+                                                                PinnedAfterView->SetIslandColors(BuildAutoPartitionPreviewColorMap(*PreviewClusters));
+                                                            }
+                                                        }
+                                                    })]]]
+
+             + SVerticalBox::Slot()
+                   .FillHeight(1.0f)
+                       [SNew(SSplitter)
+
+                        + SSplitter::Slot()
+                              .Value(0.5f)
+                                  [SNew(SVerticalBox)
+
+                                   + SVerticalBox::Slot()
+                                         .AutoHeight()
+                                         .Padding(0.0f, 0.0f, 8.0f, 6.0f)
+                                             [SNew(STextBlock)
+                                                  .Text(LOCTEXT("AutoPartitionBeforeLabel", "Before"))]
+
+                                   + SVerticalBox::Slot()
+                                         .FillHeight(1.0f)
+                                         .Padding(0.0f, 0.0f, 8.0f, 0.0f)
+                                             [SAssignNew(BeforePreviewView, SWetClothingAssetUVView)]]
+
+                        + SSplitter::Slot()
+                              .Value(0.5f)
+                                  [SNew(SVerticalBox)
+
+                                   + SVerticalBox::Slot()
+                                         .AutoHeight()
+                                         .Padding(8.0f, 0.0f, 0.0f, 6.0f)
+                                             [SNew(STextBlock)
+                                                  .Text(LOCTEXT("AutoPartitionAfterLabel", "After"))]
+
+                                   + SVerticalBox::Slot()
+                                         .FillHeight(1.0f)
+                                         .Padding(8.0f, 0.0f, 0.0f, 0.0f)
+                                             [SAssignNew(AfterPreviewView, SWetClothingAssetUVView)]]]
+
+             + SVerticalBox::Slot()
+                   .AutoHeight()
+                   .Padding(0.0f, 12.0f, 0.0f, 0.0f)
+                       [SNew(SHorizontalBox)
+
+                        + SHorizontalBox::Slot()
+                              .FillWidth(1.0f)
+                                  [SNullWidget::NullWidget]
+
+                        + SHorizontalBox::Slot()
+                              .AutoWidth()
+                              .Padding(0.0f, 0.0f, 8.0f, 0.0f)
+                                  [SNew(SButton)
+                                       .Text(LOCTEXT("AutoPartitionPreviewCancel", "Cancel"))
+                                       .OnClicked_Lambda(
+                                           [WeakPreviewWindow]()
+                                           {
+                                               if (TSharedPtr<SWindow> PinnedWindow = WeakPreviewWindow.Pin())
+                                               {
+                                                   PinnedWindow->RequestDestroyWindow();
+                                               }
+                                               return FReply::Handled();
+                                           })]
+
+                        + SHorizontalBox::Slot()
+                              .AutoWidth()
+                                  [SNew(SButton)
+                                       .Text(LOCTEXT("AutoPartitionPreviewApply", "Apply"))
+                                       .OnClicked_Lambda(
+                                           [this, PreviewClusters, WeakPreviewWindow]()
+                                           {
+                                               if (HasAutoPartitionDataToReplace())
+                                               {
+                                                   const EAppReturnType::Type Response = FMessageDialog::Open(
+                                                       EAppMsgType::YesNo,
+                                                       LOCTEXT("ConfirmAutoPartitionReplace", "This material slot already has authored part data. Delete it all and regenerate parts automatically?"));
+
+                                                   if (Response != EAppReturnType::Yes)
+                                                   {
+                                                       return FReply::Handled();
+                                                   }
+                                               }
+
+                                               ApplyAutoPartitionClusters(*PreviewClusters);
+
+                                               if (TSharedPtr<SWindow> PinnedWindow = WeakPreviewWindow.Pin())
+                                               {
+                                                   PinnedWindow->RequestDestroyWindow();
+                                               }
+                                               return FReply::Handled();
+                                           })]]]);
+
+    *WeakAfterPreviewView = AfterPreviewView;
+
+    if (BeforePreviewView.IsValid())
+    {
+        BeforePreviewView->SetBackgroundTexture(PartitionTexture);
+        BeforePreviewView->SetIslands(UVIslandItems);
+        BeforePreviewView->SetIslandColors(BuildIslandColorMap());
+        BeforePreviewView->SetDisplayMode(EWetClothingAssetUVDisplayMode::Normal);
+    }
+
+    if (AfterPreviewView.IsValid())
+    {
+        AfterPreviewView->SetBackgroundTexture(PartitionTexture);
+        AfterPreviewView->SetIslands(UVIslandItems);
+        AfterPreviewView->SetIslandColors(BuildAutoPartitionPreviewColorMap(*PreviewClusters));
+        AfterPreviewView->SetDisplayMode(EWetClothingAssetUVDisplayMode::Normal);
+    }
+
+    FSlateApplication::Get().AddModalWindow(PreviewWindow, FSlateApplication::Get().GetActiveTopLevelWindow());
+    return FReply::Handled();
+}
+
+UTexture2D* SWetClothingAssetEditorPanel::ResolveAutoPartitionTexture() const
+{
+    for (const FTextureItemPtr& TextureItem : TextureItems)
+    {
+        if (TextureItem.IsValid())
+        {
+            if (UTexture2D* Texture2D = Cast<UTexture2D>(TextureItem->Texture.Get()))
+            {
+                return Texture2D;
+            }
+        }
+    }
+
+    return Cast<UTexture2D>(ResolveSelectedMaterialTexture());
+}
+
+TMap<int32, FLinearColor> SWetClothingAssetEditorPanel::BuildAutoPartitionPreviewColorMap(const TArray<FWetClothingAutoPartitionCluster>& Clusters) const
+{
+    TMap<int32, FLinearColor> Result;
+
+    for (int32 ClusterIndex = 0; ClusterIndex < Clusters.Num(); ++ClusterIndex)
+    {
+        FLinearColor ClusterColor = GetDefaultWetPartColor(ClusterIndex + 1);
+        ClusterColor.A = 1.0f;
+
+        for (const int32 IslandID : Clusters[ClusterIndex].IslandIDs)
+        {
+            Result.Add(IslandID, ClusterColor);
+        }
+    }
+
+    return Result;
+}
+
+void SWetClothingAssetEditorPanel::ApplyAutoPartitionClusters(const TArray<FWetClothingAutoPartitionCluster>& Clusters)
+{
+    UWetClothingAsset* Profile = WetClothingAsset.Get();
+    if (Profile == nullptr || !IsAutoPartitionEnabled())
+    {
+        return;
     }
 
     const int32 UVChannelIndex = GetSelectedUVChannelIndex();
@@ -2398,7 +2580,6 @@ FReply SWetClothingAssetEditorPanel::HandleAutoPartitionClicked()
 
     RefreshWetPartList();
     RefreshUVIslandList();
-    return FReply::Handled();
 }
 
 FReply SWetClothingAssetEditorPanel::HandleAssignSelectedIslandToWetPartClicked()

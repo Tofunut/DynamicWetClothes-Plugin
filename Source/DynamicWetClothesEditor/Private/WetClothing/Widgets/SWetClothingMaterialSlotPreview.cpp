@@ -37,8 +37,8 @@ int32 SWetClothingMaterialSlotPreview::OnPaint(
     const FWidgetStyle&      InWidgetStyle,
     bool                     bParentEnabled) const
 {
-    const FSlateBrush*          WhiteBrush = FCoreStyle::Get().GetBrush(TEXT("WhiteBrush"));
-    const FVector2D             LocalSize = AllottedGeometry.GetLocalSize();
+    const FSlateBrush* WhiteBrush = FCoreStyle::Get().GetBrush(TEXT("WhiteBrush"));
+    const FVector2D    LocalSize = AllottedGeometry.GetLocalSize();
 
     FSlateDrawElement::MakeBox(
         OutDrawElements,
@@ -183,7 +183,7 @@ int32 SWetClothingMaterialSlotPreview::OnPaint(
             ESlateDrawEffect::None,
             LineColor,
             true,
-            0.3f);
+            0.1f);
     }
 
     return LayerId + 2;

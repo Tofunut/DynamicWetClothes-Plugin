@@ -6,6 +6,7 @@
 #include "WetClothing/Editor/WetClothingAssetEditorTypes.h"
 #include "WetClothingAsset.h"
 #include "WetClothing/Analysis/WetClothingAssetMeshAnalyzer.h"
+#include "WetClothing/AutoPartition/WetClothingAutoPartitionTypes.h"
 #include "WetClothing/Widgets/SWetClothingAssetUVView.h"
 #include "Widgets/SCompoundWidget.h"
 
@@ -16,6 +17,7 @@ class STableViewBase;
 class SWetClothingAssetViewport;
 class SInlineEditableTextBlock;
 class UTexture;
+class UTexture2D;
 struct FSlateBrush;
 
 class SWetClothingAssetEditorPanel : public SCompoundWidget
@@ -110,6 +112,9 @@ class SWetClothingAssetEditorPanel : public SCompoundWidget
     bool                  IsAutoPartitionEnabled() const;
     bool                  HasAutoPartitionDataToReplace() const;
     FReply                HandleAutoPartitionClicked();
+    UTexture2D*                  ResolveAutoPartitionTexture() const;
+    TMap<int32, FLinearColor>    BuildAutoPartitionPreviewColorMap(const TArray<FWetClothingAutoPartitionCluster>& Clusters) const;
+    void                         ApplyAutoPartitionClusters(const TArray<FWetClothingAutoPartitionCluster>& Clusters);
     FReply                HandleAssignSelectedIslandToWetPartClicked();
     FReply                HandleUVSelectionToolButtonClicked(FUVSelectionToolItemPtr Item);
     void                  SetCurrentUVSelectionTool(EWetClothingAssetUVSelectionTool InTool);
@@ -193,5 +198,5 @@ class SWetClothingAssetEditorPanel : public SCompoundWidget
     TMap<int32, TWeakPtr<SInlineEditableTextBlock>>    WetPartInlineRenameWidgets;
     int32                                              SelectedWetPartID = INDEX_NONE;
     int32                                              SelectedAssignWetPartID = INDEX_NONE;
-    float                                              AutoPartitionTolerancePercent = 17.2f;
+    float                                              AutoPartitionTolerancePercent = 20.0f;
 };

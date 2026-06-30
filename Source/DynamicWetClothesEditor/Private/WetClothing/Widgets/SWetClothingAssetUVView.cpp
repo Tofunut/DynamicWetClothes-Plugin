@@ -8,7 +8,6 @@
 #include "Rendering/DrawElements.h"
 #include "Rendering/RenderingCommon.h"
 #include "Rendering/SlateRenderer.h"
-#include "Styling/AppStyle.h"
 #include "Styling/CoreStyle.h"
 
 namespace
@@ -77,6 +76,85 @@ namespace
     bool IsForwardCanonicalEdge(const FVector2D& Start, const FVector2D& End, const FQuantizedUVEdge& CanonicalEdge)
     {
         return FQuantizedUVPoint(Start) == CanonicalEdge.A && FQuantizedUVPoint(End) == CanonicalEdge.B;
+    }
+
+    void DrawFilledPolygon(
+        FSlateWindowElementList& OutDrawElements,
+        int32                    LayerId,
+        const FGeometry&         AllottedGeometry,
+        const FSlateBrush*       WhiteBrush,
+        const TArray<FVector2D>& InPoints,
+        const FLinearColor&      FillColor)
+    {
+        if (WhiteBrush == nullptr || InPoints.Num() < 3)
+        {
+            return;
+        }
+
+        TArray<FVector2D> Points = InPoints;
+        if (Points.Num() > 1 && Points[0].Equals(Points.Last(), 0.01f))
+        {
+            Points.Pop(EAllowShrinking::No);
+        }
+
+        if (Points.Num() < 3)
+        {
+            return;
+        }
+
+        const FSlateResourceHandle ResourceHandle = FSlateApplication::Get().GetRenderer()->GetResourceHandle(*WhiteBrush);
+        if (!ResourceHandle.IsValid())
+        {
+            return;
+        }
+
+        FVector2D Center = FVector2D::ZeroVector;
+        for (const FVector2D& Point : Points)
+        {
+            Center += Point;
+        }
+        Center /= static_cast<float>(Points.Num());
+
+        const FSlateRenderTransform RenderTransform = AllottedGeometry.GetAccumulatedRenderTransform();
+        const FColor                VertexColor = FillColor.ToFColor(true);
+
+        TArray<FSlateVertex> FillVerts;
+        TArray<SlateIndex>   FillIndices;
+        FillVerts.Reserve(Points.Num() + 1);
+        FillIndices.Reserve(Points.Num() * 3);
+
+        FillVerts.Add(FSlateVertex::Make<ESlateVertexRounding::Disabled>(
+            RenderTransform,
+            FVector2f(Center),
+            FVector2f::ZeroVector,
+            VertexColor));
+
+        for (const FVector2D& Point : Points)
+        {
+            FillVerts.Add(FSlateVertex::Make<ESlateVertexRounding::Disabled>(
+                RenderTransform,
+                FVector2f(Point),
+                FVector2f::ZeroVector,
+                VertexColor));
+        }
+
+        for (int32 PointIndex = 0; PointIndex < Points.Num(); ++PointIndex)
+        {
+            FillIndices.Add(0);
+            FillIndices.Add(static_cast<SlateIndex>(PointIndex + 1));
+            FillIndices.Add(static_cast<SlateIndex>(((PointIndex + 1) % Points.Num()) + 1));
+        }
+
+        FSlateDrawElement::MakeCustomVerts(
+            OutDrawElements,
+            LayerId,
+            ResourceHandle,
+            FillVerts,
+            FillIndices,
+            nullptr,
+            0,
+            0,
+            ESlateDrawEffect::None);
     }
 } // namespace
 
@@ -203,8 +281,8 @@ int32 SWetClothingAssetUVView::OnPaint(
     bool                     bParentEnabled) const
 {
     const FSlateBrush* WhiteBrush = FCoreStyle::Get().GetBrush(TEXT("WhiteBrush"));
-    const FLinearColor SelectColor = FAppStyle::GetSlateColor(TEXT("Colors.SelectHover")).GetSpecifiedColor();
     const FLinearColor SelectedIslandLineColor(1.0f, 0.45f, 0.08f, 1.0f);
+    const FLinearColor SelectedIslandFillColor(1.0f, 0.45f, 0.08f, 0.16f);
     const bool         bOutlineOnly = DisplayMode == EWetClothingAssetUVDisplayMode::OutlineOnly;
 
     FSlateDrawElement::MakeBox(
@@ -249,42 +327,42 @@ int32 SWetClothingAssetUVView::OnPaint(
             FLinearColor(1.0f, 1.0f, 1.0f, 0.75f));
     }
 
-    for (int32 GridLineIndex = 0; GridLineIndex <= 4; ++GridLineIndex)
-    {
-        const double T = GridLineIndex / 4.0;
-        const double U = FMath::Lerp(UVBounds.Min.X, UVBounds.Max.X, T);
-        const double V = FMath::Lerp(UVBounds.Min.Y, UVBounds.Max.Y, T);
+    // for (int32 GridLineIndex = 0; GridLineIndex <= 4; ++GridLineIndex)
+    // {
+    //     const double T = GridLineIndex / 4.0;
+    //     const double U = FMath::Lerp(UVBounds.Min.X, UVBounds.Max.X, T);
+    //     const double V = FMath::Lerp(UVBounds.Min.Y, UVBounds.Max.Y, T);
 
-        const TArray<FVector2D> VerticalLine = {
-            UVToLocal(FVector2D(U, UVBounds.Min.Y), AllottedGeometry, UVBounds, ZoomAmount, ClampedViewOffset),
-            UVToLocal(FVector2D(U, UVBounds.Max.Y), AllottedGeometry, UVBounds, ZoomAmount, ClampedViewOffset)
-        };
+    //     const TArray<FVector2D> VerticalLine = {
+    //         UVToLocal(FVector2D(U, UVBounds.Min.Y), AllottedGeometry, UVBounds, ZoomAmount, ClampedViewOffset),
+    //         UVToLocal(FVector2D(U, UVBounds.Max.Y), AllottedGeometry, UVBounds, ZoomAmount, ClampedViewOffset)
+    //     };
 
-        const TArray<FVector2D> HorizontalLine = {
-            UVToLocal(FVector2D(UVBounds.Min.X, V), AllottedGeometry, UVBounds, ZoomAmount, ClampedViewOffset),
-            UVToLocal(FVector2D(UVBounds.Max.X, V), AllottedGeometry, UVBounds, ZoomAmount, ClampedViewOffset)
-        };
+    //     const TArray<FVector2D> HorizontalLine = {
+    //         UVToLocal(FVector2D(UVBounds.Min.X, V), AllottedGeometry, UVBounds, ZoomAmount, ClampedViewOffset),
+    //         UVToLocal(FVector2D(UVBounds.Max.X, V), AllottedGeometry, UVBounds, ZoomAmount, ClampedViewOffset)
+    //     };
 
-        FSlateDrawElement::MakeLines(
-            OutDrawElements,
-            GridLayer,
-            AllottedGeometry.ToPaintGeometry(),
-            VerticalLine,
-            ESlateDrawEffect::None,
-            FLinearColor(0.12f, 0.12f, 0.12f, 0.85f),
-            true,
-            1.0f);
+    //     FSlateDrawElement::MakeLines(
+    //         OutDrawElements,
+    //         GridLayer,
+    //         AllottedGeometry.ToPaintGeometry(),
+    //         VerticalLine,
+    //         ESlateDrawEffect::None,
+    //         FLinearColor(0.12f, 0.12f, 0.12f, 0.85f),
+    //         true,
+    //         1.0f);
 
-        FSlateDrawElement::MakeLines(
-            OutDrawElements,
-            GridLayer,
-            AllottedGeometry.ToPaintGeometry(),
-            HorizontalLine,
-            ESlateDrawEffect::None,
-            FLinearColor(0.12f, 0.12f, 0.12f, 0.85f),
-            true,
-            1.0f);
-    }
+    //     FSlateDrawElement::MakeLines(
+    //         OutDrawElements,
+    //         GridLayer,
+    //         AllottedGeometry.ToPaintGeometry(),
+    //         HorizontalLine,
+    //         ESlateDrawEffect::None,
+    //         FLinearColor(0.12f, 0.12f, 0.12f, 0.85f),
+    //         true,
+    //         1.0f);
+    // }
 
     const TArray<FVector2D> BorderPoints = {
         UVToLocal(FVector2D(0.0, 0.0), AllottedGeometry, UVBounds, ZoomAmount, ClampedViewOffset),
@@ -317,6 +395,26 @@ int32 SWetClothingAssetUVView::OnPaint(
                                             ? (bSelected ? 2.3f : (bHasAssignedColor ? 1.7f : 1.45f))
                                             : (bSelected ? 1.15f : (bIsDefaultGrayOverlay ? 0.35f : (bHasAssignedColor ? 0.75f : 0.35f)));
         const int32         DrawLayer = bSelected ? SelectedLayer : WireLayer;
+
+        if (bSelected)
+        {
+            for (const FWetClothingAssetUVTriangle& Triangle : Island.UVTriangles)
+            {
+                const TArray<FVector2D> TriangleFillPoints = {
+                    UVToLocal(Triangle.UVs[0], AllottedGeometry, UVBounds, ZoomAmount, ClampedViewOffset),
+                    UVToLocal(Triangle.UVs[1], AllottedGeometry, UVBounds, ZoomAmount, ClampedViewOffset),
+                    UVToLocal(Triangle.UVs[2], AllottedGeometry, UVBounds, ZoomAmount, ClampedViewOffset)
+                };
+
+                DrawFilledPolygon(
+                    OutDrawElements,
+                    SelectedLayer,
+                    AllottedGeometry,
+                    WhiteBrush,
+                    TriangleFillPoints,
+                    SelectedIslandFillColor);
+            }
+        }
 
         if (bOutlineOnly)
         {
@@ -411,8 +509,8 @@ int32 SWetClothingAssetUVView::OnPaint(
     {
         const FVector2D    RectMin(FMath::Min(SelectionDragStartLocal.X, SelectionDragCurrentLocal.X), FMath::Min(SelectionDragStartLocal.Y, SelectionDragCurrentLocal.Y));
         const FVector2D    RectMax(FMath::Max(SelectionDragStartLocal.X, SelectionDragCurrentLocal.X), FMath::Max(SelectionDragStartLocal.Y, SelectionDragCurrentLocal.Y));
-        const FLinearColor SelectionFillColor(SelectColor.R, SelectColor.G, SelectColor.B, 0.12f);
-        const FLinearColor SelectionLineColor(SelectColor.R, SelectColor.G, SelectColor.B, 0.9f);
+        const FLinearColor SelectionFillColor(1.0f, 0.45f, 0.08f, 0.16f);
+        const FLinearColor SelectionLineColor(1.0f, 0.45f, 0.08f, 0.95f);
 
         if (SelectionTool == EWetClothingAssetUVSelectionTool::BoxSelect)
         {
@@ -461,6 +559,14 @@ int32 SWetClothingAssetUVView::OnPaint(
                     Center.Y + FMath::Sin(Angle) * Radii.Y));
             }
 
+            DrawFilledPolygon(
+                OutDrawElements,
+                SelectionRectLayer,
+                AllottedGeometry,
+                WhiteBrush,
+                EllipsePoints,
+                SelectionFillColor);
+
             FSlateDrawElement::MakeLines(
                 OutDrawElements,
                 SelectionRectLayer + 1,
@@ -477,6 +583,22 @@ int32 SWetClothingAssetUVView::OnPaint(
             if (LassoPoints.Num() == 0 || !LassoPoints.Last().Equals(SelectionDragCurrentLocal, 0.5f))
             {
                 LassoPoints.Add(SelectionDragCurrentLocal);
+            }
+
+            if (LassoPoints.Num() > 2)
+            {
+                if (!LassoPoints[0].Equals(LassoPoints.Last(), 0.5f))
+                {
+                    LassoPoints.Add(LassoPoints[0]);
+                }
+
+                DrawFilledPolygon(
+                    OutDrawElements,
+                    SelectionRectLayer,
+                    AllottedGeometry,
+                    WhiteBrush,
+                    LassoPoints,
+                    SelectionFillColor);
             }
 
             if (LassoPoints.Num() > 1)

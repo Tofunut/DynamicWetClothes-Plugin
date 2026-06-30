@@ -52,22 +52,25 @@ public:
     bool bBindCallbackUserParameterOnBeginPlay = true;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Contact", meta = (ClampMin = "0.0"))
-    float ContactAmount = 0.05f;
+    float ContactAmount = 0.2f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Contact", meta = (ClampMin = "0.0"))
-    float ContactRadius = 5.0f;
+    float ContactRadius = 20.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Contact")
-    bool bUseParticleSizeAsRadius = true;
+    bool bUseParticleSizeAsRadius = false;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Contact", meta = (ClampMin = "0.0", EditCondition = "bUseParticleSizeAsRadius"))
-    float ParticleSizeRadiusScale = 0.5f;
+    float ParticleSizeRadiusScale = 1.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Contact", meta = (ClampMin = "0"))
     int32 MaxParticlesPerCallback = 64;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Contact", meta = (ClampMin = "0.0"))
     float MinVelocityForContact = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Contact")
+    bool bRequireBoneNameForContact = true;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Trace")
     bool bTraceForSurfaceData = false;

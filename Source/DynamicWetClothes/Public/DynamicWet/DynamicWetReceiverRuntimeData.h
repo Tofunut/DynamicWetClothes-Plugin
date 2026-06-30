@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "WetClothing/WetClothingSkeletalMeshCacheBuilder.h"
 #include "WetnessProfile.h"
 
 struct FWetnessProfileParameters;
@@ -19,11 +20,14 @@ class FDynamicWetReceiverRuntimeData
 public:
     void ResetWetPartData();
     void ResetNeighborGraph();
+    void ResetBoneOptimizationCache();
 
     TArray<int32> VertexWetPartIDs;
     TArray<FWetnessProfileParameters> VertexWetnessProfileParameters;
     TArray<FLinearColor> VertexWetPartDebugColors;
     TArray<FDynamicWetReceiverVertexNeighbors> NeighborGraph;
+    FWetClothingSkeletalMeshOptimizationCache BoneOptimizationCache;
+    bool bHasBoneOptimizationCache = false;
 };
 
 class FDynamicWetReceiverRuntimeDataBuilder
@@ -43,5 +47,11 @@ public:
         const FDynamicWetReceiverContext& Receiver,
         int32 LODIndex,
         FSkeletalMeshLODRenderData*& OutLODData);
+    bool BuildBoneOptimizationCache(FDynamicWetReceiverContext& Receiver, int32 LODIndex = 0);
+    bool GetBoneCandidateVertexRange(
+        const FDynamicWetReceiverContext& Receiver,
+        FName BoneName,
+        int32& OutStartOffset,
+        int32& OutEndOffset) const;
     bool DoesVertexMatchBoneName(const FDynamicWetReceiverContext& Receiver, int32 VertexIndex, FName BoneName);
 };

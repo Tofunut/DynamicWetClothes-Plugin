@@ -50,6 +50,12 @@ void FDynamicWetReceiverRuntimeData::ResetNeighborGraph()
     NeighborGraph.Reset();
 }
 
+void FDynamicWetReceiverRuntimeData::ResetBoneOptimizationCache()
+{
+    BoneOptimizationCache = FWetClothingSkeletalMeshOptimizationCache();
+    bHasBoneOptimizationCache = false;
+}
+
 void FDynamicWetReceiverRuntimeDataBuilder::InitializeWetnessData(FDynamicWetReceiverContext& Receiver)
 {
     FSkeletalMeshLODRenderData* LODData = nullptr;
@@ -461,6 +467,84 @@ bool FDynamicWetReceiverRuntimeDataBuilder::GetLODRenderData(
     return true;
 }
 
+bool FDynamicWetReceiverRuntimeDataBuilder::BuildBoneOptimizationCache(
+    FDynamicWetReceiverContext& Receiver,
+    const int32 LODIndex)
+{
+    Receiver.RuntimeData.ResetBoneOptimizationCache();
+
+    if (!Receiver.TargetSkeletalMesh)
+    {
+        return false;
+    }
+
+    const USkeletalMesh* SkeletalMesh = Receiver.TargetSkeletalMesh->GetSkeletalMeshAsset();
+    if (!SkeletalMesh)
+    {
+        return false;
+    }
+
+    TArray<FWetClothingBoneIncludeRule> IncludeRules;
+    FString ErrorMessage;
+    if (!FWetClothingSkeletalMeshCacheBuilder::Build(
+            SkeletalMesh,
+            LODIndex,
+            IncludeRules,
+            Receiver.RuntimeData.BoneOptimizationCache,
+            &ErrorMessage))
+    {
+        UE_LOG(
+            LogTemp,
+            Warning,
+            TEXT("DynamicWetReceiverComponent: Failed to build bone optimization cache on %s. %s"),
+            *GetNameSafe(Receiver.OwnerForLogs),
+            *ErrorMessage);
+        return false;
+    }
+
+    Receiver.RuntimeData.bHasBoneOptimizationCache = true;
+    return true;
+}
+
+bool FDynamicWetReceiverRuntimeDataBuilder::GetBoneCandidateVertexRange(
+    const FDynamicWetReceiverContext& Receiver,
+    const FName BoneName,
+    int32& OutStartOffset,
+    int32& OutEndOffset) const
+{
+    OutStartOffset = INDEX_NONE;
+    OutEndOffset = INDEX_NONE;
+
+    if (BoneName.IsNone() || !Receiver.RuntimeData.bHasBoneOptimizationCache || !Receiver.TargetSkeletalMesh)
+    {
+        return false;
+    }
+
+    const USkeletalMesh* SkeletalMesh = Receiver.TargetSkeletalMesh->GetSkeletalMeshAsset();
+    if (!SkeletalMesh)
+    {
+        return false;
+    }
+
+    const FWetClothingBonePrimaryVertexCache& PrimaryVertexCache =
+        Receiver.RuntimeData.BoneOptimizationCache.PrimaryVertexCache;
+    if (PrimaryVertexCache.SourceMesh != SkeletalMesh)
+    {
+        return false;
+    }
+
+    const int32 BoneIndex = SkeletalMesh->GetRefSkeleton().FindBoneIndex(BoneName);
+    if (BoneIndex == INDEX_NONE || !PrimaryVertexCache.BoneStartOffsets.IsValidIndex(BoneIndex + 1))
+    {
+        return false;
+    }
+
+    OutStartOffset = PrimaryVertexCache.BoneStartOffsets[BoneIndex];
+    OutEndOffset = PrimaryVertexCache.BoneStartOffsets[BoneIndex + 1];
+    return OutStartOffset >= 0 && OutEndOffset >= OutStartOffset &&
+           OutEndOffset <= PrimaryVertexCache.FlatVertexIndices.Num();
+}
+
 bool FDynamicWetReceiverRuntimeDataBuilder::DoesVertexMatchBoneName(const FDynamicWetReceiverContext& Receiver, const int32 VertexIndex, const FName BoneName)
 {
     if (BoneName.IsNone())
@@ -485,8 +569,7 @@ bool FDynamicWetReceiverRuntimeDataBuilder::DoesVertexMatchBoneName(const FDynam
         return false;
     }
 
-    const FSkinWeightVertexBuffer* SkinWeightBuffer =
-        Receiver.TargetSkeletalMesh->GetSkinWeightBuffer(0);
+    const FSkinWeightVertexBuffer* SkinWeightBuffer = Receiver.TargetSkeletalMesh->GetSkinWeightBuffer(0);
     if (!SkinWeightBuffer)
     {
         return false;

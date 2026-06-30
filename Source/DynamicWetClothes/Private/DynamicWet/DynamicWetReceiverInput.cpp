@@ -23,6 +23,169 @@ struct FPreparedWetContactData
     bool bHasNormals = false;
 };
 
+struct FDirectSkinnedWetContactData
+{
+    FTransform ComponentTransform;
+    FSkeletalMeshLODRenderData* LODData = nullptr;
+    const FSkinWeightVertexBuffer* SkinWeightBuffer = nullptr;
+};
+
+struct FBoneCandidateVertexRange
+{
+    int32 StartOffset = INDEX_NONE;
+    int32 EndOffset = INDEX_NONE;
+
+    bool IsValid() const
+    {
+        return StartOffset >= 0 && EndOffset > StartOffset;
+    }
+};
+
+struct FResolvedBoneCandidateContact
+{
+    const FDWCWetContact* Contact = nullptr;
+    FBoneCandidateVertexRange Range;
+};
+
+struct FWetContactEvaluationData
+{
+    explicit FWetContactEvaluationData(const FDWCWetContact& InContact)
+        : Contact(InContact) , EffectiveAmount(InContact.Amount)
+        , SafeDirection(InContact.Direction.IsNearlyZero()? FVector::ZeroVector: InContact.Direction.GetSafeNormal())
+        , SafeNormal(InContact.Normal.IsNearlyZero()? FVector::ZeroVector: InContact.Normal.GetSafeNormal())
+        , SafeRadius(FMath::Max(InContact.Radius, KINDA_SMALL_NUMBER))
+        , SafeRadiusSquared(SafeRadius * SafeRadius)
+    {
+    }
+
+    const FDWCWetContact& Contact;
+    float EffectiveAmount = 0.0f;
+    FVector SafeDirection = FVector::ZeroVector;
+    FVector SafeNormal = FVector::ZeroVector;
+    float SafeRadius = KINDA_SMALL_NUMBER;
+    float SafeRadiusSquared = KINDA_SMALL_NUMBER * KINDA_SMALL_NUMBER;
+};
+
+bool TryGetBoneCandidateVertexRange(
+    FDynamicWetReceiverContext& Receiver,
+    const FDWCWetContact& Contact,
+    FBoneCandidateVertexRange& OutRange)
+{
+    OutRange = FBoneCandidateVertexRange();
+    return Receiver.RuntimeDataBuilder.GetBoneCandidateVertexRange(
+               Receiver,
+               Contact.BoneName,
+               OutRange.StartOffset,
+               OutRange.EndOffset) &&
+           OutRange.IsValid();
+}
+
+bool TryResolveBoneCandidateContacts(
+    FDynamicWetReceiverContext& Receiver,
+    const TArray<FDWCWetContact>& Contacts,
+    TArray<FResolvedBoneCandidateContact>& OutResolvedContacts)
+{
+    OutResolvedContacts.Reset();
+    OutResolvedContacts.Reserve(Contacts.Num());
+
+    for (const FDWCWetContact& Contact : Contacts)
+    {
+        if (FMath::IsNearlyZero(Contact.Amount))
+        {
+            continue;
+        }
+
+        FBoneCandidateVertexRange Range;
+        if (!TryGetBoneCandidateVertexRange(Receiver, Contact, Range))
+        {
+            OutResolvedContacts.Reset();
+            return false;
+        }
+
+        FResolvedBoneCandidateContact& ResolvedContact = OutResolvedContacts.AddDefaulted_GetRef();
+        ResolvedContact.Contact = &Contact;
+        ResolvedContact.Range = Range;
+    }
+
+    return !OutResolvedContacts.IsEmpty();
+}
+
+bool CalculateWetContactBaseInfluence(
+    const FWetContactEvaluationData& Evaluation,
+    const FVector& WorldPosition,
+    float& OutInfluence)
+{
+    const float DistanceSquared = FVector::DistSquared(WorldPosition, Evaluation.Contact.Location);
+    if (DistanceSquared > Evaluation.SafeRadiusSquared)
+    {
+        return false;
+    }
+
+    const float Distance = FMath::Sqrt(DistanceSquared);
+    OutInfluence = 1.0f - (Distance / Evaluation.SafeRadius);
+    return OutInfluence > KINDA_SMALL_NUMBER;
+}
+
+void ApplyWetContactNormalExposure(
+    const FDynamicWetReceiverContext& Receiver,
+    const FWetContactEvaluationData& Evaluation,
+    const FVector* WorldNormal,
+    float& InOutInfluence)
+{
+    if (!WorldNormal || WorldNormal->IsNearlyZero())
+    {
+        return;
+    }
+
+    InOutInfluence *= FDynamicWetReceiverInputApplicator::CalculateContactExposure(
+        *WorldNormal,
+        Evaluation.SafeDirection,
+        Evaluation.SafeNormal,
+        Receiver.WetnessSettings);
+}
+
+bool ApplyWetContactInfluence(
+    FDynamicWetReceiverContext& Receiver,
+    const FWetContactEvaluationData& Evaluation,
+    const int32 VertexIndex,
+    const float Influence,
+    bool& bDirty,
+    bool& bQueuedWetness)
+{
+    if (!Receiver.SimulationState.WetnessPerVertex.IsValidIndex(VertexIndex))
+    {
+        return false;
+    }
+
+    if ((Evaluation.EffectiveAmount > 0.0f && Receiver.SimulationState.WetnessPerVertex[VertexIndex] >= Receiver.WetnessSettings.MaxStoredWetness) ||
+        (Evaluation.EffectiveAmount < 0.0f && Receiver.SimulationState.WetnessPerVertex[VertexIndex] <= 0.0f))
+    {
+        return false;
+    }
+
+    if (Influence <= KINDA_SMALL_NUMBER)
+    {
+        return false;
+    }
+
+    const float VertexAmount =
+        (Evaluation.EffectiveAmount > 0.0f
+             ? Evaluation.EffectiveAmount * Receiver.GetAbsorptionMultiplierForVertex(VertexIndex)
+             : Evaluation.EffectiveAmount) *
+        Influence;
+    if (VertexAmount > 0.0f)
+    {
+        Receiver.SimulationSolver.QueuePendingWetness(Receiver, VertexIndex, VertexAmount);
+        bQueuedWetness = true;
+    }
+    else
+    {
+        Receiver.SimulationSolver.AbsorbWetnessAtVertex(Receiver, VertexIndex, VertexAmount, bDirty);
+    }
+
+    return true;
+}
+
 bool ApplyPreparedWetContact(
     FDynamicWetReceiverContext& Receiver,
     const FDWCWetContact& Contact,
@@ -35,82 +198,141 @@ bool ApplyPreparedWetContact(
         return false;
     }
 
-    const float EffectiveAmount = Contact.Amount;
-    const FVector SafeDirection =
-        Contact.Direction.IsNearlyZero()
-            ? FVector::ZeroVector
-            : Contact.Direction.GetSafeNormal();
-    const FVector SafeNormal =
-        Contact.Normal.IsNearlyZero()
-            ? FVector::ZeroVector
-            : Contact.Normal.GetSafeNormal();
-    const float SafeRadius = FMath::Max(Contact.Radius, KINDA_SMALL_NUMBER);
-    const float SafeRadiusSquared = SafeRadius * SafeRadius;
+    const FWetContactEvaluationData Evaluation(Contact);
 
     bool bApplied = false;
-
-    for (int32 VertexIndex = 0; VertexIndex < Receiver.MeshSampler.CachedSkinnedPositions.Num(); ++VertexIndex)
+    auto ApplyVertex = [&](const int32 VertexIndex, const bool bCheckBoneName)
     {
-        if (!Receiver.SimulationState.WetnessPerVertex.IsValidIndex(VertexIndex) ||
-            !Receiver.RuntimeDataBuilder.DoesVertexMatchBoneName(Receiver, VertexIndex, Contact.BoneName))
+        if (!Receiver.MeshSampler.CachedSkinnedPositions.IsValidIndex(VertexIndex))
         {
-            continue;
+            return;
         }
 
-        if ((EffectiveAmount > 0.0f && Receiver.SimulationState.WetnessPerVertex[VertexIndex] >= Receiver.WetnessSettings.MaxStoredWetness) ||
-            (EffectiveAmount < 0.0f && Receiver.SimulationState.WetnessPerVertex[VertexIndex] <= 0.0f))
+        if (bCheckBoneName && !Receiver.RuntimeDataBuilder.DoesVertexMatchBoneName(Receiver, VertexIndex, Contact.BoneName))
         {
-            continue;
+            return;
         }
 
         const FVector WorldPosition =
             PreparedData.ComponentTransform.TransformPosition(
                 FVector(Receiver.MeshSampler.CachedSkinnedPositions[VertexIndex]));
-        const float DistanceSquared = FVector::DistSquared(WorldPosition, Contact.Location);
-        if (DistanceSquared > SafeRadiusSquared)
+
+        float Influence = 0.0f;
+        if (!CalculateWetContactBaseInfluence(Evaluation, WorldPosition, Influence))
         {
-            continue;
+            return;
         }
 
-        const float Distance = FMath::Sqrt(DistanceSquared);
-        float Influence = 1.0f - (Distance / SafeRadius);
-
+        FVector WorldNormal = FVector::ZeroVector;
+        const FVector* WorldNormalPtr = nullptr;
         if (PreparedData.bHasNormals && Receiver.MeshSampler.CachedSkinnedNormals.IsValidIndex(VertexIndex))
         {
-            const FVector WorldNormal =
-                PreparedData.ComponentTransform.TransformVectorNoScale(
-                                                 FVector(Receiver.MeshSampler.CachedSkinnedNormals[VertexIndex]))
-                    .GetSafeNormal();
-
-            if (!WorldNormal.IsNearlyZero())
-            {
-                Influence *= FDynamicWetReceiverInputApplicator::CalculateContactExposure(
-                    WorldNormal,
-                    SafeDirection,
-                    SafeNormal,
-                    Receiver.WetnessSettings);
-            }
+            WorldNormal = PreparedData.ComponentTransform.TransformVectorNoScale(FVector(Receiver.MeshSampler.CachedSkinnedNormals[VertexIndex])).GetSafeNormal();
+            WorldNormalPtr = &WorldNormal;
         }
 
-        if (Influence <= KINDA_SMALL_NUMBER)
+        ApplyWetContactNormalExposure(Receiver, Evaluation, WorldNormalPtr, Influence);
+
+        if (ApplyWetContactInfluence(Receiver, Evaluation, VertexIndex, Influence, bDirty, bQueuedWetness))
+        {
+            bApplied = true;
+        }
+    };
+
+    int32 CandidateStartOffset = INDEX_NONE;
+    int32 CandidateEndOffset = INDEX_NONE;
+    const bool bUseBoneCandidates =
+        Receiver.RuntimeDataBuilder.GetBoneCandidateVertexRange(Receiver, Contact.BoneName, CandidateStartOffset,CandidateEndOffset) 
+        && CandidateStartOffset < CandidateEndOffset;
+
+    if (bUseBoneCandidates)
+    {
+        const TArray<int32>& FlatVertexIndices =
+            Receiver.RuntimeData.BoneOptimizationCache.PrimaryVertexCache.FlatVertexIndices;
+        for (int32 CandidateOffset = CandidateStartOffset; CandidateOffset < CandidateEndOffset; ++CandidateOffset)
+        {
+            if (!FlatVertexIndices.IsValidIndex(CandidateOffset))
+            {
+                continue;
+            }
+
+            ApplyVertex(FlatVertexIndices[CandidateOffset], false);
+        }
+    }
+    else
+    {
+        for (int32 VertexIndex = 0; VertexIndex < Receiver.MeshSampler.CachedSkinnedPositions.Num(); ++VertexIndex)
+        {
+            ApplyVertex(VertexIndex, true);
+        }
+    }
+
+    return bApplied;
+}
+
+bool ApplyDirectSkinnedWetContact(
+    FDynamicWetReceiverContext& Receiver,
+    const FDWCWetContact& Contact,
+    const FBoneCandidateVertexRange& CandidateRange,
+    const FDirectSkinnedWetContactData& PreparedData,
+    bool& bDirty,
+    bool& bQueuedWetness)
+{
+    if (FMath::IsNearlyZero(Contact.Amount) || !CandidateRange.IsValid() ||
+        !PreparedData.LODData || !PreparedData.SkinWeightBuffer)
+    {
+        return false;
+    }
+
+    const FWetContactEvaluationData Evaluation(Contact);
+
+    bool bApplied = false;
+    const TArray<int32>& FlatVertexIndices =
+        Receiver.RuntimeData.BoneOptimizationCache.PrimaryVertexCache.FlatVertexIndices;
+
+    for (int32 CandidateOffset = CandidateRange.StartOffset; CandidateOffset < CandidateRange.EndOffset; ++CandidateOffset)
+    {
+        if (!FlatVertexIndices.IsValidIndex(CandidateOffset))
         {
             continue;
         }
 
-        const float VertexAmount =
-            (EffectiveAmount > 0.0f
-                 ? EffectiveAmount * Receiver.GetAbsorptionMultiplierForVertex(VertexIndex)
-                 : EffectiveAmount) *
-            Influence;
-        if (VertexAmount > 0.0f)
+        const int32 VertexIndex = FlatVertexIndices[CandidateOffset];
+        FVector3f SkinnedPosition = FVector3f::ZeroVector;
+        if (!Receiver.MeshSampler.ComputeSkinnedPosition(
+                *PreparedData.LODData,
+                *PreparedData.SkinWeightBuffer,
+                VertexIndex,
+                SkinnedPosition))
         {
-            Receiver.SimulationSolver.QueuePendingWetness(Receiver, VertexIndex, VertexAmount);
-            bQueuedWetness = true;
-            bApplied = true;
+            continue;
         }
-        else
+
+        const FVector WorldPosition = PreparedData.ComponentTransform.TransformPosition(FVector(SkinnedPosition));
+
+        float Influence = 0.0f;
+        if (!CalculateWetContactBaseInfluence(Evaluation, WorldPosition, Influence))
         {
-            Receiver.SimulationSolver.AbsorbWetnessAtVertex(Receiver, VertexIndex, VertexAmount, bDirty);
+            continue;
+        }
+
+        FVector WorldNormal = FVector::ZeroVector;
+        const FVector* WorldNormalPtr = nullptr;
+        FVector3f SkinnedNormal = FVector3f::ZeroVector;
+        if (Receiver.MeshSampler.ComputeSkinnedNormal(
+                *PreparedData.LODData,
+                *PreparedData.SkinWeightBuffer,
+                VertexIndex,
+                SkinnedNormal))
+        {
+            WorldNormal = PreparedData.ComponentTransform.TransformVectorNoScale(FVector(SkinnedNormal)).GetSafeNormal();
+            WorldNormalPtr = &WorldNormal;
+        }
+
+        ApplyWetContactNormalExposure(Receiver, Evaluation, WorldNormalPtr, Influence);
+
+        if (ApplyWetContactInfluence(Receiver, Evaluation, VertexIndex, Influence, bDirty, bQueuedWetness))
+        {
             bApplied = true;
         }
     }
@@ -486,6 +708,46 @@ bool FDynamicWetReceiverInputApplicator::ApplyWetContact(
     }
 
     const float EffectiveAmount = Contact.Amount;
+    FBoneCandidateVertexRange CandidateRange;
+    if (!FMath::IsNearlyZero(EffectiveAmount) &&
+        TryGetBoneCandidateVertexRange(Receiver, Contact, CandidateRange))
+    {
+        FSkeletalMeshLODRenderData* LODData = nullptr;
+        const FSkinWeightVertexBuffer* SkinWeightBuffer = Receiver.TargetSkeletalMesh->GetSkinWeightBuffer(0);
+        if (SkinWeightBuffer &&
+            Receiver.RuntimeDataBuilder.GetLODRenderData(Receiver, 0, LODData) &&
+            LODData &&
+            Receiver.MeshSampler.UpdateSkinningMatrices(Receiver))
+        {
+            const int32 VertexCount = LODData->GetNumVertices();
+            if (Receiver.SimulationState.WetnessPerVertex.Num() != VertexCount)
+            {
+                Receiver.RuntimeDataBuilder.EnsureWetnessBufferSize(Receiver, VertexCount);
+            }
+
+            FDirectSkinnedWetContactData PreparedData;
+            PreparedData.ComponentTransform = Receiver.TargetSkeletalMesh->GetComponentTransform();
+            PreparedData.LODData = LODData;
+            PreparedData.SkinWeightBuffer = SkinWeightBuffer;
+
+            bool bDirty = false;
+            bool bQueuedWetness = false;
+            ApplyDirectSkinnedWetContact(
+                Receiver,
+                Contact,
+                CandidateRange,
+                PreparedData,
+                bDirty,
+                bQueuedWetness);
+
+            if (bDirty && bApplyMaterial)
+            {
+                Receiver.RenderApplier.ApplyWetnessToMaterial(Receiver);
+            }
+
+            return bDirty || bQueuedWetness;
+        }
+    }
 
     if (FMath::IsNearlyZero(EffectiveAmount) || !Receiver.MeshSampler.UpdateSkinnedPositions(Receiver))
     {
@@ -505,7 +767,12 @@ bool FDynamicWetReceiverInputApplicator::ApplyWetContact(
 
     bool bDirty = false;
     bool bQueuedWetness = false;
-    ApplyPreparedWetContact(Receiver, Contact, PreparedData, bDirty, bQueuedWetness);
+    ApplyPreparedWetContact(
+        Receiver,
+        Contact,
+        PreparedData,
+        bDirty,
+        bQueuedWetness);
 
     if (bDirty && bApplyMaterial)
     {
@@ -520,6 +787,54 @@ bool FDynamicWetReceiverInputApplicator::ApplyWetContacts(FDynamicWetReceiverCon
     if (!Receiver.TargetSkeletalMesh || Contacts.IsEmpty())
     {
         return false;
+    }
+
+    TArray<FResolvedBoneCandidateContact> ResolvedCandidateContacts;
+    if (TryResolveBoneCandidateContacts(Receiver, Contacts, ResolvedCandidateContacts))
+    {
+        FSkeletalMeshLODRenderData* LODData = nullptr;
+        const FSkinWeightVertexBuffer* SkinWeightBuffer = Receiver.TargetSkeletalMesh->GetSkinWeightBuffer(0);
+        if (SkinWeightBuffer &&
+            Receiver.RuntimeDataBuilder.GetLODRenderData(Receiver, 0, LODData) &&
+            LODData &&
+            Receiver.MeshSampler.UpdateSkinningMatrices(Receiver))
+        {
+            const int32 VertexCount = LODData->GetNumVertices();
+            if (Receiver.SimulationState.WetnessPerVertex.Num() != VertexCount)
+            {
+                Receiver.RuntimeDataBuilder.EnsureWetnessBufferSize(Receiver, VertexCount);
+            }
+
+            FDirectSkinnedWetContactData PreparedData;
+            PreparedData.ComponentTransform = Receiver.TargetSkeletalMesh->GetComponentTransform();
+            PreparedData.LODData = LODData;
+            PreparedData.SkinWeightBuffer = SkinWeightBuffer;
+
+            bool bDirty = false;
+            bool bQueuedWetness = false;
+            for (const FResolvedBoneCandidateContact& ResolvedContact : ResolvedCandidateContacts)
+            {
+                if (!ResolvedContact.Contact)
+                {
+                    continue;
+                }
+
+                ApplyDirectSkinnedWetContact(
+                    Receiver,
+                    *ResolvedContact.Contact,
+                    ResolvedContact.Range,
+                    PreparedData,
+                    bDirty,
+                    bQueuedWetness);
+            }
+
+            if ((bDirty || bQueuedWetness) && bApplyMaterial)
+            {
+                Receiver.RenderApplier.ApplyWetnessToMaterial(Receiver);
+            }
+
+            return bDirty || bQueuedWetness;
+        }
     }
 
     if (!Receiver.MeshSampler.UpdateSkinnedPositions(Receiver))
@@ -542,7 +857,12 @@ bool FDynamicWetReceiverInputApplicator::ApplyWetContacts(FDynamicWetReceiverCon
     bool bQueuedWetness = false;
     for (const FDWCWetContact& Contact : Contacts)
     {
-        ApplyPreparedWetContact(Receiver, Contact, PreparedData, bDirty, bQueuedWetness);
+        ApplyPreparedWetContact(
+            Receiver,
+            Contact,
+            PreparedData,
+            bDirty,
+            bQueuedWetness);
     }
 
     if ((bDirty || bQueuedWetness) && bApplyMaterial)

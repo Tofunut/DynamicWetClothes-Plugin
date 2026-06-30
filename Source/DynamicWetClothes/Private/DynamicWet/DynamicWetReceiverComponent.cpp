@@ -56,6 +56,7 @@ bool UDynamicWetReceiverComponent::InitializeReceiverRuntime()
     FDynamicWetReceiverContext Context = MakeContext();
     RuntimeDataBuilder->InitializeWetnessData(Context);
     RuntimeDataBuilder->InitializeWetPartVertexData(Context);
+    RuntimeDataBuilder->BuildBoneOptimizationCache(Context, 0);
     RuntimeDataBuilder->BuildNeighborGraph(Context);
     RenderApplier->InitializeWetMaterialInstance(Context);
     RenderApplier->ApplyWetMaterialParameters(Context);

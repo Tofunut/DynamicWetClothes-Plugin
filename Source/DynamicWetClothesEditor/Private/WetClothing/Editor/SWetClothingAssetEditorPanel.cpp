@@ -1908,6 +1908,7 @@ void SWetClothingAssetEditorPanel::HandleWetnessProfilePicked(FWetPartEntryPtr I
         {
             Entry->ProfileAssignment.SourceProfile = FSoftObjectPath(SourceProfile);
             Entry->ProfileAssignment.SourceProfileName = SourceProfile->GetName();
+            Entry->ProfileAssignment.Parameters = SourceProfile->Parameters;
         }
     }
     else

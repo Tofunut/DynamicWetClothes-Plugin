@@ -12,6 +12,7 @@ public:
 
     void InitializeWetMaterialInstance(FDynamicWetReceiverContext& Receiver);
     void ApplyWetMaterialParameters(FDynamicWetReceiverContext& Receiver);
+    void ApplyWetProfileMapParameters(FDynamicWetReceiverContext& Receiver);
     void ApplyWetnessToMaterial(FDynamicWetReceiverContext& Receiver);
     FLinearColor MakeWetVertexColor(const FDynamicWetReceiverContext& Receiver, int32 VertexIndex, float Wetness) const;
 

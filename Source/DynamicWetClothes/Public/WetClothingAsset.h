@@ -8,6 +8,7 @@
 
 class USkeletalMesh;
 class UTexture;
+class UTexture2D;
 
 UENUM(BlueprintType)
 enum class EWetClothingPartBlendMode : uint8
@@ -132,6 +133,33 @@ struct FWetClothingAssetBakedRuntimeData
     TArray<FWetClothingAssetBakedVertexNeighbors> NeighborGraph;
 };
 
+USTRUCT(BlueprintType)
+struct FWetClothingAssetBakedProfileMap
+{
+    GENERATED_BODY()
+
+    UPROPERTY(VisibleAnywhere, Category = "Profile Map")
+    TObjectPtr<UTexture> SourceTexture = nullptr;
+
+    UPROPERTY(VisibleAnywhere, Category = "Profile Map")
+    int32 UVChannelIndex = 0;
+
+    UPROPERTY(VisibleAnywhere, Category = "Profile Map")
+    TArray<int32> MaterialSlotIndices;
+
+    UPROPERTY(VisibleAnywhere, Category = "Profile Map")
+    TObjectPtr<UTexture2D> ProfileMap0 = nullptr;
+
+    UPROPERTY(EditAnywhere, Category = "Profile Map")
+    int32 Resolution = 512;
+
+    UPROPERTY(EditAnywhere, Category = "Profile Map")
+    int32 PaddingPixels = 4;
+
+    UPROPERTY(VisibleAnywhere, Category = "Profile Map")
+    FGuid BakeGuid;
+};
+
 UCLASS(BlueprintType)
 class DYNAMICWETCLOTHES_API UWetClothingAsset : public UDataAsset
 {
@@ -154,6 +182,9 @@ class DYNAMICWETCLOTHES_API UWetClothingAsset : public UDataAsset
 
     UPROPERTY(VisibleAnywhere, Category = "Wet Clothing|Runtime Data")
     FWetClothingAssetBakedRuntimeData BakedRuntimeData;
+
+    UPROPERTY(VisibleAnywhere, Category = "Wet Clothing|Profile Maps")
+    TArray<FWetClothingAssetBakedProfileMap> BakedProfileMaps;
 
 #if WITH_EDITORONLY_DATA
     UPROPERTY(EditAnywhere, Category = "Wet Clothing")

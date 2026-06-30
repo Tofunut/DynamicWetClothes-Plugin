@@ -8,6 +8,7 @@
 #include "DynamicWet/DynamicWetReceiverSimulationState.h"
 #include "Runtime/Engine/Public/Rendering/SkeletalMeshLODRenderData.h"
 #include "Runtime/Engine/Public/Materials/MaterialInstanceDynamic.h"
+#include "WetClothingAsset.h"
 
 
 void FDynamicWetReceiverRenderApplier::ResetCachedVertexColors()
@@ -70,6 +71,92 @@ void FDynamicWetReceiverRenderApplier::ApplyWetMaterialParameters(FDynamicWetRec
             MID->SetScalarParameterValue(
                 Receiver.WetPartDebugUseWetnessMaskParameterName,
                 Receiver.bWetPartDebugUseWetnessMask ? 1.0f : 0.0f);
+        }
+    }
+
+    ApplyWetProfileMapParameters(Receiver);
+}
+
+void FDynamicWetReceiverRenderApplier::ApplyWetProfileMapParameters(FDynamicWetReceiverContext& Receiver)
+{
+    if (Receiver.ProfileMap0ParameterName.IsNone() && Receiver.UseProfileMap0ParameterName.IsNone())
+    {
+        return;
+    }
+
+    TArray<bool> bProfileMapAssigned;
+    bProfileMapAssigned.Init(false, Receiver.WetMaterialInstances.Num());
+
+    if (Receiver.WetClothingProfile)
+    {
+        for (const FWetClothingAssetBakedProfileMap& BakedProfileMap : Receiver.WetClothingProfile->BakedProfileMaps)
+        {
+            if (BakedProfileMap.ProfileMap0 == nullptr)
+            {
+                continue;
+            }
+
+            for (const int32 MaterialSlotIndex : BakedProfileMap.MaterialSlotIndices)
+            {
+                if (!Receiver.WetMaterialInstances.IsValidIndex(MaterialSlotIndex))
+                {
+                    continue;
+                }
+
+                UMaterialInstanceDynamic* MID = Receiver.WetMaterialInstances[MaterialSlotIndex];
+                if (MID == nullptr)
+                {
+                    continue;
+                }
+
+                if (!Receiver.ProfileMap0ParameterName.IsNone())
+                {
+                    MID->SetTextureParameterValue(Receiver.ProfileMap0ParameterName, BakedProfileMap.ProfileMap0);
+                }
+
+                if (!Receiver.UseProfileMap0ParameterName.IsNone())
+                {
+                    MID->SetScalarParameterValue(Receiver.UseProfileMap0ParameterName, 1.0f);
+                }
+
+                bProfileMapAssigned[MaterialSlotIndex] = true;
+
+                UE_LOG(
+                    LogTemp,
+                    Display,
+                    TEXT("DynamicWetClothes: Applied ProfileMap0 '%s' to material slot %d on %s using texture parameter '%s' and enabled scalar '%s'."),
+                    *GetNameSafe(BakedProfileMap.ProfileMap0),
+                    MaterialSlotIndex,
+                    *GetNameSafe(Receiver.OwnerForLogs),
+                    *Receiver.ProfileMap0ParameterName.ToString(),
+                    *Receiver.UseProfileMap0ParameterName.ToString());
+            }
+        }
+    }
+
+    if (Receiver.UseProfileMap0ParameterName.IsNone())
+    {
+        return;
+    }
+
+    for (int32 MaterialSlotIndex = 0; MaterialSlotIndex < Receiver.WetMaterialInstances.Num(); ++MaterialSlotIndex)
+    {
+        if (bProfileMapAssigned.IsValidIndex(MaterialSlotIndex) && bProfileMapAssigned[MaterialSlotIndex])
+        {
+            continue;
+        }
+
+        UMaterialInstanceDynamic* MID = Receiver.WetMaterialInstances[MaterialSlotIndex];
+        if (MID != nullptr)
+        {
+            MID->SetScalarParameterValue(Receiver.UseProfileMap0ParameterName, 0.0f);
+            UE_LOG(
+                LogTemp,
+                Verbose,
+                TEXT("DynamicWetClothes: Material slot %d on %s has no ProfileMap0. Set '%s' to 0."),
+                MaterialSlotIndex,
+                *GetNameSafe(Receiver.OwnerForLogs),
+                *Receiver.UseProfileMap0ParameterName.ToString());
         }
     }
 }

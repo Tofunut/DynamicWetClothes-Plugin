@@ -113,6 +113,12 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Debug")
 	FName WetPartDebugUseWetnessMaskParameterName = TEXT("DWC_WetPartDebugUseWetnessMask");
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|ProfileMap")
+	FName ProfileMap0ParameterName = TEXT("DWC_ProfileMap0");
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|ProfileMap")
+	FName UseProfileMap0ParameterName = TEXT("DWC_UseProfileMap0");
+
 	
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UMaterialInstanceDynamic>> WetMaterialInstances;

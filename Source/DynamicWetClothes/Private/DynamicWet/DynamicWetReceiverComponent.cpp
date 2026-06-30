@@ -96,6 +96,8 @@ FDynamicWetReceiverContext UDynamicWetReceiverComponent::MakeContext()
         UnassignedWetPartDebugColor,
         WetPartDebugStrengthParameterName,
         WetPartDebugUseWetnessMaskParameterName,
+        ProfileMap0ParameterName,
+        UseProfileMap0ParameterName,
         WetMaterialInstances,
         *RuntimeData,
         *RuntimeDataBuilder,
@@ -283,6 +285,8 @@ void UDynamicWetReceiverComponent::PostEditChangeProperty(FPropertyChangedEvent&
         PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetReceiverComponent, bWetPartDebugUseWetnessMask) ||
         PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetReceiverComponent, WetPartDebugStrengthParameterName) ||
         PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetReceiverComponent, WetPartDebugUseWetnessMaskParameterName) ||
+        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetReceiverComponent, ProfileMap0ParameterName) ||
+        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetReceiverComponent, UseProfileMap0ParameterName) ||
         PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetReceiverComponent, UnassignedWetPartDebugColor) ||
         PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetReceiverComponent, WetClothingProfile))
     {

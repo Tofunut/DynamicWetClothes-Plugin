@@ -10,14 +10,17 @@ public class DynamicWetClothesEditor : ModuleRules
 			new string[]
 			{
 				"AdvancedPreviewScene",
+				"AppFramework",
 				"AssetDefinition",
 				"AssetRegistry",
+				"AssetTools",
 				"Core",
 				"CoreUObject",
 				"DesktopPlatform",
 				"DynamicWetClothes",
 				"Engine",
 				"InputCore",
+				"MaterialEditor",
 				"ProceduralMeshComponent",
 				"PropertyEditor",
 				"Projects",

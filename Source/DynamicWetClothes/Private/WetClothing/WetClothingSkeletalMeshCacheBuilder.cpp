@@ -202,20 +202,20 @@ bool FWetClothingSkeletalMeshCacheBuilder::Build(
 
     if (SkeletalMesh == nullptr)
     {
-        SetError(OutErrorMessage, TEXT("No TargetMesh is assigned."));
+        WetClothingSkeletalMeshCacheBuilderInternal::SetError(OutErrorMessage, TEXT("No TargetMesh is assigned."));
         return false;
     }
 
     const FSkeletalMeshRenderData* RenderData = SkeletalMesh->GetResourceForRendering();
     if (RenderData == nullptr)
     {
-        SetError(OutErrorMessage, TEXT("TargetMesh render data is unavailable."));
+        WetClothingSkeletalMeshCacheBuilderInternal::SetError(OutErrorMessage, TEXT("TargetMesh render data is unavailable."));
         return false;
     }
 
     if (!RenderData->LODRenderData.IsValidIndex(LODIndex))
     {
-        SetError(OutErrorMessage, TEXT("Requested TargetMesh LOD render data is unavailable."));
+        WetClothingSkeletalMeshCacheBuilderInternal::SetError(OutErrorMessage, TEXT("Requested TargetMesh LOD render data is unavailable."));
         return false;
     }
 
@@ -226,6 +226,6 @@ bool FWetClothingSkeletalMeshCacheBuilder::Build(
     }
 
     ResolveIncludeRules(SkeletalMesh, IncludeRules, OutCache.ResolvedIncludeRules);
-    SetError(OutErrorMessage, TEXT(""));
+    WetClothingSkeletalMeshCacheBuilderInternal::SetError(OutErrorMessage, TEXT(""));
     return true;
 }

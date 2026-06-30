@@ -5,7 +5,7 @@
 
 struct FWetnessProfileParameters;
 class USkeletalMeshComponent;
-class UWetClothingProfile;
+class UWetClothingAsset;
 struct FDynamicWetReceiverContext;
 class FSkeletalMeshLODRenderData;
 

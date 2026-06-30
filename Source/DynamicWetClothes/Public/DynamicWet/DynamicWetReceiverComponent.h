@@ -14,13 +14,13 @@
 #include "DynamicWetReceiverSimulationSolver.h"
 #include "DynamicWetReceiverSimulationState.h"
 #include "Templates/UniquePtr.h"
+#include "WetClothingAsset.h"
 #include "WetnessProfile.h"
 
 #include "DynamicWetReceiverComponent.generated.h"
 
 class USkeletalMeshComponent;
 class UMaterialInstanceDynamic;
-class UWetClothingProfile;
 class UWetnessProfile;
 
 
@@ -78,7 +78,7 @@ public:
 	TArray<UWetnessProfile*> MaterialProfiles;
 
 	UPROPERTY(EditAnywhere, Category = "Wetness")
-	TObjectPtr<UWetClothingProfile> WetClothingProfile = nullptr;
+	TObjectPtr<UWetClothingAsset> WetClothingProfile = nullptr;
 
 	UPROPERTY(EditAnywhere, Category = "Wetness", meta = (ShowOnlyInnerProperties))
 	FDynamicWetReceiverSettings WetnessSettings;

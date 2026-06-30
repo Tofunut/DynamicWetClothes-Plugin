@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "DynamicWet/DynamicWetReceiverSettings.h"
+#include "WetClothingAsset.h"
 #include "WetnessProfile.h"
 
 class FDynamicWetReceiverMeshSampler;
@@ -12,14 +13,13 @@ class FDynamicWetReceiverSimulationSolver;
 class FDynamicWetReceiverSimulationState;
 class UMaterialInstanceDynamic;
 class USkeletalMeshComponent;
-class UWetClothingProfile;
 
 struct DYNAMICWETCLOTHES_API FDynamicWetReceiverContext
 {
     UObject* OwnerForLogs = nullptr;
     TObjectPtr<USkeletalMeshComponent>& TargetSkeletalMesh;
     TArray<UWetnessProfile*>& MaterialProfiles;
-    TObjectPtr<UWetClothingProfile>& WetClothingProfile;
+    TObjectPtr<UWetClothingAsset>& WetClothingProfile;
     FDynamicWetReceiverSettings& WetnessSettings;
     FLinearColor& FallbackUnderColor;
     float& WetUnderColorBlendStrength;
@@ -40,7 +40,7 @@ struct DYNAMICWETCLOTHES_API FDynamicWetReceiverContext
         UObject* InOwnerForLogs,
         TObjectPtr<USkeletalMeshComponent>& InTargetSkeletalMesh,
         TArray<UWetnessProfile*>& InMaterialProfiles,
-        TObjectPtr<UWetClothingProfile>& InWetClothingProfile,
+        TObjectPtr<UWetClothingAsset>& InWetClothingProfile,
         FDynamicWetReceiverSettings& InWetnessSettings,
         FLinearColor& InFallbackUnderColor,
         float& InWetUnderColorBlendStrength,

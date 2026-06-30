@@ -1239,7 +1239,6 @@ void SWetClothingAssetEditorPanel::Construct(const FArguments& InArgs)
 
 void SWetClothingAssetEditorPanel::RefreshFromAsset()
 {
-    RebuildRuntimeDataIfStale();
     RefreshAvailableWetnessProfiles();
     RefreshMaterialSlotItems();
     RefreshUVChannels();
@@ -1261,61 +1260,6 @@ void SWetClothingAssetEditorPanel::RefreshFromAsset()
 
     RefreshPreviewIslandHighlight();
     RefreshPreviewWetPartOverlay();
-}
-
-void SWetClothingAssetEditorPanel::RebuildRuntimeDataAndMarkDirty()
-{
-    UWetClothingAsset* Profile = WetClothingAsset.Get();
-    if (Profile == nullptr)
-    {
-        return;
-    }
-
-    FString ErrorMessage;
-    if (Profile->TargetMesh != nullptr)
-    {
-        if (!Profile->RebuildRuntimeData(&ErrorMessage))
-        {
-            UE_LOG(
-                LogTemp,
-                Warning,
-                TEXT("WetClothingAssetEditor: Failed to rebuild runtime data for %s: %s"),
-                *GetNameSafe(Profile),
-                *ErrorMessage);
-        }
-    }
-    else
-    {
-        Profile->ClearRuntimeData();
-    }
-
-    Profile->MarkPackageDirty();
-}
-
-void SWetClothingAssetEditorPanel::RebuildRuntimeDataIfStale()
-{
-    UWetClothingAsset* Profile = WetClothingAsset.Get();
-    if (Profile == nullptr)
-    {
-        return;
-    }
-
-    if (Profile->TargetMesh == nullptr)
-    {
-        if (Profile->GetBakedRuntimeData().bIsValid)
-        {
-            Profile->Modify();
-            Profile->ClearRuntimeData();
-            Profile->MarkPackageDirty();
-        }
-        return;
-    }
-
-    if (!Profile->IsRuntimeDataValidForMesh(Profile->TargetMesh, 0))
-    {
-        Profile->Modify();
-        RebuildRuntimeDataAndMarkDirty();
-    }
 }
 
 void SWetClothingAssetEditorPanel::RefreshMaterialSlotItems()
@@ -1765,7 +1709,7 @@ void SWetClothingAssetEditorPanel::EnsureDefaultWetPartForSelectedScope()
             Entry.Name = GetDefaultWetPartName(0);
             Entry.Color = GetDefaultWetPartColor(0);
             Entry.bViewEnabled = true;
-            RebuildRuntimeDataAndMarkDirty();
+            Profile->MarkPackageDirty();
             if (DetailsView.IsValid())
             {
                 DetailsView->ForceRefresh();
@@ -1783,7 +1727,7 @@ void SWetClothingAssetEditorPanel::EnsureDefaultWetPartForSelectedScope()
     NewEntry.Color = GetDefaultWetPartColor(NewEntry.WetPartID);
     NewEntry.bViewEnabled = true;
     Profile->WetPartEntries.Add(NewEntry);
-    RebuildRuntimeDataAndMarkDirty();
+    Profile->MarkPackageDirty();
     if (DetailsView.IsValid())
     {
         DetailsView->ForceRefresh();
@@ -2640,7 +2584,6 @@ void SWetClothingAssetEditorPanel::HandleWetnessProfilePicked(FWetPartEntryPtr I
         {
             Entry->ProfileAssignment.SourceProfile = FSoftObjectPath(SourceProfile);
             Entry->ProfileAssignment.SourceProfileName = SourceProfile->GetName();
-            Entry->ProfileAssignment.Parameters = SourceProfile->Parameters;
         }
     }
     else
@@ -2738,7 +2681,7 @@ FReply SWetClothingAssetEditorPanel::HandleAddWetPartClicked()
     NewEntry.bViewEnabled = true;
 
     Profile->WetPartEntries.Add(NewEntry);
-    RebuildRuntimeDataAndMarkDirty();
+    Profile->MarkPackageDirty();
     SelectedWetPartID = INDEX_NONE;
     SelectedAssignWetPartID = NewWetPartID;
 
@@ -2777,7 +2720,7 @@ FReply SWetClothingAssetEditorPanel::HandleRemoveWetPartClicked()
     {
         SelectedAssignWetPartID = INDEX_NONE;
     }
-    RebuildRuntimeDataAndMarkDirty();
+    Profile->MarkPackageDirty();
     if (DetailsView.IsValid())
     {
         DetailsView->ForceRefresh();
@@ -2943,7 +2886,7 @@ FReply SWetClothingAssetEditorPanel::HandleAutoPartitionClicked()
         Profile->WetPartEntries.Add(NewEntry);
     }
 
-    RebuildRuntimeDataAndMarkDirty();
+    Profile->MarkPackageDirty();
 
     if (DetailsView.IsValid())
     {
@@ -2992,7 +2935,7 @@ FReply SWetClothingAssetEditorPanel::HandleAssignSelectedIslandToWetPartClicked(
             }
         }
     }
-    RebuildRuntimeDataAndMarkDirty();
+    Profile->MarkPackageDirty();
     if (DetailsView.IsValid())
     {
         DetailsView->ForceRefresh();

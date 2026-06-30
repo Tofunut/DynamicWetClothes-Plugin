@@ -11,10 +11,32 @@
 #include "Runtime/Engine/Classes/Engine/SkeletalMesh.h"
 #include "Runtime/Engine/Public/Rendering/SkeletalMeshLODRenderData.h"
 #include "Runtime/Engine/Public/Rendering/SkeletalMeshRenderData.h"
-#include "WetClothingProfile.h"
+#include "WetClothingAsset.h"
 #include "WetnessProfile.h"
 #include "Runtime/Engine/Public/RawIndexBuffer.h"
 
+namespace
+{
+    bool ResolveWetPartSourceProfileParameters(
+        const FWetClothingAssetWetPartEntry& WetPartEntry,
+        FWetnessProfileParameters& OutParameters)
+    {
+        if (!WetPartEntry.ProfileAssignment.SourceProfile.IsValid())
+        {
+            return false;
+        }
+
+        const UWetnessProfile* SourceProfile =
+            Cast<UWetnessProfile>(WetPartEntry.ProfileAssignment.SourceProfile.TryLoad());
+        if (SourceProfile == nullptr)
+        {
+            return false;
+        }
+
+        OutParameters = SourceProfile->GetParameters();
+        return true;
+    }
+}
 
 void FDynamicWetReceiverRuntimeData::ResetWetPartData()
 {
@@ -81,11 +103,6 @@ void FDynamicWetReceiverRuntimeDataBuilder::InitializeWetPartVertexData(FDynamic
         return;
     }
 
-    if (InitializeWetPartVertexDataFromBakedProfile(Receiver, VertexCount, DefaultParameters))
-    {
-        return;
-    }
-
     USkeletalMesh* SkeletalMesh = Receiver.TargetSkeletalMesh ? Receiver.TargetSkeletalMesh->GetSkeletalMeshAsset() : nullptr;
     if (Receiver.WetClothingProfile->TargetMesh && Receiver.WetClothingProfile->TargetMesh != SkeletalMesh)
     {
@@ -96,13 +113,26 @@ void FDynamicWetReceiverRuntimeDataBuilder::InitializeWetPartVertexData(FDynamic
             *GetNameSafe(Receiver.OwnerForLogs));
     }
 
+    TMap<int32, FWetnessProfileParameters> ResolvedWetPartParametersByEntryIndex;
+    for (int32 EntryIndex = 0; EntryIndex < Receiver.WetClothingProfile->WetPartEntries.Num(); ++EntryIndex)
+    {
+        const FWetClothingAssetWetPartEntry& WetPartEntry = Receiver.WetClothingProfile->WetPartEntries[EntryIndex];
+
+        FWetnessProfileParameters ResolvedParameters;
+        if (ResolveWetPartSourceProfileParameters(WetPartEntry, ResolvedParameters))
+        {
+            ResolvedWetPartParametersByEntryIndex.Add(EntryIndex, ResolvedParameters);
+        }
+    }
+
     TMap<FIntPoint, TArray<int32>> WetPartEntryIndicesByScope;
     for (int32 EntryIndex = 0; EntryIndex < Receiver.WetClothingProfile->WetPartEntries.Num(); ++EntryIndex)
     {
-        const FWetClothingProfileWetPartEntry& WetPartEntry = Receiver.WetClothingProfile->WetPartEntries[EntryIndex];
+        const FWetClothingAssetWetPartEntry& WetPartEntry = Receiver.WetClothingProfile->WetPartEntries[EntryIndex];
         if (WetPartEntry.MaterialSlotIndex == INDEX_NONE ||
             WetPartEntry.UVChannelIndex < 0 ||
-            WetPartEntry.AssignedIslandIDs.Num() == 0)
+            WetPartEntry.AssignedIslandIDs.Num() == 0 ||
+            !ResolvedWetPartParametersByEntryIndex.Contains(EntryIndex))
         {
             continue;
         }
@@ -145,7 +175,7 @@ void FDynamicWetReceiverRuntimeDataBuilder::InitializeWetPartVertexData(FDynamic
                 continue;
             }
 
-            const FWetClothingProfileWetPartEntry& WetPartEntry = Receiver.WetClothingProfile->WetPartEntries[WetPartEntryIndex];
+            const FWetClothingAssetWetPartEntry& WetPartEntry = Receiver.WetClothingProfile->WetPartEntries[WetPartEntryIndex];
             for (const int32 IslandID : WetPartEntry.AssignedIslandIDs)
             {
                 IslandToWetPartEntryIndex.Add(IslandID, WetPartEntryIndex);
@@ -169,9 +199,10 @@ void FDynamicWetReceiverRuntimeDataBuilder::InitializeWetPartVertexData(FDynamic
                 continue;
             }
 
-            const FWetClothingProfileWetPartEntry& WetPartEntry = Receiver.WetClothingProfile->WetPartEntries[*WetPartEntryIndex];
+            const FWetClothingAssetWetPartEntry& WetPartEntry = Receiver.WetClothingProfile->WetPartEntries[*WetPartEntryIndex];
             Receiver.RuntimeData.VertexWetPartIDs[VertexIndex] = WetPartEntry.WetPartID;
-            Receiver.RuntimeData.VertexWetnessProfileParameters[VertexIndex] = WetPartEntry.ProfileAssignment.Parameters;
+            Receiver.RuntimeData.VertexWetnessProfileParameters[VertexIndex] =
+                ResolvedWetPartParametersByEntryIndex[*WetPartEntryIndex];
             Receiver.RuntimeData.VertexWetPartDebugColors[VertexIndex] = WetPartEntry.Color;
         }
     }
@@ -201,7 +232,7 @@ bool FDynamicWetReceiverRuntimeDataBuilder::InitializeWetPartVertexDataFromBaked
         return false;
     }
 
-    const FWetClothingProfileBakedRuntimeData& BakedData = Receiver.WetClothingProfile->GetBakedRuntimeData();
+    const FWetClothingAssetBakedRuntimeData& BakedData = Receiver.WetClothingProfile->GetBakedRuntimeData();
     if (BakedData.VertexCount != VertexCount || BakedData.Vertices.Num() != VertexCount)
     {
         UE_LOG(
@@ -212,9 +243,21 @@ bool FDynamicWetReceiverRuntimeDataBuilder::InitializeWetPartVertexDataFromBaked
         return false;
     }
 
+    TMap<int32, FWetnessProfileParameters> ResolvedWetPartParametersByEntryIndex;
+    for (int32 EntryIndex = 0; EntryIndex < Receiver.WetClothingProfile->WetPartEntries.Num(); ++EntryIndex)
+    {
+        const FWetClothingAssetWetPartEntry& WetPartEntry = Receiver.WetClothingProfile->WetPartEntries[EntryIndex];
+
+        FWetnessProfileParameters ResolvedParameters;
+        if (ResolveWetPartSourceProfileParameters(WetPartEntry, ResolvedParameters))
+        {
+            ResolvedWetPartParametersByEntryIndex.Add(EntryIndex, ResolvedParameters);
+        }
+    }
+
     for (int32 VertexIndex = 0; VertexIndex < BakedData.Vertices.Num(); ++VertexIndex)
     {
-        const FWetClothingProfileBakedVertexData& BakedVertex = BakedData.Vertices[VertexIndex];
+        const FWetClothingAssetBakedVertexData& BakedVertex = BakedData.Vertices[VertexIndex];
         if (!Receiver.RuntimeData.VertexWetPartIDs.IsValidIndex(VertexIndex) ||
             !Receiver.RuntimeData.VertexWetnessProfileParameters.IsValidIndex(VertexIndex) ||
             !Receiver.RuntimeData.VertexWetPartDebugColors.IsValidIndex(VertexIndex))
@@ -222,15 +265,14 @@ bool FDynamicWetReceiverRuntimeDataBuilder::InitializeWetPartVertexDataFromBaked
             continue;
         }
 
-        Receiver.RuntimeData.VertexWetPartIDs[VertexIndex] = BakedVertex.WetPartID;
-        Receiver.RuntimeData.VertexWetnessProfileParameters[VertexIndex] = DefaultParameters;
-        Receiver.RuntimeData.VertexWetPartDebugColors[VertexIndex] = Receiver.UnassignedWetPartDebugColor;
-
-        if (Receiver.WetClothingProfile->WetPartEntries.IsValidIndex(BakedVertex.WetPartEntryIndex))
+        if (Receiver.WetClothingProfile->WetPartEntries.IsValidIndex(BakedVertex.WetPartEntryIndex) &&
+            ResolvedWetPartParametersByEntryIndex.Contains(BakedVertex.WetPartEntryIndex))
         {
-            const FWetClothingProfileWetPartEntry& WetPartEntry =
+            const FWetClothingAssetWetPartEntry& WetPartEntry =
                 Receiver.WetClothingProfile->WetPartEntries[BakedVertex.WetPartEntryIndex];
-            Receiver.RuntimeData.VertexWetnessProfileParameters[VertexIndex] = WetPartEntry.ProfileAssignment.Parameters;
+            Receiver.RuntimeData.VertexWetPartIDs[VertexIndex] = BakedVertex.WetPartID;
+            Receiver.RuntimeData.VertexWetnessProfileParameters[VertexIndex] =
+                ResolvedWetPartParametersByEntryIndex[BakedVertex.WetPartEntryIndex];
             Receiver.RuntimeData.VertexWetPartDebugColors[VertexIndex] = WetPartEntry.Color;
         }
     }
@@ -252,11 +294,6 @@ void FDynamicWetReceiverRuntimeDataBuilder::BuildNeighborGraph(FDynamicWetReceiv
     {
         Receiver.RuntimeData.NeighborGraph.Empty();
         Receiver.RuntimeData.NeighborGraph.SetNum(VertexCount);
-    }
-
-    if (BuildNeighborGraphFromBakedProfile(Receiver, VertexCount))
-    {
-        return;
     }
 
     for (FDynamicWetReceiverVertexNeighbors& VertexNeighbors : Receiver.RuntimeData.NeighborGraph)
@@ -305,7 +342,7 @@ bool FDynamicWetReceiverRuntimeDataBuilder::BuildNeighborGraphFromBakedProfile(
         return false;
     }
 
-    const FWetClothingProfileBakedRuntimeData& BakedData = Receiver.WetClothingProfile->GetBakedRuntimeData();
+    const FWetClothingAssetBakedRuntimeData& BakedData = Receiver.WetClothingProfile->GetBakedRuntimeData();
     if (BakedData.NeighborGraph.Num() != VertexCount || Receiver.RuntimeData.NeighborGraph.Num() != VertexCount)
     {
         return false;

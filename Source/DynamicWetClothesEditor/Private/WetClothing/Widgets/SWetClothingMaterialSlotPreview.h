@@ -6,13 +6,17 @@
 
 #include "CoreMinimal.h"
 #include "WetClothing/Analysis/WetClothingAssetMeshAnalyzer.h"
+#include "WetClothing/Texture/WetClothingTextureReadback.h"
 #include "Widgets/SLeafWidget.h"
+
+class UTexture;
 
 class SWetClothingMaterialSlotPreview : public SLeafWidget
 {
   public:
     SLATE_BEGIN_ARGS(SWetClothingMaterialSlotPreview) {}
     SLATE_ARGUMENT(TArray<FWetClothingAssetUVTriangle>, Triangles)
+    SLATE_ARGUMENT(UTexture*, PreviewTexture)
     SLATE_END_ARGS()
 
     void Construct(const FArguments& InArgs);
@@ -30,4 +34,6 @@ class SWetClothingMaterialSlotPreview : public SLeafWidget
 
   private:
     TArray<FWetClothingAssetUVTriangle> Triangles;
+    TWeakObjectPtr<UTexture>            PreviewTexture;
+    FWetClothingTextureReadback         PreviewTextureData;
 };

@@ -4,7 +4,11 @@
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Core/DynamicWetClothesEditorUtils.h"
 #include "Core/DynamicWetClothesEditorStyle.h"
+#include "WetClothing/AutoPartition/WetClothingAutoPartitioner.h"
+#include "WetClothing/Texture/WetClothingMaterialTextureResolver.h"
+#include "WetClothing/Texture/WetClothingTextureReadback.h"
 #include "WetClothing/Widgets/SWetClothingAssetUVView.h"
+#include "WetClothing/Widgets/SWetClothingMaterialSlotPreview.h"
 #include "WetClothingAsset.h"
 #include "WetClothing/Analysis/WetClothingAssetMeshAnalyzer.h"
 #include "WetClothing/Viewport/WetClothingAssetViewport.h"
@@ -12,14 +16,10 @@
 #include "Engine/SkeletalMesh.h"
 #include "Engine/Texture.h"
 #include "Engine/Texture2D.h"
-#include "Framework/Application/SlateApplication.h"
 #include "IDetailsView.h"
 #include "Materials/MaterialInterface.h"
 #include "Misc/MessageDialog.h"
 #include "Modules/ModuleManager.h"
-#include "Rendering/DrawElements.h"
-#include "Rendering/RenderingCommon.h"
-#include "Rendering/SlateRenderer.h"
 #include "Styling/AppStyle.h"
 #include "Styling/CoreStyle.h"
 #include "Styling/StyleColors.h"
@@ -35,266 +35,16 @@
 #include "Widgets/Layout/SScaleBox.h"
 #include "Widgets/Layout/SSeparator.h"
 #include "Widgets/Layout/SSplitter.h"
-#include "Widgets/SLeafWidget.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/Text/SInlineEditableTextBlock.h"
 #include "Widgets/Text/STextBlock.h"
 #include "Widgets/Views/SListView.h"
 #include "Widgets/Views/STableRow.h"
-#include <initializer_list>
 
 #define LOCTEXT_NAMESPACE "WetClothingAssetEditorPanel"
 
-namespace
+namespace SWetClothingAssetEditorPanelLocal
 {
-    struct FWetClothingTextureReadback
-    {
-        int32                Width = 0;
-        int32                Height = 0;
-        int32                BytesPerPixel = 0;
-        bool                 bSRGB = true;
-        ETextureSourceFormat Format = TSF_Invalid;
-        TArray64<uint8>      RawData;
-
-        bool IsValid() const
-        {
-            return Width > 0 && Height > 0 && BytesPerPixel > 0 && RawData.Num() >= static_cast<int64>(Width) * Height * BytesPerPixel;
-        }
-
-        FLinearColor GetLinearColor(int32 X, int32 Y) const
-        {
-            if (!IsValid())
-            {
-                return FLinearColor::Black;
-            }
-
-            const int32  ClampedX = FMath::Clamp(X, 0, Width - 1);
-            const int32  ClampedY = FMath::Clamp(Y, 0, Height - 1);
-            const int64  PixelOffset = (static_cast<int64>(ClampedY) * Width + ClampedX) * BytesPerPixel;
-            const uint8* PixelPtr = RawData.GetData() + PixelOffset;
-            FColor       SRGBColor = FColor::Black;
-
-            switch (Format)
-            {
-            case TSF_BGRA8:
-                SRGBColor = *reinterpret_cast<const FColor*>(PixelPtr);
-                break;
-
-            case TSF_G8:
-            {
-                const uint8 Intensity = *PixelPtr;
-                SRGBColor = FColor(Intensity, Intensity, Intensity, 255);
-                break;
-            }
-
-            default:
-                return FLinearColor::Black;
-            }
-
-            return bSRGB ? FLinearColor::FromSRGBColor(SRGBColor) : FLinearColor(SRGBColor);
-        }
-    };
-
-    struct FWetClothingIslandColorStats
-    {
-        int32        IslandID = INDEX_NONE;
-        double       UVArea = 0.0;
-        double       SampleWeight = 0.0;
-        FLinearColor AverageColor = FLinearColor::Black;
-    };
-
-    struct FWetClothingAutoPartitionCluster
-    {
-        TArray<int32> IslandIDs;
-        FLinearColor  WeightedColorSum = FLinearColor::Black;
-        double        SampleWeight = 0.0;
-    };
-
-    struct FWetClothingTextureCandidate
-    {
-        UTexture* Texture = nullptr;
-        FString   Label;
-        int32     Score = MIN_int32;
-    };
-
-    bool   TryReadTextureSourceData(UTexture2D* Texture, FWetClothingTextureReadback& OutTextureData, FString& OutErrorMessage);
-    double ScoreTexturePreviewSuitability(UTexture* Texture);
-
-    FString NormalizeTextureSearchText(const FString& InText)
-    {
-        FString Result = InText.ToLower();
-        Result.ReplaceInline(TEXT(" "), TEXT(""));
-        Result.ReplaceInline(TEXT("_"), TEXT(""));
-        Result.ReplaceInline(TEXT("-"), TEXT(""));
-        return Result;
-    }
-
-    bool ContainsAnyTextureKeyword(const FString& SearchText, std::initializer_list<const TCHAR*> Keywords)
-    {
-        for (const TCHAR* Keyword : Keywords)
-        {
-            if (SearchText.Contains(Keyword))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    int32 ScoreMaterialTextureCandidate(UTexture* Texture, const FString& ParameterName)
-    {
-        if (Texture == nullptr)
-        {
-            return MIN_int32;
-        }
-
-        const FString TextureName = NormalizeTextureSearchText(Texture->GetName());
-        const FString NormalizedParameterName = NormalizeTextureSearchText(ParameterName);
-        const FString CombinedText = TextureName + NormalizedParameterName;
-
-        int32 Score = 0;
-
-        if (ContainsAnyTextureKeyword(CombinedText, { TEXT("basecolor"), TEXT("diffuse"), TEXT("albedo"), TEXT("basecolour"), TEXT("colour"), TEXT("color") }))
-        {
-            Score += 500;
-        }
-
-        if (ContainsAnyTextureKeyword(CombinedText, { TEXT("normal"), TEXT("roughness"), TEXT("metallic"), TEXT("specular"), TEXT("orm"), TEXT("rma"), TEXT("ao"), TEXT("ambientocclusion"), TEXT("opacity"), TEXT("mask"), TEXT("height"), TEXT("displace"), TEXT("emissive") }))
-        {
-            Score -= 400;
-        }
-
-        if (NormalizedParameterName.Contains(TEXT("basecolor")) || NormalizedParameterName.Contains(TEXT("diffuse")) || NormalizedParameterName.Contains(TEXT("albedo")))
-        {
-            Score += 700;
-        }
-
-        if (NormalizedParameterName.Contains(TEXT("color")) || NormalizedParameterName.Contains(TEXT("colour")))
-        {
-            Score += 150;
-        }
-
-        if (Texture->SRGB)
-        {
-            Score += 50;
-        }
-
-        return Score;
-    }
-
-    void AddOrUpdateTextureCandidate(
-        TMap<UTexture*, FWetClothingTextureCandidate>& InOutCandidates,
-        UTexture*                                      Texture,
-        const FString&                                 ParameterName)
-    {
-        if (Texture == nullptr)
-        {
-            return;
-        }
-
-        const int32                   CandidateScore = ScoreMaterialTextureCandidate(Texture, ParameterName);
-        FWetClothingTextureCandidate& Candidate = InOutCandidates.FindOrAdd(Texture);
-        if (Candidate.Texture == nullptr || CandidateScore > Candidate.Score)
-        {
-            Candidate.Texture = Texture;
-            Candidate.Score = CandidateScore;
-            Candidate.Label = Texture->GetName();
-        }
-    }
-
-    void BuildTextureItems(UMaterialInterface* Material, TArray<TSharedPtr<FWetClothingTextureItem>>& OutItems)
-    {
-        OutItems.Reset();
-
-        TSharedPtr<FWetClothingTextureItem> NoneItem = MakeShared<FWetClothingTextureItem>();
-        NoneItem->Label = TEXT("None");
-        OutItems.Add(NoneItem);
-
-        if (Material == nullptr)
-        {
-            return;
-        }
-
-        TMap<UTexture*, FWetClothingTextureCandidate> TextureCandidates;
-
-        TArray<FMaterialParameterInfo> ParameterInfos;
-        TArray<FGuid>                  ParameterIds;
-        Material->GetAllTextureParameterInfo(ParameterInfos, ParameterIds);
-
-        for (const FMaterialParameterInfo& ParameterInfo : ParameterInfos)
-        {
-            UTexture* ParameterTexture = nullptr;
-            if (Material->GetTextureParameterValue(FHashedMaterialParameterInfo(ParameterInfo), ParameterTexture))
-            {
-                AddOrUpdateTextureCandidate(TextureCandidates, ParameterTexture, ParameterInfo.Name.ToString());
-            }
-        }
-
-        TArray<UTexture*> UsedTextures;
-        Material->GetUsedTextures(UsedTextures);
-        for (UTexture* Texture : UsedTextures)
-        {
-            AddOrUpdateTextureCandidate(TextureCandidates, Texture, FString());
-        }
-
-        TArray<FWetClothingTextureCandidate> SortedCandidates;
-        SortedCandidates.Reserve(TextureCandidates.Num());
-        for (const TPair<UTexture*, FWetClothingTextureCandidate>& Pair : TextureCandidates)
-        {
-            SortedCandidates.Add(Pair.Value);
-        }
-
-        SortedCandidates.Sort([](const FWetClothingTextureCandidate& A, const FWetClothingTextureCandidate& B)
-                              {
-			if (A.Score != B.Score)
-			{
-				return A.Score > B.Score;
-			}
-
-			return A.Label < B.Label; });
-
-        for (const FWetClothingTextureCandidate& Candidate : SortedCandidates)
-        {
-            if (Candidate.Texture == nullptr)
-            {
-                continue;
-            }
-
-            TSharedPtr<FWetClothingTextureItem> Item = MakeShared<FWetClothingTextureItem>();
-            Item->Texture = Candidate.Texture;
-            Item->Label = Candidate.Label;
-            OutItems.Add(Item);
-        }
-    }
-
-    UTexture* ResolveBestMaterialTexture(UMaterialInterface* Material)
-    {
-        TArray<TSharedPtr<FWetClothingTextureItem>> TextureItemCandidates;
-        BuildTextureItems(Material, TextureItemCandidates);
-
-        UTexture* BestTexture = nullptr;
-        double    BestScore = -TNumericLimits<double>::Max();
-        int32     CandidateIndex = 0;
-
-        for (const TSharedPtr<FWetClothingTextureItem>& TextureItem : TextureItemCandidates)
-        {
-            if (TextureItem.IsValid() && TextureItem->Texture.IsValid())
-            {
-                const double CandidateScore = ScoreTexturePreviewSuitability(TextureItem->Texture.Get()) - CandidateIndex * 0.01;
-                if (CandidateScore > BestScore)
-                {
-                    BestScore = CandidateScore;
-                    BestTexture = TextureItem->Texture.Get();
-                }
-            }
-
-            ++CandidateIndex;
-        }
-
-        return BestTexture;
-    }
-
     TArray<FWetClothingAssetUVTriangle> BuildMaterialSlotPreviewTriangles(const USkeletalMesh* SkeletalMesh, int32 MaterialSlotIndex)
     {
         TArray<FWetClothingAssetUVTriangle> PreviewTriangles;
@@ -317,433 +67,7 @@ namespace
 
         return PreviewTriangles;
     }
-
-    class SWetClothingMaterialSlotPreview : public SLeafWidget
-    {
-      public:
-        SLATE_BEGIN_ARGS(SWetClothingMaterialSlotPreview) {}
-        SLATE_ARGUMENT(TArray<FWetClothingAssetUVTriangle>, Triangles)
-        SLATE_ARGUMENT(UTexture*, PreviewTexture)
-        SLATE_END_ARGS()
-
-        void Construct(const FArguments& InArgs)
-        {
-            Triangles = InArgs._Triangles;
-            PreviewTexture = InArgs._PreviewTexture;
-            if (UTexture2D* PreviewTexture2D = Cast<UTexture2D>(PreviewTexture.Get()))
-            {
-                FString ErrorMessage;
-                TryReadTextureSourceData(PreviewTexture2D, PreviewTextureData, ErrorMessage);
-            }
-        }
-
-        virtual FVector2D ComputeDesiredSize(float LayoutScaleMultiplier) const override
-        {
-            return FVector2D(48.0f, 48.0f);
-        }
-
-        virtual int32 OnPaint(
-            const FPaintArgs&        Args,
-            const FGeometry&         AllottedGeometry,
-            const FSlateRect&        MyCullingRect,
-            FSlateWindowElementList& OutDrawElements,
-            int32                    LayerId,
-            const FWidgetStyle&      InWidgetStyle,
-            bool                     bParentEnabled) const override
-        {
-            const FSlateBrush*          WhiteBrush = FCoreStyle::Get().GetBrush(TEXT("WhiteBrush"));
-            const FVector2D             LocalSize = AllottedGeometry.GetLocalSize();
-            const FSlateRenderTransform RenderTransform = AllottedGeometry.GetAccumulatedRenderTransform();
-
-            FSlateDrawElement::MakeBox(
-                OutDrawElements,
-                LayerId,
-                AllottedGeometry.ToPaintGeometry(),
-                WhiteBrush,
-                ESlateDrawEffect::None,
-                FLinearColor(0.03f, 0.03f, 0.03f, 1.0f));
-
-            if (Triangles.Num() == 0 || LocalSize.X <= 1.0f || LocalSize.Y <= 1.0f)
-            {
-                return LayerId + 1;
-            }
-
-            const FQuat ViewRotation = FRotator(-18.0f, -32.0f, 0.0f).Quaternion();
-            struct FProjectedTriangle
-            {
-                FVector2D Positions[3];
-                FVector2D UVs[3];
-            };
-
-            TArray<FProjectedTriangle> ProjectedTriangles;
-            ProjectedTriangles.Reserve(Triangles.Num());
-
-            bool      bHasBounds = false;
-            FVector2D MinPoint = FVector2D::ZeroVector;
-            FVector2D MaxPoint = FVector2D::ZeroVector;
-
-            for (const FWetClothingAssetUVTriangle& Triangle : Triangles)
-            {
-                FProjectedTriangle ProjectedTriangle;
-
-                for (int32 CornerIndex = 0; CornerIndex < 3; ++CornerIndex)
-                {
-                    const FVector   RotatedPosition = ViewRotation.RotateVector(Triangle.LocalPositions[CornerIndex]);
-                    const FVector2D ProjectedPoint(RotatedPosition.Y, -RotatedPosition.Z);
-                    ProjectedTriangle.Positions[CornerIndex] = ProjectedPoint;
-                    ProjectedTriangle.UVs[CornerIndex] = Triangle.UVs[CornerIndex];
-
-                    if (!bHasBounds)
-                    {
-                        MinPoint = ProjectedPoint;
-                        MaxPoint = ProjectedPoint;
-                        bHasBounds = true;
-                    }
-                    else
-                    {
-                        MinPoint.X = FMath::Min(MinPoint.X, ProjectedPoint.X);
-                        MinPoint.Y = FMath::Min(MinPoint.Y, ProjectedPoint.Y);
-                        MaxPoint.X = FMath::Max(MaxPoint.X, ProjectedPoint.X);
-                        MaxPoint.Y = FMath::Max(MaxPoint.Y, ProjectedPoint.Y);
-                    }
-                }
-
-                ProjectedTriangles.Add(ProjectedTriangle);
-            }
-
-            if (!bHasBounds)
-            {
-                return LayerId + 1;
-            }
-
-            const FVector2D BoundsSize = MaxPoint - MinPoint;
-            const float     Padding = 5.0f;
-            const float     AvailableWidth = FMath::Max(1.0f, LocalSize.X - Padding * 2.0f);
-            const float     AvailableHeight = FMath::Max(1.0f, LocalSize.Y - Padding * 2.0f);
-            const float     ScaleX = AvailableWidth / FMath::Max(BoundsSize.X, 1.0f);
-            const float     ScaleY = AvailableHeight / FMath::Max(BoundsSize.Y, 1.0f);
-            const float     UniformScale = FMath::Max(0.01f, FMath::Min(ScaleX, ScaleY));
-            const FVector2D ScaledSize = BoundsSize * UniformScale;
-            const FVector2D Offset(
-                (LocalSize.X - ScaledSize.X) * 0.5f,
-                (LocalSize.Y - ScaledSize.Y) * 0.5f);
-
-            if (PreviewTextureData.IsValid())
-            {
-                const FSlateResourceHandle ResourceHandle = FSlateApplication::Get().GetRenderer()->GetResourceHandle(*WhiteBrush);
-                if (ResourceHandle.IsValid())
-                {
-                    TArray<FSlateVertex> FillVerts;
-                    TArray<SlateIndex>   FillIndices;
-                    FillVerts.Reserve(ProjectedTriangles.Num() * 3);
-                    FillIndices.Reserve(ProjectedTriangles.Num() * 3);
-
-                    for (const FProjectedTriangle& ProjectedTriangle : ProjectedTriangles)
-                    {
-                        const SlateIndex StartVertexIndex = static_cast<SlateIndex>(FillVerts.Num());
-
-                        for (int32 CornerIndex = 0; CornerIndex < 3; ++CornerIndex)
-                        {
-                            const FVector2D PaintedPosition = (ProjectedTriangle.Positions[CornerIndex] - MinPoint) * UniformScale + Offset;
-                            const FVector2D UV(
-                                ProjectedTriangle.UVs[CornerIndex].X - FMath::FloorToDouble(ProjectedTriangle.UVs[CornerIndex].X),
-                                ProjectedTriangle.UVs[CornerIndex].Y - FMath::FloorToDouble(ProjectedTriangle.UVs[CornerIndex].Y));
-                            const int32  SampleX = FMath::RoundToInt(UV.X * (PreviewTextureData.Width - 1));
-                            const int32  SampleY = FMath::RoundToInt((1.0f - UV.Y) * (PreviewTextureData.Height - 1));
-                            const FColor VertexColor = PreviewTextureData.GetLinearColor(SampleX, SampleY).ToFColor(true);
-                            FillVerts.Add(FSlateVertex::Make<ESlateVertexRounding::Disabled>(
-                                RenderTransform,
-                                FVector2f(PaintedPosition),
-                                FVector2f::ZeroVector,
-                                VertexColor));
-                        }
-
-                        FillIndices.Add(StartVertexIndex);
-                        FillIndices.Add(StartVertexIndex + 1);
-                        FillIndices.Add(StartVertexIndex + 2);
-                    }
-
-                    FSlateDrawElement::MakeCustomVerts(
-                        OutDrawElements,
-                        LayerId + 1,
-                        ResourceHandle,
-                        FillVerts,
-                        FillIndices,
-                        nullptr,
-                        0,
-                        0,
-                        ESlateDrawEffect::None);
-                }
-            }
-
-            const FLinearColor LineColor(0.86f, 0.86f, 0.86f, 1.0f);
-            for (const FProjectedTriangle& ProjectedTriangle : ProjectedTriangles)
-            {
-                TArray<FVector2D> PaintedLinePoints;
-                PaintedLinePoints.Reserve(4);
-
-                for (int32 CornerIndex = 0; CornerIndex < 3; ++CornerIndex)
-                {
-                    PaintedLinePoints.Add((ProjectedTriangle.Positions[CornerIndex] - MinPoint) * UniformScale + Offset);
-                }
-                const FVector2D FirstPoint = PaintedLinePoints[0];
-                PaintedLinePoints.Add(FirstPoint);
-
-                FSlateDrawElement::MakeLines(
-                    OutDrawElements,
-                    LayerId + 2,
-                    AllottedGeometry.ToPaintGeometry(),
-                    PaintedLinePoints,
-                    ESlateDrawEffect::None,
-                    LineColor,
-                    true,
-                    1.0f);
-            }
-
-            return LayerId + 2;
-        }
-
-      private:
-        TArray<FWetClothingAssetUVTriangle> Triangles;
-        TWeakObjectPtr<UTexture>              PreviewTexture;
-        FWetClothingTextureReadback           PreviewTextureData;
-    };
-
-    bool TryReadTextureSourceData(UTexture2D* Texture, FWetClothingTextureReadback& OutTextureData, FString& OutErrorMessage)
-    {
-#if WITH_EDITORONLY_DATA
-        OutTextureData = FWetClothingTextureReadback();
-
-        if (Texture == nullptr)
-        {
-            OutErrorMessage = TEXT("Turn on a texture image for the selected material slot before running Auto-Partitioning.");
-            return false;
-        }
-
-        if (!Texture->Source.IsValid())
-        {
-            OutErrorMessage = FString::Printf(TEXT("Texture '%s' does not have readable source data."), *Texture->GetName());
-            return false;
-        }
-
-        const ETextureSourceFormat SourceFormat = Texture->Source.GetFormat();
-        if (SourceFormat != TSF_BGRA8 && SourceFormat != TSF_G8)
-        {
-            OutErrorMessage = FString::Printf(TEXT("Texture '%s' uses an unsupported source format for Auto-Partitioning."), *Texture->GetName());
-            return false;
-        }
-
-        if (!Texture->Source.GetMipData(OutTextureData.RawData, 0))
-        {
-            OutErrorMessage = FString::Printf(TEXT("Failed to read source pixels from texture '%s'."), *Texture->GetName());
-            return false;
-        }
-
-        OutTextureData.Width = Texture->Source.GetSizeX();
-        OutTextureData.Height = Texture->Source.GetSizeY();
-        OutTextureData.BytesPerPixel = Texture->Source.GetBytesPerPixel();
-        OutTextureData.bSRGB = Texture->SRGB;
-        OutTextureData.Format = SourceFormat;
-
-        if (!OutTextureData.IsValid())
-        {
-            OutErrorMessage = FString::Printf(TEXT("Texture '%s' returned invalid source pixel data."), *Texture->GetName());
-            return false;
-        }
-
-        OutErrorMessage.Reset();
-        return true;
-#else
-        OutErrorMessage = TEXT("Auto-Partitioning requires editor-only texture source data.");
-        return false;
-#endif
-    }
-
-    double ScoreTexturePreviewSuitability(UTexture* Texture)
-    {
-        if (Texture == nullptr)
-        {
-            return -TNumericLimits<double>::Max();
-        }
-
-        double Score = Texture->SRGB ? 120.0 : -40.0;
-
-        if (const UTexture2D* Texture2D = Cast<UTexture2D>(Texture))
-        {
-            FWetClothingTextureReadback TextureData;
-            FString                     ErrorMessage;
-            if (TryReadTextureSourceData(const_cast<UTexture2D*>(Texture2D), TextureData, ErrorMessage))
-            {
-                constexpr int32 SampleGridSize = 6;
-                FLinearColor    MeanColor = FLinearColor::Black;
-                double          SaturationSum = 0.0;
-                double          ValueSum = 0.0;
-                int32           SampleCount = 0;
-
-                for (int32 SampleY = 0; SampleY < SampleGridSize; ++SampleY)
-                {
-                    for (int32 SampleX = 0; SampleX < SampleGridSize; ++SampleX)
-                    {
-                        const int32        PixelX = FMath::RoundToInt((static_cast<float>(SampleX) / (SampleGridSize - 1)) * (TextureData.Width - 1));
-                        const int32        PixelY = FMath::RoundToInt((static_cast<float>(SampleY) / (SampleGridSize - 1)) * (TextureData.Height - 1));
-                        const FLinearColor Color = TextureData.GetLinearColor(PixelX, PixelY);
-                        const FLinearColor HSV = Color.LinearRGBToHSV();
-                        MeanColor += Color;
-                        SaturationSum += HSV.G;
-                        ValueSum += HSV.B;
-                        ++SampleCount;
-                    }
-                }
-
-                if (SampleCount > 0)
-                {
-                    MeanColor /= static_cast<float>(SampleCount);
-                    const double AvgSaturation = SaturationSum / SampleCount;
-                    const double AvgValue = ValueSum / SampleCount;
-                    double       VarianceSum = 0.0;
-
-                    for (int32 SampleY = 0; SampleY < SampleGridSize; ++SampleY)
-                    {
-                        for (int32 SampleX = 0; SampleX < SampleGridSize; ++SampleX)
-                        {
-                            const int32        PixelX = FMath::RoundToInt((static_cast<float>(SampleX) / (SampleGridSize - 1)) * (TextureData.Width - 1));
-                            const int32        PixelY = FMath::RoundToInt((static_cast<float>(SampleY) / (SampleGridSize - 1)) * (TextureData.Height - 1));
-                            const FLinearColor Color = TextureData.GetLinearColor(PixelX, PixelY);
-                            const FVector3f    Delta(
-                                static_cast<float>(Color.R - MeanColor.R),
-                                static_cast<float>(Color.G - MeanColor.G),
-                                static_cast<float>(Color.B - MeanColor.B));
-                            VarianceSum += Delta.SizeSquared();
-                        }
-                    }
-
-                    const double AvgVariance = VarianceSum / SampleCount;
-                    Score += AvgSaturation * 320.0;
-                    Score += AvgVariance * 420.0;
-                    Score += FMath::Log2(static_cast<double>(TextureData.Width) * TextureData.Height) * 4.0;
-
-                    if (AvgSaturation < 0.05)
-                    {
-                        Score -= 180.0;
-                    }
-
-                    if (AvgVariance < 0.003)
-                    {
-                        Score -= 180.0;
-                    }
-
-                    if (AvgValue > 0.9 && AvgSaturation < 0.08)
-                    {
-                        Score -= 220.0;
-                    }
-                }
-            }
-        }
-
-        return Score;
-    }
-
-    bool IsPointInsideTriangle(const FVector2D& Point, const FVector2D& A, const FVector2D& B, const FVector2D& C)
-    {
-        const auto Sign = [](const FVector2D& P1, const FVector2D& P2, const FVector2D& P3)
-        {
-            return (P1.X - P3.X) * (P2.Y - P3.Y) - (P2.X - P3.X) * (P1.Y - P3.Y);
-        };
-
-        const double D1 = Sign(Point, A, B);
-        const double D2 = Sign(Point, B, C);
-        const double D3 = Sign(Point, C, A);
-        const bool   bHasNegative = D1 < 0.0 || D2 < 0.0 || D3 < 0.0;
-        const bool   bHasPositive = D1 > 0.0 || D2 > 0.0 || D3 > 0.0;
-        return !(bHasNegative && bHasPositive);
-    }
-
-    bool TryComputeIslandAverageColor(
-        const FWetClothingAssetUVIsland& Island,
-        const FWetClothingTextureReadback& TextureData,
-        FWetClothingIslandColorStats&      OutStats)
-    {
-        if (!TextureData.IsValid())
-        {
-            return false;
-        }
-
-        FLinearColor WeightedColorSum = FLinearColor::Black;
-        double       SampleWeight = 0.0;
-
-        for (const FWetClothingAssetUVTriangle& Triangle : Island.UVTriangles)
-        {
-            const FVector2D& A = Triangle.UVs[0];
-            const FVector2D& B = Triangle.UVs[1];
-            const FVector2D& C = Triangle.UVs[2];
-
-            const double MinU = FMath::Min3(A.X, B.X, C.X);
-            const double MaxU = FMath::Max3(A.X, B.X, C.X);
-            const double MinV = FMath::Min3(A.Y, B.Y, C.Y);
-            const double MaxV = FMath::Max3(A.Y, B.Y, C.Y);
-
-            const int32 MinX = FMath::Clamp(FMath::FloorToInt(MinU * TextureData.Width), 0, TextureData.Width - 1);
-            const int32 MaxX = FMath::Clamp(FMath::FloorToInt(MaxU * TextureData.Width), 0, TextureData.Width - 1);
-            const int32 MinY = FMath::Clamp(FMath::FloorToInt((1.0 - MaxV) * TextureData.Height), 0, TextureData.Height - 1);
-            const int32 MaxY = FMath::Clamp(FMath::FloorToInt((1.0 - MinV) * TextureData.Height), 0, TextureData.Height - 1);
-
-            double TriangleSampleWeight = 0.0;
-            for (int32 PixelY = MinY; PixelY <= MaxY; ++PixelY)
-            {
-                for (int32 PixelX = MinX; PixelX <= MaxX; ++PixelX)
-                {
-                    const FVector2D SampleUV(
-                        (static_cast<double>(PixelX) + 0.5) / TextureData.Width,
-                        1.0 - ((static_cast<double>(PixelY) + 0.5) / TextureData.Height));
-
-                    if (!IsPointInsideTriangle(SampleUV, A, B, C))
-                    {
-                        continue;
-                    }
-
-                    WeightedColorSum += TextureData.GetLinearColor(PixelX, PixelY);
-                    ++SampleWeight;
-                    ++TriangleSampleWeight;
-                }
-            }
-
-            if (TriangleSampleWeight <= 0.0)
-            {
-                const FVector2D TriangleCenter = (A + B + C) / 3.0f;
-                const int32     FallbackX = FMath::Clamp(FMath::FloorToInt(TriangleCenter.X * TextureData.Width), 0, TextureData.Width - 1);
-                const int32     FallbackY = FMath::Clamp(FMath::FloorToInt((1.0 - TriangleCenter.Y) * TextureData.Height), 0, TextureData.Height - 1);
-                WeightedColorSum += TextureData.GetLinearColor(FallbackX, FallbackY);
-                ++SampleWeight;
-            }
-        }
-
-        if (SampleWeight <= 0.0)
-        {
-            return false;
-        }
-
-        OutStats.IslandID = Island.IslandID;
-        OutStats.UVArea = Island.UVArea;
-        OutStats.SampleWeight = SampleWeight;
-        OutStats.AverageColor = WeightedColorSum / static_cast<float>(SampleWeight);
-        return true;
-    }
-
-    FLinearColor GetClusterAverageColor(const FWetClothingAutoPartitionCluster& Cluster)
-    {
-        return Cluster.SampleWeight > 0.0
-                   ? Cluster.WeightedColorSum / static_cast<float>(Cluster.SampleWeight)
-                   : FLinearColor::Black;
-    }
-
-    double ComputeColorDistancePercent(const FLinearColor& A, const FLinearColor& B)
-    {
-        const double DeltaR = A.R - B.R;
-        const double DeltaG = A.G - B.G;
-        const double DeltaB = A.B - B.B;
-        return FMath::Sqrt((DeltaR * DeltaR + DeltaG * DeltaG + DeltaB * DeltaB) / 3.0) * 100.0;
-    }
-} // namespace
+} // namespace SWetClothingAssetEditorPanelLocal
 
 void SWetClothingAssetEditorPanel::Construct(const FArguments& InArgs)
 {
@@ -1322,7 +646,7 @@ void SWetClothingAssetEditorPanel::RefreshMaterialTextures()
         const FMaterialSlotItemPtr& MaterialSlotItem = MaterialSlotItems[SelectedMaterialSlotIndex];
         if (MaterialSlotItem.IsValid() && MaterialSlotItem->Material.IsValid())
         {
-            BuildTextureItems(MaterialSlotItem->Material.Get(), TextureItems);
+            FWetClothingMaterialTextureResolver::BuildTextureItems(MaterialSlotItem->Material.Get(), TextureItems);
 
             for (const FTextureItemPtr& TextureItem : TextureItems)
             {
@@ -1977,14 +1301,14 @@ TSharedRef<ITableRow> SWetClothingAssetEditorPanel::GenerateMaterialSlotRow(FMat
             .BorderBackgroundColor(FLinearColor(0.06f, 0.06f, 0.06f, 1.0f));
 
     TArray<FWetClothingAssetUVTriangle> SlotPreviewTriangles;
-    UTexture*                             SlotPreviewTexture = ResolveBestMaterialTexture(MaterialObject);
+    UTexture*                             SlotPreviewTexture = FWetClothingMaterialTextureResolver::ResolveBestMaterialTexture(MaterialObject);
     if (Item.IsValid() && Item->SlotIndex == SelectedMaterialSlotIndex && SelectedTextureItem.IsValid() && SelectedTextureItem->Texture.IsValid())
     {
         SlotPreviewTexture = SelectedTextureItem->Texture.Get();
     }
     if (const UWetClothingAsset* Profile = WetClothingAsset.Get())
     {
-        SlotPreviewTriangles = BuildMaterialSlotPreviewTriangles(Profile->TargetMesh, Item.IsValid() ? Item->SlotIndex : INDEX_NONE);
+        SlotPreviewTriangles = SWetClothingAssetEditorPanelLocal::BuildMaterialSlotPreviewTriangles(Profile->TargetMesh, Item.IsValid() ? Item->SlotIndex : INDEX_NONE);
     }
 
     TSharedRef<SWidget> SlotPreviewWidget =
@@ -2781,73 +2105,18 @@ FReply SWetClothingAssetEditorPanel::HandleAutoPartitionClicked()
     UTexture2D*                 PartitionTexture = Cast<UTexture2D>(ResolveSelectedMaterialTexture());
     FWetClothingTextureReadback TextureData;
     FString                     TextureErrorMessage;
-    if (!TryReadTextureSourceData(PartitionTexture, TextureData, TextureErrorMessage))
+    if (!FWetClothingTextureReadbackUtils::TryReadTextureSourceData(PartitionTexture, TextureData, TextureErrorMessage))
     {
         FMessageDialog::Open(EAppMsgType::Ok, FText::FromString(TextureErrorMessage));
         return FReply::Handled();
     }
 
-    TArray<FWetClothingIslandColorStats> IslandStats;
-    IslandStats.Reserve(UVIslandItems.Num());
-
-    for (const FUVIslandItemPtr& IslandItem : UVIslandItems)
-    {
-        if (!IslandItem.IsValid())
-        {
-            continue;
-        }
-
-        FWetClothingIslandColorStats Stats;
-        if (TryComputeIslandAverageColor(*IslandItem, TextureData, Stats))
-        {
-            IslandStats.Add(Stats);
-        }
-    }
-
-    if (IslandStats.Num() == 0)
-    {
-        FMessageDialog::Open(
-            EAppMsgType::Ok,
-            LOCTEXT("AutoPartitionNoIslands", "Auto-Partitioning could not extract average colors from the selected UV islands."));
-        return FReply::Handled();
-    }
-
-    IslandStats.Sort([](const FWetClothingIslandColorStats& A, const FWetClothingIslandColorStats& B)
-                     {
-		if (!FMath::IsNearlyEqual(A.UVArea, B.UVArea))
-		{
-			return A.UVArea > B.UVArea;
-		}
-
-		return A.IslandID < B.IslandID; });
-
     TArray<FWetClothingAutoPartitionCluster> Clusters;
-    const double                             TolerancePercent = AutoPartitionTolerancePercent;
-
-    for (const FWetClothingIslandColorStats& Stats : IslandStats)
+    FString                                  AutoPartitionErrorMessage;
+    if (!FWetClothingAutoPartitioner::BuildClusters(UVIslandItems, TextureData, AutoPartitionTolerancePercent, Clusters, &AutoPartitionErrorMessage))
     {
-        int32  BestClusterIndex = INDEX_NONE;
-        double BestDistance = TNumericLimits<double>::Max();
-
-        for (int32 ClusterIndex = 0; ClusterIndex < Clusters.Num(); ++ClusterIndex)
-        {
-            const double Distance = ComputeColorDistancePercent(Stats.AverageColor, GetClusterAverageColor(Clusters[ClusterIndex]));
-            if (Distance <= TolerancePercent && Distance < BestDistance)
-            {
-                BestDistance = Distance;
-                BestClusterIndex = ClusterIndex;
-            }
-        }
-
-        if (BestClusterIndex == INDEX_NONE)
-        {
-            BestClusterIndex = Clusters.AddDefaulted();
-        }
-
-        FWetClothingAutoPartitionCluster& Cluster = Clusters[BestClusterIndex];
-        Cluster.IslandIDs.Add(Stats.IslandID);
-        Cluster.WeightedColorSum += Stats.AverageColor * static_cast<float>(Stats.SampleWeight);
-        Cluster.SampleWeight += Stats.SampleWeight;
+        FMessageDialog::Open(EAppMsgType::Ok, FText::FromString(AutoPartitionErrorMessage));
+        return FReply::Handled();
     }
 
     const int32 UVChannelIndex = GetSelectedUVChannelIndex();

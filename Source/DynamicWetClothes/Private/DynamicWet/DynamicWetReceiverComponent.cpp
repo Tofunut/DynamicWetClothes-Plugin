@@ -153,6 +153,12 @@ bool UDynamicWetReceiverComponent::ApplyWetContacts(const TArray<FDWCWetContact>
     return InputApplicator->ApplyWetContacts(Context, Contacts, bApplyMaterial);
 }
 
+bool UDynamicWetReceiverComponent::ApplyWetRain(const FDWCWetRainData& RainData, const bool bApplyMaterial)
+{
+    FDynamicWetReceiverContext Context = MakeContext();
+    return InputApplicator->ApplyWetRain(Context, RainData, bApplyMaterial);
+}
+
 bool UDynamicWetReceiverComponent::ApplyWetSurface(
     const FDWCWetSurfaceData& SurfaceData,
     const float Amount,

@@ -122,7 +122,7 @@ void ARainVolume::ApplyWetnessTick()
             continue;
         }
 
-        ApplyWetContactToReceiver(*Receiver);
+        ApplyWetRainToReceiver(*Receiver);
     }
 }
 
@@ -169,7 +169,7 @@ void ARainVolume::RemoveReceiverFromActor(AActor* OtherActor)
     }
 }
 
-void ARainVolume::ApplyWetContactToReceiver(UDynamicWetReceiverComponent& Receiver) const
+void ARainVolume::ApplyWetRainToReceiver(UDynamicWetReceiverComponent& Receiver) const
 {
     if (!RainBounds || WetAmountPerSecond <= 0.0f || UpdateInterval <= 0.0f)
     {
@@ -181,14 +181,14 @@ void ARainVolume::ApplyWetContactToReceiver(UDynamicWetReceiverComponent& Receiv
             ? FVector::DownVector
             : GetActorTransform().TransformVectorNoScale(RainDirection).GetSafeNormal();
 
-    FDWCWetContact Contact;
-    Contact.Amount = WetAmountPerSecond * UpdateInterval;
-    Contact.Location = RainBounds->Bounds.Origin;
-    Contact.Normal = -SafeRainDirection;
-    Contact.Radius = RainBounds->Bounds.SphereRadius;
-    Contact.Direction = SafeRainDirection;
+    FDWCWetRainData RainData;
+    RainData.Amount = WetAmountPerSecond * UpdateInterval;
+    RainData.Direction = SafeRainDirection;
+    RainData.SampleCount = RainSamplesPerTick;
+    RainData.bUseNormalExposure = bUseNormalExposure;
+    RainData.bUseSkinnedNormalsForExposure = bUseSkinnedNormalsForExposure;
 
-    Receiver.ApplyWetContact(Contact, false);
+    Receiver.ApplyWetRain(RainData, false);
 }
 
 void ARainVolume::ApplyRainNiagaraParameters() const

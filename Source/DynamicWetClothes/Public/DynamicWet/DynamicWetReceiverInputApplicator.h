@@ -5,6 +5,7 @@
 
 struct FDynamicWetReceiverContext;
 struct FDWCWetContact;
+struct FDWCWetRainData;
 struct FDWCWetSurfaceData;
 
 class FDynamicWetReceiverInputApplicator
@@ -27,6 +28,10 @@ public:
         FDynamicWetReceiverContext& Receiver,
         const FVector& RainDirection,
         float Amount,
+        bool bApplyMaterial);
+    bool ApplyWetRain(
+        FDynamicWetReceiverContext& Receiver,
+        const FDWCWetRainData& RainData,
         bool bApplyMaterial);
     bool ApplyWetContact(FDynamicWetReceiverContext& Receiver, const FDWCWetContact& Contact, bool bApplyMaterial);
     bool ApplyWetContacts(

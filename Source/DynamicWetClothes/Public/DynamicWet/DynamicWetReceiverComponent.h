@@ -42,6 +42,8 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Wetness")
 	bool ApplyWetContacts(const TArray<FDWCWetContact>& Contacts, bool bApplyMaterial = true);
 	UFUNCTION(BlueprintCallable, Category = "Wetness")
+	bool ApplyWetRain(const FDWCWetRainData& RainData, bool bApplyMaterial = true);
+	UFUNCTION(BlueprintCallable, Category = "Wetness")
 	bool ApplyWetSurface(const FDWCWetSurfaceData& SurfaceData, float Amount, bool bApplyMaterial = true);
 	UFUNCTION(BlueprintCallable, Category = "Wetness|Debug")
 	void SetWetPartDebugVertexColorsEnabled(bool bEnabled);

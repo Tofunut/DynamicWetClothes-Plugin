@@ -29,7 +29,7 @@ private:
 	void ApplyWetnessTick();
 	void AddReceiverFromActor(AActor* OtherActor);
 	void RemoveReceiverFromActor(AActor* OtherActor);
-	void ApplyWetContactToReceiver(UDynamicWetReceiverComponent& Receiver) const;
+	void ApplyWetRainToReceiver(UDynamicWetReceiverComponent& Receiver) const;
 	void ApplyRainNiagaraParameters() const;
 
 	UFUNCTION()
@@ -61,6 +61,15 @@ private:
 
 	UPROPERTY(EditAnywhere, Category = "Rain Volume", meta = (ClampMin = "0.01"))
 	float UpdateInterval = 0.1f;
+
+	UPROPERTY(EditAnywhere, Category = "Rain Volume|Sampling", meta = (ClampMin = "1"))
+	int32 RainSamplesPerTick = 300;
+
+	UPROPERTY(EditAnywhere, Category = "Rain Volume|Sampling")
+	bool bUseNormalExposure = false;
+
+	UPROPERTY(EditAnywhere, Category = "Rain Volume|Sampling", meta = (EditCondition = "bUseNormalExposure"))
+	bool bUseSkinnedNormalsForExposure = false;
 
 	UPROPERTY(EditAnywhere, Category = "Rain Volume")
 	FVector RainDirection = FVector(0.0f, 0.0f, -1.0f);

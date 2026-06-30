@@ -28,6 +28,33 @@ struct DYNAMICWETCLOTHES_API FDWCWetContact
 };
 
 USTRUCT(BlueprintType)
+struct DYNAMICWETCLOTHES_API FDWCWetRainData
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wet Rain")
+    float Amount = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wet Rain")
+    FVector Direction = FVector::DownVector;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wet Rain", meta = (ClampMin = "1"))
+    int32 SampleCount = 300;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wet Rain")
+    bool bUseNormalExposure = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wet Rain")
+    bool bUseSkinnedNormalsForExposure = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wet Rain")
+    bool bOverrideRandomSeed = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wet Rain", meta = (EditCondition = "bOverrideRandomSeed"))
+    int32 RandomSeed = 0;
+};
+
+USTRUCT(BlueprintType)
 struct DYNAMICWETCLOTHES_API FDWCWetSurfaceData
 {
     GENERATED_BODY()

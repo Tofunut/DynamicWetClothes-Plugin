@@ -1,6 +1,5 @@
 #include "SWetClothingAssetUVView.h"
 
-#include "WetClothing/Texture/WetClothingTextureAddressUtils.h"
 #include "Engine/Texture.h"
 #include "Engine/Texture2D.h"
 #include "Framework/Application/SlateApplication.h"
@@ -78,6 +77,26 @@ namespace
     bool IsForwardCanonicalEdge(const FVector2D& Start, const FVector2D& End, const FQuantizedUVEdge& CanonicalEdge)
     {
         return FQuantizedUVPoint(Start) == CanonicalEdge.A && FQuantizedUVPoint(End) == CanonicalEdge.B;
+    }
+
+    double ApplyUVViewTextureAddress(double Value, double IslandCenter, TextureAddress AddressMode)
+    {
+        switch (AddressMode)
+        {
+        case TA_Wrap:
+            return Value - FMath::FloorToDouble(IslandCenter);
+
+        case TA_Mirror:
+        {
+            const int64  TileIndex = FMath::FloorToInt64(IslandCenter);
+            const double TileValue = Value - static_cast<double>(TileIndex);
+            return FMath::Abs(TileIndex) % 2 == 0 ? TileValue : 1.0 - TileValue;
+        }
+
+        case TA_Clamp:
+        default:
+            return FMath::Clamp(Value, 0.0, 1.0);
+        }
     }
 
     void DrawFilledPolygon(
@@ -205,8 +224,8 @@ void SWetClothingAssetUVView::SetIslands(const TArray<TSharedPtr<FWetClothingAss
                 for (int32 VertexIndex = 0; VertexIndex < 3; ++VertexIndex)
                 {
                     FVector2D& UV = Triangle.UVs[VertexIndex];
-                    UV.X = WetClothingTextureAddressUtils::Apply(UV.X, SourceCenter.X, Texture->AddressX);
-                    UV.Y = WetClothingTextureAddressUtils::Apply(UV.Y, SourceCenter.Y, Texture->AddressY);
+                    UV.X = ApplyUVViewTextureAddress(UV.X, SourceCenter.X, Texture->AddressX);
+                    UV.Y = ApplyUVViewTextureAddress(UV.Y, SourceCenter.Y, Texture->AddressY);
                     Island.UVBounds += UV;
                 }
             }
@@ -244,6 +263,12 @@ void SWetClothingAssetUVView::SetBackgroundTexture(UTexture* InTexture)
         BackgroundTextureBrush.ImageSize = FVector2D(1.0f, 1.0f);
     }
 
+    Invalidate(EInvalidateWidget::Paint);
+}
+
+void SWetClothingAssetUVView::SetDrawBackgroundTexture(bool bInDrawBackgroundTexture)
+{
+    bDrawBackgroundTexture = bInDrawBackgroundTexture;
     Invalidate(EInvalidateWidget::Paint);
 }
 
@@ -316,7 +341,7 @@ int32 SWetClothingAssetUVView::OnPaint(
     const FVector2D ClampedViewOffset = ClampViewOffset(AllottedGeometry, UVBounds, ZoomAmount, ViewOffset);
     OutDrawElements.PushClip(FSlateClippingZone(AllottedGeometry));
 
-    if (BackgroundTextureBrush.GetResourceObject() != nullptr)
+    if (bDrawBackgroundTexture && BackgroundTextureBrush.GetResourceObject() != nullptr)
     {
         const FVector2D TopLeft = UVToLocal(FVector2D(0.0, 0.0), AllottedGeometry, UVBounds, ZoomAmount, ClampedViewOffset);
         const FVector2D BottomRight = UVToLocal(FVector2D(1.0, 1.0), AllottedGeometry, UVBounds, ZoomAmount, ClampedViewOffset);

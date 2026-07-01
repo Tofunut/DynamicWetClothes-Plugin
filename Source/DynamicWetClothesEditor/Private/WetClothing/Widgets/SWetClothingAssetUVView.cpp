@@ -1,6 +1,7 @@
 #include "SWetClothingAssetUVView.h"
 
 #include "Engine/Texture.h"
+#include "Engine/Texture2D.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Input/Events.h"
 #include "InputCoreTypes.h"
@@ -76,6 +77,26 @@ namespace
     bool IsForwardCanonicalEdge(const FVector2D& Start, const FVector2D& End, const FQuantizedUVEdge& CanonicalEdge)
     {
         return FQuantizedUVPoint(Start) == CanonicalEdge.A && FQuantizedUVPoint(End) == CanonicalEdge.B;
+    }
+
+    double ApplyTextureAddress(double Value, double IslandCenter, TextureAddress AddressMode)
+    {
+        switch (AddressMode)
+        {
+        case TA_Wrap:
+            return Value - FMath::FloorToDouble(IslandCenter);
+
+        case TA_Mirror:
+        {
+            const int64  TileIndex = FMath::FloorToInt64(IslandCenter);
+            const double TileValue = Value - static_cast<double>(TileIndex);
+            return FMath::Abs(TileIndex) % 2 == 0 ? TileValue : 1.0 - TileValue;
+        }
+
+        case TA_Clamp:
+        default:
+            return FMath::Clamp(Value, 0.0, 1.0);
+        }
     }
 
     void DrawFilledPolygon(
@@ -162,48 +183,50 @@ void SWetClothingAssetUVView::Construct(const FArguments& InArgs)
 {
     OnIslandSelectionChanged = InArgs._OnIslandSelectionChanged;
     BackgroundTextureBrush.DrawAs = ESlateBrushDrawType::Image;
-    BackgroundTextureBrush.Mirroring = ESlateBrushMirrorType::Vertical;
+    BackgroundTextureBrush.Mirroring = ESlateBrushMirrorType::NoMirror;
     ResetView();
 }
 
 void SWetClothingAssetUVView::SetIslands(const TArray<TSharedPtr<FWetClothingAssetUVIsland>>& InIslands)
 {
     Islands.Reset();
-    FBox2D SourceBounds(ForceInit);
 
     for (const TSharedPtr<FWetClothingAssetUVIsland>& Island : InIslands)
     {
         if (Island.IsValid())
         {
             Islands.Add(*Island);
-            for (const FWetClothingAssetUVTriangle& Triangle : Island->UVTriangles)
+        }
+    }
+
+    const UTexture2D* Texture = Cast<UTexture2D>(BackgroundTexture.Get());
+    if (Texture != nullptr)
+    {
+        for (FWetClothingAssetUVIsland& Island : Islands)
+        {
+            FBox2D SourceBounds(ForceInit);
+            for (const FWetClothingAssetUVTriangle& Triangle : Island.UVTriangles)
             {
                 SourceBounds += Triangle.UVs[0];
                 SourceBounds += Triangle.UVs[1];
                 SourceBounds += Triangle.UVs[2];
             }
-        }
-    }
 
-    if (SourceBounds.bIsValid)
-    {
-        const FVector2D SourceCenter = (SourceBounds.Min + SourceBounds.Max) * 0.5f;
-        const FVector2D TileOffset(
-            FMath::FloorToDouble(SourceCenter.X),
-            FMath::FloorToDouble(SourceCenter.Y));
-
-        if (!TileOffset.IsNearlyZero())
-        {
-            for (FWetClothingAssetUVIsland& Island : Islands)
+            if (!SourceBounds.bIsValid)
             {
-                Island.UVBounds.Init();
-                for (FWetClothingAssetUVTriangle& Triangle : Island.UVTriangles)
+                continue;
+            }
+
+            const FVector2D SourceCenter = (SourceBounds.Min + SourceBounds.Max) * 0.5f;
+            Island.UVBounds.Init();
+            for (FWetClothingAssetUVTriangle& Triangle : Island.UVTriangles)
+            {
+                for (int32 VertexIndex = 0; VertexIndex < 3; ++VertexIndex)
                 {
-                    for (int32 VertexIndex = 0; VertexIndex < 3; ++VertexIndex)
-                    {
-                        Triangle.UVs[VertexIndex] -= TileOffset;
-                        Island.UVBounds += Triangle.UVs[VertexIndex];
-                    }
+                    FVector2D& UV = Triangle.UVs[VertexIndex];
+                    UV.X = ApplyTextureAddress(UV.X, SourceCenter.X, Texture->AddressX);
+                    UV.Y = ApplyTextureAddress(UV.Y, SourceCenter.Y, Texture->AddressY);
+                    Island.UVBounds += UV;
                 }
             }
         }
@@ -268,7 +291,12 @@ void SWetClothingAssetUVView::Clear()
 
 FVector2D SWetClothingAssetUVView::ComputeDesiredSize(float LayoutScaleMultiplier) const
 {
-    return FVector2D(512.0f, 512.0f);
+    constexpr double MaxDesiredDimension = 512.0;
+    const double     TextureAspectRatio = GetTextureAspectRatio();
+
+    return TextureAspectRatio >= 1.0
+               ? FVector2D(MaxDesiredDimension, MaxDesiredDimension / TextureAspectRatio)
+               : FVector2D(MaxDesiredDimension * TextureAspectRatio, MaxDesiredDimension);
 }
 
 int32 SWetClothingAssetUVView::OnPaint(
@@ -309,8 +337,8 @@ int32 SWetClothingAssetUVView::OnPaint(
 
     if (BackgroundTextureBrush.GetResourceObject() != nullptr)
     {
-        const FVector2D TopLeft = UVToLocal(FVector2D(0.0, 1.0), AllottedGeometry, UVBounds, ZoomAmount, ClampedViewOffset);
-        const FVector2D BottomRight = UVToLocal(FVector2D(1.0, 0.0), AllottedGeometry, UVBounds, ZoomAmount, ClampedViewOffset);
+        const FVector2D TopLeft = UVToLocal(FVector2D(0.0, 0.0), AllottedGeometry, UVBounds, ZoomAmount, ClampedViewOffset);
+        const FVector2D BottomRight = UVToLocal(FVector2D(1.0, 1.0), AllottedGeometry, UVBounds, ZoomAmount, ClampedViewOffset);
         const FVector2D TexturePosition(
             FMath::Min(TopLeft.X, BottomRight.X),
             FMath::Min(TopLeft.Y, BottomRight.Y));
@@ -326,43 +354,6 @@ int32 SWetClothingAssetUVView::OnPaint(
             ESlateDrawEffect::None,
             FLinearColor(1.0f, 1.0f, 1.0f, 0.75f));
     }
-
-    // for (int32 GridLineIndex = 0; GridLineIndex <= 4; ++GridLineIndex)
-    // {
-    //     const double T = GridLineIndex / 4.0;
-    //     const double U = FMath::Lerp(UVBounds.Min.X, UVBounds.Max.X, T);
-    //     const double V = FMath::Lerp(UVBounds.Min.Y, UVBounds.Max.Y, T);
-
-    //     const TArray<FVector2D> VerticalLine = {
-    //         UVToLocal(FVector2D(U, UVBounds.Min.Y), AllottedGeometry, UVBounds, ZoomAmount, ClampedViewOffset),
-    //         UVToLocal(FVector2D(U, UVBounds.Max.Y), AllottedGeometry, UVBounds, ZoomAmount, ClampedViewOffset)
-    //     };
-
-    //     const TArray<FVector2D> HorizontalLine = {
-    //         UVToLocal(FVector2D(UVBounds.Min.X, V), AllottedGeometry, UVBounds, ZoomAmount, ClampedViewOffset),
-    //         UVToLocal(FVector2D(UVBounds.Max.X, V), AllottedGeometry, UVBounds, ZoomAmount, ClampedViewOffset)
-    //     };
-
-    //     FSlateDrawElement::MakeLines(
-    //         OutDrawElements,
-    //         GridLayer,
-    //         AllottedGeometry.ToPaintGeometry(),
-    //         VerticalLine,
-    //         ESlateDrawEffect::None,
-    //         FLinearColor(0.12f, 0.12f, 0.12f, 0.85f),
-    //         true,
-    //         1.0f);
-
-    //     FSlateDrawElement::MakeLines(
-    //         OutDrawElements,
-    //         GridLayer,
-    //         AllottedGeometry.ToPaintGeometry(),
-    //         HorizontalLine,
-    //         ESlateDrawEffect::None,
-    //         FLinearColor(0.12f, 0.12f, 0.12f, 0.85f),
-    //         true,
-    //         1.0f);
-    // }
 
     const TArray<FVector2D> BorderPoints = {
         UVToLocal(FVector2D(0.0, 0.0), AllottedGeometry, UVBounds, ZoomAmount, ClampedViewOffset),
@@ -396,7 +387,7 @@ int32 SWetClothingAssetUVView::OnPaint(
                                             : (bSelected ? 1.15f : (bIsDefaultGrayOverlay ? 0.35f : (bHasAssignedColor ? 0.75f : 0.35f)));
         const int32         DrawLayer = bSelected ? SelectedLayer : WireLayer;
 
-        if (bSelected)
+        if (bSelected && !bOutlineOnly)
         {
             for (const FWetClothingAssetUVTriangle& Triangle : Island.UVTriangles)
             {
@@ -872,6 +863,17 @@ FBox2D SWetClothingAssetUVView::ComputeUVBounds() const
     return Bounds;
 }
 
+double SWetClothingAssetUVView::GetTextureAspectRatio() const
+{
+    const FVector2D ImageSize = BackgroundTextureBrush.ImageSize;
+    if (ImageSize.X <= 0.0 || ImageSize.Y <= 0.0)
+    {
+        return 1.0;
+    }
+
+    return FMath::Max(static_cast<double>(ImageSize.X / ImageSize.Y), 0.0001);
+}
+
 FVector2D SWetClothingAssetUVView::UVToLocal(
     const FVector2D& UV,
     const FGeometry& Geometry,
@@ -890,17 +892,19 @@ FVector2D SWetClothingAssetUVView::UVToLocal(
     const FVector2D LocalSize = Geometry.GetLocalSize();
     const double    Width = FMath::Max(0.0001, UVBounds.Max.X - UVBounds.Min.X);
     const double    Height = FMath::Max(0.0001, UVBounds.Max.Y - UVBounds.Min.Y);
+    const double    TextureAspectRatio = GetTextureAspectRatio();
+    const double    DisplayWidth = Width * TextureAspectRatio;
     const double    AvailableWidth = FMath::Max(1.0, LocalSize.X - Padding * 2.0);
     const double    AvailableHeight = FMath::Max(1.0, LocalSize.Y - Padding * 2.0);
-    const double    Scale = FMath::Min(AvailableWidth / Width, AvailableHeight / Height) * InZoomAmount;
-    const double    DrawWidth = Width * Scale;
+    const double    Scale = FMath::Min(AvailableWidth / DisplayWidth, AvailableHeight / Height) * InZoomAmount;
+    const double    DrawWidth = DisplayWidth * Scale;
     const double    DrawHeight = Height * Scale;
     const double    OffsetX = (LocalSize.X - DrawWidth) * 0.5 + InViewOffset.X;
     const double    OffsetY = (LocalSize.Y - DrawHeight) * 0.5 + InViewOffset.Y;
 
     return FVector2D(
-        OffsetX + (UV.X - UVBounds.Min.X) * Scale,
-        OffsetY + (UVBounds.Max.Y - UV.Y) * Scale);
+        OffsetX + (UV.X - UVBounds.Min.X) * TextureAspectRatio * Scale,
+        OffsetY + (UV.Y - UVBounds.Min.Y) * Scale);
 }
 
 FVector2D SWetClothingAssetUVView::LocalToUV(
@@ -921,17 +925,19 @@ FVector2D SWetClothingAssetUVView::LocalToUV(
     const FVector2D LocalSize = Geometry.GetLocalSize();
     const double    Width = FMath::Max(0.0001, UVBounds.Max.X - UVBounds.Min.X);
     const double    Height = FMath::Max(0.0001, UVBounds.Max.Y - UVBounds.Min.Y);
+    const double    TextureAspectRatio = GetTextureAspectRatio();
+    const double    DisplayWidth = Width * TextureAspectRatio;
     const double    AvailableWidth = FMath::Max(1.0, LocalSize.X - Padding * 2.0);
     const double    AvailableHeight = FMath::Max(1.0, LocalSize.Y - Padding * 2.0);
-    const double    Scale = FMath::Min(AvailableWidth / Width, AvailableHeight / Height) * InZoomAmount;
-    const double    DrawWidth = Width * Scale;
+    const double    Scale = FMath::Min(AvailableWidth / DisplayWidth, AvailableHeight / Height) * InZoomAmount;
+    const double    DrawWidth = DisplayWidth * Scale;
     const double    DrawHeight = Height * Scale;
     const double    OffsetX = (LocalSize.X - DrawWidth) * 0.5 + InViewOffset.X;
     const double    OffsetY = (LocalSize.Y - DrawHeight) * 0.5 + InViewOffset.Y;
 
     return FVector2D(
-        UVBounds.Min.X + (LocalPosition.X - OffsetX) / Scale,
-        UVBounds.Max.Y - (LocalPosition.Y - OffsetY) / Scale);
+        UVBounds.Min.X + (LocalPosition.X - OffsetX) / (TextureAspectRatio * Scale),
+        UVBounds.Min.Y + (LocalPosition.Y - OffsetY) / Scale);
 }
 
 FVector2D SWetClothingAssetUVView::ClampViewOffset(
@@ -948,10 +954,11 @@ FVector2D SWetClothingAssetUVView::ClampViewOffset(
     const FVector2D LocalSize = Geometry.GetLocalSize();
     const double    Width = FMath::Max(0.0001, UVBounds.Max.X - UVBounds.Min.X);
     const double    Height = FMath::Max(0.0001, UVBounds.Max.Y - UVBounds.Min.Y);
+    const double    DisplayWidth = Width * GetTextureAspectRatio();
     const double    AvailableWidth = FMath::Max(1.0, LocalSize.X - Padding * 2.0);
     const double    AvailableHeight = FMath::Max(1.0, LocalSize.Y - Padding * 2.0);
-    const double    Scale = FMath::Min(AvailableWidth / Width, AvailableHeight / Height) * InZoomAmount;
-    const double    DrawWidth = Width * Scale;
+    const double    Scale = FMath::Min(AvailableWidth / DisplayWidth, AvailableHeight / Height) * InZoomAmount;
+    const double    DrawWidth = DisplayWidth * Scale;
     const double    DrawHeight = Height * Scale;
     const double    CenteredOffsetX = (LocalSize.X - DrawWidth) * 0.5;
     const double    CenteredOffsetY = (LocalSize.Y - DrawHeight) * 0.5;

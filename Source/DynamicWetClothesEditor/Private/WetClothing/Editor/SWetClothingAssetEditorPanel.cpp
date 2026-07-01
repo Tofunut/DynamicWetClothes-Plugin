@@ -1519,27 +1519,51 @@ FReply SWetClothingAssetEditorPanel::HandleApplyMaterialSetupClicked()
         }
     }
 
-    FWetClothingMaterialSetupResult Result = FWetClothingMaterialSetup::DuplicateAndApplyToMaterialInterface(SelectedMaterial);
+    UMaterialInterface* SourceMaterial = SelectedMaterial;
+    FWetClothingMaterialSetupResult Result = FWetClothingMaterialSetup::DuplicateAndApplyToMaterialInterface(SourceMaterial);
 
-    if (Result.bSucceeded && !Result.bAlreadyConfigured && Result.ConfiguredMaterial != nullptr)
+    if (Result.bSucceeded && Result.ConfiguredMaterial != nullptr && SourceMaterial != nullptr)
     {
         if (UWetClothingAsset* Profile = WetClothingAsset.Get())
         {
             if (USkeletalMesh* TargetMesh = Profile->TargetMesh)
             {
                 TArray<FSkeletalMaterial> Materials = TargetMesh->GetMaterials();
-                if (Materials.IsValidIndex(SelectedMaterialSlotIndex))
+                TArray<int32>             AssignedSlotIndices;
+                for (int32 MaterialIndex = 0; MaterialIndex < Materials.Num(); ++MaterialIndex)
+                {
+                    if (Materials[MaterialIndex].MaterialInterface == SourceMaterial)
+                    {
+                        AssignedSlotIndices.Add(MaterialIndex);
+                    }
+                }
+
+                if (AssignedSlotIndices.Num() > 0)
                 {
                     TargetMesh->Modify();
-                    Materials[SelectedMaterialSlotIndex].MaterialInterface = Result.ConfiguredMaterial;
+                    for (const int32 MaterialIndex : AssignedSlotIndices)
+                    {
+                        Materials[MaterialIndex].MaterialInterface = Result.ConfiguredMaterial;
+                    }
                     TargetMesh->SetMaterials(Materials);
                     TargetMesh->PostEditChange();
                     TargetMesh->MarkPackageDirty();
 
-                    Result.Message += FString::Printf(TEXT("\nAssigned '%s' to material slot %d on '%s'."),
+                    FString AssignedSlotText;
+                    for (int32 Index = 0; Index < AssignedSlotIndices.Num(); ++Index)
+                    {
+                        if (Index > 0)
+                        {
+                            AssignedSlotText += TEXT(", ");
+                        }
+                        AssignedSlotText += FString::FromInt(AssignedSlotIndices[Index]);
+                    }
+
+                    Result.Message += FString::Printf(TEXT("\nAssigned '%s' to %d material slot(s) on '%s': %s."),
                         *Result.ConfiguredMaterial->GetName(),
-                        SelectedMaterialSlotIndex,
-                        *TargetMesh->GetName());
+                        AssignedSlotIndices.Num(),
+                        *TargetMesh->GetName(),
+                        *AssignedSlotText);
 
                     RefreshMaterialSlotItems();
                     RefreshMaterialTextures();
@@ -2743,8 +2767,18 @@ FText SWetClothingAssetEditorPanel::GetProfileMapBakeSettingsText() const
     const int32                             Resolution = BakedProfileMap != nullptr ? BakedProfileMap->Resolution : 512;
     const int32                             PaddingPixels = BakedProfileMap != nullptr ? BakedProfileMap->PaddingPixels : 4;
 
+    if (BakedProfileMap != nullptr && BakedProfileMap->ProfileMap0 != nullptr)
+    {
+        return FText::Format(
+            LOCTEXT("ProfileMapBakeSettingsWithSize", "Settings: Max {0} px / Output {1}x{2} / Padding {3} px"),
+            FText::AsNumber(Resolution),
+            FText::AsNumber(BakedProfileMap->ProfileMap0->GetSurfaceWidth()),
+            FText::AsNumber(BakedProfileMap->ProfileMap0->GetSurfaceHeight()),
+            FText::AsNumber(PaddingPixels));
+    }
+
     return FText::Format(
-        LOCTEXT("ProfileMapBakeSettings", "Settings: {0} px / Padding {1} px"),
+        LOCTEXT("ProfileMapBakeSettings", "Settings: Max {0} px / Padding {1} px"),
         FText::AsNumber(Resolution),
         FText::AsNumber(PaddingPixels));
 }

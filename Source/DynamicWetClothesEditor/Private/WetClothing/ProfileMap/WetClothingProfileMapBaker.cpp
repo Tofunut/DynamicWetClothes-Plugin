@@ -41,7 +41,27 @@ namespace
             255);
     }
 
-    void NormalizeIslandsToPrimaryUVTile(TArray<FWetClothingAssetUVIsland>& Islands)
+    double ApplyTextureAddress(double Value, double IslandCenter, TextureAddress AddressMode)
+    {
+        switch (AddressMode)
+        {
+        case TA_Wrap:
+            return Value - FMath::FloorToDouble(IslandCenter);
+
+        case TA_Mirror:
+        {
+            const int64  TileIndex = FMath::FloorToInt64(IslandCenter);
+            const double TileValue = Value - static_cast<double>(TileIndex);
+            return FMath::Abs(TileIndex) % 2 == 0 ? TileValue : 1.0 - TileValue;
+        }
+
+        case TA_Clamp:
+        default:
+            return FMath::Clamp(Value, 0.0, 1.0);
+        }
+    }
+
+    void ApplyTextureAddressToIslands(TArray<FWetClothingAssetUVIsland>& Islands, TextureAddress AddressX, TextureAddress AddressY)
     {
         for (FWetClothingAssetUVIsland& Island : Islands)
         {
@@ -59,17 +79,15 @@ namespace
             }
 
             const FVector2D SourceCenter = (SourceBounds.Min + SourceBounds.Max) * 0.5f;
-            const FVector2D TileOffset(
-                FMath::FloorToDouble(SourceCenter.X),
-                FMath::FloorToDouble(SourceCenter.Y));
-
             Island.UVBounds.Init();
             for (FWetClothingAssetUVTriangle& Triangle : Island.UVTriangles)
             {
                 for (int32 VertexIndex = 0; VertexIndex < 3; ++VertexIndex)
                 {
-                    Triangle.UVs[VertexIndex] -= TileOffset;
-                    Island.UVBounds += Triangle.UVs[VertexIndex];
+                    FVector2D& UV = Triangle.UVs[VertexIndex];
+                    UV.X = ApplyTextureAddress(UV.X, SourceCenter.X, AddressX);
+                    UV.Y = ApplyTextureAddress(UV.Y, SourceCenter.Y, AddressY);
+                    Island.UVBounds += UV;
                 }
             }
         }
@@ -109,7 +127,13 @@ namespace
         return nullptr;
     }
 
-    int32 PaintTriangle(TArray<FColor>& Pixels, TArray<bool>& PaintedMask, int32 Resolution, const FWetClothingAssetUVTriangle& Triangle, const FColor& Color)
+    int32 PaintTriangle(
+        TArray<FColor>&                         Pixels,
+        TArray<bool>&                           PaintedMask,
+        int32                                   Width,
+        int32                                   Height,
+        const FWetClothingAssetUVTriangle& Triangle,
+        const FColor&                            Color)
     {
         const FVector2D& A = Triangle.UVs[0];
         const FVector2D& B = Triangle.UVs[1];
@@ -120,10 +144,10 @@ namespace
         const double MinV = FMath::Min3(A.Y, B.Y, C.Y);
         const double MaxV = FMath::Max3(A.Y, B.Y, C.Y);
 
-        const int32 MinX = FMath::Clamp(FMath::FloorToInt(MinU * Resolution), 0, Resolution - 1);
-        const int32 MaxX = FMath::Clamp(FMath::FloorToInt(MaxU * Resolution), 0, Resolution - 1);
-        const int32 MinY = FMath::Clamp(FMath::FloorToInt((1.0 - MaxV) * Resolution), 0, Resolution - 1);
-        const int32 MaxY = FMath::Clamp(FMath::FloorToInt((1.0 - MinV) * Resolution), 0, Resolution - 1);
+        const int32 MinX = FMath::Clamp(FMath::FloorToInt(MinU * Width), 0, Width - 1);
+        const int32 MaxX = FMath::Clamp(FMath::FloorToInt(MaxU * Width), 0, Width - 1);
+        const int32 MinY = FMath::Clamp(FMath::FloorToInt(MinV * Height), 0, Height - 1);
+        const int32 MaxY = FMath::Clamp(FMath::FloorToInt(MaxV * Height), 0, Height - 1);
 
         int32 PaintedPixelCount = 0;
         for (int32 PixelY = MinY; PixelY <= MaxY; ++PixelY)
@@ -131,15 +155,15 @@ namespace
             for (int32 PixelX = MinX; PixelX <= MaxX; ++PixelX)
             {
                 const FVector2D SampleUV(
-                    (static_cast<double>(PixelX) + 0.5) / Resolution,
-                    1.0 - ((static_cast<double>(PixelY) + 0.5) / Resolution));
+                    (static_cast<double>(PixelX) + 0.5) / Width,
+                    (static_cast<double>(PixelY) + 0.5) / Height);
 
                 if (!IsProfileMapUVPointInsideTriangle(SampleUV, A, B, C))
                 {
                     continue;
                 }
 
-                const int32 PixelIndex = PixelY * Resolution + PixelX;
+                const int32 PixelIndex = PixelY * Width + PixelX;
                 if (!PaintedMask[PixelIndex])
                 {
                     ++PaintedPixelCount;
@@ -153,9 +177,9 @@ namespace
         if (PaintedPixelCount == 0)
         {
             const FVector2D CenterUV = (A + B + C) / 3.0f;
-            const int32     FallbackX = FMath::Clamp(FMath::FloorToInt(CenterUV.X * Resolution), 0, Resolution - 1);
-            const int32     FallbackY = FMath::Clamp(FMath::FloorToInt((1.0 - CenterUV.Y) * Resolution), 0, Resolution - 1);
-            const int32     PixelIndex = FallbackY * Resolution + FallbackX;
+            const int32     FallbackX = FMath::Clamp(FMath::FloorToInt(CenterUV.X * Width), 0, Width - 1);
+            const int32     FallbackY = FMath::Clamp(FMath::FloorToInt(CenterUV.Y * Height), 0, Height - 1);
+            const int32     PixelIndex = FallbackY * Width + FallbackX;
             if (!PaintedMask[PixelIndex])
             {
                 ++PaintedPixelCount;
@@ -167,7 +191,7 @@ namespace
         return PaintedPixelCount;
     }
 
-    void DilatePaintedPixels(TArray<FColor>& Pixels, TArray<bool>& PaintedMask, int32 Resolution, int32 PaddingPixels)
+    void DilatePaintedPixels(TArray<FColor>& Pixels, TArray<bool>& PaintedMask, int32 Width, int32 Height, int32 PaddingPixels)
     {
         const int32 ClampedPaddingPixels = FMath::Clamp(PaddingPixels, 0, 64);
         for (int32 PaddingStep = 0; PaddingStep < ClampedPaddingPixels; ++PaddingStep)
@@ -176,11 +200,11 @@ namespace
             TArray<bool>   PreviousMask = PaintedMask;
             bool           bWrotePixel = false;
 
-            for (int32 Y = 0; Y < Resolution; ++Y)
+            for (int32 Y = 0; Y < Height; ++Y)
             {
-                for (int32 X = 0; X < Resolution; ++X)
+                for (int32 X = 0; X < Width; ++X)
                 {
-                    const int32 PixelIndex = Y * Resolution + X;
+                    const int32 PixelIndex = Y * Width + X;
                     if (PreviousMask[PixelIndex])
                     {
                         continue;
@@ -197,12 +221,12 @@ namespace
 
                             const int32 NeighborX = X + OffsetX;
                             const int32 NeighborY = Y + OffsetY;
-                            if (NeighborX < 0 || NeighborY < 0 || NeighborX >= Resolution || NeighborY >= Resolution)
+                            if (NeighborX < 0 || NeighborY < 0 || NeighborX >= Width || NeighborY >= Height)
                             {
                                 continue;
                             }
 
-                            const int32 NeighborIndex = NeighborY * Resolution + NeighborX;
+                            const int32 NeighborIndex = NeighborY * Width + NeighborX;
                             if (!PreviousMask[NeighborIndex])
                             {
                                 continue;
@@ -239,7 +263,8 @@ namespace
         UWetClothingAsset& WetClothingAsset,
         UTexture&          SourceTexture,
         int32              UVChannelIndex,
-        int32              Resolution,
+        int32              Width,
+        int32              Height,
         const TArray<FColor>& Pixels,
         FString&           OutErrorMessage)
     {
@@ -274,13 +299,21 @@ namespace
             Texture->Modify();
         }
 
-        Texture->Source.Init(Resolution, Resolution, 1, 1, TSF_BGRA8, reinterpret_cast<const uint8*>(Pixels.GetData()));
+        Texture->Source.Init(Width, Height, 1, 1, TSF_BGRA8, reinterpret_cast<const uint8*>(Pixels.GetData()));
         Texture->SRGB = false;
         Texture->CompressionSettings = TC_VectorDisplacementmap;
         Texture->MipGenSettings = TMGS_NoMipmaps;
         Texture->Filter = TF_Nearest;
-        Texture->AddressX = TA_Clamp;
-        Texture->AddressY = TA_Clamp;
+        if (const UTexture2D* SourceTexture2D = Cast<UTexture2D>(&SourceTexture))
+        {
+            Texture->AddressX = SourceTexture2D->AddressX;
+            Texture->AddressY = SourceTexture2D->AddressY;
+        }
+        else
+        {
+            Texture->AddressX = TA_Clamp;
+            Texture->AddressY = TA_Clamp;
+        }
         Texture->PostEditChange();
         Texture->UpdateResource();
         Texture->MarkPackageDirty();
@@ -323,11 +356,20 @@ bool FWetClothingProfileMapBaker::BakeProfileMap0(
         return false;
     }
 
-    const int32 Resolution = FMath::Clamp(Settings.Resolution, 16, 8192);
+    const int32 MaxResolution = FMath::Clamp(Settings.Resolution, 16, 8192);
+    const int32 SourceWidth = FMath::Max(SourceTexture->GetSurfaceWidth(), 1);
+    const int32 SourceHeight = FMath::Max(SourceTexture->GetSurfaceHeight(), 1);
+    const double ResolutionScale = static_cast<double>(MaxResolution) / FMath::Max(SourceWidth, SourceHeight);
+    const int32 Width = FMath::Clamp(FMath::RoundToInt(SourceWidth * ResolutionScale), 1, 8192);
+    const int32 Height = FMath::Clamp(FMath::RoundToInt(SourceHeight * ResolutionScale), 1, 8192);
     TArray<FColor> Pixels;
     TArray<bool>   PaintedMask;
-    Pixels.Init(FColor(0, 0, 0, 0), Resolution * Resolution);
-    PaintedMask.Init(false, Resolution * Resolution);
+    Pixels.Init(FColor(0, 0, 0, 0), Width * Height);
+    PaintedMask.Init(false, Width * Height);
+
+    const UTexture2D* SourceTexture2D = Cast<UTexture2D>(SourceTexture);
+    const TextureAddress SourceAddressX = SourceTexture2D != nullptr ? static_cast<TextureAddress>(SourceTexture2D->AddressX.GetValue()) : TA_Clamp;
+    const TextureAddress SourceAddressY = SourceTexture2D != nullptr ? static_cast<TextureAddress>(SourceTexture2D->AddressY.GetValue()) : TA_Clamp;
 
     int32 PaintedPixelCount = 0;
     TArray<int32> SortedMaterialSlotIndices = MaterialSlotIndices;
@@ -349,7 +391,7 @@ bool FWetClothingProfileMapBaker::BakeProfileMap0(
             return false;
         }
 
-        NormalizeIslandsToPrimaryUVTile(Islands);
+        ApplyTextureAddressToIslands(Islands, SourceAddressX, SourceAddressY);
 
         for (const FWetClothingAssetUVIsland& Island : Islands)
         {
@@ -369,18 +411,19 @@ bool FWetClothingProfileMapBaker::BakeProfileMap0(
             const FColor EncodedParameters = EncodeProfileParameters(Parameters);
             for (const FWetClothingAssetUVTriangle& Triangle : Island.UVTriangles)
             {
-                PaintedPixelCount += PaintTriangle(Pixels, PaintedMask, Resolution, Triangle, EncodedParameters);
+                PaintedPixelCount += PaintTriangle(Pixels, PaintedMask, Width, Height, Triangle, EncodedParameters);
             }
         }
     }
 
-    DilatePaintedPixels(Pixels, PaintedMask, Resolution, Settings.PaddingPixels);
+    DilatePaintedPixels(Pixels, PaintedMask, Width, Height, Settings.PaddingPixels);
 
     UTexture2D* ProfileMap0 = CreateOrUpdateTextureAsset(
         *WetClothingAsset,
         *SourceTexture,
         UVChannelIndex,
-        Resolution,
+        Width,
+        Height,
         Pixels,
         OutErrorMessage);
     if (ProfileMap0 == nullptr)
@@ -405,7 +448,7 @@ bool FWetClothingProfileMapBaker::BakeProfileMap0(
     BakedProfileMap->UVChannelIndex = UVChannelIndex;
     BakedProfileMap->MaterialSlotIndices = SortedMaterialSlotIndices;
     BakedProfileMap->ProfileMap0 = ProfileMap0;
-    BakedProfileMap->Resolution = Resolution;
+    BakedProfileMap->Resolution = MaxResolution;
     BakedProfileMap->PaddingPixels = Settings.PaddingPixels;
     BakedProfileMap->BakeGuid = FGuid::NewGuid();
 

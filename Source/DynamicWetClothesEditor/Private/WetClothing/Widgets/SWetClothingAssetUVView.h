@@ -76,6 +76,7 @@ class SWetClothingAssetUVView : public SLeafWidget
 
   private:
     FBox2D ComputeUVBounds() const;
+    double GetTextureAspectRatio() const;
 
     FVector2D UVToLocal(
         const FVector2D& UV,

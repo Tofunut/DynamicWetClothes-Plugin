@@ -44,20 +44,13 @@ void FDynamicWetReceiverRenderApplier::InitializeWetMaterialInstance(FDynamicWet
 
 void FDynamicWetReceiverRenderApplier::ApplyWetMaterialParameters(FDynamicWetReceiverContext& Receiver)
 {
-    for (UMaterialInstanceDynamic* MID : Receiver.WetMaterialInstances)
+    for (int32 MaterialSlotIndex = 0; MaterialSlotIndex < Receiver.WetMaterialInstances.Num(); ++MaterialSlotIndex)
     {
+        UMaterialInstanceDynamic* MID = Receiver.WetMaterialInstances[MaterialSlotIndex];
         if (!MID)
         {
             continue;
         }
-
-        MID->SetVectorParameterValue(
-            TEXT("FallbackUnderColor"),
-            Receiver.FallbackUnderColor);
-
-        MID->SetScalarParameterValue(
-            TEXT("WetUnderColorBlendStrength"),
-            Receiver.WetUnderColorBlendStrength);
 
         if (!Receiver.WetPartDebugStrengthParameterName.IsNone())
         {
@@ -72,6 +65,7 @@ void FDynamicWetReceiverRenderApplier::ApplyWetMaterialParameters(FDynamicWetRec
                 Receiver.WetPartDebugUseWetnessMaskParameterName,
                 Receiver.bWetPartDebugUseWetnessMask ? 1.0f : 0.0f);
         }
+
     }
 
     ApplyWetProfileMapParameters(Receiver);
@@ -121,15 +115,6 @@ void FDynamicWetReceiverRenderApplier::ApplyWetProfileMapParameters(FDynamicWetR
 
                 bProfileMapAssigned[MaterialSlotIndex] = true;
 
-                UE_LOG(
-                    LogTemp,
-                    Display,
-                    TEXT("DynamicWetClothes: Applied ProfileMap0 '%s' to material slot %d on %s using texture parameter '%s' and enabled scalar '%s'."),
-                    *GetNameSafe(BakedProfileMap.ProfileMap0),
-                    MaterialSlotIndex,
-                    *GetNameSafe(Receiver.OwnerForLogs),
-                    *Receiver.ProfileMap0ParameterName.ToString(),
-                    *Receiver.UseProfileMap0ParameterName.ToString());
             }
         }
     }
@@ -150,13 +135,6 @@ void FDynamicWetReceiverRenderApplier::ApplyWetProfileMapParameters(FDynamicWetR
         if (MID != nullptr)
         {
             MID->SetScalarParameterValue(Receiver.UseProfileMap0ParameterName, 0.0f);
-            UE_LOG(
-                LogTemp,
-                Verbose,
-                TEXT("DynamicWetClothes: Material slot %d on %s has no ProfileMap0. Set '%s' to 0."),
-                MaterialSlotIndex,
-                *GetNameSafe(Receiver.OwnerForLogs),
-                *Receiver.UseProfileMap0ParameterName.ToString());
         }
     }
 }

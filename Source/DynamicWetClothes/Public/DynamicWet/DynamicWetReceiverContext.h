@@ -28,8 +28,8 @@ struct DYNAMICWETCLOTHES_API FDynamicWetReceiverContext
     FLinearColor& UnassignedWetPartDebugColor;
     FName& WetPartDebugStrengthParameterName;
     FName& WetPartDebugUseWetnessMaskParameterName;
-    FName& ProfileMap0ParameterName;
-    FName& UseProfileMap0ParameterName;
+    FName& WetnessProfileMap0ParameterName;
+    FName& UseWetnessProfileMap0ParameterName;
     TArray<TObjectPtr<UMaterialInstanceDynamic>>& WetMaterialInstances;
     FDynamicWetReceiverRuntimeData& RuntimeData;
     FDynamicWetReceiverRuntimeDataBuilder& RuntimeDataBuilder;
@@ -51,8 +51,8 @@ struct DYNAMICWETCLOTHES_API FDynamicWetReceiverContext
         FLinearColor& InUnassignedWetPartDebugColor,
         FName& InWetPartDebugStrengthParameterName,
         FName& InWetPartDebugUseWetnessMaskParameterName,
-        FName& InProfileMap0ParameterName,
-        FName& InUseProfileMap0ParameterName,
+        FName& InWetnessProfileMap0ParameterName,
+        FName& InUseWetnessProfileMap0ParameterName,
         TArray<TObjectPtr<UMaterialInstanceDynamic>>& InWetMaterialInstances,
         FDynamicWetReceiverRuntimeData& InRuntimeData,
         FDynamicWetReceiverRuntimeDataBuilder& InRuntimeDataBuilder,
@@ -72,8 +72,8 @@ struct DYNAMICWETCLOTHES_API FDynamicWetReceiverContext
         , UnassignedWetPartDebugColor(InUnassignedWetPartDebugColor)
         , WetPartDebugStrengthParameterName(InWetPartDebugStrengthParameterName)
         , WetPartDebugUseWetnessMaskParameterName(InWetPartDebugUseWetnessMaskParameterName)
-        , ProfileMap0ParameterName(InProfileMap0ParameterName)
-        , UseProfileMap0ParameterName(InUseProfileMap0ParameterName)
+        , WetnessProfileMap0ParameterName(InWetnessProfileMap0ParameterName)
+        , UseWetnessProfileMap0ParameterName(InUseWetnessProfileMap0ParameterName)
         , WetMaterialInstances(InWetMaterialInstances)
         , RuntimeData(InRuntimeData)
         , RuntimeDataBuilder(InRuntimeDataBuilder)

@@ -58,6 +58,7 @@ bool UDynamicWetReceiverComponent::InitializeReceiverRuntime()
     RuntimeDataBuilder->InitializeWetPartVertexData(Context);
     RuntimeDataBuilder->BuildBoneOptimizationCache(Context, 0);
     RuntimeDataBuilder->BuildNeighborGraph(Context);
+    ApplyWetMaterialOverrides();
     RenderApplier->InitializeWetMaterialInstance(Context);
     RenderApplier->ApplyWetMaterialParameters(Context);
 
@@ -97,8 +98,8 @@ FDynamicWetReceiverContext UDynamicWetReceiverComponent::MakeContext()
         UnassignedWetPartDebugColor,
         WetPartDebugStrengthParameterName,
         WetPartDebugUseWetnessMaskParameterName,
-        ProfileMap0ParameterName,
-        UseProfileMap0ParameterName,
+        WetnessProfileMap0ParameterName,
+        UseWetnessProfileMap0ParameterName,
         WetMaterialInstances,
         *RuntimeData,
         *RuntimeDataBuilder,
@@ -131,6 +132,35 @@ USkeletalMeshComponent* UDynamicWetReceiverComponent::ResolveTargetSkeletalMesh(
     }
 
     return Meshes.Num() > 0 ? Meshes[0] : nullptr;
+}
+
+void UDynamicWetReceiverComponent::ApplyWetMaterialOverrides()
+{
+    if (TargetSkeletalMesh == nullptr || WetClothingProfile == nullptr)
+    {
+        return;
+    }
+
+    for (const FWetClothingAssetWetMaterialOverride& MaterialOverride : WetClothingProfile->WetMaterialOverrides)
+    {
+        if (MaterialOverride.MaterialSlotIndex == INDEX_NONE || MaterialOverride.WetMaterial == nullptr)
+        {
+            continue;
+        }
+
+        if (MaterialOverride.MaterialSlotIndex >= TargetSkeletalMesh->GetNumMaterials())
+        {
+            UE_LOG(
+                LogTemp,
+                Warning,
+                TEXT("DynamicWetReceiverComponent: Wet material override slot %d is out of range on %s."),
+                MaterialOverride.MaterialSlotIndex,
+                *GetNameSafe(TargetSkeletalMesh));
+            continue;
+        }
+
+        TargetSkeletalMesh->SetMaterial(MaterialOverride.MaterialSlotIndex, MaterialOverride.WetMaterial);
+    }
 }
 
 void UDynamicWetReceiverComponent::ApplyWetAll(const float Amount)
@@ -280,8 +310,8 @@ void UDynamicWetReceiverComponent::PostEditChangeProperty(FPropertyChangedEvent&
         PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetReceiverComponent, bWetPartDebugUseWetnessMask) ||
         PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetReceiverComponent, WetPartDebugStrengthParameterName) ||
         PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetReceiverComponent, WetPartDebugUseWetnessMaskParameterName) ||
-        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetReceiverComponent, ProfileMap0ParameterName) ||
-        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetReceiverComponent, UseProfileMap0ParameterName) ||
+        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetReceiverComponent, WetnessProfileMap0ParameterName) ||
+        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetReceiverComponent, UseWetnessProfileMap0ParameterName) ||
         PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetReceiverComponent, UnassignedWetPartDebugColor) ||
         PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetReceiverComponent, WetClothingProfile))
     {

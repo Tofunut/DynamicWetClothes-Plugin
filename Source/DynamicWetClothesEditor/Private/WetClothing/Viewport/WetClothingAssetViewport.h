@@ -48,6 +48,7 @@ class SWetClothingAssetViewport : public SEditorViewport, public FGCObject
 
   protected:
     virtual TSharedRef<FEditorViewportClient> MakeEditorViewportClient() override;
+    virtual TSharedPtr<SWidget>               BuildViewportToolbar() override;
     virtual void                              PopulateViewportOverlays(TSharedRef<SOverlay> Overlay) override;
     virtual void                              OnFocusViewportToSelection() override;
 

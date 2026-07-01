@@ -22,9 +22,9 @@ void SWetClothingAutoPartitionControls::Construct(const FArguments& InArgs)
                    [SNew(SButton)
                         .IsEnabled(InArgs._IsAutoPartitionEnabled)
                         .OnClicked(InArgs._OnAutoPartitionClicked)
-                        .ContentPadding(FMargin(0.0f, 3.0f, 6.0f, 3.0f))
+                        .ContentPadding(FMargin(0.0f, 2.0f, 6.0f, 2.0f))
                             [SNew(SBox)
-                                 .HeightOverride(30.0f)
+                                 .HeightOverride(24.0f)
                                  .VAlign(VAlign_Center)
                                      [SNew(SHorizontalBox)
 
@@ -33,8 +33,8 @@ void SWetClothingAutoPartitionControls::Construct(const FArguments& InArgs)
                                             .VAlign(VAlign_Center)
                                             .Padding(0.0f, 0.0f, 4.0f, 0.0f)
                                                 [SNew(SBox)
-                                                     .WidthOverride(20.0f)
-                                                     .HeightOverride(20.0f)
+                                                     .WidthOverride(16.0f)
+                                                     .HeightOverride(16.0f)
                                                          [SNew(SImage)
                                                               .Image(FDynamicWetClothesEditorStyle::GetBrush(TEXT("DynamicWetClothesEditor.AutoPartitioning")))]]
 
@@ -42,7 +42,7 @@ void SWetClothingAutoPartitionControls::Construct(const FArguments& InArgs)
                                             .AutoWidth()
                                             .VAlign(VAlign_Center)
                                                 [SNew(STextBlock)
-                                                     .Text(LOCTEXT("AutoPartitionButton", "Auto Partition"))]]]]];
+                                                     .Text(LOCTEXT("AutoPartitionButton", "Auto Partition…"))]]]]];
 }
 
 #undef LOCTEXT_NAMESPACE

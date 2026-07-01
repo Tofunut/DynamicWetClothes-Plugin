@@ -28,6 +28,7 @@ public class DynamicWetClothesEditor : ModuleRules
 				"RenderCore",
 				"Slate",
 				"SlateCore",
+				"ToolMenus",
 				"UnrealEd"
 			});
 	}

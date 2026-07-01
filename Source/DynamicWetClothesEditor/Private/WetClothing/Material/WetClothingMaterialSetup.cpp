@@ -545,3 +545,21 @@ FWetClothingMaterialSetupResult FWetClothingMaterialSetup::DuplicateAndApplyToMa
                          : FString::Printf(TEXT("Duplicated the source material as '%s', but material compilation reported %d error(s)."), *Material->GetName(), CompileErrors.Num());
     return Result;
 }
+
+bool FWetClothingMaterialSetup::IsMaterialConfiguredForDwc(UMaterialInterface* MaterialInterface)
+{
+    if (MaterialInterface == nullptr)
+    {
+        return false;
+    }
+
+    UMaterial* Material = MaterialInterface->GetMaterial();
+    if (Material == nullptr)
+    {
+        return false;
+    }
+
+    UMaterialFunctionInterface* ApplyFunction = LoadObject<UMaterialFunctionInterface>(nullptr, ApplyWetnessFunctionPath);
+    UMaterialFunctionInterface* DebugFunction = LoadObject<UMaterialFunctionInterface>(nullptr, WetPartDebugFunctionPath);
+    return HasFunctionCall(Material, ApplyFunction) && HasFunctionCall(Material, DebugFunction);
+}

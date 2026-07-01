@@ -124,7 +124,33 @@ void FWetClothingAssetViewportClient::FocusOnPreviewMesh(const USkeletalMeshComp
     }
 
     const FBoxSphereBounds Bounds = InPreviewMeshComponent->CalcBounds(InPreviewMeshComponent->GetComponentTransform());
-    FocusViewportOnBox(Bounds.GetBox(), bInstant);
+    float Radius = FMath::Max3(
+        static_cast<float>(Bounds.BoxExtent.X),
+        static_cast<float>(Bounds.BoxExtent.Y),
+        static_cast<float>(Bounds.BoxExtent.Z));
+    Radius = FMath::Max(Radius, static_cast<float>(Bounds.SphereRadius));
+    Radius = FMath::Max(Radius, MinimumFocusRadius);
+
+    float AspectToUse = AspectRatio;
+    if (Viewport != nullptr)
+    {
+        const FIntPoint ViewportSize = Viewport->GetSizeXY();
+        if (ViewportSize.X > 0 && ViewportSize.Y > 0)
+        {
+            AspectToUse = Viewport->GetDesiredAspectRatio();
+        }
+    }
+
+    if (AspectToUse > 1.0f)
+    {
+        Radius *= AspectToUse;
+    }
+
+    const float HalfFOVRadians = FMath::DegreesToRadians(FMath::Max(ViewFOV, 5.0f) * 0.5f);
+    const float DistanceToCamera = (Radius / FMath::Tan(HalfFOVRadians)) * 1.15f;
+    ToggleOrbitCamera(true);
+    SetViewLocationForOrbiting(Bounds.Origin, DistanceToCamera);
+    Invalidate();
 }
 
 void FWetClothingAssetViewportClient::RequestFocusOnPreviewMeshNextTick(const USkeletalMeshComponent* InPreviewMeshComponent)

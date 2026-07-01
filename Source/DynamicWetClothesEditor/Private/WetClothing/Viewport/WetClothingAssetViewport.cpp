@@ -9,6 +9,8 @@
 #include "Materials/MaterialInterface.h"
 #include "ProceduralMeshComponent.h"
 #include "Styling/AppStyle.h"
+#include "ToolMenus.h"
+#include "ViewportToolbar/UnrealEdViewportToolbar.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Text/SRichTextBlock.h"
 
@@ -668,6 +670,30 @@ TSharedRef<FEditorViewportClient> SWetClothingAssetViewport::MakeEditorViewportC
     }
 
     return ViewportClient.ToSharedRef();
+}
+
+TSharedPtr<SWidget> SWetClothingAssetViewport::BuildViewportToolbar()
+{
+    const FName ViewportToolbarName = TEXT("WetClothingAssetEditor.ViewportToolbar");
+
+    if (!UToolMenus::Get()->IsMenuRegistered(ViewportToolbarName))
+    {
+        UToolMenu* const ViewportToolbarMenu = UToolMenus::Get()->RegisterMenu(ViewportToolbarName, NAME_None, EMultiBoxType::SlimHorizontalToolBar);
+        ViewportToolbarMenu->StyleName = TEXT("ViewportToolbar");
+
+        ViewportToolbarMenu->AddSection(TEXT("Left"));
+
+        FToolMenuSection& RightSection = ViewportToolbarMenu->AddSection(TEXT("Right"));
+        RightSection.Alignment = EToolMenuSectionAlign::Last;
+        RightSection.AddEntry(UE::UnrealEd::CreateCameraSubmenu(UE::UnrealEd::FViewportCameraMenuOptions().ShowAll()));
+        RightSection.AddEntry(UE::UnrealEd::CreateViewModesSubmenu());
+    }
+
+    FToolMenuContext ViewportToolbarContext;
+    ViewportToolbarContext.AppendCommandList(GetCommandList());
+    ViewportToolbarContext.AddObject(UE::UnrealEd::CreateViewportToolbarDefaultContext(SharedThis(this)));
+
+    return UToolMenus::Get()->GenerateWidget(ViewportToolbarName, ViewportToolbarContext);
 }
 
 void SWetClothingAssetViewport::HandleIslandPickedFromClient(int32 IslandID, bool bAppendSelection)

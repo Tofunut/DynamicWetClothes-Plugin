@@ -23,6 +23,7 @@ class FWetClothingAssetEditor : public FAssetEditorToolkit
     virtual FText        GetBaseToolkitName() const override;
     virtual FString      GetWorldCentricTabPrefix() const override;
     virtual FLinearColor GetWorldCentricTabColorScale() const override;
+    virtual bool         OnRequestClose(EAssetEditorCloseReason InCloseReason) override;
 
   private:
     void                 HandleFinishedChangingProperties(const FPropertyChangedEvent& PropertyChangedEvent);

@@ -1,5 +1,4 @@
-#include "WetClothing/ProfileMap/WetClothingProfileMapBaker.h"
-#include "WetClothing/Texture/WetClothingTextureAddressUtils.h"
+#include "WetClothing/WetnessProfileMap/WetClothingWetnessProfileMapBaker.h"
 
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Engine/Texture.h"
@@ -13,7 +12,7 @@
 
 namespace
 {
-    bool IsProfileMapUVPointInsideTriangle(const FVector2D& Point, const FVector2D& A, const FVector2D& B, const FVector2D& C)
+    bool IsWetnessProfileMapUVPointInsideTriangle(const FVector2D& Point, const FVector2D& A, const FVector2D& B, const FVector2D& C)
     {
         const auto Sign = [](const FVector2D& P1, const FVector2D& P2, const FVector2D& P3)
         {
@@ -42,6 +41,26 @@ namespace
             255);
     }
 
+    double ApplyTextureAddress(double Value, double IslandCenter, TextureAddress AddressMode)
+    {
+        switch (AddressMode)
+        {
+        case TA_Wrap:
+            return Value - FMath::FloorToDouble(IslandCenter);
+
+        case TA_Mirror:
+        {
+            const int64  TileIndex = FMath::FloorToInt64(IslandCenter);
+            const double TileValue = Value - static_cast<double>(TileIndex);
+            return FMath::Abs(TileIndex) % 2 == 0 ? TileValue : 1.0 - TileValue;
+        }
+
+        case TA_Clamp:
+        default:
+            return FMath::Clamp(Value, 0.0, 1.0);
+        }
+    }
+
     void ApplyTextureAddressToIslands(TArray<FWetClothingAssetUVIsland>& Islands, TextureAddress AddressX, TextureAddress AddressY)
     {
         for (FWetClothingAssetUVIsland& Island : Islands)
@@ -66,8 +85,8 @@ namespace
                 for (int32 VertexIndex = 0; VertexIndex < 3; ++VertexIndex)
                 {
                     FVector2D& UV = Triangle.UVs[VertexIndex];
-                    UV.X = WetClothingTextureAddressUtils::Apply(UV.X, SourceCenter.X, AddressX);
-                    UV.Y = WetClothingTextureAddressUtils::Apply(UV.Y, SourceCenter.Y, AddressY);
+                    UV.X = ApplyTextureAddress(UV.X, SourceCenter.X, AddressX);
+                    UV.Y = ApplyTextureAddress(UV.Y, SourceCenter.Y, AddressY);
                     Island.UVBounds += UV;
                 }
             }
@@ -139,7 +158,7 @@ namespace
                     (static_cast<double>(PixelX) + 0.5) / Width,
                     (static_cast<double>(PixelY) + 0.5) / Height);
 
-                if (!IsProfileMapUVPointInsideTriangle(SampleUV, A, B, C))
+                if (!IsWetnessProfileMapUVPointInsideTriangle(SampleUV, A, B, C))
                 {
                     continue;
                 }
@@ -230,10 +249,10 @@ namespace
         }
     }
 
-    FString BuildProfileMapObjectName(const UWetClothingAsset& WetClothingAsset, const UTexture& SourceTexture, int32 UVChannelIndex)
+    FString BuildWetnessProfileMapObjectName(const UWetClothingAsset& WetClothingAsset, const UTexture& SourceTexture, int32 UVChannelIndex)
     {
         const FString RawName = FString::Printf(
-            TEXT("T_%s_%s_UV%d_ProfileMap0"),
+            TEXT("T_%s_%s_UV%d_WetnessProfileMap0"),
             *WetClothingAsset.GetName(),
             *SourceTexture.GetName(),
             UVChannelIndex);
@@ -258,7 +277,7 @@ namespace
             return nullptr;
         }
 
-        const FString ObjectName = BuildProfileMapObjectName(WetClothingAsset, SourceTexture, UVChannelIndex);
+        const FString ObjectName = BuildWetnessProfileMapObjectName(WetClothingAsset, SourceTexture, UVChannelIndex);
         const FString TexturePackageName = PackagePath / ObjectName;
         const FString TextureObjectPath = TexturePackageName + TEXT(".") + ObjectName;
 
@@ -302,22 +321,22 @@ namespace
         OutErrorMessage.Reset();
         return Texture;
 #else
-        OutErrorMessage = TEXT("ProfileMap baking requires editor-only texture source data.");
+        OutErrorMessage = TEXT("Wetness Profile Map baking requires editor-only texture source data.");
         return nullptr;
 #endif
     }
 } // namespace
 
-bool FWetClothingProfileMapBaker::BakeProfileMap0(
+bool FWetClothingWetnessProfileMapBaker::BakeWetnessProfileMap0(
     UWetClothingAsset*                         WetClothingAsset,
     UTexture*                                  SourceTexture,
     int32                                      UVChannelIndex,
     const TArray<int32>&                       MaterialSlotIndices,
-    const FWetClothingProfileMapBakeSettings& Settings,
-    FWetClothingProfileMapBakeResult&          OutResult,
+    const FWetClothingWetnessProfileMapBakeSettings& Settings,
+    FWetClothingWetnessProfileMapBakeResult&          OutResult,
     FString&                                   OutErrorMessage)
 {
-    OutResult = FWetClothingProfileMapBakeResult();
+    OutResult = FWetClothingWetnessProfileMapBakeResult();
 
     if (WetClothingAsset == nullptr)
     {
@@ -327,13 +346,13 @@ bool FWetClothingProfileMapBaker::BakeProfileMap0(
 
     if (WetClothingAsset->TargetMesh == nullptr)
     {
-        OutErrorMessage = TEXT("Assign a TargetMesh before baking a ProfileMap.");
+        OutErrorMessage = TEXT("Assign a TargetMesh before baking a Wetness Profile Map.");
         return false;
     }
 
     if (SourceTexture == nullptr)
     {
-        OutErrorMessage = TEXT("Select a source texture before baking a ProfileMap.");
+        OutErrorMessage = TEXT("Select a source texture before baking a Wetness Profile Map.");
         return false;
     }
 
@@ -399,7 +418,7 @@ bool FWetClothingProfileMapBaker::BakeProfileMap0(
 
     DilatePaintedPixels(Pixels, PaintedMask, Width, Height, Settings.PaddingPixels);
 
-    UTexture2D* ProfileMap0 = CreateOrUpdateTextureAsset(
+    UTexture2D* WetnessProfileMap0 = CreateOrUpdateTextureAsset(
         *WetClothingAsset,
         *SourceTexture,
         UVChannelIndex,
@@ -407,35 +426,35 @@ bool FWetClothingProfileMapBaker::BakeProfileMap0(
         Height,
         Pixels,
         OutErrorMessage);
-    if (ProfileMap0 == nullptr)
+    if (WetnessProfileMap0 == nullptr)
     {
         return false;
     }
 
     WetClothingAsset->Modify();
 
-    FWetClothingAssetBakedProfileMap* BakedProfileMap = WetClothingAsset->BakedProfileMaps.FindByPredicate(
-        [SourceTexture, UVChannelIndex](const FWetClothingAssetBakedProfileMap& ExistingProfileMap)
+    FWetClothingAssetBakedWetnessProfileMap* BakedWetnessProfileMap = WetClothingAsset->BakedWetnessProfileMaps.FindByPredicate(
+        [SourceTexture, UVChannelIndex](const FWetClothingAssetBakedWetnessProfileMap& ExistingWetnessProfileMap)
         {
-            return ExistingProfileMap.SourceTexture == SourceTexture && ExistingProfileMap.UVChannelIndex == UVChannelIndex;
+            return ExistingWetnessProfileMap.SourceTexture == SourceTexture && ExistingWetnessProfileMap.UVChannelIndex == UVChannelIndex;
         });
 
-    if (BakedProfileMap == nullptr)
+    if (BakedWetnessProfileMap == nullptr)
     {
-        BakedProfileMap = &WetClothingAsset->BakedProfileMaps.AddDefaulted_GetRef();
+        BakedWetnessProfileMap = &WetClothingAsset->BakedWetnessProfileMaps.AddDefaulted_GetRef();
     }
 
-    BakedProfileMap->SourceTexture = SourceTexture;
-    BakedProfileMap->UVChannelIndex = UVChannelIndex;
-    BakedProfileMap->MaterialSlotIndices = SortedMaterialSlotIndices;
-    BakedProfileMap->ProfileMap0 = ProfileMap0;
-    BakedProfileMap->Resolution = MaxResolution;
-    BakedProfileMap->PaddingPixels = Settings.PaddingPixels;
-    BakedProfileMap->BakeGuid = FGuid::NewGuid();
+    BakedWetnessProfileMap->SourceTexture = SourceTexture;
+    BakedWetnessProfileMap->UVChannelIndex = UVChannelIndex;
+    BakedWetnessProfileMap->MaterialSlotIndices = SortedMaterialSlotIndices;
+    BakedWetnessProfileMap->WetnessProfileMap0 = WetnessProfileMap0;
+    BakedWetnessProfileMap->Resolution = MaxResolution;
+    BakedWetnessProfileMap->PaddingPixels = Settings.PaddingPixels;
+    BakedWetnessProfileMap->BakeGuid = FGuid::NewGuid();
 
     WetClothingAsset->MarkPackageDirty();
 
-    OutResult.ProfileMap0 = ProfileMap0;
+    OutResult.WetnessProfileMap0 = WetnessProfileMap0;
     OutResult.MaterialSlotIndices = SortedMaterialSlotIndices;
     OutResult.PaintedPixelCount = PaintedPixelCount;
     OutErrorMessage.Reset();

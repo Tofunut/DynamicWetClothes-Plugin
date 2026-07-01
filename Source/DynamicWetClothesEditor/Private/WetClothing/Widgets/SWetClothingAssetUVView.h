@@ -44,6 +44,7 @@ class SWetClothingAssetUVView : public SLeafWidget
     void                               SetSelectedIslands(const TSet<int32>& InIslandIDs);
     void                               SetIslandColors(const TMap<int32, FLinearColor>& InIslandColors);
     void                               SetBackgroundTexture(UTexture* InTexture);
+    void                               SetDrawBackgroundTexture(bool bInDrawBackgroundTexture);
     void                               SetSelectionTool(EWetClothingAssetUVSelectionTool InSelectionTool);
     void                               SetDisplayMode(EWetClothingAssetUVDisplayMode InDisplayMode);
     EWetClothingAssetUVSelectionTool GetSelectionTool() const { return SelectionTool; }
@@ -135,6 +136,7 @@ class SWetClothingAssetUVView : public SLeafWidget
     FOnWetClothingUVIslandSelectionChanged OnIslandSelectionChanged;
     FSlateBrush                            BackgroundTextureBrush;
     TWeakObjectPtr<UTexture>               BackgroundTexture;
+    bool                                   bDrawBackgroundTexture = true;
     float                                  Padding = 16.0f;
     double                                 ZoomAmount = 1.0;
     FVector2D                              ViewOffset = FVector2D::ZeroVector;

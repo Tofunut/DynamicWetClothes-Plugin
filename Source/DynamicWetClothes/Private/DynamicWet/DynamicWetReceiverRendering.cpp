@@ -68,29 +68,29 @@ void FDynamicWetReceiverRenderApplier::ApplyWetMaterialParameters(FDynamicWetRec
 
     }
 
-    ApplyWetProfileMapParameters(Receiver);
+    ApplyWetnessProfileMapParameters(Receiver);
 }
 
-void FDynamicWetReceiverRenderApplier::ApplyWetProfileMapParameters(FDynamicWetReceiverContext& Receiver)
+void FDynamicWetReceiverRenderApplier::ApplyWetnessProfileMapParameters(FDynamicWetReceiverContext& Receiver)
 {
-    if (Receiver.ProfileMap0ParameterName.IsNone() && Receiver.UseProfileMap0ParameterName.IsNone())
+    if (Receiver.WetnessProfileMap0ParameterName.IsNone() && Receiver.UseWetnessProfileMap0ParameterName.IsNone())
     {
         return;
     }
 
-    TArray<bool> bProfileMapAssigned;
-    bProfileMapAssigned.Init(false, Receiver.WetMaterialInstances.Num());
+    TArray<bool> bWetnessProfileMapAssigned;
+    bWetnessProfileMapAssigned.Init(false, Receiver.WetMaterialInstances.Num());
 
     if (Receiver.WetClothingProfile)
     {
-        for (const FWetClothingAssetBakedProfileMap& BakedProfileMap : Receiver.WetClothingProfile->BakedProfileMaps)
+        for (const FWetClothingAssetBakedWetnessProfileMap& BakedWetnessProfileMap : Receiver.WetClothingProfile->BakedWetnessProfileMaps)
         {
-            if (BakedProfileMap.ProfileMap0 == nullptr)
+            if (BakedWetnessProfileMap.WetnessProfileMap0 == nullptr)
             {
                 continue;
             }
 
-            for (const int32 MaterialSlotIndex : BakedProfileMap.MaterialSlotIndices)
+            for (const int32 MaterialSlotIndex : BakedWetnessProfileMap.MaterialSlotIndices)
             {
                 if (!Receiver.WetMaterialInstances.IsValidIndex(MaterialSlotIndex))
                 {
@@ -103,30 +103,30 @@ void FDynamicWetReceiverRenderApplier::ApplyWetProfileMapParameters(FDynamicWetR
                     continue;
                 }
 
-                if (!Receiver.ProfileMap0ParameterName.IsNone())
+                if (!Receiver.WetnessProfileMap0ParameterName.IsNone())
                 {
-                    MID->SetTextureParameterValue(Receiver.ProfileMap0ParameterName, BakedProfileMap.ProfileMap0);
+                    MID->SetTextureParameterValue(Receiver.WetnessProfileMap0ParameterName, BakedWetnessProfileMap.WetnessProfileMap0);
                 }
 
-                if (!Receiver.UseProfileMap0ParameterName.IsNone())
+                if (!Receiver.UseWetnessProfileMap0ParameterName.IsNone())
                 {
-                    MID->SetScalarParameterValue(Receiver.UseProfileMap0ParameterName, 1.0f);
+                    MID->SetScalarParameterValue(Receiver.UseWetnessProfileMap0ParameterName, 1.0f);
                 }
 
-                bProfileMapAssigned[MaterialSlotIndex] = true;
+                bWetnessProfileMapAssigned[MaterialSlotIndex] = true;
 
             }
         }
     }
 
-    if (Receiver.UseProfileMap0ParameterName.IsNone())
+    if (Receiver.UseWetnessProfileMap0ParameterName.IsNone())
     {
         return;
     }
 
     for (int32 MaterialSlotIndex = 0; MaterialSlotIndex < Receiver.WetMaterialInstances.Num(); ++MaterialSlotIndex)
     {
-        if (bProfileMapAssigned.IsValidIndex(MaterialSlotIndex) && bProfileMapAssigned[MaterialSlotIndex])
+        if (bWetnessProfileMapAssigned.IsValidIndex(MaterialSlotIndex) && bWetnessProfileMapAssigned[MaterialSlotIndex])
         {
             continue;
         }
@@ -134,7 +134,7 @@ void FDynamicWetReceiverRenderApplier::ApplyWetProfileMapParameters(FDynamicWetR
         UMaterialInstanceDynamic* MID = Receiver.WetMaterialInstances[MaterialSlotIndex];
         if (MID != nullptr)
         {
-            MID->SetScalarParameterValue(Receiver.UseProfileMap0ParameterName, 0.0f);
+            MID->SetScalarParameterValue(Receiver.UseWetnessProfileMap0ParameterName, 0.0f);
         }
     }
 }

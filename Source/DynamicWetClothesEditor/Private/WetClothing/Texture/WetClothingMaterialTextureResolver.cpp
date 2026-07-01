@@ -83,12 +83,32 @@ namespace
         return Score;
     }
 
+    bool IsEngineDefaultTexture(UTexture* Texture)
+    {
+        if (Texture == nullptr)
+        {
+            return true;
+        }
+
+        const FString TextureName = Texture->GetName();
+        if (TextureName == TEXT("BaseFlattenLinearColor") ||
+            TextureName == TEXT("DefaultNormal") ||
+            TextureName == TEXT("DefaultTexture"))
+        {
+            return true;
+        }
+
+        const FString TexturePath = Texture->GetPathName();
+        return TexturePath.StartsWith(TEXT("/Engine/EngineResources/Default")) ||
+               TexturePath.StartsWith(TEXT("/Engine/EngineResources/BaseFlatten"));
+    }
+
     void AddOrUpdateTextureCandidate(
         TMap<UTexture*, FWetClothingTextureCandidate>& InOutCandidates,
         UTexture*                                      Texture,
         const FString&                                 ParameterName)
     {
-        if (Texture == nullptr)
+        if (Texture == nullptr || IsEngineDefaultTexture(Texture))
         {
             return;
         }

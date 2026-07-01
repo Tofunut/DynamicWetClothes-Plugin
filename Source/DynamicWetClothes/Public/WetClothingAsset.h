@@ -7,6 +7,7 @@
 #include "WetClothingAsset.generated.h"
 
 class USkeletalMesh;
+class UMaterialInterface;
 class UTexture;
 class UTexture2D;
 
@@ -80,6 +81,21 @@ struct FWetClothingAssetWetPartEntry
 };
 
 USTRUCT(BlueprintType)
+struct FWetClothingAssetWetMaterialOverride
+{
+    GENERATED_BODY()
+
+    UPROPERTY(VisibleAnywhere, Category = "Wet Material")
+    int32 MaterialSlotIndex = INDEX_NONE;
+
+    UPROPERTY(VisibleAnywhere, Category = "Wet Material")
+    TObjectPtr<UMaterialInterface> SourceMaterial = nullptr;
+
+    UPROPERTY(VisibleAnywhere, Category = "Wet Material")
+    TObjectPtr<UMaterialInterface> WetMaterial = nullptr;
+};
+
+USTRUCT(BlueprintType)
 struct FWetClothingAssetBakedVertexData
 {
     GENERATED_BODY()
@@ -134,29 +150,29 @@ struct FWetClothingAssetBakedRuntimeData
 };
 
 USTRUCT(BlueprintType)
-struct FWetClothingAssetBakedProfileMap
+struct FWetClothingAssetBakedWetnessProfileMap
 {
     GENERATED_BODY()
 
-    UPROPERTY(VisibleAnywhere, Category = "Profile Map")
+    UPROPERTY(VisibleAnywhere, Category = "Wetness Profile Map")
     TObjectPtr<UTexture> SourceTexture = nullptr;
 
-    UPROPERTY(VisibleAnywhere, Category = "Profile Map")
+    UPROPERTY(VisibleAnywhere, Category = "Wetness Profile Map")
     int32 UVChannelIndex = 0;
 
-    UPROPERTY(VisibleAnywhere, Category = "Profile Map")
+    UPROPERTY(VisibleAnywhere, Category = "Wetness Profile Map")
     TArray<int32> MaterialSlotIndices;
 
-    UPROPERTY(VisibleAnywhere, Category = "Profile Map")
-    TObjectPtr<UTexture2D> ProfileMap0 = nullptr;
+    UPROPERTY(VisibleAnywhere, Category = "Wetness Profile Map")
+    TObjectPtr<UTexture2D> WetnessProfileMap0 = nullptr;
 
-    UPROPERTY(EditAnywhere, Category = "Profile Map")
+    UPROPERTY(EditAnywhere, Category = "Wetness Profile Map")
     int32 Resolution = 512;
 
-    UPROPERTY(EditAnywhere, Category = "Profile Map")
+    UPROPERTY(EditAnywhere, Category = "Wetness Profile Map")
     int32 PaddingPixels = 4;
 
-    UPROPERTY(VisibleAnywhere, Category = "Profile Map")
+    UPROPERTY(VisibleAnywhere, Category = "Wetness Profile Map")
     FGuid BakeGuid;
 };
 
@@ -180,11 +196,14 @@ class DYNAMICWETCLOTHES_API UWetClothingAsset : public UDataAsset
     UPROPERTY()
     TArray<FWetClothingAssetWetPartEntry> WetPartEntries;
 
+    UPROPERTY(VisibleAnywhere, Category = "Wet Clothing|Wet Materials")
+    TArray<FWetClothingAssetWetMaterialOverride> WetMaterialOverrides;
+
     UPROPERTY(VisibleAnywhere, Category = "Wet Clothing|Runtime Data")
     FWetClothingAssetBakedRuntimeData BakedRuntimeData;
 
-    UPROPERTY(VisibleAnywhere, Category = "Wet Clothing|Profile Maps")
-    TArray<FWetClothingAssetBakedProfileMap> BakedProfileMaps;
+    UPROPERTY(VisibleAnywhere, Category = "Wet Clothing|Wetness Profile Maps")
+    TArray<FWetClothingAssetBakedWetnessProfileMap> BakedWetnessProfileMaps;
 
 #if WITH_EDITORONLY_DATA
     UPROPERTY(EditAnywhere, Category = "Wet Clothing")

@@ -68,6 +68,7 @@ private:
 	bool FlushPendingWetContacts();
 
 	USkeletalMeshComponent* ResolveTargetSkeletalMesh() const;
+	void ApplyWetMaterialOverrides();
 
 public:
 	UPROPERTY(EditAnywhere, Category = "Wetness")
@@ -112,11 +113,11 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Debug")
 	FName WetPartDebugUseWetnessMaskParameterName = TEXT("DWC_WetPartDebugUseWetnessMask");
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|ProfileMap")
-	FName ProfileMap0ParameterName = TEXT("DWC_ProfileMap0");
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Wetness Profile Map")
+	FName WetnessProfileMap0ParameterName = TEXT("DWC_ProfileMap0");
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|ProfileMap")
-	FName UseProfileMap0ParameterName = TEXT("DWC_UseProfileMap0");
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Wetness Profile Map")
+	FName UseWetnessProfileMap0ParameterName = TEXT("DWC_UseProfileMap0");
 
 	
 	UPROPERTY(Transient)

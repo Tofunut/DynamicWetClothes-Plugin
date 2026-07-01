@@ -6,28 +6,28 @@ class UTexture;
 class UTexture2D;
 class UWetClothingAsset;
 
-struct FWetClothingProfileMapBakeSettings
+struct FWetClothingWetnessProfileMapBakeSettings
 {
     int32 Resolution = 512;
     int32 PaddingPixels = 4;
 };
 
-struct FWetClothingProfileMapBakeResult
+struct FWetClothingWetnessProfileMapBakeResult
 {
-    TObjectPtr<UTexture2D> ProfileMap0 = nullptr;
+    TObjectPtr<UTexture2D> WetnessProfileMap0 = nullptr;
     TArray<int32>          MaterialSlotIndices;
     int32                  PaintedPixelCount = 0;
 };
 
-class FWetClothingProfileMapBaker
+class FWetClothingWetnessProfileMapBaker
 {
   public:
-    static bool BakeProfileMap0(
+    static bool BakeWetnessProfileMap0(
         UWetClothingAsset*                         WetClothingAsset,
         UTexture*                                  SourceTexture,
         int32                                      UVChannelIndex,
         const TArray<int32>&                       MaterialSlotIndices,
-        const FWetClothingProfileMapBakeSettings& Settings,
-        FWetClothingProfileMapBakeResult&          OutResult,
+        const FWetClothingWetnessProfileMapBakeSettings& Settings,
+        FWetClothingWetnessProfileMapBakeResult&          OutResult,
         FString&                                   OutErrorMessage);
 };

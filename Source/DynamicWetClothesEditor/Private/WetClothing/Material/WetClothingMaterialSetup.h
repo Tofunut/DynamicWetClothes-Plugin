@@ -17,4 +17,5 @@ class FWetClothingMaterialSetup
 {
   public:
     static FWetClothingMaterialSetupResult DuplicateAndApplyToMaterialInterface(UMaterialInterface* MaterialInterface);
+    static bool IsMaterialConfiguredForDwc(UMaterialInterface* MaterialInterface);
 };

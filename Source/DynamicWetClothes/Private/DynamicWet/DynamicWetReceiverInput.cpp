@@ -144,6 +144,21 @@ void ApplyWetContactNormalExposure(
         Receiver.WetnessSettings);
 }
 
+bool PassWetContactNormalFilter(
+    const FDynamicWetReceiverContext& Receiver,
+    const FWetContactEvaluationData& Evaluation,
+    const FVector* WorldNormal)
+{
+    if (!WorldNormal || WorldNormal->IsNearlyZero() || Evaluation.SafeNormal.IsNearlyZero())
+    {
+        return true;
+    }
+
+    const float NormalExposureMin =
+        FMath::Min(Receiver.WetnessSettings.RainExposureMin, Receiver.WetnessSettings.RainExposureMax);
+    return FVector::DotProduct(*WorldNormal, Evaluation.SafeNormal) >= NormalExposureMin;
+}
+
 bool ApplyWetContactInfluence(
     FDynamicWetReceiverContext& Receiver,
     const FWetContactEvaluationData& Evaluation,
@@ -229,6 +244,11 @@ bool ApplyPreparedWetContact(
         {
             WorldNormal = PreparedData.ComponentTransform.TransformVectorNoScale(FVector(Receiver.MeshSampler.CachedSkinnedNormals[VertexIndex])).GetSafeNormal();
             WorldNormalPtr = &WorldNormal;
+        }
+
+        if (!PassWetContactNormalFilter(Receiver, Evaluation, WorldNormalPtr))
+        {
+            return;
         }
 
         ApplyWetContactNormalExposure(Receiver, Evaluation, WorldNormalPtr, Influence);
@@ -329,6 +349,11 @@ bool ApplyDirectSkinnedWetContact(
             WorldNormalPtr = &WorldNormal;
         }
 
+        if (!PassWetContactNormalFilter(Receiver, Evaluation, WorldNormalPtr))
+        {
+            continue;
+        }
+
         ApplyWetContactNormalExposure(Receiver, Evaluation, WorldNormalPtr, Influence);
 
         if (ApplyWetContactInfluence(Receiver, Evaluation, VertexIndex, Influence, bDirty, bQueuedWetness))
@@ -366,7 +391,7 @@ float FDynamicWetReceiverInputApplicator::CalculateContactExposure(
     return Exposure;
 }
 
-void FDynamicWetReceiverInputApplicator::ApplyWetnessGlobal(FDynamicWetReceiverContext& Receiver, float Amount)
+void FDynamicWetReceiverInputApplicator::ApplyWetAll(FDynamicWetReceiverContext& Receiver, float Amount)
 {
     if (Receiver.SimulationState.WetnessPerVertex.Num() == 0 || FMath::IsNearlyZero(Amount))
     {
@@ -389,60 +414,6 @@ void FDynamicWetReceiverInputApplicator::ApplyWetnessGlobal(FDynamicWetReceiverC
         }
         else
         {
-            Receiver.SimulationSolver.AbsorbWetnessAtVertex(Receiver, VertexIndex, EffectiveAmount, bDirty);
-        }
-    }
-
-    if (bDirty)
-    {
-        Receiver.RenderApplier.ApplyWetnessToMaterial(Receiver);
-    }
-}
-
-void FDynamicWetReceiverInputApplicator::ApplyWetnessBelowHeight(FDynamicWetReceiverContext& Receiver, float WaterSurfaceZ, float Amount)
-{
-    if (!Receiver.TargetSkeletalMesh || FMath::IsNearlyZero(Amount))
-    {
-        return;
-    }
-
-    const float EffectiveAmount = Amount;
-
-    if (FMath::IsNearlyZero(EffectiveAmount) || !Receiver.MeshSampler.UpdateSkinnedPositions(Receiver))
-    {
-        return;
-    }
-
-    if (Receiver.SimulationState.WetnessPerVertex.Num() != Receiver.MeshSampler.CachedSkinnedPositions.Num())
-    {
-        Receiver.RuntimeDataBuilder.EnsureWetnessBufferSize(Receiver, Receiver.MeshSampler.CachedSkinnedPositions.Num());
-    }
-
-    bool bDirty = false;
-    const FTransform ComponentTransform = Receiver.TargetSkeletalMesh->GetComponentTransform();
-
-    for (int32 VertexIndex = 0; VertexIndex < Receiver.MeshSampler.CachedSkinnedPositions.Num(); ++VertexIndex)
-    {
-        const FVector WorldPosition =
-            ComponentTransform.TransformPosition(
-                FVector(Receiver.MeshSampler.CachedSkinnedPositions[VertexIndex]));
-
-        if (WorldPosition.Z > WaterSurfaceZ)
-        {
-            continue;
-        }
-
-        if (EffectiveAmount > 0.0f)
-        {
-            Receiver.SimulationSolver.QueuePendingWetness(Receiver, VertexIndex, EffectiveAmount * Receiver.GetAbsorptionMultiplierForVertex(VertexIndex));
-        }
-        else
-        {
-            if (Receiver.SimulationState.WetnessPerVertex[VertexIndex] <= 0.0f)
-            {
-                continue;
-            }
-
             Receiver.SimulationSolver.AbsorbWetnessAtVertex(Receiver, VertexIndex, EffectiveAmount, bDirty);
         }
     }
@@ -530,26 +501,12 @@ bool FDynamicWetReceiverInputApplicator::ApplyWetSurface(FDynamicWetReceiverCont
     return bDirty || bQueuedWetness;
 }
 
-bool FDynamicWetReceiverInputApplicator::ApplyRainWetness(FDynamicWetReceiverContext& Receiver, const FVector& RainDirection, float Amount, bool bApplyMaterial)
-{
-    FDWCWetContact Contact;
-    Contact.Amount = Amount;
-    Contact.Location = Receiver.TargetSkeletalMesh ? Receiver.TargetSkeletalMesh->Bounds.Origin : FVector::ZeroVector;
-    Contact.Radius = Receiver.TargetSkeletalMesh ? Receiver.TargetSkeletalMesh->Bounds.SphereRadius : 0.0f;
-    Contact.Direction = RainDirection;
-    Contact.Normal = -RainDirection.GetSafeNormal();
-
-    return ApplyWetContact(Receiver, Contact, bApplyMaterial);
-}
-
-bool FDynamicWetReceiverInputApplicator::ApplyWetRain(
-    FDynamicWetReceiverContext& Receiver,
-    const FDWCWetRainData& RainData,
-    const bool bApplyMaterial)
+bool FDynamicWetReceiverInputApplicator::ApplyWetArea( FDynamicWetReceiverContext& Receiver,
+    const FDWCWetAreaData& AreaData, const bool bApplyMaterial)
 {
     if (!Receiver.TargetSkeletalMesh ||
-        FMath::IsNearlyZero(RainData.Amount) ||
-        RainData.SampleCount <= 0)
+        FMath::IsNearlyZero(AreaData.Amount) ||
+        AreaData.SampleCount <= 0)
     {
         return false;
     }
@@ -571,24 +528,24 @@ bool FDynamicWetReceiverInputApplicator::ApplyWetRain(
         Receiver.RuntimeDataBuilder.EnsureWetnessBufferSize(Receiver, VertexCount);
     }
 
-    const bool bWantsNormalExposure = RainData.bUseNormalExposure && !RainData.Direction.IsNearlyZero();
+    const bool bWantsNormalExposure = AreaData.bUseNormalExposure && !AreaData.Direction.IsNearlyZero();
     const bool bHasSkinnedNormals =
         bWantsNormalExposure &&
-        RainData.bUseSkinnedNormalsForExposure &&
+        AreaData.bUseSkinnedNormalsForExposure &&
         Receiver.MeshSampler.UpdateSkinnedNormals(Receiver);
 
     const FTransform ComponentTransform = Receiver.TargetSkeletalMesh->GetComponentTransform();
     const FVector SafeDirection =
-        RainData.Direction.IsNearlyZero()
+        AreaData.Direction.IsNearlyZero()
             ? FVector::DownVector
-            : RainData.Direction.GetSafeNormal();
+            : AreaData.Direction.GetSafeNormal();
     const FVector SafeNormal = -SafeDirection;
-    const int32 SamplesToProcess = FMath::Min(RainData.SampleCount, VertexCount);
+    const int32 SamplesToProcess = FMath::Min(AreaData.SampleCount, VertexCount);
 
     FRandomStream RandomStream;
-    if (RainData.bOverrideRandomSeed)
+    if (AreaData.bOverrideRandomSeed)
     {
-        RandomStream.Initialize(RainData.RandomSeed);
+        RandomStream.Initialize(AreaData.RandomSeed);
     }
     else
     {
@@ -605,8 +562,8 @@ bool FDynamicWetReceiverInputApplicator::ApplyWetRain(
             return;
         }
 
-        if ((RainData.Amount > 0.0f && Receiver.SimulationState.WetnessPerVertex[VertexIndex] >= Receiver.WetnessSettings.MaxStoredWetness) ||
-            (RainData.Amount < 0.0f && Receiver.SimulationState.WetnessPerVertex[VertexIndex] <= 0.0f))
+        if ((AreaData.Amount > 0.0f && Receiver.SimulationState.WetnessPerVertex[VertexIndex] >= Receiver.WetnessSettings.MaxStoredWetness) ||
+            (AreaData.Amount < 0.0f && Receiver.SimulationState.WetnessPerVertex[VertexIndex] <= 0.0f))
         {
             return;
         }
@@ -647,9 +604,9 @@ bool FDynamicWetReceiverInputApplicator::ApplyWetRain(
         }
 
         const float VertexAmount =
-            (RainData.Amount > 0.0f
-                 ? RainData.Amount * Receiver.GetAbsorptionMultiplierForVertex(VertexIndex)
-                 : RainData.Amount) *
+            (AreaData.Amount > 0.0f
+                 ? AreaData.Amount * Receiver.GetAbsorptionMultiplierForVertex(VertexIndex)
+                 : AreaData.Amount) *
             Exposure;
 
         if (VertexAmount > 0.0f)

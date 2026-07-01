@@ -28,29 +28,29 @@ struct DYNAMICWETCLOTHES_API FDWCWetContact
 };
 
 USTRUCT(BlueprintType)
-struct DYNAMICWETCLOTHES_API FDWCWetRainData
+struct DYNAMICWETCLOTHES_API FDWCWetAreaData
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wet Rain")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wet Area")
     float Amount = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wet Rain")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wet Area")
     FVector Direction = FVector::DownVector;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wet Rain", meta = (ClampMin = "1"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wet Area", meta = (ClampMin = "1"))
     int32 SampleCount = 300;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wet Rain")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wet Area")
     bool bUseNormalExposure = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wet Rain")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wet Area")
     bool bUseSkinnedNormalsForExposure = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wet Rain")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wet Area")
     bool bOverrideRandomSeed = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wet Rain", meta = (EditCondition = "bOverrideRandomSeed"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wet Area", meta = (EditCondition = "bOverrideRandomSeed"))
     int32 RandomSeed = 0;
 };
 

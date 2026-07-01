@@ -29,7 +29,7 @@ private:
 	void ApplyWetnessTick();
 	void AddReceiverFromActor(AActor* OtherActor);
 	void RemoveReceiverFromActor(AActor* OtherActor);
-	void ApplyWetRainToReceiver(UDynamicWetReceiverComponent& Receiver) const;
+	void ApplyRainToReceiver(UDynamicWetReceiverComponent& Receiver) const;
 	void ApplyRainNiagaraParameters() const;
 
 	UFUNCTION()

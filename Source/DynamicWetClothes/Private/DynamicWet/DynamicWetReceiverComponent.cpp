@@ -133,16 +133,10 @@ USkeletalMeshComponent* UDynamicWetReceiverComponent::ResolveTargetSkeletalMesh(
     return Meshes.Num() > 0 ? Meshes[0] : nullptr;
 }
 
-void UDynamicWetReceiverComponent::ApplyWetnessGlobal(const float Amount)
+void UDynamicWetReceiverComponent::ApplyWetAll(const float Amount)
 {
     FDynamicWetReceiverContext Context = MakeContext();
-    InputApplicator->ApplyWetnessGlobal(Context, Amount);
-}
-
-void UDynamicWetReceiverComponent::ApplyWetnessBelowHeight(const float WaterSurfaceZ, const float Amount)
-{
-    FDynamicWetReceiverContext Context = MakeContext();
-    InputApplicator->ApplyWetnessBelowHeight(Context, WaterSurfaceZ, Amount);
+    InputApplicator->ApplyWetAll(Context, Amount);
 }
 
 bool UDynamicWetReceiverComponent::ApplyWetContact(const FDWCWetContact& Contact, const bool bApplyMaterial)
@@ -173,10 +167,10 @@ bool UDynamicWetReceiverComponent::ApplyWetContacts(const TArray<FDWCWetContact>
     return InputApplicator->ApplyWetContacts(Context, Contacts, bApplyMaterial);
 }
 
-bool UDynamicWetReceiverComponent::ApplyWetRain(const FDWCWetRainData& RainData, const bool bApplyMaterial)
+bool UDynamicWetReceiverComponent::ApplyWetArea(const FDWCWetAreaData& AreaData, const bool bApplyMaterial)
 {
     FDynamicWetReceiverContext Context = MakeContext();
-    return InputApplicator->ApplyWetRain(Context, RainData, bApplyMaterial);
+    return InputApplicator->ApplyWetArea(Context, AreaData, bApplyMaterial);
 }
 
 bool UDynamicWetReceiverComponent::ApplyWetSurface(

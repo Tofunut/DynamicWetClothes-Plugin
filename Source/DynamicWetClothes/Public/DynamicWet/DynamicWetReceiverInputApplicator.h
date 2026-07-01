@@ -5,7 +5,7 @@
 
 struct FDynamicWetReceiverContext;
 struct FDWCWetContact;
-struct FDWCWetRainData;
+struct FDWCWetAreaData;
 struct FDWCWetSurfaceData;
 
 class FDynamicWetReceiverInputApplicator
@@ -17,21 +17,15 @@ public:
         const FVector& Normal,
         const FDynamicWetReceiverSettings& Settings);
 
-    void ApplyWetnessGlobal(FDynamicWetReceiverContext& Receiver, float Amount);
-    void ApplyWetnessBelowHeight(FDynamicWetReceiverContext& Receiver, float WaterSurfaceZ, float Amount);
+    void ApplyWetAll(FDynamicWetReceiverContext& Receiver, float Amount);
     bool ApplyWetSurface(
         FDynamicWetReceiverContext& Receiver,
         const FDWCWetSurfaceData& SurfaceData,
         float Amount,
         bool bApplyMaterial);
-    bool ApplyRainWetness(
+    bool ApplyWetArea(
         FDynamicWetReceiverContext& Receiver,
-        const FVector& RainDirection,
-        float Amount,
-        bool bApplyMaterial);
-    bool ApplyWetRain(
-        FDynamicWetReceiverContext& Receiver,
-        const FDWCWetRainData& RainData,
+        const FDWCWetAreaData& AreaData,
         bool bApplyMaterial);
     bool ApplyWetContact(FDynamicWetReceiverContext& Receiver, const FDWCWetContact& Contact, bool bApplyMaterial);
     bool ApplyWetContacts(

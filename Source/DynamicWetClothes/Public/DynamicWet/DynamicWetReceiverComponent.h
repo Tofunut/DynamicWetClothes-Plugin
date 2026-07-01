@@ -35,14 +35,13 @@ public:
 	virtual ~UDynamicWetReceiverComponent() override;
 	
 	//Apply Wetness
-	void ApplyWetnessGlobal(float Amount);
-	void ApplyWetnessBelowHeight(float WaterSurfaceZ, float Amount);
+	void ApplyWetAll(float Amount);
 	UFUNCTION(BlueprintCallable, Category = "Wetness")
 	bool ApplyWetContact(const FDWCWetContact& Contact, bool bApplyMaterial = true);
 	UFUNCTION(BlueprintCallable, Category = "Wetness")
 	bool ApplyWetContacts(const TArray<FDWCWetContact>& Contacts, bool bApplyMaterial = true);
 	UFUNCTION(BlueprintCallable, Category = "Wetness")
-	bool ApplyWetRain(const FDWCWetRainData& RainData, bool bApplyMaterial = true);
+	bool ApplyWetArea(const FDWCWetAreaData& AreaData, bool bApplyMaterial = true);
 	UFUNCTION(BlueprintCallable, Category = "Wetness")
 	bool ApplyWetSurface(const FDWCWetSurfaceData& SurfaceData, float Amount, bool bApplyMaterial = true);
 	UFUNCTION(BlueprintCallable, Category = "Wetness|Debug")

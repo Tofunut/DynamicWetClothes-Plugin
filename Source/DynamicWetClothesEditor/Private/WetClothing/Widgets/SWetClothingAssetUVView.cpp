@@ -1,5 +1,6 @@
 #include "SWetClothingAssetUVView.h"
 
+#include "WetClothing/Texture/WetClothingTextureAddressUtils.h"
 #include "Engine/Texture.h"
 #include "Engine/Texture2D.h"
 #include "Framework/Application/SlateApplication.h"
@@ -77,26 +78,6 @@ namespace
     bool IsForwardCanonicalEdge(const FVector2D& Start, const FVector2D& End, const FQuantizedUVEdge& CanonicalEdge)
     {
         return FQuantizedUVPoint(Start) == CanonicalEdge.A && FQuantizedUVPoint(End) == CanonicalEdge.B;
-    }
-
-    double ApplyTextureAddress(double Value, double IslandCenter, TextureAddress AddressMode)
-    {
-        switch (AddressMode)
-        {
-        case TA_Wrap:
-            return Value - FMath::FloorToDouble(IslandCenter);
-
-        case TA_Mirror:
-        {
-            const int64  TileIndex = FMath::FloorToInt64(IslandCenter);
-            const double TileValue = Value - static_cast<double>(TileIndex);
-            return FMath::Abs(TileIndex) % 2 == 0 ? TileValue : 1.0 - TileValue;
-        }
-
-        case TA_Clamp:
-        default:
-            return FMath::Clamp(Value, 0.0, 1.0);
-        }
     }
 
     void DrawFilledPolygon(
@@ -224,8 +205,8 @@ void SWetClothingAssetUVView::SetIslands(const TArray<TSharedPtr<FWetClothingAss
                 for (int32 VertexIndex = 0; VertexIndex < 3; ++VertexIndex)
                 {
                     FVector2D& UV = Triangle.UVs[VertexIndex];
-                    UV.X = ApplyTextureAddress(UV.X, SourceCenter.X, Texture->AddressX);
-                    UV.Y = ApplyTextureAddress(UV.Y, SourceCenter.Y, Texture->AddressY);
+                    UV.X = WetClothingTextureAddressUtils::Apply(UV.X, SourceCenter.X, Texture->AddressX);
+                    UV.Y = WetClothingTextureAddressUtils::Apply(UV.Y, SourceCenter.Y, Texture->AddressY);
                     Island.UVBounds += UV;
                 }
             }

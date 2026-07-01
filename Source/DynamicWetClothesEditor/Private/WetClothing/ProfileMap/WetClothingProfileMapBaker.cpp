@@ -1,4 +1,5 @@
 #include "WetClothing/ProfileMap/WetClothingProfileMapBaker.h"
+#include "WetClothing/Texture/WetClothingTextureAddressUtils.h"
 
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Engine/Texture.h"
@@ -41,26 +42,6 @@ namespace
             255);
     }
 
-    double ApplyTextureAddress(double Value, double IslandCenter, TextureAddress AddressMode)
-    {
-        switch (AddressMode)
-        {
-        case TA_Wrap:
-            return Value - FMath::FloorToDouble(IslandCenter);
-
-        case TA_Mirror:
-        {
-            const int64  TileIndex = FMath::FloorToInt64(IslandCenter);
-            const double TileValue = Value - static_cast<double>(TileIndex);
-            return FMath::Abs(TileIndex) % 2 == 0 ? TileValue : 1.0 - TileValue;
-        }
-
-        case TA_Clamp:
-        default:
-            return FMath::Clamp(Value, 0.0, 1.0);
-        }
-    }
-
     void ApplyTextureAddressToIslands(TArray<FWetClothingAssetUVIsland>& Islands, TextureAddress AddressX, TextureAddress AddressY)
     {
         for (FWetClothingAssetUVIsland& Island : Islands)
@@ -85,8 +66,8 @@ namespace
                 for (int32 VertexIndex = 0; VertexIndex < 3; ++VertexIndex)
                 {
                     FVector2D& UV = Triangle.UVs[VertexIndex];
-                    UV.X = ApplyTextureAddress(UV.X, SourceCenter.X, AddressX);
-                    UV.Y = ApplyTextureAddress(UV.Y, SourceCenter.Y, AddressY);
+                    UV.X = WetClothingTextureAddressUtils::Apply(UV.X, SourceCenter.X, AddressX);
+                    UV.Y = WetClothingTextureAddressUtils::Apply(UV.Y, SourceCenter.Y, AddressY);
                     Island.UVBounds += UV;
                 }
             }

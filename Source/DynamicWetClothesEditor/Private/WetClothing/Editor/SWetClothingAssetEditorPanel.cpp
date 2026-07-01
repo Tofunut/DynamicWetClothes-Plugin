@@ -44,6 +44,7 @@
 #include "Widgets/Layout/SSeparator.h"
 #include "Widgets/Layout/SSplitter.h"
 #include "Widgets/SBoxPanel.h"
+#include "Widgets/SCompoundWidget.h"
 #include "Widgets/SNullWidget.h"
 #include "Widgets/Text/SInlineEditableTextBlock.h"
 #include "Widgets/Text/STextBlock.h"
@@ -55,6 +56,55 @@
 
 namespace SWetClothingAssetEditorPanelLocal
 {
+    constexpr float AutoPartitionMaxTolerancePercent = 40.0f;
+    constexpr float AutoPartitionDefaultTolerancePercent = 20.0f;
+    constexpr EWetClothingAutoPartitionColorMode AutoPartitionDefaultColorMode = EWetClothingAutoPartitionColorMode::DominantColor;
+
+    FText GetAutoPartitionColorModeLabel(EWetClothingAutoPartitionColorMode ColorMode)
+    {
+        switch (ColorMode)
+        {
+        case EWetClothingAutoPartitionColorMode::AverageColor:
+            return LOCTEXT("AutoPartitionColorModeAverage", "Average");
+
+        case EWetClothingAutoPartitionColorMode::MedianColor:
+            return LOCTEXT("AutoPartitionColorModeMedian", "Median");
+
+        case EWetClothingAutoPartitionColorMode::KMeansColor:
+            return LOCTEXT("AutoPartitionColorModeKMeans", "K-Means");
+
+        case EWetClothingAutoPartitionColorMode::DominantColor:
+        default:
+            return LOCTEXT("AutoPartitionColorModeDominant", "Dominant");
+        }
+    }
+
+    class SUntintedColorBlockBox : public SCompoundWidget
+    {
+      public:
+        SLATE_BEGIN_ARGS(SUntintedColorBlockBox) {}
+            SLATE_DEFAULT_SLOT(FArguments, Content)
+        SLATE_END_ARGS()
+
+        void Construct(const FArguments& InArgs)
+        {
+            ChildSlot
+                [InArgs._Content.Widget];
+        }
+
+        virtual int32 OnPaint(
+            const FPaintArgs&        Args,
+            const FGeometry&         AllottedGeometry,
+            const FSlateRect&        MyCullingRect,
+            FSlateWindowElementList& OutDrawElements,
+            int32                    LayerId,
+            const FWidgetStyle&      InWidgetStyle,
+            bool                     bParentEnabled) const override
+        {
+            return SCompoundWidget::OnPaint(Args, AllottedGeometry, MyCullingRect, OutDrawElements, LayerId, FWidgetStyle(), true);
+        }
+    };
+
     TArray<FWetClothingAssetUVTriangle> BuildMaterialSlotPreviewTriangles(const USkeletalMesh* SkeletalMesh, int32 MaterialSlotIndex)
     {
         TArray<FWetClothingAssetUVTriangle> PreviewTriangles;
@@ -130,6 +180,14 @@ void SWetClothingAssetEditorPanel::Construct(const FArguments& InArgs)
     UVDisplayModeItems.Add(MakeShared<EWetClothingAssetUVDisplayMode>(EWetClothingAssetUVDisplayMode::OutlineOnly));
     SelectedUVDisplayModeItem = UVDisplayModeItems[0];
     CurrentUVDisplayMode = EWetClothingAssetUVDisplayMode::Normal;
+
+    AutoPartitionColorModeItems.Reset();
+    AutoPartitionColorModeItems.Add(MakeShared<EWetClothingAutoPartitionColorMode>(EWetClothingAutoPartitionColorMode::AverageColor));
+    AutoPartitionColorModeItems.Add(MakeShared<EWetClothingAutoPartitionColorMode>(EWetClothingAutoPartitionColorMode::MedianColor));
+    AutoPartitionColorModeItems.Add(MakeShared<EWetClothingAutoPartitionColorMode>(EWetClothingAutoPartitionColorMode::DominantColor));
+    AutoPartitionColorModeItems.Add(MakeShared<EWetClothingAutoPartitionColorMode>(EWetClothingAutoPartitionColorMode::KMeansColor));
+    SelectedAutoPartitionColorModeItem = AutoPartitionColorModeItems[2];
+    AutoPartitionColorMode = EWetClothingAutoPartitionColorMode::DominantColor;
 
     auto BuildSelectionToolButton = [this](FUVSelectionToolItemPtr ToolItem)
     {
@@ -879,6 +937,7 @@ void SWetClothingAssetEditorPanel::RefreshUVView()
     UVView->SetDrawBackgroundTexture(bShowMaterialTextureInUVView && ResolveSelectedMaterialTexture() != nullptr);
     UVView->SetIslands(UVIslandItems);
     UVView->SetIslandColors(BuildIslandColorMap());
+    UVView->SetHiddenIslandIDs(BuildHiddenIslandIDSet());
     UVView->SetSelectedIslands(SelectedUVIslandIDs);
     UVView->SetSelectionTool(CurrentUVSelectionTool);
     UVView->SetDisplayMode(CurrentUVDisplayMode);
@@ -1292,7 +1351,6 @@ TMap<int32, int32> SWetClothingAssetEditorPanel::BuildIslandWetPartIDMap() const
 TMap<int32, FLinearColor> SWetClothingAssetEditorPanel::BuildIslandColorMap() const
 {
     TMap<int32, FLinearColor> Result;
-    const FLinearColor        HiddenColor(0.45f, 0.45f, 0.45f, 1.0f);
 
     for (const FUVIslandItemPtr& IslandItem : UVIslandItems)
     {
@@ -1303,11 +1361,37 @@ TMap<int32, FLinearColor> SWetClothingAssetEditorPanel::BuildIslandColorMap() co
 
         if (const FWetClothingAssetWetPartEntry* Entry = FindEffectiveWetPartEntryForIsland(IslandItem->IslandID))
         {
-            FLinearColor Color = Entry->WetPartID == 0
-                                     ? FLinearColor::White
-                                     : (Entry->bViewEnabled ? Entry->Color : HiddenColor);
+            if (Entry->WetPartID != 0 && !Entry->bViewEnabled)
+            {
+                continue;
+            }
+
+            FLinearColor Color = Entry->WetPartID == 0 ? FLinearColor::White : Entry->Color;
             Color.A = 1.0f;
             Result.Add(IslandItem->IslandID, Color);
+        }
+    }
+
+    return Result;
+}
+
+TSet<int32> SWetClothingAssetEditorPanel::BuildHiddenIslandIDSet() const
+{
+    TSet<int32> Result;
+
+    for (const FUVIslandItemPtr& IslandItem : UVIslandItems)
+    {
+        if (!IslandItem.IsValid())
+        {
+            continue;
+        }
+
+        if (const FWetClothingAssetWetPartEntry* Entry = FindEffectiveWetPartEntryForIsland(IslandItem->IslandID))
+        {
+            if (Entry->WetPartID != 0 && !Entry->bViewEnabled)
+            {
+                Result.Add(IslandItem->IslandID);
+            }
         }
     }
 
@@ -1631,9 +1715,7 @@ TSharedRef<ITableRow> SWetClothingAssetEditorPanel::GenerateUVIslandRow(FUVIslan
     {
         if (const FWetClothingAssetWetPartEntry* EffectiveEntry = FindEffectiveWetPartEntryForIsland(Item->IslandID))
         {
-            SwatchColor = (EffectiveEntry->WetPartID == 0 || EffectiveEntry->bViewEnabled)
-                              ? EffectiveEntry->Color
-                              : FLinearColor(0.45f, 0.45f, 0.45f, 1.0f);
+            SwatchColor = EffectiveEntry->WetPartID == 0 ? FLinearColor::White : EffectiveEntry->Color;
             SwatchColor.A = 1.0f;
             RowText = FText::Format(LOCTEXT("UVIslandAssignedRow", "Island {0} | {1} tris | ID {2}"), FText::AsNumber(Item->IslandID), FText::AsNumber(Item->TriangleCount), FText::AsNumber(EffectiveEntry->WetPartID));
         }
@@ -1770,7 +1852,7 @@ void SWetClothingAssetEditorPanel::ResetIslandSelection()
 
 TSharedRef<ITableRow> SWetClothingAssetEditorPanel::GenerateWetPartRow(FWetPartEntryPtr Item, const TSharedRef<STableViewBase>& OwnerTable)
 {
-    const FLinearColor                   Color = Item.IsValid() ? ((Item->WetPartID == 0 || Item->bViewEnabled) ? Item->Color : FLinearColor(0.45f, 0.45f, 0.45f, 1.0f)) : FLinearColor::White;
+    const FLinearColor                   Color = Item.IsValid() ? (Item->WetPartID == 0 ? FLinearColor::White : Item->Color) : FLinearColor::White;
     TSharedPtr<SInlineEditableTextBlock> InlineTextBlock;
 
     TSharedRef<ITableRow> Row = SNew(STableRow<FWetPartEntryPtr>, OwnerTable)
@@ -1803,10 +1885,11 @@ TSharedRef<ITableRow> SWetClothingAssetEditorPanel::GenerateWetPartRow(FWetPartE
                                                                  .IsEnabled_Lambda([Item]()
                                                                                    { return Item.IsValid() && Item->WetPartID != 0; })
                                                                  .OnClicked(this, &SWetClothingAssetEditorPanel::HandleWetPartColorClicked, Item)
-                                                                     [SNew(SColorBlock)
-                                                                          .Color(Color)
-                                                                          .Size(FVector2D(30.0f, 30.0f))
-                                                                          .ShowBackgroundForAlpha(false)]]]
+                                                                     [SNew(SWetClothingAssetEditorPanelLocal::SUntintedColorBlockBox)
+                                                                          [SNew(SColorBlock)
+                                                                               .Color(Color)
+                                                                               .Size(FVector2D(30.0f, 30.0f))
+                                                                               .ShowBackgroundForAlpha(false)]]]]
 
                                          + SHorizontalBox::Slot()
                                                .FillWidth(1.0f)
@@ -1997,6 +2080,7 @@ FReply SWetClothingAssetEditorPanel::HandleToggleWetPartViewClicked(FWetPartEntr
 
     RefreshWetPartList();
     RefreshUVView();
+    RefreshPreviewWetPartOverlay();
     return FReply::Handled();
 }
 
@@ -2164,9 +2248,7 @@ FReply SWetClothingAssetEditorPanel::HandleAddProfileSearchPathClicked()
 
 TSharedRef<SWidget> SWetClothingAssetEditorPanel::GenerateAssignWetPartComboItem(FWetPartEntryPtr Item)
 {
-    const FLinearColor Color = Item.IsValid()
-                                   ? ((Item->WetPartID == 0 || Item->bViewEnabled) ? Item->Color : FLinearColor(0.45f, 0.45f, 0.45f, 1.0f))
-                                   : FLinearColor::White;
+    const FLinearColor Color = Item.IsValid() ? (Item->WetPartID == 0 ? FLinearColor::White : Item->Color) : FLinearColor::White;
 
     return SNew(SHorizontalBox) + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 6.0f, 0.0f)[SNew(SBox).WidthOverride(14.0f).HeightOverride(14.0f)[SNew(SBorder).BorderImage(FAppStyle::Get().GetBrush(TEXT("WhiteBrush"))).BorderBackgroundColor(Color)]]
 
@@ -2292,6 +2374,25 @@ FReply SWetClothingAssetEditorPanel::HandleAutoPartitionClicked()
         return FReply::Handled();
     }
 
+    AutoPartitionTolerancePercent = SWetClothingAssetEditorPanelLocal::AutoPartitionDefaultTolerancePercent;
+    AutoPartitionColorMode = SWetClothingAssetEditorPanelLocal::AutoPartitionDefaultColorMode;
+    SelectedAutoPartitionColorModeItem.Reset();
+    for (const FAutoPartitionColorModeItemPtr& ColorModeItem : AutoPartitionColorModeItems)
+    {
+        if (ColorModeItem.IsValid() && *ColorModeItem == AutoPartitionColorMode)
+        {
+            SelectedAutoPartitionColorModeItem = ColorModeItem;
+            break;
+        }
+    }
+
+    if (HasAutoPartitionDataToReplace())
+    {
+        FMessageDialog::Open(
+            EAppMsgType::Ok,
+            LOCTEXT("AutoPartitionExistingDataWarning", "This material slot already has authored part data. Auto Partition preview can be inspected safely, but applying it will ask before replacing the existing data."));
+    }
+
     UTexture2D*                 PartitionTexture = ResolveAutoPartitionTexture();
     FWetClothingTextureReadback TextureData;
     FString                     TextureErrorMessage;
@@ -2303,7 +2404,7 @@ FReply SWetClothingAssetEditorPanel::HandleAutoPartitionClicked()
 
     TSharedRef<TArray<FWetClothingAutoPartitionCluster>> PreviewClusters = MakeShared<TArray<FWetClothingAutoPartitionCluster>>();
     FString                                              AutoPartitionErrorMessage;
-    if (!FWetClothingAutoPartitioner::BuildClusters(UVIslandItems, TextureData, AutoPartitionTolerancePercent, *PreviewClusters, &AutoPartitionErrorMessage))
+    if (!FWetClothingAutoPartitioner::BuildClusters(UVIslandItems, TextureData, AutoPartitionTolerancePercent, AutoPartitionColorMode, *PreviewClusters, &AutoPartitionErrorMessage))
     {
         FMessageDialog::Open(EAppMsgType::Ok, FText::FromString(AutoPartitionErrorMessage));
         return FReply::Handled();
@@ -2323,29 +2424,22 @@ FReply SWetClothingAssetEditorPanel::HandleAutoPartitionClicked()
 
     TWeakPtr<SWindow> WeakPreviewWindow = PreviewWindow.ToSharedPtr();
     TSharedRef<TWeakPtr<SWetClothingAssetUVView>> WeakAfterPreviewView = MakeShared<TWeakPtr<SWetClothingAssetUVView>>();
+    const auto RefreshAutoPartitionPreview = [this, PreviewTextureData, PreviewClusters, WeakAfterPreviewView]()
+    {
+        FString PreviewErrorMessage;
+        if (FWetClothingAutoPartitioner::BuildClusters(UVIslandItems, *PreviewTextureData, AutoPartitionTolerancePercent, AutoPartitionColorMode, *PreviewClusters, &PreviewErrorMessage))
+        {
+            if (TSharedPtr<SWetClothingAssetUVView> PinnedAfterView = WeakAfterPreviewView->Pin())
+            {
+                PinnedAfterView->SetIslandColors(BuildAutoPartitionPreviewColorMap(*PreviewClusters));
+            }
+        }
+    };
 
     PreviewWindow->SetContent(
         SNew(SBorder)
             .Padding(12.0f)
             [SNew(SVerticalBox)
-
-             + SVerticalBox::Slot()
-                   .AutoHeight()
-                   .Padding(0.0f, 0.0f, 0.0f, 10.0f)
-                       [SNew(SHorizontalBox)
-
-                        + SHorizontalBox::Slot()
-                              .FillWidth(1.0f)
-                              .VAlign(VAlign_Center)
-                                  [SNew(STextBlock)
-                                       .Text_Lambda(
-                                           [PreviewClusters]()
-                                           {
-                                               return FText::Format(
-                                                   LOCTEXT("AutoPartitionPreviewClusterCount", "{0} parts will be generated."),
-                                                   FText::AsNumber(PreviewClusters->Num()));
-                                           })
-                                       .Font(AutoPartitionDialogTextFont)]]
 
              + SVerticalBox::Slot()
                    .FillHeight(1.0f)
@@ -2394,6 +2488,34 @@ FReply SWetClothingAssetEditorPanel::HandleAutoPartitionClicked()
                               .VAlign(VAlign_Center)
                               .Padding(0.0f, 0.0f, 10.0f, 0.0f)
                                   [SNew(STextBlock)
+                                       .Text(LOCTEXT("AutoPartitionPreviewColorModeLabel", "Representative Color"))
+                                       .Font(AutoPartitionDialogTextFont)]
+
+                        + SHorizontalBox::Slot()
+                              .AutoWidth()
+                              .VAlign(VAlign_Center)
+                              .Padding(0.0f, 0.0f, 24.0f, 0.0f)
+                                  [SNew(SBox)
+                                       .WidthOverride(150.0f)
+                                           [SNew(SComboBox<FAutoPartitionColorModeItemPtr>)
+                                                .OptionsSource(&AutoPartitionColorModeItems)
+                                                .InitiallySelectedItem(SelectedAutoPartitionColorModeItem)
+                                                .OnGenerateWidget(this, &SWetClothingAssetEditorPanel::GenerateAutoPartitionColorModeComboItem)
+                                                .OnSelectionChanged_Lambda(
+                                                    [this, RefreshAutoPartitionPreview](FAutoPartitionColorModeItemPtr Item, ESelectInfo::Type SelectInfo)
+                                                    {
+                                                        HandleAutoPartitionColorModeSelectionChanged(Item, SelectInfo);
+                                                        RefreshAutoPartitionPreview();
+                                                    })
+                                                    [SNew(STextBlock)
+                                                         .Text(this, &SWetClothingAssetEditorPanel::GetAutoPartitionColorModeText)
+                                                         .Font(AutoPartitionDialogTextFont)]]]
+
+                        + SHorizontalBox::Slot()
+                              .AutoWidth()
+                              .VAlign(VAlign_Center)
+                              .Padding(0.0f, 0.0f, 10.0f, 0.0f)
+                                  [SNew(STextBlock)
                                        .Text(LOCTEXT("AutoPartitionPreviewToleranceLabel", "Color Tolerance"))
                                        .Font(AutoPartitionDialogTextFont)]
 
@@ -2404,24 +2526,31 @@ FReply SWetClothingAssetEditorPanel::HandleAutoPartitionClicked()
                                        .WidthOverride(160.0f)
                                            [SNew(SSpinBox<float>)
                                                 .MinValue(0.0f)
-                                                .MaxValue(100.0f)
+                                                .MaxValue(SWetClothingAssetEditorPanelLocal::AutoPartitionMaxTolerancePercent)
                                                 .MinSliderValue(0.0f)
-                                                .MaxSliderValue(100.0f)
+                                                .MaxSliderValue(SWetClothingAssetEditorPanelLocal::AutoPartitionMaxTolerancePercent)
                                                 .Delta(0.1f)
                                                 .Value(this, &SWetClothingAssetEditorPanel::GetAutoPartitionTolerance)
                                                 .OnValueChanged_Lambda(
-                                                    [this, PreviewTextureData, PreviewClusters, WeakAfterPreviewView](float InValue)
+                                                    [this, RefreshAutoPartitionPreview](float InValue)
                                                     {
                                                         HandleAutoPartitionToleranceChanged(InValue);
-                                                        FString PreviewErrorMessage;
-                                                        if (FWetClothingAutoPartitioner::BuildClusters(UVIslandItems, *PreviewTextureData, AutoPartitionTolerancePercent, *PreviewClusters, &PreviewErrorMessage))
-                                                        {
-                                                            if (TSharedPtr<SWetClothingAssetUVView> PinnedAfterView = WeakAfterPreviewView->Pin())
-                                                            {
-                                                                PinnedAfterView->SetIslandColors(BuildAutoPartitionPreviewColorMap(*PreviewClusters));
-                                                            }
-                                                        }
+                                                        RefreshAutoPartitionPreview();
                                                     })]]]
+
+             + SVerticalBox::Slot()
+                   .AutoHeight()
+                   .HAlign(HAlign_Center)
+                   .Padding(0.0f, 8.0f, 0.0f, 0.0f)
+                       [SNew(STextBlock)
+                            .Text_Lambda(
+                                [PreviewClusters]()
+                                {
+                                    return FText::Format(
+                                        LOCTEXT("AutoPartitionPreviewClusterCount", "{0} parts will be generated."),
+                                        FText::AsNumber(PreviewClusters->Num()));
+                                })
+                            .Font(AutoPartitionDialogTextFont)]
 
              + SVerticalBox::Slot()
                    .AutoHeight()
@@ -2484,8 +2613,6 @@ FReply SWetClothingAssetEditorPanel::HandleAutoPartitionClicked()
     if (BeforePreviewView.IsValid())
     {
         BeforePreviewView->SetBackgroundTexture(PartitionTexture);
-        BeforePreviewView->SetIslands(UVIslandItems);
-        BeforePreviewView->SetIslandColors(BuildIslandColorMap());
         BeforePreviewView->SetDisplayMode(EWetClothingAssetUVDisplayMode::Normal);
     }
 
@@ -2846,7 +2973,7 @@ FSlateColor SWetClothingAssetEditorPanel::GetSelectedAssignWetPartColor() const
 {
     if (const FWetPartEntryPtr Item = FindWetPartItemByID(SelectedAssignWetPartID))
     {
-        return FSlateColor((Item->WetPartID == 0 || Item->bViewEnabled) ? Item->Color : FLinearColor(0.45f, 0.45f, 0.45f, 1.0f));
+        return FSlateColor(Item->WetPartID == 0 ? FLinearColor::White : Item->Color);
     }
 
     return FSlateColor(FLinearColor(0.08f, 0.08f, 0.08f, 1.0f));
@@ -2956,6 +3083,29 @@ FSlateColor SWetClothingAssetEditorPanel::GetUVSelectionToolButtonColor(FUVSelec
                            : FStyleColors::Header);
 }
 
+TSharedRef<SWidget> SWetClothingAssetEditorPanel::GenerateAutoPartitionColorModeComboItem(FAutoPartitionColorModeItemPtr Item) const
+{
+    return SNew(STextBlock)
+        .Text(Item.IsValid()
+                  ? SWetClothingAssetEditorPanelLocal::GetAutoPartitionColorModeLabel(*Item)
+                  : LOCTEXT("AutoPartitionColorModeInvalid", "Unknown"))
+        .Font(FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 12));
+}
+
+void SWetClothingAssetEditorPanel::HandleAutoPartitionColorModeSelectionChanged(FAutoPartitionColorModeItemPtr Item, ESelectInfo::Type SelectInfo)
+{
+    if (Item.IsValid())
+    {
+        SelectedAutoPartitionColorModeItem = Item;
+        AutoPartitionColorMode = *Item;
+    }
+}
+
+FText SWetClothingAssetEditorPanel::GetAutoPartitionColorModeText() const
+{
+    return SWetClothingAssetEditorPanelLocal::GetAutoPartitionColorModeLabel(AutoPartitionColorMode);
+}
+
 float SWetClothingAssetEditorPanel::GetAutoPartitionTolerance() const
 {
     return AutoPartitionTolerancePercent;
@@ -2963,7 +3113,7 @@ float SWetClothingAssetEditorPanel::GetAutoPartitionTolerance() const
 
 void SWetClothingAssetEditorPanel::HandleAutoPartitionToleranceChanged(float InValue)
 {
-    AutoPartitionTolerancePercent = FMath::Clamp(InValue, 0.0f, 100.0f);
+    AutoPartitionTolerancePercent = FMath::Clamp(InValue, 0.0f, SWetClothingAssetEditorPanelLocal::AutoPartitionMaxTolerancePercent);
 }
 
 float SWetClothingAssetEditorPanel::GetSelectionLineThicknessScale() const

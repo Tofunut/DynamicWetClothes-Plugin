@@ -21,17 +21,17 @@ struct FWetnessProfileParameters
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wet Simulation")
     float GravityFlowStrength = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water Surface")
-    float SurfaceWaterStrength = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water Surface")
-    float RunoffStrength = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wet Rendering")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Absorbed Wetness Rendering")
     float WetVisualStrength = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wet Rendering")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Absorbed Wetness Rendering")
     float TransparencyStrength = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water Rendering")
+    float SurfaceWaterStrength = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water Rendering")
+    float RunoffStrength = 1.0f;
 
     float GetAbsorptionMultiplier() const
     {

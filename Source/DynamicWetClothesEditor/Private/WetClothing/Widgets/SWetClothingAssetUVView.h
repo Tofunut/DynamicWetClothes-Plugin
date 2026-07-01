@@ -43,6 +43,7 @@ class SWetClothingAssetUVView : public SLeafWidget
     void                               SetIslands(const TArray<TSharedPtr<FWetClothingAssetUVIsland>>& InIslands);
     void                               SetSelectedIslands(const TSet<int32>& InIslandIDs);
     void                               SetIslandColors(const TMap<int32, FLinearColor>& InIslandColors);
+    void                               SetHiddenIslandIDs(const TSet<int32>& InIslandIDs);
     void                               SetBackgroundTexture(UTexture* InTexture);
     void                               SetDrawBackgroundTexture(bool bInDrawBackgroundTexture);
     void                               SetSelectionTool(EWetClothingAssetUVSelectionTool InSelectionTool);
@@ -133,6 +134,7 @@ class SWetClothingAssetUVView : public SLeafWidget
     TArray<FWetClothingAssetUVIsland>    Islands;
     TSet<int32>                            SelectedIslandIDs;
     TMap<int32, FLinearColor>              IslandColors;
+    TSet<int32>                            HiddenIslandIDs;
     FOnWetClothingUVIslandSelectionChanged OnIslandSelectionChanged;
     FSlateBrush                            BackgroundTextureBrush;
     TWeakObjectPtr<UTexture>               BackgroundTexture;

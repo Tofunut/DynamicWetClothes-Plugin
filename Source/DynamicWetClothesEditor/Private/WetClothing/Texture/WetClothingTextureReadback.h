@@ -16,6 +16,8 @@ struct FWetClothingTextureReadback
     int32                BytesPerPixel = 0;
     bool                 bSRGB = true;
     ETextureSourceFormat Format = TSF_Invalid;
+    TextureAddress       AddressX = TA_Clamp;
+    TextureAddress       AddressY = TA_Clamp;
     TArray64<uint8>      RawData;
 
     bool         IsValid() const;

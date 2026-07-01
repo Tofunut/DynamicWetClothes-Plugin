@@ -50,8 +50,8 @@ namespace
 
             const int32 MinX = FMath::Clamp(FMath::FloorToInt(MinU * TextureData.Width), 0, TextureData.Width - 1);
             const int32 MaxX = FMath::Clamp(FMath::FloorToInt(MaxU * TextureData.Width), 0, TextureData.Width - 1);
-            const int32 MinY = FMath::Clamp(FMath::FloorToInt((1.0 - MaxV) * TextureData.Height), 0, TextureData.Height - 1);
-            const int32 MaxY = FMath::Clamp(FMath::FloorToInt((1.0 - MinV) * TextureData.Height), 0, TextureData.Height - 1);
+            const int32 MinY = FMath::Clamp(FMath::FloorToInt(MinV * TextureData.Height), 0, TextureData.Height - 1);
+            const int32 MaxY = FMath::Clamp(FMath::FloorToInt(MaxV * TextureData.Height), 0, TextureData.Height - 1);
 
             double TriangleSampleWeight = 0.0;
             for (int32 PixelY = MinY; PixelY <= MaxY; ++PixelY)
@@ -60,7 +60,7 @@ namespace
                 {
                     const FVector2D SampleUV(
                         (static_cast<double>(PixelX) + 0.5) / TextureData.Width,
-                        1.0 - ((static_cast<double>(PixelY) + 0.5) / TextureData.Height));
+                        (static_cast<double>(PixelY) + 0.5) / TextureData.Height);
 
                     if (!WetPartIsPointInsideTriangle(SampleUV, A, B, C))
                     {
@@ -77,7 +77,7 @@ namespace
             {
                 const FVector2D TriangleCenter = (A + B + C) / 3.0f;
                 const int32     FallbackX = FMath::Clamp(FMath::FloorToInt(TriangleCenter.X * TextureData.Width), 0, TextureData.Width - 1);
-                const int32     FallbackY = FMath::Clamp(FMath::FloorToInt((1.0 - TriangleCenter.Y) * TextureData.Height), 0, TextureData.Height - 1);
+                const int32     FallbackY = FMath::Clamp(FMath::FloorToInt(TriangleCenter.Y * TextureData.Height), 0, TextureData.Height - 1);
                 WeightedColorSum += TextureData.GetLinearColor(FallbackX, FallbackY);
                 ++SampleWeight;
             }

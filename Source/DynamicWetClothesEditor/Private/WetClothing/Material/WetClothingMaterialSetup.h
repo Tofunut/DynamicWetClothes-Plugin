@@ -3,13 +3,12 @@
 #include "CoreMinimal.h"
 
 class UMaterialInterface;
-class UMaterial;
 
 struct FWetClothingMaterialSetupResult
 {
     bool    bSucceeded = false;
     bool    bAlreadyConfigured = false;
-    UMaterial* ConfiguredMaterial = nullptr;
+    UMaterialInterface* ConfiguredMaterial = nullptr;
     FString Message;
 };
 

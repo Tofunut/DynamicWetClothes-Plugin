@@ -42,6 +42,7 @@ class SWetClothingAssetEditorPanel : public SCompoundWidget
     using FUVIslandItemPtr = TSharedPtr<FWetClothingAssetUVIsland>;
     using FUVSelectionToolItemPtr = TSharedPtr<FWetClothingUVSelectionToolItem>;
     using FUVDisplayModeItemPtr = TSharedPtr<EWetClothingAssetUVDisplayMode>;
+    using FAutoPartitionColorModeItemPtr = TSharedPtr<EWetClothingAutoPartitionColorMode>;
     using FWetPartEntryPtr = TSharedPtr<FWetClothingAssetWetPartEntry>;
     using FWetnessProfileAssetItemPtr = TSharedPtr<FWetnessProfileAssetItem>;
 
@@ -73,6 +74,7 @@ class SWetClothingAssetEditorPanel : public SCompoundWidget
     FString                                GetAssignedProfileLabel(const FWetClothingAssetWetPartEntry& Entry) const;
     TMap<int32, int32>                     BuildIslandWetPartIDMap() const;
     TMap<int32, FLinearColor>              BuildIslandColorMap() const;
+    TSet<int32>                            BuildHiddenIslandIDSet() const;
     TArray<FString>                        GetProfileSearchPaths() const;
 
     void ApplyIslandSelection(const TArray<int32>& HitIslandIDs, bool bAppendSelection);
@@ -95,6 +97,8 @@ class SWetClothingAssetEditorPanel : public SCompoundWidget
     void                  HandleUVIslandSelectionChanged(FUVIslandItemPtr Item, ESelectInfo::Type SelectInfo);
     void                  HandleUVIslandSelectionChangedFromUVView(const TArray<int32>& IslandIDs, EWetClothingAssetUVSelectionOp SelectionOp);
     void                  HandleUVIslandPickedFromPreview(int32 IslandID, bool bAppendSelection);
+    TSharedRef<SWidget>   GenerateAutoPartitionColorModeComboItem(FAutoPartitionColorModeItemPtr Item) const;
+    void                  HandleAutoPartitionColorModeSelectionChanged(FAutoPartitionColorModeItemPtr Item, ESelectInfo::Type SelectInfo);
     TSharedRef<ITableRow> GenerateWetPartRow(FWetPartEntryPtr Item, const TSharedRef<STableViewBase>& OwnerTable);
     void                  HandleWetPartSelectionChanged(FWetPartEntryPtr Item, ESelectInfo::Type SelectInfo);
     void                  HandleWetPartItemDoubleClicked(FWetPartEntryPtr Item);
@@ -144,6 +148,7 @@ class SWetClothingAssetEditorPanel : public SCompoundWidget
     FText       GetWetnessProfileLibraryStatusText() const;
     FText       GetBlendModeText(FWetPartEntryPtr Item) const;
     FText       GetWetnessProfileButtonText(FWetPartEntryPtr Item) const;
+    FText       GetAutoPartitionColorModeText() const;
     float       GetAutoPartitionTolerance() const;
     void        HandleAutoPartitionToleranceChanged(float InValue);
     float       GetSelectionLineThicknessScale() const;
@@ -199,6 +204,9 @@ class SWetClothingAssetEditorPanel : public SCompoundWidget
     EWetClothingAssetUVDisplayMode                   CurrentUVDisplayMode = EWetClothingAssetUVDisplayMode::Normal;
     TArray<FUVSelectionToolItemPtr>                    UVSelectionToolItems;
     FUVSelectionToolItemPtr                            SelectedUVSelectionToolItem;
+    TArray<FAutoPartitionColorModeItemPtr>             AutoPartitionColorModeItems;
+    FAutoPartitionColorModeItemPtr                     SelectedAutoPartitionColorModeItem;
+    EWetClothingAutoPartitionColorMode                 AutoPartitionColorMode = EWetClothingAutoPartitionColorMode::DominantColor;
     FString                                            UVStatusMessage;
     TArray<FWetPartEntryPtr>                           CurrentWetPartItems;
     TArray<FWetnessProfileAssetItemPtr>                AvailableWetnessProfileItems;

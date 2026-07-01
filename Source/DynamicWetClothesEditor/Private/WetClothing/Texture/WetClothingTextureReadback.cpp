@@ -82,6 +82,8 @@ bool FWetClothingTextureReadbackUtils::TryReadTextureSourceData(
     OutTextureData.BytesPerPixel = Texture->Source.GetBytesPerPixel();
     OutTextureData.bSRGB = Texture->SRGB;
     OutTextureData.Format = SourceFormat;
+    OutTextureData.AddressX = Texture->AddressX;
+    OutTextureData.AddressY = Texture->AddressY;
 
     if (!OutTextureData.IsValid())
     {

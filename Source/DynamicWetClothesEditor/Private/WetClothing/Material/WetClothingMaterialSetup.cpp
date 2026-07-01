@@ -1,5 +1,6 @@
 #include "WetClothing/Material/WetClothingMaterialSetup.h"
 
+#include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetToolsModule.h"
 #include "IAssetTools.h"
 #include "MaterialEditingLibrary.h"
@@ -10,9 +11,11 @@
 #include "Materials/MaterialExpressionScalarParameter.h"
 #include "Materials/MaterialFunctionInterface.h"
 #include "Materials/MaterialInstance.h"
+#include "Materials/MaterialInstanceConstant.h"
 #include "Materials/MaterialInterface.h"
 #include "Misc/PackageName.h"
 #include "ScopedTransaction.h"
+#include "UObject/Package.h"
 
 namespace
 {
@@ -191,6 +194,129 @@ namespace
         const FString DwcAssetName = FPackageName::GetLongPackageAssetName(DwcPackageName);
         const FString DwcObjectPath = DwcPackageName + TEXT(".") + DwcAssetName;
         return LoadObject<UMaterial>(nullptr, *DwcObjectPath);
+    }
+
+    FString BuildDwcPackageNameForSourceInterface(const UMaterialInterface* SourceMaterialInterface, const UMaterial* FallbackParentMaterial)
+    {
+        FString SourcePackageName;
+        if (SourceMaterialInterface != nullptr && SourceMaterialInterface->GetOutermost() != nullptr && SourceMaterialInterface->GetOutermost() != GetTransientPackage())
+        {
+            SourcePackageName = SourceMaterialInterface->GetOutermost()->GetName();
+        }
+
+        if (SourcePackageName.IsEmpty() && FallbackParentMaterial != nullptr)
+        {
+            SourcePackageName = FallbackParentMaterial->GetOutermost()->GetName() + TEXT("_") + SourceMaterialInterface->GetName();
+        }
+
+        if (SourcePackageName.EndsWith(TEXT("_DWC")))
+        {
+            return SourcePackageName;
+        }
+
+        return SourcePackageName + TEXT("_DWC");
+    }
+
+    UMaterialInstanceConstant* LoadExistingDwcMaterialInstanceForSource(const UMaterialInstance* SourceInstance, const UMaterial* FallbackParentMaterial)
+    {
+        const FString DwcPackageName = BuildDwcPackageNameForSourceInterface(SourceInstance, FallbackParentMaterial);
+        if (DwcPackageName.IsEmpty())
+        {
+            return nullptr;
+        }
+
+        const FString DwcAssetName = FPackageName::GetLongPackageAssetName(DwcPackageName);
+        const FString DwcObjectPath = DwcPackageName + TEXT(".") + DwcAssetName;
+        return LoadObject<UMaterialInstanceConstant>(nullptr, *DwcObjectPath);
+    }
+
+    void CopyMaterialInstanceOverrides(const UMaterialInstance* SourceInstance, UMaterialInstanceConstant* TargetInstance, UMaterialInterface* WetParent)
+    {
+        check(SourceInstance != nullptr);
+        check(TargetInstance != nullptr);
+
+        TargetInstance->Modify();
+        TargetInstance->SetParentEditorOnly(WetParent);
+
+        TargetInstance->ScalarParameterValues = SourceInstance->ScalarParameterValues;
+        TargetInstance->VectorParameterValues = SourceInstance->VectorParameterValues;
+        TargetInstance->DoubleVectorParameterValues = SourceInstance->DoubleVectorParameterValues;
+        TargetInstance->TextureParameterValues = SourceInstance->TextureParameterValues;
+        TargetInstance->TextureCollectionParameterValues = SourceInstance->TextureCollectionParameterValues;
+        TargetInstance->ParameterCollectionParameterValues = SourceInstance->ParameterCollectionParameterValues;
+        TargetInstance->RuntimeVirtualTextureParameterValues = SourceInstance->RuntimeVirtualTextureParameterValues;
+        TargetInstance->SparseVolumeTextureParameterValues = SourceInstance->SparseVolumeTextureParameterValues;
+        TargetInstance->FontParameterValues = SourceInstance->FontParameterValues;
+        TargetInstance->UserSceneTextureOverrides = SourceInstance->UserSceneTextureOverrides;
+
+        FStaticParameterSet StaticParameters = SourceInstance->GetStaticParameters();
+        FMaterialInstanceBasePropertyOverrides BasePropertyOverrides = SourceInstance->BasePropertyOverrides;
+        TargetInstance->SetPermutationParameters(StaticParameters, BasePropertyOverrides);
+        TargetInstance->UpdateStaticPermutation();
+        TargetInstance->PostEditChange();
+        TargetInstance->MarkPackageDirty();
+    }
+
+    UMaterialInstanceConstant* CreateOrUpdateDwcMaterialInstanceForSource(
+        const UMaterialInstance* SourceInstance,
+        UMaterialInterface* WetParent,
+        const UMaterial* FallbackParentMaterial,
+        FString& OutErrorMessage,
+        bool& bOutReusedExisting)
+    {
+        bOutReusedExisting = false;
+
+        if (SourceInstance == nullptr || WetParent == nullptr)
+        {
+            OutErrorMessage = TEXT("Material instance setup requires a source instance and wet parent material.");
+            return nullptr;
+        }
+
+        if (UMaterialInstanceConstant* ExistingInstance = LoadExistingDwcMaterialInstanceForSource(SourceInstance, FallbackParentMaterial))
+        {
+            bOutReusedExisting = true;
+            CopyMaterialInstanceOverrides(SourceInstance, ExistingInstance, WetParent);
+            return ExistingInstance;
+        }
+
+        FString DwcPackageName = BuildDwcPackageNameForSourceInterface(SourceInstance, FallbackParentMaterial);
+        if (DwcPackageName.IsEmpty())
+        {
+            OutErrorMessage = FString::Printf(TEXT("Could not determine a package path for '%s'."), *GetNameSafe(SourceInstance));
+            return nullptr;
+        }
+
+        if (FindObject<UObject>(nullptr, *(DwcPackageName + TEXT(".") + FPackageName::GetLongPackageAssetName(DwcPackageName))) != nullptr)
+        {
+            FString UniquePackageName;
+            FString UniqueAssetName;
+            FAssetToolsModule& AssetToolsModule = FModuleManager::LoadModuleChecked<FAssetToolsModule>(TEXT("AssetTools"));
+            AssetToolsModule.Get().CreateUniqueAssetName(DwcPackageName, FString(), UniquePackageName, UniqueAssetName);
+            DwcPackageName = UniquePackageName;
+        }
+
+        const FString DwcAssetName = FPackageName::GetLongPackageAssetName(DwcPackageName);
+        UPackage* Package = CreatePackage(*DwcPackageName);
+        if (Package == nullptr)
+        {
+            OutErrorMessage = FString::Printf(TEXT("Could not create package '%s'."), *DwcPackageName);
+            return nullptr;
+        }
+
+        UMaterialInstanceConstant* NewInstance = NewObject<UMaterialInstanceConstant>(
+            Package,
+            *DwcAssetName,
+            RF_Public | RF_Standalone | RF_Transactional);
+        if (NewInstance == nullptr)
+        {
+            OutErrorMessage = FString::Printf(TEXT("Could not create wet material instance '%s'."), *DwcAssetName);
+            return nullptr;
+        }
+
+        CopyMaterialInstanceOverrides(SourceInstance, NewInstance, WetParent);
+        FAssetRegistryModule::AssetCreated(NewInstance);
+        Package->MarkPackageDirty();
+        return NewInstance;
     }
 
     bool ConnectChecked(UMaterialExpression* FromExpression, const FString& FromOutputName, UMaterialExpression* ToExpression, const FString& ToInputName, TArray<FString>& FailureReasons)
@@ -385,9 +511,61 @@ FWetClothingMaterialSetupResult FWetClothingMaterialSetup::DuplicateAndApplyToMa
     if (Material == nullptr)
     {
         const UMaterialInstance* MaterialInstance = Cast<UMaterialInstance>(MaterialInterface);
-        Result.Message = MaterialInstance != nullptr
-                             ? FString::Printf(TEXT("'%s' is a material instance. Assign or duplicate an editable material asset before running DWC setup."), *MaterialInterface->GetName())
-                             : FString::Printf(TEXT("'%s' is not an editable material asset."), *MaterialInterface->GetName());
+        if (MaterialInstance == nullptr)
+        {
+            Result.Message = FString::Printf(TEXT("'%s' is not an editable material asset."), *MaterialInterface->GetName());
+            return Result;
+        }
+
+        if (IsMaterialConfiguredForDwc(MaterialInterface))
+        {
+            Result.bSucceeded = true;
+            Result.bAlreadyConfigured = true;
+            Result.ConfiguredMaterial = MaterialInterface;
+            Result.Message = FString::Printf(TEXT("'%s' is already backed by a DWC material."), *MaterialInterface->GetName());
+            return Result;
+        }
+
+        UMaterial* ParentMaterial = const_cast<UMaterial*>(MaterialInstance->GetMaterial());
+        if (ParentMaterial == nullptr)
+        {
+            Result.Message = FString::Printf(TEXT("'%s' has no editable parent material."), *MaterialInterface->GetName());
+            return Result;
+        }
+
+        FWetClothingMaterialSetupResult ParentResult = DuplicateAndApplyToMaterialInterface(ParentMaterial);
+        if (!ParentResult.bSucceeded || ParentResult.ConfiguredMaterial == nullptr)
+        {
+            Result.Message = FString::Printf(
+                TEXT("Could not create a DWC parent material for material instance '%s'.\n%s"),
+                *MaterialInterface->GetName(),
+                *ParentResult.Message);
+            return Result;
+        }
+
+        FString InstanceErrorMessage;
+        bool    bReusedExistingInstance = false;
+        UMaterialInstanceConstant* WetInstance = CreateOrUpdateDwcMaterialInstanceForSource(
+            MaterialInstance,
+            ParentResult.ConfiguredMaterial,
+            ParentMaterial,
+            InstanceErrorMessage,
+            bReusedExistingInstance);
+        if (WetInstance == nullptr)
+        {
+            Result.Message = FString::Printf(
+                TEXT("Created DWC parent material for '%s', but could not create a matching wet material instance.\n%s"),
+                *MaterialInterface->GetName(),
+                *InstanceErrorMessage);
+            return Result;
+        }
+
+        Result.bSucceeded = true;
+        Result.bAlreadyConfigured = bReusedExistingInstance;
+        Result.ConfiguredMaterial = WetInstance;
+        Result.Message = bReusedExistingInstance
+                             ? FString::Printf(TEXT("Reused wet material instance '%s' and copied overrides from '%s'."), *WetInstance->GetName(), *MaterialInterface->GetName())
+                             : FString::Printf(TEXT("Created wet material instance '%s' from '%s'."), *WetInstance->GetName(), *MaterialInterface->GetName());
         return Result;
     }
 

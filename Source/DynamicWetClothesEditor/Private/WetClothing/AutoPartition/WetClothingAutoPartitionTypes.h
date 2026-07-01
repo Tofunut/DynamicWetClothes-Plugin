@@ -6,12 +6,20 @@
 
 #include "CoreMinimal.h"
 
+enum class EWetClothingAutoPartitionColorMode : uint8
+{
+    AverageColor,
+    MedianColor,
+    DominantColor,
+    KMeansColor
+};
+
 struct FWetClothingIslandColorStats
 {
     int32        IslandID = INDEX_NONE;
     double       UVArea = 0.0;
     double       SampleWeight = 0.0;
-    FLinearColor AverageColor = FLinearColor::Black;
+    FLinearColor RepresentativeColor = FLinearColor::Black;
 };
 
 struct FWetClothingAutoPartitionCluster

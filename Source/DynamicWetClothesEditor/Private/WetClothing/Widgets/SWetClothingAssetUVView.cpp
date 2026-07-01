@@ -177,6 +177,45 @@ namespace
             0,
             ESlateDrawEffect::None);
     }
+
+    void DrawFilledEllipseScanlines(
+        FSlateWindowElementList& OutDrawElements,
+        int32                    LayerId,
+        const FGeometry&         AllottedGeometry,
+        const FSlateBrush*       WhiteBrush,
+        const FVector2D&         Center,
+        const FVector2D&         Radii,
+        const FLinearColor&      FillColor)
+    {
+        if (WhiteBrush == nullptr || Radii.X <= KINDA_SMALL_NUMBER || Radii.Y <= KINDA_SMALL_NUMBER)
+        {
+            return;
+        }
+
+        const double MinY = FMath::FloorToDouble(Center.Y - Radii.Y);
+        const double MaxY = FMath::CeilToDouble(Center.Y + Radii.Y);
+        for (double Y = MinY; Y <= MaxY; Y += 1.0)
+        {
+            const double SampleY = Y + 0.5;
+            const double NormalizedY = (SampleY - Center.Y) / Radii.Y;
+            const double ChordScale = 1.0 - NormalizedY * NormalizedY;
+            if (ChordScale <= 0.0)
+            {
+                continue;
+            }
+
+            const double HalfWidth = FMath::Sqrt(ChordScale) * Radii.X;
+            const FVector2D StripPos(Center.X - HalfWidth, Y);
+            const FVector2D StripSize(HalfWidth * 2.0, 1.0);
+            FSlateDrawElement::MakeBox(
+                OutDrawElements,
+                LayerId,
+                AllottedGeometry.ToPaintGeometry(StripSize, FSlateLayoutTransform(StripPos)),
+                WhiteBrush,
+                ESlateDrawEffect::None,
+                FillColor);
+        }
+    }
 } // namespace
 
 void SWetClothingAssetUVView::Construct(const FArguments& InArgs)
@@ -247,6 +286,12 @@ void SWetClothingAssetUVView::SetIslandColors(const TMap<int32, FLinearColor>& I
     Invalidate(EInvalidateWidget::Paint);
 }
 
+void SWetClothingAssetUVView::SetHiddenIslandIDs(const TSet<int32>& InIslandIDs)
+{
+    HiddenIslandIDs = InIslandIDs;
+    Invalidate(EInvalidateWidget::Paint);
+}
+
 void SWetClothingAssetUVView::SetBackgroundTexture(UTexture* InTexture)
 {
     BackgroundTexture = InTexture;
@@ -290,6 +335,7 @@ void SWetClothingAssetUVView::Clear()
     Islands.Reset();
     SelectedIslandIDs.Reset();
     IslandColors.Reset();
+    HiddenIslandIDs.Reset();
     SetBackgroundTexture(nullptr);
     ResetView();
     Invalidate(EInvalidateWidget::Paint);
@@ -382,6 +428,12 @@ int32 SWetClothingAssetUVView::OnPaint(
     for (const FWetClothingAssetUVIsland& Island : Islands)
     {
         const bool          bSelected = SelectedIslandIDs.Contains(Island.IslandID);
+        const bool          bHidden = HiddenIslandIDs.Contains(Island.IslandID);
+        if (bHidden && !bSelected)
+        {
+            continue;
+        }
+
         const FLinearColor* AssignedColor = IslandColors.Find(Island.IslandID);
         const bool          bHasAssignedColor = AssignedColor != nullptr;
         const bool          bIsDefaultGrayOverlay = bHasAssignedColor && AssignedColor->A < 0.75f;
@@ -556,12 +608,13 @@ int32 SWetClothingAssetUVView::OnPaint(
                     Center.Y + FMath::Sin(Angle) * Radii.Y));
             }
 
-            DrawFilledPolygon(
+            DrawFilledEllipseScanlines(
                 OutDrawElements,
                 SelectionRectLayer,
                 AllottedGeometry,
                 WhiteBrush,
-                EllipsePoints,
+                Center,
+                Radii,
                 SelectionFillColor);
 
             FSlateDrawElement::MakeLines(
@@ -586,7 +639,8 @@ int32 SWetClothingAssetUVView::OnPaint(
             {
                 if (!LassoPoints[0].Equals(LassoPoints.Last(), 0.5f))
                 {
-                    LassoPoints.Add(LassoPoints[0]);
+                    const FVector2D FirstLassoPoint = LassoPoints[0];
+                    LassoPoints.Add(FirstLassoPoint);
                 }
 
                 DrawFilledPolygon(

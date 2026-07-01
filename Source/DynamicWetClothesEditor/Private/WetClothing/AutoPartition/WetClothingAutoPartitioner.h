@@ -17,6 +17,7 @@ class FWetClothingAutoPartitioner
         const TArray<TSharedPtr<FWetClothingAssetUVIsland>>& Islands,
         const FWetClothingTextureReadback&                     TextureData,
         float                                                  TolerancePercent,
+        EWetClothingAutoPartitionColorMode                     ColorMode,
         TArray<FWetClothingAutoPartitionCluster>&              OutClusters,
         FString*                                               OutErrorMessage = nullptr);
 };

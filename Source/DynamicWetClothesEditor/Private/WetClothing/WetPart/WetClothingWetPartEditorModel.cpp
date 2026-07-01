@@ -191,7 +191,6 @@ FLinearColor FWetClothingWetPartEditorModel::GetDefaultWetPartColor(int32 WetPar
     if (WetPartID == 0)
     {
         return FLinearColor::White;
-        // return FLinearColor(0.62f, 0.62f, 0.62f, 1.0f);
     }
 
     static const FLinearColor Palette[] = {
@@ -274,7 +273,6 @@ TMap<int32, FLinearColor> FWetClothingWetPartEditorModel::BuildIslandColorMap(
     const TArray<TSharedPtr<FWetClothingAssetUVIsland>>& Islands)
 {
     TMap<int32, FLinearColor> Result;
-    const FLinearColor        HiddenColor(0.45f, 0.45f, 0.45f, 1.0f);
 
     for (const TSharedPtr<FWetClothingAssetUVIsland>& IslandItem : Islands)
     {
@@ -285,12 +283,12 @@ TMap<int32, FLinearColor> FWetClothingWetPartEditorModel::BuildIslandColorMap(
 
         if (const FWetClothingAssetWetPartEntry* Entry = FindEffectiveEntryForIsland(Profile, Scope, IslandItem->IslandID))
         {
-            // if (Entry->WetPartID == 0)
-            // {
-            //     continue;
-            // }
+            if (Entry->WetPartID != 0 && !Entry->bViewEnabled)
+            {
+                continue;
+            }
 
-            FLinearColor Color = Entry->bViewEnabled ? Entry->Color : HiddenColor;
+            FLinearColor Color = Entry->WetPartID == 0 ? FLinearColor::White : Entry->Color;
             Color.A = 1.0f;
             Result.Add(IslandItem->IslandID, Color);
         }

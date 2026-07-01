@@ -144,19 +144,34 @@ void ApplyWetContactNormalExposure(
         Receiver.WetnessSettings);
 }
 
-bool PassWetContactNormalFilter(
+bool PassWetContactSurfaceFilter(
     const FDynamicWetReceiverContext& Receiver,
     const FWetContactEvaluationData& Evaluation,
+    const FVector& WorldPosition,
     const FVector* WorldNormal)
 {
-    if (!WorldNormal || WorldNormal->IsNearlyZero() || Evaluation.SafeNormal.IsNearlyZero())
+    if (Evaluation.SafeNormal.IsNearlyZero())
     {
         return true;
     }
 
-    const float NormalExposureMin =
-        FMath::Min(Receiver.WetnessSettings.RainExposureMin, Receiver.WetnessSettings.RainExposureMax);
-    return FVector::DotProduct(*WorldNormal, Evaluation.SafeNormal) >= NormalExposureMin;
+    if (WorldNormal && !WorldNormal->IsNearlyZero())
+    {
+        const float NormalExposureMin =
+            FMath::Min(Receiver.WetnessSettings.RainExposureMin, Receiver.WetnessSettings.RainExposureMax);
+        if (FVector::DotProduct(*WorldNormal, Evaluation.SafeNormal) < NormalExposureMin)
+        {
+            return false;
+        }
+    }
+
+    const float BackfaceDepth =
+        FVector::DotProduct(Evaluation.Contact.Location - WorldPosition, Evaluation.SafeNormal);
+    const float BackfaceDepthTolerance = FMath::Max(
+        Receiver.WetnessSettings.WetContactBackfaceDepthTolerance,
+        Evaluation.SafeRadius * Receiver.WetnessSettings.WetContactBackfaceDepthRadiusScale);
+
+    return BackfaceDepth <= BackfaceDepthTolerance;
 }
 
 bool ApplyWetContactInfluence(
@@ -246,7 +261,7 @@ bool ApplyPreparedWetContact(
             WorldNormalPtr = &WorldNormal;
         }
 
-        if (!PassWetContactNormalFilter(Receiver, Evaluation, WorldNormalPtr))
+        if (!PassWetContactSurfaceFilter(Receiver, Evaluation, WorldPosition, WorldNormalPtr))
         {
             return;
         }
@@ -349,7 +364,7 @@ bool ApplyDirectSkinnedWetContact(
             WorldNormalPtr = &WorldNormal;
         }
 
-        if (!PassWetContactNormalFilter(Receiver, Evaluation, WorldNormalPtr))
+        if (!PassWetContactSurfaceFilter(Receiver, Evaluation, WorldPosition, WorldNormalPtr))
         {
             continue;
         }

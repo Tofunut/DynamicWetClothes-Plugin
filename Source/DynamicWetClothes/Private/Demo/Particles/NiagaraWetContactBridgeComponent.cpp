@@ -4,16 +4,74 @@
 #include "DynamicWet/DynamicWetReceiverComponent.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
-#include "HAL/IConsoleManager.h"
 #include "NiagaraComponent.h"
 
 namespace
 {
-static TAutoConsoleVariable<int32> CVarDynamicWetNiagaraContactProfile(
-    TEXT("dwc.NiagaraWetContact.Profile"),
-    0,
-    TEXT("Logs DynamicWet Niagara wet contact callback stats. 0=off, 1=on."),
-    ECVF_Default);
+void AddUniqueBoneName(TArray<FName>& BoneNames, const FName BoneName)
+{
+    if (!BoneName.IsNone())
+    {
+        BoneNames.AddUnique(BoneName);
+    }
+}
+
+void CollectSphereSweepBoneNames(
+    UWorld& World,
+    const UNiagaraWetContactBridgeComponent& Bridge,
+    const USkeletalMeshComponent& HitSkeletalMesh,
+    const FDWCWetContact& Contact,
+    TArray<FName>& InOutBoneNames)
+{
+    if (Contact.Radius <= 0.0f)
+    {
+        return;
+    }
+
+    FVector SweepNormal = Contact.Normal.GetSafeNormal();
+    if (SweepNormal.IsNearlyZero())
+    {
+        SweepNormal = FVector::UpVector;
+    }
+
+    FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(NiagaraWetContactBridgeBoneSweep), false);
+    QueryParams.bReturnPhysicalMaterial = false;
+
+    const float SweepHalfDistance = FMath::Max(1.0f, Contact.Radius * 0.1f);
+    const FVector SweepStart = Contact.Location - SweepNormal * SweepHalfDistance;
+    const FVector SweepEnd = Contact.Location + SweepNormal * SweepHalfDistance;
+    const FCollisionShape SweepShape = FCollisionShape::MakeSphere(Contact.Radius);
+
+    TArray<FHitResult> SweepHits;
+    if (!World.SweepMultiByChannel(
+            SweepHits,
+            SweepStart,
+            SweepEnd,
+            FQuat::Identity,
+            Bridge.TraceChannel,
+            SweepShape,
+            QueryParams))
+    {
+        return;
+    }
+
+    for (const FHitResult& SweepHit : SweepHits)
+    {
+        if (SweepHit.GetComponent() != &HitSkeletalMesh)
+        {
+            continue;
+        }
+
+        FName BoneName = SweepHit.BoneName;
+        if (BoneName.IsNone())
+        {
+            const FVector QueryLocation = SweepHit.ImpactPoint.IsNearlyZero() ? Contact.Location : SweepHit.ImpactPoint;
+            BoneName = HitSkeletalMesh.FindClosestBone(QueryLocation);
+        }
+
+        AddUniqueBoneName(InOutBoneNames, BoneName);
+    }
+}
 }
 
 UNiagaraWetContactBridgeComponent::UNiagaraWetContactBridgeComponent()
@@ -43,7 +101,7 @@ void UNiagaraWetContactBridgeComponent::BeginPlay()
 
 void UNiagaraWetContactBridgeComponent::ReceiveParticleData_Implementation(
     const TArray<FBasicParticleData>& Data,
-    UNiagaraSystem* NiagaraSystem,
+    UNiagaraSystem*,
     const FVector& SimulationPositionOffset)
 {
     UDynamicWetReceiverComponent* TargetReceiver = Receiver;
@@ -58,51 +116,24 @@ void UNiagaraWetContactBridgeComponent::ReceiveParticleData_Implementation(
         return;
     }
 
-    const bool bProfile = CVarDynamicWetNiagaraContactProfile.GetValueOnGameThread() != 0;
-    const double StartSeconds = bProfile ? FPlatformTime::Seconds() : 0.0;
     const int32 MaxParticles = FMath::Max(0, MaxParticlesPerCallback);
     const int32 ParticleCount = MaxParticles > 0 ? FMath::Min(Data.Num(), MaxParticles) : Data.Num();
 
-    int32 BuiltContactCount = 0;
-    int32 EnqueuedContactCount = 0;
-    const double BuildStartSeconds = bProfile ? FPlatformTime::Seconds() : 0.0;
-    double EnqueueSeconds = 0.0;
+    TArray<FDWCWetContact> ParticleContacts;
+    TArray<FDWCWetContact> ContactsToApply;
+    ContactsToApply.Reserve(ParticleCount);
 
     for (int32 ParticleIndex = 0; ParticleIndex < ParticleCount; ++ParticleIndex)
     {
-        FDWCWetContact Contact;
-        if (BuildContactFromParticle(Data[ParticleIndex], SimulationPositionOffset, Contact))
+        if (BuildContactsFromParticle(Data[ParticleIndex], SimulationPositionOffset, ParticleContacts))
         {
-            ++BuiltContactCount;
-            const double EnqueueStartSeconds = bProfile ? FPlatformTime::Seconds() : 0.0;
-            if (TargetReceiver->ApplyWetContact(Contact, true))
-            {
-                ++EnqueuedContactCount;
-            }
-            if (bProfile)
-            {
-                EnqueueSeconds += FPlatformTime::Seconds() - EnqueueStartSeconds;
-            }
+            ContactsToApply.Append(ParticleContacts);
         }
     }
 
-    if (bProfile)
+    if (!ContactsToApply.IsEmpty())
     {
-        const double EndSeconds = FPlatformTime::Seconds();
-        UE_LOG(
-            LogTemp,
-            Log,
-            TEXT("DWC NiagaraWetContact Profile: Owner=%s Niagara=%s Trace=%s IncomingParticles=%d ProcessedParticles=%d BuiltContacts=%d EnqueuedContacts=%d BuildAndTraceMs=%.3f EnqueueMs=%.3f TotalMs=%.3f"),
-            *GetNameSafe(GetOwner()),
-            *GetNameSafe(NiagaraSystem),
-            bTraceForSurfaceData ? TEXT("true") : TEXT("false"),
-            Data.Num(),
-            ParticleCount,
-            BuiltContactCount,
-            EnqueuedContactCount,
-            ((EndSeconds - BuildStartSeconds) - EnqueueSeconds) * 1000.0,
-            EnqueueSeconds * 1000.0,
-            (EndSeconds - StartSeconds) * 1000.0);
+        TargetReceiver->ApplyWetContacts(ContactsToApply, true);
     }
 }
 
@@ -143,11 +174,13 @@ void UNiagaraWetContactBridgeComponent::BindCallbackUserParameter()
     NiagaraComponent->SetVariableObject(CallbackUserParameterName, this);
 }
 
-bool UNiagaraWetContactBridgeComponent::BuildContactFromParticle(
+bool UNiagaraWetContactBridgeComponent::BuildContactsFromParticle(
     const FBasicParticleData& Particle,
     const FVector& SimulationPositionOffset,
-    FDWCWetContact& OutContact) const
+    TArray<FDWCWetContact>& OutContacts) const
 {
+    OutContacts.Reset();
+
     const FVector ParticlePosition = FVector(Particle.Position) + SimulationPositionOffset;
     const FVector ParticleVelocity = FVector(Particle.Velocity);
 
@@ -162,25 +195,38 @@ bool UNiagaraWetContactBridgeComponent::BuildContactFromParticle(
             ? FVector::DownVector
             : ParticleVelocity.GetSafeNormal();
 
-    OutContact.Amount = ContactAmount;
-    OutContact.Location = ParticlePosition;
-    OutContact.Direction = ContactDirection;
-    OutContact.Radius =
+    FDWCWetContact BaseContact;
+    BaseContact.Amount = ContactAmount;
+    BaseContact.Location = ParticlePosition;
+    BaseContact.Direction = ContactDirection;
+    BaseContact.Radius =
         bUseParticleSizeAsRadius
             ? FMath::Max(ContactRadius, Particle.Size * ParticleSizeRadiusScale)
             : ContactRadius;
-    OutContact.Normal = FVector::UpVector;
-    OutContact.BoneName = NAME_None;
+    BaseContact.Normal = FVector::UpVector;
+    BaseContact.BoneName = NAME_None;
 
     if (!bTraceForSurfaceData)
     {
-        return !bRequireBoneNameForContact;
+        if (bRequireBoneNameForContact)
+        {
+            return false;
+        }
+
+        OutContacts.Add(BaseContact);
+        return true;
     }
 
     UWorld* World = GetWorld();
     if (!World)
     {
-        return !bRequireBoneNameForContact;
+        if (bRequireBoneNameForContact)
+        {
+            return false;
+        }
+
+        OutContacts.Add(BaseContact);
+        return true;
     }
 
     FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(NiagaraWetContactBridge), bTraceComplex);
@@ -190,25 +236,48 @@ bool UNiagaraWetContactBridgeComponent::BuildContactFromParticle(
     const FVector TraceEnd = ParticlePosition + ContactDirection * TraceDistance;
 
     FHitResult Hit;
-    if (World->LineTraceSingleByChannel(Hit, TraceStart, TraceEnd, TraceChannel, QueryParams))
-    {
-        OutContact.Location = Hit.ImpactPoint;
-        OutContact.Normal = Hit.ImpactNormal;
-        OutContact.BoneName = Hit.BoneName;
+    const bool bHit = World->LineTraceSingleByChannel(Hit, TraceStart, TraceEnd, TraceChannel, QueryParams);
 
-        if (OutContact.BoneName.IsNone())
+    if (bHit)
+    {
+        BaseContact.Location = Hit.ImpactPoint;
+        BaseContact.Normal = Hit.ImpactNormal;
+        BaseContact.BoneName = Hit.BoneName;
+
+        const USkeletalMeshComponent* HitSkeletalMesh = Cast<USkeletalMeshComponent>(Hit.GetComponent());
+        if (BaseContact.BoneName.IsNone())
         {
-            if (const USkeletalMeshComponent* HitSkeletalMesh = Cast<USkeletalMeshComponent>(Hit.GetComponent()))
+            if (HitSkeletalMesh)
             {
-                OutContact.BoneName = HitSkeletalMesh->FindClosestBone(Hit.ImpactPoint);
+                BaseContact.BoneName = HitSkeletalMesh->FindClosestBone(Hit.ImpactPoint);
             }
+        }
+
+        TArray<FName> CandidateBoneNames;
+        AddUniqueBoneName(CandidateBoneNames, BaseContact.BoneName);
+
+        if (HitSkeletalMesh)
+        {
+            CollectSphereSweepBoneNames(*World, *this, *HitSkeletalMesh, BaseContact, CandidateBoneNames);
+        }
+
+        for (const FName CandidateBoneName : CandidateBoneNames)
+        {
+            FDWCWetContact Contact = BaseContact;
+            Contact.BoneName = CandidateBoneName;
+            OutContacts.Add(Contact);
         }
     }
 
-    if (bRequireBoneNameForContact && OutContact.BoneName.IsNone())
+    if (OutContacts.IsEmpty() && !bRequireBoneNameForContact)
+    {
+        OutContacts.Add(BaseContact);
+    }
+
+    if (bRequireBoneNameForContact && OutContacts.IsEmpty())
     {
         return false;
     }
 
-    return true;
+    return !OutContacts.IsEmpty();
 }

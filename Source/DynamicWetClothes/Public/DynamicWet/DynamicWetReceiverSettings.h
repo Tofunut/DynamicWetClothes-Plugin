@@ -32,6 +32,12 @@ struct DYNAMICWETCLOTHES_API FDynamicWetReceiverSettings
     UPROPERTY(EditAnywhere, Category = "Wetness|Rain", meta = (ClampMin = "-1.0", ClampMax = "1.0"))
     float RainExposureMax = 0.9f;
 
+    UPROPERTY(EditAnywhere, Category = "Wetness|Contact", meta = (ClampMin = "0.0"))
+    float WetContactBackfaceDepthTolerance = 2.0f;
+
+    UPROPERTY(EditAnywhere, Category = "Wetness|Contact", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float WetContactBackfaceDepthRadiusScale = 0.05f;
+
     UPROPERTY(EditAnywhere, Category = "Wetness|Performance", meta = (ClampMin = "1"))
     int32 MaxPendingWetnessVerticesPerUpdate = 4096;
 

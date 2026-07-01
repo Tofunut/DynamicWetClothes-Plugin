@@ -30,10 +30,10 @@ private:
     UDynamicWetReceiverComponent* ResolveReceiver() const;
     UNiagaraComponent* ResolveNiagaraComponent() const;
     void BindCallbackUserParameter();
-    bool BuildContactFromParticle(
+    bool BuildContactsFromParticle(
         const FBasicParticleData& Particle,
         const FVector& SimulationPositionOffset,
-        FDWCWetContact& OutContact) const;
+        TArray<FDWCWetContact>& OutContacts) const;
 
 public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Receiver")

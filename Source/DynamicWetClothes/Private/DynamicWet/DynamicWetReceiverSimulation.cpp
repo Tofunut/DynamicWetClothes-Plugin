@@ -305,6 +305,7 @@ void FDynamicWetReceiverSimulationSolver::SpreadPendingWetnessToNeighbors(FDynam
         const float TargetCapacity = Receiver.WetnessSettings.MaxStoredWetness - Receiver.SimulationState.WetnessPerVertex[NeighborIndex];
         // if (TargetCapacity <= Receiver.WetnessSettings.MinPendingWetnessAmount)
         // {
+        //     //RefreshWetnessDryHold(Receiver, NeighborIndex);
         //     continue;
         // }
 

@@ -48,6 +48,7 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
     UFUNCTION(BlueprintCallable, Category = "Wetness|Debug")
     void RefreshWetVertexColors();
     bool GetWetnessWorldBounds(FBox& OutBounds) const;
+    int32 GetWetSurfaceSampleResolution() const;
 
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
@@ -93,6 +94,9 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Contact", meta = (ClampMin = "1", AllowPrivateAccess = "true"))
     int32 MaxBatchedWetContactsPerFrame = 64;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Surface", meta = (ClampMin = "2", ClampMax = "64", AllowPrivateAccess = "true"))
+    int32 WetSurfaceSampleResolution = 8;
 
     UPROPERTY(EditAnywhere, Category = "Wetness|Visual")
     FLinearColor FallbackUnderColor = FLinearColor(0.8f, 0.55f, 0.42f, 1.0f);

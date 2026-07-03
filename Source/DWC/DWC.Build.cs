@@ -19,8 +19,7 @@ public class DWC : ModuleRules
 			new string[]
 			{
 				"RHI",
-				"RenderCore",
-				"Water"
+				"RenderCore"
 			});
 	}
 }

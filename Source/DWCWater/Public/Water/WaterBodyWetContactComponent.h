@@ -57,9 +57,6 @@ class DWCWATER_API UWaterBodyWetContactComponent : public UActorComponent
     UPROPERTY(EditAnywhere, Category = "Wetness", meta = (ClampMin = "0.01"))
     float UpdateInterval = 0.1f;
 
-    UPROPERTY(EditAnywhere, Category = "Wetness", meta = (ClampMin = "2", ClampMax = "64"))
-    int32 SurfaceSampleResolution = 8;
-
     UPROPERTY(EditAnywhere, Category = "Wetness")
     bool bApplyToExistingOverlapsOnBeginPlay = true;
 

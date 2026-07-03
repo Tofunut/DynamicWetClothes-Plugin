@@ -343,6 +343,11 @@ bool UDynamicWetClothesComponent::GetWetnessWorldBounds(FBox& OutBounds) const
     return OutBounds.IsValid && !OutBounds.GetExtent().IsNearlyZero();
 }
 
+int32 UDynamicWetClothesComponent::GetWetSurfaceSampleResolution() const
+{
+    return FMath::Max(2, WetSurfaceSampleResolution);
+}
+
 bool UDynamicWetClothesComponent::FlushPendingWetContacts()
 {
     if (PendingWetContacts.IsEmpty())

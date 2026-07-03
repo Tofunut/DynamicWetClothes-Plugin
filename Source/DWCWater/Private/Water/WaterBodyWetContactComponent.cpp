@@ -247,7 +247,7 @@ bool UWaterBodyWetContactComponent::BuildWaterSurfaceDataForReceiver(
         return false;
     }
 
-    const int32 GridSize = FMath::Max(2, SurfaceSampleResolution);
+    const int32 GridSize = Receiver.GetWetSurfaceSampleResolution();
     const int32 SampleCount = GridSize * GridSize;
 
     OutWaterSurfaceData = FDWCWaterSurfaceData();

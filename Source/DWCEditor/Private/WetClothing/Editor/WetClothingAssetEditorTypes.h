@@ -4,7 +4,6 @@
 
 #pragma once
 
-#include "AssetRegistry/AssetData.h"
 #include "CoreMinimal.h"
 #include "WetClothing/Widgets/SWetClothingAssetUVView.h"
 
@@ -32,9 +31,3 @@ struct FWetClothingUVSelectionToolItem
     FName                            IconBrushName;
 };
 
-struct FWetnessProfileAssetItem
-{
-    FAssetData AssetData;
-    FString    DisplayName;
-    FString    ContentPath;
-};

@@ -4,6 +4,7 @@
 #include "AssetToolsModule.h"
 #include "IAssetTools.h"
 #include "MaterialEditingLibrary.h"
+#include "Interfaces/IPluginManager.h"
 #include "Materials/Material.h"
 #include "Materials/MaterialExpressionConstant.h"
 #include "Materials/MaterialExpressionConstant3Vector.h"
@@ -19,8 +20,31 @@
 
 namespace
 {
-    constexpr const TCHAR* ApplyWetnessFunctionPath = TEXT("/DWC/Materials/Functions/MF_DWC_ApplyWetness.MF_DWC_ApplyWetness");
-    constexpr const TCHAR* WetPartDebugFunctionPath = TEXT("/DWC/Materials/Functions/MF_DWC_WetPartDebug.MF_DWC_WetPartDebug");
+    constexpr const TCHAR* DynamicWetClothesPluginName = TEXT("DynamicWetClothes");
+
+    FString BuildDwcMaterialFunctionPath(const TCHAR* FunctionName)
+    {
+        const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(DynamicWetClothesPluginName);
+        if (!Plugin.IsValid())
+        {
+            return FString();
+        }
+
+        FString MountedAssetPath = Plugin->GetMountedAssetPath();
+        MountedAssetPath.RemoveFromEnd(TEXT("/"));
+        return FString::Printf(TEXT("%s/Materials/Functions/%s.%s"), *MountedAssetPath, FunctionName, FunctionName);
+    }
+
+    UMaterialFunctionInterface* LoadDwcMaterialFunction(const TCHAR* FunctionName, FString* OutObjectPath = nullptr)
+    {
+        const FString ObjectPath = BuildDwcMaterialFunctionPath(FunctionName);
+        if (OutObjectPath != nullptr)
+        {
+            *OutObjectPath = ObjectPath;
+        }
+
+        return ObjectPath.IsEmpty() ? nullptr : LoadObject<UMaterialFunctionInterface>(nullptr, *ObjectPath);
+    }
 
     bool HasFunctionCall(const UMaterial* Material, const UMaterialFunctionInterface* Function)
     {
@@ -569,11 +593,16 @@ FWetClothingMaterialSetupResult FWetClothingMaterialSetup::DuplicateAndApplyToMa
         return Result;
     }
 
-    UMaterialFunctionInterface* ApplyFunction = LoadObject<UMaterialFunctionInterface>(nullptr, ApplyWetnessFunctionPath);
-    UMaterialFunctionInterface* DebugFunction = LoadObject<UMaterialFunctionInterface>(nullptr, WetPartDebugFunctionPath);
+    FString ApplyFunctionPath;
+    FString DebugFunctionPath;
+    UMaterialFunctionInterface* ApplyFunction = LoadDwcMaterialFunction(TEXT("MF_DWC_ApplyWetness"), &ApplyFunctionPath);
+    UMaterialFunctionInterface* DebugFunction = LoadDwcMaterialFunction(TEXT("MF_DWC_WetPartDebug"), &DebugFunctionPath);
     if (ApplyFunction == nullptr || DebugFunction == nullptr)
     {
-        Result.Message = TEXT("Could not load MF_DWC_ApplyWetness or MF_DWC_WetPartDebug.");
+        Result.Message = FString::Printf(
+            TEXT("Could not load DWC material functions. Apply: '%s', Debug: '%s'."),
+            ApplyFunctionPath.IsEmpty() ? TEXT("<plugin not mounted>") : *ApplyFunctionPath,
+            DebugFunctionPath.IsEmpty() ? TEXT("<plugin not mounted>") : *DebugFunctionPath);
         return Result;
     }
 
@@ -737,7 +766,7 @@ bool FWetClothingMaterialSetup::IsMaterialConfiguredForDwc(UMaterialInterface* M
         return false;
     }
 
-    UMaterialFunctionInterface* ApplyFunction = LoadObject<UMaterialFunctionInterface>(nullptr, ApplyWetnessFunctionPath);
-    UMaterialFunctionInterface* DebugFunction = LoadObject<UMaterialFunctionInterface>(nullptr, WetPartDebugFunctionPath);
+    UMaterialFunctionInterface* ApplyFunction = LoadDwcMaterialFunction(TEXT("MF_DWC_ApplyWetness"));
+    UMaterialFunctionInterface* DebugFunction = LoadDwcMaterialFunction(TEXT("MF_DWC_WetPartDebug"));
     return HasFunctionCall(Material, ApplyFunction) && HasFunctionCall(Material, DebugFunction);
 }

@@ -177,6 +177,9 @@ struct FWetClothingAssetBakedWetnessProfileMap
     int32 PaddingPixels = 4;
 
     UPROPERTY(VisibleAnywhere, Category = "Wetness Profile Map")
+    FString BuildSignature;
+
+    UPROPERTY(VisibleAnywhere, Category = "Wetness Profile Map")
     FGuid BakeGuid;
 };
 

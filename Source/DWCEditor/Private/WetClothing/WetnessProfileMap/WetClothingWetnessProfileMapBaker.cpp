@@ -4,6 +4,7 @@
 #include "Engine/Texture.h"
 #include "Engine/Texture2D.h"
 #include "Misc/PackageName.h"
+#include "Misc/SecureHash.h"
 #include "ObjectTools.h"
 #include "UObject/Package.h"
 #include "WetClothing/Analysis/WetClothingAssetMeshAnalyzer.h"
@@ -88,6 +89,20 @@ namespace
 
         OutParameters = WetPartEntry.ProfileAssignment.Parameters;
         return true;
+    }
+
+    void AppendProfileParametersSignature(FString& Signature, const FWetnessProfileParameters& Parameters)
+    {
+        Signature += FString::Printf(
+            TEXT("A=%.9g;S=%.9g;D=%.9g;G=%.9g;WV=%.9g;T=%.9g;SW=%.9g;R=%.9g;"),
+            Parameters.Absorption,
+            Parameters.SpreadRate,
+            Parameters.DryRate,
+            Parameters.GravityFlowStrength,
+            Parameters.WetVisualStrength,
+            Parameters.TransparencyStrength,
+            Parameters.SurfaceWaterStrength,
+            Parameters.RunoffStrength);
     }
 
     const FWetClothingAssetWetPartEntry* FindWetPartEntryForUVIsland(
@@ -309,6 +324,99 @@ namespace
     }
 } // namespace
 
+FString FWetClothingWetnessProfileMapBaker::MakeBuildSignature(
+    const UWetClothingAsset* WetClothingAsset,
+    const UTexture*          SourceTexture,
+    int32                    UVChannelIndex,
+    const TArray<int32>&     MaterialSlotIndices)
+{
+    if (WetClothingAsset == nullptr || SourceTexture == nullptr || UVChannelIndex == INDEX_NONE)
+    {
+        return FString();
+    }
+
+    TArray<int32> SortedMaterialSlotIndices = MaterialSlotIndices;
+    SortedMaterialSlotIndices.Sort();
+
+    FString Canonical;
+    Canonical.Reserve(4096);
+    Canonical += TEXT("DWC.WetnessProfileMap0.v2|");
+    Canonical += SourceTexture->GetPathName();
+    const int32 SourceWidth = FMath::Max(FMath::RoundToInt(SourceTexture->GetSurfaceWidth()), 1);
+    const int32 SourceHeight = FMath::Max(FMath::RoundToInt(SourceTexture->GetSurfaceHeight()), 1);
+    Canonical += FString::Printf(
+        TEXT("|UV=%d|Source=%dx%d"),
+        UVChannelIndex,
+        SourceWidth,
+        SourceHeight);
+    if (const UTexture2D* SourceTexture2D = Cast<UTexture2D>(SourceTexture))
+    {
+        Canonical += FString::Printf(
+            TEXT(";Address=%d,%d"),
+            static_cast<int32>(SourceTexture2D->AddressX.GetValue()),
+            static_cast<int32>(SourceTexture2D->AddressY.GetValue()));
+    }
+    Canonical += TEXT("|Slots=");
+    for (const int32 MaterialSlotIndex : SortedMaterialSlotIndices)
+    {
+        Canonical += FString::FromInt(MaterialSlotIndex);
+        Canonical += TEXT(",");
+    }
+
+    TArray<const FWetClothingAssetWetPartEntry*> RelevantEntries;
+    for (const FWetClothingAssetWetPartEntry& Entry : WetClothingAsset->WetPartEntries)
+    {
+        if (Entry.UVChannelIndex == UVChannelIndex &&
+            Entry.MaterialSlotIndex != INDEX_NONE &&
+            Entry.AssignedUVIslandIDs.Num() > 0 &&
+            SortedMaterialSlotIndices.Contains(Entry.MaterialSlotIndex))
+        {
+            RelevantEntries.Add(&Entry);
+        }
+    }
+
+    RelevantEntries.Sort(
+        [](const FWetClothingAssetWetPartEntry& A, const FWetClothingAssetWetPartEntry& B)
+        {
+            if (A.MaterialSlotIndex != B.MaterialSlotIndex)
+            {
+                return A.MaterialSlotIndex < B.MaterialSlotIndex;
+            }
+            if (A.UVChannelIndex != B.UVChannelIndex)
+            {
+                return A.UVChannelIndex < B.UVChannelIndex;
+            }
+            return A.WetPartID < B.WetPartID;
+        });
+
+    for (const FWetClothingAssetWetPartEntry* Entry : RelevantEntries)
+    {
+        TArray<int32> AssignedUVIslandIDs = Entry->AssignedUVIslandIDs;
+        AssignedUVIslandIDs.Sort();
+
+        Canonical += FString::Printf(
+            TEXT("|Entry:Slot=%d;UV=%d;Part=%d;Profile=%s;Blend=%d;Islands="),
+            Entry->MaterialSlotIndex,
+            Entry->UVChannelIndex,
+            Entry->WetPartID,
+            *Entry->ProfileAssignment.SourceProfile.ToString(),
+            static_cast<int32>(Entry->ProfileAssignment.BlendMode));
+
+        for (const int32 UVIslandID : AssignedUVIslandIDs)
+        {
+            Canonical += FString::FromInt(UVIslandID);
+            Canonical += TEXT(",");
+        }
+
+        FWetnessProfileParameters Parameters;
+        ResolveWetPartParameters(*Entry, Parameters);
+        Canonical += TEXT(";Params=");
+        AppendProfileParametersSignature(Canonical, Parameters);
+    }
+
+    return FMD5::HashAnsiString(*Canonical);
+}
+
 bool FWetClothingWetnessProfileMapBaker::BakeWetnessProfileMap0(
     UWetClothingAsset*                               WetClothingAsset,
     UTexture*                                        SourceTexture,
@@ -432,6 +540,7 @@ bool FWetClothingWetnessProfileMapBaker::BakeWetnessProfileMap0(
     BakedWetnessProfileMap->WetnessProfileMap0 = WetnessProfileMap0;
     BakedWetnessProfileMap->Resolution = MaxResolution;
     BakedWetnessProfileMap->PaddingPixels = Settings.PaddingPixels;
+    BakedWetnessProfileMap->BuildSignature = MakeBuildSignature(WetClothingAsset, SourceTexture, UVChannelIndex, SortedMaterialSlotIndices);
     BakedWetnessProfileMap->BakeGuid = FGuid::NewGuid();
 
     WetClothingAsset->MarkPackageDirty();

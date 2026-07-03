@@ -22,6 +22,12 @@ struct FWetClothingWetnessProfileMapBakeResult
 class FWetClothingWetnessProfileMapBaker
 {
   public:
+    static FString MakeBuildSignature(
+        const UWetClothingAsset* WetClothingAsset,
+        const UTexture*          SourceTexture,
+        int32                    UVChannelIndex,
+        const TArray<int32>&     MaterialSlotIndices);
+
     static bool BakeWetnessProfileMap0(
         UWetClothingAsset*                               WetClothingAsset,
         UTexture*                                        SourceTexture,

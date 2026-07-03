@@ -32,7 +32,7 @@ class SWetClothingAssetEditorPanel : public SCompoundWidget
 
     void RefreshFromAsset();
     bool HasPendingWetSetupTasks(FString* OutSummary = nullptr) const;
-    bool BuildWetSetup(FString& OutSummary);
+    bool BuildWetSetup(FString& OutSummary, bool* OutHadWarnings = nullptr);
     bool SaveWetSetupAssets() const;
 
   private:
@@ -44,7 +44,6 @@ class SWetClothingAssetEditorPanel : public SCompoundWidget
     using FUVDisplayModeItemPtr = TSharedPtr<EWetClothingAssetUVDisplayMode>;
     using FAutoPartitionColorModeItemPtr = TSharedPtr<EWetPartAutoPartitionColorMode>;
     using FWetPartEntryPtr = TSharedPtr<FWetClothingAssetWetPartEntry>;
-    using FWetnessProfileAssetItemPtr = TSharedPtr<FWetnessProfileAssetItem>;
 
     void RefreshMaterialSlotItems();
     void RefreshMaterialTextures();
@@ -56,7 +55,6 @@ class SWetClothingAssetEditorPanel : public SCompoundWidget
     void RefreshWetPartList();
     void RefreshPreviewWetPartOverlay();
     void RefreshWetPartWidgets();
-    void RefreshAvailableWetnessProfiles();
 
     void                                 EnsureDefaultWetPartForSelectedScope();
     int32                                GetSelectedUVChannelIndex() const;
@@ -75,7 +73,6 @@ class SWetClothingAssetEditorPanel : public SCompoundWidget
     TMap<int32, int32>                   BuildUVIslandWetPartIDMap() const;
     TMap<int32, FLinearColor>            BuildUVIslandColorMap() const;
     TSet<int32>                          BuildHiddenUVIslandIDSet() const;
-    TArray<FString>                      GetProfileSearchPaths() const;
 
     void ApplyIslandSelection(const TArray<int32>& HitUVIslandIDs, bool bAppendSelection);
     void SetSelectedUVIslandIDs(const TSet<int32>& InSelectedUVIslandIDs, int32 InPrimarySelectedUVIslandID, bool bSyncListSelection = true);
@@ -83,7 +80,7 @@ class SWetClothingAssetEditorPanel : public SCompoundWidget
     void ResetIslandSelection();
 
     TSharedRef<ITableRow>     GenerateMaterialSlotRow(FMaterialSlotItemPtr Item, const TSharedRef<STableViewBase>& OwnerTable);
-    void                      HandleMaterialSlotSelectionChanged(FMaterialSlotItemPtr Item, ESelectInfo::Type SelectInfo);
+    void                      HandleMaterialSlotSelectionChanged(FMaterialSlotItemPtr Item, ESelectInfo::Type);
     TSharedRef<SWidget>       GenerateTextureComboItem(FTextureItemPtr Item);
     void                      HandleTextureSelectionChanged(FTextureItemPtr Item, ESelectInfo::Type SelectInfo);
     TSharedRef<SWidget>       BuildTextureComboContent(FTextureItemPtr Item, float ThumbnailSize, bool bCompactLayout);
@@ -107,9 +104,7 @@ class SWetClothingAssetEditorPanel : public SCompoundWidget
     void                      HandleWetPartColorCommitted(FLinearColor NewColor, FWetPartEntryPtr Item);
     FReply                    HandleToggleWetPartViewClicked(FWetPartEntryPtr Item);
     const FSlateBrush*        GetWetPartVisibilityBrush(FWetPartEntryPtr Item) const;
-    TSharedRef<SWidget>       BuildWetnessProfilePickerMenu(FWetPartEntryPtr Item);
-    void                      HandleWetnessProfilePicked(FWetPartEntryPtr Item, FWetnessProfileAssetItemPtr ProfileItem);
-    FReply                    HandleAddProfileSearchPathClicked();
+    void                      HandleWetnessProfilePicked(FWetPartEntryPtr Item, const FAssetData& ProfileAssetData);
     TSharedRef<SWidget>       GenerateAssignWetPartComboItem(FWetPartEntryPtr Item);
     void                      HandleAssignWetPartSelectionChanged(FWetPartEntryPtr Item, ESelectInfo::Type SelectInfo);
     FReply                    HandleAddWetPartClicked();
@@ -165,6 +160,7 @@ class SWetClothingAssetEditorPanel : public SCompoundWidget
     UTexture*                                      ResolveTextureAddressTexture() const;
     void                                           SaveSelectedTexture();
     UTexture*                                      FindSavedTextureSelection(int32 MaterialSlotIndex, int32 UVChannelIndex) const;
+    UTexture*                                      ResolveOrSaveTextureSelection(int32 MaterialSlotIndex, int32 UVChannelIndex);
     bool                                           HasSavedTextureSelection(int32 MaterialSlotIndex, int32 UVChannelIndex) const;
     void                                           SaveTextureSelection(int32 MaterialSlotIndex, int32 UVChannelIndex, UTexture* Texture);
     const FWetClothingAssetBakedWetnessProfileMap* FindBakedWetnessProfileMap(UTexture* SourceTexture, int32 UVChannelIndex) const;
@@ -180,7 +176,6 @@ class SWetClothingAssetEditorPanel : public SCompoundWidget
     TArray<TSharedPtr<FAssetThumbnail>>                MaterialSlotThumbnails;
     TSharedPtr<class SListView<FMaterialSlotItemPtr>>  MaterialSlotListView;
     int32                                              SelectedMaterialSlotIndex = INDEX_NONE;
-    TSet<int32>                                        AutoPartitionPromptedMaterialSlots;
     TArray<FTextureItemPtr>                            TextureItems;
     TArray<TSharedPtr<FAssetThumbnail>>                TextureThumbnails;
     FTextureItemPtr                                    SelectedTextureItem;
@@ -209,7 +204,6 @@ class SWetClothingAssetEditorPanel : public SCompoundWidget
     EWetPartAutoPartitionColorMode                     AutoPartitionColorMode = EWetPartAutoPartitionColorMode::DominantColor;
     FString                                            UVStatusMessage;
     TArray<FWetPartEntryPtr>                           CurrentWetPartItems;
-    TArray<FWetnessProfileAssetItemPtr>                AvailableWetnessProfileItems;
     TSharedPtr<class SListView<FWetPartEntryPtr>>      WetPartListView;
     TSharedPtr<class SComboBox<FWetPartEntryPtr>>      AssignWetPartComboBox;
     TMap<int32, TWeakPtr<SInlineEditableTextBlock>>    WetPartInlineRenameWidgets;

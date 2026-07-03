@@ -2,17 +2,10 @@
 
 #include "Engine/SkeletalMesh.h"
 #include "ReferenceSkeleton.h"
+#include "Utility/DWCError.h"
 
 namespace
 {
-    void SetError(FString* OutErrorMessage, const TCHAR* Message)
-    {
-        if (OutErrorMessage != nullptr)
-        {
-            *OutErrorMessage = Message;
-        }
-    }
-
     FString MakeSkeletonSignature(const USkeletalMesh* SkeletalMesh)
     {
         if (SkeletalMesh == nullptr)
@@ -49,21 +42,21 @@ bool FWetClothingAssetBakedBoneOptimizationCache::BuildFromRuntimeCache(
 
     if (SkeletalMesh == nullptr)
     {
-        SetError(OutErrorMessage, TEXT("No skeletal mesh was provided for baked bone cache."));
+        DWC::Error::SetMessage(OutErrorMessage, TEXT("No skeletal mesh was provided for baked bone cache."));
         return false;
     }
 
     const FWetBonePrimaryVertexCache& PrimaryCache = RuntimeCache.PrimaryVertexCache;
     if (PrimaryCache.VertexCount <= 0 || PrimaryCache.BoneCount <= 0 || PrimaryCache.BoneStartOffsets.Num() != PrimaryCache.BoneCount + 1)
     {
-        SetError(OutErrorMessage, TEXT("Runtime bone optimization cache is invalid."));
+        DWC::Error::SetMessage(OutErrorMessage, TEXT("Runtime bone optimization cache is invalid."));
         return false;
     }
 
     const FReferenceSkeleton& RefSkeleton = SkeletalMesh->GetRefSkeleton();
     if (RefSkeleton.GetNum() != PrimaryCache.BoneCount)
     {
-        SetError(OutErrorMessage, TEXT("Runtime bone optimization cache bone count does not match the skeletal mesh."));
+        DWC::Error::SetMessage(OutErrorMessage, TEXT("Runtime bone optimization cache bone count does not match the skeletal mesh."));
         return false;
     }
 
@@ -93,7 +86,7 @@ bool FWetClothingAssetBakedBoneOptimizationCache::BuildFromRuntimeCache(
         ResolvedIncludeRules.Add(MoveTemp(BakedRule));
     }
 
-    SetError(OutErrorMessage, TEXT(""));
+    DWC::Error::SetMessage(OutErrorMessage, TEXT(""));
     return true;
 }
 

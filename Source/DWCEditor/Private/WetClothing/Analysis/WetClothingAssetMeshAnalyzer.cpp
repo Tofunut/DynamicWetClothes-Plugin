@@ -3,6 +3,7 @@
 #include "Engine/SkeletalMesh.h"
 #include "Rendering/SkeletalMeshLODRenderData.h"
 #include "Rendering/SkeletalMeshRenderData.h"
+#include "Utility/DWCError.h"
 
 namespace WetClothingAssetMeshAnalyzerInternal
 {
@@ -316,10 +317,7 @@ namespace WetClothingAssetMeshAnalyzerInternal
 
 void FWetClothingAssetMeshAnalyzer::SetError(FString* OutErrorMessage, const TCHAR* InMessage)
 {
-    if (OutErrorMessage != nullptr)
-    {
-        *OutErrorMessage = InMessage;
-    }
+    DWC::Error::SetMessage(OutErrorMessage, InMessage);
 }
 
 int32 FWetClothingAssetMeshAnalyzer::GetNumUVChannels(const USkeletalMesh* SkeletalMesh, int32 LODIndex)

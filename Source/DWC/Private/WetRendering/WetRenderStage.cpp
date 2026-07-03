@@ -12,7 +12,7 @@
 
 namespace
 {
-    bool GetLODRenderData(const USkeletalMeshComponent* TargetSkeletalMesh, const int32 LODIndex, FSkeletalMeshLODRenderData*& OutLODData)
+    bool GetWetRenderStageLODRenderData(const USkeletalMeshComponent* TargetSkeletalMesh, const int32 LODIndex, FSkeletalMeshLODRenderData*& OutLODData)
     {
         OutLODData = nullptr;
         if (!TargetSkeletalMesh)
@@ -189,7 +189,7 @@ FLinearColor FWetRenderStage::MakeWetVertexColor(
 void FWetRenderStage::ApplyWetnessToMaterial(FWetRenderStageArgs& Receiver)
 {
     FSkeletalMeshLODRenderData* LODData = nullptr;
-    if (!GetLODRenderData(Receiver.TargetSkeletalMesh, Receiver.LODIndex, LODData))
+    if (!GetWetRenderStageLODRenderData(Receiver.TargetSkeletalMesh, Receiver.LODIndex, LODData))
     {
         return;
     }

@@ -5,17 +5,10 @@
 #include "Rendering/SkeletalMeshLODRenderData.h"
 #include "Rendering/SkeletalMeshRenderData.h"
 #include "Rendering/SkinWeightVertexBuffer.h"
+#include "Utility/DWCError.h"
 
 namespace WetClothingSkeletalMeshCacheBuilderInternal
 {
-    static void SetError(FString* OutErrorMessage, const TCHAR* Message)
-    {
-        if (OutErrorMessage != nullptr)
-        {
-            *OutErrorMessage = Message;
-        }
-    }
-
     static bool AddValidUniqueBoneIndex(
         int32          BoneIndex,
         int32          BoneCount,
@@ -42,7 +35,7 @@ namespace WetClothingSkeletalMeshCacheBuilderInternal
         const FSkinWeightVertexBuffer* SkinWeightBuffer = LODData.GetSkinWeightVertexBuffer();
         if (SkinWeightBuffer == nullptr)
         {
-            SetError(OutErrorMessage, TEXT("TargetMesh skin weight buffer is unavailable."));
+            DWC::Error::SetMessage(OutErrorMessage, TEXT("TargetMesh skin weight buffer is unavailable."));
             return false;
         }
 
@@ -50,20 +43,20 @@ namespace WetClothingSkeletalMeshCacheBuilderInternal
         const int32 VertexCount = static_cast<int32>(LODData.GetNumVertices());
         if (BoneCount <= 0)
         {
-            SetError(OutErrorMessage, TEXT("TargetMesh has no reference skeleton bones."));
+            DWC::Error::SetMessage(OutErrorMessage, TEXT("TargetMesh has no reference skeleton bones."));
             return false;
         }
 
         if (VertexCount <= 0)
         {
-            SetError(OutErrorMessage, TEXT("TargetMesh LOD has no render vertices."));
+            DWC::Error::SetMessage(OutErrorMessage, TEXT("TargetMesh LOD has no render vertices."));
             return false;
         }
 
         const uint32 MaxInfluences = SkinWeightBuffer->GetMaxBoneInfluences();
         if (MaxInfluences == 0)
         {
-            SetError(OutErrorMessage, TEXT("TargetMesh skin weight buffer has no bone influences."));
+            DWC::Error::SetMessage(OutErrorMessage, TEXT("TargetMesh skin weight buffer has no bone influences."));
             return false;
         }
 
@@ -202,20 +195,20 @@ bool FWetBoneOptimizationCacheBuilder::Build(
 
     if (SkeletalMesh == nullptr)
     {
-        WetClothingSkeletalMeshCacheBuilderInternal::SetError(OutErrorMessage, TEXT("No TargetMesh is assigned."));
+        DWC::Error::SetMessage(OutErrorMessage, TEXT("No TargetMesh is assigned."));
         return false;
     }
 
     const FSkeletalMeshRenderData* RenderData = SkeletalMesh->GetResourceForRendering();
     if (RenderData == nullptr)
     {
-        WetClothingSkeletalMeshCacheBuilderInternal::SetError(OutErrorMessage, TEXT("TargetMesh render data is unavailable."));
+        DWC::Error::SetMessage(OutErrorMessage, TEXT("TargetMesh render data is unavailable."));
         return false;
     }
 
     if (!RenderData->LODRenderData.IsValidIndex(LODIndex))
     {
-        WetClothingSkeletalMeshCacheBuilderInternal::SetError(OutErrorMessage, TEXT("Requested TargetMesh LOD render data is unavailable."));
+        DWC::Error::SetMessage(OutErrorMessage, TEXT("Requested TargetMesh LOD render data is unavailable."));
         return false;
     }
 
@@ -226,6 +219,6 @@ bool FWetBoneOptimizationCacheBuilder::Build(
     }
 
     ResolveIncludeRules(SkeletalMesh, IncludeRules, OutCache.ResolvedIncludeRules);
-    WetClothingSkeletalMeshCacheBuilderInternal::SetError(OutErrorMessage, TEXT(""));
+    DWC::Error::SetMessage(OutErrorMessage, TEXT(""));
     return true;
 }

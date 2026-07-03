@@ -1,8 +1,9 @@
-#include "RuntimeData/Build/WetMeshAnalysis.h"
 
+#include "RuntimeData/Build/WetMeshAnalysis.h"
 #include "Runtime/Engine/Classes/Engine/SkeletalMesh.h"
 #include "Runtime/Engine/Public/Rendering/SkeletalMeshLODRenderData.h"
 #include "Runtime/Engine/Public/Rendering/SkeletalMeshRenderData.h"
+#include "Utility/DWCError.h"
 
 namespace DynamicWetMeshAnalysisInternal
 {
@@ -279,10 +280,7 @@ uint32 GetTypeHash(const FWetUVEdgeKey& Key)
 
 void FWetMeshAnalysis::SetError(FString* OutErrorMessage, const TCHAR* InMessage)
 {
-    if (OutErrorMessage != nullptr)
-    {
-        *OutErrorMessage = InMessage;
-    }
+    DWC::Error::SetMessage(OutErrorMessage, InMessage);
 }
 
 int32 FWetMeshAnalysis::GetNumUVChannels(const USkeletalMesh* SkeletalMesh, const int32 LODIndex)

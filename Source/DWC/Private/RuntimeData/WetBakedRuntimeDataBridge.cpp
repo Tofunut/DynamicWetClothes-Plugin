@@ -2,17 +2,7 @@
 
 #include "DataAssets/WetClothingAsset.h"
 #include "Engine/SkeletalMesh.h"
-
-namespace
-{
-    void SetError(FString* OutErrorMessage, const TCHAR* Message)
-    {
-        if (OutErrorMessage != nullptr)
-        {
-            *OutErrorMessage = Message;
-        }
-    }
-} // namespace
+#include "Utility/DWCError.h"
 
 bool FWetBakedRuntimeDataBridge::TryCopyBakedBoneOptimizationCache(
     const UWetClothingAsset*   WetClothingAsset,
@@ -25,13 +15,13 @@ bool FWetBakedRuntimeDataBridge::TryCopyBakedBoneOptimizationCache(
 
     if (WetClothingAsset == nullptr || SkeletalMesh == nullptr)
     {
-        SetError(OutErrorMessage, TEXT("No WetClothingAsset or SkeletalMesh is available."));
+        DWC::Error::SetMessage(OutErrorMessage, TEXT("No WetClothingAsset or SkeletalMesh is available."));
         return false;
     }
 
     if (!WetClothingAsset->IsBakedRuntimeDataValidForMesh(SkeletalMesh, LODIndex))
     {
-        SetError(OutErrorMessage, TEXT("Baked runtime data is stale or invalid for the target mesh."));
+        DWC::Error::SetMessage(OutErrorMessage, TEXT("Baked runtime data is stale or invalid for the target mesh."));
         return false;
     }
 
@@ -42,16 +32,16 @@ bool FWetBakedRuntimeDataBridge::TryCopyBakedBoneOptimizationCache(
             BakedData.VertexCount,
             BakedData.MeshBuildSignature))
     {
-        SetError(OutErrorMessage, TEXT("Baked bone optimization cache is stale or invalid for the target mesh."));
+        DWC::Error::SetMessage(OutErrorMessage, TEXT("Baked bone optimization cache is stale or invalid for the target mesh."));
         return false;
     }
 
     if (!BakedData.BoneOptimizationCache.CopyToRuntimeCache(SkeletalMesh, OutRuntimeCache))
     {
-        SetError(OutErrorMessage, TEXT("Failed to copy baked bone optimization cache to runtime cache."));
+        DWC::Error::SetMessage(OutErrorMessage, TEXT("Failed to copy baked bone optimization cache to runtime cache."));
         return false;
     }
 
-    SetError(OutErrorMessage, TEXT(""));
+    DWC::Error::SetMessage(OutErrorMessage, TEXT(""));
     return true;
 }

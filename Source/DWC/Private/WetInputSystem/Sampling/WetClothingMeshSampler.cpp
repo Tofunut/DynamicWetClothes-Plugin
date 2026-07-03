@@ -9,7 +9,7 @@
 
 namespace
 {
-    bool GetLODRenderData(const USkeletalMeshComponent* TargetSkeletalMesh, const int32 LODIndex, FSkeletalMeshLODRenderData*& OutLODData)
+    bool GetWetMeshSamplerLODRenderData(const USkeletalMeshComponent* TargetSkeletalMesh, const int32 LODIndex, FSkeletalMeshLODRenderData*& OutLODData)
     {
         OutLODData = nullptr;
         if (!TargetSkeletalMesh)
@@ -63,7 +63,7 @@ bool FWetClothingMeshSampler::UpdateSkinnedPositions(USkeletalMeshComponent* Tar
     }
 
     FSkeletalMeshLODRenderData* LODData = nullptr;
-    if (!GetLODRenderData(TargetSkeletalMesh, LODIndex, LODData))
+    if (!GetWetMeshSamplerLODRenderData(TargetSkeletalMesh, LODIndex, LODData))
     {
         return false;
     }
@@ -102,7 +102,7 @@ bool FWetClothingMeshSampler::UpdateSkinnedNormals(USkeletalMeshComponent* Targe
     }
 
     FSkeletalMeshLODRenderData* LODData = nullptr;
-    if (!GetLODRenderData(TargetSkeletalMesh, LODIndex, LODData))
+    if (!GetWetMeshSamplerLODRenderData(TargetSkeletalMesh, LODIndex, LODData))
     {
         return false;
     }

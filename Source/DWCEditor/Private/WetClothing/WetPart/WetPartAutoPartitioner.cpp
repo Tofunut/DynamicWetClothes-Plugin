@@ -6,6 +6,7 @@
 
 #include "WetClothing/Analysis/WetClothingAssetMeshAnalyzer.h"
 #include "WetClothing/Texture/WetClothingTextureReadback.h"
+#include "WetClothing/Texture/WetClothingTextureAddressUtils.h"
 
 namespace
 {
@@ -92,31 +93,11 @@ namespace
         }
     }
 
-    double ApplyTextureAddress(double Value, double IslandCenter, TextureAddress AddressMode)
-    {
-        switch (AddressMode)
-        {
-        case TA_Wrap:
-            return Value - FMath::FloorToDouble(IslandCenter);
-
-        case TA_Mirror:
-        {
-            const int64  TileIndex = FMath::FloorToInt64(IslandCenter);
-            const double TileValue = Value - static_cast<double>(TileIndex);
-            return FMath::Abs(TileIndex) % 2 == 0 ? TileValue : 1.0 - TileValue;
-        }
-
-        case TA_Clamp:
-        default:
-            return FMath::Clamp(Value, 0.0, 1.0);
-        }
-    }
-
-    FVector2D ApplyTextureAddress(const FVector2D& UV, const FVector2D& IslandCenter, const FWetClothingTextureReadback& TextureData)
+    FVector2D ApplyTextureAddressToUV(const FVector2D& UV, const FVector2D& IslandCenter, const FWetClothingTextureReadback& TextureData)
     {
         return FVector2D(
-            ApplyTextureAddress(UV.X, IslandCenter.X, TextureData.AddressX),
-            ApplyTextureAddress(UV.Y, IslandCenter.Y, TextureData.AddressY));
+            WetClothingTextureAddressUtils::Apply(UV.X, IslandCenter.X, TextureData.AddressX),
+            WetClothingTextureAddressUtils::Apply(UV.Y, IslandCenter.Y, TextureData.AddressY));
     }
 
     FLabColor ConvertLinearRgbToLab(const FLinearColor& Color)
@@ -409,9 +390,9 @@ namespace
 
         for (const FWetClothingAssetUVTriangle& Triangle : Island.UVTriangles)
         {
-            const FVector2D A = ApplyTextureAddress(Triangle.UVs[0], IslandCenter, TextureData);
-            const FVector2D B = ApplyTextureAddress(Triangle.UVs[1], IslandCenter, TextureData);
-            const FVector2D C = ApplyTextureAddress(Triangle.UVs[2], IslandCenter, TextureData);
+            const FVector2D A = ApplyTextureAddressToUV(Triangle.UVs[0], IslandCenter, TextureData);
+            const FVector2D B = ApplyTextureAddressToUV(Triangle.UVs[1], IslandCenter, TextureData);
+            const FVector2D C = ApplyTextureAddressToUV(Triangle.UVs[2], IslandCenter, TextureData);
             AddressedUVBounds += A;
             AddressedUVBounds += B;
             AddressedUVBounds += C;

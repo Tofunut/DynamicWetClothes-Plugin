@@ -4,6 +4,7 @@
 #include "Rendering/SkeletalMeshLODRenderData.h"
 #include "Rendering/SkeletalMeshRenderData.h"
 #include "RuntimeData/WetBoneOptimizationCacheBuilder.h"
+#include "Utility/DWCError.h"
 
 namespace
 {
@@ -109,13 +110,6 @@ namespace
         TSet<int32> VertexIndices;
     };
 
-    void SetError(FString* OutErrorMessage, const TCHAR* InMessage)
-    {
-        if (OutErrorMessage != nullptr)
-        {
-            *OutErrorMessage = InMessage;
-        }
-    }
 
     int32 FindParent(TArray<int32>& Parents, int32 Index)
     {
@@ -166,14 +160,14 @@ namespace
 
         if (SkeletalMesh == nullptr || !SkeletalMesh->GetMaterials().IsValidIndex(MaterialSlotIndex))
         {
-            SetError(OutErrorMessage, TEXT("A wet part references an invalid material slot."));
+            DWC::Error::SetMessage(OutErrorMessage, TEXT("A wet part references an invalid material slot."));
             return false;
         }
 
         const int32 NumUVChannels = static_cast<int32>(LODData.GetNumTexCoords());
         if (UVChannelIndex < 0 || UVChannelIndex >= NumUVChannels)
         {
-            SetError(OutErrorMessage, TEXT("A wet part references a UV channel that is not available on the mesh."));
+            DWC::Error::SetMessage(OutErrorMessage, TEXT("A wet part references a UV channel that is not available on the mesh."));
             return false;
         }
 
@@ -213,7 +207,7 @@ namespace
             }
         }
 
-        SetError(OutErrorMessage, TEXT(""));
+        DWC::Error::SetMessage(OutErrorMessage, TEXT(""));
         return true;
     }
 
@@ -354,20 +348,20 @@ bool UWetClothingAsset::RebuildBakedRuntimeData(FString* OutErrorMessage, int32 
 
     if (TargetMesh == nullptr)
     {
-        SetError(OutErrorMessage, TEXT("No TargetMesh is assigned."));
+        DWC::Error::SetMessage(OutErrorMessage, TEXT("No TargetMesh is assigned."));
         return false;
     }
 
     const FSkeletalMeshRenderData* RenderData = TargetMesh->GetResourceForRendering();
     if (RenderData == nullptr)
     {
-        SetError(OutErrorMessage, TEXT("TargetMesh render data is unavailable."));
+        DWC::Error::SetMessage(OutErrorMessage, TEXT("TargetMesh render data is unavailable."));
         return false;
     }
 
     if (!RenderData->LODRenderData.IsValidIndex(LODIndex))
     {
-        SetError(OutErrorMessage, TEXT("The requested LOD render data is unavailable."));
+        DWC::Error::SetMessage(OutErrorMessage, TEXT("The requested LOD render data is unavailable."));
         return false;
     }
 
@@ -377,7 +371,7 @@ bool UWetClothingAsset::RebuildBakedRuntimeData(FString* OutErrorMessage, int32 
 
     if (LODData.GetNumVertices() <= 0 || IndexBuffer.Num() == 0)
     {
-        SetError(OutErrorMessage, TEXT("TargetMesh render data is empty."));
+        DWC::Error::SetMessage(OutErrorMessage, TEXT("TargetMesh render data is empty."));
         return false;
     }
 
@@ -495,6 +489,6 @@ bool UWetClothingAsset::RebuildBakedRuntimeData(FString* OutErrorMessage, int32 
             *BoneCacheErrorMessage);
     }
 
-    SetError(OutErrorMessage, TEXT(""));
+    DWC::Error::SetMessage(OutErrorMessage, TEXT(""));
     return true;
 }

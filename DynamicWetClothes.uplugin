@@ -7,23 +7,20 @@
 	"Category": "Gameplay",
 	"EnabledByDefault": true,
 	"CanContainContent": true,
-	"Modules": [
-		{
-			"Name": "DynamicWetClothes",
-			"Type": "Runtime",
-			"LoadingPhase": "Default"
-		},
-		{
-			"Name": "DynamicWetClothesWater",
-			"Type": "Runtime",
-			"LoadingPhase": "Default"
-		},
-		{
-			"Name": "DynamicWetClothesEditor",
-			"Type": "Editor",
-			"LoadingPhase": "Default"
-		}
-	],
+    "Modules": [
+    {
+        "Name": "DWC",
+        "Type": "Runtime"
+    },
+    {
+        "Name": "DWCEditor",
+        "Type": "Editor"
+    },
+    {
+        "Name": "DWCWater",
+        "Type": "Runtime"
+    }
+    ],
 	"Plugins": [
 		{
 			"Name": "ProceduralMeshComponent",

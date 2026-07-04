@@ -42,7 +42,7 @@ void SWetPartAutoPartitionControls::Construct(const FArguments& InArgs)
                                             .AutoWidth()
                                             .VAlign(VAlign_Center)
                                                 [SNew(STextBlock)
-                                                     .Text(LOCTEXT("AutoPartitionButton", "Auto Partition…"))]]]]];
+                                                     .Text(LOCTEXT("AutoPartitionButton", "Auto Partition"))]]]]];
 }
 
 #undef LOCTEXT_NAMESPACE

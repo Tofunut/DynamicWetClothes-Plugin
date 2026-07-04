@@ -5,6 +5,7 @@
 #include "RuntimeData/WetBakedRuntimeDataBridge.h"
 #include "RuntimeData/WetBoneOptimizationCacheBuilder.h"
 #include "RuntimeData/WetClothingRuntimeData.h"
+#include "RuntimeData/WetNeighborGraphBuilder.h"
 
 #include "Runtime/Engine/Classes/Components/SkeletalMeshComponent.h"
 
@@ -18,65 +19,9 @@
 #include "Runtime/Engine/Public/Rendering/SkeletalMeshRenderData.h"
 #include "DataAssets/WetClothingAsset.h"
 #include "DataAssets/WetnessProfile.h"
-#include "Runtime/Engine/Public/RawIndexBuffer.h"
 
 namespace
 {
-    FIntVector MakeCoincidentVertexPositionKey(const FVector3f& Position, const float Tolerance)
-    {
-        const float QuantizeScale = 1.0f / Tolerance;
-        return FIntVector(
-            FMath::RoundToInt(Position.X * QuantizeScale),
-            FMath::RoundToInt(Position.Y * QuantizeScale),
-            FMath::RoundToInt(Position.Z * QuantizeScale));
-    }
-
-    void ConnectCoincidentPositionNeighbors(
-        FWetClothingRuntimeData&          RuntimeData,
-        const FSkeletalMeshLODRenderData& LODData,
-        FWetRuntimeDataBuilder&           Builder,
-        const float                       Tolerance)
-    {
-        if (Tolerance <= 0.0f)
-        {
-            return;
-        }
-
-        TMap<FIntVector, TArray<int32>> VerticesByPosition;
-        const int32                     VertexCount = LODData.GetNumVertices();
-        VerticesByPosition.Reserve(VertexCount);
-
-        for (int32 VertexIndex = 0; VertexIndex < VertexCount; ++VertexIndex)
-        {
-            const FVector3f Position = LODData.StaticVertexBuffers.PositionVertexBuffer.VertexPosition(VertexIndex);
-            VerticesByPosition.FindOrAdd(MakeCoincidentVertexPositionKey(Position, Tolerance)).Add(VertexIndex);
-        }
-
-        const float ToleranceSquared = FMath::Square(Tolerance);
-        for (const TPair<FIntVector, TArray<int32>>& Pair : VerticesByPosition)
-        {
-            const TArray<int32>& Vertices = Pair.Value;
-            for (int32 IndexA = 0; IndexA < Vertices.Num(); ++IndexA)
-            {
-                const int32     VertexA = Vertices[IndexA];
-                const FVector3f PositionA = LODData.StaticVertexBuffers.PositionVertexBuffer.VertexPosition(VertexA);
-
-                for (int32 IndexB = IndexA + 1; IndexB < Vertices.Num(); ++IndexB)
-                {
-                    const int32     VertexB = Vertices[IndexB];
-                    const FVector3f PositionB = LODData.StaticVertexBuffers.PositionVertexBuffer.VertexPosition(VertexB);
-                    if ((PositionA - PositionB).SizeSquared() > ToleranceSquared)
-                    {
-                        continue;
-                    }
-
-                    Builder.AddNeighbor(RuntimeData, VertexA, VertexB);
-                    Builder.AddNeighbor(RuntimeData, VertexB, VertexA);
-                }
-            }
-        }
-    }
-
     bool ResolveWetPartSourceProfileParameters(
         const FWetClothingAssetWetPartEntry& WetPartEntry,
         FWetnessProfileParameters&           OutParameters)
@@ -337,77 +282,73 @@ void FWetRuntimeDataBuilder::BuildNeighborGraph(FWetRuntimeDataBuildArgs& Receiv
     }
 
     const int32 VertexCount = LODData->GetNumVertices();
+    Receiver.RuntimeData->ResetNeighborGraph();
 
-    if (Receiver.RuntimeData->NeighborGraph.Num() != VertexCount)
+    USkeletalMesh* SkeletalMesh = Receiver.TargetSkeletalMesh ? Receiver.TargetSkeletalMesh->GetSkeletalMeshAsset() : nullptr;
+    if (Receiver.bUseBakedRuntimeData && Receiver.WetClothingAsset)
     {
-        Receiver.RuntimeData->NeighborGraph.Empty();
-        Receiver.RuntimeData->NeighborGraph.SetNum(VertexCount);
+        FString BakedGraphErrorMessage;
+        if (FWetNeighborGraphBuilder::TryCopyBakedGraph(
+                Receiver.WetClothingAsset,
+                SkeletalMesh,
+                Receiver.LODIndex,
+                VertexCount,
+                Receiver.RuntimeData->NeighborGraph,
+                &BakedGraphErrorMessage))
+        {
+            return;
+        }
+
+        if (!BakedGraphErrorMessage.IsEmpty())
+        {
+            UE_LOG(
+                LogTemp,
+                Verbose,
+                TEXT("DynamicWetClothesComponent: Baked neighbor graph was not used on %s. %s"),
+                *GetNameSafe(Receiver.OwnerForLogs),
+                *BakedGraphErrorMessage);
+        }
     }
 
-    for (FWetVertexNeighbors& VertexNeighbors : Receiver.RuntimeData->NeighborGraph)
-    {
-        VertexNeighbors.Neighbors.Reset();
-    }
-
-    const FRawStaticIndexBuffer16or32Interface* IndexBuffer =
-        LODData->MultiSizeIndexContainer.GetIndexBuffer();
-
-    if (!IndexBuffer)
+    if (!Receiver.bAllowRuntimeFallbackBuild)
     {
         return;
     }
 
-    const int32 IndexCount = IndexBuffer->Num();
-    for (int32 Index = 0; Index + 2 < IndexCount; Index += 3)
+    UE_LOG(
+        LogTemp,
+        Log,
+        TEXT("DynamicWetClothesComponent: Building neighbor graph at runtime fallback on %s."),
+        *GetNameSafe(Receiver.OwnerForLogs));
+
+    FString ErrorMessage;
+    if (!FWetNeighborGraphBuilder::BuildRuntimeGraph(
+            *LODData,
+            Receiver.CoincidentVertexNeighborTolerance,
+            Receiver.RuntimeData->NeighborGraph,
+            &ErrorMessage))
     {
-        const int32 V0 = IndexBuffer->Get(Index);
-        const int32 V1 = IndexBuffer->Get(Index + 1);
-        const int32 V2 = IndexBuffer->Get(Index + 2);
-
-        AddNeighbor(*Receiver.RuntimeData, V0, V1);
-        AddNeighbor(*Receiver.RuntimeData, V1, V0);
-
-        AddNeighbor(*Receiver.RuntimeData, V1, V2);
-        AddNeighbor(*Receiver.RuntimeData, V2, V1);
-
-        AddNeighbor(*Receiver.RuntimeData, V2, V0);
-        AddNeighbor(*Receiver.RuntimeData, V0, V2);
+        UE_LOG(
+            LogTemp,
+            Warning,
+            TEXT("DynamicWetClothesComponent: Failed to build neighbor graph on %s. %s"),
+            *GetNameSafe(Receiver.OwnerForLogs),
+            *ErrorMessage);
     }
-
-    ConnectCoincidentPositionNeighbors(
-        *Receiver.RuntimeData,
-        *LODData,
-        *this,
-        Receiver.CoincidentVertexNeighborTolerance);
 }
 
 bool FWetRuntimeDataBuilder::BuildNeighborGraphFromBakedProfile(
     FWetRuntimeDataBuildArgs& Receiver,
     const int32               VertexCount)
 {
-    if (!Receiver.WetClothingAsset || !Receiver.TargetSkeletalMesh)
-    {
-        return false;
-    }
-
-    const USkeletalMesh* SkeletalMesh = Receiver.TargetSkeletalMesh->GetSkeletalMeshAsset();
-    if (!Receiver.WetClothingAsset->IsBakedRuntimeDataValidForMesh(SkeletalMesh, 0))
-    {
-        return false;
-    }
-
-    const FWetClothingAssetBakedRuntimeData& BakedData = Receiver.WetClothingAsset->GetBakedRuntimeData();
-    if (BakedData.NeighborGraph.Num() != VertexCount || Receiver.RuntimeData->NeighborGraph.Num() != VertexCount)
-    {
-        return false;
-    }
-
-    for (int32 VertexIndex = 0; VertexIndex < VertexCount; ++VertexIndex)
-    {
-        Receiver.RuntimeData->NeighborGraph[VertexIndex].Neighbors = BakedData.NeighborGraph[VertexIndex].Neighbors;
-    }
-
-    return true;
+    const USkeletalMesh* SkeletalMesh = Receiver.TargetSkeletalMesh ? Receiver.TargetSkeletalMesh->GetSkeletalMeshAsset() : nullptr;
+    return FWetNeighborGraphBuilder::TryCopyBakedGraph(
+        Receiver.WetClothingAsset,
+        SkeletalMesh,
+        Receiver.LODIndex,
+        VertexCount,
+        Receiver.RuntimeData->NeighborGraph,
+        nullptr);
 }
 
 void FWetRuntimeDataBuilder::AddNeighbor(

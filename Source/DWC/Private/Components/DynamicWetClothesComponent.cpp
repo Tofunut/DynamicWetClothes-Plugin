@@ -122,6 +122,7 @@ FWetRuntimeDataBuildArgs UDynamicWetClothesComponent::MakeRuntimeDataBuildArgs()
     Args.bUseBakedRuntimeData = true;
     Args.bUseBakedBoneOptimizationCache = true;
     Args.bAllowRuntimeFallbackBuild = true;
+    Args.CoincidentVertexNeighborTolerance = WetnessSettings.CoincidentVertexNeighborTolerance;
     return Args;
 }
 

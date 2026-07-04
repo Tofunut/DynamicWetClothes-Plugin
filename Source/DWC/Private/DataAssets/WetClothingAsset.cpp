@@ -9,6 +9,7 @@
 namespace
 {
     static constexpr double UVQuantizeScale = 100000.0;
+    static constexpr float CoincidentVertexNeighborTolerance = 0.001f;
 
     struct FRuntimeQuantizedUV
     {
@@ -284,6 +285,54 @@ namespace
         }
     }
 
+    FIntVector MakeCoincidentVertexPositionKey(const FVector3f& Position)
+    {
+        static constexpr float QuantizeScale = 1.0f / CoincidentVertexNeighborTolerance;
+        return FIntVector(
+            FMath::RoundToInt(Position.X * QuantizeScale),
+            FMath::RoundToInt(Position.Y * QuantizeScale),
+            FMath::RoundToInt(Position.Z * QuantizeScale));
+    }
+
+    void ConnectCoincidentPositionNeighbors(
+        const FSkeletalMeshLODRenderData&              LODData,
+        TArray<FWetClothingAssetBakedVertexNeighbors>& NeighborGraph)
+    {
+        TMap<FIntVector, TArray<int32>> VerticesByPosition;
+        const int32                     VertexCount = LODData.GetNumVertices();
+        VerticesByPosition.Reserve(VertexCount);
+
+        for (int32 VertexIndex = 0; VertexIndex < VertexCount; ++VertexIndex)
+        {
+            const FVector3f Position = LODData.StaticVertexBuffers.PositionVertexBuffer.VertexPosition(VertexIndex);
+            VerticesByPosition.FindOrAdd(MakeCoincidentVertexPositionKey(Position)).Add(VertexIndex);
+        }
+
+        const float ToleranceSquared = FMath::Square(CoincidentVertexNeighborTolerance);
+        for (const TPair<FIntVector, TArray<int32>>& Pair : VerticesByPosition)
+        {
+            const TArray<int32>& Vertices = Pair.Value;
+            for (int32 IndexA = 0; IndexA < Vertices.Num(); ++IndexA)
+            {
+                const int32     VertexA = Vertices[IndexA];
+                const FVector3f PositionA = LODData.StaticVertexBuffers.PositionVertexBuffer.VertexPosition(VertexA);
+
+                for (int32 IndexB = IndexA + 1; IndexB < Vertices.Num(); ++IndexB)
+                {
+                    const int32     VertexB = Vertices[IndexB];
+                    const FVector3f PositionB = LODData.StaticVertexBuffers.PositionVertexBuffer.VertexPosition(VertexB);
+                    if ((PositionA - PositionB).SizeSquared() > ToleranceSquared)
+                    {
+                        continue;
+                    }
+
+                    AddNeighbor(NeighborGraph, VertexA, VertexB);
+                    AddNeighbor(NeighborGraph, VertexB, VertexA);
+                }
+            }
+        }
+    }
+
     void BuildNeighborGraph(
         const FSkeletalMeshLODRenderData&              LODData,
         const TArray<uint32>&                          IndexBuffer,
@@ -315,6 +364,8 @@ namespace
                 AddNeighbor(OutNeighborGraph, Index2, Index1);
             }
         }
+
+        ConnectCoincidentPositionNeighbors(LODData, OutNeighborGraph);
     }
 } // namespace
 

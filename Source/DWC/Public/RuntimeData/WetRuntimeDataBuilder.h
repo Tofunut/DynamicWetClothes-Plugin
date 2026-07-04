@@ -35,6 +35,7 @@ struct DWC_API FWetRuntimeDataBuildArgs
     bool  bUseBakedRuntimeData = true;
     bool  bUseBakedBoneOptimizationCache = true;
     bool  bAllowRuntimeFallbackBuild = true;
+    float CoincidentVertexNeighborTolerance = 0.001f;
 
     const UWetnessProfile* GetActiveWetnessProfile() const
     {

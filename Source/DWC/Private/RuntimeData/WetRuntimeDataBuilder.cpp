@@ -22,6 +22,61 @@
 
 namespace
 {
+    FIntVector MakeCoincidentVertexPositionKey(const FVector3f& Position, const float Tolerance)
+    {
+        const float QuantizeScale = 1.0f / Tolerance;
+        return FIntVector(
+            FMath::RoundToInt(Position.X * QuantizeScale),
+            FMath::RoundToInt(Position.Y * QuantizeScale),
+            FMath::RoundToInt(Position.Z * QuantizeScale));
+    }
+
+    void ConnectCoincidentPositionNeighbors(
+        FWetClothingRuntimeData&          RuntimeData,
+        const FSkeletalMeshLODRenderData& LODData,
+        FWetRuntimeDataBuilder&           Builder,
+        const float                       Tolerance)
+    {
+        if (Tolerance <= 0.0f)
+        {
+            return;
+        }
+
+        TMap<FIntVector, TArray<int32>> VerticesByPosition;
+        const int32                     VertexCount = LODData.GetNumVertices();
+        VerticesByPosition.Reserve(VertexCount);
+
+        for (int32 VertexIndex = 0; VertexIndex < VertexCount; ++VertexIndex)
+        {
+            const FVector3f Position = LODData.StaticVertexBuffers.PositionVertexBuffer.VertexPosition(VertexIndex);
+            VerticesByPosition.FindOrAdd(MakeCoincidentVertexPositionKey(Position, Tolerance)).Add(VertexIndex);
+        }
+
+        const float ToleranceSquared = FMath::Square(Tolerance);
+        for (const TPair<FIntVector, TArray<int32>>& Pair : VerticesByPosition)
+        {
+            const TArray<int32>& Vertices = Pair.Value;
+            for (int32 IndexA = 0; IndexA < Vertices.Num(); ++IndexA)
+            {
+                const int32     VertexA = Vertices[IndexA];
+                const FVector3f PositionA = LODData.StaticVertexBuffers.PositionVertexBuffer.VertexPosition(VertexA);
+
+                for (int32 IndexB = IndexA + 1; IndexB < Vertices.Num(); ++IndexB)
+                {
+                    const int32     VertexB = Vertices[IndexB];
+                    const FVector3f PositionB = LODData.StaticVertexBuffers.PositionVertexBuffer.VertexPosition(VertexB);
+                    if ((PositionA - PositionB).SizeSquared() > ToleranceSquared)
+                    {
+                        continue;
+                    }
+
+                    Builder.AddNeighbor(RuntimeData, VertexA, VertexB);
+                    Builder.AddNeighbor(RuntimeData, VertexB, VertexA);
+                }
+            }
+        }
+    }
+
     bool ResolveWetPartSourceProfileParameters(
         const FWetClothingAssetWetPartEntry& WetPartEntry,
         FWetnessProfileParameters&           OutParameters)
@@ -318,6 +373,12 @@ void FWetRuntimeDataBuilder::BuildNeighborGraph(FWetRuntimeDataBuildArgs& Receiv
         AddNeighbor(*Receiver.RuntimeData, V2, V0);
         AddNeighbor(*Receiver.RuntimeData, V0, V2);
     }
+
+    ConnectCoincidentPositionNeighbors(
+        *Receiver.RuntimeData,
+        *LODData,
+        *this,
+        Receiver.CoincidentVertexNeighborTolerance);
 }
 
 bool FWetRuntimeDataBuilder::BuildNeighborGraphFromBakedProfile(

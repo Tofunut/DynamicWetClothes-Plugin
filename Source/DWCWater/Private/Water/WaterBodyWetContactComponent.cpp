@@ -4,14 +4,13 @@
 #include "Components/PrimitiveComponent.h"
 #include "WetInputSystem/WetContactTypes.h"
 #include "Components/DynamicWetClothesComponent.h"
-#include "Engine/World.h"
-#include "TimerManager.h"
 #include "WaterBodyComponent.h"
 #include "WaterBodyTypes.h"
 
 UWaterBodyWetContactComponent::UWaterBodyWetContactComponent()
 {
-    PrimaryComponentTick.bCanEverTick = false;
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.bStartWithTickEnabled = false;
 }
 
 void UWaterBodyWetContactComponent::BeginPlay()
@@ -36,25 +35,10 @@ void UWaterBodyWetContactComponent::BeginPlay()
             RefreshExistingOverlaps();
         }
     }
-
-    if (GetWorld() && UpdateInterval > 0.0f)
-    {
-        GetWorld()->GetTimerManager().SetTimer(
-            WetnessTimer,
-            this,
-            &UWaterBodyWetContactComponent::ApplyWetnessTick,
-            UpdateInterval,
-            true);
-    }
 }
 
 void UWaterBodyWetContactComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
-    if (GetWorld())
-    {
-        GetWorld()->GetTimerManager().ClearTimer(WetnessTimer);
-    }
-
     if (OverlapProxy)
     {
         OverlapProxy->OnComponentBeginOverlap.RemoveDynamic(
@@ -70,6 +54,16 @@ void UWaterBodyWetContactComponent::EndPlay(const EEndPlayReason::Type EndPlayRe
     DestroyOverlapProxy();
 
     Super::EndPlay(EndPlayReason);
+}
+
+void UWaterBodyWetContactComponent::TickComponent(
+    const float                        DeltaTime,
+    const ELevelTick                   TickType,
+    FActorComponentTickFunction* const ThisTickFunction)
+{
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+
+    ApplyWetnessTick(DeltaTime);
 }
 
 void UWaterBodyWetContactComponent::InitializeWaterBody()
@@ -162,18 +156,14 @@ void UWaterBodyWetContactComponent::RefreshExistingOverlaps()
     }
 }
 
-void UWaterBodyWetContactComponent::ApplyWetnessTick()
+void UWaterBodyWetContactComponent::ApplyWetnessTick(const float DeltaTime)
 {
     if (!IsValid(WaterBodyComponent) || ReceiverOverlapCounts.Num() == 0)
     {
         return;
     }
 
-    const float TickAmount = WetAmountPerSecond * UpdateInterval;
-    if (TickAmount <= 0.0f)
-    {
-        return;
-    }
+    constexpr float WetAmount = 1.0f;
 
     for (auto It = ReceiverOverlapCounts.CreateIterator(); It; ++It)
     {
@@ -185,12 +175,68 @@ void UWaterBodyWetContactComponent::ApplyWetnessTick()
         }
 
         FDWCWaterSurfaceData WaterSurfaceData;
+        const double         BuildStartSeconds = FPlatformTime::Seconds();
         if (!BuildWaterSurfaceDataForReceiver(*Receiver, WaterSurfaceData))
         {
+            if (bEnablePerformanceLogging)
+            {
+                AccumulatedBuildSurfaceDataSeconds += FPlatformTime::Seconds() - BuildStartSeconds;
+            }
             continue;
         }
 
-        Receiver->ApplyWetSurface(WaterSurfaceData, TickAmount, false);
+        const double BuildEndSeconds = FPlatformTime::Seconds();
+        const double ApplyStartSeconds = BuildEndSeconds;
+        Receiver->ApplyWetSurface(WaterSurfaceData, WetAmount, false);
+        const double ApplyEndSeconds = FPlatformTime::Seconds();
+
+        if (bEnablePerformanceLogging)
+        {
+            AccumulatedBuildSurfaceDataSeconds += BuildEndSeconds - BuildStartSeconds;
+            AccumulatedApplyWetSurfaceSeconds += ApplyEndSeconds - ApplyStartSeconds;
+            ++AccumulatedProcessedReceivers;
+            AccumulatedWaterSurfaceSamples += WaterSurfaceData.SizeX * WaterSurfaceData.SizeY;
+        }
+    }
+
+    if (ReceiverOverlapCounts.Num() == 0)
+    {
+        SetComponentTickEnabled(false);
+    }
+
+    if (bEnablePerformanceLogging)
+    {
+        ++AccumulatedPerformanceFrames;
+        AccumulatedPerformanceLogSeconds += DeltaTime;
+        if (AccumulatedPerformanceLogSeconds >= FMath::Max(0.1f, PerformanceLogInterval))
+        {
+            const double BuildMilliseconds = AccumulatedBuildSurfaceDataSeconds * 1000.0;
+            const double ApplyMilliseconds = AccumulatedApplyWetSurfaceSeconds * 1000.0;
+            const double TotalMilliseconds = BuildMilliseconds + ApplyMilliseconds;
+            const int32  SafeFrames = FMath::Max(1, AccumulatedPerformanceFrames);
+            const int32  SafeReceivers = FMath::Max(1, AccumulatedProcessedReceivers);
+
+            UE_LOG(
+                LogTemp,
+                Log,
+                TEXT("WaterBodyWetContact perf: frames=%d receivers=%d samples=%d total=%.3fms build/query=%.3fms apply=%.3fms avg/frame=%.3fms avg/receiver build=%.3fms apply=%.3fms"),
+                AccumulatedPerformanceFrames,
+                AccumulatedProcessedReceivers,
+                AccumulatedWaterSurfaceSamples,
+                TotalMilliseconds,
+                BuildMilliseconds,
+                ApplyMilliseconds,
+                TotalMilliseconds / static_cast<double>(SafeFrames),
+                BuildMilliseconds / static_cast<double>(SafeReceivers),
+                ApplyMilliseconds / static_cast<double>(SafeReceivers));
+
+            AccumulatedBuildSurfaceDataSeconds = 0.0;
+            AccumulatedApplyWetSurfaceSeconds = 0.0;
+            AccumulatedPerformanceLogSeconds = 0.0f;
+            AccumulatedPerformanceFrames = 0;
+            AccumulatedProcessedReceivers = 0;
+            AccumulatedWaterSurfaceSamples = 0;
+        }
     }
 }
 
@@ -209,6 +255,7 @@ void UWaterBodyWetContactComponent::AddReceiverFromActor(AActor* OtherActor)
 
     int32& OverlapCount = ReceiverOverlapCounts.FindOrAdd(Receiver);
     ++OverlapCount;
+    SetComponentTickEnabled(true);
 }
 
 void UWaterBodyWetContactComponent::RemoveReceiverFromActor(AActor* OtherActor)
@@ -234,6 +281,11 @@ void UWaterBodyWetContactComponent::RemoveReceiverFromActor(AActor* OtherActor)
     if (*OverlapCount <= 0)
     {
         ReceiverOverlapCounts.Remove(Receiver);
+    }
+
+    if (ReceiverOverlapCounts.Num() == 0)
+    {
+        SetComponentTickEnabled(false);
     }
 }
 

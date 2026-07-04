@@ -11,6 +11,9 @@ struct DWC_API FWetClothingSettings
     UPROPERTY(EditAnywhere, Category = "Wetness")
     float WetnessUpdateInterval = 0.1f;
 
+    UPROPERTY(EditAnywhere, Category = "Wetness|Rendering", meta = (ClampMin = "0.001"))
+    float WetnessRenderUpdateInterval = 0.1f;
+
     UPROPERTY(EditAnywhere, Category = "Wetness", meta = (ClampMin = "0.0"))
     float MaxWetness = 1.15f;
 

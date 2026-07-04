@@ -461,7 +461,7 @@ bool FWetInputStage::ApplyWetSurface(FWetInputStageArgs& Receiver, const FDWCWat
 
     const float EffectiveAmount = Amount;
 
-    if (FMath::IsNearlyZero(EffectiveAmount) || !Receiver.MeshSampler->UpdateSkinnedPositions(Receiver.TargetSkeletalMesh, Receiver.LODIndex))
+    if (FMath::IsNearlyZero(EffectiveAmount) || !Receiver.MeshSampler->UpdateSkinnedPositionsDirect(Receiver.TargetSkeletalMesh, Receiver.LODIndex))
     {
         return false;
     }

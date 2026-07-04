@@ -14,6 +14,7 @@ class FWetClothingMeshSampler
 
     bool UpdateSkinningMatrices(USkeletalMeshComponent* TargetSkeletalMesh);
     bool UpdateSkinnedPositions(USkeletalMeshComponent* TargetSkeletalMesh, int32 LODIndex = 0);
+    bool UpdateSkinnedPositionsDirect(USkeletalMeshComponent* TargetSkeletalMesh, int32 LODIndex = 0);
     bool UpdateSkinnedNormals(USkeletalMeshComponent* TargetSkeletalMesh, int32 LODIndex = 0);
     bool ComputeSkinnedPosition(
         const FSkeletalMeshLODRenderData& LODData,

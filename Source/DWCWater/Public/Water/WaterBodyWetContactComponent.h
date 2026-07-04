@@ -21,13 +21,14 @@ class DWCWATER_API UWaterBodyWetContactComponent : public UActorComponent
   protected:
     virtual void BeginPlay() override;
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
   private:
     void InitializeWaterBody();
     void CreateOverlapProxy();
     void DestroyOverlapProxy();
     void RefreshExistingOverlaps();
-    void ApplyWetnessTick();
+    void ApplyWetnessTick(float DeltaTime);
     void AddReceiverFromActor(AActor* OtherActor);
     void RemoveReceiverFromActor(AActor* OtherActor);
     bool BuildWaterSurfaceDataForReceiver(const UDynamicWetClothesComponent& Receiver, FDWCWaterSurfaceData& OutWaterSurfaceData) const;
@@ -51,17 +52,17 @@ class DWCWATER_API UWaterBodyWetContactComponent : public UActorComponent
         int32                OtherBodyIndex);
 
   private:
-    UPROPERTY(EditAnywhere, Category = "Wetness", meta = (ClampMin = "0.0"))
-    float WetAmountPerSecond = 0.5f;
-
-    UPROPERTY(EditAnywhere, Category = "Wetness", meta = (ClampMin = "0.01"))
-    float UpdateInterval = 0.1f;
-
     UPROPERTY(EditAnywhere, Category = "Wetness")
     bool bApplyToExistingOverlapsOnBeginPlay = true;
 
     UPROPERTY(EditAnywhere, Category = "Wetness|Overlap Proxy")
     bool bCreateOverlapProxy = true;
+
+    UPROPERTY(EditAnywhere, Category = "Wetness|Profiling")
+    bool bEnablePerformanceLogging = false;
+
+    UPROPERTY(EditAnywhere, Category = "Wetness|Profiling", meta = (ClampMin = "0.1"))
+    float PerformanceLogInterval = 1.0f;
 
     UPROPERTY(Transient)
     TObjectPtr<UWaterBodyComponent> WaterBodyComponent;
@@ -70,5 +71,11 @@ class DWCWATER_API UWaterBodyWetContactComponent : public UActorComponent
     TObjectPtr<UBoxComponent> OverlapProxy;
 
     TMap<TWeakObjectPtr<UDynamicWetClothesComponent>, int32> ReceiverOverlapCounts;
-    FTimerHandle                                             WetnessTimer;
+
+    double AccumulatedBuildSurfaceDataSeconds = 0.0;
+    double AccumulatedApplyWetSurfaceSeconds = 0.0;
+    float  AccumulatedPerformanceLogSeconds = 0.0f;
+    int32  AccumulatedPerformanceFrames = 0;
+    int32  AccumulatedProcessedReceivers = 0;
+    int32  AccumulatedWaterSurfaceSamples = 0;
 };

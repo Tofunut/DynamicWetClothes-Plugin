@@ -41,7 +41,18 @@ void UDynamicWetClothesComponent::BeginPlay()
         return;
     }
 
-    StartWetnessTimer();
+    StartWetnessTimers();
+}
+
+void UDynamicWetClothesComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+    if (GetWorld())
+    {
+        GetWorld()->GetTimerManager().ClearTimer(WetnessSimulationTimer);
+        GetWorld()->GetTimerManager().ClearTimer(WetnessRenderTimer);
+    }
+
+    Super::EndPlay(EndPlayReason);
 }
 
 bool UDynamicWetClothesComponent::InitializeWetRuntime()
@@ -67,13 +78,28 @@ bool UDynamicWetClothesComponent::InitializeWetRuntime()
     return true;
 }
 
-void UDynamicWetClothesComponent::StartWetnessTimer()
+void UDynamicWetClothesComponent::StartWetnessTimers()
 {
+    if (!GetWorld())
+    {
+        return;
+    }
+
+    const float SimulationInterval = FMath::Max(KINDA_SMALL_NUMBER, WetnessSettings.WetnessUpdateInterval);
+    const float RenderInterval = FMath::Max(KINDA_SMALL_NUMBER, WetnessSettings.WetnessRenderUpdateInterval);
+
     GetWorld()->GetTimerManager().SetTimer(
-        WetnessUpdateTimer,
+        WetnessSimulationTimer,
         this,
         &UDynamicWetClothesComponent::UpdateWetness,
-        WetnessSettings.WetnessUpdateInterval,
+        SimulationInterval,
+        true);
+
+    GetWorld()->GetTimerManager().SetTimer(
+        WetnessRenderTimer,
+        this,
+        &UDynamicWetClothesComponent::UpdateWetRendering,
+        RenderInterval,
         true);
 }
 
@@ -222,8 +248,7 @@ void UDynamicWetClothesComponent::ApplyWetAll(const float Amount)
     FWetInputStageArgs InputArgs = MakeWetInputStageArgs();
     InputStage->ApplyWetAll(InputArgs, Amount);
 
-    FWetRenderStageArgs RenderArgs = MakeWetRenderStageArgs();
-    RenderStage->ApplyWetnessToMaterial(RenderArgs);
+    RequestWetRenderingUpdate();
 }
 
 bool UDynamicWetClothesComponent::ApplyWetContact(const FDWCWetContact& Contact, const bool bApplyMaterial)
@@ -246,8 +271,7 @@ bool UDynamicWetClothesComponent::ApplyWetContact(const FDWCWetContact& Contact,
     const bool         bChanged = InputStage->ApplyWetContact(InputArgs, Contact, bApplyMaterial);
     if (bChanged && bApplyMaterial)
     {
-        FWetRenderStageArgs RenderArgs = MakeWetRenderStageArgs();
-        RenderStage->ApplyWetnessToMaterial(RenderArgs);
+        RequestWetRenderingUpdate();
     }
     return bChanged;
 }
@@ -260,8 +284,7 @@ bool UDynamicWetClothesComponent::ApplyWetContacts(const TArray<FDWCWetContact>&
     const bool         bChanged = InputStage->ApplyWetContacts(InputArgs, Contacts, bApplyMaterial);
     if (bChanged && bApplyMaterial)
     {
-        FWetRenderStageArgs RenderArgs = MakeWetRenderStageArgs();
-        RenderStage->ApplyWetnessToMaterial(RenderArgs);
+        RequestWetRenderingUpdate();
     }
     return bChanged;
 }
@@ -272,8 +295,7 @@ bool UDynamicWetClothesComponent::ApplyWetArea(const FDWCWetAreaData& AreaData, 
     const bool         bChanged = InputStage->ApplyWetArea(InputArgs, AreaData, bApplyMaterial);
     if (bChanged && bApplyMaterial)
     {
-        FWetRenderStageArgs RenderArgs = MakeWetRenderStageArgs();
-        RenderStage->ApplyWetnessToMaterial(RenderArgs);
+        RequestWetRenderingUpdate();
     }
     return bChanged;
 }
@@ -287,8 +309,7 @@ bool UDynamicWetClothesComponent::ApplyWetSurface(
     const bool         bChanged = InputStage->ApplyWetSurface(InputArgs, WaterSurfaceData, Amount, bApplyMaterial);
     if (bChanged && bApplyMaterial)
     {
-        FWetRenderStageArgs RenderArgs = MakeWetRenderStageArgs();
-        RenderStage->ApplyWetnessToMaterial(RenderArgs);
+        RequestWetRenderingUpdate();
     }
     return bChanged;
 }
@@ -348,6 +369,11 @@ int32 UDynamicWetClothesComponent::GetWetSurfaceSampleResolution() const
     return FMath::Max(2, WetSurfaceSampleResolution);
 }
 
+void UDynamicWetClothesComponent::RequestWetRenderingUpdate()
+{
+    bWetRenderDirty = true;
+}
+
 bool UDynamicWetClothesComponent::FlushPendingWetContacts()
 {
     if (PendingWetContacts.IsEmpty())
@@ -372,8 +398,7 @@ bool UDynamicWetClothesComponent::FlushPendingWetContacts()
     const bool         bChanged = InputStage->ApplyWetContacts(InputArgs, ContactsToApply, bApplyMaterial);
     if (bChanged && bApplyMaterial)
     {
-        FWetRenderStageArgs RenderArgs = MakeWetRenderStageArgs();
-        RenderStage->ApplyWetnessToMaterial(RenderArgs);
+        RequestWetRenderingUpdate();
     }
     return bChanged;
 }
@@ -386,9 +411,21 @@ void UDynamicWetClothesComponent::UpdateWetness()
     const bool              bChanged = SimulationStage->UpdateWetness(SimulationArgs);
     if (bChanged)
     {
-        FWetRenderStageArgs RenderArgs = MakeWetRenderStageArgs();
-        RenderStage->ApplyWetnessToMaterial(RenderArgs);
+        RequestWetRenderingUpdate();
     }
+}
+
+void UDynamicWetClothesComponent::UpdateWetRendering()
+{
+    if (!bWetRenderDirty &&
+        (!SimulationState.IsValid() || SimulationState->DirtyWetVertexIndices.Num() == 0))
+    {
+        return;
+    }
+
+    FWetRenderStageArgs RenderArgs = MakeWetRenderStageArgs();
+    RenderStage->ApplyWetnessToMaterial(RenderArgs);
+    bWetRenderDirty = false;
 }
 
 void UDynamicWetClothesComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)

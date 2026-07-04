@@ -59,6 +59,7 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
   protected:
     // Called when the game starts
     virtual void BeginPlay() override;
+    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
   private:
     FWetRuntimeDataBuildArgs MakeRuntimeDataBuildArgs();
@@ -66,8 +67,10 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
     FWetSimulationStageArgs  MakeWetSimulationStageArgs();
     FWetRenderStageArgs      MakeWetRenderStageArgs();
     bool                     InitializeWetRuntime();
-    void                     StartWetnessTimer();
+    void                     StartWetnessTimers();
     void                     UpdateWetness();
+    void                     UpdateWetRendering();
+    void                     RequestWetRenderingUpdate();
     bool                     FlushPendingWetContacts();
 
     USkeletalMeshComponent* ResolveTargetSkeletalMesh() const;
@@ -137,7 +140,9 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
     TUniquePtr<FWetClothingMeshSampler>         MeshSampler;
     TUniquePtr<FWetRenderStage>                 RenderStage;
 
-    FTimerHandle           WetnessUpdateTimer;
+    FTimerHandle           WetnessSimulationTimer;
+    FTimerHandle           WetnessRenderTimer;
     TArray<FDWCWetContact> PendingWetContacts;
     bool                   bPendingWetContactsApplyMaterial = false;
+    bool                   bWetRenderDirty = false;
 };

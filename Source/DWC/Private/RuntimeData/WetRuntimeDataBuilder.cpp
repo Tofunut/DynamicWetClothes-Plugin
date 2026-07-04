@@ -288,7 +288,7 @@ void FWetRuntimeDataBuilder::BuildNeighborGraph(FWetRuntimeDataBuildArgs& Receiv
     if (Receiver.bUseBakedRuntimeData && Receiver.WetClothingAsset)
     {
         FString BakedGraphErrorMessage;
-        if (FWetNeighborGraphBuilder::TryCopyBakedGraph(
+        if (FWetBakedRuntimeDataBridge::TryCopyBakedNeighborGraph(
                 Receiver.WetClothingAsset,
                 SkeletalMesh,
                 Receiver.LODIndex,
@@ -296,6 +296,7 @@ void FWetRuntimeDataBuilder::BuildNeighborGraph(FWetRuntimeDataBuildArgs& Receiv
                 Receiver.RuntimeData->NeighborGraph,
                 &BakedGraphErrorMessage))
         {
+            Receiver.RuntimeData->bHasNeighborGraph = true;
             return;
         }
 
@@ -322,11 +323,15 @@ void FWetRuntimeDataBuilder::BuildNeighborGraph(FWetRuntimeDataBuildArgs& Receiv
         *GetNameSafe(Receiver.OwnerForLogs));
 
     FString ErrorMessage;
-    if (!FWetNeighborGraphBuilder::BuildRuntimeGraph(
+    if (FWetNeighborGraphBuilder::BuildRuntimeGraph(
             *LODData,
             Receiver.CoincidentVertexNeighborTolerance,
             Receiver.RuntimeData->NeighborGraph,
             &ErrorMessage))
+    {
+        Receiver.RuntimeData->bHasNeighborGraph = true;
+    }
+    else
     {
         UE_LOG(
             LogTemp,
@@ -342,13 +347,20 @@ bool FWetRuntimeDataBuilder::BuildNeighborGraphFromBakedProfile(
     const int32               VertexCount)
 {
     const USkeletalMesh* SkeletalMesh = Receiver.TargetSkeletalMesh ? Receiver.TargetSkeletalMesh->GetSkeletalMeshAsset() : nullptr;
-    return FWetNeighborGraphBuilder::TryCopyBakedGraph(
-        Receiver.WetClothingAsset,
-        SkeletalMesh,
-        Receiver.LODIndex,
-        VertexCount,
-        Receiver.RuntimeData->NeighborGraph,
-        nullptr);
+    Receiver.RuntimeData->ResetNeighborGraph();
+    if (!FWetBakedRuntimeDataBridge::TryCopyBakedNeighborGraph(
+            Receiver.WetClothingAsset,
+            SkeletalMesh,
+            Receiver.LODIndex,
+            VertexCount,
+            Receiver.RuntimeData->NeighborGraph,
+            nullptr))
+    {
+        return false;
+    }
+
+    Receiver.RuntimeData->bHasNeighborGraph = true;
+    return true;
 }
 
 void FWetRuntimeDataBuilder::AddNeighbor(

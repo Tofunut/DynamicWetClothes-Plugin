@@ -5,6 +5,7 @@
 
 class UWetClothingAsset;
 class USkeletalMesh;
+struct FWetVertexNeighbors;
 
 class DWC_API FWetBakedRuntimeDataBridge
 {
@@ -15,4 +16,12 @@ class DWC_API FWetBakedRuntimeDataBridge
         int32                      LODIndex,
         FWetBoneOptimizationCache& OutRuntimeCache,
         FString*                   OutErrorMessage = nullptr);
+
+    static bool TryCopyBakedNeighborGraph(
+        const UWetClothingAsset*     WetClothingAsset,
+        const USkeletalMesh*         SkeletalMesh,
+        int32                        LODIndex,
+        int32                        VertexCount,
+        TArray<FWetVertexNeighbors>& OutNeighborGraph,
+        FString*                     OutErrorMessage = nullptr);
 };

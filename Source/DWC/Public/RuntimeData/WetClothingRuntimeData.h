@@ -22,6 +22,7 @@ class DWC_API FWetClothingRuntimeData
     TArray<FWetnessProfileParameters> VertexWetnessProfileParameters;
     TArray<FLinearColor>              VertexWetPartDebugColors;
     TArray<FWetVertexNeighbors>       NeighborGraph;
+    bool                              bHasNeighborGraph = false;
 
     FWetBoneOptimizationCache BoneOptimizationCache;
     bool                      bHasBoneOptimizationCache = false;

@@ -289,6 +289,7 @@ bool FWetSimulationStage::PreparePendingWetnessProcessing(FWetSimulationStageArg
     }
 
     bOutCanSpread =
+        Receiver.RuntimeData->bHasNeighborGraph &&
         Receiver.RuntimeData->NeighborGraph.Num() == Receiver.SimulationState->AbsorbedWetnessPerVertex.Num();
 
     if (bOutUseGravityBias)

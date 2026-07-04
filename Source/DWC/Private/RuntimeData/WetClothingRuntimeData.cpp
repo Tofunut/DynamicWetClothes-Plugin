@@ -10,6 +10,7 @@ void FWetClothingRuntimeData::ResetWetPartData()
 void FWetClothingRuntimeData::ResetNeighborGraph()
 {
     NeighborGraph.Reset();
+    bHasNeighborGraph = false;
 }
 
 void FWetClothingRuntimeData::ResetBoneOptimizationCache()

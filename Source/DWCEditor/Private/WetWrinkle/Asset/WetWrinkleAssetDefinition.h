@@ -1,0 +1,18 @@
+#pragma once
+
+#include "AssetDefinitionDefault.h"
+#include "WetWrinkleAssetDefinition.generated.h"
+
+UCLASS()
+class DWCEDITOR_API UWetWrinkleAssetDefinition : public UAssetDefinitionDefault
+{
+    GENERATED_BODY()
+
+  public:
+    virtual FText                               GetAssetDisplayName() const override;
+    virtual FLinearColor                        GetAssetColor() const override;
+    virtual TSoftClassPtr<UObject>              GetAssetClass() const override;
+    virtual TConstArrayView<FAssetCategoryPath> GetAssetCategories() const override;
+    virtual const FSlateBrush*                  GetThumbnailBrush(const FAssetData& InAssetData, const FName InClassName) const override;
+    virtual const FSlateBrush*                  GetIconBrush(const FAssetData& InAssetData, const FName InClassName) const override;
+};

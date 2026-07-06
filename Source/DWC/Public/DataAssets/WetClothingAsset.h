@@ -11,6 +11,7 @@ class USkeletalMesh;
 class UMaterialInterface;
 class UTexture;
 class UTexture2D;
+class UWetWrinkleAsset;
 
 UENUM(BlueprintType)
 enum class EWetPartProfileBlendMode : uint8
@@ -211,6 +212,9 @@ class DWC_API UWetClothingAsset : public UDataAsset
 
     UPROPERTY(VisibleAnywhere, Category = "Wet Clothing|Wetness Profile Maps")
     TArray<FWetClothingAssetBakedWetnessProfileMap> BakedWetnessProfileMaps;
+
+    UPROPERTY(EditAnywhere, Category = "Wet Clothing|Wrinkle")
+    TObjectPtr<UWetWrinkleAsset> WetWrinkleAsset = nullptr;
 
 #if WITH_EDITORONLY_DATA
     UPROPERTY(EditAnywhere, Category = "Wet Clothing")

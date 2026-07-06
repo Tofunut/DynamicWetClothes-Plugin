@@ -44,6 +44,8 @@ void FDWCEditorStyle::Initialize()
 
     SetPngBrush(*StyleSet, TEXT("ClassIcon.WetClothingAsset"), TEXT("AssetIcons/WetClothing_128"), Icon16x16);
     SetPngBrush(*StyleSet, TEXT("ClassThumbnail.WetClothingAsset"), TEXT("AssetIcons/WetClothing_128"), Thumbnail64x64);
+    SetPngBrush(*StyleSet, TEXT("ClassIcon.WetWrinkleAsset"), TEXT("AssetIcons/WetClothing_128"), Icon16x16);
+    SetPngBrush(*StyleSet, TEXT("ClassThumbnail.WetWrinkleAsset"), TEXT("AssetIcons/WetClothing_128"), Thumbnail64x64);
     SetPngBrush(*StyleSet, TEXT("ClassIcon.WetnessProfile"), TEXT("AssetIcons/WetnessProfile_128"), Icon16x16);
     SetPngBrush(*StyleSet, TEXT("ClassThumbnail.WetnessProfile"), TEXT("AssetIcons/WetnessProfile_128"), Thumbnail64x64);
 

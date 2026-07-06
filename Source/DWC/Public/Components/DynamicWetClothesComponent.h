@@ -128,6 +128,30 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Wetness Profile Map")
     FName UseWetnessProfileMap0ParameterName = TEXT("DWC_UseWetnessProfileMap0");
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Wrinkle", meta = (ClampMin = "0.0"))
+    float WrinkleStrength = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Wrinkle", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float WrinkleWetnessMin = 0.25f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Wrinkle", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float WrinkleWetnessMax = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Wrinkle")
+    FName WrinkleNormalMapParameterName = TEXT("DWC_WrinkleNormalMap");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Wrinkle")
+    FName UseWrinkleNormalMapParameterName = TEXT("DWC_UseWrinkleNormalMap");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Wrinkle")
+    FName WrinkleStrengthParameterName = TEXT("DWC_WrinkleStrength");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Wrinkle")
+    FName WrinkleWetnessMinParameterName = TEXT("DWC_WrinkleWetnessMin");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Wrinkle")
+    FName WrinkleWetnessMaxParameterName = TEXT("DWC_WrinkleWetnessMax");
+
     UPROPERTY(Transient)
     TArray<TObjectPtr<UMaterialInstanceDynamic>> WetMaterialInstances;
 

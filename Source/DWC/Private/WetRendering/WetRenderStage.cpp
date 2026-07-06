@@ -38,6 +38,7 @@ namespace
 } // namespace
 #include "Runtime/Engine/Public/Materials/MaterialInstanceDynamic.h"
 #include "DataAssets/WetClothingAsset.h"
+#include "DataAssets/WetWrinkleAsset.h"
 
 void FWetRenderStage::ResetCachedVertexColors()
 {
@@ -96,6 +97,7 @@ void FWetRenderStage::ApplyWetMaterialParameters(FWetRenderStageArgs& Receiver)
     }
 
     ApplyWetnessProfileMapParameters(Receiver);
+    ApplyWetWrinkleNormalMapParameters(Receiver);
 }
 
 void FWetRenderStage::ApplyWetnessProfileMapParameters(FWetRenderStageArgs& Receiver)
@@ -161,6 +163,111 @@ void FWetRenderStage::ApplyWetnessProfileMapParameters(FWetRenderStageArgs& Rece
         if (MID != nullptr)
         {
             MID->SetScalarParameterValue(Receiver.UseWetnessProfileMap0ParameterName, 0.0f);
+        }
+    }
+}
+
+void FWetRenderStage::ApplyWetWrinkleNormalMapParameters(FWetRenderStageArgs& Receiver)
+{
+    if (Receiver.WrinkleNormalMapParameterName.IsNone() &&
+        Receiver.UseWrinkleNormalMapParameterName.IsNone() &&
+        Receiver.WrinkleStrengthParameterName.IsNone() &&
+        Receiver.WrinkleWetnessMinParameterName.IsNone() &&
+        Receiver.WrinkleWetnessMaxParameterName.IsNone())
+    {
+        return;
+    }
+
+    const float SafeWrinkleWetnessMin = FMath::Clamp(Receiver.WrinkleWetnessMin, 0.0f, 1.0f);
+    const float SafeWrinkleWetnessMax = FMath::Max(SafeWrinkleWetnessMin, FMath::Clamp(Receiver.WrinkleWetnessMax, 0.0f, 1.0f));
+    const float SafeWrinkleStrength = FMath::Max(0.0f, Receiver.WrinkleStrength);
+
+    TArray<bool> bWrinkleNormalMapAssigned;
+    bWrinkleNormalMapAssigned.Init(false, Receiver.WetMaterialInstances->Num());
+
+    const UWetWrinkleAsset* WetWrinkleAsset = Receiver.WetClothingAsset != nullptr ? Receiver.WetClothingAsset->WetWrinkleAsset : nullptr;
+    if (WetWrinkleAsset != nullptr)
+    {
+        for (const FWetWrinkleBakedNormalMap& BakedNormalMap : WetWrinkleAsset->BakedNormalMaps)
+        {
+            if (BakedNormalMap.WrinkleNormalMap == nullptr)
+            {
+                continue;
+            }
+
+            for (const int32 MaterialSlotIndex : BakedNormalMap.MaterialSlotIndices)
+            {
+                if (!Receiver.WetMaterialInstances->IsValidIndex(MaterialSlotIndex) ||
+                    bWrinkleNormalMapAssigned[MaterialSlotIndex])
+                {
+                    continue;
+                }
+
+                UMaterialInstanceDynamic* MID = (*Receiver.WetMaterialInstances)[MaterialSlotIndex];
+                if (MID == nullptr)
+                {
+                    continue;
+                }
+
+                if (!Receiver.WrinkleNormalMapParameterName.IsNone())
+                {
+                    MID->SetTextureParameterValue(Receiver.WrinkleNormalMapParameterName, BakedNormalMap.WrinkleNormalMap);
+                }
+
+                if (!Receiver.UseWrinkleNormalMapParameterName.IsNone())
+                {
+                    MID->SetScalarParameterValue(Receiver.UseWrinkleNormalMapParameterName, 1.0f);
+                }
+
+                if (!Receiver.WrinkleStrengthParameterName.IsNone())
+                {
+                    MID->SetScalarParameterValue(Receiver.WrinkleStrengthParameterName, SafeWrinkleStrength);
+                }
+
+                if (!Receiver.WrinkleWetnessMinParameterName.IsNone())
+                {
+                    MID->SetScalarParameterValue(Receiver.WrinkleWetnessMinParameterName, SafeWrinkleWetnessMin);
+                }
+
+                if (!Receiver.WrinkleWetnessMaxParameterName.IsNone())
+                {
+                    MID->SetScalarParameterValue(Receiver.WrinkleWetnessMaxParameterName, SafeWrinkleWetnessMax);
+                }
+
+                bWrinkleNormalMapAssigned[MaterialSlotIndex] = true;
+            }
+        }
+    }
+
+    for (int32 MaterialSlotIndex = 0; MaterialSlotIndex < Receiver.WetMaterialInstances->Num(); ++MaterialSlotIndex)
+    {
+        UMaterialInstanceDynamic* MID = (*Receiver.WetMaterialInstances)[MaterialSlotIndex];
+        if (MID == nullptr)
+        {
+            continue;
+        }
+
+        if (!bWrinkleNormalMapAssigned.IsValidIndex(MaterialSlotIndex) || !bWrinkleNormalMapAssigned[MaterialSlotIndex])
+        {
+            if (!Receiver.UseWrinkleNormalMapParameterName.IsNone())
+            {
+                MID->SetScalarParameterValue(Receiver.UseWrinkleNormalMapParameterName, 0.0f);
+            }
+        }
+
+        if (!Receiver.WrinkleStrengthParameterName.IsNone())
+        {
+            MID->SetScalarParameterValue(Receiver.WrinkleStrengthParameterName, SafeWrinkleStrength);
+        }
+
+        if (!Receiver.WrinkleWetnessMinParameterName.IsNone())
+        {
+            MID->SetScalarParameterValue(Receiver.WrinkleWetnessMinParameterName, SafeWrinkleWetnessMin);
+        }
+
+        if (!Receiver.WrinkleWetnessMaxParameterName.IsNone())
+        {
+            MID->SetScalarParameterValue(Receiver.WrinkleWetnessMaxParameterName, SafeWrinkleWetnessMax);
         }
     }
 }

@@ -186,6 +186,14 @@ FWetRenderStageArgs UDynamicWetClothesComponent::MakeWetRenderStageArgs()
     Args.WetPartDebugUseWetnessMaskParameterName = WetPartDebugUseWetnessMaskParameterName;
     Args.WetnessProfileMap0ParameterName = WetnessProfileMap0ParameterName;
     Args.UseWetnessProfileMap0ParameterName = UseWetnessProfileMap0ParameterName;
+    Args.WrinkleNormalMapParameterName = WrinkleNormalMapParameterName;
+    Args.UseWrinkleNormalMapParameterName = UseWrinkleNormalMapParameterName;
+    Args.WrinkleStrengthParameterName = WrinkleStrengthParameterName;
+    Args.WrinkleWetnessMinParameterName = WrinkleWetnessMinParameterName;
+    Args.WrinkleWetnessMaxParameterName = WrinkleWetnessMaxParameterName;
+    Args.WrinkleStrength = WrinkleStrength;
+    Args.WrinkleWetnessMin = WrinkleWetnessMin;
+    Args.WrinkleWetnessMax = WrinkleWetnessMax;
     Args.LODIndex = 0;
     return Args;
 }
@@ -449,6 +457,14 @@ void UDynamicWetClothesComponent::PostEditChangeProperty(FPropertyChangedEvent& 
         PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, WetPartDebugUseWetnessMaskParameterName) ||
         PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, WetnessProfileMap0ParameterName) ||
         PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, UseWetnessProfileMap0ParameterName) ||
+        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, WrinkleStrength) ||
+        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, WrinkleWetnessMin) ||
+        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, WrinkleWetnessMax) ||
+        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, WrinkleNormalMapParameterName) ||
+        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, UseWrinkleNormalMapParameterName) ||
+        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, WrinkleStrengthParameterName) ||
+        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, WrinkleWetnessMinParameterName) ||
+        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, WrinkleWetnessMaxParameterName) ||
         PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, UnassignedWetPartDebugColor) ||
         PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, WetClothingAsset))
     {

@@ -39,6 +39,15 @@ struct DWC_API FWetRenderStageArgs
     FName WetPartDebugUseWetnessMaskParameterName = TEXT("DWC_WetPartDebugUseWetnessMask");
     FName WetnessProfileMap0ParameterName = TEXT("DWC_WetnessProfileMap0");
     FName UseWetnessProfileMap0ParameterName = TEXT("DWC_UseWetnessProfileMap0");
+    FName WrinkleNormalMapParameterName = TEXT("DWC_WrinkleNormalMap");
+    FName UseWrinkleNormalMapParameterName = TEXT("DWC_UseWrinkleNormalMap");
+    FName WrinkleStrengthParameterName = TEXT("DWC_WrinkleStrength");
+    FName WrinkleWetnessMinParameterName = TEXT("DWC_WrinkleWetnessMin");
+    FName WrinkleWetnessMaxParameterName = TEXT("DWC_WrinkleWetnessMax");
+
+    float WrinkleStrength = 1.0f;
+    float WrinkleWetnessMin = 0.25f;
+    float WrinkleWetnessMax = 1.0f;
 
     int32 LODIndex = 0;
 };
@@ -52,6 +61,7 @@ class DWC_API FWetRenderStage
     void         InitializeWetMaterialInstance(FWetRenderStageArgs& Args);
     void         ApplyWetMaterialParameters(FWetRenderStageArgs& Args);
     void         ApplyWetnessProfileMapParameters(FWetRenderStageArgs& Args);
+    void         ApplyWetWrinkleNormalMapParameters(FWetRenderStageArgs& Args);
     void         ApplyWetnessToMaterial(FWetRenderStageArgs& Args);
     FLinearColor MakeWetVertexColor(const FWetRenderStageArgs& Args, int32 VertexIndex, float Wetness) const;
 

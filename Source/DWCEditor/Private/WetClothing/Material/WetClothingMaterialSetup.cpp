@@ -10,10 +10,12 @@
 #include "Materials/MaterialExpressionConstant3Vector.h"
 #include "Materials/MaterialExpressionMaterialFunctionCall.h"
 #include "Materials/MaterialExpressionScalarParameter.h"
+#include "Materials/MaterialExpressionTextureSampleParameter2D.h"
 #include "Materials/MaterialFunctionInterface.h"
 #include "Materials/MaterialInstance.h"
 #include "Materials/MaterialInstanceConstant.h"
 #include "Materials/MaterialInterface.h"
+#include "Engine/Texture.h"
 #include "Misc/PackageName.h"
 #include "ScopedTransaction.h"
 #include "UObject/Package.h"
@@ -150,6 +152,18 @@ namespace
             return Fallback;
         }
 
+        if (Property == MP_Normal)
+        {
+            UMaterialExpressionConstant3Vector* Fallback = Cast<UMaterialExpressionConstant3Vector>(
+                UMaterialEditingLibrary::CreateMaterialExpression(Material, UMaterialExpressionConstant3Vector::StaticClass(), NodePosition.X, NodePosition.Y));
+            if (Fallback != nullptr)
+            {
+                Fallback->Constant = FLinearColor(0.0f, 0.0f, 1.0f);
+            }
+            OutOutputName.Reset();
+            return Fallback;
+        }
+
         UMaterialExpressionConstant* Fallback = Cast<UMaterialExpressionConstant>(
             UMaterialEditingLibrary::CreateMaterialExpression(Material, UMaterialExpressionConstant::StaticClass(), NodePosition.X, NodePosition.Y));
         if (Fallback != nullptr)
@@ -199,6 +213,64 @@ namespace
         }
 
         return CreateScalarParameter(Material, ParameterName, DefaultValue, NodePosX, NodePosY);
+    }
+
+    UTexture* LoadDefaultNormalTexture()
+    {
+        if (UTexture* DefaultNormal = LoadObject<UTexture>(nullptr, TEXT("/Engine/EngineMaterials/DefaultNormal.DefaultNormal")))
+        {
+            return DefaultNormal;
+        }
+
+        return LoadObject<UTexture>(nullptr, TEXT("/Engine/EngineMaterials/T_Default_Normal.T_Default_Normal"));
+    }
+
+    UMaterialExpressionTextureSampleParameter2D* FindTextureSampleParameter(UMaterial* Material, const FName ParameterName)
+    {
+        if (Material == nullptr)
+        {
+            return nullptr;
+        }
+
+        for (UMaterialExpression* Expression : Material->GetExpressions())
+        {
+            UMaterialExpressionTextureSampleParameter2D* Parameter = Cast<UMaterialExpressionTextureSampleParameter2D>(Expression);
+            if (Parameter != nullptr && Parameter->ParameterName == ParameterName)
+            {
+                return Parameter;
+            }
+        }
+
+        return nullptr;
+    }
+
+    UMaterialExpressionTextureSampleParameter2D* CreateTextureSampleParameter(UMaterial* Material, const FName ParameterName, int32 NodePosX, int32 NodePosY)
+    {
+        UMaterialExpressionTextureSampleParameter2D* Parameter = Cast<UMaterialExpressionTextureSampleParameter2D>(
+            UMaterialEditingLibrary::CreateMaterialExpression(Material, UMaterialExpressionTextureSampleParameter2D::StaticClass(), NodePosX, NodePosY));
+        if (Parameter != nullptr)
+        {
+            Parameter->ParameterName = ParameterName;
+            Parameter->SamplerType = SAMPLERTYPE_Normal;
+            Parameter->Texture = LoadDefaultNormalTexture();
+            Parameter->Desc = TEXT("DWC baked wrinkle tangent-space normal map.");
+        }
+        return Parameter;
+    }
+
+    UMaterialExpressionTextureSampleParameter2D* FindOrCreateTextureSampleParameter(UMaterial* Material, const FName ParameterName, int32 NodePosX, int32 NodePosY)
+    {
+        if (UMaterialExpressionTextureSampleParameter2D* ExistingParameter = FindTextureSampleParameter(Material, ParameterName))
+        {
+            ExistingParameter->SamplerType = SAMPLERTYPE_Normal;
+            if (ExistingParameter->Texture == nullptr)
+            {
+                ExistingParameter->Texture = LoadDefaultNormalTexture();
+            }
+            return ExistingParameter;
+        }
+
+        return CreateTextureSampleParameter(Material, ParameterName, NodePosX, NodePosY);
     }
 
     UMaterial* LoadExistingDwcMaterialForSource(const UMaterial* SourceMaterial)
@@ -368,6 +440,98 @@ namespace
         return true;
     }
 
+    bool ConnectDwcApplyWetnessNormalGraph(
+        UMaterial*                           Material,
+        UMaterialExpressionMaterialFunctionCall* ApplyCall,
+        TArray<FString>&                     FailureReasons)
+    {
+        if (Material == nullptr || ApplyCall == nullptr)
+        {
+            FailureReasons.Add(TEXT("Normal setup requires a material and MF_DWC_ApplyWetness call."));
+            return false;
+        }
+
+        FString              BaseNormalOutputName;
+        UMaterialExpression* BaseNormalInput = ResolveMaterialPropertyInputOrFallback(Material, MP_Normal, FVector2D(-900.0f, 500.0f), BaseNormalOutputName);
+        if (BaseNormalInput == ApplyCall)
+        {
+            BaseNormalInput = Cast<UMaterialExpressionConstant3Vector>(
+                UMaterialEditingLibrary::CreateMaterialExpression(Material, UMaterialExpressionConstant3Vector::StaticClass(), -900, 500));
+            if (UMaterialExpressionConstant3Vector* FlatNormal = Cast<UMaterialExpressionConstant3Vector>(BaseNormalInput))
+            {
+                FlatNormal->Constant = FLinearColor(0.0f, 0.0f, 1.0f);
+            }
+            BaseNormalOutputName.Reset();
+        }
+
+        UMaterialExpressionTextureSampleParameter2D* WrinkleNormalMap = FindOrCreateTextureSampleParameter(
+            Material,
+            TEXT("DWC_WrinkleNormalMap"),
+            -900,
+            670);
+        UMaterialExpressionScalarParameter* UseWrinkleNormalMap = FindOrCreateScalarParameter(
+            Material,
+            TEXT("DWC_UseWrinkleNormalMap"),
+            0.0f,
+            -900,
+            840);
+        UMaterialExpressionScalarParameter* WrinkleStrength = FindOrCreateScalarParameter(
+            Material,
+            TEXT("DWC_WrinkleStrength"),
+            1.0f,
+            -900,
+            930);
+        UMaterialExpressionScalarParameter* WrinkleWetnessMin = FindOrCreateScalarParameter(
+            Material,
+            TEXT("DWC_WrinkleWetnessMin"),
+            0.25f,
+            -900,
+            1020);
+        UMaterialExpressionScalarParameter* WrinkleWetnessMax = FindOrCreateScalarParameter(
+            Material,
+            TEXT("DWC_WrinkleWetnessMax"),
+            1.0f,
+            -900,
+            1110);
+
+        const bool bCreatedRequiredNodes = BaseNormalInput != nullptr &&
+                                           WrinkleNormalMap != nullptr &&
+                                           UseWrinkleNormalMap != nullptr &&
+                                           WrinkleStrength != nullptr &&
+                                           WrinkleWetnessMin != nullptr &&
+                                           WrinkleWetnessMax != nullptr;
+        if (!bCreatedRequiredNodes)
+        {
+            FailureReasons.Add(TEXT("DWC material setup could not create one or more wrinkle normal nodes."));
+            return false;
+        }
+
+        bool bConnected = true;
+        bConnected &= ConnectChecked(BaseNormalInput, BaseNormalOutputName, ApplyCall, TEXT("BaseNormal"), FailureReasons);
+        bConnected &= ConnectChecked(WrinkleNormalMap, TEXT("RGB"), ApplyCall, TEXT("WrinkleNormal"), FailureReasons);
+        bConnected &= ConnectChecked(UseWrinkleNormalMap, FString(), ApplyCall, TEXT("UseWrinkleNormalMap"), FailureReasons);
+        bConnected &= ConnectChecked(WrinkleStrength, FString(), ApplyCall, TEXT("WrinkleStrength"), FailureReasons);
+        bConnected &= ConnectChecked(WrinkleWetnessMin, FString(), ApplyCall, TEXT("WrinkleWetnessMin"), FailureReasons);
+        bConnected &= ConnectChecked(WrinkleWetnessMax, FString(), ApplyCall, TEXT("WrinkleWetnessMax"), FailureReasons);
+
+        FString ApplyNormalOutput;
+        if (!ResolveRequiredOutputName(ApplyCall, TEXT("Normal"), ApplyNormalOutput))
+        {
+            FailureReasons.Add(FString::Printf(TEXT("Missing output 'Normal' on MF_DWC_ApplyWetness. Available outputs: %s"),
+                                               *JoinPinNames(UMaterialEditingLibrary::GetMaterialExpressionOutputNames(ApplyCall))));
+            return false;
+        }
+
+        if (!UMaterialEditingLibrary::ConnectMaterialProperty(ApplyCall, ApplyNormalOutput, MP_Normal))
+        {
+            FailureReasons.Add(FString::Printf(TEXT("Failed to connect MF_DWC_ApplyWetness output '%s' to Material Normal."),
+                                               ApplyNormalOutput.IsEmpty() ? TEXT("<first>") : *ApplyNormalOutput));
+            bConnected = false;
+        }
+
+        return bConnected;
+    }
+
     bool ConfigureExistingDwcMaterial(
         UMaterial*                  Material,
         UMaterialFunctionInterface* ApplyFunction,
@@ -399,6 +563,7 @@ namespace
         {
             bConnected &= ConnectChecked(WetDarkeningStrength, FString(), ApplyCall, TEXT("WetDarkeningStrength"), FailureReasons);
         }
+        bConnected &= ConnectDwcApplyWetnessNormalGraph(Material, ApplyCall, FailureReasons);
 
         FString ApplyBaseColorOutput;
         FString ApplyRoughnessOutput;
@@ -475,6 +640,7 @@ namespace
         bConnected &= ConnectChecked(RoughnessInput, RoughnessOutputName, ApplyCall, TEXT("BaseRoughness"), FailureReasons);
         bConnected &= ConnectChecked(WetRoughness, FString(), ApplyCall, TEXT("WetRoughness"), FailureReasons);
         bConnected &= ConnectChecked(SurfaceWaterStrength, FString(), ApplyCall, TEXT("SurfaceWaterStrength"), FailureReasons);
+        bConnected &= ConnectDwcApplyWetnessNormalGraph(Material, ApplyCall, FailureReasons);
 
         FString ApplyBaseColorOutput;
         FString ApplyRoughnessOutput;
@@ -694,6 +860,7 @@ FWetClothingMaterialSetupResult FWetClothingMaterialSetup::DuplicateAndApplyToMa
     bConnected &= ConnectChecked(RoughnessInput, RoughnessOutputName, ApplyCall, TEXT("BaseRoughness"), FailureReasons);
     bConnected &= ConnectChecked(WetRoughness, FString(), ApplyCall, TEXT("WetRoughness"), FailureReasons);
     bConnected &= ConnectChecked(SurfaceWaterStrength, FString(), ApplyCall, TEXT("SurfaceWaterStrength"), FailureReasons);
+    bConnected &= ConnectDwcApplyWetnessNormalGraph(Material, ApplyCall, FailureReasons);
 
     FString ApplyBaseColorOutput;
     FString ApplyRoughnessOutput;

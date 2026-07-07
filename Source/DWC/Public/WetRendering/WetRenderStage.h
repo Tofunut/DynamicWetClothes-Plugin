@@ -10,14 +10,14 @@ class FAbsorbedWetnessSimulationState;
 struct FWetClothingSettings;
 
 /*
-WetRenderStage 실행에 필요한 인자 묶음이다.
+WetRenderStage �행�요�자 묶음�다.
 
-현재는 멀티스레드 작업 요청이 아니라, DynamicWetClothesComponent가 Game Thread에서
-렌더 표현을 갱신할 때 필요한 참조를 모은 내부용 인자다.
-역할:
-- Wetness 값을 MaterialInstance parameter에 반영
-- WetnessProfileMap parameter 설정
-- VertexColor 기반 debug / 1차 wetness 표현 갱신
+�재멀�스�드 �업 �청�니 DynamicWetClothesComponent가 Game Thread�서
+�더 �현갱신�요참조�모� ��자
+��:
+- Wetness 값을 MaterialInstance parameter반영
+- WetnessProfileMap parameter �정
+- VertexColor 기반 debug / 1�wetness �현 갱신
 */
 struct DWC_API FWetRenderStageArgs
 {
@@ -48,6 +48,12 @@ struct DWC_API FWetRenderStageArgs
     float WrinkleStrength = 1.0f;
     float WrinkleWetnessMin = 0.25f;
     float WrinkleWetnessMax = 1.0f;
+
+    FName UnderColorParameterName = TEXT("DWC_UnderColor");
+    FName UnderColorBlendStrengthParameterName = TEXT("DWC_UnderColorBlendStrength");
+
+    FLinearColor UnderColor = FLinearColor(0.8f, 0.55f, 0.42f, 1.0f);
+    float        UnderColorBlendStrength = 0.3f;
 
     int32 LODIndex = 0;
 };

@@ -119,6 +119,7 @@ FWetRuntimeDataBuildArgs UDynamicWetClothesComponent::MakeRuntimeDataBuildArgs()
     Args.CachedWetVertexColors = &RenderStage->CachedWetVertexColors;
     Args.UnassignedWetPartDebugColor = UnassignedWetPartDebugColor;
     Args.LODIndex = 0;
+
     Args.bUseBakedRuntimeData = true;
     Args.bUseBakedBoneOptimizationCache = true;
     Args.bAllowRuntimeFallbackBuild = true;
@@ -195,6 +196,14 @@ FWetRenderStageArgs UDynamicWetClothesComponent::MakeWetRenderStageArgs()
     Args.WrinkleWetnessMin = WrinkleWetnessMin;
     Args.WrinkleWetnessMax = WrinkleWetnessMax;
     Args.LODIndex = 0;
+
+    Args.WetPartDebugUseWetnessMaskParameterName = WetPartDebugUseWetnessMaskParameterName;
+    Args.WetnessProfileMap0ParameterName = WetnessProfileMap0ParameterName;
+    Args.UseWetnessProfileMap0ParameterName = UseWetnessProfileMap0ParameterName;
+    Args.UnderColorParameterName = UnderColorParameterName;
+    Args.UnderColorBlendStrengthParameterName = UnderColorBlendStrengthParameterName;
+    Args.UnderColor = FallbackUnderColor;
+    Args.UnderColorBlendStrength = WetUnderColorBlendStrength;
     return Args;
 }
 
@@ -465,6 +474,10 @@ void UDynamicWetClothesComponent::PostEditChangeProperty(FPropertyChangedEvent& 
         PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, WrinkleStrengthParameterName) ||
         PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, WrinkleWetnessMinParameterName) ||
         PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, WrinkleWetnessMaxParameterName) ||
+        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, FallbackUnderColor) ||
+        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, WetUnderColorBlendStrength) ||
+        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, UnderColorParameterName) ||
+        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, UnderColorBlendStrengthParameterName) ||
         PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, UnassignedWetPartDebugColor) ||
         PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, WetClothingAsset))
     {

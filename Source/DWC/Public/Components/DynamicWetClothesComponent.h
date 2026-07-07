@@ -107,6 +107,12 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
     UPROPERTY(EditAnywhere, Category = "Wetness|Visual", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float WetUnderColorBlendStrength = 0.3f;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Visual")
+    FName UnderColorParameterName = TEXT("DWC_UnderColor");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Visual")
+    FName UnderColorBlendStrengthParameterName = TEXT("DWC_UnderColorBlendStrength");
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Debug")
     bool bEnableWetPartDebugVertexColors = false;
 

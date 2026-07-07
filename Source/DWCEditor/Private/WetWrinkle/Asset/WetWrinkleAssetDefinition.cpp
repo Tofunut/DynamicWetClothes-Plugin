@@ -2,6 +2,7 @@
 
 #include "Core/DWCEditorStyle.h"
 #include "DataAssets/WetWrinkleAsset.h"
+#include "WetWrinkle/Editor/WetWrinkleAssetEditor.h"
 
 #define LOCTEXT_NAMESPACE "WetWrinkleAssetDefinition"
 
@@ -34,6 +35,24 @@ const FSlateBrush* UWetWrinkleAssetDefinition::GetThumbnailBrush(const FAssetDat
 const FSlateBrush* UWetWrinkleAssetDefinition::GetIconBrush(const FAssetData& InAssetData, const FName InClassName) const
 {
     return FDWCEditorStyle::GetBrush(TEXT("ClassIcon.WetWrinkleAsset"));
+}
+
+EAssetCommandResult UWetWrinkleAssetDefinition::OpenAssets(const FAssetOpenArgs& OpenArgs) const
+{
+    const TArray<UWetWrinkleAsset*> WetWrinkleAssets = OpenArgs.LoadObjects<UWetWrinkleAsset>();
+
+    if (WetWrinkleAssets.IsEmpty())
+    {
+        return EAssetCommandResult::Unhandled;
+    }
+
+    for (UWetWrinkleAsset* WetWrinkleAsset : WetWrinkleAssets)
+    {
+        TSharedRef<FWetWrinkleAssetEditor> Editor = MakeShared<FWetWrinkleAssetEditor>();
+        Editor->Initialize(OpenArgs.GetToolkitMode(), OpenArgs.ToolkitHost, WetWrinkleAsset);
+    }
+
+    return EAssetCommandResult::Handled;
 }
 
 #undef LOCTEXT_NAMESPACE

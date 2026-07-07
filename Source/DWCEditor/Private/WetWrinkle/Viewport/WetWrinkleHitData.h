@@ -2,10 +2,13 @@
 
 #include "CoreMinimal.h"
 
+class UTexture2D;
+
 struct FWetWrinkleBrushSettings
 {
     int32 UVChannelIndex = 0;
     int32 MaterialSlotIndex = INDEX_NONE;
+    TObjectPtr<UTexture2D> BrushHeightTexture = nullptr;
     float BrushRadiusUV = 0.025f;
     float Strength = 1.0f;
     float Falloff = 0.5f;

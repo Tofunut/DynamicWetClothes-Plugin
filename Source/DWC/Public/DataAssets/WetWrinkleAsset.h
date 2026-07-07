@@ -42,7 +42,7 @@ struct DWC_API FWetWrinkleStamp
     float Falloff = 0.5f;
 
     UPROPERTY(EditAnywhere, Category = "Wrinkle Stamp")
-    TObjectPtr<UTexture2D> BrushNormalTexture = nullptr;
+    TObjectPtr<UTexture2D> BrushHeightTexture = nullptr;
 
     UPROPERTY(EditAnywhere, Category = "Wrinkle Stamp")
     int32 AffectedWetPartID = INDEX_NONE;

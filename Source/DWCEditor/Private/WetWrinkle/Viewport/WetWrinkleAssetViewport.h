@@ -10,9 +10,13 @@ class FAdvancedPreviewScene;
 class FWetWrinkleAssetViewportClient;
 class SRichTextBlock;
 class UMaterialInterface;
+class UMaterialInstanceDynamic;
 class UProceduralMeshComponent;
 class USkeletalMesh;
 class USkeletalMeshComponent;
+class UTexture;
+class UTexture2D;
+class UWetClothingAsset;
 class UWetWrinkleAsset;
 
 struct FWetWrinkleProjectedSurface
@@ -77,6 +81,12 @@ class SWetWrinkleAssetViewport : public SEditorViewport, public FGCObject
     UMaterialInterface* ResolveCursorMaterial();
     FText GetViewportHintText() const;
     float CalculateBrushCursorWorldRadius() const;
+    const UWetClothingAsset* ResolveSourceWetClothingAsset() const;
+    UTexture* ResolveSourceTextureForMaterialSlot(int32 MaterialSlotIndex, int32 UVChannelIndex) const;
+    void InitializePreviewMaterialInstances();
+    void ApplyPreviewWetVertexColors();
+    void RefreshWrinklePreviewMaterials();
+    void ResetPreviewWrinkleTextures();
     void FindProjectedSurfacesAtUV(int32 MaterialSlotIndex, int32 UVChannelIndex, const FVector2D& UV, TArray<FWetWrinkleProjectedSurface>& OutSurfaces) const;
     bool TryProjectUVToWorld(int32 MaterialSlotIndex, int32 UVChannelIndex, const FVector2D& UV, FVector& OutWorldPosition, FVector& OutWorldNormal, FVector& OutWorldTangent, FVector& OutWorldBitangent) const;
 
@@ -92,6 +102,9 @@ class SWetWrinkleAssetViewport : public SEditorViewport, public FGCObject
     TObjectPtr<UProceduralMeshComponent> BrushCursorComponent = nullptr;
     TObjectPtr<UProceduralMeshComponent> StoredStampOverlayComponent = nullptr;
     TObjectPtr<UMaterialInterface> CursorMaterial = nullptr;
+    TArray<TObjectPtr<UMaterialInterface>> PreviewBaseMaterials;
+    TArray<TObjectPtr<UMaterialInstanceDynamic>> PreviewMaterialInstances;
+    TArray<TObjectPtr<UTexture2D>> PreviewWrinkleNormalTextures;
     TSharedPtr<SRichTextBlock> OverlayText;
     TArray<FWetClothingAssetUVTriangle> HitTriangles;
     FWetWrinkleBrushSettings BrushSettings;

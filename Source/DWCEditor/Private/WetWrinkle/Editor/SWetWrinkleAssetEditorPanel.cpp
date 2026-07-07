@@ -1,10 +1,13 @@
 #include "SWetWrinkleAssetEditorPanel.h"
 
+#include "AssetRegistry/AssetData.h"
 #include "Core/DWCEditorUtils.h"
 #include "DataAssets/WetClothingAsset.h"
 #include "DataAssets/WetWrinkleAsset.h"
 #include "Engine/SkeletalMesh.h"
+#include "Engine/Texture2D.h"
 #include "IDetailsView.h"
+#include "PropertyCustomizationHelpers.h"
 #include "Styling/CoreStyle.h"
 #include "WetClothing/Texture/WetClothingMaterialTextureResolver.h"
 #include "WetWrinkle/Viewport/WetWrinkleAssetViewport.h"
@@ -25,11 +28,19 @@
 
 #define LOCTEXT_NAMESPACE "WetWrinkleAssetEditorPanel"
 
+namespace
+{
+    constexpr const TCHAR* WetWrinklePreset0Path = TEXT("/DynamicWetClothes/Presets/WrinkleTextures/wet_cloth_wrinkle_stamp_height_16bit.wet_cloth_wrinkle_stamp_height_16bit");
+    constexpr const TCHAR* WetWrinklePreset1Path = TEXT("/DynamicWetClothes/Presets/WrinkleTextures/T_DWC_WrinklePreset1_H.T_DWC_WrinklePreset1_H");
+}
+
 void SWetWrinkleAssetEditorPanel::Construct(const FArguments& InArgs)
 {
     WetWrinkleAsset = InArgs._WetWrinkleAsset;
     DetailsView = InArgs._DetailsView;
     RefreshMaterialSlotOptions();
+    RefreshBrushPresetOptions();
+    BrushSettings.BrushHeightTexture = ResolveDefaultBrushHeightTexture();
 
     const FSlateFontInfo PanelHeadingFont = FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), 16);
     const FSlateFontInfo SectionHeadingFont = FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), 13);
@@ -177,6 +188,37 @@ void SWetWrinkleAssetEditorPanel::Construct(const FArguments& InArgs)
                                               .AutoHeight()
                                               .Padding(0.0f, 0.0f, 0.0f, 6.0f)
                                                   [SNew(STextBlock)
+                                                       .Text(LOCTEXT("BrushPresetLabel", "Wrinkle Preset"))]
+
+                                        + SVerticalBox::Slot()
+                                              .AutoHeight()
+                                              .Padding(0.0f, 0.0f, 0.0f, 10.0f)
+                                                  [SAssignNew(BrushPresetComboBox, SComboBox<TSharedPtr<FWetWrinkleBrushPresetOption>>)
+                                                       .OptionsSource(&BrushPresetOptions)
+                                                       .InitiallySelectedItem(FindBrushPresetOption(BrushSettings.BrushHeightTexture.Get()))
+                                                       .OnGenerateWidget(this, &SWetWrinkleAssetEditorPanel::GenerateBrushPresetComboRow)
+                                                       .OnSelectionChanged(this, &SWetWrinkleAssetEditorPanel::HandleBrushPresetChanged)
+                                                           [SNew(STextBlock)
+                                                                .Text(this, &SWetWrinkleAssetEditorPanel::GetSelectedBrushPresetText)]]
+
+                                        + SVerticalBox::Slot()
+                                              .AutoHeight()
+                                              .Padding(0.0f, 0.0f, 0.0f, 6.0f)
+                                                  [SNew(STextBlock)
+                                                       .Text(LOCTEXT("BrushHeightTextureLabel", "Brush Height Texture"))]
+
+                                        + SVerticalBox::Slot()
+                                              .AutoHeight()
+                                              .Padding(0.0f, 0.0f, 0.0f, 10.0f)
+                                                  [SNew(SObjectPropertyEntryBox)
+                                                       .AllowedClass(UTexture2D::StaticClass())
+                                                       .ObjectPath(this, &SWetWrinkleAssetEditorPanel::GetBrushHeightTextureObjectPath)
+                                                       .OnObjectChanged(this, &SWetWrinkleAssetEditorPanel::HandleBrushHeightTextureChanged)]
+
+                                        + SVerticalBox::Slot()
+                                              .AutoHeight()
+                                              .Padding(0.0f, 0.0f, 0.0f, 6.0f)
+                                                  [SNew(STextBlock)
                                                        .Text(LOCTEXT("RadiusLabel", "Radius UV"))]
 
                                         + SVerticalBox::Slot()
@@ -298,6 +340,7 @@ void SWetWrinkleAssetEditorPanel::Construct(const FArguments& InArgs)
 void SWetWrinkleAssetEditorPanel::RefreshFromAsset()
 {
     RefreshMaterialSlotOptions();
+    RefreshBrushPresetOptions();
     RefreshStrokeList();
 
     if (PreviewViewport.IsValid())
@@ -483,6 +526,28 @@ void SWetWrinkleAssetEditorPanel::RefreshMaterialSlotOptions()
     }
 }
 
+void SWetWrinkleAssetEditorPanel::RefreshBrushPresetOptions()
+{
+    BrushPresetOptions.Reset();
+
+    auto AddPreset = [this](const FText& DisplayName, const TCHAR* TexturePath)
+    {
+        TSharedPtr<FWetWrinkleBrushPresetOption> Option = MakeShared<FWetWrinkleBrushPresetOption>();
+        Option->DisplayName = DisplayName;
+        Option->TexturePath = FSoftObjectPath(TexturePath);
+        BrushPresetOptions.Add(Option);
+    };
+
+    AddPreset(LOCTEXT("WetWrinklePreset0", "Preset 0"), WetWrinklePreset0Path);
+    AddPreset(LOCTEXT("WetWrinklePreset1", "Preset 1"), WetWrinklePreset1Path);
+
+    if (BrushPresetComboBox.IsValid())
+    {
+        BrushPresetComboBox->RefreshOptions();
+        BrushPresetComboBox->SetSelectedItem(FindBrushPresetOption(BrushSettings.BrushHeightTexture.Get()));
+    }
+}
+
 void SWetWrinkleAssetEditorPanel::RefreshTexturePreview()
 {
     if (!TexturePreview.IsValid())
@@ -559,6 +624,55 @@ void SWetWrinkleAssetEditorPanel::HandleMaterialSlotComboChanged(TSharedPtr<int3
     PushBrushSettingsToViewport();
     RefreshStrokeOverlay();
     RefreshTexturePreview();
+}
+
+TSharedRef<SWidget> SWetWrinkleAssetEditorPanel::GenerateBrushPresetComboRow(TSharedPtr<FWetWrinkleBrushPresetOption> Item) const
+{
+    return SNew(STextBlock)
+        .Text(Item.IsValid() ? Item->DisplayName : LOCTEXT("MissingWrinklePreset", "<missing>"));
+}
+
+FText SWetWrinkleAssetEditorPanel::GetSelectedBrushPresetText() const
+{
+    if (TSharedPtr<FWetWrinkleBrushPresetOption> Option = FindBrushPresetOption(BrushSettings.BrushHeightTexture.Get()))
+    {
+        return Option->DisplayName;
+    }
+
+    UTexture2D* BrushHeightTexture = BrushSettings.BrushHeightTexture.Get();
+    return BrushHeightTexture != nullptr
+               ? FText::FromString(FString::Printf(TEXT("Custom - %s"), *BrushHeightTexture->GetName()))
+               : LOCTEXT("NoWrinklePresetSelected", "None");
+}
+
+void SWetWrinkleAssetEditorPanel::HandleBrushPresetChanged(TSharedPtr<FWetWrinkleBrushPresetOption> Item, ESelectInfo::Type SelectInfo)
+{
+    if (!Item.IsValid())
+    {
+        return;
+    }
+
+    BrushSettings.BrushHeightTexture = Cast<UTexture2D>(Item->TexturePath.TryLoad());
+    PushBrushSettingsToViewport();
+    RefreshStrokeOverlay();
+}
+
+FString SWetWrinkleAssetEditorPanel::GetBrushHeightTextureObjectPath() const
+{
+    UTexture2D* BrushHeightTexture = BrushSettings.BrushHeightTexture.Get();
+    return BrushHeightTexture != nullptr ? BrushHeightTexture->GetPathName() : FString();
+}
+
+void SWetWrinkleAssetEditorPanel::HandleBrushHeightTextureChanged(const FAssetData& AssetData)
+{
+    BrushSettings.BrushHeightTexture = Cast<UTexture2D>(AssetData.GetAsset());
+    if (BrushPresetComboBox.IsValid())
+    {
+        BrushPresetComboBox->SetSelectedItem(FindBrushPresetOption(BrushSettings.BrushHeightTexture.Get()));
+    }
+
+    PushBrushSettingsToViewport();
+    RefreshStrokeOverlay();
 }
 
 TSharedRef<ITableRow> SWetWrinkleAssetEditorPanel::GenerateStrokeRow(FStrokeListItemPtr Item, const TSharedRef<STableViewBase>& OwnerTable)
@@ -820,7 +934,7 @@ FWetWrinkleStamp SWetWrinkleAssetEditorPanel::MakeStampFromHit(const FWetWrinkle
     Stamp.Scale = FVector2D(1.0f, 1.0f);
     Stamp.Strength = BrushSettings.Strength;
     Stamp.Falloff = BrushSettings.Falloff;
-    Stamp.BrushNormalTexture = nullptr;
+    Stamp.BrushHeightTexture = BrushSettings.BrushHeightTexture.Get();
     Stamp.AffectedWetPartID = INDEX_NONE;
 #if WITH_EDITORONLY_DATA
     Stamp.bHasEditorSurface = true;
@@ -870,6 +984,11 @@ UTexture* SWetWrinkleAssetEditorPanel::ResolveSourceTextureForStamp(int32 Materi
     return nullptr;
 }
 
+UTexture2D* SWetWrinkleAssetEditorPanel::ResolveDefaultBrushHeightTexture() const
+{
+    return LoadObject<UTexture2D>(nullptr, WetWrinklePreset0Path);
+}
+
 FText SWetWrinkleAssetEditorPanel::GetMaterialSlotDisplayText(int32 MaterialSlotIndex) const
 {
     if (MaterialSlotIndex == INDEX_NONE)
@@ -908,6 +1027,25 @@ TSharedPtr<int32> SWetWrinkleAssetEditorPanel::FindMaterialSlotOption(int32 Mate
     }
 
     return MaterialSlotOptions.Num() > 0 ? MaterialSlotOptions[0] : nullptr;
+}
+
+TSharedPtr<FWetWrinkleBrushPresetOption> SWetWrinkleAssetEditorPanel::FindBrushPresetOption(UTexture2D* Texture) const
+{
+    if (Texture == nullptr)
+    {
+        return nullptr;
+    }
+
+    const FSoftObjectPath TexturePath(Texture);
+    for (const TSharedPtr<FWetWrinkleBrushPresetOption>& Option : BrushPresetOptions)
+    {
+        if (Option.IsValid() && Option->TexturePath == TexturePath)
+        {
+            return Option;
+        }
+    }
+
+    return nullptr;
 }
 
 void SWetWrinkleAssetEditorPanel::HandleTextureUVHovered(const FVector2D& UV)

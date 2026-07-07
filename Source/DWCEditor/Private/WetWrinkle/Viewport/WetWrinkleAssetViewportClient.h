@@ -18,6 +18,7 @@ class FWetWrinkleAssetViewportClient : public FEditorViewportClient
         const TSharedRef<SWetWrinkleAssetViewport>& InViewportWidget);
 
     virtual void Tick(float DeltaSeconds) override;
+    virtual bool InputKey(const FInputKeyEventArgs& EventArgs) override;
     virtual void MouseMove(FViewport* InViewport, int32 X, int32 Y) override;
     virtual void CapturedMouseMove(FViewport* InViewport, int32 X, int32 Y) override;
     virtual void ProcessClick(FSceneView& View, HHitProxy* HitProxy, FKey Key, EInputEvent Event, uint32 HitX, uint32 HitY) override;
@@ -28,6 +29,7 @@ class FWetWrinkleAssetViewportClient : public FEditorViewportClient
 
   private:
     void UpdateSurfaceHitUnderCursor();
+    bool TraceSurfaceUnderCursor(FWetWrinkleSurfaceHit& OutSurfaceHit);
     void ClearSurfaceHit();
 
   private:
@@ -37,4 +39,5 @@ class FWetWrinkleAssetViewportClient : public FEditorViewportClient
     TWeakObjectPtr<const USkeletalMeshComponent> PendingFocusMeshComponent;
     bool bFocusPreviewMeshOnNextTick = false;
     bool bHasCurrentSurfaceHit = false;
+    bool bIsPainting = false;
 };

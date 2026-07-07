@@ -46,6 +46,23 @@ struct DWC_API FWetWrinkleStamp
 
     UPROPERTY(EditAnywhere, Category = "Wrinkle Stamp")
     int32 AffectedWetPartID = INDEX_NONE;
+
+#if WITH_EDITORONLY_DATA
+    UPROPERTY(VisibleAnywhere, Category = "Wrinkle Stamp|Editor Preview")
+    bool bHasEditorSurface = false;
+
+    UPROPERTY(VisibleAnywhere, Category = "Wrinkle Stamp|Editor Preview")
+    FVector EditorSurfaceLocalPosition = FVector::ZeroVector;
+
+    UPROPERTY(VisibleAnywhere, Category = "Wrinkle Stamp|Editor Preview")
+    FVector EditorSurfaceLocalNormal = FVector::UpVector;
+
+    UPROPERTY(VisibleAnywhere, Category = "Wrinkle Stamp|Editor Preview")
+    FVector EditorSurfaceLocalTangent = FVector::ForwardVector;
+
+    UPROPERTY(VisibleAnywhere, Category = "Wrinkle Stamp|Editor Preview")
+    FVector EditorSurfaceLocalBitangent = FVector::RightVector;
+#endif
 };
 
 USTRUCT(BlueprintType)

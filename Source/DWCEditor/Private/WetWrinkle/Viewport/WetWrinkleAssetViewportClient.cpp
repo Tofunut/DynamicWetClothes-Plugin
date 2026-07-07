@@ -58,6 +58,43 @@ void FWetWrinkleAssetViewportClient::Tick(float DeltaSeconds)
     }
 }
 
+bool FWetWrinkleAssetViewportClient::InputKey(const FInputKeyEventArgs& EventArgs)
+{
+    const bool bIsLeftMouseButton = EventArgs.Key == EKeys::LeftMouseButton;
+    const bool bIsCameraModifierDown =
+        Viewport != nullptr &&
+        (Viewport->KeyState(EKeys::LeftAlt) || Viewport->KeyState(EKeys::RightAlt));
+
+    if (bIsLeftMouseButton && EventArgs.Event == IE_Released && bIsPainting)
+    {
+        if (const TSharedPtr<SWetWrinkleAssetViewport> PinnedViewport = ViewportWidget.Pin())
+        {
+            PinnedViewport->EndPaintStrokeFromClient();
+        }
+
+        bIsPainting = false;
+        return true;
+    }
+
+    if (bIsLeftMouseButton && EventArgs.Event == IE_Pressed && !bIsCameraModifierDown)
+    {
+        FWetWrinkleSurfaceHit SurfaceHit;
+        if (TraceSurfaceUnderCursor(SurfaceHit))
+        {
+            if (const TSharedPtr<SWetWrinkleAssetViewport> PinnedViewport = ViewportWidget.Pin())
+            {
+                PinnedViewport->HandleSurfaceHitFromClient(SurfaceHit);
+                PinnedViewport->BeginPaintStrokeFromClient(SurfaceHit);
+                bHasCurrentSurfaceHit = true;
+                bIsPainting = true;
+                return true;
+            }
+        }
+    }
+
+    return FEditorViewportClient::InputKey(EventArgs);
+}
+
 void FWetWrinkleAssetViewportClient::MouseMove(FViewport* InViewport, int32 X, int32 Y)
 {
     FEditorViewportClient::MouseMove(InViewport, X, Y);
@@ -66,6 +103,25 @@ void FWetWrinkleAssetViewportClient::MouseMove(FViewport* InViewport, int32 X, i
 
 void FWetWrinkleAssetViewportClient::CapturedMouseMove(FViewport* InViewport, int32 X, int32 Y)
 {
+    if (bIsPainting)
+    {
+        FWetWrinkleSurfaceHit SurfaceHit;
+        if (TraceSurfaceUnderCursor(SurfaceHit))
+        {
+            if (const TSharedPtr<SWetWrinkleAssetViewport> PinnedViewport = ViewportWidget.Pin())
+            {
+                PinnedViewport->HandleSurfaceHitFromClient(SurfaceHit);
+                PinnedViewport->RequestPaintStampFromClient(SurfaceHit);
+                bHasCurrentSurfaceHit = true;
+            }
+        }
+        else
+        {
+            ClearSurfaceHit();
+        }
+        return;
+    }
+
     FEditorViewportClient::CapturedMouseMove(InViewport, X, Y);
     UpdateSurfaceHitUnderCursor();
 }
@@ -146,18 +202,10 @@ void FWetWrinkleAssetViewportClient::SetPreviewMeshComponent(const USkeletalMesh
 
 void FWetWrinkleAssetViewportClient::UpdateSurfaceHitUnderCursor()
 {
-    if (Viewport == nullptr || PreviewMeshComponent.Get() == nullptr)
+    FWetWrinkleSurfaceHit SurfaceHit;
+    if (TraceSurfaceUnderCursor(SurfaceHit))
     {
-        ClearSurfaceHit();
-        return;
-    }
-
-    const FViewportCursorLocation Cursor = GetCursorWorldLocationFromMousePos();
-
-    if (const TSharedPtr<SWetWrinkleAssetViewport> PinnedViewport = ViewportWidget.Pin())
-    {
-        FWetWrinkleSurfaceHit SurfaceHit;
-        if (PinnedViewport->TraceSurface(Cursor.GetOrigin(), Cursor.GetDirection(), SurfaceHit))
+        if (const TSharedPtr<SWetWrinkleAssetViewport> PinnedViewport = ViewportWidget.Pin())
         {
             PinnedViewport->HandleSurfaceHitFromClient(SurfaceHit);
             bHasCurrentSurfaceHit = true;
@@ -166,6 +214,23 @@ void FWetWrinkleAssetViewportClient::UpdateSurfaceHitUnderCursor()
     }
 
     ClearSurfaceHit();
+}
+
+bool FWetWrinkleAssetViewportClient::TraceSurfaceUnderCursor(FWetWrinkleSurfaceHit& OutSurfaceHit)
+{
+    if (Viewport == nullptr || PreviewMeshComponent.Get() == nullptr)
+    {
+        return false;
+    }
+
+    const FViewportCursorLocation Cursor = GetCursorWorldLocationFromMousePos();
+
+    if (const TSharedPtr<SWetWrinkleAssetViewport> PinnedViewport = ViewportWidget.Pin())
+    {
+        return PinnedViewport->TraceSurface(Cursor.GetOrigin(), Cursor.GetDirection(), OutSurfaceHit);
+    }
+
+    return false;
 }
 
 void FWetWrinkleAssetViewportClient::ClearSurfaceHit()

@@ -13,6 +13,7 @@ struct FWetWrinkleBrushSettings
     float Strength = 2.0f;
     float Falloff = 0.5f;
     float RotationRadians = 0.0f;
+    float PreviewWetness = 1.0f;
     bool bShowPreview = true;
 };
 

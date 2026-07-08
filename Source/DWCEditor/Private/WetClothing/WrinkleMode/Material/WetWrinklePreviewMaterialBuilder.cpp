@@ -11,6 +11,7 @@
 #include "Materials/MaterialExpressionTextureCoordinate.h"
 #include "Materials/MaterialExpressionTextureObjectParameter.h"
 #include "Materials/MaterialExpressionVectorParameter.h"
+#include "Materials/MaterialExpressionVertexColor.h"
 #include "Materials/MaterialInstance.h"
 #include "Materials/MaterialInstanceConstant.h"
 #include "Materials/MaterialInstanceDynamic.h"
@@ -21,6 +22,7 @@
 namespace WetWrinklePreviewMaterialParameters
 {
     const FName UVChannel(TEXT("DWC_WrinklePreview_UVChannel"));
+    const FName PreviewWetness(TEXT("DWC_WrinklePreview_Wetness"));
     const FName AccumulatedNormal(TEXT("DWC_WrinklePreview_AccumulatedNormal"));
     const FName AccumulatedEnabled(TEXT("DWC_WrinklePreview_AccumulatedEnabled"));
     const FName AccumulatedStrength(TEXT("DWC_WrinklePreview_AccumulatedStrength"));
@@ -292,6 +294,115 @@ return CombinedTS;
         return Custom;
     }
 
+    UMaterialExpressionCustom* CreatePreviewWetnessVertexColorOverride(
+        UMaterial* Material,
+        const int32 NodeX,
+        const int32 NodeY)
+    {
+        UMaterialExpressionCustom* Custom = Cast<UMaterialExpressionCustom>(
+            UMaterialEditingLibrary::CreateMaterialExpression(Material, UMaterialExpressionCustom::StaticClass(), NodeX, NodeY));
+        if (Custom == nullptr)
+        {
+            return nullptr;
+        }
+
+        FCustomInput& WetnessInput = Custom->Inputs.AddDefaulted_GetRef();
+        WetnessInput.InputName = TEXT("PreviewWetness");
+
+        FCustomOutput& RedOutput = Custom->AdditionalOutputs.AddDefaulted_GetRef();
+        RedOutput.OutputName = TEXT("R");
+        RedOutput.OutputType = CMOT_Float1;
+
+        FCustomOutput& GreenOutput = Custom->AdditionalOutputs.AddDefaulted_GetRef();
+        GreenOutput.OutputName = TEXT("G");
+        GreenOutput.OutputType = CMOT_Float1;
+
+        FCustomOutput& BlueOutput = Custom->AdditionalOutputs.AddDefaulted_GetRef();
+        BlueOutput.OutputName = TEXT("B");
+        BlueOutput.OutputType = CMOT_Float1;
+
+        FCustomOutput& AlphaOutput = Custom->AdditionalOutputs.AddDefaulted_GetRef();
+        AlphaOutput.OutputName = TEXT("A");
+        AlphaOutput.OutputType = CMOT_Float1;
+
+        Custom->Code = TEXT(R"(
+float Wetness = saturate(PreviewWetness);
+float4 PreviewVertexColor = float4(Wetness, 0.0, 0.0, 1.0);
+R = PreviewVertexColor.r;
+G = PreviewVertexColor.g;
+B = PreviewVertexColor.b;
+A = PreviewVertexColor.a;
+return PreviewVertexColor;
+)");
+        Custom->OutputType = CMOT_Float4;
+        Custom->Description = TEXT("DWC Wrinkle Preview Wetness VertexColor Override");
+        Custom->RebuildOutputs();
+        return Custom;
+    }
+
+    bool InjectPreviewWetnessVertexColorOverride(UMaterial* Material, FString& OutError)
+    {
+        if (Material == nullptr)
+        {
+            OutError = TEXT("Cannot inject preview wetness override into a null material.");
+            return false;
+        }
+
+        TArray<UMaterialExpressionVertexColor*> VertexColorExpressions;
+        for (UMaterialExpression* Expression : Material->GetExpressions())
+        {
+            if (UMaterialExpressionVertexColor* VertexColor = Cast<UMaterialExpressionVertexColor>(Expression))
+            {
+                VertexColorExpressions.Add(VertexColor);
+            }
+        }
+
+        if (VertexColorExpressions.Num() == 0)
+        {
+            return true;
+        }
+
+        UMaterialExpressionScalarParameter* PreviewWetness = CreateWetWrinkleScalarParameter(
+            Material,
+            WetWrinklePreviewMaterialParameters::PreviewWetness,
+            1.0f,
+            -1150,
+            1100);
+        UMaterialExpressionCustom* OverrideVertexColor = CreatePreviewWetnessVertexColorOverride(Material, -900, 1100);
+        if (PreviewWetness == nullptr || OverrideVertexColor == nullptr)
+        {
+            OutError = TEXT("Failed to create preview wetness override material expressions.");
+            return false;
+        }
+
+        if (!ConnectExpression(PreviewWetness, FString(), OverrideVertexColor, TEXT("PreviewWetness"), OutError))
+        {
+            return false;
+        }
+
+        for (UMaterialExpression* Expression : Material->GetExpressions())
+        {
+            if (Expression == nullptr || Expression == OverrideVertexColor)
+            {
+                continue;
+            }
+
+            for (FExpressionInputIterator It{Expression}; It; ++It)
+            {
+                for (UMaterialExpressionVertexColor* VertexColorExpression : VertexColorExpressions)
+                {
+                    if (It->Expression == VertexColorExpression)
+                    {
+                        It->Expression = OverrideVertexColor;
+                        break;
+                    }
+                }
+            }
+        }
+
+        return true;
+    }
+
     bool ConnectPreviewGraph(UMaterial* Material, FString& OutError)
     {
         UMaterialExpressionCustom* Blend = CreatePreviewBlendExpression(Material, -100, 1300);
@@ -497,9 +608,10 @@ return CombinedTS;
     }
 }
 
-FWetWrinklePreviewMaterialBuildResult FWetWrinklePreviewMaterialBuilder::Build(UMaterialInterface* SourceMaterial)
+FWetWrinklePreviewMaterialBuildResult FWetWrinklePreviewMaterialBuilder::Build(const FWetWrinklePreviewMaterialBuildArgs& Args)
 {
     FWetWrinklePreviewMaterialBuildResult Result;
+    UMaterialInterface* const SourceMaterial = Args.SourceMaterial;
     if (SourceMaterial == nullptr)
     {
         Result.ErrorMessage = TEXT("No source material was supplied for wrinkle preview.");
@@ -527,6 +639,11 @@ FWetWrinklePreviewMaterialBuildResult FWetWrinklePreviewMaterialBuilder::Build(U
     TransientMaterial->SetFlags(RF_Transient);
     TransientMaterial->ClearFlags(RF_Standalone | RF_Transactional);
     RemoveLegacyPreviewGraph(TransientMaterial);
+
+    if (Args.bInjectPreviewWetness && !InjectPreviewWetnessVertexColorOverride(TransientMaterial, Result.ErrorMessage))
+    {
+        return Result;
+    }
 
     if (!ConnectPreviewGraph(TransientMaterial, Result.ErrorMessage))
     {
@@ -557,6 +674,7 @@ FWetWrinklePreviewMaterialBuildResult FWetWrinklePreviewMaterialBuilder::Build(U
     }
 
     PreviewMID->SetFlags(RF_Transient);
+    PreviewMID->SetScalarParameterValue(WetWrinklePreviewMaterialParameters::PreviewWetness, 1.0f);
     PreviewMID->SetScalarParameterValue(WetWrinklePreviewMaterialParameters::AccumulatedEnabled, 0.0f);
     PreviewMID->SetScalarParameterValue(WetWrinklePreviewMaterialParameters::HoverEnabled, 0.0f);
 

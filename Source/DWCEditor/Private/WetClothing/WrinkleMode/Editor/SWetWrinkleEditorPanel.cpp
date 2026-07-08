@@ -374,6 +374,24 @@ TSharedRef<SWidget> SWetWrinkleEditorPanel::BuildPatchBrushSection()
 
              + SVerticalBox::Slot()
                    .AutoHeight()
+                   .Padding(0.0f, 0.0f, 0.0f, 6.0f)
+                       [SNew(STextBlock)
+                            .Text(LOCTEXT("PreviewWetnessLabel", "Preview Wetness"))]
+
+             + SVerticalBox::Slot()
+                   .AutoHeight()
+                   .Padding(0.0f, 0.0f, 0.0f, 10.0f)
+                       [SNew(SSpinBox<float>)
+                            .MinValue(0.0f)
+                            .MaxValue(1.0f)
+                            .MinSliderValue(0.0f)
+                            .MaxSliderValue(1.0f)
+                            .Delta(0.05f)
+                            .Value(BrushSettings.PreviewWetness)
+                            .OnValueChanged(this, &SWetWrinkleEditorPanel::HandlePreviewWetnessChanged)]
+
+             + SVerticalBox::Slot()
+                   .AutoHeight()
                    .Padding(0.0f, 0.0f, 0.0f, 0.0f)
                        [SNew(SCheckBox)
                             .IsChecked(this, &SWetWrinkleEditorPanel::GetPreviewToggleState)
@@ -1251,8 +1269,23 @@ void SWetWrinkleEditorPanel::HandleMeshUVChannelComboChanged(TSharedPtr<int32> I
         return;
     }
 
-    SelectedMeshUVChannelIndex = *Item;
+    const int32 NewUVChannelIndex = *Item;
+    SelectedMeshUVChannelIndex = NewUVChannelIndex;
+    BrushSettings.UVChannelIndex = NewUVChannelIndex;
+
+    if (UWetClothingAsset* Asset = WetClothingAsset.Get())
+    {
+        Asset->Modify();
+        Asset->WrinkleData.WrinkleUVChannelIndex = NewUVChannelIndex;
+        MarkAssetEdited();
+    }
+
+    CurrentHit = FWetWrinkleSurfaceHit();
+    bHasLastStamp = false;
+    LastStampUVChannelIndex = INDEX_NONE;
     InvalidateWrinkleUVViewCache();
+    PushBrushSettingsToViewport();
+    RefreshPartMapItems();
     RefreshWrinkleUVView();
 }
 
@@ -1961,6 +1994,12 @@ void SWetWrinkleEditorPanel::HandleFalloffChanged(float NewValue)
 void SWetWrinkleEditorPanel::HandleRotationChanged(float NewValue)
 {
     BrushSettings.RotationRadians = FMath::DegreesToRadians(NewValue);
+    PushBrushSettingsToViewport();
+}
+
+void SWetWrinkleEditorPanel::HandlePreviewWetnessChanged(float NewValue)
+{
+    BrushSettings.PreviewWetness = FMath::Clamp(NewValue, 0.0f, 1.0f);
     PushBrushSettingsToViewport();
 }
 

@@ -128,6 +128,7 @@ class SWetWrinkleEditorPanel : public SCompoundWidget
     void HandleStrengthChanged(float NewValue);
     void HandleFalloffChanged(float NewValue);
     void HandleRotationChanged(float NewValue);
+    void HandlePreviewWetnessChanged(float NewValue);
     void HandlePreviewToggleChanged(ECheckBoxState NewState);
     ECheckBoxState GetPreviewToggleState() const;
     FWetWrinklePatchStroke* FindMutableStroke(const FGuid& StrokeGuid) const;

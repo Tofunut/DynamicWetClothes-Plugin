@@ -123,6 +123,7 @@ class SWetWrinkleViewport : public SEditorViewport, public FGCObject
     UMaterialInterface* ResolveDwcWetMaterialForSlot(int32 MaterialSlotIndex) const;
     UMaterialInterface* GetPreviewSourceMaterial(int32 MaterialSlotIndex) const;
     void ApplyPreviewWetVertexColors();
+    UTexture2D* ResolveWetnessProfileMapForSlot(int32 MaterialSlotIndex) const;
     void RefreshWrinklePreviewMaterials();
     bool EnsurePreviewMaterialForSlot(int32 MaterialSlotIndex);
     void ResetPreviewMaterialParameters(int32 MaterialSlotIndex);

@@ -9,6 +9,7 @@ class UMaterialInstanceDynamic;
 namespace WetWrinklePreviewMaterialParameters
 {
     extern const FName UVChannel;
+    extern const FName PreviewWetness;
     extern const FName AccumulatedNormal;
     extern const FName AccumulatedEnabled;
     extern const FName AccumulatedStrength;
@@ -22,6 +23,12 @@ namespace WetWrinklePreviewMaterialParameters
     extern const FName HoverFalloff;
 }
 
+struct FWetWrinklePreviewMaterialBuildArgs
+{
+    UMaterialInterface* SourceMaterial = nullptr;
+    bool bInjectPreviewWetness = false;
+};
+
 struct FWetWrinklePreviewMaterialBuildResult
 {
     UMaterial* TransientBaseMaterial = nullptr;
@@ -34,5 +41,5 @@ struct FWetWrinklePreviewMaterialBuildResult
 class FWetWrinklePreviewMaterialBuilder
 {
   public:
-    static FWetWrinklePreviewMaterialBuildResult Build(UMaterialInterface* SourceMaterial);
+    static FWetWrinklePreviewMaterialBuildResult Build(const FWetWrinklePreviewMaterialBuildArgs& Args);
 };

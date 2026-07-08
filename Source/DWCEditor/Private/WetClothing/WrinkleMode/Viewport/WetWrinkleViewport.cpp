@@ -27,6 +27,9 @@ DEFINE_LOG_CATEGORY_STATIC(LogWetWrinklePreviewViewport, Log, All);
 
 namespace
 {
+    const FName EditorPreviewWetnessProfileMap0ParameterName(TEXT("DWC_WetnessProfileMap0"));
+    const FName EditorPreviewUseWetnessProfileMap0ParameterName(TEXT("DWC_UseWetnessProfileMap0"));
+
     FVector MakeWetWrinkleAnyPerpendicular(const FVector& Direction)
     {
         FVector Perpendicular = FVector::CrossProduct(Direction, FVector::UpVector).GetSafeNormal();
@@ -114,7 +117,7 @@ namespace
 
     FIntPoint ComputeWetWrinklePreviewTextureSize(const UTexture* SourceTexture)
     {
-        constexpr int32 TargetPreviewLargestDimension = 1024;
+        constexpr int32 TargetPreviewLargestDimension = 2048;
         constexpr int32 MinPreviewDimension = 256;
 
         const int32 SourceSizeX = SourceTexture != nullptr ? FMath::Max(1, SourceTexture->GetSurfaceWidth()) : TargetPreviewLargestDimension;
@@ -557,6 +560,7 @@ void SWetWrinkleViewport::SetBrushSettings(const FWetWrinkleBrushSettings& InBru
         BrushSettings.MaterialSlotIndex != InBrushSettings.MaterialSlotIndex;
 
     BrushSettings = InBrushSettings;
+    ApplyPreviewWetVertexColors();
     ApplyMaterialSlotVisibility();
 
     if (bNeedsTriangleRebuild)
@@ -974,13 +978,48 @@ void SWetWrinkleViewport::ApplyPreviewWetVertexColors()
     const int32 VertexCount = RenderData->LODRenderData[0].GetNumVertices();
     if (VertexCount <= 0)
     {
+        PreviewMeshComponent->ClearVertexColorOverride(0);
+        PreviewMeshComponent->MarkRenderStateDirty();
         return;
     }
 
+    const float PreviewWetness = FMath::Clamp(BrushSettings.PreviewWetness, 0.0f, 1.0f);
     TArray<FLinearColor> PreviewVertexColors;
-    PreviewVertexColors.Init(FLinearColor::White, VertexCount);
+    PreviewVertexColors.Init(FLinearColor(PreviewWetness, 0.0f, 0.0f, 1.0f), VertexCount);
     PreviewMeshComponent->SetVertexColorOverride_LinearColor(0, PreviewVertexColors);
     PreviewMeshComponent->MarkRenderStateDirty();
+}
+
+UTexture2D* SWetWrinkleViewport::ResolveWetnessProfileMapForSlot(int32 MaterialSlotIndex) const
+{
+    const UWetClothingAsset* SourceWetClothingAsset = ResolveSourceWetClothingAsset();
+    if (SourceWetClothingAsset == nullptr)
+    {
+        return nullptr;
+    }
+
+    const UTexture* DesiredSourceTexture = ResolveSourceTextureForMaterialSlot(MaterialSlotIndex, BrushSettings.UVChannelIndex);
+
+    const FWetClothingBakedWetnessProfileMap* ExactMatch = SourceWetClothingAsset->PartData.BakedWetnessProfileMaps.FindByPredicate(
+        [MaterialSlotIndex, DesiredSourceTexture, this](const FWetClothingBakedWetnessProfileMap& Entry)
+        {
+            return Entry.WetnessProfileMap0 != nullptr &&
+                   Entry.SourceTexture == DesiredSourceTexture &&
+                   Entry.UVChannelIndex == BrushSettings.UVChannelIndex &&
+                   Entry.MaterialSlotIndices.Contains(MaterialSlotIndex);
+        });
+    if (ExactMatch != nullptr)
+    {
+        return ExactMatch->WetnessProfileMap0.Get();
+    }
+
+    const FWetClothingBakedWetnessProfileMap* SlotMatch = SourceWetClothingAsset->PartData.BakedWetnessProfileMaps.FindByPredicate(
+        [MaterialSlotIndex](const FWetClothingBakedWetnessProfileMap& Entry)
+        {
+            return Entry.WetnessProfileMap0 != nullptr &&
+                   Entry.MaterialSlotIndices.Contains(MaterialSlotIndex);
+        });
+    return SlotMatch != nullptr ? SlotMatch->WetnessProfileMap0.Get() : nullptr;
 }
 
 void SWetWrinkleViewport::RefreshWrinklePreviewMaterials()
@@ -1081,8 +1120,11 @@ bool SWetWrinkleViewport::EnsurePreviewMaterialForSlot(int32 MaterialSlotIndex)
         return false;
     }
 
-    FWetWrinklePreviewMaterialBuildResult BuildResult =
-        FWetWrinklePreviewMaterialBuilder::Build(SlotState.PreviewSourceMaterial.Get());
+    FWetWrinklePreviewMaterialBuildArgs BuildArgs;
+    BuildArgs.SourceMaterial = SlotState.PreviewSourceMaterial.Get();
+    BuildArgs.bInjectPreviewWetness = SlotState.bUsesDwcWetMaterial;
+
+    FWetWrinklePreviewMaterialBuildResult BuildResult = FWetWrinklePreviewMaterialBuilder::Build(BuildArgs);
     if (!BuildResult.bSucceeded || BuildResult.PreviewMID == nullptr)
     {
         SlotState.PreviewStatus = EWetWrinklePreviewMaterialStatus::Failed;
@@ -1122,6 +1164,9 @@ void SWetWrinkleViewport::ResetPreviewMaterialParameters(int32 MaterialSlotIndex
     SlotState.PreviewMID->SetScalarParameterValue(
         WetWrinklePreviewMaterialParameters::UVChannel,
         static_cast<float>(FMath::Max(BrushSettings.UVChannelIndex, 0)));
+    SlotState.PreviewMID->SetScalarParameterValue(
+        WetWrinklePreviewMaterialParameters::PreviewWetness,
+        FMath::Clamp(BrushSettings.PreviewWetness, 0.0f, 1.0f));
     SlotState.PreviewMID->SetTextureParameterValue(WetWrinklePreviewMaterialParameters::AccumulatedNormal, nullptr);
     SlotState.PreviewMID->SetScalarParameterValue(WetWrinklePreviewMaterialParameters::AccumulatedEnabled, 0.0f);
     SlotState.PreviewMID->SetScalarParameterValue(WetWrinklePreviewMaterialParameters::AccumulatedStrength, 1.0f);
@@ -1135,6 +1180,18 @@ void SWetWrinkleViewport::ResetPreviewMaterialParameters(int32 MaterialSlotIndex
     SlotState.PreviewMID->SetVectorParameterValue(
         WetWrinklePreviewMaterialParameters::HoverScale,
         FLinearColor(1.0f, 1.0f, 0.0f, 0.0f));
+
+    SlotState.PreviewMID->SetTextureParameterValue(EditorPreviewWetnessProfileMap0ParameterName, nullptr);
+    SlotState.PreviewMID->SetScalarParameterValue(EditorPreviewUseWetnessProfileMap0ParameterName, 0.0f);
+
+    if (SlotState.bUsesDwcWetMaterial)
+    {
+        if (UTexture2D* WetnessProfileMap0 = ResolveWetnessProfileMapForSlot(MaterialSlotIndex))
+        {
+            SlotState.PreviewMID->SetTextureParameterValue(EditorPreviewWetnessProfileMap0ParameterName, WetnessProfileMap0);
+            SlotState.PreviewMID->SetScalarParameterValue(EditorPreviewUseWetnessProfileMap0ParameterName, 1.0f);
+        }
+    }
 }
 
 void SWetWrinkleViewport::AppendAccumulatedPreviewStamp(const FWetWrinklePatchPlacement& Stamp)

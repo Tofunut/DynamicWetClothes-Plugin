@@ -13,6 +13,7 @@ namespace
     const FVector2D Icon16x16(16.0f, 16.0f);
     const FVector2D Icon20x20(20.0f, 20.0f);
     const FVector2D Thumbnail64x64(64.0f, 64.0f);
+    const FVector2D ModeIconSize(32.0f, 32.0f);
 } // namespace
 
 void FDWCEditorStyle::Initialize()
@@ -44,8 +45,6 @@ void FDWCEditorStyle::Initialize()
 
     SetPngBrush(*StyleSet, TEXT("ClassIcon.WetClothingAsset"), TEXT("AssetIcons/WetClothing_128"), Icon16x16);
     SetPngBrush(*StyleSet, TEXT("ClassThumbnail.WetClothingAsset"), TEXT("AssetIcons/WetClothing_128"), Thumbnail64x64);
-    SetPngBrush(*StyleSet, TEXT("ClassIcon.WetWrinkleAsset"), TEXT("AssetIcons/WetClothing_128"), Icon16x16);
-    SetPngBrush(*StyleSet, TEXT("ClassThumbnail.WetWrinkleAsset"), TEXT("AssetIcons/WetClothing_128"), Thumbnail64x64);
     SetPngBrush(*StyleSet, TEXT("ClassIcon.WetnessProfile"), TEXT("AssetIcons/WetnessProfile_128"), Icon16x16);
     SetPngBrush(*StyleSet, TEXT("ClassThumbnail.WetnessProfile"), TEXT("AssetIcons/WetnessProfile_128"), Thumbnail64x64);
 
@@ -54,6 +53,9 @@ void FDWCEditorStyle::Initialize()
     SetSvgBrush(*StyleSet, TEXT("DWCEditor.UVTool.EllipseSelect"), TEXT("EditorIcons/SelectEllipse_20"), Icon20x20);
     SetSvgBrush(*StyleSet, TEXT("DWCEditor.UVTool.LassoSelect"), TEXT("EditorIcons/SelectLasso_20"), Icon20x20);
     SetSvgBrush(*StyleSet, TEXT("DWCEditor.AutoPartitioning"), TEXT("EditorIcons/AutoPartitioning"), Icon20x20);
+    SetSvgBrush(*StyleSet, TEXT("DWCEditor.Mode.Part"), TEXT("EditorIcons/Mode_Part_400"), ModeIconSize);
+    SetSvgBrush(*StyleSet, TEXT("DWCEditor.Mode.Wrinkle"), TEXT("EditorIcons/Mode_Wrinkles_400"), ModeIconSize);
+    SetSvgBrush(*StyleSet, TEXT("DWCEditor.Mode.Transparency"), TEXT("EditorIcons/Mode_Transparency_400"), ModeIconSize);
 
     FSlateStyleRegistry::RegisterSlateStyle(*StyleSet);
 }

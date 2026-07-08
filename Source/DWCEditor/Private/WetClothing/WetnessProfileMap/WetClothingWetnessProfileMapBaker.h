@@ -57,12 +57,12 @@ class FWetClothingWetnessProfileMapBaker
         TextureAddress                     AddressY);
 
     static bool ResolveWetPartParameters(
-        const FWetClothingAssetWetPartEntry& WetPartEntry,
+        const FWetClothingWetPartEntry& WetPartEntry,
         FWetnessProfileParameters&           OutParameters);
 
     static void AppendProfileParametersSignature(FString& Signature, const FWetnessProfileParameters& Parameters);
 
-    static const FWetClothingAssetWetPartEntry* FindWetPartEntryForUVIsland(
+    static const FWetClothingWetPartEntry* FindWetPartEntryForUVIsland(
         const UWetClothingAsset& WetClothingAsset,
         int32                    MaterialSlotIndex,
         int32                    UVChannelIndex,

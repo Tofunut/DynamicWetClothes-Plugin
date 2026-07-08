@@ -1,4 +1,4 @@
-#include "DataAssets/WetClothingAssetBakedBoneOptimizationCache.h"
+#include "DataAssets/WetClothingPrecomputedBoneOptimizationCache.h"
 
 #include "Engine/SkeletalMesh.h"
 #include "ReferenceSkeleton.h"
@@ -27,12 +27,12 @@ namespace
     }
 } // namespace
 
-void FWetClothingAssetBakedBoneOptimizationCache::Reset()
+void FWetClothingPrecomputedBoneOptimizationCache::Reset()
 {
-    *this = FWetClothingAssetBakedBoneOptimizationCache();
+    *this = FWetClothingPrecomputedBoneOptimizationCache();
 }
 
-bool FWetClothingAssetBakedBoneOptimizationCache::BuildFromRuntimeCache(
+bool FWetClothingPrecomputedBoneOptimizationCache::BuildFromRuntimeCache(
     const USkeletalMesh*             SkeletalMesh,
     const FWetBoneOptimizationCache& RuntimeCache,
     const FString&                   InMeshBuildSignature,
@@ -42,7 +42,7 @@ bool FWetClothingAssetBakedBoneOptimizationCache::BuildFromRuntimeCache(
 
     if (SkeletalMesh == nullptr)
     {
-        DWC::Error::SetMessage(OutErrorMessage, TEXT("No skeletal mesh was provided for baked bone cache."));
+        DWC::Error::SetMessage(OutErrorMessage, TEXT("No skeletal mesh was provided for precomputed bone cache."));
         return false;
     }
 
@@ -80,17 +80,17 @@ bool FWetClothingAssetBakedBoneOptimizationCache::BuildFromRuntimeCache(
     ResolvedIncludeRules.Reset();
     for (const FWetResolvedBoneIncludeRule& RuntimeRule : RuntimeCache.ResolvedIncludeRules)
     {
-        FWetClothingAssetBakedResolvedBoneIncludeRule BakedRule;
-        BakedRule.TargetBoneIndex = RuntimeRule.TargetBoneIndex;
-        BakedRule.IncludedBoneIndices = RuntimeRule.IncludedBoneIndices;
-        ResolvedIncludeRules.Add(MoveTemp(BakedRule));
+        FWetClothingPrecomputedResolvedBoneIncludeRule PrecomputedRule;
+        PrecomputedRule.TargetBoneIndex = RuntimeRule.TargetBoneIndex;
+        PrecomputedRule.IncludedBoneIndices = RuntimeRule.IncludedBoneIndices;
+        ResolvedIncludeRules.Add(MoveTemp(PrecomputedRule));
     }
 
     DWC::Error::SetMessage(OutErrorMessage, TEXT(""));
     return true;
 }
 
-bool FWetClothingAssetBakedBoneOptimizationCache::IsValidForMesh(
+bool FWetClothingPrecomputedBoneOptimizationCache::IsValidForMesh(
     const USkeletalMesh* SkeletalMesh,
     const int32          InLODIndex,
     const int32          InVertexCount,
@@ -123,7 +123,7 @@ bool FWetClothingAssetBakedBoneOptimizationCache::IsValidForMesh(
     return SkeletonSignature == MakeSkeletonSignature(SkeletalMesh);
 }
 
-bool FWetClothingAssetBakedBoneOptimizationCache::CopyToRuntimeCache(
+bool FWetClothingPrecomputedBoneOptimizationCache::CopyToRuntimeCache(
     USkeletalMesh*             SkeletalMesh,
     FWetBoneOptimizationCache& OutRuntimeCache) const
 {
@@ -141,11 +141,11 @@ bool FWetClothingAssetBakedBoneOptimizationCache::CopyToRuntimeCache(
     OutRuntimeCache.PrimaryVertexCache.FlatVertexIndices = FlatVertexIndices;
 
     OutRuntimeCache.ResolvedIncludeRules.Reset();
-    for (const FWetClothingAssetBakedResolvedBoneIncludeRule& BakedRule : ResolvedIncludeRules)
+    for (const FWetClothingPrecomputedResolvedBoneIncludeRule& PrecomputedRule : ResolvedIncludeRules)
     {
         FWetResolvedBoneIncludeRule RuntimeRule;
-        RuntimeRule.TargetBoneIndex = BakedRule.TargetBoneIndex;
-        RuntimeRule.IncludedBoneIndices = BakedRule.IncludedBoneIndices;
+        RuntimeRule.TargetBoneIndex = PrecomputedRule.TargetBoneIndex;
+        RuntimeRule.IncludedBoneIndices = PrecomputedRule.IncludedBoneIndices;
         OutRuntimeCache.ResolvedIncludeRules.Add(MoveTemp(RuntimeRule));
     }
 

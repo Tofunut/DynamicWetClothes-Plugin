@@ -155,7 +155,7 @@ namespace WetClothingSkeletalMeshCacheBuilderInternal
 
         for (const FWetBoneIncludeRule& IncludeRule : IncludeRules)
         {
-            const int32 TargetBoneIndex = RefSkeleton.FindBoneIndex(IncludeRule.TargetBoneName);
+            const int32 TargetBoneIndex = RefSkeleton.FindBoneIndex(IncludeRule.TargetBoneDisplayName);
             if (TargetBoneIndex == INDEX_NONE)
             {
                 continue;

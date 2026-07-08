@@ -6,7 +6,7 @@ class USkeletalMesh;
 
 struct DWC_API FWetBoneIncludeRule
 {
-    FName         TargetBoneName;
+    FName         TargetBoneDisplayName;
     TArray<FName> ParentBoneNamesToInclude;
     TArray<FName> ChildBoneNamesToInclude;
 };

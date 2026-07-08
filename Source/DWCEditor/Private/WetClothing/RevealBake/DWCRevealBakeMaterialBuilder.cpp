@@ -33,7 +33,7 @@ USkeletalMeshComponent* FDWCRevealBakeMaterialBuilder::FindLayerComponent(const 
     Actor.GetComponents<USkeletalMeshComponent>(MeshComponents);
     for (USkeletalMeshComponent* MeshComponent : MeshComponents)
     {
-        if (MeshComponent != nullptr && MeshComponent->GetFName() == Layer.ComponentName)
+        if (MeshComponent != nullptr && MeshComponent->GetFName() == Layer.ComponentDisplayName)
         {
             return MeshComponent;
         }

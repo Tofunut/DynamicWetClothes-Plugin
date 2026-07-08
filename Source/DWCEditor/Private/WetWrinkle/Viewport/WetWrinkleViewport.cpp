@@ -1,9 +1,8 @@
-#include "WetWrinkleAssetViewport.h"
+#include "WetWrinkleViewport.h"
 
 #include "AdvancedPreviewScene.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "DataAssets/WetClothingAsset.h"
-#include "DataAssets/WetWrinkleAsset.h"
 #include "Engine/Engine.h"
 #include "Engine/SkeletalMesh.h"
 #include "Engine/Texture.h"
@@ -18,11 +17,11 @@
 #include "ViewportToolbar/UnrealEdViewportToolbar.h"
 #include "WetClothing/Texture/WetClothingMaterialTextureResolver.h"
 #include "WetWrinkle/Material/WetWrinklePreviewMaterialBuilder.h"
-#include "WetWrinkleAssetViewportClient.h"
+#include "WetWrinkleViewportClient.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Text/SRichTextBlock.h"
 
-#define LOCTEXT_NAMESPACE "WetWrinkleAssetViewport"
+#define LOCTEXT_NAMESPACE "WetWrinkleViewport"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWetWrinklePreviewViewport, Log, All);
 
@@ -429,9 +428,9 @@ namespace
     }
 } // namespace
 
-void SWetWrinkleAssetViewport::Construct(const FArguments& InArgs)
+void SWetWrinkleViewport::Construct(const FArguments& InArgs)
 {
-    WetWrinkleAsset = InArgs._WetWrinkleAsset;
+    WetClothingAsset = InArgs._WetClothingAsset;
     OnSurfaceHitChanged = InArgs._OnSurfaceHitChanged;
     OnPaintStrokeStarted = InArgs._OnPaintStrokeStarted;
     OnPaintStampRequested = InArgs._OnPaintStampRequested;
@@ -465,7 +464,7 @@ void SWetWrinkleAssetViewport::Construct(const FArguments& InArgs)
     RefreshPreviewMesh();
 }
 
-SWetWrinkleAssetViewport::~SWetWrinkleAssetViewport()
+SWetWrinkleViewport::~SWetWrinkleViewport()
 {
     ReleasePreviewMaterialSlots();
 
@@ -485,7 +484,7 @@ SWetWrinkleAssetViewport::~SWetWrinkleAssetViewport()
     }
 }
 
-void SWetWrinkleAssetViewport::AddReferencedObjects(FReferenceCollector& Collector)
+void SWetWrinkleViewport::AddReferencedObjects(FReferenceCollector& Collector)
 {
     Collector.AddReferencedObject(PreviewMeshComponent);
     Collector.AddReferencedObject(BrushCursorComponent);
@@ -503,7 +502,7 @@ void SWetWrinkleAssetViewport::AddReferencedObjects(FReferenceCollector& Collect
     Collector.AddReferencedObject(BrushSettings.BrushHeightTexture);
 }
 
-void SWetWrinkleAssetViewport::RefreshPreviewMesh()
+void SWetWrinkleViewport::RefreshPreviewMesh()
 {
     if (PreviewMeshComponent == nullptr)
     {
@@ -549,7 +548,7 @@ void SWetWrinkleAssetViewport::RefreshPreviewMesh()
     }
 }
 
-void SWetWrinkleAssetViewport::SetBrushSettings(const FWetWrinkleBrushSettings& InBrushSettings)
+void SWetWrinkleViewport::SetBrushSettings(const FWetWrinkleBrushSettings& InBrushSettings)
 {
     const bool bNeedsTriangleRebuild =
         BrushSettings.UVChannelIndex != InBrushSettings.UVChannelIndex ||
@@ -569,7 +568,7 @@ void SWetWrinkleAssetViewport::SetBrushSettings(const FWetWrinkleBrushSettings& 
     Invalidate();
 }
 
-void SWetWrinkleAssetViewport::RefreshStoredStampOverlay()
+void SWetWrinkleViewport::RefreshStoredStampOverlay()
 {
     if (StoredStampOverlayComponent == nullptr)
     {
@@ -578,7 +577,7 @@ void SWetWrinkleAssetViewport::RefreshStoredStampOverlay()
 
     StoredStampOverlayComponent->ClearAllMeshSections();
 
-    const UWetWrinkleAsset* Asset = WetWrinkleAsset.Get();
+    const UWetClothingAsset* Asset = WetClothingAsset.Get();
     if (Asset == nullptr || HitTriangles.Num() == 0)
     {
         return;
@@ -613,14 +612,14 @@ void SWetWrinkleAssetViewport::RefreshStoredStampOverlay()
     const FVector ViewLocation = ViewportClient.IsValid() ? ViewportClient->GetViewLocation() : FVector::ZeroVector;
     const bool bHasViewLocation = ViewportClient.IsValid();
 
-    for (const FWetWrinkleStroke& Stroke : Asset->Strokes)
+    for (const FWetWrinklePatchStroke& Stroke : Asset->WrinkleData.EditablePatchStrokes)
     {
         if (!Stroke.bEnabled)
         {
             continue;
         }
 
-        for (const FWetWrinkleStamp& Stamp : Stroke.Stamps)
+        for (const FWetWrinklePatchPlacement& Stamp : Stroke.PatchPlacements)
         {
             if (Stamp.UVChannelIndex != BrushSettings.UVChannelIndex)
             {
@@ -735,7 +734,7 @@ void SWetWrinkleAssetViewport::RefreshStoredStampOverlay()
                     MaterialBuffer.VertexColors,
                     MaterialBuffer.Tangents,
                     ProjectStampUVToSurface,
-                    Stamp.BrushHeightTexture,
+                    Stamp.NormalPatchTexture,
                     Surface.WorldPosition,
                     SurfaceNormal,
                     SurfaceTangent,
@@ -785,14 +784,14 @@ void SWetWrinkleAssetViewport::RefreshStoredStampOverlay()
     }
 }
 
-void SWetWrinkleAssetViewport::SetSelectedStrokeGuid(const FGuid& InStrokeGuid)
+void SWetWrinkleViewport::SetSelectedStrokeGuid(const FGuid& InStrokeGuid)
 {
     SelectedStrokeGuid = InStrokeGuid;
     RefreshStoredStampOverlay();
     Invalidate();
 }
 
-void SWetWrinkleAssetViewport::PreviewBrushAtUV(int32 MaterialSlotIndex, int32 UVChannelIndex, const FVector2D& UV)
+void SWetWrinkleViewport::PreviewBrushAtUV(int32 MaterialSlotIndex, int32 UVChannelIndex, const FVector2D& UV)
 {
     TArray<FWetWrinkleProjectedSurface> ProjectedSurfaces;
     FindProjectedSurfacesAtUV(MaterialSlotIndex, UVChannelIndex, UV, ProjectedSurfaces);
@@ -819,7 +818,7 @@ void SWetWrinkleAssetViewport::PreviewBrushAtUV(int32 MaterialSlotIndex, int32 U
     Invalidate();
 }
 
-void SWetWrinkleAssetViewport::ClearExternalBrushPreview()
+void SWetWrinkleViewport::ClearExternalBrushPreview()
 {
     ClearBrushCursor();
     CurrentSurfaceHit = FWetWrinkleSurfaceHit();
@@ -827,7 +826,7 @@ void SWetWrinkleAssetViewport::ClearExternalBrushPreview()
     Invalidate();
 }
 
-bool SWetWrinkleAssetViewport::TryBuildSurfaceHitAtUV(int32 MaterialSlotIndex, int32 UVChannelIndex, const FVector2D& UV, FWetWrinkleSurfaceHit& OutHit) const
+bool SWetWrinkleViewport::TryBuildSurfaceHitAtUV(int32 MaterialSlotIndex, int32 UVChannelIndex, const FVector2D& UV, FWetWrinkleSurfaceHit& OutHit) const
 {
     OutHit = FWetWrinkleSurfaceHit();
     OutHit.UVChannelIndex = UVChannelIndex;
@@ -860,7 +859,7 @@ bool SWetWrinkleAssetViewport::TryBuildSurfaceHitAtUV(int32 MaterialSlotIndex, i
     return true;
 }
 
-bool SWetWrinkleAssetViewport::TraceSurface(const FVector& RayOrigin, const FVector& RayDirection, FWetWrinkleSurfaceHit& OutHit) const
+bool SWetWrinkleViewport::TraceSurface(const FVector& RayOrigin, const FVector& RayDirection, FWetWrinkleSurfaceHit& OutHit) const
 {
     OutHit = FWetWrinkleSurfaceHit();
     OutHit.UVChannelIndex = BrushSettings.UVChannelIndex;
@@ -947,7 +946,7 @@ bool SWetWrinkleAssetViewport::TraceSurface(const FVector& RayOrigin, const FVec
     return OutHit.bHit;
 }
 
-void SWetWrinkleAssetViewport::FocusOnPreviewMesh(bool bInstant)
+void SWetWrinkleViewport::FocusOnPreviewMesh(bool bInstant)
 {
     if (ViewportClient.IsValid())
     {
@@ -955,10 +954,10 @@ void SWetWrinkleAssetViewport::FocusOnPreviewMesh(bool bInstant)
     }
 }
 
-TSharedRef<FEditorViewportClient> SWetWrinkleAssetViewport::MakeEditorViewportClient()
+TSharedRef<FEditorViewportClient> SWetWrinkleViewport::MakeEditorViewportClient()
 {
     check(PreviewScene.IsValid());
-    ViewportClient = MakeShared<FWetWrinkleAssetViewportClient>(PreviewScene.Get(), SharedThis(this));
+    ViewportClient = MakeShared<FWetWrinkleViewportClient>(PreviewScene.Get(), SharedThis(this));
 
     if (PreviewMeshComponent != nullptr)
     {
@@ -969,9 +968,9 @@ TSharedRef<FEditorViewportClient> SWetWrinkleAssetViewport::MakeEditorViewportCl
     return ViewportClient.ToSharedRef();
 }
 
-TSharedPtr<SWidget> SWetWrinkleAssetViewport::BuildViewportToolbar()
+TSharedPtr<SWidget> SWetWrinkleViewport::BuildViewportToolbar()
 {
-    const FName ViewportToolbarName = TEXT("WetWrinkleAssetEditor.ViewportToolbar");
+    const FName ViewportToolbarName = TEXT("WetWrinkleEditor.ViewportToolbar");
 
     if (!UToolMenus::Get()->IsMenuRegistered(ViewportToolbarName))
     {
@@ -993,7 +992,7 @@ TSharedPtr<SWidget> SWetWrinkleAssetViewport::BuildViewportToolbar()
     return UToolMenus::Get()->GenerateWidget(ViewportToolbarName, ViewportToolbarContext);
 }
 
-void SWetWrinkleAssetViewport::PopulateViewportOverlays(TSharedRef<SOverlay> Overlay)
+void SWetWrinkleViewport::PopulateViewportOverlays(TSharedRef<SOverlay> Overlay)
 {
     SEditorViewport::PopulateViewportOverlays(Overlay);
 
@@ -1008,14 +1007,14 @@ void SWetWrinkleAssetViewport::PopulateViewportOverlays(TSharedRef<SOverlay> Ove
                           .Text(GetViewportHintText())]];
 }
 
-void SWetWrinkleAssetViewport::OnFocusViewportToSelection()
+void SWetWrinkleViewport::OnFocusViewportToSelection()
 {
     FocusOnPreviewMesh(false);
 }
 
-USkeletalMesh* SWetWrinkleAssetViewport::ResolveTargetMesh() const
+USkeletalMesh* SWetWrinkleViewport::ResolveTargetMesh() const
 {
-    const UWetWrinkleAsset* Asset = WetWrinkleAsset.Get();
+    const UWetClothingAsset* Asset = WetClothingAsset.Get();
     if (Asset == nullptr)
     {
         return nullptr;
@@ -1026,26 +1025,20 @@ USkeletalMesh* SWetWrinkleAssetViewport::ResolveTargetMesh() const
         return Asset->TargetMesh;
     }
 
-    if (Asset->SourceWetClothingAsset != nullptr)
-    {
-        return Asset->SourceWetClothingAsset->TargetMesh;
-    }
-
-    return nullptr;
+    return Asset->TargetMesh;
 }
 
-const UWetClothingAsset* SWetWrinkleAssetViewport::ResolveSourceWetClothingAsset() const
+const UWetClothingAsset* SWetWrinkleViewport::ResolveSourceWetClothingAsset() const
 {
-    const UWetWrinkleAsset* Asset = WetWrinkleAsset.Get();
-    return Asset != nullptr ? Asset->SourceWetClothingAsset.Get() : nullptr;
+    return WetClothingAsset.Get();
 }
 
-UTexture* SWetWrinkleAssetViewport::ResolveSourceTextureForMaterialSlot(int32 MaterialSlotIndex, int32 UVChannelIndex) const
+UTexture* SWetWrinkleViewport::ResolveSourceTextureForMaterialSlot(int32 MaterialSlotIndex, int32 UVChannelIndex) const
 {
     const UWetClothingAsset* SourceWetClothingAsset = ResolveSourceWetClothingAsset();
     if (SourceWetClothingAsset != nullptr)
     {
-        for (const FWetClothingAssetTextureSelection& TextureSelection : SourceWetClothingAsset->TextureSelections)
+        for (const FWetClothingSourceTextureSelection& TextureSelection : SourceWetClothingAsset->PartData.EditableWetPartData.SourceTextureSelections)
         {
             if (TextureSelection.MaterialSlotIndex == MaterialSlotIndex &&
                 TextureSelection.UVChannelIndex == UVChannelIndex &&
@@ -1065,7 +1058,7 @@ UTexture* SWetWrinkleAssetViewport::ResolveSourceTextureForMaterialSlot(int32 Ma
     return nullptr;
 }
 
-UMaterialInterface* SWetWrinkleAssetViewport::ResolveDwcWetMaterialForSlot(int32 MaterialSlotIndex) const
+UMaterialInterface* SWetWrinkleViewport::ResolveDwcWetMaterialForSlot(int32 MaterialSlotIndex) const
 {
     const UWetClothingAsset* SourceWetClothingAsset = ResolveSourceWetClothingAsset();
     if (SourceWetClothingAsset == nullptr)
@@ -1073,20 +1066,20 @@ UMaterialInterface* SWetWrinkleAssetViewport::ResolveDwcWetMaterialForSlot(int32
         return nullptr;
     }
 
-    const FWetClothingAssetWetMaterialOverride* WetOverride = SourceWetClothingAsset->WetMaterialOverrides.FindByPredicate(
-        [MaterialSlotIndex](const FWetClothingAssetWetMaterialOverride& Entry)
+    const FWetClothingGeneratedWetMaterialOverride* WetOverride = SourceWetClothingAsset->PartData.GeneratedWetMaterialOverrides.FindByPredicate(
+        [MaterialSlotIndex](const FWetClothingGeneratedWetMaterialOverride& Entry)
         {
             return Entry.MaterialSlotIndex == MaterialSlotIndex;
         });
     return WetOverride != nullptr ? WetOverride->WetMaterial.Get() : nullptr;
 }
 
-void SWetWrinkleAssetViewport::ReleasePreviewMaterialSlots()
+void SWetWrinkleViewport::ReleasePreviewMaterialSlots()
 {
     PreviewMaterialSlots.Reset();
 }
 
-void SWetWrinkleAssetViewport::RebuildPreviewMaterialSlots()
+void SWetWrinkleViewport::RebuildPreviewMaterialSlots()
 {
     ReleasePreviewMaterialSlots();
 
@@ -1128,7 +1121,7 @@ void SWetWrinkleAssetViewport::RebuildPreviewMaterialSlots()
     ApplyPreviewMaterialsToMesh();
 }
 
-void SWetWrinkleAssetViewport::ApplyPreviewMaterialsToMesh()
+void SWetWrinkleViewport::ApplyPreviewMaterialsToMesh()
 {
     if (PreviewMeshComponent == nullptr)
     {
@@ -1147,14 +1140,14 @@ void SWetWrinkleAssetViewport::ApplyPreviewMaterialsToMesh()
     }
 }
 
-UMaterialInterface* SWetWrinkleAssetViewport::GetPreviewSourceMaterial(int32 MaterialSlotIndex) const
+UMaterialInterface* SWetWrinkleViewport::GetPreviewSourceMaterial(int32 MaterialSlotIndex) const
 {
     return PreviewMaterialSlots.IsValidIndex(MaterialSlotIndex)
                ? PreviewMaterialSlots[MaterialSlotIndex].PreviewSourceMaterial.Get()
                : nullptr;
 }
 
-void SWetWrinkleAssetViewport::ApplyPreviewWetVertexColors()
+void SWetWrinkleViewport::ApplyPreviewWetVertexColors()
 {
     if (PreviewMeshComponent == nullptr || PreviewMeshComponent->GetSkeletalMeshAsset() == nullptr)
     {
@@ -1179,7 +1172,7 @@ void SWetWrinkleAssetViewport::ApplyPreviewWetVertexColors()
     PreviewMeshComponent->MarkRenderStateDirty();
 }
 
-void SWetWrinkleAssetViewport::RefreshWrinklePreviewMaterials()
+void SWetWrinkleViewport::RefreshWrinklePreviewMaterials()
 {
     const int32 ActiveMaterialSlotIndex = ResolveActivePreviewMaterialSlot();
     if (ActiveMaterialSlotIndex != INDEX_NONE)
@@ -1196,7 +1189,7 @@ void SWetWrinkleAssetViewport::RefreshWrinklePreviewMaterials()
     }
 }
 
-bool SWetWrinkleAssetViewport::EnsurePreviewMaterialForSlot(int32 MaterialSlotIndex)
+bool SWetWrinkleViewport::EnsurePreviewMaterialForSlot(int32 MaterialSlotIndex)
 {
     if (!PreviewMaterialSlots.IsValidIndex(MaterialSlotIndex))
     {
@@ -1247,7 +1240,7 @@ bool SWetWrinkleAssetViewport::EnsurePreviewMaterialForSlot(int32 MaterialSlotIn
     return true;
 }
 
-void SWetWrinkleAssetViewport::ResetPreviewMaterialParameters(int32 MaterialSlotIndex)
+void SWetWrinkleViewport::ResetPreviewMaterialParameters(int32 MaterialSlotIndex)
 {
     if (!PreviewMaterialSlots.IsValidIndex(MaterialSlotIndex))
     {
@@ -1276,14 +1269,14 @@ void SWetWrinkleAssetViewport::ResetPreviewMaterialParameters(int32 MaterialSlot
         FLinearColor(1.0f, 1.0f, 0.0f, 0.0f));
 }
 
-int32 SWetWrinkleAssetViewport::ResolveActivePreviewMaterialSlot() const
+int32 SWetWrinkleViewport::ResolveActivePreviewMaterialSlot() const
 {
     return PreviewMaterialSlots.IsValidIndex(BrushSettings.MaterialSlotIndex)
                ? BrushSettings.MaterialSlotIndex
                : INDEX_NONE;
 }
 
-void SWetWrinkleAssetViewport::ApplyMaterialSlotVisibility()
+void SWetWrinkleViewport::ApplyMaterialSlotVisibility()
 {
     if (PreviewMeshComponent == nullptr)
     {
@@ -1320,7 +1313,7 @@ void SWetWrinkleAssetViewport::ApplyMaterialSlotVisibility()
     }
 }
 
-void SWetWrinkleAssetViewport::RebuildHitTriangles()
+void SWetWrinkleViewport::RebuildHitTriangles()
 {
     HitTriangles.Reset();
 
@@ -1351,7 +1344,7 @@ void SWetWrinkleAssetViewport::RebuildHitTriangles()
     }
 }
 
-void SWetWrinkleAssetViewport::HandleSurfaceHitFromClient(const FWetWrinkleSurfaceHit& SurfaceHit)
+void SWetWrinkleViewport::HandleSurfaceHitFromClient(const FWetWrinkleSurfaceHit& SurfaceHit)
 {
     CurrentSurfaceHit = SurfaceHit;
     RefreshBrushCursor();
@@ -1363,7 +1356,7 @@ void SWetWrinkleAssetViewport::HandleSurfaceHitFromClient(const FWetWrinkleSurfa
     }
 }
 
-void SWetWrinkleAssetViewport::BeginPaintStrokeFromClient(const FWetWrinkleSurfaceHit& SurfaceHit)
+void SWetWrinkleViewport::BeginPaintStrokeFromClient(const FWetWrinkleSurfaceHit& SurfaceHit)
 {
     if (OnPaintStrokeStarted.IsBound())
     {
@@ -1371,7 +1364,7 @@ void SWetWrinkleAssetViewport::BeginPaintStrokeFromClient(const FWetWrinkleSurfa
     }
 }
 
-void SWetWrinkleAssetViewport::RequestPaintStampFromClient(const FWetWrinkleSurfaceHit& SurfaceHit)
+void SWetWrinkleViewport::RequestPaintStampFromClient(const FWetWrinkleSurfaceHit& SurfaceHit)
 {
     if (OnPaintStampRequested.IsBound())
     {
@@ -1379,7 +1372,7 @@ void SWetWrinkleAssetViewport::RequestPaintStampFromClient(const FWetWrinkleSurf
     }
 }
 
-void SWetWrinkleAssetViewport::EndPaintStrokeFromClient()
+void SWetWrinkleViewport::EndPaintStrokeFromClient()
 {
     if (OnPaintStrokeEnded.IsBound())
     {
@@ -1387,7 +1380,7 @@ void SWetWrinkleAssetViewport::EndPaintStrokeFromClient()
     }
 }
 
-void SWetWrinkleAssetViewport::RefreshBrushCursor()
+void SWetWrinkleViewport::RefreshBrushCursor()
 {
     if (BrushCursorComponent == nullptr)
     {
@@ -1603,7 +1596,7 @@ void SWetWrinkleAssetViewport::RefreshBrushCursor()
     BrushCursorComponent->MarkRenderStateDirty();
 }
 
-void SWetWrinkleAssetViewport::ClearBrushCursor()
+void SWetWrinkleViewport::ClearBrushCursor()
 {
     if (BrushCursorComponent != nullptr)
     {
@@ -1613,7 +1606,7 @@ void SWetWrinkleAssetViewport::ClearBrushCursor()
     }
 }
 
-void SWetWrinkleAssetViewport::ClearStoredStampOverlay()
+void SWetWrinkleViewport::ClearStoredStampOverlay()
 {
     if (StoredStampOverlayComponent != nullptr)
     {
@@ -1621,7 +1614,7 @@ void SWetWrinkleAssetViewport::ClearStoredStampOverlay()
     }
 }
 
-UMaterialInterface* SWetWrinkleAssetViewport::ResolveCursorMaterial()
+UMaterialInterface* SWetWrinkleViewport::ResolveCursorMaterial()
 {
     if (CursorMaterial != nullptr)
     {
@@ -1647,7 +1640,7 @@ UMaterialInterface* SWetWrinkleAssetViewport::ResolveCursorMaterial()
     return CursorMaterial;
 }
 
-FText SWetWrinkleAssetViewport::GetViewportHintText() const
+FText SWetWrinkleViewport::GetViewportHintText() const
 {
     if (ResolveTargetMesh() == nullptr)
     {
@@ -1662,7 +1655,7 @@ FText SWetWrinkleAssetViewport::GetViewportHintText() const
     return LOCTEXT("ViewportHint", "Move the cursor over the mesh to inspect wrinkle brush UV hits.");
 }
 
-float SWetWrinkleAssetViewport::CalculateBrushCursorWorldRadius() const
+float SWetWrinkleViewport::CalculateBrushCursorWorldRadius() const
 {
     if (PreviewMeshComponent == nullptr || PreviewMeshComponent->GetSkeletalMeshAsset() == nullptr)
     {
@@ -1674,7 +1667,7 @@ float SWetWrinkleAssetViewport::CalculateBrushCursorWorldRadius() const
     return FMath::Clamp(MeshRadius * BrushSettings.BrushRadiusUV, 0.25f, MeshRadius * 0.35f);
 }
 
-void SWetWrinkleAssetViewport::FindProjectedSurfacesAtUV(
+void SWetWrinkleViewport::FindProjectedSurfacesAtUV(
     int32 MaterialSlotIndex,
     int32 UVChannelIndex,
     const FVector2D& UV,
@@ -1741,7 +1734,7 @@ void SWetWrinkleAssetViewport::FindProjectedSurfacesAtUV(
     }
 }
 
-bool SWetWrinkleAssetViewport::TryProjectUVToWorld(
+bool SWetWrinkleViewport::TryProjectUVToWorld(
     int32 MaterialSlotIndex,
     int32 UVChannelIndex,
     const FVector2D& UV,

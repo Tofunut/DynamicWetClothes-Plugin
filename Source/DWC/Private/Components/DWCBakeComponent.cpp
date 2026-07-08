@@ -106,7 +106,7 @@ bool UDWCBakeComponent::ResolveLayer(const FDWCBakeLayer& Layer, FDWCBakeResolve
     //Save Actual Component Information.
     OutResolvedLayer.LayerId = Layer.LayerId;
     OutResolvedLayer.LayerOrder = Layer.LayerOrder;
-    OutResolvedLayer.ComponentName = SkeletalMeshComponent->GetFName();
+    OutResolvedLayer.ComponentDisplayName = SkeletalMeshComponent->GetFName();
     OutResolvedLayer.ComponentPath = SkeletalMeshComponent->GetPathName(GetOwner());
     OutResolvedLayer.SkeletalMesh = SkeletalMesh;
     OutResolvedLayer.BakeTransform = MakeBakeTransform(*SkeletalMeshComponent);

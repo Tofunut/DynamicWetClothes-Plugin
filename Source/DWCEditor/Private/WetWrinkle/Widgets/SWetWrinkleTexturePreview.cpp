@@ -1,6 +1,6 @@
 #include "WetWrinkle/Widgets/SWetWrinkleTexturePreview.h"
 
-#include "DataAssets/WetWrinkleAsset.h"
+#include "DataAssets/WetClothingAsset.h"
 #include "Engine/Texture.h"
 #include "InputCoreTypes.h"
 #include "Rendering/DrawElements.h"
@@ -10,7 +10,7 @@ namespace
 {
     constexpr int32 WetWrinkleTextureCircleSegments = 64;
 
-    FLinearColor MakeWetWrinkleTextureStrokeColor(const FWetWrinkleStroke& Stroke, bool bSelected)
+    FLinearColor MakeWetWrinkleTextureStrokeColor(const FWetWrinklePatchStroke& Stroke, bool bSelected)
     {
         if (bSelected)
         {
@@ -44,14 +44,14 @@ void SWetWrinkleTexturePreview::Construct(const FArguments& InArgs)
 }
 
 void SWetWrinkleTexturePreview::SetPreviewContext(
-    UWetWrinkleAsset* InWetWrinkleAsset,
+    UWetClothingAsset* InWetClothingAsset,
     UTexture* InSourceTexture,
     int32 InMaterialSlotIndex,
     int32 InUVChannelIndex,
     const FWetWrinkleBrushSettings& InBrushSettings,
     const FWetWrinkleSurfaceHit& InSurfaceHit)
 {
-    WetWrinkleAsset = InWetWrinkleAsset;
+    WetClothingAsset = InWetClothingAsset;
     SourceTexture = InSourceTexture;
     MaterialSlotIndex = InMaterialSlotIndex;
     UVChannelIndex = InUVChannelIndex;
@@ -120,14 +120,14 @@ int32 SWetWrinkleTexturePreview::OnPaint(
             FLinearColor(0.65f, 0.65f, 0.65f, 1.0f));
     }
 
-    const UWetWrinkleAsset* Asset = WetWrinkleAsset.Get();
+    const UWetClothingAsset* Asset = WetClothingAsset.Get();
     const UTexture* Texture = SourceTexture.Get();
     if (Asset != nullptr && Texture != nullptr)
     {
-        for (const FWetWrinkleStroke& Stroke : Asset->Strokes)
+        for (const FWetWrinklePatchStroke& Stroke : Asset->WrinkleData.EditablePatchStrokes)
         {
             const FLinearColor StrokeColor = MakeWetWrinkleTextureStrokeColor(Stroke, false);
-            for (const FWetWrinkleStamp& Stamp : Stroke.Stamps)
+            for (const FWetWrinklePatchPlacement& Stamp : Stroke.PatchPlacements)
             {
                 if (Stamp.SourceTexture != Texture ||
                     Stamp.MaterialSlotIndex != MaterialSlotIndex ||

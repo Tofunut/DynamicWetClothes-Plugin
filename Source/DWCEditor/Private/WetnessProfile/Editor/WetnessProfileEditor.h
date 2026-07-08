@@ -30,7 +30,7 @@ class FWetnessProfileEditor : public FAssetEditorToolkit
     TSharedRef<SDockTab> SpawnMainTab(const FSpawnTabArgs& Args);
 
   private:
-    static const FName EditorAppName;
+    static const FName EditorAppDisplayName;
     static const FName MainTabId;
 
     TWeakObjectPtr<UWetnessProfile>        WetnessProfile;

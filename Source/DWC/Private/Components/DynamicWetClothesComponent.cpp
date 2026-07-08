@@ -69,7 +69,7 @@ bool UDynamicWetClothesComponent::InitializeWetRuntime()
     RuntimeDataBuilder->InitializeWetPartVertexData(RuntimeDataBuildArgs);
     RuntimeDataBuilder->BuildBoneOptimizationCache(RuntimeDataBuildArgs, 0);
     RuntimeDataBuilder->BuildNeighborGraph(RuntimeDataBuildArgs);
-    ApplyWetMaterialOverrides();
+    ApplyGeneratedWetMaterialOverrides();
 
     FWetRenderStageArgs RenderArgs = MakeWetRenderStageArgs();
     RenderStage->InitializeWetMaterialInstance(RenderArgs);
@@ -120,8 +120,8 @@ FWetRuntimeDataBuildArgs UDynamicWetClothesComponent::MakeRuntimeDataBuildArgs()
     Args.UnassignedWetPartDebugColor = UnassignedWetPartDebugColor;
     Args.LODIndex = 0;
 
-    Args.bUseBakedRuntimeData = true;
-    Args.bUseBakedBoneOptimizationCache = true;
+    Args.bUsePrecomputedSimulationData = true;
+    Args.bUsePrecomputedBoneOptimizationCache = true;
     Args.bAllowRuntimeFallbackBuild = true;
     Args.CoincidentVertexNeighborTolerance = WetnessSettings.CoincidentVertexNeighborTolerance;
     return Args;
@@ -232,14 +232,14 @@ USkeletalMeshComponent* UDynamicWetClothesComponent::ResolveTargetSkeletalMesh()
     return Meshes.Num() > 0 ? Meshes[0] : nullptr;
 }
 
-void UDynamicWetClothesComponent::ApplyWetMaterialOverrides()
+void UDynamicWetClothesComponent::ApplyGeneratedWetMaterialOverrides()
 {
     if (TargetSkeletalMesh == nullptr || WetClothingAsset == nullptr)
     {
         return;
     }
 
-    for (const FWetClothingAssetWetMaterialOverride& MaterialOverride : WetClothingAsset->WetMaterialOverrides)
+    for (const FWetClothingGeneratedWetMaterialOverride& MaterialOverride : WetClothingAsset->PartData.GeneratedWetMaterialOverrides)
     {
         if (MaterialOverride.MaterialSlotIndex == INDEX_NONE || MaterialOverride.WetMaterial == nullptr)
         {

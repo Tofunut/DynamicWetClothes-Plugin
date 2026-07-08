@@ -24,21 +24,21 @@ class FWetPartEditingService
   public:
     static FWetPartScope MakeScope(int32 MaterialSlotIndex, int32 UVChannelIndex);
 
-    static bool MatchesScope(const FWetClothingAssetWetPartEntry& Entry, const FWetPartScope& Scope);
+    static bool MatchesScope(const FWetClothingWetPartEntry& Entry, const FWetPartScope& Scope);
 
     static bool EnsureDefaultWetPartForScope(UWetClothingAsset* WetClothingAsset, const FWetPartScope& Scope);
 
     static int32 FindNextWetPartIDForScope(const UWetClothingAsset* WetClothingAsset, const FWetPartScope& Scope);
 
-    static FWetClothingAssetWetPartEntry*       FindMutableEntry(UWetClothingAsset* WetClothingAsset, const FWetPartScope& Scope, int32 WetPartID);
-    static const FWetClothingAssetWetPartEntry* FindEntry(const UWetClothingAsset* WetClothingAsset, const FWetPartScope& Scope, int32 WetPartID);
-    static const FWetClothingAssetWetPartEntry* FindEntryForUVIsland(const UWetClothingAsset* WetClothingAsset, const FWetPartScope& Scope, int32 UVIslandID);
-    static const FWetClothingAssetWetPartEntry* FindEffectiveEntryForUVIsland(const UWetClothingAsset* WetClothingAsset, const FWetPartScope& Scope, int32 UVIslandID);
+    static FWetClothingWetPartEntry*       FindMutableEntry(UWetClothingAsset* WetClothingAsset, const FWetPartScope& Scope, int32 WetPartID);
+    static const FWetClothingWetPartEntry* FindEntry(const UWetClothingAsset* WetClothingAsset, const FWetPartScope& Scope, int32 WetPartID);
+    static const FWetClothingWetPartEntry* FindEntryForUVIsland(const UWetClothingAsset* WetClothingAsset, const FWetPartScope& Scope, int32 UVIslandID);
+    static const FWetClothingWetPartEntry* FindEffectiveEntryForUVIsland(const UWetClothingAsset* WetClothingAsset, const FWetPartScope& Scope, int32 UVIslandID);
 
     static void BuildWetPartItemsForScope(
         const UWetClothingAsset*                           WetClothingAsset,
         const FWetPartScope&                               Scope,
-        TArray<TSharedPtr<FWetClothingAssetWetPartEntry>>& OutItems);
+        TArray<TSharedPtr<FWetClothingWetPartEntry>>& OutItems);
 
     static TSet<int32> GetUVIslandIDsForWetPart(
         const UWetClothingAsset*                             WetClothingAsset,
@@ -50,8 +50,8 @@ class FWetPartEditingService
 
     static FLinearColor GetDefaultWetPartColor(int32 WetPartID);
     static FString      GetDefaultWetPartName(int32 WetPartID);
-    static FString      GetWetPartDisplayName(const FWetClothingAssetWetPartEntry& Entry);
-    static FString      GetAssignedProfileLabel(const FWetClothingAssetWetPartEntry& Entry);
+    static FString      GetWetPartDisplayName(const FWetClothingWetPartEntry& Entry);
+    static FString      GetAssignedProfileLabel(const FWetClothingWetPartEntry& Entry);
 
     static TMap<int32, int32> BuildUVIslandWetPartIDMap(
         const UWetClothingAsset*                             WetClothingAsset,

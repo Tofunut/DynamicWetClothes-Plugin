@@ -9,16 +9,16 @@ class IDetailsView;
 class ITableRow;
 class SInlineEditableTextBlock;
 class SWetWrinkleTexturePreview;
-class SWetWrinkleAssetViewport;
+class SWetWrinkleViewport;
 class STableViewBase;
-class UWetWrinkleAsset;
+class UWetClothingAsset;
 class UTexture;
 class UTexture2D;
 struct FAssetData;
-struct FWetWrinkleStamp;
-struct FWetWrinkleStroke;
+struct FWetWrinklePatchPlacement;
+struct FWetWrinklePatchStroke;
 
-struct FWetWrinkleStrokeListItem
+struct FWetWrinklePatchStrokeListItem
 {
     FGuid StrokeGuid;
 };
@@ -29,11 +29,11 @@ struct FWetWrinkleBrushPresetOption
     FSoftObjectPath TexturePath;
 };
 
-class SWetWrinkleAssetEditorPanel : public SCompoundWidget
+class SWetWrinkleEditorPanel : public SCompoundWidget
 {
   public:
-    SLATE_BEGIN_ARGS(SWetWrinkleAssetEditorPanel) {}
-    SLATE_ARGUMENT(UWetWrinkleAsset*, WetWrinkleAsset)
+    SLATE_BEGIN_ARGS(SWetWrinkleEditorPanel) {}
+    SLATE_ARGUMENT(UWetClothingAsset*, WetClothingAsset)
     SLATE_ARGUMENT(TSharedPtr<IDetailsView>, DetailsView)
     SLATE_END_ARGS()
 
@@ -41,7 +41,7 @@ class SWetWrinkleAssetEditorPanel : public SCompoundWidget
     void RefreshFromAsset();
 
   private:
-    using FStrokeListItemPtr = TSharedPtr<FWetWrinkleStrokeListItem>;
+    using FStrokeListItemPtr = TSharedPtr<FWetWrinklePatchStrokeListItem>;
 
     FReply HandleSaveClicked();
     FReply HandleFocusClicked();
@@ -82,9 +82,9 @@ class SWetWrinkleAssetEditorPanel : public SCompoundWidget
     void HandleRotationChanged(float NewValue);
     void HandlePreviewToggleChanged(ECheckBoxState NewState);
     ECheckBoxState GetPreviewToggleState() const;
-    FWetWrinkleStroke* FindMutableStroke(const FGuid& StrokeGuid) const;
-    const FWetWrinkleStroke* FindStroke(const FGuid& StrokeGuid) const;
-    FWetWrinkleStamp MakeStampFromHit(const FWetWrinkleSurfaceHit& SurfaceHit) const;
+    FWetWrinklePatchStroke* FindMutableStroke(const FGuid& StrokeGuid) const;
+    const FWetWrinklePatchStroke* FindStroke(const FGuid& StrokeGuid) const;
+    FWetWrinklePatchPlacement MakeStampFromHit(const FWetWrinkleSurfaceHit& SurfaceHit) const;
     UTexture* ResolveSourceTextureForStamp(int32 MaterialSlotIndex, int32 UVChannelIndex) const;
     UTexture2D* ResolveDefaultBrushHeightTexture() const;
     FText GetMaterialSlotDisplayText(int32 MaterialSlotIndex) const;
@@ -101,9 +101,9 @@ class SWetWrinkleAssetEditorPanel : public SCompoundWidget
     void MarkAssetEdited();
 
   private:
-    TWeakObjectPtr<UWetWrinkleAsset> WetWrinkleAsset;
+    TWeakObjectPtr<UWetClothingAsset> WetClothingAsset;
     TSharedPtr<IDetailsView> DetailsView;
-    TSharedPtr<SWetWrinkleAssetViewport> PreviewViewport;
+    TSharedPtr<SWetWrinkleViewport> PreviewViewport;
     TSharedPtr<SWetWrinkleTexturePreview> TexturePreview;
     TSharedPtr<class SComboBox<TSharedPtr<int32>>> MaterialSlotComboBox;
     TSharedPtr<class SComboBox<TSharedPtr<FWetWrinkleBrushPresetOption>>> BrushPresetComboBox;

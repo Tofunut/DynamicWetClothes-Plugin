@@ -32,8 +32,8 @@ struct DWC_API FWetRuntimeDataBuildArgs
     FLinearColor UnassignedWetPartDebugColor = FLinearColor(0.25f, 0.25f, 0.25f, 1.0f);
 
     int32 LODIndex = 0;
-    bool  bUseBakedRuntimeData = true;
-    bool  bUseBakedBoneOptimizationCache = true;
+    bool  bUsePrecomputedSimulationData = true;
+    bool  bUsePrecomputedBoneOptimizationCache = true;
     bool  bAllowRuntimeFallbackBuild = true;
     float CoincidentVertexNeighborTolerance = 0.001f;
 

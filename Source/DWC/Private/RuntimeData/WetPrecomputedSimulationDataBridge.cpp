@@ -1,11 +1,11 @@
-#include "RuntimeData/WetBakedRuntimeDataBridge.h"
+#include "RuntimeData/WetPrecomputedSimulationDataBridge.h"
 
 #include "DataAssets/WetClothingAsset.h"
 #include "Engine/SkeletalMesh.h"
 #include "RuntimeData/WetClothingRuntimeData.h"
 #include "Utility/DWCError.h"
 
-bool FWetBakedRuntimeDataBridge::TryCopyBakedBoneOptimizationCache(
+bool FWetPrecomputedSimulationDataBridge::TryCopyPrecomputedBoneOptimizationCache(
     const UWetClothingAsset*   WetClothingAsset,
     USkeletalMesh*             SkeletalMesh,
     const int32                LODIndex,
@@ -20,26 +20,26 @@ bool FWetBakedRuntimeDataBridge::TryCopyBakedBoneOptimizationCache(
         return false;
     }
 
-    if (!WetClothingAsset->IsBakedRuntimeDataValidForMesh(SkeletalMesh, LODIndex))
+    if (!WetClothingAsset->IsPrecomputedSimulationDataValidForMesh(SkeletalMesh, LODIndex))
     {
-        DWC::Error::SetMessage(OutErrorMessage, TEXT("Baked runtime data is stale or invalid for the target mesh."));
+        DWC::Error::SetMessage(OutErrorMessage, TEXT("Precomputed simulation data is stale or invalid for the target mesh."));
         return false;
     }
 
-    const FWetClothingAssetBakedRuntimeData& BakedData = WetClothingAsset->GetBakedRuntimeData();
-    if (!BakedData.BoneOptimizationCache.IsValidForMesh(
+    const FWetClothingPrecomputedSimulationData& PrecomputedData = WetClothingAsset->GetPrecomputedSimulationData();
+    if (!PrecomputedData.BoneOptimizationCache.IsValidForMesh(
             SkeletalMesh,
             LODIndex,
-            BakedData.VertexCount,
-            BakedData.MeshBuildSignature))
+            PrecomputedData.VertexCount,
+            PrecomputedData.MeshBuildSignature))
     {
-        DWC::Error::SetMessage(OutErrorMessage, TEXT("Baked bone optimization cache is stale or invalid for the target mesh."));
+        DWC::Error::SetMessage(OutErrorMessage, TEXT("Precomputed bone optimization cache is stale or invalid for the target mesh."));
         return false;
     }
 
-    if (!BakedData.BoneOptimizationCache.CopyToRuntimeCache(SkeletalMesh, OutRuntimeCache))
+    if (!PrecomputedData.BoneOptimizationCache.CopyToRuntimeCache(SkeletalMesh, OutRuntimeCache))
     {
-        DWC::Error::SetMessage(OutErrorMessage, TEXT("Failed to copy baked bone optimization cache to runtime cache."));
+        DWC::Error::SetMessage(OutErrorMessage, TEXT("Failed to copy precomputed bone optimization cache to runtime cache."));
         return false;
     }
 
@@ -47,7 +47,7 @@ bool FWetBakedRuntimeDataBridge::TryCopyBakedBoneOptimizationCache(
     return true;
 }
 
-bool FWetBakedRuntimeDataBridge::TryCopyBakedNeighborGraph(
+bool FWetPrecomputedSimulationDataBridge::TryCopyPrecomputedNeighborGraph(
     const UWetClothingAsset*     WetClothingAsset,
     const USkeletalMesh*         SkeletalMesh,
     const int32                  LODIndex,
@@ -63,33 +63,33 @@ bool FWetBakedRuntimeDataBridge::TryCopyBakedNeighborGraph(
         return false;
     }
 
-    if (!WetClothingAsset->IsBakedRuntimeDataValidForMesh(SkeletalMesh, LODIndex))
+    if (!WetClothingAsset->IsPrecomputedSimulationDataValidForMesh(SkeletalMesh, LODIndex))
     {
-        DWC::Error::SetMessage(OutErrorMessage, TEXT("Baked runtime data is stale or invalid for the target mesh."));
+        DWC::Error::SetMessage(OutErrorMessage, TEXT("Precomputed simulation data is stale or invalid for the target mesh."));
         return false;
     }
 
-    const FWetClothingAssetBakedRuntimeData& BakedData = WetClothingAsset->GetBakedRuntimeData();
-    if (BakedData.NeighborGraph.Num() != VertexCount)
+    const FWetClothingPrecomputedSimulationData& PrecomputedData = WetClothingAsset->GetPrecomputedSimulationData();
+    if (PrecomputedData.NeighborGraph.Num() != VertexCount)
     {
-        DWC::Error::SetMessage(OutErrorMessage, TEXT("Baked neighbor graph vertex count does not match the mesh."));
+        DWC::Error::SetMessage(OutErrorMessage, TEXT("Precomputed neighbor graph vertex count does not match the mesh."));
         return false;
     }
 
     OutNeighborGraph.SetNum(VertexCount);
     for (int32 VertexIndex = 0; VertexIndex < VertexCount; ++VertexIndex)
     {
-        for (const int32 NeighborIndex : BakedData.NeighborGraph[VertexIndex].Neighbors)
+        for (const int32 NeighborIndex : PrecomputedData.NeighborGraph[VertexIndex].Neighbors)
         {
             if (!OutNeighborGraph.IsValidIndex(NeighborIndex))
             {
                 OutNeighborGraph.Reset();
-                DWC::Error::SetMessage(OutErrorMessage, TEXT("Baked neighbor graph contains an invalid vertex index."));
+                DWC::Error::SetMessage(OutErrorMessage, TEXT("Precomputed neighbor graph contains an invalid vertex index."));
                 return false;
             }
         }
 
-        OutNeighborGraph[VertexIndex].Neighbors = BakedData.NeighborGraph[VertexIndex].Neighbors;
+        OutNeighborGraph[VertexIndex].Neighbors = PrecomputedData.NeighborGraph[VertexIndex].Neighbors;
     }
 
     DWC::Error::SetMessage(OutErrorMessage, TEXT(""));

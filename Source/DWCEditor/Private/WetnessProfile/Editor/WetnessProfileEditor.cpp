@@ -11,7 +11,7 @@
 
 #define LOCTEXT_NAMESPACE "WetnessProfileEditor"
 
-const FName FWetnessProfileEditor::EditorAppName(TEXT("WetnessProfileEditorApp"));
+const FName FWetnessProfileEditor::EditorAppDisplayName(TEXT("WetnessProfileEditorApp"));
 const FName FWetnessProfileEditor::MainTabId(TEXT("WetnessProfileEditor_Main"));
 
 FWetnessProfileEditor::~FWetnessProfileEditor()
@@ -42,7 +42,7 @@ void FWetnessProfileEditor::Initialize(const EToolkitMode::Type Mode, const TSha
                                                         ->AddArea(
                                                             FTabManager::NewPrimaryArea()->SetOrientation(Orient_Vertical)->Split(FTabManager::NewStack()->SetHideTabWell(true)->AddTab(MainTabId, ETabState::OpenedTab)));
 
-    FAssetEditorToolkit::InitAssetEditor(Mode, InitToolkitHost, EditorAppName, Layout, true, false, InProfile);
+    FAssetEditorToolkit::InitAssetEditor(Mode, InitToolkitHost, EditorAppDisplayName, Layout, true, false, InProfile);
 }
 
 void FWetnessProfileEditor::RegisterTabSpawners(const TSharedRef<FTabManager>& InTabManager)
@@ -64,7 +64,7 @@ void FWetnessProfileEditor::UnregisterTabSpawners(const TSharedRef<FTabManager>&
 
 FName FWetnessProfileEditor::GetToolkitFName() const
 {
-    return EditorAppName;
+    return EditorAppDisplayName;
 }
 
 FText FWetnessProfileEditor::GetBaseToolkitName() const

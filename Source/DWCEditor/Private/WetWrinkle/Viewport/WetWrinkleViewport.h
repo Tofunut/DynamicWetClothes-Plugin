@@ -7,7 +7,7 @@
 #include "WetWrinkleHitData.h"
 
 class FAdvancedPreviewScene;
-class FWetWrinkleAssetViewportClient;
+class FWetWrinkleViewportClient;
 class SRichTextBlock;
 class UMaterial;
 class UMaterialInterface;
@@ -18,7 +18,6 @@ class USkeletalMeshComponent;
 class UTexture;
 class UTexture2D;
 class UWetClothingAsset;
-class UWetWrinkleAsset;
 
 enum class EWetWrinklePreviewMaterialStatus : uint8
 {
@@ -52,13 +51,13 @@ struct FWetWrinklePreviewMaterialSlotState
     bool bUsesDwcWetMaterial = false;
 };
 
-class SWetWrinkleAssetViewport : public SEditorViewport, public FGCObject
+class SWetWrinkleViewport : public SEditorViewport, public FGCObject
 {
-    friend class FWetWrinkleAssetViewportClient;
+    friend class FWetWrinkleViewportClient;
 
   public:
-    SLATE_BEGIN_ARGS(SWetWrinkleAssetViewport) {}
-    SLATE_ARGUMENT(UWetWrinkleAsset*, WetWrinkleAsset)
+    SLATE_BEGIN_ARGS(SWetWrinkleViewport) {}
+    SLATE_ARGUMENT(UWetClothingAsset*, WetClothingAsset)
     SLATE_EVENT(FOnWetWrinkleSurfaceHitChanged, OnSurfaceHitChanged)
     SLATE_EVENT(FOnWetWrinklePaintStrokeStarted, OnPaintStrokeStarted)
     SLATE_EVENT(FOnWetWrinklePaintStampRequested, OnPaintStampRequested)
@@ -66,12 +65,12 @@ class SWetWrinkleAssetViewport : public SEditorViewport, public FGCObject
     SLATE_END_ARGS()
 
     void Construct(const FArguments& InArgs);
-    virtual ~SWetWrinkleAssetViewport() override;
+    virtual ~SWetWrinkleViewport() override;
 
     virtual void AddReferencedObjects(FReferenceCollector& Collector) override;
     virtual FString GetReferencerName() const override
     {
-        return TEXT("SWetWrinkleAssetViewport");
+        return TEXT("SWetWrinkleViewport");
     }
 
     void RefreshPreviewMesh();
@@ -120,13 +119,13 @@ class SWetWrinkleAssetViewport : public SEditorViewport, public FGCObject
     bool TryProjectUVToWorld(int32 MaterialSlotIndex, int32 UVChannelIndex, const FVector2D& UV, FVector& OutWorldPosition, FVector& OutWorldNormal, FVector& OutWorldTangent, FVector& OutWorldBitangent) const;
 
   private:
-    TWeakObjectPtr<UWetWrinkleAsset> WetWrinkleAsset;
+    TWeakObjectPtr<UWetClothingAsset> WetClothingAsset;
     FOnWetWrinkleSurfaceHitChanged OnSurfaceHitChanged;
     FOnWetWrinklePaintStrokeStarted OnPaintStrokeStarted;
     FOnWetWrinklePaintStampRequested OnPaintStampRequested;
     FOnWetWrinklePaintStrokeEnded OnPaintStrokeEnded;
     TSharedPtr<FAdvancedPreviewScene> PreviewScene;
-    TSharedPtr<FWetWrinkleAssetViewportClient> ViewportClient;
+    TSharedPtr<FWetWrinkleViewportClient> ViewportClient;
     TObjectPtr<USkeletalMeshComponent> PreviewMeshComponent = nullptr;
     TObjectPtr<UProceduralMeshComponent> BrushCursorComponent = nullptr;
     TObjectPtr<UProceduralMeshComponent> StoredStampOverlayComponent = nullptr;

@@ -128,7 +128,7 @@ bool FWetNeighborGraphBuilder::BuildRuntimeGraph(
 bool FWetNeighborGraphBuilder::BuildBakedGraph(
     const FSkeletalMeshLODRenderData&              LODData,
     const float                                    InCoincidentVertexNeighborTolerance,
-    TArray<FWetClothingAssetBakedVertexNeighbors>& OutNeighborGraph,
+    TArray<FWetClothingPrecomputedVertexNeighbors>& OutNeighborGraph,
     FString*                                       OutErrorMessage)
 {
     return BuildGraphFromLODData(LODData, InCoincidentVertexNeighborTolerance, OutNeighborGraph, OutErrorMessage);

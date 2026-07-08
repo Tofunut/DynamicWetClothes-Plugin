@@ -3,7 +3,7 @@
 #include "CoreMinimal.h"
 
 class FSkeletalMeshLODRenderData;
-struct FWetClothingAssetBakedVertexNeighbors;
+struct FWetClothingPrecomputedVertexNeighbors;
 struct FWetVertexNeighbors;
 
 class DWC_API FWetNeighborGraphBuilder
@@ -18,6 +18,6 @@ class DWC_API FWetNeighborGraphBuilder
     static bool BuildBakedGraph(
         const FSkeletalMeshLODRenderData&              LODData,
         float                                          InCoincidentVertexNeighborTolerance,
-        TArray<FWetClothingAssetBakedVertexNeighbors>& OutNeighborGraph,
+        TArray<FWetClothingPrecomputedVertexNeighbors>& OutNeighborGraph,
         FString*                                       OutErrorMessage = nullptr);
 };

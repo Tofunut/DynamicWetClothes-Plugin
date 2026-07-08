@@ -7,15 +7,15 @@
 class FAdvancedPreviewScene;
 class FSceneView;
 class HHitProxy;
-class SWetWrinkleAssetViewport;
+class SWetWrinkleViewport;
 class USkeletalMeshComponent;
 
-class FWetWrinkleAssetViewportClient : public FEditorViewportClient
+class FWetWrinkleViewportClient : public FEditorViewportClient
 {
   public:
-    FWetWrinkleAssetViewportClient(
+    FWetWrinkleViewportClient(
         FAdvancedPreviewScene* InPreviewScene,
-        const TSharedRef<SWetWrinkleAssetViewport>& InViewportWidget);
+        const TSharedRef<SWetWrinkleViewport>& InViewportWidget);
 
     virtual void Tick(float DeltaSeconds) override;
     virtual bool InputKey(const FInputKeyEventArgs& EventArgs) override;
@@ -34,7 +34,7 @@ class FWetWrinkleAssetViewportClient : public FEditorViewportClient
 
   private:
     FAdvancedPreviewScene* PreviewScene = nullptr;
-    TWeakPtr<SWetWrinkleAssetViewport> ViewportWidget;
+    TWeakPtr<SWetWrinkleViewport> ViewportWidget;
     TWeakObjectPtr<const USkeletalMeshComponent> PreviewMeshComponent;
     TWeakObjectPtr<const USkeletalMeshComponent> PendingFocusMeshComponent;
     bool bFocusPreviewMeshOnNextTick = false;

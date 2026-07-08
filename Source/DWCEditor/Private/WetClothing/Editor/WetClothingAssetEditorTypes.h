@@ -28,6 +28,6 @@ struct FWetClothingUVSelectionToolItem
     EWetClothingAssetUVSelectionTool Tool = EWetClothingAssetUVSelectionTool::Select;
     FText                            Label;
     FText                            Tooltip;
-    FName                            IconBrushName;
+    FName                            IconBrushDisplayName;
 };
 

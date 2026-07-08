@@ -81,7 +81,7 @@ void FWetClothingWetnessProfileMapBaker::ApplyTextureAddressToIslands(
 }
 
 bool FWetClothingWetnessProfileMapBaker::ResolveWetPartParameters(
-    const FWetClothingAssetWetPartEntry& WetPartEntry,
+    const FWetClothingWetPartEntry& WetPartEntry,
     FWetnessProfileParameters&           OutParameters)
 {
     if (WetPartEntry.ProfileAssignment.SourceProfile.IsValid())
@@ -113,13 +113,13 @@ void FWetClothingWetnessProfileMapBaker::AppendProfileParametersSignature(
         Parameters.RunoffStrength);
 }
 
-const FWetClothingAssetWetPartEntry* FWetClothingWetnessProfileMapBaker::FindWetPartEntryForUVIsland(
+const FWetClothingWetPartEntry* FWetClothingWetnessProfileMapBaker::FindWetPartEntryForUVIsland(
     const UWetClothingAsset& WetClothingAsset,
     const int32              MaterialSlotIndex,
     const int32              UVChannelIndex,
     const int32              UVIslandID)
 {
-    for (const FWetClothingAssetWetPartEntry& Entry : WetClothingAsset.WetPartEntries)
+    for (const FWetClothingWetPartEntry& Entry : WetClothingAsset.PartData.EditableWetPartData.WetPartEntries)
     {
         if (Entry.MaterialSlotIndex == MaterialSlotIndex &&
             Entry.UVChannelIndex == UVChannelIndex &&
@@ -381,8 +381,8 @@ FString FWetClothingWetnessProfileMapBaker::MakeBuildSignature(
         Canonical += TEXT(",");
     }
 
-    TArray<const FWetClothingAssetWetPartEntry*> RelevantEntries;
-    for (const FWetClothingAssetWetPartEntry& Entry : WetClothingAsset->WetPartEntries)
+    TArray<const FWetClothingWetPartEntry*> RelevantEntries;
+    for (const FWetClothingWetPartEntry& Entry : WetClothingAsset->PartData.EditableWetPartData.WetPartEntries)
     {
         if (Entry.UVChannelIndex == UVChannelIndex &&
             Entry.MaterialSlotIndex != INDEX_NONE &&
@@ -394,7 +394,7 @@ FString FWetClothingWetnessProfileMapBaker::MakeBuildSignature(
     }
 
     RelevantEntries.Sort(
-        [](const FWetClothingAssetWetPartEntry& A, const FWetClothingAssetWetPartEntry& B)
+        [](const FWetClothingWetPartEntry& A, const FWetClothingWetPartEntry& B)
         {
             if (A.MaterialSlotIndex != B.MaterialSlotIndex)
             {
@@ -407,7 +407,7 @@ FString FWetClothingWetnessProfileMapBaker::MakeBuildSignature(
             return A.WetPartID < B.WetPartID;
         });
 
-    for (const FWetClothingAssetWetPartEntry* Entry : RelevantEntries)
+    for (const FWetClothingWetPartEntry* Entry : RelevantEntries)
     {
         TArray<int32> AssignedUVIslandIDs = Entry->AssignedUVIslandIDs;
         AssignedUVIslandIDs.Sort();
@@ -503,7 +503,7 @@ bool FWetClothingWetnessProfileMapBaker::BakeWetnessProfileMap0(
 
         for (const FWetClothingAssetUVIsland& Island : Islands)
         {
-            const FWetClothingAssetWetPartEntry* WetPartEntry =
+            const FWetClothingWetPartEntry* WetPartEntry =
                 FindWetPartEntryForUVIsland(*WetClothingAsset, MaterialSlotIndex, UVChannelIndex, Island.UVIslandID);
             if (WetPartEntry == nullptr)
             {
@@ -541,15 +541,15 @@ bool FWetClothingWetnessProfileMapBaker::BakeWetnessProfileMap0(
 
     WetClothingAsset->Modify();
 
-    FWetClothingAssetBakedWetnessProfileMap* BakedWetnessProfileMap = WetClothingAsset->BakedWetnessProfileMaps.FindByPredicate(
-        [SourceTexture, UVChannelIndex](const FWetClothingAssetBakedWetnessProfileMap& ExistingWetnessProfileMap)
+    FWetClothingBakedWetnessProfileMap* BakedWetnessProfileMap = WetClothingAsset->PartData.BakedWetnessProfileMaps.FindByPredicate(
+        [SourceTexture, UVChannelIndex](const FWetClothingBakedWetnessProfileMap& ExistingWetnessProfileMap)
         {
             return ExistingWetnessProfileMap.SourceTexture == SourceTexture && ExistingWetnessProfileMap.UVChannelIndex == UVChannelIndex;
         });
 
     if (BakedWetnessProfileMap == nullptr)
     {
-        BakedWetnessProfileMap = &WetClothingAsset->BakedWetnessProfileMaps.AddDefaulted_GetRef();
+        BakedWetnessProfileMap = &WetClothingAsset->PartData.BakedWetnessProfileMaps.AddDefaulted_GetRef();
     }
 
     BakedWetnessProfileMap->SourceTexture = SourceTexture;

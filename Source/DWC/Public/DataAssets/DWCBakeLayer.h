@@ -78,7 +78,7 @@ struct FDWCBakeResolvedLayer
     int32 LayerOrder = 0;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DWC|Bake")
-    FName ComponentName;
+    FName ComponentDisplayName;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DWC|Bake")
     FString ComponentPath;

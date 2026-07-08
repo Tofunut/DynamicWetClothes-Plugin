@@ -277,7 +277,7 @@ namespace
         }
     }
 
-    void AddNeighbor(TArray<FWetClothingAssetBakedVertexNeighbors>& NeighborGraph, int32 A, int32 B)
+    void AddNeighbor(TArray<FWetClothingPrecomputedVertexNeighbors>& NeighborGraph, int32 A, int32 B)
     {
         if (NeighborGraph.IsValidIndex(A) && NeighborGraph.IsValidIndex(B) && A != B)
         {
@@ -296,7 +296,7 @@ namespace
 
     void ConnectCoincidentPositionNeighbors(
         const FSkeletalMeshLODRenderData&              LODData,
-        TArray<FWetClothingAssetBakedVertexNeighbors>& NeighborGraph)
+        TArray<FWetClothingPrecomputedVertexNeighbors>& NeighborGraph)
     {
         TMap<FIntVector, TArray<int32>> VerticesByPosition;
         const int32                     VertexCount = LODData.GetNumVertices();
@@ -336,7 +336,7 @@ namespace
     void BuildNeighborGraph(
         const FSkeletalMeshLODRenderData&              LODData,
         const TArray<uint32>&                          IndexBuffer,
-        TArray<FWetClothingAssetBakedVertexNeighbors>& OutNeighborGraph)
+        TArray<FWetClothingPrecomputedVertexNeighbors>& OutNeighborGraph)
     {
         OutNeighborGraph.SetNum(LODData.GetNumVertices());
 
@@ -369,14 +369,14 @@ namespace
     }
 } // namespace
 
-void UWetClothingAsset::ClearBakedRuntimeData()
+void UWetClothingAsset::ClearPrecomputedSimulationData()
 {
-    BakedRuntimeData = FWetClothingAssetBakedRuntimeData();
+    PartData.PrecomputedSimulationData = FWetClothingPrecomputedSimulationData();
 }
 
-bool UWetClothingAsset::IsBakedRuntimeDataValidForMesh(const USkeletalMesh* SkeletalMesh, int32 LODIndex) const
+bool UWetClothingAsset::IsPrecomputedSimulationDataValidForMesh(const USkeletalMesh* SkeletalMesh, int32 LODIndex) const
 {
-    if (!BakedRuntimeData.bIsValid || SkeletalMesh == nullptr)
+    if (!PartData.PrecomputedSimulationData.bIsValid || SkeletalMesh == nullptr)
     {
         return false;
     }
@@ -388,14 +388,14 @@ bool UWetClothingAsset::IsBakedRuntimeDataValidForMesh(const USkeletalMesh* Skel
     }
 
     const FSkeletalMeshLODRenderData& LODData = RenderData->LODRenderData[LODIndex];
-    return BakedRuntimeData.LODIndex == LODIndex &&
-           BakedRuntimeData.VertexCount == LODData.GetNumVertices() &&
-           BakedRuntimeData.MeshBuildSignature == MakeMeshBuildSignature(SkeletalMesh, LODData, LODIndex);
+    return PartData.PrecomputedSimulationData.LODIndex == LODIndex &&
+           PartData.PrecomputedSimulationData.VertexCount == LODData.GetNumVertices() &&
+           PartData.PrecomputedSimulationData.MeshBuildSignature == MakeMeshBuildSignature(SkeletalMesh, LODData, LODIndex);
 }
 
-bool UWetClothingAsset::RebuildBakedRuntimeData(FString* OutErrorMessage, int32 LODIndex)
+bool UWetClothingAsset::RebuildPrecomputedSimulationData(FString* OutErrorMessage, int32 LODIndex)
 {
-    ClearBakedRuntimeData();
+    ClearPrecomputedSimulationData();
 
     if (TargetMesh == nullptr)
     {
@@ -426,17 +426,17 @@ bool UWetClothingAsset::RebuildBakedRuntimeData(FString* OutErrorMessage, int32 
         return false;
     }
 
-    BakedRuntimeData.bIsValid = true;
-    BakedRuntimeData.LODIndex = LODIndex;
-    BakedRuntimeData.VertexCount = LODData.GetNumVertices();
-    BakedRuntimeData.MeshBuildSignature = MakeMeshBuildSignature(TargetMesh, LODData, LODIndex);
-    BakedRuntimeData.Vertices.SetNum(BakedRuntimeData.VertexCount);
-    BuildNeighborGraph(LODData, IndexBuffer, BakedRuntimeData.NeighborGraph);
+    PartData.PrecomputedSimulationData.bIsValid = true;
+    PartData.PrecomputedSimulationData.LODIndex = LODIndex;
+    PartData.PrecomputedSimulationData.VertexCount = LODData.GetNumVertices();
+    PartData.PrecomputedSimulationData.MeshBuildSignature = MakeMeshBuildSignature(TargetMesh, LODData, LODIndex);
+    PartData.PrecomputedSimulationData.Vertices.SetNum(PartData.PrecomputedSimulationData.VertexCount);
+    BuildNeighborGraph(LODData, IndexBuffer, PartData.PrecomputedSimulationData.NeighborGraph);
 
     TMap<FWetPartScopeKey, TArray<int32>> EntryIndicesByScope;
-    for (int32 EntryIndex = 0; EntryIndex < WetPartEntries.Num(); ++EntryIndex)
+    for (int32 EntryIndex = 0; EntryIndex < PartData.EditableWetPartData.WetPartEntries.Num(); ++EntryIndex)
     {
-        const FWetClothingAssetWetPartEntry& Entry = WetPartEntries[EntryIndex];
+        const FWetClothingWetPartEntry& Entry = PartData.EditableWetPartData.WetPartEntries[EntryIndex];
         if (Entry.MaterialSlotIndex == INDEX_NONE || Entry.UVChannelIndex == INDEX_NONE)
         {
             continue;
@@ -460,7 +460,7 @@ bool UWetClothingAsset::RebuildBakedRuntimeData(FString* OutErrorMessage, int32 
                 RawTriangles,
                 OutErrorMessage))
         {
-            ClearBakedRuntimeData();
+            ClearPrecomputedSimulationData();
             return false;
         }
 
@@ -472,7 +472,7 @@ bool UWetClothingAsset::RebuildBakedRuntimeData(FString* OutErrorMessage, int32 
 
         for (int32 EntryIndex : ScopePair.Value)
         {
-            const FWetClothingAssetWetPartEntry& Entry = WetPartEntries[EntryIndex];
+            const FWetClothingWetPartEntry& Entry = PartData.EditableWetPartData.WetPartEntries[EntryIndex];
             if (Entry.WetPartID == 0)
             {
                 DefaultEntryIndex = EntryIndex;
@@ -490,20 +490,20 @@ bool UWetClothingAsset::RebuildBakedRuntimeData(FString* OutErrorMessage, int32 
             const int32* AssignedEntryIndex = AssignedUVIslandToEntryIndex.Find(Island.UVIslandID);
             const int32  EffectiveEntryIndex = AssignedEntryIndex != nullptr ? *AssignedEntryIndex : DefaultEntryIndex;
 
-            if (!WetPartEntries.IsValidIndex(EffectiveEntryIndex))
+            if (!PartData.EditableWetPartData.WetPartEntries.IsValidIndex(EffectiveEntryIndex))
             {
                 continue;
             }
 
-            const FWetClothingAssetWetPartEntry& Entry = WetPartEntries[EffectiveEntryIndex];
+            const FWetClothingWetPartEntry& Entry = PartData.EditableWetPartData.WetPartEntries[EffectiveEntryIndex];
             for (int32 VertexIndex : Island.VertexIndices)
             {
-                if (!BakedRuntimeData.Vertices.IsValidIndex(VertexIndex))
+                if (!PartData.PrecomputedSimulationData.Vertices.IsValidIndex(VertexIndex))
                 {
                     continue;
                 }
 
-                FWetClothingAssetBakedVertexData& VertexData = BakedRuntimeData.Vertices[VertexIndex];
+                FWetClothingPrecomputedVertexData& VertexData = PartData.PrecomputedSimulationData.Vertices[VertexIndex];
                 VertexData.WetPartID = Entry.WetPartID;
                 VertexData.WetPartEntryIndex = EffectiveEntryIndex;
                 VertexData.MaterialSlotIndex = ScopePair.Key.MaterialSlotIndex;
@@ -523,19 +523,19 @@ bool UWetClothingAsset::RebuildBakedRuntimeData(FString* OutErrorMessage, int32 
             RuntimeBoneOptimizationCache,
             &BoneCacheErrorMessage))
     {
-        BakedRuntimeData.BoneOptimizationCache.BuildFromRuntimeCache(
+        PartData.PrecomputedSimulationData.BoneOptimizationCache.BuildFromRuntimeCache(
             TargetMesh,
             RuntimeBoneOptimizationCache,
-            BakedRuntimeData.MeshBuildSignature,
+            PartData.PrecomputedSimulationData.MeshBuildSignature,
             nullptr);
     }
     else
     {
-        BakedRuntimeData.BoneOptimizationCache.Reset();
+        PartData.PrecomputedSimulationData.BoneOptimizationCache.Reset();
         UE_LOG(
             LogTemp,
             Warning,
-            TEXT("WetClothingAsset: Failed to bake bone optimization cache for %s. %s"),
+            TEXT("WetClothingAsset: Failed to precompute bone optimization cache for %s. %s"),
             *GetNameSafe(TargetMesh),
             *BoneCacheErrorMessage);
     }

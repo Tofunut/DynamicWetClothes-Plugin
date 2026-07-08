@@ -2,12 +2,17 @@
 
 #include "CoreMinimal.h"
 #include "Toolkits/AssetEditorToolkit.h"
+#include "WetClothing/Editor/WetClothingEditorMode.h"
 
 struct FPropertyChangedEvent;
+struct FSlateColor;
+struct FSlateBrush;
 class IDetailsView;
 class SDockTab;
+class SWidget;
 class SWetClothingAssetEditorPanel;
 class UWetClothingAsset;
+enum class ECheckBoxState : uint8;
 
 class FWetClothingAssetEditor : public FAssetEditorToolkit
 {
@@ -26,12 +31,19 @@ class FWetClothingAssetEditor : public FAssetEditorToolkit
     virtual bool         OnRequestClose(EAssetEditorCloseReason InCloseReason) override;
 
   private:
+    virtual void         PostRegenerateMenusAndToolbars() override;
     void                 HandleFinishedChangingProperties(const FPropertyChangedEvent& PropertyChangedEvent);
     void                 HandleObjectPropertyChanged(UObject* ObjectBeingModified, FPropertyChangedEvent& PropertyChangedEvent);
     TSharedRef<SDockTab> SpawnMainTab(const FSpawnTabArgs& Args);
+    TSharedRef<SWidget>  BuildModeToolbarWidget();
+    TSharedRef<SWidget>  BuildModeToggleButton(EWetClothingEditorMode Mode, FName IconName, const FText& ToolTipText);
+    void                 SetEditorMode(EWetClothingEditorMode NewMode);
+    ECheckBoxState       IsModeChecked(EWetClothingEditorMode Mode) const;
+    void                 HandleModeCheckStateChanged(ECheckBoxState NewState, EWetClothingEditorMode Mode);
+    FSlateColor          GetModeIconColor(EWetClothingEditorMode Mode) const;
 
   private:
-    static const FName EditorAppName;
+    static const FName EditorAppDisplayName;
     static const FName MainTabId;
 
     TWeakObjectPtr<UWetClothingAsset>        WetClothingAsset;
@@ -39,4 +51,5 @@ class FWetClothingAssetEditor : public FAssetEditorToolkit
     TSharedPtr<SWetClothingAssetEditorPanel> EditorPanel;
     TSharedPtr<FWorkspaceItem>               WorkspaceMenuCategory;
     FDelegateHandle                          ObjectPropertyChangedHandle;
+    EWetClothingEditorMode                   CurrentMode = EWetClothingEditorMode::Part;
 };

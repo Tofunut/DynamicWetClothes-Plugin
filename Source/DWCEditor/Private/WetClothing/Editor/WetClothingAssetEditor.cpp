@@ -1,5 +1,7 @@
 #include "WetClothingAssetEditor.h"
 
+#include "Brushes/SlateRoundedBoxBrush.h"
+#include "Core/DWCEditorStyle.h"
 #include "DataAssets/WetClothingAsset.h"
 #include "SWetClothingAssetEditorPanel.h"
 #include "DetailsViewArgs.h"
@@ -10,10 +12,15 @@
 #include "PropertyEditorModule.h"
 #include "PropertyEditorDelegates.h"
 #include "Styling/AppStyle.h"
+#include "Styling/SlateTypes.h"
+#include "Styling/StyleColors.h"
+#include "Styling/ToolBarStyle.h"
 #include "UObject/UnrealType.h"
 #include "UObject/UObjectGlobals.h"
 #include "Widgets/Docking/SDockTab.h"
 #include "Widgets/Input/SButton.h"
+#include "Widgets/Input/SCheckBox.h"
+#include "Widgets/Images/SImage.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/SBoxPanel.h"
@@ -24,6 +31,27 @@
 
 namespace
 {
+    const FCheckBoxStyle& GetWetClothingModeToggleStyle()
+    {
+        static const FSlateRoundedBoxBrush UncheckedBrush(FStyleColors::Header, 4.0f);
+        static const FSlateRoundedBoxBrush UncheckedHoveredBrush(FStyleColors::Hover, 4.0f);
+        static const FSlateRoundedBoxBrush UncheckedPressedBrush(FStyleColors::Recessed, 4.0f);
+        static const FSlateRoundedBoxBrush CheckedBrush(FStyleColors::AccentBlue, 4.0f);
+        static const FSlateRoundedBoxBrush CheckedHoveredBrush(FStyleColors::PrimaryHover, 4.0f);
+
+        static const FCheckBoxStyle Style =
+            FCheckBoxStyle(FAppStyle::Get().GetWidgetStyle<FToolBarStyle>(TEXT("AssetEditorToolbar")).ToggleButton)
+                .SetUncheckedImage(UncheckedBrush)
+                .SetUncheckedHoveredImage(UncheckedHoveredBrush)
+                .SetUncheckedPressedImage(UncheckedPressedBrush)
+                .SetCheckedImage(CheckedBrush)
+                .SetCheckedHoveredImage(CheckedHoveredBrush)
+                .SetCheckedPressedImage(CheckedBrush)
+                .SetPadding(FMargin(0.0f));
+
+        return Style;
+    }
+
     enum class EWetClothingPendingCloseChoice : uint8
     {
         BuildAndSave,
@@ -99,7 +127,7 @@ namespace
     }
 } // namespace
 
-const FName FWetClothingAssetEditor::EditorAppName(TEXT("WetClothingAssetEditorApp"));
+const FName FWetClothingAssetEditor::EditorAppDisplayName(TEXT("WetClothingAssetEditorApp"));
 const FName FWetClothingAssetEditor::MainTabId(TEXT("WetClothingAssetEditor_Main"));
 
 FWetClothingAssetEditor::~FWetClothingAssetEditor()
@@ -136,8 +164,10 @@ void FWetClothingAssetEditor::Initialize(const EToolkitMode::Type Mode, const TS
                                                             FTabManager::NewPrimaryArea()->SetOrientation(Orient_Vertical)->Split(FTabManager::NewStack()->SetHideTabWell(true)->AddTab(MainTabId, ETabState::OpenedTab)));
 
     const bool bCreateDefaultStandaloneMenu = true;
-    const bool bCreateDefaultToolbar = false;
-    FAssetEditorToolkit::InitAssetEditor(Mode, InitToolkitHost, EditorAppName, Layout, bCreateDefaultStandaloneMenu, bCreateDefaultToolbar, InWetClothingAsset);
+    const bool bCreateDefaultToolbar = true;
+    FAssetEditorToolkit::InitAssetEditor(Mode, InitToolkitHost, EditorAppDisplayName, Layout, bCreateDefaultStandaloneMenu, bCreateDefaultToolbar, InWetClothingAsset);
+
+    RegenerateMenusAndToolbars();
 }
 
 void FWetClothingAssetEditor::RegisterTabSpawners(const TSharedRef<FTabManager>& InTabManager)
@@ -159,7 +189,7 @@ void FWetClothingAssetEditor::UnregisterTabSpawners(const TSharedRef<FTabManager
 
 FName FWetClothingAssetEditor::GetToolkitFName() const
 {
-    return EditorAppName;
+    return EditorAppDisplayName;
 }
 
 FText FWetClothingAssetEditor::GetBaseToolkitName() const
@@ -238,6 +268,112 @@ TSharedRef<SDockTab> FWetClothingAssetEditor::SpawnMainTab(const FSpawnTabArgs& 
             [SAssignNew(EditorPanel, SWetClothingAssetEditorPanel)
                  .DetailsView(DetailsView)
                  .WetClothingAsset(WetClothingAsset.Get())];
+}
+
+void FWetClothingAssetEditor::PostRegenerateMenusAndToolbars()
+{
+    AddToolbarWidget(BuildModeToolbarWidget());
+    GenerateToolbar();
+}
+
+TSharedRef<SWidget> FWetClothingAssetEditor::BuildModeToolbarWidget()
+{
+    return SNew(SBox)
+        .Padding(FMargin(8.0f, 0.0f))
+            [SNew(SHorizontalBox)
+             + SHorizontalBox::Slot()
+                   .AutoWidth()
+                   .VAlign(VAlign_Center)
+                   .Padding(0.0f, 0.0f, 6.0f, 0.0f)
+                       [BuildModeToggleButton(
+                           EWetClothingEditorMode::Part,
+                           TEXT("DWCEditor.Mode.Part"),
+                           LOCTEXT("PartModeTooltip", "Part Edit"))]
+
+             + SHorizontalBox::Slot()
+                   .AutoWidth()
+                   .VAlign(VAlign_Center)
+                   .Padding(0.0f, 0.0f, 6.0f, 0.0f)
+                       [BuildModeToggleButton(
+                           EWetClothingEditorMode::Wrinkle,
+                           TEXT("DWCEditor.Mode.Wrinkle"),
+                           LOCTEXT("WrinkleModeTooltip", "Wrinkle Edit"))]
+
+             + SHorizontalBox::Slot()
+                   .AutoWidth()
+                   .VAlign(VAlign_Center)
+                   .Padding(0.0f)
+                       [BuildModeToggleButton(
+                           EWetClothingEditorMode::Transparency,
+                           TEXT("DWCEditor.Mode.Transparency"),
+                           LOCTEXT("TransparencyModeTooltip", "Transparency"))]];
+}
+
+TSharedRef<SWidget> FWetClothingAssetEditor::BuildModeToggleButton(EWetClothingEditorMode Mode, FName IconName, const FText& ToolTipText)
+{
+    return SNew(SCheckBox)
+        .Style(&GetWetClothingModeToggleStyle())
+        .Type(ESlateCheckBoxType::ToggleButton)
+        .ToolTipText(ToolTipText)
+        .IsChecked(this, &FWetClothingAssetEditor::IsModeChecked, Mode)
+        .OnCheckStateChanged(this, &FWetClothingAssetEditor::HandleModeCheckStateChanged, Mode)
+            [SNew(SBox)
+                 .WidthOverride(72.0f)
+                 .HeightOverride(32.0f)
+                 .HAlign(HAlign_Center)
+                 .VAlign(VAlign_Center)
+                     [SNew(SImage)
+                          .DesiredSizeOverride(FVector2D(24.0f, 24.0f))
+                          .Image(FDWCEditorStyle::GetBrush(IconName))
+                          .ColorAndOpacity(this, &FWetClothingAssetEditor::GetModeIconColor, Mode)]];
+}
+
+void FWetClothingAssetEditor::SetEditorMode(EWetClothingEditorMode NewMode)
+{
+    if (CurrentMode == NewMode)
+    {
+        return;
+    }
+
+    CurrentMode = NewMode;
+
+    if (EditorPanel.IsValid())
+    {
+        EditorPanel->SetEditorMode(NewMode);
+    }
+}
+
+ECheckBoxState FWetClothingAssetEditor::IsModeChecked(EWetClothingEditorMode Mode) const
+{
+    return CurrentMode == Mode ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+}
+
+void FWetClothingAssetEditor::HandleModeCheckStateChanged(ECheckBoxState NewState, EWetClothingEditorMode Mode)
+{
+    if (NewState == ECheckBoxState::Checked)
+    {
+        SetEditorMode(Mode);
+    }
+}
+
+FSlateColor FWetClothingAssetEditor::GetModeIconColor(EWetClothingEditorMode Mode) const
+{
+    if (CurrentMode == Mode)
+    {
+        return FSlateColor(FLinearColor::White);
+    }
+
+    switch (Mode)
+    {
+    case EWetClothingEditorMode::Part:
+        return FSlateColor(FLinearColor(1.0f, 0.66f, 0.78f, 1.0f));
+    case EWetClothingEditorMode::Wrinkle:
+        return FSlateColor(FLinearColor(0.62f, 0.95f, 0.62f, 1.0f));
+    case EWetClothingEditorMode::Transparency:
+        return FSlateColor(FLinearColor(0.45f, 0.78f, 1.0f, 1.0f));
+    default:
+        return FSlateColor::UseForeground();
+    }
 }
 
 #undef LOCTEXT_NAMESPACE

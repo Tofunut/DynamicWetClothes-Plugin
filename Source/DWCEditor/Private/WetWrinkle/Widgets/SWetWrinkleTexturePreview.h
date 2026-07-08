@@ -6,7 +6,7 @@
 #include "WetWrinkle/Viewport/WetWrinkleHitData.h"
 
 class UTexture;
-class UWetWrinkleAsset;
+class UWetClothingAsset;
 
 DECLARE_DELEGATE_OneParam(FOnWetWrinkleTextureUVHovered, const FVector2D& /*UV*/);
 DECLARE_DELEGATE(FOnWetWrinkleTextureUVHoverEnded);
@@ -28,7 +28,7 @@ class SWetWrinkleTexturePreview : public SLeafWidget
     void Construct(const FArguments& InArgs);
 
     void SetPreviewContext(
-        UWetWrinkleAsset* InWetWrinkleAsset,
+        UWetClothingAsset* InWetClothingAsset,
         UTexture* InSourceTexture,
         int32 InMaterialSlotIndex,
         int32 InUVChannelIndex,
@@ -56,7 +56,7 @@ class SWetWrinkleTexturePreview : public SLeafWidget
     void AppendCirclePoints(const FSlateRect& TextureRect, const FVector2D& UV, float RadiusUV, TArray<FVector2D>& OutPoints) const;
 
   private:
-    TWeakObjectPtr<UWetWrinkleAsset> WetWrinkleAsset;
+    TWeakObjectPtr<UWetClothingAsset> WetClothingAsset;
     TWeakObjectPtr<UTexture> SourceTexture;
     int32 MaterialSlotIndex = INDEX_NONE;
     int32 UVChannelIndex = 0;

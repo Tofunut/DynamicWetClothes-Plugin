@@ -16,7 +16,7 @@ class DWC_API UWetnessProfilePreset : public UDataAsset
 
   public:
     UPROPERTY(EditAnywhere, BlueprintReadOnly)
-    FName PresetName;
+    FName PresetDisplayName;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly)
     float Absorption = 1.0f;

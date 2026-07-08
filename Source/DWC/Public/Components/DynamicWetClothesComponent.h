@@ -74,7 +74,7 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
     bool                     FlushPendingWetContacts();
 
     USkeletalMeshComponent* ResolveTargetSkeletalMesh() const;
-    void                    ApplyWetMaterialOverrides();
+    void                    ApplyGeneratedWetMaterialOverrides();
 
   public:
     UPROPERTY(EditAnywhere, Category = "Wetness")

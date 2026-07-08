@@ -243,7 +243,7 @@ void SWetWrinkleEditorPanel::Construct(const FArguments& InArgs)
                                               .Padding(0.0f, 0.0f, 0.0f, 10.0f)
                                                   [SNew(SSpinBox<float>)
                                                        .MinValue(0.0f)
-                                                       .MaxValue(1.0f)
+                                                       .MaxValue(4.0f)
                                                        .Value(BrushSettings.Strength)
                                                        .OnValueChanged(this, &SWetWrinkleEditorPanel::HandleStrengthChanged)]
 
@@ -408,7 +408,11 @@ void SWetWrinkleEditorPanel::HandlePaintStrokeStarted(const FWetWrinkleSurfaceHi
 
     MarkAssetEdited();
     RefreshStrokeList();
-    RefreshStrokeOverlay();
+    if (PreviewViewport.IsValid())
+    {
+        PreviewViewport->AppendAccumulatedPreviewStamp(NewStroke.PatchPlacements.Last());
+    }
+    RefreshStrokeOverlay(false);
     RefreshTexturePreview();
 }
 
@@ -441,7 +445,11 @@ void SWetWrinkleEditorPanel::HandlePaintStampRequested(const FWetWrinkleSurfaceH
     {
         StrokeListView->RequestListRefresh();
     }
-    RefreshStrokeOverlay();
+    if (PreviewViewport.IsValid())
+    {
+        PreviewViewport->AppendAccumulatedPreviewStamp(ActiveStroke->PatchPlacements.Last());
+    }
+    RefreshStrokeOverlay(false);
     RefreshTexturePreview();
 }
 
@@ -491,12 +499,12 @@ void SWetWrinkleEditorPanel::RefreshStrokeList()
     }
 }
 
-void SWetWrinkleEditorPanel::RefreshStrokeOverlay()
+void SWetWrinkleEditorPanel::RefreshStrokeOverlay(bool bRebuildAccumulatedPreview)
 {
     if (PreviewViewport.IsValid())
     {
         PreviewViewport->SetSelectedStrokeGuid(SelectedStrokeGuid);
-        PreviewViewport->RefreshStoredStampOverlay();
+        PreviewViewport->RefreshStoredStampOverlay(bRebuildAccumulatedPreview);
     }
 }
 
@@ -628,7 +636,7 @@ void SWetWrinkleEditorPanel::HandleMaterialSlotComboChanged(TSharedPtr<int32> It
     BrushSettings.MaterialSlotIndex = Item.IsValid() && *Item >= 0 ? *Item : INDEX_NONE;
     CurrentHit = FWetWrinkleSurfaceHit();
     PushBrushSettingsToViewport();
-    RefreshStrokeOverlay();
+    RefreshStrokeOverlay(false);
     RefreshTexturePreview();
 }
 
@@ -660,7 +668,7 @@ void SWetWrinkleEditorPanel::HandleBrushPresetChanged(TSharedPtr<FWetWrinkleBrus
 
     BrushSettings.BrushHeightTexture = Cast<UTexture2D>(Item->TexturePath.TryLoad());
     PushBrushSettingsToViewport();
-    RefreshStrokeOverlay();
+    RefreshStrokeOverlay(false);
 }
 
 FString SWetWrinkleEditorPanel::GetBrushHeightTextureObjectPath() const
@@ -678,7 +686,7 @@ void SWetWrinkleEditorPanel::HandleBrushHeightTextureChanged(const FAssetData& A
     }
 
     PushBrushSettingsToViewport();
-    RefreshStrokeOverlay();
+    RefreshStrokeOverlay(false);
 }
 
 TSharedRef<ITableRow> SWetWrinkleEditorPanel::GenerateStrokeRow(FStrokeListItemPtr Item, const TSharedRef<STableViewBase>& OwnerTable)
@@ -732,7 +740,7 @@ TSharedRef<ITableRow> SWetWrinkleEditorPanel::GenerateStrokeRow(FStrokeListItemP
 void SWetWrinkleEditorPanel::HandleStrokeSelectionChanged(FStrokeListItemPtr Item, ESelectInfo::Type SelectInfo)
 {
     SelectedStrokeGuid = Item.IsValid() ? Item->StrokeGuid : FGuid();
-    RefreshStrokeOverlay();
+    RefreshStrokeOverlay(false);
 }
 
 FReply SWetWrinkleEditorPanel::HandleClearStrokesClicked()
@@ -866,7 +874,7 @@ void SWetWrinkleEditorPanel::HandleMaterialSlotChanged(int32 NewValue)
         MaterialSlotComboBox->SetSelectedItem(FindMaterialSlotOption(BrushSettings.MaterialSlotIndex));
     }
     PushBrushSettingsToViewport();
-    RefreshStrokeOverlay();
+    RefreshStrokeOverlay(false);
     RefreshTexturePreview();
 }
 
@@ -878,7 +886,7 @@ void SWetWrinkleEditorPanel::HandleBrushRadiusChanged(float NewValue)
 
 void SWetWrinkleEditorPanel::HandleStrengthChanged(float NewValue)
 {
-    BrushSettings.Strength = FMath::Clamp(NewValue, 0.0f, 1.0f);
+    BrushSettings.Strength = FMath::Clamp(NewValue, 0.0f, 4.0f);
     PushBrushSettingsToViewport();
 }
 

@@ -51,7 +51,7 @@ class SWetWrinkleEditorPanel : public SCompoundWidget
     void HandlePaintStrokeEnded();
     void PushBrushSettingsToViewport();
     void RefreshStrokeList();
-    void RefreshStrokeOverlay();
+    void RefreshStrokeOverlay(bool bRebuildAccumulatedPreview = true);
     void RefreshMaterialSlotOptions();
     void RefreshBrushPresetOptions();
     void RefreshTexturePreview();

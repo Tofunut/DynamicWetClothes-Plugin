@@ -3,7 +3,7 @@
 #include "DataAssets/WetClothingAsset.h"
 #include "IDetailsView.h"
 #include "WetClothing/PartMode/Editor/SWetClothingPartEditorPanel.h"
-#include "WetClothing/TransparencyMode/Editor/STransparencyPlaceholderPanel.h"
+#include "WetClothing/TransparencyMode/Editor/SWetClothingTransparencyEditorPanel.h"
 #include "WetClothing/WrinkleMode/Editor/SWetWrinkleEditorPanel.h"
 #include "Widgets/Layout/SWidgetSwitcher.h"
 
@@ -28,7 +28,9 @@ void SWetClothingAssetEditorPanel::Construct(const FArguments& InArgs)
                     .DetailsView(DetailsView)]
 
          + SWidgetSwitcher::Slot()
-               [SNew(STransparencyPlaceholderPanel)]];
+               [SAssignNew(TransparencyEditorPanel, SWetClothingTransparencyEditorPanel)
+                    .WetClothingAsset(WetClothingAsset.Get())
+                    .DetailsView(DetailsView)]];
 
     SetEditorMode(EWetClothingEditorMode::Part);
 }
@@ -43,21 +45,88 @@ void SWetClothingAssetEditorPanel::RefreshFromAsset()
     {
         WrinkleEditorPanel->RefreshFromAsset();
     }
+    if (TransparencyEditorPanel.IsValid())
+    {
+        TransparencyEditorPanel->RefreshFromAsset();
+    }
 }
 
 bool SWetClothingAssetEditorPanel::HasPendingWetSetupTasks(FString* OutSummary) const
 {
-    return PartEditorPanel.IsValid() && PartEditorPanel->HasPendingWetSetupTasks(OutSummary);
+    TArray<FString> PendingSections;
+    FString PartSummary;
+    if (PartEditorPanel.IsValid() && PartEditorPanel->HasPendingWetSetupTasks(&PartSummary))
+    {
+        PendingSections.Add(PartSummary);
+    }
+
+    FString TransparencySummary;
+    if (TransparencyEditorPanel.IsValid() && TransparencyEditorPanel->HasPendingTransparencySetup(&TransparencySummary))
+    {
+        PendingSections.Add(TransparencySummary);
+    }
+
+    if (OutSummary != nullptr)
+    {
+        *OutSummary = PendingSections.Num() == 0
+            ? TEXT("Wet setup is up to date.")
+            : FString::Join(PendingSections, TEXT("\n\n"));
+    }
+
+    return PendingSections.Num() > 0;
 }
 
 bool SWetClothingAssetEditorPanel::BuildWetSetup(FString& OutSummary, bool* OutHadWarnings)
 {
-    return PartEditorPanel.IsValid() && PartEditorPanel->BuildWetSetup(OutSummary, OutHadWarnings);
+    bool bHadWarnings = false;
+    TArray<FString> Sections;
+
+    if (PartEditorPanel.IsValid())
+    {
+        FString PartSummary;
+        bool bPartHadWarnings = false;
+        if (!PartEditorPanel->BuildWetSetup(PartSummary, &bPartHadWarnings))
+        {
+            OutSummary = PartSummary;
+            return false;
+        }
+        bHadWarnings |= bPartHadWarnings;
+        Sections.Add(PartSummary);
+    }
+
+    if (TransparencyEditorPanel.IsValid() && WetClothingAsset.IsValid() && !WetClothingAsset->TransparencyData.SourceBlueprintClass.IsNull())
+    {
+        FString TransparencySummary;
+        bool bTransparencyHadWarnings = false;
+        if (!TransparencyEditorPanel->BuildTransparencySetup(TransparencySummary, &bTransparencyHadWarnings))
+        {
+            OutSummary = TransparencySummary;
+            return false;
+        }
+        bHadWarnings |= bTransparencyHadWarnings;
+        Sections.Add(TransparencySummary);
+    }
+
+    OutSummary = Sections.Num() > 0 ? FString::Join(Sections, TEXT("\n\n")) : TEXT("Wet setup is already up to date.");
+    if (OutHadWarnings != nullptr)
+    {
+        *OutHadWarnings = bHadWarnings;
+    }
+    return true;
 }
 
 bool SWetClothingAssetEditorPanel::SaveWetSetupAssets() const
 {
-    return PartEditorPanel.IsValid() && PartEditorPanel->SaveWetSetupAssets();
+    bool bSaved = true;
+    if (PartEditorPanel.IsValid())
+    {
+        bSaved &= PartEditorPanel->SaveWetSetupAssets();
+    }
+    if (TransparencyEditorPanel.IsValid())
+    {
+        bSaved &= TransparencyEditorPanel->SaveTransparencySetupAssets();
+    }
+    return bSaved;
 }
 
 void SWetClothingAssetEditorPanel::SetEditorMode(EWetClothingEditorMode NewMode)
@@ -69,6 +138,10 @@ void SWetClothingAssetEditorPanel::SetEditorMode(EWetClothingEditorMode NewMode)
     else if (NewMode == EWetClothingEditorMode::Wrinkle && WrinkleEditorPanel.IsValid())
     {
         WrinkleEditorPanel->RefreshFromAsset();
+    }
+    else if (NewMode == EWetClothingEditorMode::Transparency && TransparencyEditorPanel.IsValid())
+    {
+        TransparencyEditorPanel->RefreshFromAsset();
     }
 
     if (ModeContentSwitcher.IsValid())

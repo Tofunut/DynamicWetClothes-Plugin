@@ -32,6 +32,13 @@ class FDWCRevealBakeMaterialBuilder
         const FDWCRevealBakeTextureSet& TextureSet,
         const TArray<FName>&            SourceLayerIds);
 
+    static UMaterialInterface* CreateConfiguredRevealMaterial(
+        UMaterialInterface*             SourceMaterial,
+        const FString&                  AssetNamePrefix,
+        const UDWCBakeComponent&        BakeComponent,
+        const FDWCBakeResolvedLayer&    OuterLayer,
+        const FDWCRevealBakeTextureSet& TextureSet);
+
   private:
     static USkeletalMeshComponent* FindLayerComponent(const AActor& Actor, const FDWCBakeResolvedLayer& Layer);
     static void SetTextureParameterIfValid(UMaterialInstanceDynamic& MID, FName ParameterName, UTexture* Texture);
@@ -79,10 +86,4 @@ class FDWCRevealBakeMaterialBuilder
         UMaterialInterface*      RevealParent,
         const FString&           AssetNamePrefix);
 
-    static UMaterialInterface* CreateConfiguredRevealMaterial(
-        UMaterialInterface*             SourceMaterial,
-        const FString&                  AssetNamePrefix,
-        const UDWCBakeComponent&        BakeComponent,
-        const FDWCBakeResolvedLayer&    OuterLayer,
-        const FDWCRevealBakeTextureSet& TextureSet);
 };

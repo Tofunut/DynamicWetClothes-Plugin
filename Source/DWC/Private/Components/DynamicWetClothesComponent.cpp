@@ -259,6 +259,27 @@ void UDynamicWetClothesComponent::ApplyGeneratedWetMaterialOverrides()
 
         TargetSkeletalMesh->SetMaterial(MaterialOverride.MaterialSlotIndex, MaterialOverride.WetMaterial);
     }
+
+    for (const FWetClothingBakedTransparencyRevealLayer& RevealLayer : WetClothingAsset->TransparencyData.BakedRevealLayers)
+    {
+        if (RevealLayer.MaterialSlotIndex == INDEX_NONE || RevealLayer.RevealMaterial == nullptr)
+        {
+            continue;
+        }
+
+        if (RevealLayer.MaterialSlotIndex >= TargetSkeletalMesh->GetNumMaterials())
+        {
+            UE_LOG(
+                LogTemp,
+                Warning,
+                TEXT("DynamicWetClothesComponent: Transparency reveal material slot %d is out of range on %s."),
+                RevealLayer.MaterialSlotIndex,
+                *GetNameSafe(TargetSkeletalMesh));
+            continue;
+        }
+
+        TargetSkeletalMesh->SetMaterial(RevealLayer.MaterialSlotIndex, RevealLayer.RevealMaterial);
+    }
 }
 
 void UDynamicWetClothesComponent::ApplyWetAll(const float Amount)

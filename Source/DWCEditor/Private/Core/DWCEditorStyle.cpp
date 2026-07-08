@@ -12,6 +12,8 @@ namespace
 {
     const FVector2D Icon16x16(16.0f, 16.0f);
     const FVector2D Icon20x20(20.0f, 20.0f);
+    const FVector2D Icon24x24(24.0f, 24.0f);
+    const FVector2D WettableIconSize(30.0f, 30.0f);
     const FVector2D Thumbnail64x64(64.0f, 64.0f);
     const FVector2D ModeIconSize(32.0f, 32.0f);
 } // namespace
@@ -52,7 +54,12 @@ void FDWCEditorStyle::Initialize()
     SetSvgBrush(*StyleSet, TEXT("DWCEditor.UVTool.BoxSelect"), TEXT("EditorIcons/SelectBox_20"), Icon20x20);
     SetSvgBrush(*StyleSet, TEXT("DWCEditor.UVTool.EllipseSelect"), TEXT("EditorIcons/SelectEllipse_20"), Icon20x20);
     SetSvgBrush(*StyleSet, TEXT("DWCEditor.UVTool.LassoSelect"), TEXT("EditorIcons/SelectLasso_20"), Icon20x20);
-    SetSvgBrush(*StyleSet, TEXT("DWCEditor.AutoPartitioning"), TEXT("EditorIcons/AutoPartitioning"), Icon20x20);
+    SetSvgBrush(*StyleSet, TEXT("DWCEditor.MagicWandTool"), TEXT("EditorIcons/MagicWandTool"), Icon20x20);
+    SetSvgBrush(*StyleSet, TEXT("DWCEditor.MagicWandTool.Large"), TEXT("EditorIcons/MagicWandTool"), ModeIconSize);
+    SetSvgBrush(*StyleSet, TEXT("DWCEditor.AutoPartitioning"), TEXT("EditorIcons/MagicWandTool"), Icon20x20);
+    SetSvgBrush(*StyleSet, TEXT("DWCEditor.Bake"), TEXT("EditorIcons/Bake_400"), Icon24x24);
+    SetSvgBrush(*StyleSet, TEXT("DWCEditor.Part.IsWettable.True"), TEXT("EditorIcons/Part_IsWettable_True_400"), WettableIconSize);
+    SetSvgBrush(*StyleSet, TEXT("DWCEditor.Part.IsWettable.False"), TEXT("EditorIcons/Part_IsWettable_False_400"), WettableIconSize);
     SetSvgBrush(*StyleSet, TEXT("DWCEditor.Mode.Part"), TEXT("EditorIcons/Mode_Part_400"), ModeIconSize);
     SetSvgBrush(*StyleSet, TEXT("DWCEditor.Mode.Wrinkle"), TEXT("EditorIcons/Mode_Wrinkles_400"), ModeIconSize);
     SetSvgBrush(*StyleSet, TEXT("DWCEditor.Mode.Transparency"), TEXT("EditorIcons/Mode_Transparency_400"), ModeIconSize);

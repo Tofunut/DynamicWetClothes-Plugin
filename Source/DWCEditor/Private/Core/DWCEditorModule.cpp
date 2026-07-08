@@ -1,6 +1,6 @@
 #include "Core/DWCEditorStyle.h"
 #include "ToolMenus.h"
-#include "WetClothing/RevealBake/DWCRevealBakeMenu.h"
+#include "WetClothing/TransparencyMode/RevealBake/DWCRevealBakeMenu.h"
 #include "Modules/ModuleManager.h"
 
 class FDWCEditorModule : public IModuleInterface

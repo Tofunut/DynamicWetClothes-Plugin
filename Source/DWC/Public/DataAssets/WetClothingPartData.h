@@ -50,6 +50,18 @@ struct DWC_API FWetClothingSourceTextureSelection
 };
 
 USTRUCT(BlueprintType)
+struct DWC_API FWetClothingWettableMaterialSlotState
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, Category = "Wet Part")
+    int32 MaterialSlotIndex = INDEX_NONE;
+
+    UPROPERTY(EditAnywhere, Category = "Wet Part")
+    bool bIsWettableSlot = false;
+};
+
+USTRUCT(BlueprintType)
 struct DWC_API FWetClothingWetPartEntry
 {
     GENERATED_BODY()
@@ -86,6 +98,9 @@ struct DWC_API FWetClothingEditableWetPartData
 
     UPROPERTY(EditAnywhere, Category = "Wet Part")
     TArray<FWetClothingSourceTextureSelection> SourceTextureSelections;
+
+    UPROPERTY(EditAnywhere, Category = "Wet Part")
+    TArray<FWetClothingWettableMaterialSlotState> WettableMaterialSlots;
 
     UPROPERTY(EditAnywhere, Category = "Wet Part")
     TArray<FWetClothingWetPartEntry> WetPartEntries;

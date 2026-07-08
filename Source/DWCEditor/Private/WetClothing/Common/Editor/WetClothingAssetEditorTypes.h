@@ -1,0 +1,33 @@
+/*
+ *  Wet Clothing Asset 에디터 UI에서 공유하는 Material Slot, Texture, Selection Tool, Profile 항목 타입을 정의합니다.
+ */
+
+#pragma once
+
+#include "CoreMinimal.h"
+#include "WetClothing/Common/Widgets/SWetClothingAssetUVView.h"
+
+class UMaterialInterface;
+class UTexture;
+
+struct FWetClothingMaterialSlotItem
+{
+    int32                              SlotIndex = INDEX_NONE;
+    FName                              SlotName = NAME_None;
+    TWeakObjectPtr<UMaterialInterface> Material;
+    bool                               bIsWettableSlot = false;
+};
+
+struct FWetClothingTextureItem
+{
+    TWeakObjectPtr<UTexture> Texture;
+    FString                  Label;
+};
+
+struct FWetClothingUVSelectionToolItem
+{
+    EWetClothingAssetUVSelectionTool Tool = EWetClothingAssetUVSelectionTool::Select;
+    FText                            Label;
+    FText                            Tooltip;
+    FName                            IconBrushDisplayName;
+};

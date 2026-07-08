@@ -42,7 +42,7 @@ struct DWC_API FWetWrinklePatchPlacement
     UPROPERTY(EditAnywhere, Category = "Wet Wrinkle Patch")
     FVector2D Scale = FVector2D(1.0f, 1.0f);
 
-    UPROPERTY(EditAnywhere, Category = "Wet Wrinkle Patch", meta = (ClampMin = "0.0", ClampMax = "4.0"))
+    UPROPERTY(EditAnywhere, Category = "Wet Wrinkle Patch", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float Strength = 1.0f;
 
     UPROPERTY(EditAnywhere, Category = "Wet Wrinkle Patch", meta = (ClampMin = "0.0", ClampMax = "1.0"))

@@ -130,6 +130,17 @@ void FWetWrinkleViewportClient::ProcessClick(FSceneView& View, HHitProxy* HitPro
 {
     FEditorViewportClient::ProcessClick(View, HitProxy, Key, Event, HitX, HitY);
 
+    if (Key == EKeys::LeftMouseButton && Event == IE_Released && bIsPainting)
+    {
+        if (const TSharedPtr<SWetWrinkleViewport> PinnedViewport = ViewportWidget.Pin())
+        {
+            PinnedViewport->EndPaintStrokeFromClient();
+        }
+
+        bIsPainting = false;
+        return;
+    }
+
     if (Key == EKeys::LeftMouseButton && (Event == IE_Pressed || Event == IE_Released))
     {
         FVector RayOrigin = FVector::ZeroVector;
@@ -142,6 +153,11 @@ void FWetWrinkleViewportClient::ProcessClick(FSceneView& View, HHitProxy* HitPro
             if (PinnedViewport->TraceSurface(RayOrigin, RayDirection, SurfaceHit))
             {
                 PinnedViewport->HandleSurfaceHitFromClient(SurfaceHit);
+                if (Event == IE_Pressed && !bIsPainting)
+                {
+                    PinnedViewport->BeginPaintStrokeFromClient(SurfaceHit);
+                    bIsPainting = true;
+                }
                 bHasCurrentSurfaceHit = true;
                 return;
             }

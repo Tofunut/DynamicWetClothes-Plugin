@@ -20,13 +20,16 @@ public class DWCEditor : ModuleRules
 				"Engine",
 				"InputCore",
 				"MaterialEditor",
+				"MeshDescription",
 				"ProceduralMeshComponent",
 				"PropertyEditor",
 				"Projects",
 				"RHI",
 				"RenderCore",
 				"Slate",
+				"SkeletalMeshDescription",
 				"SlateCore",
+				"StaticMeshDescription",
 				"ToolMenus",
 				"UnrealEd"
 			});

@@ -114,18 +114,18 @@ namespace
 
     FIntPoint ComputeWetWrinklePreviewTextureSize(const UTexture* SourceTexture)
     {
-        constexpr int32 MaxPreviewDimension = 256;
-        constexpr int32 MinPreviewDimension = 128;
+        constexpr int32 TargetPreviewLargestDimension = 1024;
+        constexpr int32 MinPreviewDimension = 256;
 
-        const int32 SourceSizeX = SourceTexture != nullptr ? FMath::Max(1, SourceTexture->GetSurfaceWidth()) : 512;
-        const int32 SourceSizeY = SourceTexture != nullptr ? FMath::Max(1, SourceTexture->GetSurfaceHeight()) : 512;
+        const int32 SourceSizeX = SourceTexture != nullptr ? FMath::Max(1, SourceTexture->GetSurfaceWidth()) : TargetPreviewLargestDimension;
+        const int32 SourceSizeY = SourceTexture != nullptr ? FMath::Max(1, SourceTexture->GetSurfaceHeight()) : TargetPreviewLargestDimension;
         const int32 LargestDimension = FMath::Max(SourceSizeX, SourceSizeY);
-        if (LargestDimension <= MaxPreviewDimension)
+        if (LargestDimension == TargetPreviewLargestDimension)
         {
             return FIntPoint(SourceSizeX, SourceSizeY);
         }
 
-        const float Scale = static_cast<float>(MaxPreviewDimension) / static_cast<float>(LargestDimension);
+        const float Scale = static_cast<float>(TargetPreviewLargestDimension) / static_cast<float>(LargestDimension);
         return FIntPoint(
             FMath::Max(MinPreviewDimension, FMath::RoundToInt(static_cast<float>(SourceSizeX) * Scale)),
             FMath::Max(MinPreviewDimension, FMath::RoundToInt(static_cast<float>(SourceSizeY) * Scale)));
@@ -184,6 +184,63 @@ namespace
         }
     }
 
+    float ComputeWetWrinkleSmoothStep(float Edge0, float Edge1, float Value)
+    {
+        if (Edge0 >= Edge1)
+        {
+            return Value < Edge0 ? 0.0f : 1.0f;
+        }
+
+        const float T = FMath::Clamp((Value - Edge0) / (Edge1 - Edge0), 0.0f, 1.0f);
+        return T * T * (3.0f - 2.0f * T);
+    }
+
+
+
+    bool AreWetWrinkleSurfaceHitsEquivalentForPreview(const FWetWrinkleSurfaceHit& A, const FWetWrinkleSurfaceHit& B)
+    {
+        if (A.bHit != B.bHit)
+        {
+            return false;
+        }
+
+        if (!A.bHit)
+        {
+            return true;
+        }
+
+        constexpr double UVToleranceSq = 1.0e-8;
+        return A.MaterialSlotIndex == B.MaterialSlotIndex &&
+               A.UVChannelIndex == B.UVChannelIndex &&
+               A.TriangleID == B.TriangleID &&
+               (A.UV - B.UV).SizeSquared() <= UVToleranceSq;
+    }
+
+    FVector DecodeWetWrinkleNormal(const FColor& Color)
+    {
+        FVector DecodedNormal(
+            static_cast<float>(Color.R) / 255.0f * 2.0f - 1.0f,
+            static_cast<float>(Color.G) / 255.0f * 2.0f - 1.0f,
+            static_cast<float>(Color.B) / 255.0f * 2.0f - 1.0f);
+        if (DecodedNormal.Z <= UE_SMALL_NUMBER)
+        {
+            const float XYLengthSq = FMath::Min(DecodedNormal.X * DecodedNormal.X + DecodedNormal.Y * DecodedNormal.Y, 1.0f);
+            DecodedNormal.Z = FMath::Sqrt(FMath::Max(1.0f - XYLengthSq, 0.0f));
+        }
+
+        return DecodedNormal.GetSafeNormal(UE_SMALL_NUMBER, FVector(0.0f, 0.0f, 1.0f));
+    }
+
+    FColor EncodeWetWrinkleNormal(const FVector& Normal)
+    {
+        const FVector SafeNormal = Normal.GetSafeNormal(UE_SMALL_NUMBER, FVector(0.0f, 0.0f, 1.0f));
+        return FColor(
+            static_cast<uint8>(FMath::RoundToInt(FMath::Clamp(SafeNormal.X * 0.5f + 0.5f, 0.0f, 1.0f) * 255.0f)),
+            static_cast<uint8>(FMath::RoundToInt(FMath::Clamp(SafeNormal.Y * 0.5f + 0.5f, 0.0f, 1.0f) * 255.0f)),
+            static_cast<uint8>(FMath::RoundToInt(FMath::Clamp(SafeNormal.Z * 0.5f + 0.5f, 0.0f, 1.0f) * 255.0f)),
+            255);
+    }
+
     struct FWetWrinkleBrushNormalSource
     {
         explicit FWetWrinkleBrushNormalSource(UTexture2D* InTexture)
@@ -204,6 +261,7 @@ namespace
                 return;
             }
 
+            bFlipGreenChannel = Texture->bFlipGreenChannel;
             MipData = Texture->Source.LockMipReadOnly(0);
         }
 
@@ -244,9 +302,15 @@ namespace
 
             const FColor* ColorData = reinterpret_cast<const FColor*>(MipData);
             const FColor Color = ColorData[PixelY * SizeX + PixelX];
+            const float DecodedX = static_cast<float>(Color.R) / 255.0f * 2.0f - 1.0f;
+            float DecodedY = -(static_cast<float>(Color.G) / 255.0f * 2.0f - 1.0f);
+            if (bFlipGreenChannel)
+            {
+                DecodedY = -DecodedY;
+            }
             FVector DecodedNormal(
-                static_cast<float>(Color.R) / 255.0f * 2.0f - 1.0f,
-                static_cast<float>(Color.G) / 255.0f * 2.0f - 1.0f,
+                DecodedX,
+                DecodedY,
                 static_cast<float>(Color.B) / 255.0f * 2.0f - 1.0f);
             if (DecodedNormal.Z <= UE_SMALL_NUMBER)
             {
@@ -262,166 +326,111 @@ namespace
         int32 SizeX = 0;
         int32 SizeY = 0;
         ETextureSourceFormat SourceFormat = TSF_Invalid;
+        bool bFlipGreenChannel = false;
     };
 
-    struct FWetWrinkleProceduralMeshBuffers
+    void RasterizeWetWrinkleAccumulatedStamp(const FWetWrinklePatchPlacement& Stamp, const FIntPoint& TextureSize, TArray<FColor>& InOutPixels)
     {
-        TArray<FVector> Vertices;
-        TArray<int32> Indices;
-        TArray<FVector> Normals;
-        TArray<FVector2D> UVs;
-        TArray<FLinearColor> VertexColors;
-        TArray<FProcMeshTangent> Tangents;
-    };
-
-    void AppendWetWrinkleNormalPatchMesh(
-        TArray<FVector>& Vertices,
-        TArray<int32>& Indices,
-        TArray<FVector>& Normals,
-        TArray<FVector2D>& UVs,
-        TArray<FLinearColor>& VertexColors,
-        TArray<FProcMeshTangent>& Tangents,
-        TFunctionRef<bool(const FVector2D& /*MeshUV*/, FVector& /*WorldPosition*/, FVector& /*WorldNormal*/, FVector& /*WorldTangent*/, FVector& /*WorldBitangent*/)> ProjectMeshUVToWorld,
-        UTexture2D* BrushNormalTexture,
-        const FVector& Center,
-        const FVector& Normal,
-        const FVector& Tangent,
-        const FVector& Bitangent,
-        const FVector2D& CenterMeshUV,
-        float RadiusWorld,
-        float RadiusUV,
-        float RotationRadians,
-        const FVector2D& Scale,
-        float Strength,
-        float Falloff,
-        float SurfaceOffset,
-        const FLinearColor& VertexColor)
-    {
-        if (BrushNormalTexture == nullptr || RadiusWorld <= 0.0f || RadiusUV <= 0.0f || Strength <= 0.0f)
+        if (TextureSize.X <= 0 || TextureSize.Y <= 0 || InOutPixels.Num() != TextureSize.X * TextureSize.Y || Stamp.NormalPatchTexture == nullptr ||
+            Stamp.BrushRadiusUV <= 0.0f || Stamp.Strength <= 0.0f)
         {
             return;
         }
 
-        FWetWrinkleBrushNormalSource NormalSource(BrushNormalTexture);
+        FWetWrinkleBrushNormalSource NormalSource(Stamp.NormalPatchTexture);
         if (!NormalSource.IsValid())
         {
             return;
         }
 
-        constexpr int32 GridSize = 48;
-        const float EdgeFadeStart = FMath::Clamp(1.0f - Falloff, 0.0f, 0.98f);
+        const FVector2D WrappedCenter = WrapWetWrinkleRasterPreviewUV(Stamp.PositionUV);
         const FVector2D SafeScale(
-            FMath::Max(FMath::Abs(Scale.X), UE_SMALL_NUMBER),
-            FMath::Max(FMath::Abs(Scale.Y), UE_SMALL_NUMBER));
-        const float CosRotation = FMath::Cos(RotationRadians);
-        const float SinRotation = FMath::Sin(RotationRadians);
-        const FVector RotatedTangent = (Tangent * CosRotation + Bitangent * SinRotation).GetSafeNormal(UE_SMALL_NUMBER, Tangent);
-        const FVector RotatedBitangent = (-Tangent * SinRotation + Bitangent * CosRotation).GetSafeNormal(UE_SMALL_NUMBER, Bitangent);
-        const int32 VertexGridSize = GridSize + 1;
-        TArray<int32> VertexIndexGrid;
-        VertexIndexGrid.Init(INDEX_NONE, VertexGridSize * VertexGridSize);
+            FMath::Max(FMath::Abs(Stamp.Scale.X), UE_SMALL_NUMBER),
+            FMath::Max(FMath::Abs(Stamp.Scale.Y), UE_SMALL_NUMBER));
+        const float EdgeFadeStart = FMath::Clamp(1.0f - Stamp.Falloff, 0.0f, 0.98f);
+        const float CosRotation = FMath::Cos(Stamp.RotationRadians);
+        const float SinRotation = FMath::Sin(Stamp.RotationRadians);
 
-        auto GetVertexGridIndex = [VertexGridSize](int32 X, int32 Y)
+        for (int32 TileOffsetY = -1; TileOffsetY <= 1; ++TileOffsetY)
         {
-            return Y * VertexGridSize + X;
-        };
-
-        for (int32 GridY = 0; GridY <= GridSize; ++GridY)
-        {
-            for (int32 GridX = 0; GridX <= GridSize; ++GridX)
+            for (int32 TileOffsetX = -1; TileOffsetX <= 1; ++TileOffsetX)
             {
-                const FVector2D BrushUV(
-                    static_cast<float>(GridX) / static_cast<float>(GridSize),
-                    static_cast<float>(GridY) / static_cast<float>(GridSize));
-                const FVector2D Local = (BrushUV - FVector2D(0.5f, 0.5f)) * 2.0f;
-                const float DistanceFromCenter = Local.Size();
-                if (DistanceFromCenter > 1.0f)
+                const FVector2D TileCenter = WrappedCenter + FVector2D(static_cast<float>(TileOffsetX), static_cast<float>(TileOffsetY));
+                const int32 MinX = FMath::Clamp(
+                    FMath::FloorToInt((TileCenter.X - Stamp.BrushRadiusUV) * static_cast<float>(TextureSize.X)),
+                    0,
+                    TextureSize.X - 1);
+                const int32 MaxX = FMath::Clamp(
+                    FMath::CeilToInt((TileCenter.X + Stamp.BrushRadiusUV) * static_cast<float>(TextureSize.X)),
+                    0,
+                    TextureSize.X - 1);
+                const int32 MinY = FMath::Clamp(
+                    FMath::FloorToInt((TileCenter.Y - Stamp.BrushRadiusUV) * static_cast<float>(TextureSize.Y)),
+                    0,
+                    TextureSize.Y - 1);
+                const int32 MaxY = FMath::Clamp(
+                    FMath::CeilToInt((TileCenter.Y + Stamp.BrushRadiusUV) * static_cast<float>(TextureSize.Y)),
+                    0,
+                    TextureSize.Y - 1);
+                if (MinX > MaxX || MinY > MaxY)
                 {
                     continue;
                 }
 
-                const float EdgeFade = 1.0f - FMath::SmoothStep(EdgeFadeStart, 1.0f, DistanceFromCenter);
-                if (EdgeFade <= UE_SMALL_NUMBER)
+                for (int32 PixelY = MinY; PixelY <= MaxY; ++PixelY)
                 {
-                    continue;
-                }
+                    for (int32 PixelX = MinX; PixelX <= MaxX; ++PixelX)
+                    {
+                        const FVector2D PixelUV(
+                            (static_cast<float>(PixelX) + 0.5f) / static_cast<float>(TextureSize.X),
+                            (static_cast<float>(PixelY) + 0.5f) / static_cast<float>(TextureSize.Y));
+                        const FVector2D DeltaUV(
+                            ComputeWrappedWetWrinkleDelta(PixelUV.X - TileCenter.X),
+                            ComputeWrappedWetWrinkleDelta(PixelUV.Y - TileCenter.Y));
+                        const FVector2D Local = DeltaUV / FMath::Max(Stamp.BrushRadiusUV, UE_SMALL_NUMBER);
+                        const float DistanceFromCenter = Local.Size();
+                        if (DistanceFromCenter > 1.0f)
+                        {
+                            continue;
+                        }
 
-                const float BrushLocalX = (CosRotation * Local.X + SinRotation * Local.Y) / SafeScale.X;
-                const float BrushLocalY = (-SinRotation * Local.X + CosRotation * Local.Y) / SafeScale.Y;
-                if (FMath::Abs(BrushLocalX) > 1.0f || FMath::Abs(BrushLocalY) > 1.0f)
-                {
-                    continue;
-                }
+                        const float EdgeFade = 1.0f - ComputeWetWrinkleSmoothStep(EdgeFadeStart, 1.0f, DistanceFromCenter);
+                        if (EdgeFade <= UE_SMALL_NUMBER)
+                        {
+                            continue;
+                        }
 
-                const FVector2D BrushTextureUV(BrushLocalX * 0.5f + 0.5f, BrushLocalY * 0.5f + 0.5f);
-                const FVector BrushNormalTS = NormalSource.SampleNormalTS(BrushTextureUV);
-                const float BlendAlpha = FMath::Clamp(Strength * EdgeFade, 0.0f, 1.0f);
-                const FVector BlendedNormalTS = FMath::Lerp(FVector(0.0f, 0.0f, 1.0f), BrushNormalTS, BlendAlpha).GetSafeNormal();
-                const FVector2D MeshUV = CenterMeshUV + FVector2D(Local.X * RadiusUV, Local.Y * RadiusUV);
+                        const float BrushLocalX = (CosRotation * Local.X + SinRotation * Local.Y) / SafeScale.X;
+                        const float BrushLocalY = (-SinRotation * Local.X + CosRotation * Local.Y) / SafeScale.Y;
+                        if (FMath::Abs(BrushLocalX) > 1.0f || FMath::Abs(BrushLocalY) > 1.0f)
+                        {
+                            continue;
+                        }
 
-                FVector ProjectedWorldPosition = Center;
-                FVector ProjectedWorldNormal = Normal;
-                FVector ProjectedWorldTangent = RotatedTangent;
-                FVector ProjectedWorldBitangent = RotatedBitangent;
-                if (!ProjectMeshUVToWorld(MeshUV, ProjectedWorldPosition, ProjectedWorldNormal, ProjectedWorldTangent, ProjectedWorldBitangent))
-                {
-                    continue;
-                }
+                        const FVector2D BrushTextureUV(BrushLocalX * 0.5f + 0.5f, BrushLocalY * 0.5f + 0.5f);
+                        const FVector BrushNormalTS = NormalSource.SampleNormalTS(BrushTextureUV);
+                        const FVector RotatedBrushNormalTS(
+                            BrushNormalTS.X * CosRotation - BrushNormalTS.Y * SinRotation,
+                            BrushNormalTS.X * SinRotation + BrushNormalTS.Y * CosRotation,
+                            BrushNormalTS.Z);
+                        const float StrengthScale = FMath::Max(Stamp.Strength * EdgeFade, 0.0f);
+                        const FVector StampNormalTS =
+                            FVector(
+                                RotatedBrushNormalTS.X * StrengthScale,
+                                RotatedBrushNormalTS.Y * StrengthScale,
+                                RotatedBrushNormalTS.Z)
+                                .GetSafeNormal(UE_SMALL_NUMBER, FVector(0.0f, 0.0f, 1.0f));
 
-                ProjectedWorldNormal = ProjectedWorldNormal.GetSafeNormal(UE_SMALL_NUMBER, Normal);
-                ProjectedWorldTangent = (ProjectedWorldTangent - ProjectedWorldNormal * FVector::DotProduct(ProjectedWorldTangent, ProjectedWorldNormal)).GetSafeNormal();
-                if (ProjectedWorldTangent.IsNearlyZero())
-                {
-                    ProjectedWorldTangent = RotatedTangent;
-                }
-
-                ProjectedWorldBitangent = (ProjectedWorldBitangent - ProjectedWorldNormal * FVector::DotProduct(ProjectedWorldBitangent, ProjectedWorldNormal)).GetSafeNormal();
-                if (ProjectedWorldBitangent.IsNearlyZero())
-                {
-                    ProjectedWorldBitangent = FVector::CrossProduct(ProjectedWorldNormal, ProjectedWorldTangent).GetSafeNormal();
-                }
-                if (ProjectedWorldBitangent.IsNearlyZero())
-                {
-                    ProjectedWorldBitangent = RotatedBitangent;
-                }
-
-                const FVector PreviewNormal =
-                    (ProjectedWorldTangent * BlendedNormalTS.X +
-                     ProjectedWorldBitangent * BlendedNormalTS.Y +
-                     ProjectedWorldNormal * BlendedNormalTS.Z)
-                        .GetSafeNormal(UE_SMALL_NUMBER, ProjectedWorldNormal);
-                const FVector SurfacePoint = ProjectedWorldPosition + ProjectedWorldNormal * SurfaceOffset;
-
-                VertexIndexGrid[GetVertexGridIndex(GridX, GridY)] = Vertices.Num();
-                Vertices.Add(SurfacePoint);
-                Normals.Add(PreviewNormal);
-                UVs.Add(MeshUV);
-                VertexColors.Add(VertexColor);
-                Tangents.Add(FProcMeshTangent(ProjectedWorldTangent, false));
-            }
-        }
-
-        for (int32 GridY = 0; GridY < GridSize; ++GridY)
-        {
-            for (int32 GridX = 0; GridX < GridSize; ++GridX)
-            {
-                const int32 Vertex00 = VertexIndexGrid[GetVertexGridIndex(GridX, GridY)];
-                const int32 Vertex10 = VertexIndexGrid[GetVertexGridIndex(GridX + 1, GridY)];
-                const int32 Vertex01 = VertexIndexGrid[GetVertexGridIndex(GridX, GridY + 1)];
-                const int32 Vertex11 = VertexIndexGrid[GetVertexGridIndex(GridX + 1, GridY + 1)];
-
-                if (Vertex00 != INDEX_NONE && Vertex10 != INDEX_NONE && Vertex11 != INDEX_NONE)
-                {
-                    Indices.Add(Vertex00);
-                    Indices.Add(Vertex10);
-                    Indices.Add(Vertex11);
-                }
-
-                if (Vertex00 != INDEX_NONE && Vertex11 != INDEX_NONE && Vertex01 != INDEX_NONE)
-                {
-                    Indices.Add(Vertex00);
-                    Indices.Add(Vertex11);
-                    Indices.Add(Vertex01);
+                        FColor& Pixel = InOutPixels[PixelY * TextureSize.X + PixelX];
+                        const FVector ExistingNormalTS = DecodeWetWrinkleNormal(Pixel);
+                        const FVector BlendedNormalTS =
+                            FVector(
+                                ExistingNormalTS.X + StampNormalTS.X,
+                                ExistingNormalTS.Y + StampNormalTS.Y,
+                                ExistingNormalTS.Z * StampNormalTS.Z)
+                                .GetSafeNormal(UE_SMALL_NUMBER, FVector(0.0f, 0.0f, 1.0f));
+                        Pixel = EncodeWetWrinkleNormal(BlendedNormalTS);
+                    }
                 }
             }
         }
@@ -453,20 +462,13 @@ void SWetWrinkleViewport::Construct(const FArguments& InArgs)
     BrushCursorComponent->SetMaterial(0, ResolveCursorMaterial());
     PreviewScene->AddComponent(BrushCursorComponent, FTransform::Identity);
 
-    StoredStampOverlayComponent = NewObject<UProceduralMeshComponent>(GetTransientPackage(), NAME_None, RF_Transient);
-    StoredStampOverlayComponent->SetMobility(EComponentMobility::Movable);
-    StoredStampOverlayComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-    StoredStampOverlayComponent->SetCastShadow(false);
-    StoredStampOverlayComponent->bUseAsyncCooking = false;
-    StoredStampOverlayComponent->SetMaterial(0, ResolveCursorMaterial());
-    PreviewScene->AddComponent(StoredStampOverlayComponent, FTransform::Identity);
-
     RefreshPreviewMesh();
 }
 
 SWetWrinkleViewport::~SWetWrinkleViewport()
 {
     ReleasePreviewMaterialSlots();
+    ReleaseAccumulatedPreviewStates();
 
     if (PreviewScene.IsValid() && PreviewMeshComponent != nullptr)
     {
@@ -477,18 +479,12 @@ SWetWrinkleViewport::~SWetWrinkleViewport()
     {
         PreviewScene->RemoveComponent(BrushCursorComponent);
     }
-
-    if (PreviewScene.IsValid() && StoredStampOverlayComponent != nullptr)
-    {
-        PreviewScene->RemoveComponent(StoredStampOverlayComponent);
-    }
 }
 
 void SWetWrinkleViewport::AddReferencedObjects(FReferenceCollector& Collector)
 {
     Collector.AddReferencedObject(PreviewMeshComponent);
     Collector.AddReferencedObject(BrushCursorComponent);
-    Collector.AddReferencedObject(StoredStampOverlayComponent);
     Collector.AddReferencedObject(CursorMaterial);
     for (FWetWrinklePreviewMaterialSlotState& SlotState : PreviewMaterialSlots)
     {
@@ -498,6 +494,11 @@ void SWetWrinkleViewport::AddReferencedObjects(FReferenceCollector& Collector)
         Collector.AddReferencedObject(SlotState.TransientPreviewMaterial);
         Collector.AddReferencedObject(SlotState.TransientPreviewParent);
         Collector.AddReferencedObject(SlotState.PreviewMID);
+    }
+    for (FWetWrinkleAccumulatedPreviewState& PreviewState : AccumulatedPreviewStates)
+    {
+        Collector.AddReferencedObject(PreviewState.SourceTexture);
+        Collector.AddReferencedObject(PreviewState.AccumulatedNormalTexture);
     }
     Collector.AddReferencedObject(BrushSettings.BrushHeightTexture);
 }
@@ -517,6 +518,7 @@ void SWetWrinkleViewport::RefreshPreviewMesh()
     RebuildHitTriangles();
     CurrentSurfaceHit = FWetWrinkleSurfaceHit();
     ClearBrushCursor();
+    ReleaseAccumulatedPreviewStates();
     RefreshStoredStampOverlay();
     RefreshWrinklePreviewMaterials();
 
@@ -560,7 +562,7 @@ void SWetWrinkleViewport::SetBrushSettings(const FWetWrinkleBrushSettings& InBru
     if (bNeedsTriangleRebuild)
     {
         RebuildHitTriangles();
-        RefreshStoredStampOverlay();
+        RefreshStoredStampOverlay(false);
     }
 
     RefreshBrushCursor();
@@ -568,226 +570,25 @@ void SWetWrinkleViewport::SetBrushSettings(const FWetWrinkleBrushSettings& InBru
     Invalidate();
 }
 
-void SWetWrinkleViewport::RefreshStoredStampOverlay()
+void SWetWrinkleViewport::RefreshStoredStampOverlay(bool bRebuildAccumulatedPreview)
 {
-    if (StoredStampOverlayComponent == nullptr)
+    if (bRebuildAccumulatedPreview)
     {
-        return;
+        MarkAccumulatedPreviewStatesDirty();
     }
 
-    StoredStampOverlayComponent->ClearAllMeshSections();
-
-    const UWetClothingAsset* Asset = WetClothingAsset.Get();
-    if (Asset == nullptr || HitTriangles.Num() == 0)
-    {
-        return;
-    }
-
-    if (PreviewMaterialSlots.Num() != PreviewMeshComponent->GetNumMaterials())
-    {
-        RebuildPreviewMaterialSlots();
-    }
-
-    TMap<int32, int32> MaterialSlotToBufferIndex;
-    TArray<FWetWrinkleProceduralMeshBuffers> MaterialBuffers;
-    auto GetOrAddMaterialBuffer = [&MaterialSlotToBufferIndex, &MaterialBuffers](int32 MaterialSlotIndex) -> FWetWrinkleProceduralMeshBuffers&
-    {
-        if (const int32* ExistingIndex = MaterialSlotToBufferIndex.Find(MaterialSlotIndex))
-        {
-            return MaterialBuffers[*ExistingIndex];
-        }
-
-        const int32 NewIndex = MaterialBuffers.AddDefaulted();
-        MaterialSlotToBufferIndex.Add(MaterialSlotIndex, NewIndex);
-        return MaterialBuffers[NewIndex];
-    };
-
-    const FBoxSphereBounds Bounds = PreviewMeshComponent != nullptr
-                                        ? PreviewMeshComponent->CalcBounds(PreviewMeshComponent->GetComponentTransform())
-                                        : FBoxSphereBounds(FSphere(FVector::ZeroVector, 1.0f));
-    const float MeshRadius = FMath::Max(1.0f, static_cast<float>(Bounds.SphereRadius));
-    const FTransform ComponentTransform = PreviewMeshComponent != nullptr
-                                              ? PreviewMeshComponent->GetComponentTransform()
-                                              : FTransform::Identity;
-    const FVector ViewLocation = ViewportClient.IsValid() ? ViewportClient->GetViewLocation() : FVector::ZeroVector;
-    const bool bHasViewLocation = ViewportClient.IsValid();
-
-    for (const FWetWrinklePatchStroke& Stroke : Asset->WrinkleData.EditablePatchStrokes)
-    {
-        if (!Stroke.bEnabled)
-        {
-            continue;
-        }
-
-        for (const FWetWrinklePatchPlacement& Stamp : Stroke.PatchPlacements)
-        {
-            if (Stamp.UVChannelIndex != BrushSettings.UVChannelIndex)
-            {
-                continue;
-            }
-
-            if (BrushSettings.MaterialSlotIndex != INDEX_NONE && Stamp.MaterialSlotIndex != BrushSettings.MaterialSlotIndex)
-            {
-                continue;
-            }
-
-            TArray<FWetWrinkleProjectedSurface> ProjectedSurfaces;
-            FindProjectedSurfacesAtUV(Stamp.MaterialSlotIndex, Stamp.UVChannelIndex, Stamp.PositionUV, ProjectedSurfaces);
-            if (ProjectedSurfaces.Num() == 0)
-            {
-                continue;
-            }
-
-            int32 PrimarySurfaceIndex = 0;
-#if WITH_EDITORONLY_DATA
-            if (Stamp.bHasEditorSurface)
-            {
-                const FVector PrimaryWorldPosition = ComponentTransform.TransformPosition(Stamp.EditorSurfaceLocalPosition);
-                double ClosestDistanceSq = TNumericLimits<double>::Max();
-                for (int32 SurfaceIndex = 0; SurfaceIndex < ProjectedSurfaces.Num(); ++SurfaceIndex)
-                {
-                    const double DistanceSq = FVector::DistSquared(PrimaryWorldPosition, ProjectedSurfaces[SurfaceIndex].WorldPosition);
-                    if (DistanceSq < ClosestDistanceSq)
-                    {
-                        ClosestDistanceSq = DistanceSq;
-                        PrimarySurfaceIndex = SurfaceIndex;
-                    }
-                }
-            }
-#endif
-
-            const float Radius = FMath::Clamp(MeshRadius * Stamp.BrushRadiusUV, 0.25f, MeshRadius * 0.35f);
-            const float SurfaceOffset = FMath::Max(Radius * 0.00075f, 0.01f);
-            const FVector PrimarySurfacePosition = ProjectedSurfaces[PrimarySurfaceIndex].WorldPosition;
-            FWetWrinkleProceduralMeshBuffers& MaterialBuffer = GetOrAddMaterialBuffer(Stamp.MaterialSlotIndex);
-
-            for (int32 SurfaceIndex = 0; SurfaceIndex < ProjectedSurfaces.Num(); ++SurfaceIndex)
-            {
-                const FWetWrinkleProjectedSurface& Surface = ProjectedSurfaces[SurfaceIndex];
-                const bool bPrimarySurface = SurfaceIndex == PrimarySurfaceIndex;
-                if (!bPrimarySurface && !IsWetWrinkleLinkedSurface(PrimarySurfacePosition, Surface.WorldPosition, Radius))
-                {
-                    continue;
-                }
-
-                FVector SurfaceNormal = Surface.WorldNormal.GetSafeNormal();
-                if (SurfaceNormal.IsNearlyZero())
-                {
-                    SurfaceNormal = FVector::UpVector;
-                }
-                if (bHasViewLocation && FVector::DotProduct(SurfaceNormal, ViewLocation - Surface.WorldPosition) < 0.0)
-                {
-                    SurfaceNormal *= -1.0;
-                }
-
-                FVector SurfaceTangent = Surface.WorldTangent.GetSafeNormal();
-                SurfaceTangent = (SurfaceTangent - SurfaceNormal * FVector::DotProduct(SurfaceTangent, SurfaceNormal)).GetSafeNormal();
-                if (SurfaceTangent.IsNearlyZero())
-                {
-                    SurfaceTangent = MakeWetWrinkleAnyPerpendicular(SurfaceNormal);
-                }
-
-                FVector SurfaceBitangent = Surface.WorldBitangent.GetSafeNormal();
-                SurfaceBitangent = (SurfaceBitangent - SurfaceNormal * FVector::DotProduct(SurfaceBitangent, SurfaceNormal)).GetSafeNormal();
-                if (SurfaceBitangent.IsNearlyZero())
-                {
-                    SurfaceBitangent = FVector::CrossProduct(SurfaceNormal, SurfaceTangent).GetSafeNormal();
-                }
-                if (SurfaceBitangent.IsNearlyZero())
-                {
-                    SurfaceBitangent = MakeWetWrinkleAnyPerpendicular(SurfaceNormal);
-                }
-
-                auto ProjectStampUVToSurface = [this, &Surface, StampUVChannelIndex = Stamp.UVChannelIndex](const FVector2D& MeshUV, FVector& OutWorldPosition, FVector& OutWorldNormal, FVector& OutWorldTangent, FVector& OutWorldBitangent)
-                {
-                    TArray<FWetWrinkleProjectedSurface> CandidateSurfaces;
-                    FindProjectedSurfacesAtUV(Surface.MaterialSlotIndex, StampUVChannelIndex, MeshUV, CandidateSurfaces);
-                    if (CandidateSurfaces.Num() == 0)
-                    {
-                        return false;
-                    }
-
-                    const FWetWrinkleProjectedSurface* BestSurface = &CandidateSurfaces[0];
-                    double BestDistanceSq = FVector::DistSquared(Surface.WorldPosition, BestSurface->WorldPosition);
-                    for (int32 CandidateIndex = 1; CandidateIndex < CandidateSurfaces.Num(); ++CandidateIndex)
-                    {
-                        const double CandidateDistanceSq = FVector::DistSquared(Surface.WorldPosition, CandidateSurfaces[CandidateIndex].WorldPosition);
-                        if (CandidateDistanceSq < BestDistanceSq)
-                        {
-                            BestSurface = &CandidateSurfaces[CandidateIndex];
-                            BestDistanceSq = CandidateDistanceSq;
-                        }
-                    }
-
-                    OutWorldPosition = BestSurface->WorldPosition;
-                    OutWorldNormal = BestSurface->WorldNormal;
-                    OutWorldTangent = BestSurface->WorldTangent;
-                    OutWorldBitangent = BestSurface->WorldBitangent;
-                    return true;
-                };
-
-                AppendWetWrinkleNormalPatchMesh(
-                    MaterialBuffer.Vertices,
-                    MaterialBuffer.Indices,
-                    MaterialBuffer.Normals,
-                    MaterialBuffer.UVs,
-                    MaterialBuffer.VertexColors,
-                    MaterialBuffer.Tangents,
-                    ProjectStampUVToSurface,
-                    Stamp.NormalPatchTexture,
-                    Surface.WorldPosition,
-                    SurfaceNormal,
-                    SurfaceTangent,
-                    SurfaceBitangent,
-                    Stamp.PositionUV,
-                    Radius,
-                    Stamp.BrushRadiusUV,
-                    Stamp.RotationRadians,
-                    Stamp.Scale,
-                    Stamp.Strength,
-                    Stamp.Falloff,
-                    SurfaceOffset,
-                    FLinearColor::White);
-            }
-        }
-    }
-
-    int32 SectionIndex = 0;
-    for (const TPair<int32, int32>& Pair : MaterialSlotToBufferIndex)
-    {
-        const int32 MaterialSlotIndex = Pair.Key;
-        const FWetWrinkleProceduralMeshBuffers& MaterialBuffer = MaterialBuffers[Pair.Value];
-        if (MaterialBuffer.Vertices.Num() == 0)
-        {
-            continue;
-        }
-
-        UMaterialInterface* SectionMaterial = nullptr;
-        SectionMaterial = GetPreviewSourceMaterial(MaterialSlotIndex);
-
-        if (SectionMaterial != nullptr)
-        {
-            StoredStampOverlayComponent->SetMaterial(SectionIndex, SectionMaterial);
-        }
-
-        StoredStampOverlayComponent->CreateMeshSection_LinearColor(
-            SectionIndex,
-            MaterialBuffer.Vertices,
-            MaterialBuffer.Indices,
-            MaterialBuffer.Normals,
-            MaterialBuffer.UVs,
-            MaterialBuffer.VertexColors,
-            MaterialBuffer.Tangents,
-            false,
-            false);
-        ++SectionIndex;
-    }
+    RefreshWrinklePreviewMaterials();
+    Invalidate();
 }
 
 void SWetWrinkleViewport::SetSelectedStrokeGuid(const FGuid& InStrokeGuid)
 {
+    if (SelectedStrokeGuid == InStrokeGuid)
+    {
+        return;
+    }
+
     SelectedStrokeGuid = InStrokeGuid;
-    RefreshStoredStampOverlay();
     Invalidate();
 }
 
@@ -862,7 +663,7 @@ bool SWetWrinkleViewport::TryBuildSurfaceHitAtUV(int32 MaterialSlotIndex, int32 
 bool SWetWrinkleViewport::TraceSurface(const FVector& RayOrigin, const FVector& RayDirection, FWetWrinkleSurfaceHit& OutHit) const
 {
     OutHit = FWetWrinkleSurfaceHit();
-    OutHit.UVChannelIndex = BrushSettings.UVChannelIndex;
+    OutHit.UVChannelIndex = HitTriangleUVChannelIndex != INDEX_NONE ? HitTriangleUVChannelIndex : BrushSettings.UVChannelIndex;
 
     if (PreviewMeshComponent == nullptr || PreviewMeshComponent->GetSkeletalMeshAsset() == nullptr || HitTriangles.Num() == 0)
     {
@@ -929,7 +730,7 @@ bool SWetWrinkleViewport::TraceSurface(const FVector& RayOrigin, const FVector& 
         OutHit.bHit = true;
         OutHit.MaterialSlotIndex = Triangle.MaterialSlotIndex;
         OutHit.TriangleID = Triangle.TriangleID;
-        OutHit.UVChannelIndex = BrushSettings.UVChannelIndex;
+        OutHit.UVChannelIndex = HitTriangleUVChannelIndex != INDEX_NONE ? HitTriangleUVChannelIndex : BrushSettings.UVChannelIndex;
         OutHit.WorldPosition = IntersectionPoint;
         OutHit.WorldNormal = Normal;
         OutHit.WorldTangent = Tangent;
@@ -1077,6 +878,7 @@ UMaterialInterface* SWetWrinkleViewport::ResolveDwcWetMaterialForSlot(int32 Mate
 void SWetWrinkleViewport::ReleasePreviewMaterialSlots()
 {
     PreviewMaterialSlots.Reset();
+    MarkPreviewMaterialsNeedReapply();
 }
 
 void SWetWrinkleViewport::RebuildPreviewMaterialSlots()
@@ -1138,6 +940,15 @@ void SWetWrinkleViewport::ApplyPreviewMaterialsToMesh()
                 : SlotState.PreviewSourceMaterial.Get();
         PreviewMeshComponent->SetMaterial(SlotState.MaterialSlotIndex, MaterialToApply);
     }
+
+    LastAppliedActivePreviewMaterialSlot = ActiveMaterialSlotIndex;
+    bPreviewMaterialsNeedReapply = false;
+}
+
+void SWetWrinkleViewport::MarkPreviewMaterialsNeedReapply()
+{
+    LastAppliedActivePreviewMaterialSlot = INDEX_NONE;
+    bPreviewMaterialsNeedReapply = true;
 }
 
 UMaterialInterface* SWetWrinkleViewport::GetPreviewSourceMaterial(int32 MaterialSlotIndex) const
@@ -1177,15 +988,70 @@ void SWetWrinkleViewport::RefreshWrinklePreviewMaterials()
     const int32 ActiveMaterialSlotIndex = ResolveActivePreviewMaterialSlot();
     if (ActiveMaterialSlotIndex != INDEX_NONE)
     {
+        const bool bWasReady =
+            PreviewMaterialSlots.IsValidIndex(ActiveMaterialSlotIndex) &&
+            PreviewMaterialSlots[ActiveMaterialSlotIndex].PreviewStatus == EWetWrinklePreviewMaterialStatus::Ready &&
+            PreviewMaterialSlots[ActiveMaterialSlotIndex].PreviewMID != nullptr;
         EnsurePreviewMaterialForSlot(ActiveMaterialSlotIndex);
+        const bool bIsReady =
+            PreviewMaterialSlots.IsValidIndex(ActiveMaterialSlotIndex) &&
+            PreviewMaterialSlots[ActiveMaterialSlotIndex].PreviewStatus == EWetWrinklePreviewMaterialStatus::Ready &&
+            PreviewMaterialSlots[ActiveMaterialSlotIndex].PreviewMID != nullptr;
+        if (!bWasReady && bIsReady)
+        {
+            bPreviewMaterialsNeedReapply = true;
+        }
         ResetPreviewMaterialParameters(ActiveMaterialSlotIndex);
+
+        if (PreviewMaterialSlots.IsValidIndex(ActiveMaterialSlotIndex))
+        {
+            FWetWrinklePreviewMaterialSlotState& SlotState = PreviewMaterialSlots[ActiveMaterialSlotIndex];
+            if (SlotState.PreviewStatus == EWetWrinklePreviewMaterialStatus::Ready && SlotState.PreviewMID != nullptr)
+            {
+                UTexture* SourceTexture = ResolveSourceTextureForMaterialSlot(ActiveMaterialSlotIndex, BrushSettings.UVChannelIndex);
+                if (UTexture2D* AccumulatedPreviewTexture =
+                        ResolveAccumulatedPreviewTexture(SourceTexture, ActiveMaterialSlotIndex, BrushSettings.UVChannelIndex))
+                {
+                    SlotState.PreviewMID->SetTextureParameterValue(
+                        WetWrinklePreviewMaterialParameters::AccumulatedNormal,
+                        AccumulatedPreviewTexture);
+                    SlotState.PreviewMID->SetScalarParameterValue(WetWrinklePreviewMaterialParameters::AccumulatedEnabled, 1.0f);
+                    SlotState.PreviewMID->SetScalarParameterValue(WetWrinklePreviewMaterialParameters::AccumulatedStrength, 1.0f);
+                }
+
+                if (BrushSettings.bShowPreview && CurrentSurfaceHit.bHit && CurrentSurfaceHit.MaterialSlotIndex == ActiveMaterialSlotIndex &&
+                    CurrentSurfaceHit.UVChannelIndex == BrushSettings.UVChannelIndex && BrushSettings.BrushHeightTexture != nullptr)
+                {
+                    SlotState.PreviewMID->SetTextureParameterValue(
+                        WetWrinklePreviewMaterialParameters::HoverNormal,
+                        BrushSettings.BrushHeightTexture.Get());
+                    SlotState.PreviewMID->SetScalarParameterValue(WetWrinklePreviewMaterialParameters::HoverEnabled, 1.0f);
+                    SlotState.PreviewMID->SetVectorParameterValue(
+                        WetWrinklePreviewMaterialParameters::HoverCenterUV,
+                        FLinearColor(CurrentSurfaceHit.UV.X, CurrentSurfaceHit.UV.Y, 0.0f, 0.0f));
+                    SlotState.PreviewMID->SetScalarParameterValue(
+                        WetWrinklePreviewMaterialParameters::HoverRadiusUV,
+                        FMath::Max(BrushSettings.BrushRadiusUV, UE_SMALL_NUMBER));
+                    SlotState.PreviewMID->SetScalarParameterValue(
+                        WetWrinklePreviewMaterialParameters::HoverRotation,
+                        BrushSettings.RotationRadians);
+                    SlotState.PreviewMID->SetVectorParameterValue(
+                        WetWrinklePreviewMaterialParameters::HoverScale,
+                        FLinearColor(1.0f, 1.0f, 0.0f, 0.0f));
+                    SlotState.PreviewMID->SetScalarParameterValue(
+                        WetWrinklePreviewMaterialParameters::HoverStrength,
+                        FMath::Clamp(BrushSettings.Strength, 0.0f, 4.0f));
+                    SlotState.PreviewMID->SetScalarParameterValue(
+                        WetWrinklePreviewMaterialParameters::HoverFalloff,
+                        FMath::Clamp(BrushSettings.Falloff, 0.0f, 1.0f));
+                }
+            }
+        }
     }
 
-    ApplyPreviewMaterialsToMesh();
-
-    if (PreviewMeshComponent != nullptr)
+    if (bPreviewMaterialsNeedReapply || LastAppliedActivePreviewMaterialSlot != ActiveMaterialSlotIndex)
     {
-        PreviewMeshComponent->MarkRenderStateDirty();
+        ApplyPreviewMaterialsToMesh();
     }
 }
 
@@ -1256,8 +1122,10 @@ void SWetWrinkleViewport::ResetPreviewMaterialParameters(int32 MaterialSlotIndex
     SlotState.PreviewMID->SetScalarParameterValue(
         WetWrinklePreviewMaterialParameters::UVChannel,
         static_cast<float>(FMath::Max(BrushSettings.UVChannelIndex, 0)));
+    SlotState.PreviewMID->SetTextureParameterValue(WetWrinklePreviewMaterialParameters::AccumulatedNormal, nullptr);
     SlotState.PreviewMID->SetScalarParameterValue(WetWrinklePreviewMaterialParameters::AccumulatedEnabled, 0.0f);
     SlotState.PreviewMID->SetScalarParameterValue(WetWrinklePreviewMaterialParameters::AccumulatedStrength, 1.0f);
+    SlotState.PreviewMID->SetTextureParameterValue(WetWrinklePreviewMaterialParameters::HoverNormal, nullptr);
     SlotState.PreviewMID->SetScalarParameterValue(WetWrinklePreviewMaterialParameters::HoverEnabled, 0.0f);
     SlotState.PreviewMID->SetScalarParameterValue(WetWrinklePreviewMaterialParameters::HoverRotation, 0.0f);
     SlotState.PreviewMID->SetScalarParameterValue(WetWrinklePreviewMaterialParameters::HoverRadiusUV, 0.0f);
@@ -1269,10 +1137,199 @@ void SWetWrinkleViewport::ResetPreviewMaterialParameters(int32 MaterialSlotIndex
         FLinearColor(1.0f, 1.0f, 0.0f, 0.0f));
 }
 
+void SWetWrinkleViewport::AppendAccumulatedPreviewStamp(const FWetWrinklePatchPlacement& Stamp)
+{
+    if (Stamp.MaterialSlotIndex == INDEX_NONE || Stamp.UVChannelIndex < 0)
+    {
+        return;
+    }
+
+    FWetWrinkleAccumulatedPreviewState* PreviewState =
+        FindOrAddAccumulatedPreviewState(Stamp.SourceTexture.Get(), Stamp.MaterialSlotIndex, Stamp.UVChannelIndex);
+    if (PreviewState == nullptr)
+    {
+        return;
+    }
+
+    if (PreviewState->bDirty || PreviewState->AccumulatedNormalTexture == nullptr ||
+        PreviewState->AccumulatedNormalTexture->GetPlatformData() == nullptr ||
+        !PreviewState->AccumulatedNormalTexture->GetPlatformData()->Mips.IsValidIndex(0))
+    {
+        RebuildAccumulatedPreviewTexture(*PreviewState);
+        RefreshWrinklePreviewMaterials();
+        return;
+    }
+
+    PreviewState->TextureSize = ComputeWetWrinklePreviewTextureSize(PreviewState->SourceTexture);
+    if (PreviewState->TextureSize.X <= 0 || PreviewState->TextureSize.Y <= 0 ||
+        PreviewState->AccumulatedNormalTexture->GetSizeX() != PreviewState->TextureSize.X ||
+        PreviewState->AccumulatedNormalTexture->GetSizeY() != PreviewState->TextureSize.Y)
+    {
+        RebuildAccumulatedPreviewTexture(*PreviewState);
+        RefreshWrinklePreviewMaterials();
+        return;
+    }
+
+    TArray<FColor> Pixels;
+    Pixels.SetNumUninitialized(PreviewState->TextureSize.X * PreviewState->TextureSize.Y);
+
+    FTexture2DMipMap& Mip = PreviewState->AccumulatedNormalTexture->GetPlatformData()->Mips[0];
+    const void* MipData = Mip.BulkData.LockReadOnly();
+    FMemory::Memcpy(Pixels.GetData(), MipData, Pixels.Num() * sizeof(FColor));
+    Mip.BulkData.Unlock();
+
+    RasterizeWetWrinkleAccumulatedStamp(Stamp, PreviewState->TextureSize, Pixels);
+
+    void* WritableMipData = Mip.BulkData.Lock(LOCK_READ_WRITE);
+    FMemory::Memcpy(WritableMipData, Pixels.GetData(), Pixels.Num() * sizeof(FColor));
+    Mip.BulkData.Unlock();
+    PreviewState->AccumulatedNormalTexture->UpdateResource();
+    PreviewState->bDirty = false;
+
+    RefreshWrinklePreviewMaterials();
+}
+
+void SWetWrinkleViewport::ReleaseAccumulatedPreviewStates()
+{
+    AccumulatedPreviewStates.Reset();
+}
+
+void SWetWrinkleViewport::MarkAccumulatedPreviewStatesDirty()
+{
+    for (FWetWrinkleAccumulatedPreviewState& PreviewState : AccumulatedPreviewStates)
+    {
+        PreviewState.bDirty = true;
+    }
+}
+
+FWetWrinkleAccumulatedPreviewState* SWetWrinkleViewport::FindOrAddAccumulatedPreviewState(
+    UTexture* SourceTexture,
+    int32 MaterialSlotIndex,
+    int32 UVChannelIndex)
+{
+    if (MaterialSlotIndex == INDEX_NONE || UVChannelIndex < 0)
+    {
+        return nullptr;
+    }
+
+    for (FWetWrinkleAccumulatedPreviewState& PreviewState : AccumulatedPreviewStates)
+    {
+        if (PreviewState.MaterialSlotIndex == MaterialSlotIndex && PreviewState.UVChannelIndex == UVChannelIndex)
+        {
+            if (PreviewState.SourceTexture.Get() != SourceTexture)
+            {
+                PreviewState.SourceTexture = SourceTexture;
+                PreviewState.bDirty = true;
+            }
+            return &PreviewState;
+        }
+    }
+
+    FWetWrinkleAccumulatedPreviewState& NewState = AccumulatedPreviewStates.AddDefaulted_GetRef();
+    NewState.SourceTexture = SourceTexture;
+    NewState.MaterialSlotIndex = MaterialSlotIndex;
+    NewState.UVChannelIndex = UVChannelIndex;
+    NewState.TextureSize = ComputeWetWrinklePreviewTextureSize(SourceTexture);
+    NewState.bDirty = true;
+    return &NewState;
+}
+
+UTexture2D* SWetWrinkleViewport::ResolveAccumulatedPreviewTexture(UTexture* SourceTexture, int32 MaterialSlotIndex, int32 UVChannelIndex)
+{
+    FWetWrinkleAccumulatedPreviewState* PreviewState = FindOrAddAccumulatedPreviewState(SourceTexture, MaterialSlotIndex, UVChannelIndex);
+    if (PreviewState == nullptr)
+    {
+        return nullptr;
+    }
+
+    if (PreviewState->bDirty && !RebuildAccumulatedPreviewTexture(*PreviewState))
+    {
+        return nullptr;
+    }
+
+    return PreviewState->AccumulatedNormalTexture;
+}
+
+bool SWetWrinkleViewport::RebuildAccumulatedPreviewTexture(FWetWrinkleAccumulatedPreviewState& PreviewState)
+{
+    PreviewState.bDirty = false;
+
+    if (PreviewState.MaterialSlotIndex == INDEX_NONE || PreviewState.UVChannelIndex < 0)
+    {
+        PreviewState.AccumulatedNormalTexture = nullptr;
+        return false;
+    }
+
+    PreviewState.TextureSize = ComputeWetWrinklePreviewTextureSize(PreviewState.SourceTexture);
+    if (PreviewState.TextureSize.X <= 0 || PreviewState.TextureSize.Y <= 0)
+    {
+        PreviewState.AccumulatedNormalTexture = nullptr;
+        return false;
+    }
+
+    TArray<FColor> Pixels;
+    Pixels.Init(EncodeWetWrinkleNormal(FVector(0.0f, 0.0f, 1.0f)), PreviewState.TextureSize.X * PreviewState.TextureSize.Y);
+
+    const UWetClothingAsset* Asset = WetClothingAsset.Get();
+    if (Asset != nullptr)
+    {
+        for (const FWetWrinklePatchStroke& Stroke : Asset->WrinkleData.EditablePatchStrokes)
+        {
+            if (!Stroke.bEnabled)
+            {
+                continue;
+            }
+
+            for (const FWetWrinklePatchPlacement& Stamp : Stroke.PatchPlacements)
+            {
+                if (Stamp.MaterialSlotIndex != PreviewState.MaterialSlotIndex || Stamp.UVChannelIndex != PreviewState.UVChannelIndex)
+                {
+                    continue;
+                }
+
+                RasterizeWetWrinkleAccumulatedStamp(Stamp, PreviewState.TextureSize, Pixels);
+            }
+        }
+    }
+
+    const bool bNeedsNewTexture = PreviewState.AccumulatedNormalTexture == nullptr ||
+                                  PreviewState.AccumulatedNormalTexture->GetSizeX() != PreviewState.TextureSize.X ||
+                                  PreviewState.AccumulatedNormalTexture->GetSizeY() != PreviewState.TextureSize.Y;
+    if (bNeedsNewTexture)
+    {
+        PreviewState.AccumulatedNormalTexture =
+            UTexture2D::CreateTransient(PreviewState.TextureSize.X, PreviewState.TextureSize.Y, PF_B8G8R8A8);
+        if (PreviewState.AccumulatedNormalTexture == nullptr)
+        {
+            return false;
+        }
+
+        PreviewState.AccumulatedNormalTexture->SRGB = false;
+        PreviewState.AccumulatedNormalTexture->CompressionSettings = TC_Normalmap;
+        PreviewState.AccumulatedNormalTexture->MipGenSettings = TMGS_NoMipmaps;
+        PreviewState.AccumulatedNormalTexture->Filter = TF_Bilinear;
+        PreviewState.AccumulatedNormalTexture->AddressX = TA_Wrap;
+        PreviewState.AccumulatedNormalTexture->AddressY = TA_Wrap;
+        PreviewState.AccumulatedNormalTexture->LODGroup = TEXTUREGROUP_WorldNormalMap;
+    }
+
+    FTexture2DMipMap& Mip = PreviewState.AccumulatedNormalTexture->GetPlatformData()->Mips[0];
+    void* MipData = Mip.BulkData.Lock(LOCK_READ_WRITE);
+    FMemory::Memcpy(MipData, Pixels.GetData(), Pixels.Num() * sizeof(FColor));
+    Mip.BulkData.Unlock();
+    PreviewState.AccumulatedNormalTexture->UpdateResource();
+    return true;
+}
+
 int32 SWetWrinkleViewport::ResolveActivePreviewMaterialSlot() const
 {
-    return PreviewMaterialSlots.IsValidIndex(BrushSettings.MaterialSlotIndex)
-               ? BrushSettings.MaterialSlotIndex
+    if (PreviewMaterialSlots.IsValidIndex(BrushSettings.MaterialSlotIndex))
+    {
+        return BrushSettings.MaterialSlotIndex;
+    }
+
+    return CurrentSurfaceHit.bHit && PreviewMaterialSlots.IsValidIndex(CurrentSurfaceHit.MaterialSlotIndex)
+               ? CurrentSurfaceHit.MaterialSlotIndex
                : INDEX_NONE;
 }
 
@@ -1316,36 +1373,51 @@ void SWetWrinkleViewport::ApplyMaterialSlotVisibility()
 void SWetWrinkleViewport::RebuildHitTriangles()
 {
     HitTriangles.Reset();
+    HitTriangleUVChannelIndex = INDEX_NONE;
 
     USkeletalMesh* TargetMesh = ResolveTargetMesh();
-    if (TargetMesh == nullptr)
+    if (TargetMesh == nullptr || BrushSettings.UVChannelIndex == INDEX_NONE)
     {
         return;
     }
 
-    const int32 MaterialCount = TargetMesh->GetMaterials().Num();
-    for (int32 MaterialSlotIndex = 0; MaterialSlotIndex < MaterialCount; ++MaterialSlotIndex)
+    auto AppendHitTrianglesForUVChannel = [this, TargetMesh](int32 UVChannelIndex)
     {
-        if (BrushSettings.MaterialSlotIndex != INDEX_NONE && BrushSettings.MaterialSlotIndex != MaterialSlotIndex)
+        const int32 MaterialCount = TargetMesh->GetMaterials().Num();
+        for (int32 MaterialSlotIndex = 0; MaterialSlotIndex < MaterialCount; ++MaterialSlotIndex)
         {
-            continue;
-        }
+            if (BrushSettings.MaterialSlotIndex != INDEX_NONE && BrushSettings.MaterialSlotIndex != MaterialSlotIndex)
+            {
+                continue;
+            }
 
-        TArray<FWetClothingAssetUVIsland> Islands;
-        if (!FWetClothingAssetMeshAnalyzer::BuildMaterialSlotUVIslands(TargetMesh, 0, BrushSettings.UVChannelIndex, MaterialSlotIndex, Islands, nullptr))
-        {
-            continue;
-        }
+            TArray<FWetClothingAssetUVIsland> Islands;
+            if (!FWetClothingAssetMeshAnalyzer::BuildMaterialSlotUVIslands(TargetMesh, 0, UVChannelIndex, MaterialSlotIndex, Islands, nullptr))
+            {
+                continue;
+            }
 
-        for (const FWetClothingAssetUVIsland& Island : Islands)
-        {
-            HitTriangles.Append(Island.UVTriangles);
+            for (const FWetClothingAssetUVIsland& Island : Islands)
+            {
+                HitTriangles.Append(Island.UVTriangles);
+            }
         }
+    };
+
+    AppendHitTrianglesForUVChannel(BrushSettings.UVChannelIndex);
+    if (HitTriangles.Num() > 0)
+    {
+        HitTriangleUVChannelIndex = BrushSettings.UVChannelIndex;
     }
 }
 
 void SWetWrinkleViewport::HandleSurfaceHitFromClient(const FWetWrinkleSurfaceHit& SurfaceHit)
 {
+    if (AreWetWrinkleSurfaceHitsEquivalentForPreview(CurrentSurfaceHit, SurfaceHit))
+    {
+        return;
+    }
+
     CurrentSurfaceHit = SurfaceHit;
     RefreshBrushCursor();
     RefreshWrinklePreviewMaterials();
@@ -1397,18 +1469,13 @@ void SWetWrinkleViewport::RefreshBrushCursor()
     }
 
     const float Radius = CalculateBrushCursorWorldRadius();
+    if (Radius <= UE_SMALL_NUMBER)
+    {
+        return;
+    }
+
     const float InnerRadius = Radius * 0.92f;
     const float NormalOffset = FMath::Max(Radius * 0.12f, 1.0f);
-    const FVector ViewLocation = ViewportClient.IsValid() ? ViewportClient->GetViewLocation() : FVector::ZeroVector;
-    const bool bHasViewLocation = ViewportClient.IsValid();
-
-    TArray<FVector> PatchVertices;
-    TArray<int32> PatchIndices;
-    TArray<FVector> PatchNormals;
-    TArray<FVector2D> PatchUVs;
-    TArray<FLinearColor> PatchVertexColors;
-    TArray<FProcMeshTangent> PatchTangents;
-
     TArray<FVector> RingVertices;
     TArray<int32> RingIndices;
     TArray<FVector> RingNormals;
@@ -1416,172 +1483,47 @@ void SWetWrinkleViewport::RefreshBrushCursor()
     TArray<FLinearColor> RingVertexColors;
     TArray<FProcMeshTangent> RingTangents;
 
-    const FLinearColor CursorColor(0.12f, 0.82f, 1.0f, 1.0f);
-    TArray<FWetWrinkleProjectedSurface> ProjectedSurfaces;
-    FindProjectedSurfacesAtUV(CurrentSurfaceHit.MaterialSlotIndex, CurrentSurfaceHit.UVChannelIndex, CurrentSurfaceHit.UV, ProjectedSurfaces);
-    if (ProjectedSurfaces.Num() == 0)
+    const FLinearColor CursorColor(1.0f, 0.55f, 0.08f, 1.0f);
+    const FVector SurfacePosition = CurrentSurfaceHit.WorldPosition;
+    FVector SurfaceNormal = CurrentSurfaceHit.WorldNormal.GetSafeNormal();
+    if (SurfaceNormal.IsNearlyZero())
     {
-        FWetWrinkleProjectedSurface FallbackSurface;
-        FallbackSurface.MaterialSlotIndex = CurrentSurfaceHit.MaterialSlotIndex;
-        FallbackSurface.TriangleID = CurrentSurfaceHit.TriangleID;
-        FallbackSurface.WorldPosition = CurrentSurfaceHit.WorldPosition;
-        FallbackSurface.WorldNormal = CurrentSurfaceHit.WorldNormal;
-        FallbackSurface.WorldTangent = CurrentSurfaceHit.WorldTangent;
-        FallbackSurface.WorldBitangent = CurrentSurfaceHit.WorldBitangent;
-        ProjectedSurfaces.Add(FallbackSurface);
+        SurfaceNormal = FVector::UpVector;
     }
 
-    int32 PrimarySurfaceIndex = 0;
-    double ClosestPrimaryDistanceSq = TNumericLimits<double>::Max();
-    for (int32 SurfaceIndex = 0; SurfaceIndex < ProjectedSurfaces.Num(); ++SurfaceIndex)
+    FVector SurfaceTangent = CurrentSurfaceHit.WorldTangent.GetSafeNormal();
+    FVector SurfaceBitangent = CurrentSurfaceHit.WorldBitangent.GetSafeNormal();
+    SurfaceTangent = (SurfaceTangent - SurfaceNormal * FVector::DotProduct(SurfaceTangent, SurfaceNormal)).GetSafeNormal();
+    if (SurfaceTangent.IsNearlyZero())
     {
-        const double DistanceSq = FVector::DistSquared(CurrentSurfaceHit.WorldPosition, ProjectedSurfaces[SurfaceIndex].WorldPosition);
-        if (DistanceSq < ClosestPrimaryDistanceSq)
-        {
-            ClosestPrimaryDistanceSq = DistanceSq;
-            PrimarySurfaceIndex = SurfaceIndex;
-        }
+        SurfaceTangent = MakeWetWrinkleAnyPerpendicular(SurfaceNormal);
+    }
+    SurfaceBitangent = (SurfaceBitangent - SurfaceNormal * FVector::DotProduct(SurfaceBitangent, SurfaceNormal)).GetSafeNormal();
+    if (SurfaceBitangent.IsNearlyZero())
+    {
+        SurfaceBitangent = FVector::CrossProduct(SurfaceNormal, SurfaceTangent).GetSafeNormal();
     }
 
-    const FVector PrimarySurfacePosition = ProjectedSurfaces[PrimarySurfaceIndex].WorldPosition;
-    for (int32 SurfaceIndex = 0; SurfaceIndex < ProjectedSurfaces.Num(); ++SurfaceIndex)
-    {
-        const FWetWrinkleProjectedSurface& Surface = ProjectedSurfaces[SurfaceIndex];
-        const bool bPrimarySurface = SurfaceIndex == PrimarySurfaceIndex;
-        if (!bPrimarySurface && !IsWetWrinkleLinkedSurface(PrimarySurfacePosition, Surface.WorldPosition, Radius))
-        {
-            continue;
-        }
-
-        const FVector SurfacePosition = bPrimarySurface ? CurrentSurfaceHit.WorldPosition : Surface.WorldPosition;
-        FVector SurfaceNormal = (bPrimarySurface ? CurrentSurfaceHit.WorldNormal : Surface.WorldNormal).GetSafeNormal();
-        if (SurfaceNormal.IsNearlyZero())
-        {
-            SurfaceNormal = FVector::UpVector;
-        }
-        if (!bPrimarySurface && bHasViewLocation && FVector::DotProduct(SurfaceNormal, ViewLocation - SurfacePosition) < 0.0)
-        {
-            SurfaceNormal *= -1.0;
-        }
-
-        FVector SurfaceTangent = (bPrimarySurface ? CurrentSurfaceHit.WorldTangent : Surface.WorldTangent).GetSafeNormal();
-        FVector SurfaceBitangent = (bPrimarySurface ? CurrentSurfaceHit.WorldBitangent : Surface.WorldBitangent).GetSafeNormal();
-        SurfaceTangent = (SurfaceTangent - SurfaceNormal * FVector::DotProduct(SurfaceTangent, SurfaceNormal)).GetSafeNormal();
-        if (SurfaceTangent.IsNearlyZero())
-        {
-            SurfaceTangent = MakeWetWrinkleAnyPerpendicular(SurfaceNormal);
-        }
-        SurfaceBitangent = (SurfaceBitangent - SurfaceNormal * FVector::DotProduct(SurfaceBitangent, SurfaceNormal)).GetSafeNormal();
-        if (SurfaceBitangent.IsNearlyZero())
-        {
-            SurfaceBitangent = FVector::CrossProduct(SurfaceNormal, SurfaceTangent).GetSafeNormal();
-        }
-
-        FLinearColor SurfaceColor = CursorColor;
-        if (!bPrimarySurface)
-        {
-            SurfaceColor = FLinearColor(1.0f, 0.55f, 0.08f, 1.0f);
-        }
-
-        if (BrushSettings.BrushHeightTexture != nullptr)
-        {
-            auto ProjectBrushUVToSurface = [this, &Surface, SurfaceMaterialSlotIndex = CurrentSurfaceHit.MaterialSlotIndex, SurfaceUVChannelIndex = CurrentSurfaceHit.UVChannelIndex](
-                                               const FVector2D& MeshUV,
-                                               FVector& OutWorldPosition,
-                                               FVector& OutWorldNormal,
-                                               FVector& OutWorldTangent,
-                                               FVector& OutWorldBitangent)
-            {
-                TArray<FWetWrinkleProjectedSurface> CandidateSurfaces;
-                FindProjectedSurfacesAtUV(SurfaceMaterialSlotIndex, SurfaceUVChannelIndex, MeshUV, CandidateSurfaces);
-                if (CandidateSurfaces.Num() == 0)
-                {
-                    return false;
-                }
-
-                const FWetWrinkleProjectedSurface* BestSurface = &CandidateSurfaces[0];
-                double BestDistanceSq = FVector::DistSquared(Surface.WorldPosition, BestSurface->WorldPosition);
-                for (int32 CandidateIndex = 1; CandidateIndex < CandidateSurfaces.Num(); ++CandidateIndex)
-                {
-                    const double CandidateDistanceSq = FVector::DistSquared(Surface.WorldPosition, CandidateSurfaces[CandidateIndex].WorldPosition);
-                    if (CandidateDistanceSq < BestDistanceSq)
-                    {
-                        BestSurface = &CandidateSurfaces[CandidateIndex];
-                        BestDistanceSq = CandidateDistanceSq;
-                    }
-                }
-
-                OutWorldPosition = BestSurface->WorldPosition;
-                OutWorldNormal = BestSurface->WorldNormal;
-                OutWorldTangent = BestSurface->WorldTangent;
-                OutWorldBitangent = BestSurface->WorldBitangent;
-                return true;
-            };
-
-            AppendWetWrinkleNormalPatchMesh(
-                PatchVertices,
-                PatchIndices,
-                PatchNormals,
-                PatchUVs,
-                PatchVertexColors,
-                PatchTangents,
-                ProjectBrushUVToSurface,
-                BrushSettings.BrushHeightTexture.Get(),
-                SurfacePosition,
-                SurfaceNormal,
-                SurfaceTangent,
-                SurfaceBitangent,
-                CurrentSurfaceHit.UV,
-                Radius,
-                BrushSettings.BrushRadiusUV,
-                BrushSettings.RotationRadians,
-                FVector2D(1.0f, 1.0f),
-                BrushSettings.Strength,
-                BrushSettings.Falloff,
-                FMath::Max(Radius * 0.00075f, 0.01f),
-                FLinearColor::White);
-        }
-
-        AppendWetWrinkleRingMesh(
-            RingVertices,
-            RingIndices,
-            RingNormals,
-            RingUVs,
-            RingVertexColors,
-            RingTangents,
-            SurfacePosition + SurfaceNormal * NormalOffset,
-            SurfaceNormal,
-            SurfaceTangent,
-            SurfaceBitangent,
-            Radius,
-            InnerRadius,
-            SurfaceColor);
-
-    }
-
-    UMaterialInterface* PatchMaterial = nullptr;
-    PatchMaterial = GetPreviewSourceMaterial(CurrentSurfaceHit.MaterialSlotIndex);
-
-    if (PatchVertices.Num() > 0)
-    {
-        BrushCursorComponent->SetMaterial(0, PatchMaterial != nullptr ? PatchMaterial : ResolveCursorMaterial());
-        BrushCursorComponent->CreateMeshSection_LinearColor(
-            0,
-            PatchVertices,
-            PatchIndices,
-            PatchNormals,
-            PatchUVs,
-            PatchVertexColors,
-            PatchTangents,
-            false,
-            false);
-    }
+    AppendWetWrinkleRingMesh(
+        RingVertices,
+        RingIndices,
+        RingNormals,
+        RingUVs,
+        RingVertexColors,
+        RingTangents,
+        SurfacePosition + SurfaceNormal * NormalOffset,
+        SurfaceNormal,
+        SurfaceTangent,
+        SurfaceBitangent,
+        Radius,
+        InnerRadius,
+        CursorColor);
 
     if (RingVertices.Num() > 0)
     {
-        BrushCursorComponent->SetMaterial(1, ResolveCursorMaterial());
+        BrushCursorComponent->SetMaterial(0, ResolveCursorMaterial());
         BrushCursorComponent->CreateMeshSection_LinearColor(
-            1,
+            0,
             RingVertices,
             RingIndices,
             RingNormals,
@@ -1594,6 +1536,10 @@ void SWetWrinkleViewport::RefreshBrushCursor()
 
     BrushCursorComponent->SetVisibility(true, true);
     BrushCursorComponent->MarkRenderStateDirty();
+    if (ViewportClient.IsValid())
+    {
+        ViewportClient->Invalidate();
+    }
 }
 
 void SWetWrinkleViewport::ClearBrushCursor()
@@ -1603,14 +1549,10 @@ void SWetWrinkleViewport::ClearBrushCursor()
         BrushCursorComponent->SetVisibility(false, true);
         BrushCursorComponent->ClearAllMeshSections();
         BrushCursorComponent->MarkRenderStateDirty();
-    }
-}
-
-void SWetWrinkleViewport::ClearStoredStampOverlay()
-{
-    if (StoredStampOverlayComponent != nullptr)
-    {
-        StoredStampOverlayComponent->ClearAllMeshSections();
+        if (ViewportClient.IsValid())
+        {
+            ViewportClient->Invalidate();
+        }
     }
 }
 
@@ -1640,6 +1582,18 @@ UMaterialInterface* SWetWrinkleViewport::ResolveCursorMaterial()
     return CursorMaterial;
 }
 
+float SWetWrinkleViewport::CalculateBrushCursorWorldRadius() const
+{
+    if (PreviewMeshComponent == nullptr || PreviewMeshComponent->GetSkeletalMeshAsset() == nullptr)
+    {
+        return 5.0f;
+    }
+
+    const FBoxSphereBounds Bounds = PreviewMeshComponent->CalcBounds(PreviewMeshComponent->GetComponentTransform());
+    const float MeshRadius = FMath::Max(1.0f, static_cast<float>(Bounds.SphereRadius));
+    return FMath::Clamp(MeshRadius * BrushSettings.BrushRadiusUV, 0.25f, MeshRadius * 0.35f);
+}
+
 FText SWetWrinkleViewport::GetViewportHintText() const
 {
     if (ResolveTargetMesh() == nullptr)
@@ -1655,18 +1609,6 @@ FText SWetWrinkleViewport::GetViewportHintText() const
     return LOCTEXT("ViewportHint", "Move the cursor over the mesh to inspect wrinkle brush UV hits.");
 }
 
-float SWetWrinkleViewport::CalculateBrushCursorWorldRadius() const
-{
-    if (PreviewMeshComponent == nullptr || PreviewMeshComponent->GetSkeletalMeshAsset() == nullptr)
-    {
-        return 5.0f;
-    }
-
-    const FBoxSphereBounds Bounds = PreviewMeshComponent->CalcBounds(PreviewMeshComponent->GetComponentTransform());
-    const float MeshRadius = FMath::Max(1.0f, static_cast<float>(Bounds.SphereRadius));
-    return FMath::Clamp(MeshRadius * BrushSettings.BrushRadiusUV, 0.25f, MeshRadius * 0.35f);
-}
-
 void SWetWrinkleViewport::FindProjectedSurfacesAtUV(
     int32 MaterialSlotIndex,
     int32 UVChannelIndex,
@@ -1675,7 +1617,7 @@ void SWetWrinkleViewport::FindProjectedSurfacesAtUV(
 {
     OutSurfaces.Reset();
 
-    if (PreviewMeshComponent == nullptr || UVChannelIndex != BrushSettings.UVChannelIndex)
+    if (PreviewMeshComponent == nullptr || UVChannelIndex != HitTriangleUVChannelIndex)
     {
         return;
     }

@@ -15,6 +15,6 @@ struct FWetClothingMaterialSetupResult
 class FWetClothingMaterialSetup
 {
   public:
-    static FWetClothingMaterialSetupResult DuplicateAndApplyToMaterialInterface(UMaterialInterface* MaterialInterface);
+    static FWetClothingMaterialSetupResult DuplicateAndApplyToMaterialInterface(UMaterialInterface* MaterialInterface, int32 WrinkleUVChannelIndex = INDEX_NONE);
     static bool                            IsMaterialConfiguredForDwc(UMaterialInterface* MaterialInterface);
 };

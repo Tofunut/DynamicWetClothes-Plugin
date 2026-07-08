@@ -6,11 +6,11 @@ class UTexture2D;
 
 struct FWetWrinkleBrushSettings
 {
-    int32 UVChannelIndex = 0;
+    int32 UVChannelIndex = INDEX_NONE;
     int32 MaterialSlotIndex = INDEX_NONE;
     TObjectPtr<UTexture2D> BrushHeightTexture = nullptr;
     float BrushRadiusUV = 0.025f;
-    float Strength = 1.0f;
+    float Strength = 2.0f;
     float Falloff = 0.5f;
     float RotationRadians = 0.0f;
     bool bShowPreview = true;
@@ -21,7 +21,7 @@ struct FWetWrinkleSurfaceHit
     bool bHit = false;
     int32 MaterialSlotIndex = INDEX_NONE;
     int32 TriangleID = INDEX_NONE;
-    int32 UVChannelIndex = 0;
+    int32 UVChannelIndex = INDEX_NONE;
     FVector WorldPosition = FVector::ZeroVector;
     FVector WorldNormal = FVector::UpVector;
     FVector WorldTangent = FVector::ForwardVector;

@@ -4,6 +4,8 @@
 #include "ScopedTransaction.h"
 #include "Widgets/SCompoundWidget.h"
 #include "WetClothing/Common/Editor/WetClothingAssetEditorTypes.h"
+#include "WetClothing/Common/Analysis/WetClothingAssetMeshAnalyzer.h"
+#include "WetClothing/Common/Widgets/SWetClothingAssetUVView.h"
 #include "WetClothing/WrinkleMode/Viewport/WetWrinkleHitData.h"
 
 class FAssetThumbnail;
@@ -55,6 +57,7 @@ class SWetWrinkleEditorPanel : public SCompoundWidget
     FReply HandleBakeWetnessProfileMapsClicked();
     FReply HandleBakeWrinkleNormalMapClicked();
     FReply HandleBakeWrinkleMaskClicked();
+    FReply BakeWrinkleMapsForSelectedSlot(bool bBakeNormalMap, bool bBakeMask);
     FReply HandleFocusClicked();
     void HandleSurfaceHitChanged(const FWetWrinkleSurfaceHit& SurfaceHit);
     void HandlePaintStrokeStarted(const FWetWrinkleSurfaceHit& SurfaceHit);
@@ -64,13 +67,31 @@ class SWetWrinkleEditorPanel : public SCompoundWidget
     TSharedRef<SWidget> BuildPatchListSection();
     void PushBrushSettingsToViewport();
     void RefreshStrokeList();
-    void RefreshStrokeOverlay();
+    void RefreshStrokeOverlay(bool bRebuildAccumulatedPreview = true);
     void RefreshMaterialSlotOptions();
     void RefreshBrushPresetOptions();
     void RefreshPartMapItems();
+    void EnsureWrinkleUVChannelForModeEntry();
+    bool HasUsableWrinkleUVChannel() const;
+    bool HasGeneratedWrinkleUVForMaterialSlot(int32 MaterialSlotIndex) const;
+    bool EnsureWrinkleUVChannelForMaterialSlot(int32 MaterialSlotIndex, bool bShowFailureDialog);
+    void InvalidateWrinkleUVViewCache();
+    void RefreshUVChannelOptions();
+    void RefreshWrinkleUVView();
+    TSharedRef<SWidget> BuildWrinkleUVViewSection();
 
+    int32 GetWrinkleUVViewChannelIndex() const;
+    int32 GetProtectedBaseUVChannelCount() const;
+    bool IsUVChannelDeleteAllowed(int32 UVChannelIndex) const;
     FText GetWrinkleUVChannelText() const;
-    FReply HandleAutoGenerateWrinkleUVClicked();
+    FText GetSelectedMeshUVChannelText() const;
+    FText GetMeshUVChannelDisplayText(int32 UVChannelIndex) const;
+    TSharedRef<SWidget> GenerateMeshUVChannelComboRow(TSharedPtr<int32> Item) const;
+    void HandleMeshUVChannelComboChanged(TSharedPtr<int32> Item, ESelectInfo::Type SelectInfo);
+    FReply HandleDeleteMeshUVChannelClicked();
+    bool IsDeleteMeshUVChannelEnabled() const;
+    FReply HandleGenerateWrinkleUVChannelClicked();
+    FReply HandleAutoGenerateClicked();
     FText GetHitInfoText() const;
     FText GetPatchListSummaryText() const;
     FText GetMaterialSlotCountText() const;
@@ -100,7 +121,10 @@ class SWetWrinkleEditorPanel : public SCompoundWidget
     void HandleUVChannelChanged(int32 NewValue);
     void HandleMaterialSlotChanged(int32 NewValue);
     float GetBrushSizeCm() const;
+    FText GetBrushSizeDisplayText() const;
+    TSharedRef<SWidget> BuildBrushSizeMenu();
     void HandleBrushRadiusChanged(float NewValue);
+    FReply HandleBrushSizePresetClicked(float NewValue);
     void HandleStrengthChanged(float NewValue);
     void HandleFalloffChanged(float NewValue);
     void HandleRotationChanged(float NewValue);
@@ -115,6 +139,12 @@ class SWetWrinkleEditorPanel : public SCompoundWidget
     TSharedPtr<int32> FindMaterialSlotOption(int32 MaterialSlotIndex) const;
     FMaterialSlotItemPtr FindMaterialSlotItem(int32 MaterialSlotIndex) const;
     TSharedPtr<FWetWrinkleBrushPresetOption> FindBrushPresetOption(UTexture2D* Texture) const;
+    void HandleTextureUVHovered(const FVector2D& UV);
+    void HandleTextureUVHoverEnded();
+    void HandleTexturePaintStrokeStarted(const FVector2D& UV);
+    void HandleTexturePaintStampRequested(const FVector2D& UV);
+    void HandleTexturePaintStrokeEnded();
+    bool TryBuildTextureSurfaceHit(const FVector2D& UV, FWetWrinkleSurfaceHit& OutSurfaceHit) const;
     bool ShouldAddStampForHit(const FWetWrinkleSurfaceHit& SurfaceHit) const;
     FString MakeDefaultStrokeName() const;
     void MarkAssetEdited();
@@ -123,13 +153,20 @@ class SWetWrinkleEditorPanel : public SCompoundWidget
     TWeakObjectPtr<UWetClothingAsset> WetClothingAsset;
     TSharedPtr<IDetailsView> DetailsView;
     TSharedPtr<SWetWrinkleViewport> PreviewViewport;
+    TSharedPtr<SWetClothingAssetUVView> WrinkleUVView;
+    TArray<TSharedPtr<FWetClothingAssetUVIsland>> WrinkleUVIslandItems;
+    int32 CachedWrinkleUVViewChannelIndex = INDEX_NONE;
+    int32 CachedWrinkleUVViewMaterialSlotIndex = INDEX_NONE;
     TSharedPtr<class SComboBox<TSharedPtr<int32>>> MaterialSlotComboBox;
+    TSharedPtr<class SComboBox<TSharedPtr<int32>>> MeshUVChannelComboBox;
     TSharedPtr<class SListView<FMaterialSlotItemPtr>> MaterialSlotListView;
     TSharedPtr<class SComboBox<TSharedPtr<FWetWrinkleBrushPresetOption>>> BrushPresetComboBox;
+    TSharedPtr<class SComboButton> BrushSizeComboButton;
     TSharedPtr<class SListView<FPatchTextureItemPtr>> PatchTextureListView;
     TSharedPtr<class SListView<FStrokeListItemPtr>> StrokeListView;
     TArray<FStrokeListItemPtr> StrokeListItems;
     TArray<TSharedPtr<int32>> MaterialSlotOptions;
+    TArray<TSharedPtr<int32>> MeshUVChannelOptions;
     TArray<FMaterialSlotItemPtr> MaterialSlotItems;
     TArray<FWetPartEntryPtr> PartMapItems;
     TArray<TSharedPtr<FWetWrinkleBrushPresetOption>> BrushPresetOptions;
@@ -147,6 +184,7 @@ class SWetWrinkleEditorPanel : public SCompoundWidget
     FVector2D LastStampUV = FVector2D::ZeroVector;
     int32 LastStampMaterialSlotIndex = INDEX_NONE;
     int32 LastStampUVChannelIndex = INDEX_NONE;
+    int32 SelectedMeshUVChannelIndex = INDEX_NONE;
     bool bHasLastStamp = false;
     bool bAllowImmediateNextStrokeStamp = false;
     TUniquePtr<FScopedTransaction> ActivePaintTransaction;

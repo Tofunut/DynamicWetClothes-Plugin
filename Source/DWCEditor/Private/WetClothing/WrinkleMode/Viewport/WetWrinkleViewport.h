@@ -18,6 +18,7 @@ class USkeletalMeshComponent;
 class UTexture;
 class UTexture2D;
 class UWetClothingAsset;
+struct FWetWrinklePatchPlacement;
 
 enum class EWetWrinklePreviewMaterialStatus : uint8
 {
@@ -51,6 +52,16 @@ struct FWetWrinklePreviewMaterialSlotState
     bool bUsesDwcWetMaterial = false;
 };
 
+struct FWetWrinkleAccumulatedPreviewState
+{
+    TObjectPtr<UTexture> SourceTexture = nullptr;
+    int32 MaterialSlotIndex = INDEX_NONE;
+    int32 UVChannelIndex = INDEX_NONE;
+    TObjectPtr<UTexture2D> AccumulatedNormalTexture = nullptr;
+    FIntPoint TextureSize = FIntPoint::ZeroValue;
+    bool bDirty = true;
+};
+
 class SWetWrinkleViewport : public SEditorViewport, public FGCObject
 {
     friend class FWetWrinkleViewportClient;
@@ -75,7 +86,8 @@ class SWetWrinkleViewport : public SEditorViewport, public FGCObject
 
     void RefreshPreviewMesh();
     void SetBrushSettings(const FWetWrinkleBrushSettings& InBrushSettings);
-    void RefreshStoredStampOverlay();
+    void RefreshStoredStampOverlay(bool bRebuildAccumulatedPreview = true);
+    void AppendAccumulatedPreviewStamp(const FWetWrinklePatchPlacement& Stamp);
     void SetSelectedStrokeGuid(const FGuid& InStrokeGuid);
     void PreviewBrushAtUV(int32 MaterialSlotIndex, int32 UVChannelIndex, const FVector2D& UV);
     void ClearExternalBrushPreview();
@@ -99,21 +111,26 @@ class SWetWrinkleViewport : public SEditorViewport, public FGCObject
     void EndPaintStrokeFromClient();
     void RefreshBrushCursor();
     void ClearBrushCursor();
-    void ClearStoredStampOverlay();
     UMaterialInterface* ResolveCursorMaterial();
-    FText GetViewportHintText() const;
     float CalculateBrushCursorWorldRadius() const;
+    FText GetViewportHintText() const;
     const UWetClothingAsset* ResolveSourceWetClothingAsset() const;
     UTexture* ResolveSourceTextureForMaterialSlot(int32 MaterialSlotIndex, int32 UVChannelIndex) const;
     void RebuildPreviewMaterialSlots();
     void ReleasePreviewMaterialSlots();
     void ApplyPreviewMaterialsToMesh();
+    void MarkPreviewMaterialsNeedReapply();
     UMaterialInterface* ResolveDwcWetMaterialForSlot(int32 MaterialSlotIndex) const;
     UMaterialInterface* GetPreviewSourceMaterial(int32 MaterialSlotIndex) const;
     void ApplyPreviewWetVertexColors();
     void RefreshWrinklePreviewMaterials();
     bool EnsurePreviewMaterialForSlot(int32 MaterialSlotIndex);
     void ResetPreviewMaterialParameters(int32 MaterialSlotIndex);
+    void ReleaseAccumulatedPreviewStates();
+    void MarkAccumulatedPreviewStatesDirty();
+    FWetWrinkleAccumulatedPreviewState* FindOrAddAccumulatedPreviewState(UTexture* SourceTexture, int32 MaterialSlotIndex, int32 UVChannelIndex);
+    UTexture2D* ResolveAccumulatedPreviewTexture(UTexture* SourceTexture, int32 MaterialSlotIndex, int32 UVChannelIndex);
+    bool RebuildAccumulatedPreviewTexture(FWetWrinkleAccumulatedPreviewState& PreviewState);
     int32 ResolveActivePreviewMaterialSlot() const;
     void FindProjectedSurfacesAtUV(int32 MaterialSlotIndex, int32 UVChannelIndex, const FVector2D& UV, TArray<FWetWrinkleProjectedSurface>& OutSurfaces) const;
     bool TryProjectUVToWorld(int32 MaterialSlotIndex, int32 UVChannelIndex, const FVector2D& UV, FVector& OutWorldPosition, FVector& OutWorldNormal, FVector& OutWorldTangent, FVector& OutWorldBitangent) const;
@@ -128,11 +145,14 @@ class SWetWrinkleViewport : public SEditorViewport, public FGCObject
     TSharedPtr<FWetWrinkleViewportClient> ViewportClient;
     TObjectPtr<USkeletalMeshComponent> PreviewMeshComponent = nullptr;
     TObjectPtr<UProceduralMeshComponent> BrushCursorComponent = nullptr;
-    TObjectPtr<UProceduralMeshComponent> StoredStampOverlayComponent = nullptr;
     TObjectPtr<UMaterialInterface> CursorMaterial = nullptr;
     TArray<FWetWrinklePreviewMaterialSlotState> PreviewMaterialSlots;
+    TArray<FWetWrinkleAccumulatedPreviewState> AccumulatedPreviewStates;
     TSharedPtr<SRichTextBlock> OverlayText;
     TArray<FWetClothingAssetUVTriangle> HitTriangles;
+    int32 HitTriangleUVChannelIndex = INDEX_NONE;
+    int32 LastAppliedActivePreviewMaterialSlot = INDEX_NONE;
+    bool bPreviewMaterialsNeedReapply = true;
     FWetWrinkleBrushSettings BrushSettings;
     FWetWrinkleSurfaceHit CurrentSurfaceHit;
     FGuid SelectedStrokeGuid;

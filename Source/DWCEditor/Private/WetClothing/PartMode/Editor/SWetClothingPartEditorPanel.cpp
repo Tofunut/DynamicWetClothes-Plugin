@@ -1446,12 +1446,16 @@ FReply SWetClothingPartEditorPanel::HandleApplyMaterialSetupClicked()
         }
     }
 
-    UMaterialInterface*             SourceMaterial = SelectedMaterial;
-    FWetClothingMaterialSetupResult Result = FWetClothingMaterialSetup::DuplicateAndApplyToMaterialInterface(SourceMaterial);
+    UMaterialInterface* SourceMaterial = SelectedMaterial;
+    UWetClothingAsset*  WetClothingAssetPtr = WetClothingAsset.Get();
+
+    FWetClothingMaterialSetupResult Result = FWetClothingMaterialSetup::DuplicateAndApplyToMaterialInterface(
+        SourceMaterial,
+        WetClothingAssetPtr != nullptr ? WetClothingAssetPtr->WrinkleData.WrinkleUVChannelIndex : INDEX_NONE);
 
     if (Result.bSucceeded && Result.ConfiguredMaterial != nullptr && SourceMaterial != nullptr)
     {
-        if (UWetClothingAsset* WetClothingAssetPtr = WetClothingAsset.Get())
+        if (WetClothingAssetPtr != nullptr)
         {
             if (const USkeletalMesh* TargetMesh = WetClothingAssetPtr->TargetMesh)
             {
@@ -3411,11 +3415,27 @@ bool SWetClothingPartEditorPanel::BuildWetSetup(FString& OutSummary, bool* OutHa
             ExistingOverride->WetMaterial != nullptr &&
             FWetClothingMaterialSetup::IsMaterialConfiguredForDwc(ExistingOverride->WetMaterial))
         {
-            Skipped.Add(FString::Printf(TEXT("Slot %d already has '%s'."), MaterialSlotIndex, *GetNameSafe(ExistingOverride->WetMaterial)));
+            FWetClothingMaterialSetupResult RefreshResult = FWetClothingMaterialSetup::DuplicateAndApplyToMaterialInterface(
+                ExistingOverride->WetMaterial,
+                WetClothingAssetPtr->WrinkleData.WrinkleUVChannelIndex);
+            if (!RefreshResult.bSucceeded)
+            {
+                Warnings.Add(FString::Printf(TEXT("Slot %d existing wet material refresh failed: %s"), MaterialSlotIndex, *RefreshResult.Message));
+            }
+            else
+            {
+                Skipped.Add(FString::Printf(
+                    TEXT("Slot %d already has '%s'. Refreshed wrinkle UV channel %d."),
+                    MaterialSlotIndex,
+                    *GetNameSafe(ExistingOverride->WetMaterial),
+                    FMath::Max(WetClothingAssetPtr->WrinkleData.WrinkleUVChannelIndex, 0)));
+            }
             continue;
         }
 
-        FWetClothingMaterialSetupResult Result = FWetClothingMaterialSetup::DuplicateAndApplyToMaterialInterface(SourceMaterial);
+        FWetClothingMaterialSetupResult Result = FWetClothingMaterialSetup::DuplicateAndApplyToMaterialInterface(
+            SourceMaterial,
+            WetClothingAssetPtr->WrinkleData.WrinkleUVChannelIndex);
         if (!Result.bSucceeded || Result.ConfiguredMaterial == nullptr)
         {
             Warnings.Add(FString::Printf(TEXT("Slot %d material setup failed: %s"), MaterialSlotIndex, *Result.Message));

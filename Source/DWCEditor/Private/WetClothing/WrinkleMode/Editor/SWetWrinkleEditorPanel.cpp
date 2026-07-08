@@ -20,6 +20,8 @@
 #include "WetClothing/Common/Texture/WetClothingMaterialTextureResolver.h"
 #include "WetClothing/Common/Widgets/WetClothingEditorCommonWidgets.h"
 #include "WetClothing/PartMode/Partition/WetPartEditingService.h"
+#include "WetClothing/WrinkleMode/Bake/WetWrinkleNormalMapBaker.h"
+#include "WetClothing/WrinkleMode/UV/WetWrinkleUVChannelGenerator.h"
 #include "WetClothing/WrinkleMode/Viewport/WetWrinkleViewport.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SCheckBox.h"
@@ -31,6 +33,7 @@
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SSeparator.h"
 #include "Widgets/Layout/SSplitter.h"
+#include "Widgets/Layout/SUniformGridPanel.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/Text/SInlineEditableTextBlock.h"
 #include "Widgets/Text/STextBlock.h"
@@ -46,6 +49,14 @@ namespace
     constexpr float WetWrinkleDefaultSizeCm = 8.0f;
     constexpr float WetWrinkleDefaultSizeUV = 0.0677f;
     constexpr float WetWrinkleUVPerCm = WetWrinkleDefaultSizeUV / WetWrinkleDefaultSizeCm;
+
+    FText FormatWetWrinkleBrushSizeCm(float SizeCm)
+    {
+        FNumberFormattingOptions Options;
+        Options.MinimumFractionalDigits = 0;
+        Options.MaximumFractionalDigits = 1;
+        return FText::AsNumber(SizeCm, &Options);
+    }
 }
 
 void SWetWrinkleEditorPanel::Construct(const FArguments& InArgs)
@@ -57,9 +68,10 @@ void SWetWrinkleEditorPanel::Construct(const FArguments& InArgs)
 
     if (UWetClothingAsset* Asset = WetClothingAsset.Get())
     {
-        BrushSettings.UVChannelIndex = FMath::Max(0, Asset->WrinkleData.WrinkleUVChannelIndex);
+        BrushSettings.UVChannelIndex = BrushSettings.MaterialSlotIndex != INDEX_NONE ? Asset->WrinkleData.WrinkleUVChannelIndex : INDEX_NONE;
     }
     RefreshMaterialSlotOptions();
+    RefreshUVChannelOptions();
     RefreshBrushPresetOptions();
     BrushSettings.BrushHeightTexture = ResolveDefaultBrushHeightTexture();
     SizeCm = WetWrinkleDefaultSizeCm;
@@ -103,18 +115,49 @@ void SWetWrinkleEditorPanel::Construct(const FArguments& InArgs)
 
                                         + SVerticalBox::Slot()
                                               .AutoHeight()
-                                              .Padding(0.0f, 0.0f, 0.0f, 12.0f)
+                                              .Padding(0.0f, 0.0f, 0.0f, 8.0f)
                                                   [SNew(STextBlock)
                                                        .AutoWrapText(true)
                                                        .Text(this, &SWetWrinkleEditorPanel::GetWrinkleUVChannelText)]
 
                                         + SVerticalBox::Slot()
                                               .AutoHeight()
+                                              .Padding(0.0f, 0.0f, 0.0f, 4.0f)
+                                                  [SNew(STextBlock)
+                                                       .Text(LOCTEXT("MeshUVChannelsLabel", "Mesh UV Channels"))]
+
+                                        + SVerticalBox::Slot()
+                                              .AutoHeight()
+                                              .Padding(0.0f, 0.0f, 0.0f, 6.0f)
+                                                  [SNew(SHorizontalBox)
+
+                                                   + SHorizontalBox::Slot()
+                                                         .FillWidth(1.0f)
+                                                         .VAlign(VAlign_Center)
+                                                             [SAssignNew(MeshUVChannelComboBox, SComboBox<TSharedPtr<int32>>)
+                                                                  .OptionsSource(&MeshUVChannelOptions)
+                                                                  .OnGenerateWidget(this, &SWetWrinkleEditorPanel::GenerateMeshUVChannelComboRow)
+                                                                  .OnSelectionChanged(this, &SWetWrinkleEditorPanel::HandleMeshUVChannelComboChanged)
+                                                                      [SNew(STextBlock)
+                                                                           .Text(this, &SWetWrinkleEditorPanel::GetSelectedMeshUVChannelText)]]
+
+                                                   + SHorizontalBox::Slot()
+                                                         .AutoWidth()
+                                                         .VAlign(VAlign_Center)
+                                                         .Padding(6.0f, 0.0f, 0.0f, 0.0f)
+                                                             [SNew(SButton)
+                                                                  .Text(LOCTEXT("DeleteMeshUVChannelButton", "Delete"))
+                                                                  .ToolTipText(LOCTEXT("DeleteMeshUVChannelTooltip", "Delete the selected DWC-added UV channel. Original/imported mesh UV channels are protected."))
+                                                                  .IsEnabled(this, &SWetWrinkleEditorPanel::IsDeleteMeshUVChannelEnabled)
+                                                                  .OnClicked(this, &SWetWrinkleEditorPanel::HandleDeleteMeshUVChannelClicked)]]
+
+                                        + SVerticalBox::Slot()
+                                              .AutoHeight()
                                               .Padding(0.0f, 0.0f, 0.0f, 14.0f)
                                                   [SNew(SButton)
-                                                       .ToolTipText(LOCTEXT("AutoGenerateWrinkleUVTooltip", "Select the generated wrinkle UV channel for patch painting and wrinkle map baking."))
+                                                       .ToolTipText(LOCTEXT("AutoGenerateWrinkleTextureTooltip", "Automatically generate wrinkle texture maps from the current wrinkle patch data."))
                                                        .ContentPadding(FMargin(8.0f, 5.0f))
-                                                       .OnClicked(this, &SWetWrinkleEditorPanel::HandleAutoGenerateWrinkleUVClicked)
+                                                       .OnClicked(this, &SWetWrinkleEditorPanel::HandleAutoGenerateClicked)
                                                            [SNew(SHorizontalBox)
 
                                                             + SHorizontalBox::Slot()
@@ -129,7 +172,7 @@ void SWetWrinkleEditorPanel::Construct(const FArguments& InArgs)
                                                                   .FillWidth(1.0f)
                                                                   .VAlign(VAlign_Center)
                                                                       [SNew(STextBlock)
-                                                                           .Text(LOCTEXT("AutoGenerateWrinkleUVButton", "Auto Generate"))]]]
+                                                                           .Text(LOCTEXT("AutoGenerateWrinkleButton", "Generate Wrinkle Textures"))]]]
 
                                         + SVerticalBox::Slot()
                                               .FillHeight(1.0f)
@@ -187,12 +230,21 @@ void SWetWrinkleEditorPanel::Construct(const FArguments& InArgs)
                     + SSplitter::Slot()
                           .Value(0.47f)
                               [FWetClothingEditorCommonWidgets::BuildPreviewSection(
-                                  SAssignNew(PreviewViewport, SWetWrinkleViewport)
-                                      .WetClothingAsset(WetClothingAsset.Get())
-                                      .OnSurfaceHitChanged(FOnWetWrinkleSurfaceHitChanged::CreateSP(this, &SWetWrinkleEditorPanel::HandleSurfaceHitChanged))
-                                      .OnPaintStrokeStarted(FOnWetWrinklePaintStrokeStarted::CreateSP(this, &SWetWrinkleEditorPanel::HandlePaintStrokeStarted))
-                                      .OnPaintStampRequested(FOnWetWrinklePaintStampRequested::CreateSP(this, &SWetWrinkleEditorPanel::HandlePaintStampRequested))
-                                      .OnPaintStrokeEnded(FOnWetWrinklePaintStrokeEnded::CreateSP(this, &SWetWrinkleEditorPanel::HandlePaintStrokeEnded)),
+                                  SNew(SSplitter)
+                                      .Orientation(Orient_Vertical)
+
+                                      + SSplitter::Slot()
+                                            .Value(0.68f)
+                                                [SAssignNew(PreviewViewport, SWetWrinkleViewport)
+                                                     .WetClothingAsset(WetClothingAsset.Get())
+                                                     .OnSurfaceHitChanged(FOnWetWrinkleSurfaceHitChanged::CreateSP(this, &SWetWrinkleEditorPanel::HandleSurfaceHitChanged))
+                                                     .OnPaintStrokeStarted(FOnWetWrinklePaintStrokeStarted::CreateSP(this, &SWetWrinkleEditorPanel::HandlePaintStrokeStarted))
+                                                     .OnPaintStampRequested(FOnWetWrinklePaintStampRequested::CreateSP(this, &SWetWrinkleEditorPanel::HandlePaintStampRequested))
+                                                     .OnPaintStrokeEnded(FOnWetWrinklePaintStrokeEnded::CreateSP(this, &SWetWrinkleEditorPanel::HandlePaintStrokeEnded))]
+
+                                      + SSplitter::Slot()
+                                            .Value(0.32f)
+                                                [BuildWrinkleUVViewSection()],
                                   FOnWetClothingPreviewFocusClicked::CreateSP(this, &SWetWrinkleEditorPanel::HandleFocusClicked))]
 
                     + SSplitter::Slot()
@@ -249,25 +301,45 @@ TSharedRef<SWidget> SWetWrinkleEditorPanel::BuildPatchBrushSection()
              + SVerticalBox::Slot()
                    .AutoHeight()
                    .Padding(0.0f, 0.0f, 0.0f, 10.0f)
-                       [SNew(SSpinBox<float>)
-                            .MinValue(0.1f)
-                            .MaxValue(100.0f)
-                            .Value(this, &SWetWrinkleEditorPanel::GetBrushSizeCm)
-                            .OnValueChanged(this, &SWetWrinkleEditorPanel::HandleBrushRadiusChanged)]
+                       [SNew(SHorizontalBox)
+
+                        + SHorizontalBox::Slot()
+                              .AutoWidth()
+                                  [SNew(SBox)
+                                       .WidthOverride(64.0f)
+                                           [SNew(SSpinBox<float>)
+                                                .MinValue(0.1f)
+                                                .MaxValue(100.0f)
+                                                .Value(this, &SWetWrinkleEditorPanel::GetBrushSizeCm)
+                                                .OnValueChanged(this, &SWetWrinkleEditorPanel::HandleBrushRadiusChanged)]]
+
+                        + SHorizontalBox::Slot()
+                              .FillWidth(1.0f)
+                              .Padding(4.0f, 0.0f, 0.0f, 0.0f)
+                                  [SAssignNew(BrushSizeComboButton, SComboButton)
+                                       .HasDownArrow(true)
+                                       .ContentPadding(FMargin(8.0f, 2.0f))
+                                       .ButtonContent()
+                                           [SNew(STextBlock)
+                                                .Text(this, &SWetWrinkleEditorPanel::GetBrushSizeDisplayText)]
+                                       .MenuContent()
+                                           [BuildBrushSizeMenu()]]]
 
              + SVerticalBox::Slot()
                    .AutoHeight()
                    .Padding(0.0f, 0.0f, 0.0f, 6.0f)
                        [SNew(STextBlock)
-                            .Text(LOCTEXT("StrengthLabel", "Strength (%)"))]
+                            .Text(LOCTEXT("StrengthLabel", "Strength"))]
 
              + SVerticalBox::Slot()
                    .AutoHeight()
                    .Padding(0.0f, 0.0f, 0.0f, 10.0f)
                        [SNew(SSpinBox<float>)
                             .MinValue(0.0f)
-                            .MaxValue(100.0f)
-                            .Value(BrushSettings.Strength * 100.0f)
+                            .MaxValue(4.0f)
+                            .MinSliderValue(0.0f)
+                            .MaxSliderValue(4.0f)
+                            .Value(BrushSettings.Strength)
                             .OnValueChanged(this, &SWetWrinkleEditorPanel::HandleStrengthChanged)]
 
              + SVerticalBox::Slot()
@@ -356,12 +428,14 @@ void SWetWrinkleEditorPanel::RefreshFromAsset()
 {
     if (UWetClothingAsset* Asset = WetClothingAsset.Get())
     {
-        BrushSettings.UVChannelIndex = FMath::Max(0, Asset->WrinkleData.WrinkleUVChannelIndex);
+        BrushSettings.UVChannelIndex = BrushSettings.MaterialSlotIndex != INDEX_NONE ? Asset->WrinkleData.WrinkleUVChannelIndex : INDEX_NONE;
     }
     RefreshMaterialSlotOptions();
+    RefreshUVChannelOptions();
     RefreshBrushPresetOptions();
     RefreshPartMapItems();
     RefreshStrokeList();
+    InvalidateWrinkleUVViewCache();
 
     if (PreviewViewport.IsValid())
     {
@@ -370,6 +444,7 @@ void SWetWrinkleEditorPanel::RefreshFromAsset()
         RefreshStrokeOverlay();
     }
 
+    RefreshWrinkleUVView();
 }
 
 FReply SWetWrinkleEditorPanel::HandleSaveClicked()
@@ -413,8 +488,7 @@ TSharedRef<SWidget> SWetWrinkleEditorPanel::BuildBakeMapsMenu()
 
 FReply SWetWrinkleEditorPanel::HandleBakeAllMapsClicked()
 {
-    FMessageDialog::Open(EAppMsgType::Ok, LOCTEXT("BakeAllMapsPending", "Bake All Maps is not implemented for Wrinkle mode yet."));
-    return FReply::Handled();
+    return BakeWrinkleMapsForSelectedSlot(true, true);
 }
 
 FReply SWetWrinkleEditorPanel::HandleBakeWetnessProfileMapsClicked()
@@ -425,13 +499,57 @@ FReply SWetWrinkleEditorPanel::HandleBakeWetnessProfileMapsClicked()
 
 FReply SWetWrinkleEditorPanel::HandleBakeWrinkleNormalMapClicked()
 {
-    FMessageDialog::Open(EAppMsgType::Ok, LOCTEXT("BakeWrinkleNormalMapPending", "Wrinkle Normal Map baking is not implemented yet."));
-    return FReply::Handled();
+    return BakeWrinkleMapsForSelectedSlot(true, false);
 }
 
 FReply SWetWrinkleEditorPanel::HandleBakeWrinkleMaskClicked()
 {
-    FMessageDialog::Open(EAppMsgType::Ok, LOCTEXT("BakeWrinkleMaskPending", "Wrinkle Mask baking is not implemented yet."));
+    // The mask is generated from the same patch rasterization pass as the normal map.
+    return BakeWrinkleMapsForSelectedSlot(true, true);
+}
+
+FReply SWetWrinkleEditorPanel::BakeWrinkleMapsForSelectedSlot(bool bBakeNormalMap, bool bBakeMask)
+{
+    UWetClothingAsset* Asset = WetClothingAsset.Get();
+    if (Asset == nullptr)
+    {
+        FMessageDialog::Open(EAppMsgType::Ok, LOCTEXT("BakeWrinkleNoAsset", "Wet Clothing Asset is unavailable."));
+        return FReply::Handled();
+    }
+
+    if (BrushSettings.MaterialSlotIndex == INDEX_NONE)
+    {
+        FMessageDialog::Open(EAppMsgType::Ok, LOCTEXT("BakeWrinkleNoSlot", "Select a material slot before baking wrinkle maps."));
+        return FReply::Handled();
+    }
+
+    FWetWrinkleNormalMapBakeSettings Settings;
+    Settings.Resolution = Asset->WrinkleData.BakeSettings.DefaultResolution;
+    Settings.PaddingPixels = Asset->WrinkleData.BakeSettings.PaddingPixels;
+    Settings.bIncludeDisabledPatchStrokes = Asset->WrinkleData.BakeSettings.bIncludeDisabledPatchStrokes;
+    Settings.bBakeNormalMap = bBakeNormalMap && Asset->WrinkleData.BakeSettings.bBakeNormalMap;
+    Settings.bBakeMask = bBakeMask && Asset->WrinkleData.BakeSettings.bBakeMask;
+
+    FWetWrinkleNormalMapBakeResult Result;
+    FString ErrorMessage;
+    if (!FWetWrinkleNormalMapBaker::BakeMaterialSlot(Asset, BrushSettings.MaterialSlotIndex, Settings, Result, ErrorMessage))
+    {
+        FMessageDialog::Open(EAppMsgType::Ok, FText::FromString(ErrorMessage));
+        return FReply::Handled();
+    }
+
+    MarkAssetEdited();
+    if (DetailsView.IsValid())
+    {
+        DetailsView->ForceRefresh();
+    }
+
+    FMessageDialog::Open(
+        EAppMsgType::Ok,
+        FText::Format(
+            LOCTEXT("BakeWrinkleSlotSuccess", "Baked {0} wrinkle map set(s) from {1} patch(es)."),
+            FText::AsNumber(Result.BakedMapCount),
+            FText::AsNumber(Result.BakedStampCount)));
     return FReply::Handled();
 }
 
@@ -447,6 +565,7 @@ FReply SWetWrinkleEditorPanel::HandleFocusClicked()
 void SWetWrinkleEditorPanel::HandleSurfaceHitChanged(const FWetWrinkleSurfaceHit& SurfaceHit)
 {
     CurrentHit = SurfaceHit;
+    RefreshWrinkleUVView();
 }
 
 void SWetWrinkleEditorPanel::HandlePaintStrokeStarted(const FWetWrinkleSurfaceHit& SurfaceHit)
@@ -477,7 +596,12 @@ void SWetWrinkleEditorPanel::HandlePaintStrokeStarted(const FWetWrinkleSurfaceHi
 
     MarkAssetEdited();
     RefreshStrokeList();
-    RefreshStrokeOverlay();
+    if (PreviewViewport.IsValid())
+    {
+        PreviewViewport->SetSelectedStrokeGuid(SelectedStrokeGuid);
+        PreviewViewport->AppendAccumulatedPreviewStamp(NewStroke.PatchPlacements.Last());
+    }
+    RefreshWrinkleUVView();
 }
 
 void SWetWrinkleEditorPanel::HandlePaintStampRequested(const FWetWrinkleSurfaceHit& SurfaceHit)
@@ -509,7 +633,11 @@ void SWetWrinkleEditorPanel::HandlePaintStampRequested(const FWetWrinkleSurfaceH
     {
         StrokeListView->RequestListRefresh();
     }
-    RefreshStrokeOverlay();
+    if (PreviewViewport.IsValid())
+    {
+        PreviewViewport->AppendAccumulatedPreviewStamp(ActiveStroke->PatchPlacements.Last());
+    }
+    RefreshWrinkleUVView();
 }
 
 void SWetWrinkleEditorPanel::HandlePaintStrokeEnded()
@@ -526,6 +654,7 @@ void SWetWrinkleEditorPanel::PushBrushSettingsToViewport()
     {
         PreviewViewport->SetBrushSettings(BrushSettings);
     }
+
 }
 
 void SWetWrinkleEditorPanel::RefreshStrokeList()
@@ -556,13 +685,14 @@ void SWetWrinkleEditorPanel::RefreshStrokeList()
     }
 }
 
-void SWetWrinkleEditorPanel::RefreshStrokeOverlay()
+void SWetWrinkleEditorPanel::RefreshStrokeOverlay(bool bRebuildAccumulatedPreview)
 {
     if (PreviewViewport.IsValid())
     {
         PreviewViewport->SetSelectedStrokeGuid(SelectedStrokeGuid);
-        PreviewViewport->RefreshStoredStampOverlay();
+        PreviewViewport->RefreshStoredStampOverlay(bRebuildAccumulatedPreview);
     }
+    RefreshWrinkleUVView();
 }
 
 void SWetWrinkleEditorPanel::RefreshMaterialSlotOptions()
@@ -652,6 +782,361 @@ void SWetWrinkleEditorPanel::RefreshPartMapItems()
     }
 }
 
+
+void SWetWrinkleEditorPanel::EnsureWrinkleUVChannelForModeEntry()
+{
+    // Wrinkle UVs are intentionally generated lazily per material slot.
+    // Opening wrinkle mode should not unwrap the entire target skeletal mesh.
+}
+
+bool SWetWrinkleEditorPanel::HasUsableWrinkleUVChannel() const
+{
+    const UWetClothingAsset* Asset = WetClothingAsset.Get();
+    const USkeletalMesh* TargetMesh = Asset != nullptr ? Asset->TargetMesh.Get() : nullptr;
+    if (Asset == nullptr || TargetMesh == nullptr)
+    {
+        return false;
+    }
+
+    const int32 UVChannelIndex = Asset->WrinkleData.WrinkleUVChannelIndex;
+    if (UVChannelIndex == INDEX_NONE)
+    {
+        return false;
+    }
+
+    const int32 NumUVChannels = FWetClothingAssetMeshAnalyzer::GetNumUVChannels(TargetMesh, 0);
+    return UVChannelIndex >= 0 && UVChannelIndex < NumUVChannels;
+}
+
+bool SWetWrinkleEditorPanel::HasGeneratedWrinkleUVForMaterialSlot(int32 MaterialSlotIndex) const
+{
+    const UWetClothingAsset* Asset = WetClothingAsset.Get();
+    if (Asset == nullptr || MaterialSlotIndex == INDEX_NONE || !HasUsableWrinkleUVChannel())
+    {
+        return false;
+    }
+
+    const int32 WrinkleUVChannelIndex = Asset->WrinkleData.WrinkleUVChannelIndex;
+    const FWetWrinkleGeneratedUVSlot* GeneratedSlot = Asset->WrinkleData.GeneratedWrinkleUVSlots.FindByPredicate(
+        [MaterialSlotIndex, WrinkleUVChannelIndex](const FWetWrinkleGeneratedUVSlot& Candidate)
+        {
+            return Candidate.MaterialSlotIndex == MaterialSlotIndex && Candidate.UVChannelIndex == WrinkleUVChannelIndex;
+        });
+
+    return GeneratedSlot != nullptr;
+}
+
+bool SWetWrinkleEditorPanel::EnsureWrinkleUVChannelForMaterialSlot(int32 MaterialSlotIndex, bool bShowFailureDialog)
+{
+    UWetClothingAsset* Asset = WetClothingAsset.Get();
+    if (Asset == nullptr)
+    {
+        return false;
+    }
+
+    USkeletalMesh* TargetMesh = Asset->TargetMesh.Get();
+    if (TargetMesh == nullptr)
+    {
+        if (bShowFailureDialog)
+        {
+            FMessageDialog::Open(EAppMsgType::Ok, LOCTEXT("GenerateWrinkleUVNoTargetMesh", "Assign a Target Mesh before generating wrinkle UVs."));
+        }
+        return false;
+    }
+
+    if (MaterialSlotIndex == INDEX_NONE)
+    {
+        BrushSettings.UVChannelIndex = INDEX_NONE;
+        InvalidateWrinkleUVViewCache();
+        return false;
+    }
+
+    if (!FWetClothingEditorCommonWidgets::IsMaterialSlotWettable(Asset, MaterialSlotIndex))
+    {
+        BrushSettings.UVChannelIndex = INDEX_NONE;
+        InvalidateWrinkleUVViewCache();
+        if (bShowFailureDialog)
+        {
+            FMessageDialog::Open(
+                EAppMsgType::Ok,
+                LOCTEXT("GenerateWrinkleUVSlotNotWettable", "This material slot is not marked wettable. Enable the wettable toggle for the slot before editing wrinkles."));
+        }
+        return false;
+    }
+
+    if (HasGeneratedWrinkleUVForMaterialSlot(MaterialSlotIndex))
+    {
+        BrushSettings.UVChannelIndex = Asset->WrinkleData.WrinkleUVChannelIndex;
+        SelectedMeshUVChannelIndex = Asset->WrinkleData.WrinkleUVChannelIndex;
+        return true;
+    }
+
+    FWetWrinkleUVChannelGenerationSettings Settings;
+    Settings.LODIndex = 0;
+    Settings.Resolution = FMath::Max(16, Asset->WrinkleData.BakeSettings.DefaultResolution);
+    Settings.PaddingPixels = FMath::Max(4, Asset->WrinkleData.BakeSettings.PaddingPixels);
+    Settings.SourceUVChannelIndex = 0;
+    Settings.PreferredUVChannelIndex = Asset->WrinkleData.WrinkleUVChannelIndex != INDEX_NONE
+                                           ? Asset->WrinkleData.WrinkleUVChannelIndex
+                                           : FWetClothingAssetMeshAnalyzer::GetNumUVChannels(TargetMesh, 0);
+    Settings.TargetMaterialSlotIndex = MaterialSlotIndex;
+    Settings.bAllowOverwriteExistingGeneratedChannel = true;
+
+    const FScopedTransaction Transaction(LOCTEXT("LazyGenerateWrinkleUVForSlotTransaction", "Generate Wrinkle UV For Material Slot"));
+    FWetWrinkleUVChannelGenerationResult Result = FWetWrinkleUVChannelGenerator::GenerateForAsset(Asset, Settings);
+    if (!Result.bSucceeded)
+    {
+        BrushSettings.UVChannelIndex = INDEX_NONE;
+        InvalidateWrinkleUVViewCache();
+        if (bShowFailureDialog)
+        {
+            FMessageDialog::Open(EAppMsgType::Ok, FText::FromString(Result.Message));
+        }
+        return false;
+    }
+
+    BrushSettings.UVChannelIndex = Result.UVChannelIndex;
+    SelectedMeshUVChannelIndex = Result.UVChannelIndex;
+    RefreshUVChannelOptions();
+    CurrentHit = FWetWrinkleSurfaceHit();
+    bHasLastStamp = false;
+    LastStampUVChannelIndex = INDEX_NONE;
+    InvalidateWrinkleUVViewCache();
+    MarkAssetEdited();
+    return true;
+}
+
+void SWetWrinkleEditorPanel::InvalidateWrinkleUVViewCache()
+{
+    CachedWrinkleUVViewChannelIndex = INDEX_NONE;
+    CachedWrinkleUVViewMaterialSlotIndex = INDEX_NONE;
+}
+
+void SWetWrinkleEditorPanel::RefreshUVChannelOptions()
+{
+    MeshUVChannelOptions.Reset();
+
+    const UWetClothingAsset* Asset = WetClothingAsset.Get();
+    const USkeletalMesh* TargetMesh = Asset != nullptr ? Asset->TargetMesh.Get() : nullptr;
+    const int32 NumUVChannels = FWetClothingAssetMeshAnalyzer::GetNumUVChannels(TargetMesh, 0);
+
+    for (int32 UVChannelIndex = 0; UVChannelIndex < NumUVChannels; ++UVChannelIndex)
+    {
+        MeshUVChannelOptions.Add(MakeShared<int32>(UVChannelIndex));
+    }
+
+    if (SelectedMeshUVChannelIndex == INDEX_NONE || SelectedMeshUVChannelIndex >= NumUVChannels)
+    {
+        SelectedMeshUVChannelIndex = Asset != nullptr ? Asset->WrinkleData.WrinkleUVChannelIndex : INDEX_NONE;
+        if (SelectedMeshUVChannelIndex < 0 || SelectedMeshUVChannelIndex >= NumUVChannels)
+        {
+            SelectedMeshUVChannelIndex = NumUVChannels > 0 ? 0 : INDEX_NONE;
+        }
+    }
+
+    if (MeshUVChannelComboBox.IsValid())
+    {
+        MeshUVChannelComboBox->RefreshOptions();
+        TSharedPtr<int32> SelectedItem;
+        for (const TSharedPtr<int32>& Item : MeshUVChannelOptions)
+        {
+            if (Item.IsValid() && *Item == SelectedMeshUVChannelIndex)
+            {
+                SelectedItem = Item;
+                break;
+            }
+        }
+        MeshUVChannelComboBox->SetSelectedItem(SelectedItem);
+    }
+}
+
+int32 SWetWrinkleEditorPanel::GetWrinkleUVViewChannelIndex() const
+{
+    const UWetClothingAsset* Asset = WetClothingAsset.Get();
+    const USkeletalMesh* TargetMesh = Asset != nullptr ? Asset->TargetMesh.Get() : nullptr;
+    const int32 NumUVChannels = FWetClothingAssetMeshAnalyzer::GetNumUVChannels(TargetMesh, 0);
+
+    if (SelectedMeshUVChannelIndex >= 0 && SelectedMeshUVChannelIndex < NumUVChannels)
+    {
+        return SelectedMeshUVChannelIndex;
+    }
+
+    const int32 WrinkleUVChannelIndex = Asset != nullptr ? Asset->WrinkleData.WrinkleUVChannelIndex : INDEX_NONE;
+    return WrinkleUVChannelIndex >= 0 && WrinkleUVChannelIndex < NumUVChannels ? WrinkleUVChannelIndex : INDEX_NONE;
+}
+
+int32 SWetWrinkleEditorPanel::GetProtectedBaseUVChannelCount() const
+{
+    const UWetClothingAsset* Asset = WetClothingAsset.Get();
+    const USkeletalMesh* TargetMesh = Asset != nullptr ? Asset->TargetMesh.Get() : nullptr;
+    const int32 NumUVChannels = FWetClothingAssetMeshAnalyzer::GetNumUVChannels(TargetMesh, 0);
+    if (Asset == nullptr || TargetMesh == nullptr)
+    {
+        return NumUVChannels;
+    }
+
+#if WITH_EDITORONLY_DATA
+    if (Asset->WrinkleData.OriginalUVChannelCount != INDEX_NONE)
+    {
+        return FMath::Clamp(Asset->WrinkleData.OriginalUVChannelCount, 0, NumUVChannels);
+    }
+#endif
+
+    int32 FirstKnownGeneratedChannel = TNumericLimits<int32>::Max();
+    for (const FWetWrinkleGeneratedUVSlot& GeneratedSlot : Asset->WrinkleData.GeneratedWrinkleUVSlots)
+    {
+        if (GeneratedSlot.UVChannelIndex >= 0)
+        {
+            FirstKnownGeneratedChannel = FMath::Min(FirstKnownGeneratedChannel, GeneratedSlot.UVChannelIndex);
+        }
+    }
+
+#if WITH_EDITORONLY_DATA
+    if (Asset->WrinkleData.bHasGeneratedWrinkleUV && Asset->WrinkleData.WrinkleUVChannelIndex >= 0)
+    {
+        FirstKnownGeneratedChannel = FMath::Min(FirstKnownGeneratedChannel, Asset->WrinkleData.WrinkleUVChannelIndex);
+    }
+#endif
+
+    return FirstKnownGeneratedChannel != TNumericLimits<int32>::Max()
+               ? FMath::Clamp(FirstKnownGeneratedChannel, 0, NumUVChannels)
+               : NumUVChannels;
+}
+
+bool SWetWrinkleEditorPanel::IsUVChannelDeleteAllowed(int32 UVChannelIndex) const
+{
+    const UWetClothingAsset* Asset = WetClothingAsset.Get();
+    const USkeletalMesh* TargetMesh = Asset != nullptr ? Asset->TargetMesh.Get() : nullptr;
+    const int32 NumUVChannels = FWetClothingAssetMeshAnalyzer::GetNumUVChannels(TargetMesh, 0);
+    return UVChannelIndex >= 0 &&
+           UVChannelIndex < NumUVChannels &&
+           UVChannelIndex >= GetProtectedBaseUVChannelCount();
+}
+
+TSharedRef<SWidget> SWetWrinkleEditorPanel::BuildWrinkleUVViewSection()
+{
+    return SNew(SBorder)
+        .Padding(8.0f)
+        .BorderImage(FAppStyle::Get().GetBrush(TEXT("ToolPanel.GroupBorder")))
+            [SNew(SVerticalBox)
+
+             + SVerticalBox::Slot()
+                   .AutoHeight()
+                   .Padding(0.0f, 0.0f, 0.0f, 4.0f)
+                       [FWetClothingEditorCommonWidgets::BuildSectionHeader(
+                           LOCTEXT("WrinkleUVViewLabel", "Wrinkle UV View"),
+                           TAttribute<FText>::Create(TAttribute<FText>::FGetter::CreateSP(this, &SWetWrinkleEditorPanel::GetSelectedMeshUVChannelText)))]
+
+             + SVerticalBox::Slot()
+                   .AutoHeight()
+                   .Padding(0.0f, 0.0f, 0.0f, 6.0f)
+                       [SNew(SSeparator)
+                            .Orientation(Orient_Horizontal)]
+
+             + SVerticalBox::Slot()
+                   .FillHeight(1.0f)
+                       [SAssignNew(WrinkleUVView, SWetClothingAssetUVView)]];
+}
+
+void SWetWrinkleEditorPanel::RefreshWrinkleUVView()
+{
+    if (!WrinkleUVView.IsValid())
+    {
+        return;
+    }
+
+    const UWetClothingAsset* Asset = WetClothingAsset.Get();
+    const USkeletalMesh* TargetMesh = Asset != nullptr ? Asset->TargetMesh.Get() : nullptr;
+    const int32 MaterialSlotIndex = BrushSettings.MaterialSlotIndex;
+    const int32 UVChannelIndex = GetWrinkleUVViewChannelIndex();
+    const int32 NumUVChannels = FWetClothingAssetMeshAnalyzer::GetNumUVChannels(TargetMesh, 0);
+    const bool bNeedsIslandRebuild = CachedWrinkleUVViewChannelIndex != UVChannelIndex ||
+                                     CachedWrinkleUVViewMaterialSlotIndex != MaterialSlotIndex ||
+                                     WrinkleUVIslandItems.Num() == 0;
+
+    if (bNeedsIslandRebuild)
+    {
+        WrinkleUVIslandItems.Reset();
+        CachedWrinkleUVViewChannelIndex = UVChannelIndex;
+        CachedWrinkleUVViewMaterialSlotIndex = MaterialSlotIndex;
+
+        if (TargetMesh != nullptr &&
+            MaterialSlotIndex != INDEX_NONE &&
+            UVChannelIndex >= 0 &&
+            UVChannelIndex < NumUVChannels)
+        {
+            TArray<FWetClothingAssetUVIsland> BuiltIslands;
+            if (FWetClothingAssetMeshAnalyzer::BuildMaterialSlotUVIslands(TargetMesh, 0, UVChannelIndex, MaterialSlotIndex, BuiltIslands, nullptr))
+            {
+                int32 NextUVIslandID = 0;
+                for (FWetClothingAssetUVIsland& Island : BuiltIslands)
+                {
+                    Island.UVIslandID = NextUVIslandID++;
+                    for (FWetClothingAssetUVTriangle& Triangle : Island.UVTriangles)
+                    {
+                        Triangle.UVIslandID = Island.UVIslandID;
+                    }
+                    WrinkleUVIslandItems.Add(MakeShared<FWetClothingAssetUVIsland>(Island));
+                }
+            }
+        }
+
+        WrinkleUVView->SetBackgroundTexture(nullptr);
+        WrinkleUVView->SetDrawBackgroundTexture(false);
+        WrinkleUVView->SetIslands(WrinkleUVIslandItems);
+        WrinkleUVView->SetIslandColors(TMap<int32, FLinearColor>());
+        WrinkleUVView->SetHiddenUVIslandIDs(TSet<int32>());
+        WrinkleUVView->SetSelectedIslands(TSet<int32>());
+        WrinkleUVView->SetDisplayMode(EWetClothingAssetUVDisplayMode::OutlineOnly);
+    }
+
+    TArray<FWetClothingAssetUVViewCircleMarker> CircleMarkers;
+    if (Asset != nullptr && MaterialSlotIndex != INDEX_NONE && UVChannelIndex != INDEX_NONE)
+    {
+        const FLinearColor PatchFillColor(0.35f, 0.82f, 1.0f, 0.38f);
+        const FLinearColor PatchOutlineColor(0.35f, 0.82f, 1.0f, 0.95f);
+        for (const FWetWrinklePatchStroke& Stroke : Asset->WrinkleData.EditablePatchStrokes)
+        {
+            if (!Stroke.bEnabled)
+            {
+                continue;
+            }
+
+            for (const FWetWrinklePatchPlacement& Patch : Stroke.PatchPlacements)
+            {
+                if (Patch.MaterialSlotIndex != MaterialSlotIndex || Patch.UVChannelIndex != UVChannelIndex)
+                {
+                    continue;
+                }
+
+                FWetClothingAssetUVViewCircleMarker Marker;
+                Marker.CenterUV = Patch.PositionUV;
+                Marker.RadiusUV = FMath::Max(Patch.BrushRadiusUV * static_cast<float>(FMath::Max(Patch.Scale.X, Patch.Scale.Y)), 0.001f);
+                Marker.FillColor = PatchFillColor;
+                Marker.OutlineColor = PatchOutlineColor;
+                Marker.OutlineThickness = 1.0f;
+                CircleMarkers.Add(Marker);
+            }
+        }
+    }
+
+    if (BrushSettings.bShowPreview &&
+        CurrentHit.bHit &&
+        CurrentHit.MaterialSlotIndex == MaterialSlotIndex &&
+        CurrentHit.UVChannelIndex == UVChannelIndex)
+    {
+        FWetClothingAssetUVViewCircleMarker Marker;
+        Marker.CenterUV = CurrentHit.UV;
+        Marker.RadiusUV = FMath::Max(BrushSettings.BrushRadiusUV, 0.001f);
+        Marker.FillColor = FLinearColor(1.0f, 0.55f, 0.08f, 0.45f);
+        Marker.OutlineColor = FLinearColor(1.0f, 0.55f, 0.08f, 1.0f);
+        Marker.OutlineThickness = 1.4f;
+        CircleMarkers.Add(Marker);
+    }
+
+    WrinkleUVView->SetCircleMarkers(CircleMarkers);
+}
+
 void SWetWrinkleEditorPanel::RefreshBrushPresetOptions()
 {
     BrushPresetOptions.Reset();
@@ -704,46 +1189,223 @@ void SWetWrinkleEditorPanel::RefreshBrushPresetOptions()
     }
 }
 
-FText SWetWrinkleEditorPanel::GetWrinkleUVChannelText() const
+FText SWetWrinkleEditorPanel::GetSelectedMeshUVChannelText() const
 {
-    const int32 UVChannelIndex = FMath::Max(0, BrushSettings.UVChannelIndex);
-    return FText::Format(
-        LOCTEXT("WrinkleUVChannelGeneratedText", "UV Channel {0} - generated wrinkle map UV"),
-        FText::AsNumber(UVChannelIndex));
+    if (SelectedMeshUVChannelIndex == INDEX_NONE)
+    {
+        return LOCTEXT("NoMeshUVChannelSelected", "No UV Channel");
+    }
+
+    return GetMeshUVChannelDisplayText(SelectedMeshUVChannelIndex);
 }
 
-FReply SWetWrinkleEditorPanel::HandleAutoGenerateWrinkleUVClicked()
+FText SWetWrinkleEditorPanel::GetMeshUVChannelDisplayText(int32 UVChannelIndex) const
 {
-    UWetClothingAsset* Asset = WetClothingAsset.Get();
-    if (Asset == nullptr)
+    const UWetClothingAsset* Asset = WetClothingAsset.Get();
+    const USkeletalMesh* TargetMesh = Asset != nullptr ? Asset->TargetMesh.Get() : nullptr;
+    const int32 NumUVChannels = FWetClothingAssetMeshAnalyzer::GetNumUVChannels(TargetMesh, 0);
+    if (UVChannelIndex < 0 || UVChannelIndex >= NumUVChannels)
+    {
+        return LOCTEXT("InvalidMeshUVChannel", "Invalid UV Channel");
+    }
+
+    const bool bProtectedOriginal = UVChannelIndex < GetProtectedBaseUVChannelCount();
+    bool bKnownDWCGenerated = false;
+    if (Asset != nullptr)
+    {
+        bKnownDWCGenerated = Asset->WrinkleData.GeneratedWrinkleUVSlots.ContainsByPredicate(
+            [UVChannelIndex](const FWetWrinkleGeneratedUVSlot& Candidate)
+            {
+                return Candidate.UVChannelIndex == UVChannelIndex;
+            });
+#if WITH_EDITORONLY_DATA
+        bKnownDWCGenerated = bKnownDWCGenerated ||
+                             (Asset->WrinkleData.bHasGeneratedWrinkleUV && Asset->WrinkleData.WrinkleUVChannelIndex == UVChannelIndex);
+#endif
+    }
+
+    if (bProtectedOriginal)
+    {
+        return FText::Format(LOCTEXT("OriginalMeshUVChannelLabel", "UV {0} (Original / Protected)"), FText::AsNumber(UVChannelIndex));
+    }
+
+    if (bKnownDWCGenerated)
+    {
+        return FText::Format(LOCTEXT("GeneratedMeshUVChannelLabel", "UV {0} (DWC Generated)"), FText::AsNumber(UVChannelIndex));
+    }
+
+    return FText::Format(LOCTEXT("ExtraMeshUVChannelLabel", "UV {0} (Extra / Deletable)"), FText::AsNumber(UVChannelIndex));
+}
+
+TSharedRef<SWidget> SWetWrinkleEditorPanel::GenerateMeshUVChannelComboRow(TSharedPtr<int32> Item) const
+{
+    const int32 UVChannelIndex = Item.IsValid() ? *Item : INDEX_NONE;
+    return SNew(STextBlock)
+        .Text(GetMeshUVChannelDisplayText(UVChannelIndex));
+}
+
+void SWetWrinkleEditorPanel::HandleMeshUVChannelComboChanged(TSharedPtr<int32> Item, ESelectInfo::Type SelectInfo)
+{
+    if (!Item.IsValid())
+    {
+        return;
+    }
+
+    SelectedMeshUVChannelIndex = *Item;
+    InvalidateWrinkleUVViewCache();
+    RefreshWrinkleUVView();
+}
+
+bool SWetWrinkleEditorPanel::IsDeleteMeshUVChannelEnabled() const
+{
+    return IsUVChannelDeleteAllowed(SelectedMeshUVChannelIndex);
+}
+
+FReply SWetWrinkleEditorPanel::HandleDeleteMeshUVChannelClicked()
+{
+    if (!IsUVChannelDeleteAllowed(SelectedMeshUVChannelIndex))
+    {
+        FMessageDialog::Open(
+            EAppMsgType::Ok,
+            LOCTEXT("DeleteMeshUVChannelProtected", "This UV channel belongs to the original mesh data or is not valid, so it cannot be deleted from the wrinkle editor."));
+        return FReply::Handled();
+    }
+
+    const EAppReturnType::Type ConfirmResult = FMessageDialog::Open(
+        EAppMsgType::YesNo,
+        FText::Format(
+            LOCTEXT(
+                "DeleteMeshUVChannelConfirm",
+                "Delete UV Channel {0}?\n\nThis will remove wrinkle patches and baked wrinkle map records that use this channel. Higher UV channel indices will shift down by one."),
+            FText::AsNumber(SelectedMeshUVChannelIndex)));
+    if (ConfirmResult != EAppReturnType::Yes)
     {
         return FReply::Handled();
     }
 
-    const USkeletalMesh* TargetMesh = Asset->TargetMesh.Get();
-    const int32 NumUVChannels = FWetClothingAssetMeshAnalyzer::GetNumUVChannels(TargetMesh, 0);
-    const int32 PreferredUVChannelIndex = NumUVChannels > 2 ? 2 : FMath::Max(0, NumUVChannels - 1);
-
-    Asset->Modify();
-    Asset->WrinkleData.WrinkleUVChannelIndex = PreferredUVChannelIndex;
-    Asset->MarkPackageDirty();
-
-    BrushSettings.UVChannelIndex = PreferredUVChannelIndex;
-    CurrentHit = FWetWrinkleSurfaceHit();
-    PushBrushSettingsToViewport();
-    RefreshStrokeOverlay();
-    RefreshPartMapItems();
-
-    if (DetailsView.IsValid())
+    const FScopedTransaction Transaction(LOCTEXT("DeleteMeshUVChannelTransaction", "Delete DWC Generated UV Channel"));
+    const int32 DeletedChannelIndex = SelectedMeshUVChannelIndex;
+    FWetWrinkleUVChannelGenerationResult Result = FWetWrinkleUVChannelGenerator::DeleteUVChannelForAsset(WetClothingAsset.Get(), 0, DeletedChannelIndex);
+    if (!Result.bSucceeded)
     {
-        DetailsView->ForceRefresh();
+        FMessageDialog::Open(EAppMsgType::Ok, FText::FromString(Result.Message));
+        return FReply::Handled();
     }
 
+    if (BrushSettings.UVChannelIndex == DeletedChannelIndex)
+    {
+        BrushSettings.UVChannelIndex = INDEX_NONE;
+    }
+    else if (BrushSettings.UVChannelIndex > DeletedChannelIndex)
+    {
+        --BrushSettings.UVChannelIndex;
+    }
+
+    CurrentHit = FWetWrinkleSurfaceHit();
+    bHasLastStamp = false;
+    LastStampUVChannelIndex = INDEX_NONE;
+    SelectedMeshUVChannelIndex = BrushSettings.UVChannelIndex != INDEX_NONE ? BrushSettings.UVChannelIndex : FMath::Max(0, DeletedChannelIndex - 1);
+
+    RefreshUVChannelOptions();
+    InvalidateWrinkleUVViewCache();
+    RefreshStrokeList();
+    RefreshStrokeOverlay();
+    PushBrushSettingsToViewport();
+    RefreshWrinkleUVView();
+    MarkAssetEdited();
+
+    FMessageDialog::Open(EAppMsgType::Ok, FText::FromString(Result.Message));
+    return FReply::Handled();
+}
+
+FText SWetWrinkleEditorPanel::GetWrinkleUVChannelText() const
+{
+    const UWetClothingAsset* Asset = WetClothingAsset.Get();
+    const USkeletalMesh* TargetMesh = Asset != nullptr ? Asset->TargetMesh.Get() : nullptr;
+    const int32 MaterialSlotIndex = BrushSettings.MaterialSlotIndex;
+    const int32 UVChannelIndex = Asset != nullptr ? Asset->WrinkleData.WrinkleUVChannelIndex : INDEX_NONE;
+
+    if (TargetMesh == nullptr)
+    {
+        return LOCTEXT("WrinkleUVNoTargetMeshText", "Not generated. Assign a Target Mesh first.");
+    }
+
+    if (MaterialSlotIndex == INDEX_NONE)
+    {
+        return LOCTEXT(
+            "WrinkleUVNoSelectedSlotText",
+            "Select a wettable material slot. Wrinkle UVs are generated lazily per selected slot, not for the whole mesh.");
+    }
+
+    if (!FWetClothingEditorCommonWidgets::IsMaterialSlotWettable(Asset, MaterialSlotIndex))
+    {
+        return FText::Format(
+            LOCTEXT("WrinkleUVSlotNotWettableText", "Slot {0} is not wettable. Enable wettable for this slot to generate wrinkle UVs."),
+            FText::AsNumber(MaterialSlotIndex));
+    }
+
+    if (UVChannelIndex == INDEX_NONE)
+    {
+        return FText::Format(
+            LOCTEXT("WrinkleUVChannelNotGeneratedText", "Slot {0}: not generated yet. It will be generated when this slot is selected."),
+            FText::AsNumber(MaterialSlotIndex));
+    }
+
+    const int32 NumUVChannels = FWetClothingAssetMeshAnalyzer::GetNumUVChannels(TargetMesh, 0);
+    if (UVChannelIndex < 0 || NumUVChannels <= UVChannelIndex)
+    {
+        return FText::Format(
+            LOCTEXT("WrinkleUVChannelMissingText", "Slot {0}: UV Channel {1} is recorded as wrinkle UV, but missing on the target mesh."),
+            FText::AsNumber(MaterialSlotIndex),
+            FText::AsNumber(UVChannelIndex));
+    }
+
+    if (!HasGeneratedWrinkleUVForMaterialSlot(MaterialSlotIndex))
+    {
+        return FText::Format(
+            LOCTEXT("WrinkleUVSlotPendingText", "Slot {0}: pending lazy generation in wrinkle UV Channel {1}."),
+            FText::AsNumber(MaterialSlotIndex),
+            FText::AsNumber(UVChannelIndex));
+    }
+
+    return FText::Format(
+        LOCTEXT(
+            "WrinkleUVChannelGeneratedText",
+            "Slot {0}: UV Channel {1}. Only this material slot is shown/generated in the Wrinkle UV View."),
+        FText::AsNumber(MaterialSlotIndex),
+        FText::AsNumber(UVChannelIndex));
+}
+
+FReply SWetWrinkleEditorPanel::HandleGenerateWrinkleUVChannelClicked()
+{
+    const int32 MaterialSlotIndex = BrushSettings.MaterialSlotIndex;
+    if (MaterialSlotIndex == INDEX_NONE)
+    {
+        FMessageDialog::Open(EAppMsgType::Ok, LOCTEXT("GenerateWrinkleUVNoSelectedSlot", "Select a material slot before generating wrinkle UVs."));
+        return FReply::Handled();
+    }
+
+    const bool bGenerated = EnsureWrinkleUVChannelForMaterialSlot(MaterialSlotIndex, true);
+    if (bGenerated)
+    {
+        MarkAssetEdited();
+        RefreshUVChannelOptions();
+        RefreshPartMapItems();
+        RefreshStrokeOverlay();
+        PushBrushSettingsToViewport();
+        RefreshWrinkleUVView();
+    }
+
+    return FReply::Handled();
+}
+
+FReply SWetWrinkleEditorPanel::HandleAutoGenerateClicked()
+{
     FMessageDialog::Open(
         EAppMsgType::Ok,
-        FText::Format(
-            LOCTEXT("WrinkleUVChannelGeneratedMessage", "Wrinkle UV Channel {0} is now selected for generated wrinkle maps."),
-            FText::AsNumber(PreferredUVChannelIndex)));
+        LOCTEXT(
+            "WrinkleAutoGenerateNotImplementedMessage",
+            "Automatic wrinkle texture generation is not implemented yet. This button will generate wrinkle texture maps from the current patch data."));
 
     return FReply::Handled();
 }
@@ -826,9 +1488,12 @@ void SWetWrinkleEditorPanel::HandleMaterialSlotComboChanged(TSharedPtr<int32> It
 {
     BrushSettings.MaterialSlotIndex = Item.IsValid() && *Item >= 0 ? *Item : INDEX_NONE;
     CurrentHit = FWetWrinkleSurfaceHit();
+    EnsureWrinkleUVChannelForMaterialSlot(BrushSettings.MaterialSlotIndex, false);
+    RefreshUVChannelOptions();
     PushBrushSettingsToViewport();
     RefreshStrokeOverlay();
     RefreshPartMapItems();
+    RefreshWrinkleUVView();
 }
 
 
@@ -849,6 +1514,8 @@ void SWetWrinkleEditorPanel::HandleMaterialSlotSelectionChanged(FMaterialSlotIte
 {
     BrushSettings.MaterialSlotIndex = Item.IsValid() ? Item->SlotIndex : INDEX_NONE;
     CurrentHit = FWetWrinkleSurfaceHit();
+    EnsureWrinkleUVChannelForMaterialSlot(BrushSettings.MaterialSlotIndex, false);
+    RefreshUVChannelOptions();
     if (MaterialSlotComboBox.IsValid())
     {
         MaterialSlotComboBox->SetSelectedItem(FindMaterialSlotOption(BrushSettings.MaterialSlotIndex));
@@ -856,6 +1523,7 @@ void SWetWrinkleEditorPanel::HandleMaterialSlotSelectionChanged(FMaterialSlotIte
     PushBrushSettingsToViewport();
     RefreshStrokeOverlay();
     RefreshPartMapItems();
+    RefreshWrinkleUVView();
 }
 
 FReply SWetWrinkleEditorPanel::HandleWettableMaterialSlotClicked(int32 MaterialSlotIndex)
@@ -868,6 +1536,28 @@ FReply SWetWrinkleEditorPanel::HandleWettableMaterialSlotClicked(int32 MaterialS
 
     const bool bNewWettable = !FWetClothingEditorCommonWidgets::IsMaterialSlotWettable(Asset, MaterialSlotIndex);
     FWetClothingEditorCommonWidgets::SetMaterialSlotWettable(Asset, MaterialSlotIndex, bNewWettable);
+
+    if (bNewWettable)
+    {
+        BrushSettings.MaterialSlotIndex = MaterialSlotIndex;
+        CurrentHit = FWetWrinkleSurfaceHit();
+        EnsureWrinkleUVChannelForMaterialSlot(MaterialSlotIndex, true);
+        PushBrushSettingsToViewport();
+        RefreshUVChannelOptions();
+        RefreshPartMapItems();
+        RefreshStrokeOverlay();
+        RefreshWrinkleUVView();
+    }
+    else if (BrushSettings.MaterialSlotIndex == MaterialSlotIndex)
+    {
+        BrushSettings.UVChannelIndex = INDEX_NONE;
+        CurrentHit = FWetWrinkleSurfaceHit();
+        InvalidateWrinkleUVViewCache();
+        PushBrushSettingsToViewport();
+        RefreshStrokeOverlay();
+        RefreshWrinkleUVView();
+    }
+
     RefreshMaterialSlotOptions();
     return FReply::Handled();
 }
@@ -1147,7 +1837,7 @@ FReply SWetWrinkleEditorPanel::HandleDeleteStrokeClicked(FStrokeListItemPtr Item
 
 void SWetWrinkleEditorPanel::HandleUVChannelChanged(int32 NewValue)
 {
-    const int32 NewUVChannelIndex = FMath::Max(0, NewValue);
+    const int32 NewUVChannelIndex = NewValue;
     BrushSettings.UVChannelIndex = NewUVChannelIndex;
     if (UWetClothingAsset* Asset = WetClothingAsset.Get())
     {
@@ -1156,14 +1846,17 @@ void SWetWrinkleEditorPanel::HandleUVChannelChanged(int32 NewValue)
         MarkAssetEdited();
     }
     CurrentHit = FWetWrinkleSurfaceHit();
+    InvalidateWrinkleUVViewCache();
     PushBrushSettingsToViewport();
     RefreshPartMapItems();
+    RefreshWrinkleUVView();
 }
 
 void SWetWrinkleEditorPanel::HandleMaterialSlotChanged(int32 NewValue)
 {
     BrushSettings.MaterialSlotIndex = NewValue < 0 ? INDEX_NONE : NewValue;
     CurrentHit = FWetWrinkleSurfaceHit();
+    EnsureWrinkleUVChannelForMaterialSlot(BrushSettings.MaterialSlotIndex, true);
     if (MaterialSlotComboBox.IsValid())
     {
         MaterialSlotComboBox->SetSelectedItem(FindMaterialSlotOption(BrushSettings.MaterialSlotIndex));
@@ -1171,11 +1864,66 @@ void SWetWrinkleEditorPanel::HandleMaterialSlotChanged(int32 NewValue)
     PushBrushSettingsToViewport();
     RefreshStrokeOverlay();
     RefreshPartMapItems();
+    RefreshWrinkleUVView();
 }
 
 float SWetWrinkleEditorPanel::GetBrushSizeCm() const
 {
     return SizeCm;
+}
+
+FText SWetWrinkleEditorPanel::GetBrushSizeDisplayText() const
+{
+    return FormatWetWrinkleBrushSizeCm(SizeCm);
+}
+
+TSharedRef<SWidget> SWetWrinkleEditorPanel::BuildBrushSizeMenu()
+{
+    static constexpr float BrushSizePresetsCm[] = {
+        0.7f, 1.0f, 1.5f, 2.0f, 2.5f, 3.0f, 4.0f, 5.0f,
+        6.0f, 7.0f, 8.0f, 10.0f, 12.0f, 15.0f, 17.0f, 20.0f,
+        25.0f, 30.0f, 40.0f, 50.0f, 60.0f, 70.0f, 80.0f, 100.0f
+    };
+
+    constexpr int32 ColumnCount = 8;
+    TSharedRef<SUniformGridPanel> Grid = SNew(SUniformGridPanel)
+        .SlotPadding(FMargin(2.0f, 2.0f));
+
+    for (int32 PresetIndex = 0; PresetIndex < UE_ARRAY_COUNT(BrushSizePresetsCm); ++PresetIndex)
+    {
+        const float PresetSizeCm = BrushSizePresetsCm[PresetIndex];
+        const int32 Column = PresetIndex % ColumnCount;
+        const int32 Row = PresetIndex / ColumnCount;
+        const int32 DotFontSize = FMath::RoundToInt(8.0f + FMath::Sqrt(PresetSizeCm / 100.0f) * 18.0f);
+
+        Grid->AddSlot(Column, Row)
+            [SNew(SButton)
+                 .ContentPadding(FMargin(3.0f, 2.0f))
+                 .OnClicked(this, &SWetWrinkleEditorPanel::HandleBrushSizePresetClicked, PresetSizeCm)
+                     [SNew(SVerticalBox)
+
+                      + SVerticalBox::Slot()
+                            .AutoHeight()
+                            .HAlign(HAlign_Center)
+                                [SNew(SBox)
+                                     .HeightOverride(24.0f)
+                                     .VAlign(VAlign_Center)
+                                         [SNew(STextBlock)
+                                              .Text(FText::FromString(TEXT("\u25CF")))
+                                              .Font(FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), DotFontSize))
+                                              .ColorAndOpacity(FSlateColor(FLinearColor::White))]]
+
+                      + SVerticalBox::Slot()
+                            .AutoHeight()
+                            .HAlign(HAlign_Center)
+                                [SNew(STextBlock)
+                                     .Text(FormatWetWrinkleBrushSizeCm(PresetSizeCm))]]];
+    }
+
+    return SNew(SBorder)
+        .Padding(4.0f)
+        .BorderImage(FAppStyle::Get().GetBrush(TEXT("Menu.Background")))
+            [Grid];
 }
 
 void SWetWrinkleEditorPanel::HandleBrushRadiusChanged(float NewValue)
@@ -1184,11 +1932,23 @@ void SWetWrinkleEditorPanel::HandleBrushRadiusChanged(float NewValue)
     SizeUV = FMath::Clamp(SizeCm * WetWrinkleUVPerCm, 0.001f, 0.5f);
     BrushSettings.BrushRadiusUV = SizeUV;
     PushBrushSettingsToViewport();
+    RefreshWrinkleUVView();
+}
+
+FReply SWetWrinkleEditorPanel::HandleBrushSizePresetClicked(float NewValue)
+{
+    HandleBrushRadiusChanged(NewValue);
+    if (BrushSizeComboButton.IsValid())
+    {
+        BrushSizeComboButton->SetIsOpen(false);
+    }
+
+    return FReply::Handled();
 }
 
 void SWetWrinkleEditorPanel::HandleStrengthChanged(float NewValue)
 {
-    BrushSettings.Strength = FMath::Clamp(NewValue / 100.0f, 0.0f, 1.0f);
+    BrushSettings.Strength = FMath::Clamp(NewValue, 0.0f, 4.0f);
     PushBrushSettingsToViewport();
 }
 
@@ -1208,6 +1968,7 @@ void SWetWrinkleEditorPanel::HandlePreviewToggleChanged(ECheckBoxState NewState)
 {
     BrushSettings.bShowPreview = NewState == ECheckBoxState::Checked;
     PushBrushSettingsToViewport();
+    RefreshWrinkleUVView();
 }
 
 ECheckBoxState SWetWrinkleEditorPanel::GetPreviewToggleState() const
@@ -1369,6 +2130,104 @@ TSharedPtr<FWetWrinkleBrushPresetOption> SWetWrinkleEditorPanel::FindBrushPreset
     }
 
     return nullptr;
+}
+
+void SWetWrinkleEditorPanel::HandleTextureUVHovered(const FVector2D& UV)
+{
+    if (!PreviewViewport.IsValid())
+    {
+        return;
+    }
+
+    const int32 PreviewMaterialSlotIndex = CurrentHit.bHit ? CurrentHit.MaterialSlotIndex : BrushSettings.MaterialSlotIndex;
+    const int32 PreviewUVChannelIndex = CurrentHit.bHit ? CurrentHit.UVChannelIndex : BrushSettings.UVChannelIndex;
+    if (PreviewMaterialSlotIndex == INDEX_NONE)
+    {
+        return;
+    }
+
+    FVector2D TiledUV = UV;
+    if (CurrentHit.bHit &&
+        CurrentHit.MaterialSlotIndex == PreviewMaterialSlotIndex &&
+        CurrentHit.UVChannelIndex == PreviewUVChannelIndex)
+    {
+        TiledUV.X += FMath::FloorToFloat(CurrentHit.UV.X);
+        TiledUV.Y += FMath::FloorToFloat(CurrentHit.UV.Y);
+    }
+
+    FWetWrinkleSurfaceHit SurfaceHit;
+    if (PreviewViewport->TryBuildSurfaceHitAtUV(PreviewMaterialSlotIndex, PreviewUVChannelIndex, TiledUV, SurfaceHit))
+    {
+        CurrentHit = SurfaceHit;
+        PreviewViewport->PreviewBrushAtUV(PreviewMaterialSlotIndex, PreviewUVChannelIndex, TiledUV);
+        RefreshWrinkleUVView();
+        return;
+    }
+
+    PreviewViewport->ClearExternalBrushPreview();
+    CurrentHit = FWetWrinkleSurfaceHit();
+    RefreshWrinkleUVView();
+}
+
+void SWetWrinkleEditorPanel::HandleTextureUVHoverEnded()
+{
+    if (PreviewViewport.IsValid())
+    {
+        PreviewViewport->ClearExternalBrushPreview();
+    }
+    CurrentHit = FWetWrinkleSurfaceHit();
+    RefreshWrinkleUVView();
+}
+
+void SWetWrinkleEditorPanel::HandleTexturePaintStrokeStarted(const FVector2D& UV)
+{
+    FWetWrinkleSurfaceHit SurfaceHit;
+    if (TryBuildTextureSurfaceHit(UV, SurfaceHit))
+    {
+        HandleSurfaceHitChanged(SurfaceHit);
+        HandlePaintStrokeStarted(SurfaceHit);
+    }
+}
+
+void SWetWrinkleEditorPanel::HandleTexturePaintStampRequested(const FVector2D& UV)
+{
+    FWetWrinkleSurfaceHit SurfaceHit;
+    if (TryBuildTextureSurfaceHit(UV, SurfaceHit))
+    {
+        HandleSurfaceHitChanged(SurfaceHit);
+        HandlePaintStampRequested(SurfaceHit);
+    }
+}
+
+void SWetWrinkleEditorPanel::HandleTexturePaintStrokeEnded()
+{
+    HandlePaintStrokeEnded();
+}
+
+bool SWetWrinkleEditorPanel::TryBuildTextureSurfaceHit(const FVector2D& UV, FWetWrinkleSurfaceHit& OutSurfaceHit) const
+{
+    if (!PreviewViewport.IsValid())
+    {
+        return false;
+    }
+
+    const int32 PreviewMaterialSlotIndex = CurrentHit.bHit ? CurrentHit.MaterialSlotIndex : BrushSettings.MaterialSlotIndex;
+    const int32 PreviewUVChannelIndex = CurrentHit.bHit ? CurrentHit.UVChannelIndex : BrushSettings.UVChannelIndex;
+    if (PreviewMaterialSlotIndex == INDEX_NONE)
+    {
+        return false;
+    }
+
+    FVector2D TiledUV = UV;
+    if (CurrentHit.bHit &&
+        CurrentHit.MaterialSlotIndex == PreviewMaterialSlotIndex &&
+        CurrentHit.UVChannelIndex == PreviewUVChannelIndex)
+    {
+        TiledUV.X += FMath::FloorToFloat(CurrentHit.UV.X);
+        TiledUV.Y += FMath::FloorToFloat(CurrentHit.UV.Y);
+    }
+
+    return PreviewViewport->TryBuildSurfaceHitAtUV(PreviewMaterialSlotIndex, PreviewUVChannelIndex, TiledUV, OutSurfaceHit);
 }
 
 bool SWetWrinkleEditorPanel::ShouldAddStampForHit(const FWetWrinkleSurfaceHit& SurfaceHit) const

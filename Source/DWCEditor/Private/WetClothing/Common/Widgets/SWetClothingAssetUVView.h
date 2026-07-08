@@ -31,6 +31,15 @@ enum class EWetClothingAssetUVDisplayMode : uint8
 
 DECLARE_DELEGATE_TwoParams(FOnWetClothingUVIslandSelectionChanged, const TArray<int32>& /*UVIslandIDs*/, EWetClothingAssetUVSelectionOp /*SelectionOp*/);
 
+struct FWetClothingAssetUVViewCircleMarker
+{
+    FVector2D CenterUV = FVector2D::ZeroVector;
+    float RadiusUV = 0.025f;
+    FLinearColor FillColor = FLinearColor::Transparent;
+    FLinearColor OutlineColor = FLinearColor::Transparent;
+    float OutlineThickness = 1.0f;
+};
+
 class SWetClothingAssetUVView : public SLeafWidget
 {
   public:
@@ -44,6 +53,7 @@ class SWetClothingAssetUVView : public SLeafWidget
     void                             SetSelectedIslands(const TSet<int32>& InUVIslandIDs);
     void                             SetIslandColors(const TMap<int32, FLinearColor>& InIslandColors);
     void                             SetHiddenUVIslandIDs(const TSet<int32>& InUVIslandIDs);
+    void                             SetCircleMarkers(const TArray<FWetClothingAssetUVViewCircleMarker>& InCircleMarkers);
     void                             SetBackgroundTexture(UTexture* InTexture);
     void                             SetDrawBackgroundTexture(bool bInDrawBackgroundTexture);
     void                             SetSelectionTool(EWetClothingAssetUVSelectionTool InSelectionTool);
@@ -135,6 +145,7 @@ class SWetClothingAssetUVView : public SLeafWidget
     TSet<int32>                            SelectedUVIslandIDs;
     TMap<int32, FLinearColor>              IslandColors;
     TSet<int32>                            HiddenUVIslandIDs;
+    TArray<FWetClothingAssetUVViewCircleMarker> CircleMarkers;
     FOnWetClothingUVIslandSelectionChanged OnIslandSelectionChanged;
     FSlateBrush                            BackgroundTextureBrush;
     TWeakObjectPtr<UTexture>               BackgroundTexture;

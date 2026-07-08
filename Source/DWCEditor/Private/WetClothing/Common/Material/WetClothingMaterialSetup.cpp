@@ -11,6 +11,7 @@
 #include "Materials/MaterialExpressionMaterialFunctionCall.h"
 #include "Materials/MaterialExpressionScalarParameter.h"
 #include "Materials/MaterialExpressionTextureSampleParameter2D.h"
+#include "Materials/MaterialExpressionTextureCoordinate.h"
 #include "Materials/MaterialExpressionVectorParameter.h"
 #include "Materials/MaterialFunctionInterface.h"
 #include "Materials/MaterialInstance.h"
@@ -320,6 +321,34 @@ namespace
         return CreateTextureSampleParameter(Material, ParameterName, NodePosX, NodePosY);
     }
 
+    UMaterialExpressionTextureCoordinate* FindOrCreateWrinkleTextureCoordinate(UMaterial* Material, int32 WrinkleUVChannelIndex, int32 NodePosX, int32 NodePosY)
+    {
+        if (Material == nullptr)
+        {
+            return nullptr;
+        }
+
+        const int32 SafeWrinkleUVChannelIndex = FMath::Clamp(WrinkleUVChannelIndex, 0, 7);
+        for (UMaterialExpression* Expression : Material->GetExpressions())
+        {
+            UMaterialExpressionTextureCoordinate* TextureCoordinate = Cast<UMaterialExpressionTextureCoordinate>(Expression);
+            if (TextureCoordinate != nullptr && TextureCoordinate->Desc == TEXT("DWC Wrinkle UV"))
+            {
+                TextureCoordinate->CoordinateIndex = SafeWrinkleUVChannelIndex;
+                return TextureCoordinate;
+            }
+        }
+
+        UMaterialExpressionTextureCoordinate* TextureCoordinate = Cast<UMaterialExpressionTextureCoordinate>(
+            UMaterialEditingLibrary::CreateMaterialExpression(Material, UMaterialExpressionTextureCoordinate::StaticClass(), NodePosX, NodePosY));
+        if (TextureCoordinate != nullptr)
+        {
+            TextureCoordinate->CoordinateIndex = SafeWrinkleUVChannelIndex;
+            TextureCoordinate->Desc = TEXT("DWC Wrinkle UV");
+        }
+        return TextureCoordinate;
+    }
+
     UMaterial* LoadExistingDwcMaterialForSource(const UMaterial* SourceMaterial)
     {
         if (SourceMaterial == nullptr)
@@ -487,10 +516,36 @@ namespace
         return true;
     }
 
+    bool ConnectTextureCoordinateChecked(UMaterialExpression* UVExpression, UMaterialExpressionTextureSampleParameter2D* TextureSample, TArray<FString>& FailureReasons)
+    {
+        if (UVExpression == nullptr || TextureSample == nullptr)
+        {
+            FailureReasons.Add(TEXT("Wrinkle normal map UV connection requires a TextureCoordinate node and a texture sample node."));
+            return false;
+        }
+
+        const TArray<FString> InputNames = UMaterialEditingLibrary::GetMaterialExpressionInputNames(TextureSample);
+        static const FString CandidateInputNames[] = { TEXT("UVs"), TEXT("Coordinates") };
+        for (const FString& CandidateInputName : CandidateInputNames)
+        {
+            if (InputNames.Contains(CandidateInputName) &&
+                UMaterialEditingLibrary::ConnectMaterialExpressions(UVExpression, FString(), TextureSample, CandidateInputName))
+            {
+                return true;
+            }
+        }
+
+        FailureReasons.Add(FString::Printf(
+            TEXT("Failed to connect the DWC wrinkle TextureCoordinate to DWC_WrinkleNormalMap. Available texture sample inputs: %s"),
+            *JoinPinNames(InputNames)));
+        return false;
+    }
+
     bool ConnectDwcApplyWetnessNormalGraph(
-        UMaterial*                           Material,
+        UMaterial*                               Material,
         UMaterialExpressionMaterialFunctionCall* ApplyCall,
-        TArray<FString>&                     FailureReasons)
+        int32                                    WrinkleUVChannelIndex,
+        TArray<FString>&                         FailureReasons)
     {
         if (Material == nullptr || ApplyCall == nullptr)
         {
@@ -515,6 +570,11 @@ namespace
             Material,
             TEXT("DWC_WrinkleNormalMap"),
             -900,
+            670);
+        UMaterialExpressionTextureCoordinate* WrinkleUV = FindOrCreateWrinkleTextureCoordinate(
+            Material,
+            WrinkleUVChannelIndex,
+            -1150,
             670);
         UMaterialExpressionScalarParameter* UseWrinkleNormalMap = FindOrCreateScalarParameter(
             Material,
@@ -543,6 +603,7 @@ namespace
 
         const bool bCreatedRequiredNodes = BaseNormalInput != nullptr &&
                                            WrinkleNormalMap != nullptr &&
+                                           WrinkleUV != nullptr &&
                                            UseWrinkleNormalMap != nullptr &&
                                            WrinkleStrength != nullptr &&
                                            WrinkleWetnessMin != nullptr &&
@@ -555,6 +616,7 @@ namespace
 
         bool bConnected = true;
         bConnected &= ConnectChecked(BaseNormalInput, BaseNormalOutputName, ApplyCall, TEXT("BaseNormal"), FailureReasons);
+        bConnected &= ConnectTextureCoordinateChecked(WrinkleUV, WrinkleNormalMap, FailureReasons);
         bConnected &= ConnectChecked(WrinkleNormalMap, TEXT("RGB"), ApplyCall, TEXT("WrinkleNormal"), FailureReasons);
         bConnected &= ConnectChecked(UseWrinkleNormalMap, FString(), ApplyCall, TEXT("UseWrinkleNormalMap"), FailureReasons);
         bConnected &= ConnectChecked(WrinkleStrength, FString(), ApplyCall, TEXT("WrinkleStrength"), FailureReasons);
@@ -582,6 +644,7 @@ namespace
         UMaterial*                  Material,
         UMaterialFunctionInterface* ApplyFunction,
         UMaterialFunctionInterface* DebugFunction,
+        int32                       WrinkleUVChannelIndex,
         TArray<FString>&            FailureReasons)
     {
         UMaterialExpressionMaterialFunctionCall* ApplyCall = FindFunctionCall(Material, ApplyFunction);
@@ -609,7 +672,7 @@ namespace
         {
             bConnected &= ConnectChecked(WetDarkeningStrength, FString(), ApplyCall, TEXT("WetDarkeningStrength"), FailureReasons);
         }
-        bConnected &= ConnectDwcApplyWetnessNormalGraph(Material, ApplyCall, FailureReasons);
+        bConnected &= ConnectDwcApplyWetnessNormalGraph(Material, ApplyCall, WrinkleUVChannelIndex, FailureReasons);
 
         FString ApplyBaseColorOutput;
         FString ApplyRoughnessOutput;
@@ -657,6 +720,7 @@ namespace
         UMaterial*                  Material,
         UMaterialFunctionInterface* ApplyFunction,
         UMaterialFunctionInterface* DebugFunction,
+        int32                       WrinkleUVChannelIndex,
         TArray<FString>&            FailureReasons)
     {
         FString              BaseColorOutputName;
@@ -686,7 +750,7 @@ namespace
         bConnected &= ConnectChecked(RoughnessInput, RoughnessOutputName, ApplyCall, TEXT("BaseRoughness"), FailureReasons);
         bConnected &= ConnectChecked(WetRoughness, FString(), ApplyCall, TEXT("WetRoughness"), FailureReasons);
         bConnected &= ConnectChecked(SurfaceWaterStrength, FString(), ApplyCall, TEXT("SurfaceWaterStrength"), FailureReasons);
-        bConnected &= ConnectDwcApplyWetnessNormalGraph(Material, ApplyCall, FailureReasons);
+        bConnected &= ConnectDwcApplyWetnessNormalGraph(Material, ApplyCall, WrinkleUVChannelIndex, FailureReasons);
 
         FString ApplyBaseColorOutput;
         FString ApplyRoughnessOutput;
@@ -733,7 +797,7 @@ namespace
     }
 } // namespace
 
-FWetClothingMaterialSetupResult FWetClothingMaterialSetup::DuplicateAndApplyToMaterialInterface(UMaterialInterface* MaterialInterface)
+FWetClothingMaterialSetupResult FWetClothingMaterialSetup::DuplicateAndApplyToMaterialInterface(UMaterialInterface* MaterialInterface, int32 WrinkleUVChannelIndex)
 {
     FWetClothingMaterialSetupResult Result;
 
@@ -753,23 +817,40 @@ FWetClothingMaterialSetupResult FWetClothingMaterialSetup::DuplicateAndApplyToMa
             return Result;
         }
 
+        UMaterial* ParentMaterial = const_cast<UMaterial*>(MaterialInstance->GetMaterial());
         if (IsMaterialConfiguredForDwc(MaterialInterface))
         {
+            if (ParentMaterial != nullptr)
+            {
+                FWetClothingMaterialSetupResult ParentRefreshResult = DuplicateAndApplyToMaterialInterface(ParentMaterial, WrinkleUVChannelIndex);
+                if (!ParentRefreshResult.bSucceeded)
+                {
+                    Result.Message = FString::Printf(
+                        TEXT("'%s' is already backed by a DWC material, but the parent material could not be refreshed for wrinkle UV channel %d.\n%s"),
+                        *MaterialInterface->GetName(),
+                        FMath::Max(WrinkleUVChannelIndex, 0),
+                        *ParentRefreshResult.Message);
+                    return Result;
+                }
+            }
+
             Result.bSucceeded = true;
             Result.bAlreadyConfigured = true;
             Result.ConfiguredMaterial = MaterialInterface;
-            Result.Message = FString::Printf(TEXT("'%s' is already backed by a DWC material."), *MaterialInterface->GetName());
+            Result.Message = FString::Printf(
+                TEXT("'%s' is already backed by a DWC material. Refreshed wrinkle UV channel %d on its parent material."),
+                *MaterialInterface->GetName(),
+                FMath::Max(WrinkleUVChannelIndex, 0));
             return Result;
         }
 
-        UMaterial* ParentMaterial = const_cast<UMaterial*>(MaterialInstance->GetMaterial());
         if (ParentMaterial == nullptr)
         {
             Result.Message = FString::Printf(TEXT("'%s' has no editable parent material."), *MaterialInterface->GetName());
             return Result;
         }
 
-        FWetClothingMaterialSetupResult ParentResult = DuplicateAndApplyToMaterialInterface(ParentMaterial);
+        FWetClothingMaterialSetupResult ParentResult = DuplicateAndApplyToMaterialInterface(ParentMaterial, WrinkleUVChannelIndex);
         if (!ParentResult.bSucceeded || ParentResult.ConfiguredMaterial == nullptr)
         {
             Result.Message = FString::Printf(
@@ -824,7 +905,7 @@ FWetClothingMaterialSetupResult FWetClothingMaterialSetup::DuplicateAndApplyToMa
         Material->Modify();
 
         TArray<FString>       FailureReasons;
-        const bool            bConfigured = ConfigureExistingDwcMaterial(Material, ApplyFunction, DebugFunction, FailureReasons);
+        const bool            bConfigured = ConfigureExistingDwcMaterial(Material, ApplyFunction, DebugFunction, WrinkleUVChannelIndex, FailureReasons);
         const TArray<FString> CompileErrors = bConfigured ? UMaterialEditingLibrary::RecompileMaterial(Material) : TArray<FString>();
         Material->MarkPackageDirty();
 
@@ -845,8 +926,8 @@ FWetClothingMaterialSetupResult FWetClothingMaterialSetup::DuplicateAndApplyToMa
         TArray<FString>       FailureReasons;
         const bool            bHasDwcFunctionCall = HasFunctionCall(ExistingDwcMaterial, ApplyFunction) || HasFunctionCall(ExistingDwcMaterial, DebugFunction);
         const bool            bConfigured = bHasDwcFunctionCall
-                                                ? ConfigureExistingDwcMaterial(ExistingDwcMaterial, ApplyFunction, DebugFunction, FailureReasons)
-                                                : CreateDwcMaterialGraph(ExistingDwcMaterial, ApplyFunction, DebugFunction, FailureReasons);
+                                                ? ConfigureExistingDwcMaterial(ExistingDwcMaterial, ApplyFunction, DebugFunction, WrinkleUVChannelIndex, FailureReasons)
+                                                : CreateDwcMaterialGraph(ExistingDwcMaterial, ApplyFunction, DebugFunction, WrinkleUVChannelIndex, FailureReasons);
         const TArray<FString> CompileErrors = bConfigured ? UMaterialEditingLibrary::RecompileMaterial(ExistingDwcMaterial) : TArray<FString>();
         ExistingDwcMaterial->MarkPackageDirty();
 
@@ -906,7 +987,7 @@ FWetClothingMaterialSetupResult FWetClothingMaterialSetup::DuplicateAndApplyToMa
     bConnected &= ConnectChecked(RoughnessInput, RoughnessOutputName, ApplyCall, TEXT("BaseRoughness"), FailureReasons);
     bConnected &= ConnectChecked(WetRoughness, FString(), ApplyCall, TEXT("WetRoughness"), FailureReasons);
     bConnected &= ConnectChecked(SurfaceWaterStrength, FString(), ApplyCall, TEXT("SurfaceWaterStrength"), FailureReasons);
-    bConnected &= ConnectDwcApplyWetnessNormalGraph(Material, ApplyCall, FailureReasons);
+    bConnected &= ConnectDwcApplyWetnessNormalGraph(Material, ApplyCall, WrinkleUVChannelIndex, FailureReasons);
 
     FString ApplyBaseColorOutput;
     FString ApplyRoughnessOutput;

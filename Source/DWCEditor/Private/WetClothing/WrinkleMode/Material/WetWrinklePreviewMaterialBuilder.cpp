@@ -1,6 +1,7 @@
 #include "WetWrinklePreviewMaterialBuilder.h"
 
 #include "MaterialEditingLibrary.h"
+#include "MaterialShared.h"
 #include "Materials/Material.h"
 #include "Materials/MaterialExpressionConstant3Vector.h"
 #include "Materials/MaterialExpressionCustom.h"
@@ -251,8 +252,8 @@ float3 CombinedTS = BaseTS;
 if (AccumulatedEnabled > 0.5)
 {
     float2 AccumulatedXY = Texture2DSampleLevel(AccumulatedNormalTex, AccumulatedNormalTexSampler, frac(SelectedUV), 0).rg * 2.0 - 1.0;
-    float3 AccumulatedTS = normalize(float3(AccumulatedXY, sqrt(saturate(1.0 - dot(AccumulatedXY, AccumulatedXY)))));
-    AccumulatedTS = normalize(lerp(float3(0.0, 0.0, 1.0), AccumulatedTS, saturate(AccumulatedStrength)));
+    float AccumulatedWeight = max(AccumulatedStrength, 0.0);
+    float3 AccumulatedTS = normalize(float3(AccumulatedXY * AccumulatedWeight, 1.0));
     CombinedTS = normalize(float3(CombinedTS.xy + AccumulatedTS.xy, CombinedTS.z * AccumulatedTS.z));
 }
 
@@ -260,6 +261,7 @@ if (HoverEnabled > 0.5 && HoverRadiusUV > 0.000001)
 {
     float2 SafeScale = max(abs(HoverScale.xy), float2(0.0001, 0.0001));
     float2 DeltaUV = SelectedUV - HoverCenterUV.xy;
+    DeltaUV = DeltaUV - round(DeltaUV);
     float CosRotation = cos(HoverRotation);
     float SinRotation = sin(HoverRotation);
     float2 LocalBrush = float2(
@@ -272,8 +274,12 @@ if (HoverEnabled > 0.5 && HoverRadiusUV > 0.000001)
         float EdgeFade = 1.0 - smoothstep(EdgeFadeStart, 1.0, DistanceFromCenter);
         float2 HoverUV = saturate(LocalBrush * 0.5 + 0.5);
         float2 HoverXY = Texture2DSampleLevel(HoverNormalTex, HoverNormalTexSampler, HoverUV, 0).rg * 2.0 - 1.0;
-        float3 HoverTS = normalize(float3(HoverXY, sqrt(saturate(1.0 - dot(HoverXY, HoverXY)))));
-        HoverTS = normalize(lerp(float3(0.0, 0.0, 1.0), HoverTS, saturate(HoverStrength) * EdgeFade));
+        HoverXY.y = -HoverXY.y;
+        HoverXY = float2(
+            HoverXY.x * CosRotation - HoverXY.y * SinRotation,
+            HoverXY.x * SinRotation + HoverXY.y * CosRotation);
+        float HoverWeight = max(HoverStrength, 0.0) * EdgeFade;
+        float3 HoverTS = normalize(float3(HoverXY * HoverWeight, 1.0));
         CombinedTS = normalize(float3(CombinedTS.xy + HoverTS.xy, CombinedTS.z * HoverTS.z));
     }
 }
@@ -463,6 +469,32 @@ return CombinedTS;
         TransientInstance->PostEditChange();
         return TransientInstance;
     }
+
+    TArray<FString> CompileTransientPreviewMaterial(UMaterial* Material)
+    {
+        if (Material == nullptr)
+        {
+            return { TEXT("Cannot compile a null wrinkle preview material.") };
+        }
+
+        bool bNeedsSkeletalMeshUsageRecompile = false;
+        Material->SetMaterialUsage(bNeedsSkeletalMeshUsageRecompile, MATUSAGE_SkeletalMesh);
+        Material->UpdateCachedExpressionData();
+
+        {
+            FMaterialUpdateContext UpdateContext(FMaterialUpdateContext::EOptions::SyncWithRenderingThread);
+            UpdateContext.AddMaterial(Material);
+            Material->PreEditChange(nullptr);
+            Material->PostEditChange();
+        }
+
+        if (const FMaterialResource* Resource = Material->GetMaterialResource(GMaxRHIShaderPlatform))
+        {
+            return Resource->GetCompileErrors();
+        }
+
+        return {};
+    }
 }
 
 FWetWrinklePreviewMaterialBuildResult FWetWrinklePreviewMaterialBuilder::Build(UMaterialInterface* SourceMaterial)
@@ -498,6 +530,16 @@ FWetWrinklePreviewMaterialBuildResult FWetWrinklePreviewMaterialBuilder::Build(U
 
     if (!ConnectPreviewGraph(TransientMaterial, Result.ErrorMessage))
     {
+        return Result;
+    }
+
+    const TArray<FString> CompileErrors = CompileTransientPreviewMaterial(TransientMaterial);
+    if (CompileErrors.Num() > 0)
+    {
+        Result.ErrorMessage = FString::Printf(
+            TEXT("Wrinkle preview material compilation failed for '%s':\n%s"),
+            *SourceMaterial->GetName(),
+            *FString::Join(CompileErrors, TEXT("\n")));
         return Result;
     }
 

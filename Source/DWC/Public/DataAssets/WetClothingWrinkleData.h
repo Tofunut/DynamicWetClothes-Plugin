@@ -42,8 +42,8 @@ struct DWC_API FWetWrinklePatchPlacement
     UPROPERTY(EditAnywhere, Category = "Wet Wrinkle Patch")
     FVector2D Scale = FVector2D(1.0f, 1.0f);
 
-    UPROPERTY(EditAnywhere, Category = "Wet Wrinkle Patch", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float Strength = 1.0f;
+    UPROPERTY(EditAnywhere, Category = "Wet Wrinkle Patch", meta = (ClampMin = "0.0", ClampMax = "4.0"))
+    float Strength = 2.0f;
 
     UPROPERTY(EditAnywhere, Category = "Wet Wrinkle Patch", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float Falloff = 0.5f;
@@ -135,7 +135,7 @@ struct DWC_API FWetWrinkleBakedMapSet
     int32 MaterialSlotIndex = INDEX_NONE;
 
     UPROPERTY(VisibleAnywhere, Category = "Wet Wrinkle Baked")
-    int32 UVChannelIndex = 2;
+    int32 UVChannelIndex = INDEX_NONE;
 
     UPROPERTY(VisibleAnywhere, Category = "Wet Wrinkle Baked")
     TObjectPtr<UTexture2D> BakedWrinkleNormalMap = nullptr;
@@ -157,13 +157,52 @@ struct DWC_API FWetWrinkleBakedMapSet
 };
 
 USTRUCT(BlueprintType)
+struct DWC_API FWetWrinkleGeneratedUVSlot
+{
+    GENERATED_BODY()
+
+    UPROPERTY(VisibleAnywhere, Category = "Editable|Generated UV")
+    int32 MaterialSlotIndex = INDEX_NONE;
+
+    UPROPERTY(VisibleAnywhere, Category = "Editable|Generated UV")
+    int32 UVChannelIndex = INDEX_NONE;
+
+    UPROPERTY(VisibleAnywhere, Category = "Editable|Generated UV")
+    int32 SourceUVChannelIndex = 0;
+
+    UPROPERTY(VisibleAnywhere, Category = "Editable|Generated UV")
+    int32 LODIndex = 0;
+
+#if WITH_EDITORONLY_DATA
+    UPROPERTY(VisibleAnywhere, Category = "Editable|Generated UV")
+    FGuid GeneratedUVBuildGuid;
+#endif
+};
+
+USTRUCT(BlueprintType)
 struct DWC_API FWetClothingWrinkleData
 {
     GENERATED_BODY()
 
-    // Dedicated UV channel for wet wrinkle normal/mask baking. Do not share it with overlapped base material UVs.
+    // Dedicated mesh UV channel used by wet wrinkle maps. Generation is tracked per material slot below.
     UPROPERTY(EditAnywhere, Category = "Editable")
-    int32 WrinkleUVChannelIndex = 2;
+    int32 WrinkleUVChannelIndex = INDEX_NONE;
+
+#if WITH_EDITORONLY_DATA
+    // Number of UV channels that existed before DWC started appending wrinkle UV channels.
+    // Channels below this count are treated as imported mesh data and cannot be deleted from the wrinkle editor.
+    UPROPERTY(VisibleAnywhere, Category = "Editable|Generated UV")
+    int32 OriginalUVChannelCount = INDEX_NONE;
+
+    UPROPERTY(VisibleAnywhere, Category = "Editable|Generated UV")
+    bool bHasGeneratedWrinkleUV = false;
+
+    UPROPERTY(VisibleAnywhere, Category = "Editable|Generated UV")
+    FGuid GeneratedWrinkleUVBuildGuid;
+#endif
+
+    UPROPERTY(VisibleAnywhere, Category = "Editable|Generated UV")
+    TArray<FWetWrinkleGeneratedUVSlot> GeneratedWrinkleUVSlots;
 
     UPROPERTY(EditAnywhere, Category = "Editable")
     TArray<FWetWrinklePatchStroke> EditablePatchStrokes;

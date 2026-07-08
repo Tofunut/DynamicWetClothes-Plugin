@@ -290,6 +290,12 @@ void SWetClothingAssetUVView::SetHiddenUVIslandIDs(const TSet<int32>& InUVIsland
     Invalidate(EInvalidateWidget::Paint);
 }
 
+void SWetClothingAssetUVView::SetCircleMarkers(const TArray<FWetClothingAssetUVViewCircleMarker>& InCircleMarkers)
+{
+    CircleMarkers = InCircleMarkers;
+    Invalidate(EInvalidateWidget::Paint);
+}
+
 void SWetClothingAssetUVView::SetBackgroundTexture(UTexture* InTexture)
 {
     BackgroundTexture = InTexture;
@@ -334,6 +340,7 @@ void SWetClothingAssetUVView::Clear()
     SelectedUVIslandIDs.Reset();
     IslandColors.Reset();
     HiddenUVIslandIDs.Reset();
+    CircleMarkers.Reset();
     SetBackgroundTexture(nullptr);
     ResetView();
     Invalidate(EInvalidateWidget::Paint);
@@ -380,8 +387,9 @@ int32 SWetClothingAssetUVView::OnPaint(
     const int32     TextureLayer = LayerId + 1;
     const int32     GridLayer = LayerId + 2;
     const int32     WireLayer = LayerId + 3;
-    const int32     SelectedLayer = LayerId + 4;
-    const int32     SelectionRectLayer = LayerId + 5;
+    const int32     MarkerLayer = LayerId + 4;
+    const int32     SelectedLayer = LayerId + 5;
+    const int32     SelectionRectLayer = LayerId + 6;
     const FVector2D ClampedViewOffset = ClampViewOffset(AllottedGeometry, UVBounds, ZoomAmount, ViewOffset);
     OutDrawElements.PushClip(FSlateClippingZone(AllottedGeometry));
 
@@ -550,6 +558,53 @@ int32 SWetClothingAssetUVView::OnPaint(
                     Thickness);
             }
         }
+    }
+
+
+
+    for (const FWetClothingAssetUVViewCircleMarker& Marker : CircleMarkers)
+    {
+        if (Marker.RadiusUV <= UE_SMALL_NUMBER)
+        {
+            continue;
+        }
+
+        const FVector2D CenterLocal = UVToLocal(Marker.CenterUV, AllottedGeometry, UVBounds, ZoomAmount, ClampedViewOffset);
+        const FVector2D RadiusULocal = UVToLocal(Marker.CenterUV + FVector2D(Marker.RadiusUV, 0.0f), AllottedGeometry, UVBounds, ZoomAmount, ClampedViewOffset);
+        const FVector2D RadiusVLocal = UVToLocal(Marker.CenterUV + FVector2D(0.0f, Marker.RadiusUV), AllottedGeometry, UVBounds, ZoomAmount, ClampedViewOffset);
+        const FVector2D Radii(
+            FMath::Max(FMath::Abs(RadiusULocal.X - CenterLocal.X), 1.0),
+            FMath::Max(FMath::Abs(RadiusVLocal.Y - CenterLocal.Y), 1.0));
+
+        DrawFilledEllipseScanlines(
+            OutDrawElements,
+            MarkerLayer,
+            AllottedGeometry,
+            WhiteBrush,
+            CenterLocal,
+            Radii,
+            Marker.FillColor);
+
+        TArray<FVector2D> CirclePoints;
+        constexpr int32 CircleSegmentCount = 48;
+        CirclePoints.Reserve(CircleSegmentCount + 1);
+        for (int32 SegmentIndex = 0; SegmentIndex <= CircleSegmentCount; ++SegmentIndex)
+        {
+            const float Angle = static_cast<float>(SegmentIndex) / static_cast<float>(CircleSegmentCount) * UE_TWO_PI;
+            CirclePoints.Add(FVector2D(
+                CenterLocal.X + FMath::Cos(Angle) * Radii.X,
+                CenterLocal.Y + FMath::Sin(Angle) * Radii.Y));
+        }
+
+        FSlateDrawElement::MakeLines(
+            OutDrawElements,
+            MarkerLayer + 1,
+            AllottedGeometry.ToPaintGeometry(),
+            CirclePoints,
+            ESlateDrawEffect::None,
+            Marker.OutlineColor,
+            true,
+            Marker.OutlineThickness);
     }
 
     if (bIsDraggingSelectionShape)
@@ -882,6 +937,13 @@ FBox2D SWetClothingAssetUVView::ComputeUVBounds() const
 
     Bounds += FVector2D(0.0f, 0.0f);
     Bounds += FVector2D(1.0f, 1.0f);
+
+    for (const FWetClothingAssetUVViewCircleMarker& Marker : CircleMarkers)
+    {
+        const double SafeRadius = FMath::Max(static_cast<double>(Marker.RadiusUV), 0.0);
+        Bounds += Marker.CenterUV - FVector2D(SafeRadius, SafeRadius);
+        Bounds += Marker.CenterUV + FVector2D(SafeRadius, SafeRadius);
+    }
 
     for (const FWetClothingAssetUVIsland& Island : Islands)
     {

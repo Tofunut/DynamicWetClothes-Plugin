@@ -17,6 +17,7 @@
 #include "Materials/MaterialInstance.h"
 #include "Materials/MaterialInstanceConstant.h"
 #include "Materials/MaterialInterface.h"
+#include "WetRendering/WetMaterialParameters.h"
 #include "Engine/Texture.h"
 #include "Misc/PackageName.h"
 #include "ScopedTransaction.h"
@@ -349,6 +350,31 @@ namespace
         return TextureCoordinate;
     }
 
+    const FName& GetWrinkleNormalMapParameterName()
+    {
+        return DWCWetMaterialParameters::WrinkleNormalMap();
+    }
+
+    const FName& GetUseWrinkleNormalMapParameterName()
+    {
+        return DWCWetMaterialParameters::UseWrinkleNormalMap();
+    }
+
+    const FName& GetWrinkleStrengthParameterName()
+    {
+        return DWCWetMaterialParameters::WrinkleStrength();
+    }
+
+    const FName& GetWrinkleWetnessMinParameterName()
+    {
+        return DWCWetMaterialParameters::WrinkleWetnessMin();
+    }
+
+    const FName& GetWrinkleWetnessMaxParameterName()
+    {
+        return DWCWetMaterialParameters::WrinkleWetnessMax();
+    }
+
     UMaterial* LoadExistingDwcMaterialForSource(const UMaterial* SourceMaterial)
     {
         if (SourceMaterial == nullptr)
@@ -568,7 +594,7 @@ namespace
 
         UMaterialExpressionTextureSampleParameter2D* WrinkleNormalMap = FindOrCreateTextureSampleParameter(
             Material,
-            TEXT("DWC_WrinkleNormalMap"),
+            GetWrinkleNormalMapParameterName(),
             -900,
             670);
         UMaterialExpressionTextureCoordinate* WrinkleUV = FindOrCreateWrinkleTextureCoordinate(
@@ -578,26 +604,26 @@ namespace
             670);
         UMaterialExpressionScalarParameter* UseWrinkleNormalMap = FindOrCreateScalarParameter(
             Material,
-            TEXT("DWC_UseWrinkleNormalMap"),
+            GetUseWrinkleNormalMapParameterName(),
             0.0f,
             -900,
             840);
         UMaterialExpressionScalarParameter* WrinkleStrength = FindOrCreateScalarParameter(
             Material,
-            TEXT("DWC_WrinkleStrength"),
-            1.0f,
+            GetWrinkleStrengthParameterName(),
+            DWCWetMaterialParameters::DefaultWrinkleStrength(),
             -900,
             930);
         UMaterialExpressionScalarParameter* WrinkleWetnessMin = FindOrCreateScalarParameter(
             Material,
-            TEXT("DWC_WrinkleWetnessMin"),
-            0.25f,
+            GetWrinkleWetnessMinParameterName(),
+            DWCWetMaterialParameters::DefaultWrinkleWetnessMin(),
             -900,
             1020);
         UMaterialExpressionScalarParameter* WrinkleWetnessMax = FindOrCreateScalarParameter(
             Material,
-            TEXT("DWC_WrinkleWetnessMax"),
-            1.0f,
+            GetWrinkleWetnessMaxParameterName(),
+            DWCWetMaterialParameters::DefaultWrinkleWetnessMax(),
             -900,
             1110);
 

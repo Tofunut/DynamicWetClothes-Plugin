@@ -343,14 +343,22 @@ FReply FWetClothingAssetEditor::HandleBakeWetnessProfileMapsClicked()
 
 FReply FWetClothingAssetEditor::HandleBakeWrinkleNormalMapClicked()
 {
-    FMessageDialog::Open(EAppMsgType::Ok, LOCTEXT("BakeWrinkleNormalMapPending", "Wrinkle Normal Map baking is not implemented yet."));
-    return FReply::Handled();
+    if (!EditorPanel.IsValid())
+    {
+        return FReply::Handled();
+    }
+
+    return EditorPanel->ExecuteBakeWrinkleNormalMap();
 }
 
 FReply FWetClothingAssetEditor::HandleBakeWrinkleMaskClicked()
 {
-    FMessageDialog::Open(EAppMsgType::Ok, LOCTEXT("BakeWrinkleMaskPending", "Wrinkle Mask baking is not implemented yet."));
-    return FReply::Handled();
+    if (!EditorPanel.IsValid())
+    {
+        return FReply::Handled();
+    }
+
+    return EditorPanel->ExecuteBakeWrinkleMask();
 }
 
 TSharedRef<SWidget> FWetClothingAssetEditor::BuildModeToolbarWidget()

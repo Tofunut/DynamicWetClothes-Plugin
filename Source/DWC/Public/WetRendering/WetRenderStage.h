@@ -1,6 +1,7 @@
 ﻿#pragma once
 
 #include "CoreMinimal.h"
+#include "WetRendering/WetMaterialParameters.h"
 
 class USkeletalMeshComponent;
 class UMaterialInstanceDynamic;
@@ -38,23 +39,24 @@ struct DWC_API FWetRenderStageArgs
 
     FName WetPartDebugStrengthParameterName = TEXT("DWC_WetPartDebugStrength");
     FName WetPartDebugUseWetnessMaskParameterName = TEXT("DWC_WetPartDebugUseWetnessMask");
-    FName WetnessProfileMap0ParameterName = TEXT("DWC_WetnessProfileMap0");
-    FName UseWetnessProfileMap0ParameterName = TEXT("DWC_UseWetnessProfileMap0");
-    FName WrinkleNormalMapParameterName = TEXT("DWC_WrinkleNormalMap");
-    FName UseWrinkleNormalMapParameterName = TEXT("DWC_UseWrinkleNormalMap");
-    FName WrinkleStrengthParameterName = TEXT("DWC_WrinkleStrength");
-    FName WrinkleWetnessMinParameterName = TEXT("DWC_WrinkleWetnessMin");
-    FName WrinkleWetnessMaxParameterName = TEXT("DWC_WrinkleWetnessMax");
+    FName WetnessProfileMap0ParameterName = DWCWetMaterialParameters::WetnessProfileMap0();
+    FName UseWetnessProfileMap0ParameterName = DWCWetMaterialParameters::UseWetnessProfileMap0();
+    FName WrinkleNormalMapParameterName = DWCWetMaterialParameters::WrinkleNormalMap();
+    FName UseWrinkleNormalMapParameterName = DWCWetMaterialParameters::UseWrinkleNormalMap();
+    FName WrinkleStrengthParameterName = DWCWetMaterialParameters::WrinkleStrength();
+    FName WrinkleWetnessMinParameterName = DWCWetMaterialParameters::WrinkleWetnessMin();
+    FName WrinkleWetnessMaxParameterName = DWCWetMaterialParameters::WrinkleWetnessMax();
 
-    float WrinkleStrength = 1.0f;
-    float WrinkleWetnessMin = 0.25f;
-    float WrinkleWetnessMax = 1.0f;
+    float WrinkleStrength = DWCWetMaterialParameters::DefaultWrinkleStrength();
+    float WrinkleWetnessMin = DWCWetMaterialParameters::DefaultWrinkleWetnessMin();
+    float WrinkleWetnessMax = DWCWetMaterialParameters::DefaultWrinkleWetnessMax();
 
     FName UnderColorParameterName = TEXT("DWC_UnderColor");
     FName UnderColorBlendStrengthParameterName = TEXT("DWC_UnderColorBlendStrength");
 
     FLinearColor UnderColor = FLinearColor(0.8f, 0.55f, 0.42f, 1.0f);
     float        UnderColorBlendStrength = 0.3f;
+    bool         bLogWrinkleRuntimeBindings = false;
 
     int32 LODIndex = 0;
 };

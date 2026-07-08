@@ -206,6 +206,9 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Wrinkle")
     FName WrinkleWetnessMaxParameterName = TEXT("DWC_WrinkleWetnessMax");
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Debug")
+    bool bLogWrinkleRuntimeBindings = false;
+
   private:
     TArray<TUniquePtr<FDWCWetMeshReceiverRuntime>> Receivers;
 

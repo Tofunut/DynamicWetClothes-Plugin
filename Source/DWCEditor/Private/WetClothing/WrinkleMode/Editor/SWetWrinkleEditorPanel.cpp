@@ -57,6 +57,38 @@ namespace
         Options.MaximumFractionalDigits = 1;
         return FText::AsNumber(SizeCm, &Options);
     }
+
+    FText GetBakeSlotLabel(const UWetClothingAsset* Asset, const int32 MaterialSlotIndex)
+    {
+        if (Asset != nullptr && Asset->TargetMesh != nullptr && Asset->TargetMesh->GetMaterials().IsValidIndex(MaterialSlotIndex))
+        {
+            const FName SlotName = Asset->TargetMesh->GetMaterials()[MaterialSlotIndex].MaterialSlotName;
+            if (!SlotName.IsNone())
+            {
+                return FText::Format(
+                    LOCTEXT("BakeSlotLabelFormat", "{0} (Slot {1})"),
+                    FText::FromName(SlotName),
+                    FText::AsNumber(MaterialSlotIndex));
+            }
+        }
+
+        return FText::Format(LOCTEXT("BakeSlotFallbackLabelFormat", "Material Slot {0}"), FText::AsNumber(MaterialSlotIndex));
+    }
+
+    FString MakeTextureNameList(const TArray<UTexture2D*>& Textures)
+    {
+        TArray<FString> TextureNames;
+        TextureNames.Reserve(Textures.Num());
+        for (UTexture2D* Texture : Textures)
+        {
+            if (Texture != nullptr)
+            {
+                TextureNames.Add(Texture->GetName());
+            }
+        }
+
+        return FString::Join(TextureNames, TEXT(", "));
+    }
 }
 
 void SWetWrinkleEditorPanel::Construct(const FArguments& InArgs)
@@ -465,6 +497,16 @@ void SWetWrinkleEditorPanel::RefreshFromAsset()
     RefreshWrinkleUVView();
 }
 
+FReply SWetWrinkleEditorPanel::ExecuteBakeWrinkleNormalMap()
+{
+    return BakeWrinkleMapsForSelectedSlot(true, false);
+}
+
+FReply SWetWrinkleEditorPanel::ExecuteBakeWrinkleMask()
+{
+    return HandleBakeWrinkleMaskClicked();
+}
+
 FReply SWetWrinkleEditorPanel::HandleSaveClicked()
 {
     DWCEditorUtils::SaveAsset(WetClothingAsset.Get());
@@ -506,7 +548,7 @@ TSharedRef<SWidget> SWetWrinkleEditorPanel::BuildBakeMapsMenu()
 
 FReply SWetWrinkleEditorPanel::HandleBakeAllMapsClicked()
 {
-    return BakeWrinkleMapsForSelectedSlot(true, true);
+    return HandleBakeWrinkleNormalMapClicked();
 }
 
 FReply SWetWrinkleEditorPanel::HandleBakeWetnessProfileMapsClicked()
@@ -522,8 +564,10 @@ FReply SWetWrinkleEditorPanel::HandleBakeWrinkleNormalMapClicked()
 
 FReply SWetWrinkleEditorPanel::HandleBakeWrinkleMaskClicked()
 {
-    // The mask is generated from the same patch rasterization pass as the normal map.
-    return BakeWrinkleMapsForSelectedSlot(true, true);
+    FMessageDialog::Open(
+        EAppMsgType::Ok,
+        LOCTEXT("BakeWrinkleMaskReserved", "Wrinkle Mask baking is reserved for the transparency workflow and is not wired into the wrinkle normal bake path."));
+    return FReply::Handled();
 }
 
 FReply SWetWrinkleEditorPanel::BakeWrinkleMapsForSelectedSlot(bool bBakeNormalMap, bool bBakeMask)
@@ -541,33 +585,97 @@ FReply SWetWrinkleEditorPanel::BakeWrinkleMapsForSelectedSlot(bool bBakeNormalMa
         return FReply::Handled();
     }
 
+    if (Asset->TargetMesh == nullptr)
+    {
+        FMessageDialog::Open(EAppMsgType::Ok, LOCTEXT("BakeWrinkleNoTargetMesh", "Assign a Target Mesh before baking wrinkle maps."));
+        return FReply::Handled();
+    }
+
+    if (!Asset->TargetMesh->GetMaterials().IsValidIndex(BrushSettings.MaterialSlotIndex))
+    {
+        FMessageDialog::Open(
+            EAppMsgType::Ok,
+            FText::Format(
+                LOCTEXT("BakeWrinkleInvalidSlot", "The selected material slot ({0}) is no longer valid for the current Target Mesh."),
+                FText::AsNumber(BrushSettings.MaterialSlotIndex)));
+        return FReply::Handled();
+    }
+
     FWetWrinkleNormalMapBakeSettings Settings;
     Settings.Resolution = Asset->WrinkleData.BakeSettings.DefaultResolution;
     Settings.PaddingPixels = Asset->WrinkleData.BakeSettings.PaddingPixels;
+    Settings.PreferredUVChannelIndex = BrushSettings.UVChannelIndex;
     Settings.bIncludeDisabledPatchStrokes = Asset->WrinkleData.BakeSettings.bIncludeDisabledPatchStrokes;
     Settings.bBakeNormalMap = bBakeNormalMap && Asset->WrinkleData.BakeSettings.bBakeNormalMap;
     Settings.bBakeMask = bBakeMask && Asset->WrinkleData.BakeSettings.bBakeMask;
+
+    if (!Settings.bBakeNormalMap && !Settings.bBakeMask)
+    {
+        FMessageDialog::Open(
+            EAppMsgType::Ok,
+            LOCTEXT("BakeWrinkleNoBakeOutputsEnabled", "Enable at least one wrinkle bake output in Wrinkle Bake Settings before baking."));
+        return FReply::Handled();
+    }
 
     FWetWrinkleNormalMapBakeResult Result;
     FString ErrorMessage;
     if (!FWetWrinkleNormalMapBaker::BakeMaterialSlot(Asset, BrushSettings.MaterialSlotIndex, Settings, Result, ErrorMessage))
     {
-        FMessageDialog::Open(EAppMsgType::Ok, FText::FromString(ErrorMessage));
+        const FString SafeErrorMessage = ErrorMessage.IsEmpty() ? TEXT("An unknown wrinkle bake error occurred.") : ErrorMessage;
+        FMessageDialog::Open(
+            EAppMsgType::Ok,
+            FText::Format(
+                LOCTEXT("BakeWrinkleSlotFailure", "Wrinkle bake failed for {0}.\n\n{1}"),
+                GetBakeSlotLabel(Asset, BrushSettings.MaterialSlotIndex),
+                FText::FromString(SafeErrorMessage)));
         return FReply::Handled();
     }
 
     MarkAssetEdited();
+    RefreshFromAsset();
     if (DetailsView.IsValid())
     {
         DetailsView->ForceRefresh();
     }
 
+    FString SuccessDetails = FString::Printf(
+        TEXT("Slot: %s\nGenerated map sets: %d\nPatch count: %d"),
+        *GetBakeSlotLabel(Asset, BrushSettings.MaterialSlotIndex).ToString(),
+        Result.BakedMapCount,
+        Result.BakedStampCount);
+
+    if (Result.BakedUVChannelIndices.Num() > 0)
+    {
+        TArray<FString> BakedUVChannelLabels;
+        BakedUVChannelLabels.Reserve(Result.BakedUVChannelIndices.Num());
+        for (const int32 UVChannelIndex : Result.BakedUVChannelIndices)
+        {
+            BakedUVChannelLabels.Add(FString::FromInt(UVChannelIndex));
+        }
+
+        SuccessDetails += FString::Printf(TEXT("\nBake UV Channel: %s"), *FString::Join(BakedUVChannelLabels, TEXT(", ")));
+    }
+
+    const FString BakedNormalNames = MakeTextureNameList(Result.BakedNormalMaps);
+    if (!BakedNormalNames.IsEmpty())
+    {
+        SuccessDetails += FString::Printf(TEXT("\nNormal Texture: %s"), *BakedNormalNames);
+    }
+
+    const FString BakedMaskNames = MakeTextureNameList(Result.BakedMasks);
+    if (!BakedMaskNames.IsEmpty())
+    {
+        SuccessDetails += FString::Printf(TEXT("\nMask Texture: %s"), *BakedMaskNames);
+    }
+
+    SuccessDetails += TEXT("\nBaked wrinkle metadata has been refreshed on the asset.");
+
     FMessageDialog::Open(
+        EAppMsgCategory::Success,
         EAppMsgType::Ok,
         FText::Format(
-            LOCTEXT("BakeWrinkleSlotSuccess", "Baked {0} wrinkle map set(s) from {1} patch(es)."),
-            FText::AsNumber(Result.BakedMapCount),
-            FText::AsNumber(Result.BakedStampCount)));
+            LOCTEXT("BakeWrinkleSlotSuccess", "Wrinkle bake completed.\n\n{0}"),
+            FText::FromString(SuccessDetails)));
     return FReply::Handled();
 }
 

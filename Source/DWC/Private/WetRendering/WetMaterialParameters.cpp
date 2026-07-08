@@ -1,9 +1,61 @@
-// dummy
-/*
-WetMaterialParameters의 구현 파일이 될 예정이다.
+#include "WetRendering/WetMaterialParameters.h"
 
-예상 구현:
-- 기본 parameter name 정의
-- 프로젝트/플러그인 설정에서 parameter override를 읽는 helper
-- MaterialInstanceDynamic에 공통 wet parameter를 적용하는 작은 유틸 함수
-*/
+namespace DWCWetMaterialParameters
+{
+    const FName& WetnessProfileMap0()
+    {
+        static const FName Name(TEXT("DWC_WetnessProfileMap0"));
+        return Name;
+    }
+
+    const FName& UseWetnessProfileMap0()
+    {
+        static const FName Name(TEXT("DWC_UseWetnessProfileMap0"));
+        return Name;
+    }
+
+    const FName& WrinkleNormalMap()
+    {
+        static const FName Name(TEXT("DWC_WrinkleNormalMap"));
+        return Name;
+    }
+
+    const FName& UseWrinkleNormalMap()
+    {
+        static const FName Name(TEXT("DWC_UseWrinkleNormalMap"));
+        return Name;
+    }
+
+    const FName& WrinkleStrength()
+    {
+        static const FName Name(TEXT("DWC_WrinkleStrength"));
+        return Name;
+    }
+
+    const FName& WrinkleWetnessMin()
+    {
+        static const FName Name(TEXT("DWC_WrinkleWetnessMin"));
+        return Name;
+    }
+
+    const FName& WrinkleWetnessMax()
+    {
+        static const FName Name(TEXT("DWC_WrinkleWetnessMax"));
+        return Name;
+    }
+
+    float DefaultWrinkleStrength()
+    {
+        return 1.0f;
+    }
+
+    float DefaultWrinkleWetnessMin()
+    {
+        return 0.25f;
+    }
+
+    float DefaultWrinkleWetnessMax()
+    {
+        return 1.0f;
+    }
+}

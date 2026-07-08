@@ -105,10 +105,10 @@ struct DWC_API FWetWrinkleBakeSettings
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, Category = "Wet Wrinkle Bake", meta = (ClampMin = "16", ClampMax = "8192"))
-    int32 DefaultResolution = 1024;
+    int32 DefaultResolution = 2048;
 
     UPROPERTY(EditAnywhere, Category = "Wet Wrinkle Bake", meta = (ClampMin = "0", ClampMax = "64"))
-    int32 PaddingPixels = 4;
+    int32 PaddingPixels = 8;
 
     UPROPERTY(EditAnywhere, Category = "Wet Wrinkle Bake")
     TArray<int32> TargetLODIndices;
@@ -144,10 +144,10 @@ struct DWC_API FWetWrinkleBakedMapSet
     TObjectPtr<UTexture2D> BakedWrinkleMask = nullptr;
 
     UPROPERTY(VisibleAnywhere, Category = "Wet Wrinkle Baked")
-    int32 Resolution = 1024;
+    int32 Resolution = 2048;
 
     UPROPERTY(VisibleAnywhere, Category = "Wet Wrinkle Baked")
-    int32 PaddingPixels = 4;
+    int32 PaddingPixels = 8;
 
     UPROPERTY(VisibleAnywhere, Category = "Wet Wrinkle Baked")
     FString BuildSignature;
@@ -212,4 +212,55 @@ struct DWC_API FWetClothingWrinkleData
 
     UPROPERTY(VisibleAnywhere, Category = "Baked")
     TArray<FWetWrinkleBakedMapSet> BakedWrinkleMaps;
+
+    const FWetWrinkleBakedMapSet* FindBakedWrinkleMap(
+        int32 MaterialSlotIndex,
+        int32 PreferredUVChannelIndex = INDEX_NONE,
+        int32 PreferredLODIndex = INDEX_NONE) const
+    {
+        if (PreferredUVChannelIndex != INDEX_NONE && PreferredLODIndex != INDEX_NONE)
+        {
+            if (const FWetWrinkleBakedMapSet* ExactMatch = BakedWrinkleMaps.FindByPredicate(
+                    [MaterialSlotIndex, PreferredUVChannelIndex, PreferredLODIndex](const FWetWrinkleBakedMapSet& Candidate)
+                    {
+                        return Candidate.MaterialSlotIndex == MaterialSlotIndex &&
+                               Candidate.UVChannelIndex == PreferredUVChannelIndex &&
+                               Candidate.LODIndex == PreferredLODIndex &&
+                               Candidate.BakedWrinkleNormalMap != nullptr;
+                    }))
+            {
+                return ExactMatch;
+            }
+        }
+
+        if (PreferredUVChannelIndex != INDEX_NONE)
+        {
+            if (const FWetWrinkleBakedMapSet* UVMatch = BakedWrinkleMaps.FindByPredicate(
+                    [MaterialSlotIndex, PreferredUVChannelIndex](const FWetWrinkleBakedMapSet& Candidate)
+                    {
+                        return Candidate.MaterialSlotIndex == MaterialSlotIndex &&
+                               Candidate.UVChannelIndex == PreferredUVChannelIndex &&
+                               Candidate.BakedWrinkleNormalMap != nullptr;
+                    }))
+            {
+                return UVMatch;
+            }
+        }
+
+        return BakedWrinkleMaps.FindByPredicate(
+            [MaterialSlotIndex](const FWetWrinkleBakedMapSet& Candidate)
+            {
+                return Candidate.MaterialSlotIndex == MaterialSlotIndex &&
+                       Candidate.BakedWrinkleNormalMap != nullptr;
+            });
+    }
+
+    UTexture2D* ResolveBakedWrinkleNormalMap(
+        int32 MaterialSlotIndex,
+        int32 PreferredUVChannelIndex = INDEX_NONE,
+        int32 PreferredLODIndex = INDEX_NONE) const
+    {
+        const FWetWrinkleBakedMapSet* Match = FindBakedWrinkleMap(MaterialSlotIndex, PreferredUVChannelIndex, PreferredLODIndex);
+        return Match != nullptr ? Match->BakedWrinkleNormalMap.Get() : nullptr;
+    }
 };

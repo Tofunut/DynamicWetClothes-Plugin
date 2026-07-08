@@ -129,6 +129,26 @@ bool SWetClothingAssetEditorPanel::SaveWetSetupAssets() const
     return bSaved;
 }
 
+FReply SWetClothingAssetEditorPanel::ExecuteBakeWrinkleNormalMap()
+{
+    if (!WrinkleEditorPanel.IsValid())
+    {
+        return FReply::Handled();
+    }
+
+    return WrinkleEditorPanel->ExecuteBakeWrinkleNormalMap();
+}
+
+FReply SWetClothingAssetEditorPanel::ExecuteBakeWrinkleMask()
+{
+    if (!WrinkleEditorPanel.IsValid())
+    {
+        return FReply::Handled();
+    }
+
+    return WrinkleEditorPanel->ExecuteBakeWrinkleMask();
+}
+
 void SWetClothingAssetEditorPanel::SetEditorMode(EWetClothingEditorMode NewMode)
 {
     if (NewMode == EWetClothingEditorMode::Part && PartEditorPanel.IsValid())

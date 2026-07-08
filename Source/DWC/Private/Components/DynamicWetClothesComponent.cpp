@@ -6,12 +6,14 @@
 #include "WetInputSystem/WetInputStage.h"
 #include "WetInputSystem/Sampling/WetClothingMeshSampler.h"
 #include "WetRendering/WetRenderStage.h"
+#include "WetRendering/WetMaterialParameters.h"
 #include "RuntimeData/WetClothingRuntimeData.h"
 #include "WetSimulation/WetSimulationStage.h"
 #include "WetSimulation/AbsorbedWetness/AbsorbedWetnessSimulationState.h"
 #include "Runtime/Engine/Public/Rendering/SkeletalMeshLODRenderData.h"
 #include "UObject/UnrealType.h"
 #include "DataAssets/WetnessProfile.h"
+#include "Utility/DWCLog.h"
 
 namespace
 {
@@ -89,6 +91,17 @@ UDynamicWetClothesComponent::UDynamicWetClothesComponent()
     // Wetness simulation is timer-driven; tick is enabled only to flush batched contacts.
     PrimaryComponentTick.bCanEverTick = true;
     PrimaryComponentTick.bStartWithTickEnabled = false;
+
+    WetnessProfileMap0ParameterName = DWCWetMaterialParameters::WetnessProfileMap0();
+    UseWetnessProfileMap0ParameterName = DWCWetMaterialParameters::UseWetnessProfileMap0();
+    WrinkleNormalMapParameterName = DWCWetMaterialParameters::WrinkleNormalMap();
+    UseWrinkleNormalMapParameterName = DWCWetMaterialParameters::UseWrinkleNormalMap();
+    WrinkleStrengthParameterName = DWCWetMaterialParameters::WrinkleStrength();
+    WrinkleWetnessMinParameterName = DWCWetMaterialParameters::WrinkleWetnessMin();
+    WrinkleWetnessMaxParameterName = DWCWetMaterialParameters::WrinkleWetnessMax();
+    WrinkleStrength = DWCWetMaterialParameters::DefaultWrinkleStrength();
+    WrinkleWetnessMin = DWCWetMaterialParameters::DefaultWrinkleWetnessMin();
+    WrinkleWetnessMax = DWCWetMaterialParameters::DefaultWrinkleWetnessMax();
 }
 
 UDynamicWetClothesComponent::~UDynamicWetClothesComponent() = default;
@@ -356,6 +369,7 @@ FWetRenderStageArgs UDynamicWetClothesComponent::MakeWetRenderStageArgs(FDWCWetM
     Args.WrinkleStrength = WrinkleStrength;
     Args.WrinkleWetnessMin = WrinkleWetnessMin;
     Args.WrinkleWetnessMax = WrinkleWetnessMax;
+    Args.bLogWrinkleRuntimeBindings = bLogWrinkleRuntimeBindings;
     Args.LODIndex = 0;
 
     Args.WetPartDebugUseWetnessMaskParameterName = WetPartDebugUseWetnessMaskParameterName;
@@ -489,6 +503,18 @@ void UDynamicWetClothesComponent::ApplyGeneratedWetMaterialOverrides()
             }
 
             OverrideTargetMesh->SetMaterial(MaterialOverride.MaterialSlotIndex, MaterialOverride.WetMaterial);
+
+            if (bLogWrinkleRuntimeBindings)
+            {
+                UE_LOG(
+                    LogDWC,
+                    Log,
+                    TEXT("DWC wrinkle runtime: applied generated wet material override '%s' to mesh '%s' slot %d (component '%s')."),
+                    *GetNameSafe(MaterialOverride.WetMaterial),
+                    *GetNameSafe(OverrideTargetMesh),
+                    MaterialOverride.MaterialSlotIndex,
+                    *Receiver->ComponentPath);
+            }
         }
 
         for (const FWetClothingBakedTransparencyRevealLayer& RevealLayer : ReceiverWetClothingAsset->TransparencyData.BakedRevealLayers)
@@ -510,6 +536,42 @@ void UDynamicWetClothesComponent::ApplyGeneratedWetMaterialOverrides()
             }
 
             OverrideTargetMesh->SetMaterial(RevealLayer.MaterialSlotIndex, RevealLayer.RevealMaterial);
+        }
+
+        if (bLogWrinkleRuntimeBindings)
+        {
+            const int32 PreferredUVChannelIndex = ReceiverWetClothingAsset->WrinkleData.WrinkleUVChannelIndex;
+            for (int32 MaterialSlotIndex = 0; MaterialSlotIndex < OverrideTargetMesh->GetNumMaterials(); ++MaterialSlotIndex)
+            {
+                const FWetWrinkleBakedMapSet* BakedWrinkleMap =
+                    ReceiverWetClothingAsset->WrinkleData.FindBakedWrinkleMap(MaterialSlotIndex, PreferredUVChannelIndex, 0);
+                if (BakedWrinkleMap == nullptr || BakedWrinkleMap->BakedWrinkleNormalMap == nullptr)
+                {
+                    continue;
+                }
+
+                const FWetClothingGeneratedWetMaterialOverride* MatchingOverride =
+                    ReceiverWetClothingAsset->PartData.GeneratedWetMaterialOverrides.FindByPredicate(
+                        [ComponentPath = Receiver->ComponentPath, MaterialSlotIndex](const FWetClothingGeneratedWetMaterialOverride& Candidate)
+                        {
+                            return Candidate.MaterialSlotIndex == MaterialSlotIndex &&
+                                   Candidate.WetMaterial != nullptr &&
+                                   Candidate.ComponentPath == ComponentPath;
+                        });
+
+                if (MatchingOverride == nullptr)
+                {
+                    UE_LOG(
+                        LogDWC,
+                        Log,
+                        TEXT("DWC wrinkle runtime: mesh '%s' slot %d has baked wrinkle map '%s' (UV %d, LOD %d) but no generated wet material override entry. Runtime wrinkle apply expects the current slot material to already contain MF_DWC_ApplyWetness."),
+                        *GetNameSafe(OverrideTargetMesh),
+                        MaterialSlotIndex,
+                        *GetNameSafe(BakedWrinkleMap->BakedWrinkleNormalMap),
+                        BakedWrinkleMap->UVChannelIndex,
+                        BakedWrinkleMap->LODIndex);
+                }
+            }
         }
     }
 }
@@ -938,6 +1000,7 @@ void UDynamicWetClothesComponent::PostEditChangeProperty(FPropertyChangedEvent& 
         PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, WrinkleStrengthParameterName) ||
         PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, WrinkleWetnessMinParameterName) ||
         PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, WrinkleWetnessMaxParameterName) ||
+        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, bLogWrinkleRuntimeBindings) ||
         PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, FallbackUnderColor) ||
         PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, WetUnderColorBlendStrength) ||
         PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, UnderColorParameterName) ||

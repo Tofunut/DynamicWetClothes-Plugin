@@ -44,6 +44,8 @@ class SWetWrinkleEditorPanel : public SCompoundWidget
 
     void Construct(const FArguments& InArgs);
     void RefreshFromAsset();
+    FReply ExecuteBakeWrinkleNormalMap();
+    FReply ExecuteBakeWrinkleMask();
 
   private:
     using FStrokeListItemPtr = TSharedPtr<FWetWrinklePatchStrokeListItem>;

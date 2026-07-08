@@ -25,6 +25,8 @@ class SWetClothingAssetEditorPanel : public SCompoundWidget
     bool HasPendingWetSetupTasks(FString* OutSummary = nullptr) const;
     bool BuildWetSetup(FString& OutSummary, bool* OutHadWarnings = nullptr);
     bool SaveWetSetupAssets() const;
+    FReply ExecuteBakeWrinkleNormalMap();
+    FReply ExecuteBakeWrinkleMask();
     void SetEditorMode(EWetClothingEditorMode NewMode);
 
   private:

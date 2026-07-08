@@ -38,6 +38,33 @@ namespace
 } // namespace
 #include "Runtime/Engine/Public/Materials/MaterialInstanceDynamic.h"
 #include "DataAssets/WetClothingAsset.h"
+#include "DataAssets/WetClothingWrinkleData.h"
+#include "Utility/DWCLog.h"
+
+namespace
+{
+    const TCHAR* DescribeWrinkleMapMatchType(
+        const FWetWrinkleBakedMapSet& BakedMap,
+        const int32                   PreferredUVChannelIndex,
+        const int32                   PreferredLODIndex)
+    {
+        if (PreferredUVChannelIndex != INDEX_NONE &&
+            PreferredLODIndex != INDEX_NONE &&
+            BakedMap.UVChannelIndex == PreferredUVChannelIndex &&
+            BakedMap.LODIndex == PreferredLODIndex)
+        {
+            return TEXT("ExactSlotUvLod");
+        }
+
+        if (PreferredUVChannelIndex != INDEX_NONE &&
+            BakedMap.UVChannelIndex == PreferredUVChannelIndex)
+        {
+            return TEXT("SlotUvFallbackLod");
+        }
+
+        return TEXT("SlotFallback");
+    }
+}
 
 void FWetRenderStage::ResetCachedVertexColors()
 {
@@ -181,6 +208,11 @@ void FWetRenderStage::ApplyWetnessProfileMapParameters(FWetRenderStageArgs& Rece
 
 void FWetRenderStage::ApplyWetWrinkleNormalMapParameters(FWetRenderStageArgs& Receiver)
 {
+    if (Receiver.WetMaterialInstances == nullptr)
+    {
+        return;
+    }
+
     if (Receiver.WrinkleNormalMapParameterName.IsNone() &&
         Receiver.UseWrinkleNormalMapParameterName.IsNone() &&
         Receiver.WrinkleStrengthParameterName.IsNone() &&
@@ -193,19 +225,36 @@ void FWetRenderStage::ApplyWetWrinkleNormalMapParameters(FWetRenderStageArgs& Re
     const float SafeWrinkleWetnessMin = FMath::Clamp(Receiver.WrinkleWetnessMin, 0.0f, 1.0f);
     const float SafeWrinkleWetnessMax = FMath::Max(SafeWrinkleWetnessMin, FMath::Clamp(Receiver.WrinkleWetnessMax, 0.0f, 1.0f));
     const float SafeWrinkleStrength = FMath::Max(0.0f, Receiver.WrinkleStrength);
+    if (Receiver.bLogWrinkleRuntimeBindings && Receiver.WrinkleWetnessMax < Receiver.WrinkleWetnessMin)
+    {
+        UE_LOG(
+            LogDWC,
+            Log,
+            TEXT("DWC wrinkle runtime: clamped wetness range on mesh '%s' from [%.3f, %.3f] to [%.3f, %.3f]."),
+            *GetNameSafe(Receiver.TargetSkeletalMesh),
+            Receiver.WrinkleWetnessMin,
+            Receiver.WrinkleWetnessMax,
+            SafeWrinkleWetnessMin,
+            SafeWrinkleWetnessMax);
+    }
 
     TArray<bool> bWrinkleNormalMapAssigned;
     bWrinkleNormalMapAssigned.Init(false, Receiver.WetMaterialInstances->Num());
 
     if (Receiver.WetClothingAsset != nullptr)
     {
-        for (const FWetWrinkleBakedMapSet& BakedWrinkleMap : Receiver.WetClothingAsset->WrinkleData.BakedWrinkleMaps)
+        const int32 PreferredUVChannelIndex = Receiver.WetClothingAsset->WrinkleData.WrinkleUVChannelIndex;
+        for (int32 MaterialSlotIndex = 0; MaterialSlotIndex < Receiver.WetMaterialInstances->Num(); ++MaterialSlotIndex)
         {
-            const int32 MaterialSlotIndex = BakedWrinkleMap.MaterialSlotIndex;
-            if (BakedWrinkleMap.LODIndex != Receiver.LODIndex ||
-                BakedWrinkleMap.BakedWrinkleNormalMap == nullptr ||
-                !Receiver.WetMaterialInstances->IsValidIndex(MaterialSlotIndex) ||
+            if (!Receiver.WetMaterialInstances->IsValidIndex(MaterialSlotIndex) ||
                 bWrinkleNormalMapAssigned[MaterialSlotIndex])
+            {
+                continue;
+            }
+
+            const FWetWrinkleBakedMapSet* BakedWrinkleMap =
+                Receiver.WetClothingAsset->WrinkleData.FindBakedWrinkleMap(MaterialSlotIndex, PreferredUVChannelIndex, Receiver.LODIndex);
+            if (BakedWrinkleMap == nullptr || BakedWrinkleMap->BakedWrinkleNormalMap == nullptr)
             {
                 continue;
             }
@@ -218,7 +267,7 @@ void FWetRenderStage::ApplyWetWrinkleNormalMapParameters(FWetRenderStageArgs& Re
 
             if (!Receiver.WrinkleNormalMapParameterName.IsNone())
             {
-                MID->SetTextureParameterValue(Receiver.WrinkleNormalMapParameterName, BakedWrinkleMap.BakedWrinkleNormalMap);
+                MID->SetTextureParameterValue(Receiver.WrinkleNormalMapParameterName, BakedWrinkleMap->BakedWrinkleNormalMap);
             }
 
             if (!Receiver.UseWrinkleNormalMapParameterName.IsNone())
@@ -241,6 +290,24 @@ void FWetRenderStage::ApplyWetWrinkleNormalMapParameters(FWetRenderStageArgs& Re
                 MID->SetScalarParameterValue(Receiver.WrinkleWetnessMaxParameterName, SafeWrinkleWetnessMax);
             }
 
+            if (Receiver.bLogWrinkleRuntimeBindings)
+            {
+                UE_LOG(
+                    LogDWC,
+                    Log,
+                    TEXT("DWC wrinkle runtime: mesh '%s' slot %d assigned baked wrinkle map '%s' (match=%s, bakedUV=%d, bakedLOD=%d, strength=%.3f, wetnessRange=[%.3f, %.3f], material='%s')."),
+                    *GetNameSafe(Receiver.TargetSkeletalMesh),
+                    MaterialSlotIndex,
+                    *GetNameSafe(BakedWrinkleMap->BakedWrinkleNormalMap),
+                    DescribeWrinkleMapMatchType(*BakedWrinkleMap, PreferredUVChannelIndex, Receiver.LODIndex),
+                    BakedWrinkleMap->UVChannelIndex,
+                    BakedWrinkleMap->LODIndex,
+                    SafeWrinkleStrength,
+                    SafeWrinkleWetnessMin,
+                    SafeWrinkleWetnessMax,
+                    *GetNameSafe(Receiver.TargetSkeletalMesh != nullptr ? Receiver.TargetSkeletalMesh->GetMaterial(MaterialSlotIndex) : nullptr));
+            }
+
             bWrinkleNormalMapAssigned[MaterialSlotIndex] = true;
         }
     }
@@ -255,10 +322,60 @@ void FWetRenderStage::ApplyWetWrinkleNormalMapParameters(FWetRenderStageArgs& Re
 
         if (!bWrinkleNormalMapAssigned.IsValidIndex(MaterialSlotIndex) || !bWrinkleNormalMapAssigned[MaterialSlotIndex])
         {
+            if (!Receiver.WrinkleNormalMapParameterName.IsNone())
+            {
+                MID->SetTextureParameterValue(Receiver.WrinkleNormalMapParameterName, nullptr);
+            }
+
             if (!Receiver.UseWrinkleNormalMapParameterName.IsNone())
             {
                 MID->SetScalarParameterValue(Receiver.UseWrinkleNormalMapParameterName, 0.0f);
             }
+
+            if (!Receiver.WrinkleStrengthParameterName.IsNone())
+            {
+                MID->SetScalarParameterValue(Receiver.WrinkleStrengthParameterName, 0.0f);
+            }
+
+            if (!Receiver.WrinkleWetnessMinParameterName.IsNone())
+            {
+                MID->SetScalarParameterValue(Receiver.WrinkleWetnessMinParameterName, SafeWrinkleWetnessMin);
+            }
+
+            if (!Receiver.WrinkleWetnessMaxParameterName.IsNone())
+            {
+                MID->SetScalarParameterValue(Receiver.WrinkleWetnessMaxParameterName, SafeWrinkleWetnessMax);
+            }
+
+            if (Receiver.bLogWrinkleRuntimeBindings)
+            {
+                const bool bHasAnyBakedEntryForSlot = Receiver.WetClothingAsset != nullptr &&
+                                                      Receiver.WetClothingAsset->WrinkleData.BakedWrinkleMaps.ContainsByPredicate(
+                                                          [MaterialSlotIndex](const FWetWrinkleBakedMapSet& Candidate)
+                                                          {
+                                                              return Candidate.MaterialSlotIndex == MaterialSlotIndex;
+                                                          });
+                const bool bHasAnyUsableNormalForSlot = Receiver.WetClothingAsset != nullptr &&
+                                                        Receiver.WetClothingAsset->WrinkleData.BakedWrinkleMaps.ContainsByPredicate(
+                                                            [MaterialSlotIndex](const FWetWrinkleBakedMapSet& Candidate)
+                                                            {
+                                                                return Candidate.MaterialSlotIndex == MaterialSlotIndex &&
+                                                                       Candidate.BakedWrinkleNormalMap != nullptr;
+                                                            });
+
+                UE_LOG(
+                    LogDWC,
+                    Log,
+                    TEXT("DWC wrinkle runtime: mesh '%s' slot %d disabled wrinkle normal apply (hasSlotMetadata=%s, hasUsableNormal=%s, preferredUV=%d, material='%s')."),
+                    *GetNameSafe(Receiver.TargetSkeletalMesh),
+                    MaterialSlotIndex,
+                    bHasAnyBakedEntryForSlot ? TEXT("true") : TEXT("false"),
+                    bHasAnyUsableNormalForSlot ? TEXT("true") : TEXT("false"),
+                    Receiver.WetClothingAsset != nullptr ? Receiver.WetClothingAsset->WrinkleData.WrinkleUVChannelIndex : INDEX_NONE,
+                    *GetNameSafe(Receiver.TargetSkeletalMesh != nullptr ? Receiver.TargetSkeletalMesh->GetMaterial(MaterialSlotIndex) : nullptr));
+            }
+
+            continue;
         }
 
         if (!Receiver.WrinkleStrengthParameterName.IsNone())

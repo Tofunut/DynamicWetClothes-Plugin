@@ -41,7 +41,7 @@ struct DWC_API FWetWrinkleStamp
     UPROPERTY(EditAnywhere, Category = "Wrinkle Stamp", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float Falloff = 0.5f;
 
-    UPROPERTY(EditAnywhere, Category = "Wrinkle Stamp")
+    UPROPERTY(EditAnywhere, Category = "Wrinkle Stamp", meta = (DisplayName = "Brush Normal Texture"))
     TObjectPtr<UTexture2D> BrushHeightTexture = nullptr;
 
     UPROPERTY(EditAnywhere, Category = "Wrinkle Stamp")

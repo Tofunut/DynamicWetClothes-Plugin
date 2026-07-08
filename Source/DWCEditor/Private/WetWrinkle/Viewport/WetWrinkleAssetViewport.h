@@ -9,6 +9,7 @@
 class FAdvancedPreviewScene;
 class FWetWrinkleAssetViewportClient;
 class SRichTextBlock;
+class UMaterial;
 class UMaterialInterface;
 class UMaterialInstanceDynamic;
 class UProceduralMeshComponent;
@@ -19,6 +20,14 @@ class UTexture2D;
 class UWetClothingAsset;
 class UWetWrinkleAsset;
 
+enum class EWetWrinklePreviewMaterialStatus : uint8
+{
+    Uninitialized,
+    Ready,
+    Unsupported,
+    Failed
+};
+
 struct FWetWrinkleProjectedSurface
 {
     int32 MaterialSlotIndex = INDEX_NONE;
@@ -27,6 +36,20 @@ struct FWetWrinkleProjectedSurface
     FVector WorldNormal = FVector::UpVector;
     FVector WorldTangent = FVector::ForwardVector;
     FVector WorldBitangent = FVector::RightVector;
+};
+
+struct FWetWrinklePreviewMaterialSlotState
+{
+    int32 MaterialSlotIndex = INDEX_NONE;
+    TObjectPtr<UMaterialInterface> MeshOriginalMaterial = nullptr;
+    TObjectPtr<UMaterialInterface> DwcWetMaterial = nullptr;
+    TObjectPtr<UMaterialInterface> PreviewSourceMaterial = nullptr;
+    TObjectPtr<UMaterial> TransientPreviewMaterial = nullptr;
+    TObjectPtr<UMaterialInterface> TransientPreviewParent = nullptr;
+    TObjectPtr<UMaterialInstanceDynamic> PreviewMID = nullptr;
+    EWetWrinklePreviewMaterialStatus PreviewStatus = EWetWrinklePreviewMaterialStatus::Uninitialized;
+    FString PreviewBuildError;
+    bool bUsesDwcWetMaterial = false;
 };
 
 class SWetWrinkleAssetViewport : public SEditorViewport, public FGCObject
@@ -83,10 +106,16 @@ class SWetWrinkleAssetViewport : public SEditorViewport, public FGCObject
     float CalculateBrushCursorWorldRadius() const;
     const UWetClothingAsset* ResolveSourceWetClothingAsset() const;
     UTexture* ResolveSourceTextureForMaterialSlot(int32 MaterialSlotIndex, int32 UVChannelIndex) const;
-    void InitializePreviewMaterialInstances();
+    void RebuildPreviewMaterialSlots();
+    void ReleasePreviewMaterialSlots();
+    void ApplyPreviewMaterialsToMesh();
+    UMaterialInterface* ResolveDwcWetMaterialForSlot(int32 MaterialSlotIndex) const;
+    UMaterialInterface* GetPreviewSourceMaterial(int32 MaterialSlotIndex) const;
     void ApplyPreviewWetVertexColors();
     void RefreshWrinklePreviewMaterials();
-    void ResetPreviewWrinkleTextures();
+    bool EnsurePreviewMaterialForSlot(int32 MaterialSlotIndex);
+    void ResetPreviewMaterialParameters(int32 MaterialSlotIndex);
+    int32 ResolveActivePreviewMaterialSlot() const;
     void FindProjectedSurfacesAtUV(int32 MaterialSlotIndex, int32 UVChannelIndex, const FVector2D& UV, TArray<FWetWrinkleProjectedSurface>& OutSurfaces) const;
     bool TryProjectUVToWorld(int32 MaterialSlotIndex, int32 UVChannelIndex, const FVector2D& UV, FVector& OutWorldPosition, FVector& OutWorldNormal, FVector& OutWorldTangent, FVector& OutWorldBitangent) const;
 
@@ -102,9 +131,7 @@ class SWetWrinkleAssetViewport : public SEditorViewport, public FGCObject
     TObjectPtr<UProceduralMeshComponent> BrushCursorComponent = nullptr;
     TObjectPtr<UProceduralMeshComponent> StoredStampOverlayComponent = nullptr;
     TObjectPtr<UMaterialInterface> CursorMaterial = nullptr;
-    TArray<TObjectPtr<UMaterialInterface>> PreviewBaseMaterials;
-    TArray<TObjectPtr<UMaterialInstanceDynamic>> PreviewMaterialInstances;
-    TArray<TObjectPtr<UTexture2D>> PreviewWrinkleNormalTextures;
+    TArray<FWetWrinklePreviewMaterialSlotState> PreviewMaterialSlots;
     TSharedPtr<SRichTextBlock> OverlayText;
     TArray<FWetClothingAssetUVTriangle> HitTriangles;
     FWetWrinkleBrushSettings BrushSettings;

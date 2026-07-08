@@ -30,8 +30,7 @@
 
 namespace
 {
-    constexpr const TCHAR* WetWrinklePreset0Path = TEXT("/DynamicWetClothes/Presets/WrinkleTextures/wet_cloth_wrinkle_stamp_height_16bit.wet_cloth_wrinkle_stamp_height_16bit");
-    constexpr const TCHAR* WetWrinklePreset1Path = TEXT("/DynamicWetClothes/Presets/WrinkleTextures/T_DWC_WrinklePreset1_H.T_DWC_WrinklePreset1_H");
+    constexpr const TCHAR* WetWrinklePreset0Path = TEXT("/DynamicWetClothes/Presets/WrinkleTextures/Wet_Wrinkle_Normal0.Wet_Wrinkle_Normal0");
 }
 
 void SWetWrinkleAssetEditorPanel::Construct(const FArguments& InArgs)
@@ -205,7 +204,7 @@ void SWetWrinkleAssetEditorPanel::Construct(const FArguments& InArgs)
                                               .AutoHeight()
                                               .Padding(0.0f, 0.0f, 0.0f, 6.0f)
                                                   [SNew(STextBlock)
-                                                       .Text(LOCTEXT("BrushHeightTextureLabel", "Brush Height Texture"))]
+                                                       .Text(LOCTEXT("BrushHeightTextureLabel", "Brush Normal Texture"))]
 
                                         + SVerticalBox::Slot()
                                               .AutoHeight()
@@ -532,6 +531,11 @@ void SWetWrinkleAssetEditorPanel::RefreshBrushPresetOptions()
 
     auto AddPreset = [this](const FText& DisplayName, const TCHAR* TexturePath)
     {
+        if (TexturePath == nullptr || LoadObject<UTexture2D>(nullptr, TexturePath) == nullptr)
+        {
+            return;
+        }
+
         TSharedPtr<FWetWrinkleBrushPresetOption> Option = MakeShared<FWetWrinkleBrushPresetOption>();
         Option->DisplayName = DisplayName;
         Option->TexturePath = FSoftObjectPath(TexturePath);
@@ -539,7 +543,6 @@ void SWetWrinkleAssetEditorPanel::RefreshBrushPresetOptions()
     };
 
     AddPreset(LOCTEXT("WetWrinklePreset0", "Preset 0"), WetWrinklePreset0Path);
-    AddPreset(LOCTEXT("WetWrinklePreset1", "Preset 1"), WetWrinklePreset1Path);
 
     if (BrushPresetComboBox.IsValid())
     {

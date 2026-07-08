@@ -6,9 +6,11 @@
 #include "Engine/SkeletalMesh.h"
 #include "Engine/Texture2D.h"
 #include "IDetailsView.h"
+#include "Misc/MessageDialog.h"
 #include "PropertyCustomizationHelpers.h"
 #include "Styling/CoreStyle.h"
 #include "WetClothing/Texture/WetClothingMaterialTextureResolver.h"
+#include "WetWrinkle/Bake/WetWrinkleNormalMapBaker.h"
 #include "WetWrinkle/Viewport/WetWrinkleViewport.h"
 #include "WetWrinkle/Widgets/SWetWrinkleTexturePreview.h"
 #include "Widgets/Input/SButton.h"
@@ -68,6 +70,13 @@ void SWetWrinkleEditorPanel::Construct(const FArguments& InArgs)
                               [SNew(SButton)
                                    .Text(LOCTEXT("FocusButton", "Focus"))
                                    .OnClicked(this, &SWetWrinkleEditorPanel::HandleFocusClicked)]
+
+                    + SHorizontalBox::Slot()
+                          .AutoWidth()
+                          .Padding(0.0f, 0.0f, 6.0f, 0.0f)
+                              [SNew(SButton)
+                                   .Text(LOCTEXT("BakeSelectedSlotButton", "Bake Slot"))
+                                   .OnClicked(this, &SWetWrinkleEditorPanel::HandleBakeSelectedSlotClicked)]
 
                     + SHorizontalBox::Slot()
                           .AutoWidth()
@@ -362,6 +371,46 @@ void SWetWrinkleEditorPanel::RefreshFromAsset()
 FReply SWetWrinkleEditorPanel::HandleSaveClicked()
 {
     DWCEditorUtils::SaveAsset(WetClothingAsset.Get());
+    return FReply::Handled();
+}
+
+FReply SWetWrinkleEditorPanel::HandleBakeSelectedSlotClicked()
+{
+    UWetClothingAsset* Asset = WetClothingAsset.Get();
+    if (Asset == nullptr)
+    {
+        FMessageDialog::Open(EAppMsgType::Ok, LOCTEXT("BakeWrinkleNoAsset", "Wet Clothing Asset is unavailable."));
+        return FReply::Handled();
+    }
+
+    if (BrushSettings.MaterialSlotIndex == INDEX_NONE)
+    {
+        FMessageDialog::Open(EAppMsgType::Ok, LOCTEXT("BakeWrinkleNoSlot", "Select a material slot before baking the current wrinkle slot."));
+        return FReply::Handled();
+    }
+
+    FWetWrinkleNormalMapBakeSettings Settings;
+    Settings.Resolution = Asset->WrinkleData.BakeSettings.DefaultResolution;
+    Settings.PaddingPixels = Asset->WrinkleData.BakeSettings.PaddingPixels;
+    Settings.bIncludeDisabledPatchStrokes = Asset->WrinkleData.BakeSettings.bIncludeDisabledPatchStrokes;
+    Settings.bBakeNormalMap = Asset->WrinkleData.BakeSettings.bBakeNormalMap;
+    Settings.bBakeMask = Asset->WrinkleData.BakeSettings.bBakeMask;
+
+    FWetWrinkleNormalMapBakeResult Result;
+    FString ErrorMessage;
+    if (!FWetWrinkleNormalMapBaker::BakeMaterialSlot(Asset, BrushSettings.MaterialSlotIndex, Settings, Result, ErrorMessage))
+    {
+        FMessageDialog::Open(EAppMsgType::Ok, FText::FromString(ErrorMessage));
+        return FReply::Handled();
+    }
+
+    MarkAssetEdited();
+    FMessageDialog::Open(
+        EAppMsgType::Ok,
+        FText::Format(
+            LOCTEXT("BakeWrinkleSlotSuccess", "Baked {0} wrinkle normal map(s) from {1} stamp(s)."),
+            FText::AsNumber(Result.BakedMapCount),
+            FText::AsNumber(Result.BakedStampCount)));
     return FReply::Handled();
 }
 

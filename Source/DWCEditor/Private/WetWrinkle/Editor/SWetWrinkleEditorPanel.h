@@ -44,6 +44,7 @@ class SWetWrinkleEditorPanel : public SCompoundWidget
     using FStrokeListItemPtr = TSharedPtr<FWetWrinklePatchStrokeListItem>;
 
     FReply HandleSaveClicked();
+    FReply HandleBakeSelectedSlotClicked();
     FReply HandleFocusClicked();
     void HandleSurfaceHitChanged(const FWetWrinkleSurfaceHit& SurfaceHit);
     void HandlePaintStrokeStarted(const FWetWrinkleSurfaceHit& SurfaceHit);

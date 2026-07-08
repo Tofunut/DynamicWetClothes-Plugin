@@ -437,7 +437,9 @@ bool UWetClothingAsset::RebuildPrecomputedSimulationData(FString* OutErrorMessag
     for (int32 EntryIndex = 0; EntryIndex < PartData.EditableWetPartData.WetPartEntries.Num(); ++EntryIndex)
     {
         const FWetClothingWetPartEntry& Entry = PartData.EditableWetPartData.WetPartEntries[EntryIndex];
-        if (Entry.MaterialSlotIndex == INDEX_NONE || Entry.UVChannelIndex == INDEX_NONE)
+        if (!Entry.ComponentPath.IsEmpty() ||
+            Entry.MaterialSlotIndex == INDEX_NONE ||
+            Entry.UVChannelIndex == INDEX_NONE)
         {
             continue;
         }

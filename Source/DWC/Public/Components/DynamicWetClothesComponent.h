@@ -20,8 +20,46 @@
 #include "DynamicWetClothesComponent.generated.h"
 
 class USkeletalMeshComponent;
+class USkeletalMesh;
 class UMaterialInstanceDynamic;
 class UWetnessProfile;
+
+USTRUCT(BlueprintType)
+struct FDWCWetMeshBinding
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, Category = "Wetness")
+    FName ComponentName = NAME_None;
+
+    UPROPERTY(EditAnywhere, Category = "Wetness")
+    TObjectPtr<USkeletalMesh> TargetMesh = nullptr;
+
+    UPROPERTY(EditAnywhere, Category = "Wetness")
+    TObjectPtr<UWetClothingAsset> WetClothingAsset = nullptr;
+
+    UPROPERTY(EditAnywhere, Category = "Wetness")
+    bool bEnabled = true;
+};
+
+struct FDWCWetMeshReceiverRuntime
+{
+    FName ReceiverId = NAME_None;
+    FString ComponentPath;
+    TWeakObjectPtr<USkeletalMeshComponent> MeshComponent;
+    TWeakObjectPtr<UWetClothingAsset> WetClothingAsset;
+
+    TUniquePtr<FWetClothingRuntimeData> RuntimeData;
+    TUniquePtr<FWetRuntimeDataBuilder> RuntimeDataBuilder;
+    TUniquePtr<FAbsorbedWetnessSimulationState> SimulationState;
+    TUniquePtr<FWetSimulationStage> SimulationStage;
+    TUniquePtr<FWetInputStage> InputStage;
+    TUniquePtr<FWetClothingMeshSampler> MeshSampler;
+    TUniquePtr<FWetRenderStage> RenderStage;
+    TArray<TObjectPtr<UMaterialInstanceDynamic>> WetMaterialInstances;
+
+    bool bWetRenderDirty = false;
+};
 
 UCLASS(ClassGroup = (Wetness), DisplayName = "Dynamic Wet Clothes", meta = (BlueprintSpawnableComponent))
 class DWC_API UDynamicWetClothesComponent : public UActorComponent
@@ -62,19 +100,26 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
   private:
-    FWetRuntimeDataBuildArgs MakeRuntimeDataBuildArgs();
-    FWetInputStageArgs       MakeWetInputStageArgs();
-    FWetSimulationStageArgs  MakeWetSimulationStageArgs();
-    FWetRenderStageArgs      MakeWetRenderStageArgs();
+    FWetRuntimeDataBuildArgs MakeRuntimeDataBuildArgs(FDWCWetMeshReceiverRuntime& Receiver);
+    FWetInputStageArgs       MakeWetInputStageArgs(FDWCWetMeshReceiverRuntime& Receiver);
+    FWetSimulationStageArgs  MakeWetSimulationStageArgs(FDWCWetMeshReceiverRuntime& Receiver);
+    FWetRenderStageArgs      MakeWetRenderStageArgs(FDWCWetMeshReceiverRuntime& Receiver);
     bool                     InitializeWetRuntime();
+    bool                     RebuildWetMeshReceivers();
+    bool                     InitializeWetMeshReceiverRuntime(FDWCWetMeshReceiverRuntime& Receiver);
     void                     StartWetnessTimers();
     void                     UpdateWetness();
     void                     UpdateWetRendering();
     void                     RequestWetRenderingUpdate();
+    void                     RequestWetRenderingUpdate(FDWCWetMeshReceiverRuntime& Receiver);
     bool                     FlushPendingWetContacts();
 
     USkeletalMeshComponent* ResolveTargetSkeletalMesh() const;
+    UWetClothingAsset*      ResolveWetClothingAssetForMesh(const USkeletalMeshComponent& MeshComponent) const;
     void                    ApplyGeneratedWetMaterialOverrides();
+    bool                    HasWetDataForMeshComponent(const USkeletalMeshComponent& MeshComponent, const FString& ComponentPath, const UWetClothingAsset* MeshWetClothingAsset) const;
+    bool                    ShouldReceiverConsiderContact(const FDWCWetMeshReceiverRuntime& Receiver, const FDWCWetContact& Contact) const;
+    bool                    ShouldReceiverConsiderSurface(const FDWCWetMeshReceiverRuntime& Receiver, const FDWCWaterSurfaceData& WaterSurfaceData) const;
 
   public:
     UPROPERTY(EditAnywhere, Category = "Wetness")
@@ -88,6 +133,9 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
 
     UPROPERTY(EditAnywhere, Category = "Wetness")
     TObjectPtr<UWetClothingAsset> WetClothingAsset = nullptr;
+
+    UPROPERTY(EditAnywhere, Category = "Wetness")
+    TArray<FDWCWetMeshBinding> WetMeshBindings;
 
     UPROPERTY(EditAnywhere, Category = "Wetness", meta = (ShowOnlyInnerProperties))
     FWetClothingSettings WetnessSettings;
@@ -158,17 +206,8 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Wrinkle")
     FName WrinkleWetnessMaxParameterName = TEXT("DWC_WrinkleWetnessMax");
 
-    UPROPERTY(Transient)
-    TArray<TObjectPtr<UMaterialInstanceDynamic>> WetMaterialInstances;
-
   private:
-    TUniquePtr<FWetClothingRuntimeData>         RuntimeData;
-    TUniquePtr<FWetRuntimeDataBuilder>          RuntimeDataBuilder;
-    TUniquePtr<FAbsorbedWetnessSimulationState> SimulationState;
-    TUniquePtr<FWetSimulationStage>             SimulationStage;
-    TUniquePtr<FWetInputStage>                  InputStage;
-    TUniquePtr<FWetClothingMeshSampler>         MeshSampler;
-    TUniquePtr<FWetRenderStage>                 RenderStage;
+    TArray<TUniquePtr<FDWCWetMeshReceiverRuntime>> Receivers;
 
     FTimerHandle           WetnessSimulationTimer;
     FTimerHandle           WetnessRenderTimer;

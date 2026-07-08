@@ -40,6 +40,9 @@ struct DWC_API FWetClothingSourceTextureSelection
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, Category = "Wet Part")
+    FString ComponentPath;
+
+    UPROPERTY(EditAnywhere, Category = "Wet Part")
     int32 MaterialSlotIndex = INDEX_NONE;
 
     UPROPERTY(EditAnywhere, Category = "Wet Part")
@@ -55,6 +58,9 @@ struct DWC_API FWetClothingWettableMaterialSlotState
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, Category = "Wet Part")
+    FString ComponentPath;
+
+    UPROPERTY(EditAnywhere, Category = "Wet Part")
     int32 MaterialSlotIndex = INDEX_NONE;
 
     UPROPERTY(EditAnywhere, Category = "Wet Part")
@@ -65,6 +71,9 @@ USTRUCT(BlueprintType)
 struct DWC_API FWetClothingWetPartEntry
 {
     GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, Category = "Wet Part")
+    FString ComponentPath;
 
     UPROPERTY(EditAnywhere, Category = "Wet Part")
     int32 MaterialSlotIndex = INDEX_NONE;
@@ -112,6 +121,9 @@ struct DWC_API FWetClothingGeneratedWetMaterialOverride
     GENERATED_BODY()
 
     UPROPERTY(VisibleAnywhere, Category = "Generated Wet Material")
+    FString ComponentPath;
+
+    UPROPERTY(VisibleAnywhere, Category = "Generated Wet Material")
     int32 MaterialSlotIndex = INDEX_NONE;
 
     UPROPERTY(VisibleAnywhere, Category = "Generated Wet Material")
@@ -125,6 +137,9 @@ USTRUCT(BlueprintType)
 struct DWC_API FWetClothingBakedWetnessProfileMap
 {
     GENERATED_BODY()
+
+    UPROPERTY(VisibleAnywhere, Category = "Baked Wetness Profile Map")
+    FString ComponentPath;
 
     UPROPERTY(VisibleAnywhere, Category = "Baked Wetness Profile Map")
     TObjectPtr<UTexture> SourceTexture = nullptr;

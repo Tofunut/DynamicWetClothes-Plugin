@@ -125,7 +125,8 @@ void FWetRenderStage::ApplyWetnessProfileMapParameters(FWetRenderStageArgs& Rece
     {
         for (const FWetClothingBakedWetnessProfileMap& BakedWetnessProfileMap : Receiver.WetClothingAsset->PartData.BakedWetnessProfileMaps)
         {
-            if (BakedWetnessProfileMap.WetnessProfileMap0 == nullptr)
+            if (BakedWetnessProfileMap.ComponentPath != Receiver.ComponentPath ||
+                BakedWetnessProfileMap.WetnessProfileMap0 == nullptr)
             {
                 continue;
             }

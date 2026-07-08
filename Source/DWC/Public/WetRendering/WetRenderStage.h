@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "CoreMinimal.h"
 
@@ -10,18 +10,19 @@ class FAbsorbedWetnessSimulationState;
 struct FWetClothingSettings;
 
 /*
-WetRenderStage �행�요�자 묶음�다.
+WetRenderStage �행�요�자 묶음�다.
 
-�재멀�스�드 �업 �청�니 DynamicWetClothesComponent가 Game Thread�서
-�더 �현갱신�요참조�모� ��자
-��:
+�재멀�스�드 �업 �청�니 DynamicWetClothesComponent가 Game Thread�서
+�더 �현갱신�요참조�모� ��자
+��:
 - Wetness 값을 MaterialInstance parameter반영
-- WetnessProfileMap parameter �정
-- VertexColor 기반 debug / 1�wetness �현 갱신
+- WetnessProfileMap parameter �정
+- VertexColor 기반 debug / 1�wetness �현 갱신
 */
 struct DWC_API FWetRenderStageArgs
 {
     USkeletalMeshComponent*     TargetSkeletalMesh = nullptr;
+    FString                     ComponentPath;
     const UWetClothingAsset*    WetClothingAsset = nullptr;
     const FWetClothingSettings* WetnessSettings = nullptr;
 

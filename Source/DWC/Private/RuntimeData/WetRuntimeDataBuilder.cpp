@@ -41,6 +41,13 @@ namespace
         OutParameters = SourceProfile->GetParameters();
         return true;
     }
+
+    bool DoesWetPartEntryMatchReceiverScope(
+        const FWetRuntimeDataBuildArgs& Receiver,
+        const FWetClothingWetPartEntry& WetPartEntry)
+    {
+        return WetPartEntry.ComponentPath == Receiver.ComponentPath;
+    }
 } // namespace
 
 void FWetRuntimeDataBuilder::InitializeAbsorbedWetnessData(FWetRuntimeDataBuildArgs& Receiver)
@@ -97,7 +104,7 @@ void FWetRuntimeDataBuilder::InitializeWetPartVertexData(FWetRuntimeDataBuildArg
     }
 
     USkeletalMesh* SkeletalMesh = Receiver.TargetSkeletalMesh ? Receiver.TargetSkeletalMesh->GetSkeletalMeshAsset() : nullptr;
-    if (Receiver.WetClothingAsset->TargetMesh && Receiver.WetClothingAsset->TargetMesh != SkeletalMesh)
+    if (Receiver.ComponentPath.IsEmpty() && Receiver.WetClothingAsset->TargetMesh && Receiver.WetClothingAsset->TargetMesh != SkeletalMesh)
     {
         UE_LOG(
             LogTemp,
@@ -110,6 +117,10 @@ void FWetRuntimeDataBuilder::InitializeWetPartVertexData(FWetRuntimeDataBuildArg
     for (int32 EntryIndex = 0; EntryIndex < Receiver.WetClothingAsset->PartData.EditableWetPartData.WetPartEntries.Num(); ++EntryIndex)
     {
         const FWetClothingWetPartEntry& WetPartEntry = Receiver.WetClothingAsset->PartData.EditableWetPartData.WetPartEntries[EntryIndex];
+        if (!DoesWetPartEntryMatchReceiverScope(Receiver, WetPartEntry))
+        {
+            continue;
+        }
 
         FWetnessProfileParameters ResolvedParameters;
         if (ResolveWetPartSourceProfileParameters(WetPartEntry, ResolvedParameters))
@@ -122,7 +133,8 @@ void FWetRuntimeDataBuilder::InitializeWetPartVertexData(FWetRuntimeDataBuildArg
     for (int32 EntryIndex = 0; EntryIndex < Receiver.WetClothingAsset->PartData.EditableWetPartData.WetPartEntries.Num(); ++EntryIndex)
     {
         const FWetClothingWetPartEntry& WetPartEntry = Receiver.WetClothingAsset->PartData.EditableWetPartData.WetPartEntries[EntryIndex];
-        if (WetPartEntry.MaterialSlotIndex == INDEX_NONE ||
+        if (!DoesWetPartEntryMatchReceiverScope(Receiver, WetPartEntry) ||
+            WetPartEntry.MaterialSlotIndex == INDEX_NONE ||
             WetPartEntry.UVChannelIndex < 0 ||
             WetPartEntry.AssignedUVIslandIDs.Num() == 0 ||
             !ResolvedWetPartParametersByEntryIndex.Contains(EntryIndex))
@@ -240,6 +252,10 @@ bool FWetRuntimeDataBuilder::InitializeWetPartVertexDataFromBakedProfile(
     for (int32 EntryIndex = 0; EntryIndex < Receiver.WetClothingAsset->PartData.EditableWetPartData.WetPartEntries.Num(); ++EntryIndex)
     {
         const FWetClothingWetPartEntry& WetPartEntry = Receiver.WetClothingAsset->PartData.EditableWetPartData.WetPartEntries[EntryIndex];
+        if (!DoesWetPartEntryMatchReceiverScope(Receiver, WetPartEntry))
+        {
+            continue;
+        }
 
         FWetnessProfileParameters ResolvedParameters;
         if (ResolveWetPartSourceProfileParameters(WetPartEntry, ResolvedParameters))
@@ -263,6 +279,10 @@ bool FWetRuntimeDataBuilder::InitializeWetPartVertexDataFromBakedProfile(
         {
             const FWetClothingWetPartEntry& WetPartEntry =
                 Receiver.WetClothingAsset->PartData.EditableWetPartData.WetPartEntries[PrecomputedVertex.WetPartEntryIndex];
+            if (!DoesWetPartEntryMatchReceiverScope(Receiver, WetPartEntry))
+            {
+                continue;
+            }
             Receiver.RuntimeData->VertexWetPartIDs[VertexIndex] = PrecomputedVertex.WetPartID;
             Receiver.RuntimeData->VertexWetnessProfileParameters[VertexIndex] =
                 ResolvedWetPartParametersByEntryIndex[PrecomputedVertex.WetPartEntryIndex];

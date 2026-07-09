@@ -3,7 +3,7 @@
 #include "CoreMinimal.h"
 class USkeletalMesh;
 
-#include "RuntimeData/WetBoneOptimizationCache.h"
+#include "RuntimeState/WetBoneOptimizationCache.h"
 
 class DWC_API FWetBoneOptimizationCacheBuilder
 {

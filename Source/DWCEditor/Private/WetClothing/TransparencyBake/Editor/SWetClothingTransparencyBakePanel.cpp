@@ -12,7 +12,7 @@
 #include "PropertyCustomizationHelpers.h"
 #include "Styling/AppStyle.h"
 #include "Styling/CoreStyle.h"
-#include "WetClothing/BakeSource/DWCBakeBlueprintSnapshotResolver.h"
+#include "WetClothing/TransparencyBake/SourceSnapshot/DWCBakeBlueprintSnapshotResolver.h"
 #include "WetClothing/Common/Widgets/WetClothingEditorCommonWidgets.h"
 #include "WetClothing/TransparencyBake/RevealBake/DWCTransparencyAssetBakeService.h"
 #include "WetClothing/TransparencyBake/Viewport/SWetClothingTransparencyPreviewViewport.h"
@@ -75,7 +75,7 @@ void SWetClothingTransparencyBakePanel::RefreshFromAsset()
 
     if (Asset->TargetMesh == nullptr)
     {
-        StatusMessage = TEXT("Assign a TargetMesh before building Transparency.");
+        StatusMessage = TEXT("Assign a TargetMesh before baking Transparency.");
         UpdateInnerSourceStatus();
         return;
     }
@@ -83,8 +83,8 @@ void SWetClothingTransparencyBakePanel::RefreshFromAsset()
     if (RevealSourceType != EDWCTransparencyRevealSourceType::MeshRaycast)
     {
         StatusMessage = RevealSourceType == EDWCTransparencyRevealSourceType::ManualInnerTexture
-                            ? TEXT("Manual Inner Texture is a UI placeholder. Mesh Raycast is still required for the Bake Maps build step.")
-                            : TEXT("Fallback Color is a UI placeholder. Mesh Raycast is still required for the Bake Maps build step.");
+                            ? TEXT("Manual Inner Texture is a UI placeholder. Mesh Raycast is still required for the Bake Maps step.")
+                            : TEXT("Fallback Color is a UI placeholder. Mesh Raycast is still required for the Bake Maps step.");
         UpdateInnerSourceStatus();
         return;
     }
@@ -107,9 +107,9 @@ bool SWetClothingTransparencyBakePanel::HasPendingTransparencySetup(FString* Out
     return FDWCTransparencyAssetBakeService::HasPendingTransparencySetup(WetClothingAsset.Get(), OutSummary);
 }
 
-bool SWetClothingTransparencyBakePanel::BuildTransparencySetup(FString& OutSummary, bool* OutHadWarnings)
+bool SWetClothingTransparencyBakePanel::BakeTransparencyRevealAssets(FString& OutSummary, bool* OutHadWarnings)
 {
-    const bool bSucceeded = FDWCTransparencyAssetBakeService::BuildTransparencySetup(WetClothingAsset.Get(), OutSummary, OutHadWarnings);
+    const bool bSucceeded = FDWCTransparencyAssetBakeService::BakeTransparencyRevealAssets(WetClothingAsset.Get(), OutSummary, OutHadWarnings);
     StatusMessage = OutSummary;
     UpdateInnerSourceStatus();
     if (DetailsView.IsValid())
@@ -158,11 +158,11 @@ void SWetClothingTransparencyBakePanel::HandleSourceClassChanged(const UClass* N
     RebuildEditorLayout();
 }
 
-FReply SWetClothingTransparencyBakePanel::HandleBuildAndSaveClicked()
+FReply SWetClothingTransparencyBakePanel::HandleBakeAndSaveClicked()
 {
     FString Summary;
     bool bHadWarnings = false;
-    if (!BuildTransparencySetup(Summary, &bHadWarnings))
+    if (!BakeTransparencyRevealAssets(Summary, &bHadWarnings))
     {
         FMessageDialog::Open(EAppMsgType::Ok, FText::FromString(Summary));
         return FReply::Handled();
@@ -245,9 +245,9 @@ FText SWetClothingTransparencyBakePanel::GetStatusText() const
     return FText::FromString(StatusMessage);
 }
 
-FText SWetClothingTransparencyBakePanel::GetBuildButtonText() const
+FText SWetClothingTransparencyBakePanel::GetBakeButtonText() const
 {
-    return LOCTEXT("BuildAndSave", "Build & Save");
+    return LOCTEXT("BakeAndSave", "Bake & Save");
 }
 
 FText SWetClothingTransparencyBakePanel::GetTargetMeshText() const
@@ -364,7 +364,7 @@ void SWetClothingTransparencyBakePanel::HandleRevealMapTypeChanged(const ECheckB
     }
 }
 
-bool SWetClothingTransparencyBakePanel::IsBuildEnabled() const
+bool SWetClothingTransparencyBakePanel::IsBakeEnabled() const
 {
     const UWetClothingAsset* Asset = WetClothingAsset.Get();
     return RevealSourceType == EDWCTransparencyRevealSourceType::MeshRaycast
@@ -384,7 +384,7 @@ void SWetClothingTransparencyBakePanel::UpdateInnerSourceStatus()
 
     if (RevealSourceType == EDWCTransparencyRevealSourceType::ManualInnerTexture)
     {
-        InnerSourceStatusMessage = TEXT("Manual texture source placeholder. Assign an inner color texture and optional mask here. Build integration will be added separately.");
+        InnerSourceStatusMessage = TEXT("Manual texture source placeholder. Assign an inner color texture and optional mask here. Bake integration will be added separately.");
         return;
     }
 
@@ -594,7 +594,7 @@ TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildInnerSourceSection()
 
         Box->AddSlot()
             .AutoHeight()
-                [BuildEmptyAssetRow(LOCTEXT("ManualTexturePlaceholderNote", "Placeholder only: these textures are not used by the Bake Maps build step yet."))];
+                [BuildEmptyAssetRow(LOCTEXT("ManualTexturePlaceholderNote", "Placeholder only: these textures are not used by the Bake Maps step yet."))];
     }
     else if (RevealSourceType == EDWCTransparencyRevealSourceType::FallbackColor)
     {
@@ -617,7 +617,7 @@ TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildInnerSourceSection()
 
         Box->AddSlot()
             .AutoHeight()
-                [BuildEmptyAssetRow(LOCTEXT("FallbackColorPlaceholderNote", "Placeholder only: fallback color build support will be added separately."))];
+                [BuildEmptyAssetRow(LOCTEXT("FallbackColorPlaceholderNote", "Placeholder only: fallback color bake support will be added separately."))];
     }
 
     return Box;
@@ -652,13 +652,13 @@ TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildGeneratedOutputsSect
                        [BuildRevealTextureSection()]];
 }
 
-TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildBuildSection()
+TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildBakeSection()
 {
     return SNew(SVerticalBox)
         + SVerticalBox::Slot()
               .AutoHeight()
               .Padding(0.0f, 0.0f, 0.0f, 8.0f)
-                  [FWetClothingEditorCommonWidgets::BuildSectionHeader(LOCTEXT("BuildSection", "Build"))]
+                  [FWetClothingEditorCommonWidgets::BuildSectionHeader(LOCTEXT("BakeSection", "Bake"))]
 
         + SVerticalBox::Slot()
               .AutoHeight()
@@ -670,9 +670,9 @@ TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildBuildSection()
         + SVerticalBox::Slot()
               .AutoHeight()
                   [SNew(SButton)
-                       .Text(this, &SWetClothingTransparencyBakePanel::GetBuildButtonText)
-                       .IsEnabled(this, &SWetClothingTransparencyBakePanel::IsBuildEnabled)
-                       .OnClicked(this, &SWetClothingTransparencyBakePanel::HandleBuildAndSaveClicked)];
+                       .Text(this, &SWetClothingTransparencyBakePanel::GetBakeButtonText)
+                       .IsEnabled(this, &SWetClothingTransparencyBakePanel::IsBakeEnabled)
+                       .OnClicked(this, &SWetClothingTransparencyBakePanel::HandleBakeAndSaveClicked)];
 }
 
 TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildPreviewSettingsSection()

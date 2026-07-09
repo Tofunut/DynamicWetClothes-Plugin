@@ -1,8 +1,8 @@
-#include "RuntimeData/WetPrecomputedSimulationDataBridge.h"
+#include "RuntimeState/WetPrecomputedSimulationDataBridge.h"
 
 #include "DataAssets/WetClothingAsset.h"
 #include "Engine/SkeletalMesh.h"
-#include "RuntimeData/WetClothingRuntimeData.h"
+#include "RuntimeState/WetClothingRuntimeData.h"
 #include "Utility/DWCError.h"
 
 bool FWetPrecomputedSimulationDataBridge::TryCopyPrecomputedBoneOptimizationCache(
@@ -31,7 +31,7 @@ bool FWetPrecomputedSimulationDataBridge::TryCopyPrecomputedBoneOptimizationCach
             SkeletalMesh,
             LODIndex,
             PrecomputedData.VertexCount,
-            PrecomputedData.MeshBuildSignature))
+            PrecomputedData.MeshSignature))
     {
         DWC::Error::SetMessage(OutErrorMessage, TEXT("Precomputed bone optimization cache is stale or invalid for the target mesh."));
         return false;

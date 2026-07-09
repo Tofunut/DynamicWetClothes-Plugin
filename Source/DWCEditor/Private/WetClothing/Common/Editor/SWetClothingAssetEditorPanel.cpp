@@ -6,6 +6,10 @@
 #include "WetClothing/TransparencyBake/Editor/SWetClothingTransparencyBakePanel.h"
 #include "WetClothing/WrinkleEdit/Editor/SWetWrinkleEditorPanel.h"
 #include "Widgets/Layout/SWidgetSwitcher.h"
+#include "Widgets/Layout/SBorder.h"
+#include "Widgets/SBoxPanel.h"
+#include "Widgets/Text/STextBlock.h"
+#include "Styling/AppStyle.h"
 
 #define LOCTEXT_NAMESPACE "WetClothingAssetEditorPanel"
 
@@ -15,22 +19,38 @@ void SWetClothingAssetEditorPanel::Construct(const FArguments& InArgs)
     DetailsView = InArgs._DetailsView;
 
     ChildSlot
-        [SAssignNew(ModeContentSwitcher, SWidgetSwitcher)
+        [SNew(SVerticalBox)
 
-         + SWidgetSwitcher::Slot()
-               [SAssignNew(PartEditorPanel, SWetClothingPartEditorPanel)
-                    .WetClothingAsset(WetClothingAsset.Get())
-                    .DetailsView(DetailsView)]
+         + SVerticalBox::Slot()
+               .AutoHeight()
+               .Padding(0.0f, 0.0f, 0.0f, 6.0f)
+                   [SNew(SBorder)
+                        .Visibility(this, &SWetClothingAssetEditorPanel::GetRuntimeReadyWarningVisibility)
+                        .Padding(FMargin(10.0f, 6.0f))
+                        .BorderImage(FAppStyle::Get().GetBrush(TEXT("Brushes.Panel")))
+                        .BorderBackgroundColor(FLinearColor(0.35f, 0.02f, 0.02f, 1.0f))
+                            [SNew(STextBlock)
+                                 .Text(this, &SWetClothingAssetEditorPanel::GetRuntimeReadyWarningText)
+                                 .ColorAndOpacity(FSlateColor(FLinearColor(1.0f, 0.22f, 0.22f, 1.0f)))]]
 
-         + SWidgetSwitcher::Slot()
-               [SAssignNew(WrinkleEditorPanel, SWetWrinkleEditorPanel)
-                    .WetClothingAsset(WetClothingAsset.Get())
-                    .DetailsView(DetailsView)]
+         + SVerticalBox::Slot()
+               .FillHeight(1.0f)
+                   [SAssignNew(ModeContentSwitcher, SWidgetSwitcher)
 
-         + SWidgetSwitcher::Slot()
-               [SAssignNew(TransparencyBakePanel, SWetClothingTransparencyBakePanel)
-                    .WetClothingAsset(WetClothingAsset.Get())
-                    .DetailsView(DetailsView)]];
+                    + SWidgetSwitcher::Slot()
+                          [SAssignNew(PartEditorPanel, SWetClothingPartEditorPanel)
+                               .WetClothingAsset(WetClothingAsset.Get())
+                               .DetailsView(DetailsView)]
+
+                    + SWidgetSwitcher::Slot()
+                          [SAssignNew(WrinkleEditorPanel, SWetWrinkleEditorPanel)
+                               .WetClothingAsset(WetClothingAsset.Get())
+                               .DetailsView(DetailsView)]
+
+                    + SWidgetSwitcher::Slot()
+                          [SAssignNew(TransparencyBakePanel, SWetClothingTransparencyBakePanel)
+                               .WetClothingAsset(WetClothingAsset.Get())
+                               .DetailsView(DetailsView)]]];
 
     SetEditorMode(EWetClothingEditorMode::PartEdit);
 }
@@ -51,11 +71,11 @@ void SWetClothingAssetEditorPanel::RefreshFromAsset()
     }
 }
 
-bool SWetClothingAssetEditorPanel::HasPendingWetSetupTasks(FString* OutSummary) const
+bool SWetClothingAssetEditorPanel::HasPendingVisualBakeTasks(FString* OutSummary) const
 {
     TArray<FString> PendingSections;
     FString PartSummary;
-    if (PartEditorPanel.IsValid() && PartEditorPanel->HasPendingWetSetupTasks(&PartSummary))
+    if (PartEditorPanel.IsValid() && PartEditorPanel->HasPendingVisualBakeTasks(&PartSummary))
     {
         PendingSections.Add(PartSummary);
     }
@@ -69,14 +89,14 @@ bool SWetClothingAssetEditorPanel::HasPendingWetSetupTasks(FString* OutSummary) 
     if (OutSummary != nullptr)
     {
         *OutSummary = PendingSections.Num() == 0
-            ? TEXT("Wet setup is up to date.")
+            ? TEXT("Visual maps are up to date.")
             : FString::Join(PendingSections, TEXT("\n\n"));
     }
 
     return PendingSections.Num() > 0;
 }
 
-bool SWetClothingAssetEditorPanel::BuildWetSetup(FString& OutSummary, bool* OutHadWarnings)
+bool SWetClothingAssetEditorPanel::BakeWetVisualAssets(FString& OutSummary, bool* OutHadWarnings)
 {
     bool bHadWarnings = false;
     TArray<FString> Sections;
@@ -85,7 +105,7 @@ bool SWetClothingAssetEditorPanel::BuildWetSetup(FString& OutSummary, bool* OutH
     {
         FString PartSummary;
         bool bPartHadWarnings = false;
-        if (!PartEditorPanel->BuildWetSetup(PartSummary, &bPartHadWarnings))
+        if (!PartEditorPanel->BakeWetnessProfileMapsAndUpdateMaterials(PartSummary, &bPartHadWarnings))
         {
             OutSummary = PartSummary;
             return false;
@@ -98,7 +118,7 @@ bool SWetClothingAssetEditorPanel::BuildWetSetup(FString& OutSummary, bool* OutH
     {
         FString TransparencySummary;
         bool bTransparencyHadWarnings = false;
-        if (!TransparencyBakePanel->BuildTransparencySetup(TransparencySummary, &bTransparencyHadWarnings))
+        if (!TransparencyBakePanel->BakeTransparencyRevealAssets(TransparencySummary, &bTransparencyHadWarnings))
         {
             OutSummary = TransparencySummary;
             return false;
@@ -107,7 +127,7 @@ bool SWetClothingAssetEditorPanel::BuildWetSetup(FString& OutSummary, bool* OutH
         Sections.Add(TransparencySummary);
     }
 
-    OutSummary = Sections.Num() > 0 ? FString::Join(Sections, TEXT("\n\n")) : TEXT("Wet setup is already up to date.");
+    OutSummary = Sections.Num() > 0 ? FString::Join(Sections, TEXT("\n\n")) : TEXT("Visual maps are already up to date.");
     if (OutHadWarnings != nullptr)
     {
         *OutHadWarnings = bHadWarnings;
@@ -115,7 +135,7 @@ bool SWetClothingAssetEditorPanel::BuildWetSetup(FString& OutSummary, bool* OutH
     return true;
 }
 
-bool SWetClothingAssetEditorPanel::BuildPendingWetSetup(FString& OutSummary, bool* OutHadWarnings)
+bool SWetClothingAssetEditorPanel::BakePendingVisualAssets(FString& OutSummary, bool* OutHadWarnings)
 {
     bool bHadWarnings = false;
     TArray<FString> Sections;
@@ -123,11 +143,11 @@ bool SWetClothingAssetEditorPanel::BuildPendingWetSetup(FString& OutSummary, boo
     if (PartEditorPanel.IsValid())
     {
         FString PartPendingSummary;
-        if (PartEditorPanel->HasPendingWetSetupTasks(&PartPendingSummary))
+        if (PartEditorPanel->HasPendingVisualBakeTasks(&PartPendingSummary))
         {
             FString PartSummary;
             bool bPartHadWarnings = false;
-            if (!PartEditorPanel->BuildWetSetup(PartSummary, &bPartHadWarnings))
+            if (!PartEditorPanel->BakeWetnessProfileMapsAndUpdateMaterials(PartSummary, &bPartHadWarnings))
             {
                 OutSummary = PartSummary;
                 return false;
@@ -144,7 +164,7 @@ bool SWetClothingAssetEditorPanel::BuildPendingWetSetup(FString& OutSummary, boo
         {
             FString TransparencySummary;
             bool bTransparencyHadWarnings = false;
-            if (!TransparencyBakePanel->BuildTransparencySetup(TransparencySummary, &bTransparencyHadWarnings))
+            if (!TransparencyBakePanel->BakeTransparencyRevealAssets(TransparencySummary, &bTransparencyHadWarnings))
             {
                 OutSummary = TransparencySummary;
                 return false;
@@ -154,7 +174,7 @@ bool SWetClothingAssetEditorPanel::BuildPendingWetSetup(FString& OutSummary, boo
         }
     }
 
-    OutSummary = Sections.Num() > 0 ? FString::Join(Sections, TEXT("\n\n")) : TEXT("Wet setup is already up to date.");
+    OutSummary = Sections.Num() > 0 ? FString::Join(Sections, TEXT("\n\n")) : TEXT("Visual maps are already up to date.");
     if (OutHadWarnings != nullptr)
     {
         *OutHadWarnings = bHadWarnings;
@@ -162,7 +182,7 @@ bool SWetClothingAssetEditorPanel::BuildPendingWetSetup(FString& OutSummary, boo
     return true;
 }
 
-bool SWetClothingAssetEditorPanel::BuildTransparencySetup(FString& OutSummary, bool* OutHadWarnings)
+bool SWetClothingAssetEditorPanel::BakeTransparencyRevealAssets(FString& OutSummary, bool* OutHadWarnings)
 {
     if (!TransparencyBakePanel.IsValid())
     {
@@ -174,7 +194,7 @@ bool SWetClothingAssetEditorPanel::BuildTransparencySetup(FString& OutSummary, b
         return false;
     }
 
-    return TransparencyBakePanel->BuildTransparencySetup(OutSummary, OutHadWarnings);
+    return TransparencyBakePanel->BakeTransparencyRevealAssets(OutSummary, OutHadWarnings);
 }
 
 bool SWetClothingAssetEditorPanel::SaveTransparencySetupAssets() const
@@ -182,18 +202,36 @@ bool SWetClothingAssetEditorPanel::SaveTransparencySetupAssets() const
     return TransparencyBakePanel.IsValid() ? TransparencyBakePanel->SaveTransparencySetupAssets() : true;
 }
 
-bool SWetClothingAssetEditorPanel::SaveWetSetupAssets() const
+bool SWetClothingAssetEditorPanel::SaveBakedVisualAssets() const
 {
     bool bSaved = true;
     if (PartEditorPanel.IsValid())
     {
-        bSaved &= PartEditorPanel->SaveWetSetupAssets();
+        bSaved &= PartEditorPanel->SaveBakedWetnessAssets();
     }
     if (TransparencyBakePanel.IsValid())
     {
         bSaved &= TransparencyBakePanel->SaveTransparencySetupAssets();
     }
     return bSaved;
+}
+
+EVisibility SWetClothingAssetEditorPanel::GetRuntimeReadyWarningVisibility() const
+{
+    const UWetClothingAsset* Asset = WetClothingAsset.Get();
+    if (Asset == nullptr || Asset->TargetMesh == nullptr)
+    {
+        return EVisibility::Collapsed;
+    }
+
+    return Asset->IsPrecomputedSimulationDataValidForMesh(Asset->TargetMesh, 0)
+        ? EVisibility::Collapsed
+        : EVisibility::Visible;
+}
+
+FText SWetClothingAssetEditorPanel::GetRuntimeReadyWarningText() const
+{
+    return LOCTEXT("RuntimeReadyDataOutdatedWarning", "Runtime-ready data is outdated. Save this asset to update it.");
 }
 
 void SWetClothingAssetEditorPanel::SetEditorMode(EWetClothingEditorMode NewMode)

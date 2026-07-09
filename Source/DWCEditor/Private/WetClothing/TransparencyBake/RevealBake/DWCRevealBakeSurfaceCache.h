@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Bake/DWCBakeSurface.h"
+#include "WetClothing/TransparencyBake/RevealBake/DWCRevealBakeSurface.h"
 #include "CoreMinimal.h"
 
 struct FDWCRevealBakeSurfaceCacheKey
@@ -22,7 +22,7 @@ uint32 GetTypeHash(const FDWCRevealBakeSurfaceCacheKey& Key);
 class FDWCRevealBakeSurfaceCache
 {
   public:
-    const FDWCBakeSurface* FindOrBuild(
+    const FDWCRevealBakeSurface* FindOrBuild(
         const FDWCBakeResolvedLayer& Layer,
         int32                       LayerIndex,
         int32                       LODIndex,
@@ -30,5 +30,5 @@ class FDWCRevealBakeSurfaceCache
         FString&                    OutErrorMessage);
 
   private:
-    TMap<FDWCRevealBakeSurfaceCacheKey, FDWCBakeSurface> Surfaces;
+    TMap<FDWCRevealBakeSurfaceCacheKey, FDWCRevealBakeSurface> Surfaces;
 };

@@ -5,7 +5,7 @@
 
 class USkeletalMesh;
 
-struct DWC_API FDWCBakeSurfaceTriangle
+struct FDWCRevealBakeSurfaceTriangle
 {
     int32 TriangleIndex = INDEX_NONE;
     int32 MaterialSlotIndex = INDEX_NONE;
@@ -16,7 +16,7 @@ struct DWC_API FDWCBakeSurfaceTriangle
     FBox Bounds = FBox(ForceInit);
 };
 
-struct DWC_API FDWCBakeSurface
+struct FDWCRevealBakeSurface
 {
     FName LayerId;
     int32 LayerOrder = 0;
@@ -27,20 +27,20 @@ struct DWC_API FDWCBakeSurface
     bool bCanBeWetOuterLayer = true;
     bool bBlocksReveal = false;
     float MaxRevealDistance = 5.0f;
-    TArray<FDWCBakeSurfaceTriangle> Triangles;
+    TArray<FDWCRevealBakeSurfaceTriangle> Triangles;
     FBox Bounds = FBox(ForceInit);
 
     void Reset();
 };
 
-class DWC_API FDWCBakeSurfaceBuilder
+class FDWCRevealBakeSurfaceBuilder
 {
   public:
     static bool BuildReferencePoseSurface(
         const FDWCBakeResolvedLayer& ResolvedLayer,
         int32                        LODIndex,
         int32                        UVChannelIndex,
-        FDWCBakeSurface&             OutSurface,
+        FDWCRevealBakeSurface&             OutSurface,
         FString*                     OutErrorMessage = nullptr);
 
   private:

@@ -31,10 +31,10 @@ bool FDWCRevealBakeSourceResolver::ContainsAnyTextureKeyword(
     return false;
 }
 
-TArray<FName> FDWCRevealBakeSourceResolver::BuildRevealSourceLayerIds(const TArray<FDWCBakeSurface>& SourceSurfaces)
+TArray<FName> FDWCRevealBakeSourceResolver::BuildRevealSourceLayerIds(const TArray<FDWCRevealBakeSurface>& SourceSurfaces)
 {
     TArray<FName> SourceLayerIds;
-    for (const FDWCBakeSurface& SourceSurface : SourceSurfaces)
+    for (const FDWCRevealBakeSurface& SourceSurface : SourceSurfaces)
     {
         if (SourceSurface.bCanBeRevealSource)
         {

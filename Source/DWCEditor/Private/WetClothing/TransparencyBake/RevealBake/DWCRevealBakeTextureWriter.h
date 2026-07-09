@@ -1,7 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Bake/DWCBakeProjection.h"
+#include "WetClothing/TransparencyBake/RevealBake/DWCRevealBakeProjection.h"
 #include "Runtime/Engine/Classes/Engine/Texture.h"
 #include "WetClothing/Common/Texture/WetClothingTextureReadback.h"
 
@@ -29,7 +29,7 @@ class FDWCRevealBakeTextureWriter
 {
   public:
     static bool WriteTextures(
-        const TArray<FDWCBakeRayHit>&              Hits,
+        const TArray<FDWCRevealBakeRayHit>&              Hits,
         const FDWCRevealBakeTextureWriteSettings& Settings,
         FDWCRevealBakeTextureSet&                 OutTextures,
         FString*                                  OutErrorMessage = nullptr);

@@ -1,7 +1,7 @@
 #include "WetClothing/TransparencyBake/RevealBake/DWCTransparencyAssetBakeService.h"
 
-#include "Bake/DWCBakeProjection.h"
-#include "Bake/DWCBakeSurface.h"
+#include "WetClothing/TransparencyBake/RevealBake/DWCRevealBakeProjection.h"
+#include "WetClothing/TransparencyBake/RevealBake/DWCRevealBakeSurface.h"
 #include "Components/DWCBakeComponent.h"
 #include "DataAssets/WetClothingAsset.h"
 #include "FileHelpers.h"
@@ -40,13 +40,32 @@ namespace
             });
     }
 
+    bool IsMaterialSlotWettableForBake(const UWetClothingAsset& WetClothingAsset, const int32 MaterialSlotIndex, const FString& ComponentPath)
+    {
+        const FWetClothingWettableMaterialSlotState* State = WetClothingAsset.PartData.EditableWetPartData.WettableMaterialSlots.FindByPredicate(
+            [MaterialSlotIndex, &ComponentPath](const FWetClothingWettableMaterialSlotState& Candidate)
+            {
+                return Candidate.MaterialSlotIndex == MaterialSlotIndex &&
+                       (Candidate.ComponentPath == ComponentPath || Candidate.ComponentPath.IsEmpty());
+            });
+
+        return State != nullptr && State->bIsWettableSlot;
+    }
+
     UMaterialInterface* ResolveOrCreateWetBaseMaterial(
         UWetClothingAsset&          WetClothingAsset,
         const int32                 MaterialSlotIndex,
+        const FString&              ComponentPath,
         UMaterialInterface*         SourceMaterial,
         TArray<FString>&            OutSetupMessages,
         FString&                    OutErrorMessage)
     {
+        if (!IsMaterialSlotWettableForBake(WetClothingAsset, MaterialSlotIndex, ComponentPath))
+        {
+            OutErrorMessage = FString::Printf(TEXT("Slot %d is not wettable."), MaterialSlotIndex);
+            return nullptr;
+        }
+
         if (SourceMaterial == nullptr)
         {
             OutErrorMessage = FString::Printf(TEXT("Slot %d has no source material."), MaterialSlotIndex);
@@ -65,7 +84,7 @@ namespace
         if (!WetSetupResult.bSucceeded || WetSetupResult.ConfiguredMaterial == nullptr)
         {
             OutErrorMessage = FString::Printf(
-                TEXT("Slot %d wet material setup failed before Transparency build: %s"),
+                TEXT("Slot %d wet material setup failed before Transparency bake: %s"),
                 MaterialSlotIndex,
                 *WetSetupResult.Message);
             return nullptr;
@@ -114,7 +133,7 @@ namespace
         TSubclassOf<AActor> BlueprintClass = WetClothingAsset.TransparencyData.SourceBlueprintClass.LoadSynchronous();
         if (BlueprintClass == nullptr)
         {
-            OutErrorMessage = TEXT("Assign a Source Blueprint before building Transparency.");
+            OutErrorMessage = TEXT("Assign a Source Blueprint before baking Transparency.");
             return false;
         }
 
@@ -183,7 +202,7 @@ namespace
 
         if (WetClothingAsset.TargetMesh == nullptr)
         {
-            OutErrorMessage = TEXT("Assign a TargetMesh before building Transparency.");
+            OutErrorMessage = TEXT("Assign a TargetMesh before baking Transparency.");
             return false;
         }
 
@@ -226,7 +245,7 @@ namespace
         FString&                        OutErrorMessage)
     {
         FDWCRevealBakeSurfaceCache SurfaceCache;
-        const FDWCBakeSurface* OuterSurface = SurfaceCache.FindOrBuild(
+        const FDWCRevealBakeSurface* OuterSurface = SurfaceCache.FindOrBuild(
             OuterLayer,
             OuterLayerIndex,
             0,
@@ -237,7 +256,7 @@ namespace
             return false;
         }
 
-        TArray<FDWCBakeSurface> SourceSurfaces =
+        TArray<FDWCRevealBakeSurface> SourceSurfaces =
             FDWCRevealBakeSurfaceResolver::BuildSourceSurfacesForOuter(Snapshot, OuterLayer, SurfaceCache, OutErrorMessage);
         if (SourceSurfaces.Num() == 0)
         {
@@ -245,21 +264,21 @@ namespace
             return false;
         }
 
-        FDWCBakeTexelSamplingSettings SamplingSettings;
+        FDWCRevealBakeTexelSamplingSettings SamplingSettings;
         SamplingSettings.Resolution = FIntPoint(
             FMath::Clamp(WetClothingAsset.TransparencyData.RevealBakeResolution, MinRevealBakeResolution, MaxRevealBakeResolution),
             FMath::Clamp(WetClothingAsset.TransparencyData.RevealBakeResolution, MinRevealBakeResolution, MaxRevealBakeResolution));
         SamplingSettings.MaterialSlotIndex = INDEX_NONE;
 
-        TArray<FDWCBakeTexelSample> Samples;
-        if (!FDWCBakeTexelSampler::BuildOuterTexelSamples(*OuterSurface, SamplingSettings, Samples, &OutErrorMessage))
+        TArray<FDWCRevealBakeTexelSample> Samples;
+        if (!FDWCRevealBakeTexelSampler::BuildOuterTexelSamples(*OuterSurface, SamplingSettings, Samples, &OutErrorMessage))
         {
             return false;
         }
 
-        TArray<FDWCBakeRayHit> Hits;
-        FDWCBakeRayProjectionSettings ProjectionSettings;
-        if (!FDWCBakeRayProjector::ProjectSamplesToSources(*OuterSurface, SourceSurfaces, Samples, ProjectionSettings, Hits, &OutErrorMessage))
+        TArray<FDWCRevealBakeRayHit> Hits;
+        FDWCRevealBakeRayProjectionSettings ProjectionSettings;
+        if (!FDWCRevealBakeRayProjector::ProjectSamplesToSources(*OuterSurface, SourceSurfaces, Samples, ProjectionSettings, Hits, &OutErrorMessage))
         {
             return false;
         }
@@ -289,7 +308,7 @@ namespace
     }
 }
 
-bool FDWCTransparencyAssetBakeService::BuildTransparencySetup(UWetClothingAsset* WetClothingAsset, FString& OutSummary, bool* OutHadWarnings)
+bool FDWCTransparencyAssetBakeService::BakeTransparencyRevealAssets(UWetClothingAsset* WetClothingAsset, FString& OutSummary, bool* OutHadWarnings)
 {
     if (OutHadWarnings != nullptr)
     {
@@ -332,6 +351,11 @@ bool FDWCTransparencyAssetBakeService::BuildTransparencySetup(UWetClothingAsset*
 
     for (int32 MaterialSlotIndex = 0; MaterialSlotIndex < TargetLayer->Materials.Num(); ++MaterialSlotIndex)
     {
+        if (!IsMaterialSlotWettableForBake(*WetClothingAsset, MaterialSlotIndex, TargetLayer->ComponentPath))
+        {
+            continue;
+        }
+
         UMaterialInterface* SourceMaterial = TargetLayer->Materials[MaterialSlotIndex];
         if (SourceMaterial == nullptr)
         {
@@ -342,6 +366,7 @@ bool FDWCTransparencyAssetBakeService::BuildTransparencySetup(UWetClothingAsset*
         UMaterialInterface* WetBaseMaterial = ResolveOrCreateWetBaseMaterial(
             *WetClothingAsset,
             MaterialSlotIndex,
+            TargetLayer->ComponentPath,
             SourceMaterial,
             WetBaseMaterials,
             ErrorMessage);

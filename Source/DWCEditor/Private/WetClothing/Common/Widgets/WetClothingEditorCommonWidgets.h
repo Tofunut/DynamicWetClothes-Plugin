@@ -27,6 +27,7 @@ struct FWetClothingMaterialSlotRowArgs
     TSharedPtr<FAssetThumbnailPool> ThumbnailPool;
     TArray<TSharedPtr<FAssetThumbnail>>* ThumbnailSink = nullptr;
     FOnWettableMaterialSlotClicked OnWettableSlotClicked;
+    TFunction<FText(int32)> GetMaterialSlotStatusText;
 };
 
 struct FWetClothingBakeMapsMenuArgs

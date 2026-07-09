@@ -4,7 +4,7 @@
 
 #include "Runtime/Engine/Classes/Components/SkeletalMeshComponent.h"
 
-#include "RuntimeData/WetClothingRuntimeData.h"
+#include "RuntimeState/WetClothingRuntimeData.h"
 #include "Core/WetClothingSettings.h"
 #include "WetSimulation/AbsorbedWetness/AbsorbedWetnessSimulationState.h"
 #include "Runtime/Engine/Public/Rendering/SkeletalMeshLODRenderData.h"
@@ -43,6 +43,23 @@ namespace
 
 namespace
 {
+    bool IsMaterialSlotWettableForRender(const UWetClothingAsset* WetClothingAsset, const int32 MaterialSlotIndex, const FString& ComponentPath)
+    {
+        if (WetClothingAsset == nullptr || MaterialSlotIndex == INDEX_NONE)
+        {
+            return false;
+        }
+
+        const FWetClothingWettableMaterialSlotState* State = WetClothingAsset->PartData.EditableWetPartData.WettableMaterialSlots.FindByPredicate(
+            [MaterialSlotIndex, &ComponentPath](const FWetClothingWettableMaterialSlotState& Candidate)
+            {
+                return Candidate.MaterialSlotIndex == MaterialSlotIndex &&
+                       (Candidate.ComponentPath == ComponentPath || Candidate.ComponentPath.IsEmpty());
+            });
+
+        return State != nullptr && State->bIsWettableSlot;
+    }
+
     const TCHAR* DescribeWrinkleMapMatchType(
         const FWetWrinkleBakedMapSet& BakedMap,
         const int32                   PreferredUVChannelIndex,
@@ -160,7 +177,8 @@ void FWetRenderStage::ApplyWetnessProfileMapParameters(FWetRenderStageArgs& Rece
 
             for (const int32 MaterialSlotIndex : BakedWetnessProfileMap.MaterialSlotIndices)
             {
-                if (!Receiver.WetMaterialInstances->IsValidIndex(MaterialSlotIndex))
+                if (!Receiver.WetMaterialInstances->IsValidIndex(MaterialSlotIndex) ||
+                    !IsMaterialSlotWettableForRender(Receiver.WetClothingAsset, MaterialSlotIndex, Receiver.ComponentPath))
                 {
                     continue;
                 }
@@ -247,7 +265,8 @@ void FWetRenderStage::ApplyWetWrinkleNormalMapParameters(FWetRenderStageArgs& Re
         for (int32 MaterialSlotIndex = 0; MaterialSlotIndex < Receiver.WetMaterialInstances->Num(); ++MaterialSlotIndex)
         {
             if (!Receiver.WetMaterialInstances->IsValidIndex(MaterialSlotIndex) ||
-                bWrinkleNormalMapAssigned[MaterialSlotIndex])
+                bWrinkleNormalMapAssigned[MaterialSlotIndex] ||
+                !IsMaterialSlotWettableForRender(Receiver.WetClothingAsset, MaterialSlotIndex, Receiver.ComponentPath))
             {
                 continue;
             }
@@ -400,6 +419,11 @@ FLinearColor FWetRenderStage::MakeWetVertexColor(
     const int32                VertexIndex,
     const float                Wetness) const
 {
+    if (Receiver.RuntimeData == nullptr || !Receiver.RuntimeData->IsVertexWettable(VertexIndex))
+    {
+        return FLinearColor::Black;
+    }
+
     if (!Receiver.bEnableWetPartDebugVertexColors)
     {
         const float TransparencyStrength = Receiver.RuntimeData->VertexWetnessProfileParameters.IsValidIndex(VertexIndex)
@@ -461,6 +485,12 @@ void FWetRenderStage::ApplyWetnessToMaterial(FWetRenderStageArgs& Receiver)
         if (!Receiver.SimulationState->AbsorbedWetnessPerVertex.IsValidIndex(VertexIndex) ||
             !CachedWetVertexColors.IsValidIndex(VertexIndex))
         {
+            continue;
+        }
+
+        if (Receiver.RuntimeData == nullptr || !Receiver.RuntimeData->IsVertexWettable(VertexIndex))
+        {
+            CachedWetVertexColors[VertexIndex] = FLinearColor::Black;
             continue;
         }
 

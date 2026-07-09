@@ -112,6 +112,7 @@ class SWetWrinkleEditorPanel : public SCompoundWidget
     FText GetPartMapSectionText() const;
     TSharedRef<SWidget> GenerateMaterialSlotComboRow(TSharedPtr<int32> Item) const;
     FText GetSelectedMaterialSlotText() const;
+    FText GetMaterialSlotStatusText(int32 MaterialSlotIndex) const;
     void HandleMaterialSlotComboChanged(TSharedPtr<int32> Item, ESelectInfo::Type SelectInfo);
     TSharedRef<ITableRow> GenerateMaterialSlotRow(FMaterialSlotItemPtr Item, const TSharedRef<STableViewBase>& OwnerTable);
     void HandleMaterialSlotSelectionChanged(FMaterialSlotItemPtr Item, ESelectInfo::Type SelectInfo);

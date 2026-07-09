@@ -61,13 +61,13 @@ namespace
         Cancel
     };
 
-    EWetClothingPendingCloseChoice ShowPendingWetSetupCloseDialog(const FString& PendingSummary)
+    EWetClothingPendingCloseChoice ShowPendingVisualBakeCloseDialog(const FString& PendingSummary)
     {
         EWetClothingPendingCloseChoice Choice = EWetClothingPendingCloseChoice::Cancel;
 
         TSharedRef<SWindow> DialogWindow =
             SNew(SWindow)
-                .Title(LOCTEXT("PendingWetSetupCloseTitle", "Pending Wet Setup"))
+                .Title(LOCTEXT("PendingVisualBakeCloseTitle", "Pending Visual Bake"))
                 .SizingRule(ESizingRule::Autosized)
                 .SupportsMaximize(false)
                 .SupportsMinimize(false);
@@ -96,7 +96,7 @@ namespace
                                       .AutoWidth()
                                       .Padding(0.0f, 0.0f, 6.0f, 0.0f)
                                           [SNew(SButton)
-                                               .Text(LOCTEXT("PendingWetSetupSave", "Build & Save"))
+                                               .Text(LOCTEXT("PendingVisualBakeSave", "Bake & Save"))
                                                .OnClicked_Lambda([&Choice, DialogWindow]()
                                                                  {
                                                     Choice = EWetClothingPendingCloseChoice::Save;
@@ -107,7 +107,7 @@ namespace
                                       .AutoWidth()
                                       .Padding(0.0f, 0.0f, 6.0f, 0.0f)
                                           [SNew(SButton)
-                                               .Text(LOCTEXT("PendingWetSetupCloseAnyway", "Close Anyway"))
+                                               .Text(LOCTEXT("PendingVisualBakeCloseAnyway", "Close Anyway"))
                                                .OnClicked_Lambda([&Choice, DialogWindow]()
                                                                  {
                                                    Choice = EWetClothingPendingCloseChoice::CloseAnyway;
@@ -117,7 +117,7 @@ namespace
                                 + SHorizontalBox::Slot()
                                       .AutoWidth()
                                           [SNew(SButton)
-                                               .Text(LOCTEXT("PendingWetSetupCancel", "Cancel"))
+                                               .Text(LOCTEXT("PendingVisualBakeCancel", "Cancel"))
                                                .OnClicked_Lambda([&Choice, DialogWindow]()
                                                                  {
                                                    Choice = EWetClothingPendingCloseChoice::Cancel;
@@ -222,9 +222,9 @@ bool FWetClothingAssetEditor::OnRequestClose(EAssetEditorCloseReason InCloseReas
     if (EditorPanel.IsValid())
     {
         FString PendingSummary;
-        if (EditorPanel->HasPendingWetSetupTasks(&PendingSummary))
+        if (EditorPanel->HasPendingVisualBakeTasks(&PendingSummary))
         {
-            const EWetClothingPendingCloseChoice Choice = ShowPendingWetSetupCloseDialog(PendingSummary);
+            const EWetClothingPendingCloseChoice Choice = ShowPendingVisualBakeCloseDialog(PendingSummary);
             if (Choice == EWetClothingPendingCloseChoice::Cancel)
             {
                 return false;
@@ -234,13 +234,13 @@ bool FWetClothingAssetEditor::OnRequestClose(EAssetEditorCloseReason InCloseReas
             {
                 FString Summary;
                 bool bHadWarnings = false;
-                if (!EditorPanel->BuildPendingWetSetup(Summary, &bHadWarnings))
+                if (!EditorPanel->BakePendingVisualAssets(Summary, &bHadWarnings))
                 {
                     FMessageDialog::Open(EAppMsgType::Ok, FText::FromString(Summary));
                     return false;
                 }
 
-                EditorPanel->SaveWetSetupAssets();
+                EditorPanel->SaveBakedVisualAssets();
                 DWCEditorUtils::SaveAsset(WetClothingAsset.Get());
             }
         }
@@ -319,13 +319,13 @@ FReply FWetClothingAssetEditor::HandleBakeWetnessProfileMapsClicked()
 
     FString Summary;
     bool    bHadWarnings = false;
-    if (!EditorPanel->BuildWetSetup(Summary, &bHadWarnings))
+    if (!EditorPanel->BakeWetVisualAssets(Summary, &bHadWarnings))
     {
         FMessageDialog::Open(EAppMsgType::Ok, FText::FromString(Summary));
         return FReply::Handled();
     }
 
-    EditorPanel->SaveWetSetupAssets();
+    EditorPanel->SaveBakedVisualAssets();
 
     const EAppMsgCategory MessageCategory = bHadWarnings ? EAppMsgCategory::Warning : EAppMsgCategory::Success;
     FMessageDialog::Open(MessageCategory, EAppMsgType::Ok, FText::FromString(Summary));
@@ -341,7 +341,7 @@ FReply FWetClothingAssetEditor::HandleBakeTransparencyRevealMapsClicked()
 
     FString Summary;
     bool bHadWarnings = false;
-    if (!EditorPanel->BuildTransparencySetup(Summary, &bHadWarnings))
+    if (!EditorPanel->BakeTransparencyRevealAssets(Summary, &bHadWarnings))
     {
         FMessageDialog::Open(EAppMsgType::Ok, FText::FromString(Summary));
         return FReply::Handled();

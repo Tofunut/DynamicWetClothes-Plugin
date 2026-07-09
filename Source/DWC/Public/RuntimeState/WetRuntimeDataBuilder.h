@@ -1,7 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "RuntimeData/WetClothingRuntimeData.h"
+#include "RuntimeState/WetClothingRuntimeData.h"
 
 class FSkeletalMeshLODRenderData;
 class USkeletalMeshComponent;
@@ -35,8 +35,6 @@ struct DWC_API FWetRuntimeDataBuildArgs
     int32 LODIndex = 0;
     bool  bUsePrecomputedSimulationData = true;
     bool  bUsePrecomputedBoneOptimizationCache = true;
-    bool  bAllowRuntimeFallbackBuild = true;
-    float CoincidentVertexNeighborTolerance = 0.001f;
 
     const UWetnessProfile* GetActiveWetnessProfile() const
     {
@@ -60,21 +58,19 @@ class DWC_API FWetRuntimeDataBuilder
 {
   public:
     void InitializeAbsorbedWetnessData(FWetRuntimeDataBuildArgs& Args);
-    void InitializeWetPartVertexData(FWetRuntimeDataBuildArgs& Args);
-    bool InitializeWetPartVertexDataFromBakedProfile(
+    bool InitializeWetPartVertexData(FWetRuntimeDataBuildArgs& Args);
+    bool InitializeWetPartVertexDataFromPrecomputedData(
         FWetRuntimeDataBuildArgs&        Args,
         int32                            VertexCount,
         const FWetnessProfileParameters& DefaultParameters);
-    void BuildNeighborGraph(FWetRuntimeDataBuildArgs& Args);
-    bool BuildNeighborGraphFromBakedProfile(FWetRuntimeDataBuildArgs& Args, int32 VertexCount);
-    void AddNeighbor(FWetClothingRuntimeData& RuntimeData, int32 VertexIndex, int32 NeighborIndex);
+    bool InitializeNeighborGraphFromPrecomputedData(FWetRuntimeDataBuildArgs& Args);
     void EnsureWetnessBufferSize(FWetRuntimeDataBuildArgs& Args, int32 VertexCount);
     void EnsureWetnessBufferSize(FWetInputStageArgs& Args, int32 VertexCount);
     bool GetLODRenderData(
         const USkeletalMeshComponent* TargetSkeletalMesh,
         int32                         LODIndex,
         FSkeletalMeshLODRenderData*&  OutLODData) const;
-    bool BuildBoneOptimizationCache(FWetRuntimeDataBuildArgs& Args, int32 LODIndex = 0);
+    bool InitializeBoneOptimizationCacheFromPrecomputedData(FWetRuntimeDataBuildArgs& Args, int32 LODIndex = 0);
     bool GetBoneCandidateVertexRange(
         const FWetClothingRuntimeData& RuntimeData,
         const USkeletalMeshComponent*  TargetSkeletalMesh,

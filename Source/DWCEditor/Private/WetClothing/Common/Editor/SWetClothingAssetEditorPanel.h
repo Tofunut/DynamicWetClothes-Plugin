@@ -22,16 +22,18 @@ class SWetClothingAssetEditorPanel : public SCompoundWidget
     void Construct(const FArguments& InArgs);
 
     void RefreshFromAsset();
-    bool HasPendingWetSetupTasks(FString* OutSummary = nullptr) const;
-    bool BuildWetSetup(FString& OutSummary, bool* OutHadWarnings = nullptr);
-    bool BuildPendingWetSetup(FString& OutSummary, bool* OutHadWarnings = nullptr);
-    bool BuildTransparencySetup(FString& OutSummary, bool* OutHadWarnings = nullptr);
-    bool SaveWetSetupAssets() const;
+    bool HasPendingVisualBakeTasks(FString* OutSummary = nullptr) const;
+    bool BakeWetVisualAssets(FString& OutSummary, bool* OutHadWarnings = nullptr);
+    bool BakePendingVisualAssets(FString& OutSummary, bool* OutHadWarnings = nullptr);
+    bool BakeTransparencyRevealAssets(FString& OutSummary, bool* OutHadWarnings = nullptr);
+    bool SaveBakedVisualAssets() const;
     bool SaveTransparencySetupAssets() const;
     void SetEditorMode(EWetClothingEditorMode NewMode);
 
   private:
     int32 GetModeIndex(EWetClothingEditorMode Mode) const;
+    EVisibility GetRuntimeReadyWarningVisibility() const;
+    FText GetRuntimeReadyWarningText() const;
 
   private:
     TWeakObjectPtr<UWetClothingAsset> WetClothingAsset;

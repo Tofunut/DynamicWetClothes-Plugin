@@ -1,9 +1,9 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Bake/DWCBakeSurface.h"
+#include "WetClothing/TransparencyBake/RevealBake/DWCRevealBakeSurface.h"
 
-struct DWC_API FDWCBakeTexelSample
+struct FDWCRevealBakeTexelSample
 {
     FIntPoint Pixel = FIntPoint::ZeroValue;
     FVector2D UV = FVector2D::ZeroVector;
@@ -14,7 +14,7 @@ struct DWC_API FDWCBakeTexelSample
     FVector Barycentric = FVector::ZeroVector;
 };
 
-struct DWC_API FDWCBakeRayHit
+struct FDWCRevealBakeRayHit
 {
     bool bHit = false;
     FIntPoint Pixel = FIntPoint::ZeroValue;
@@ -28,13 +28,13 @@ struct DWC_API FDWCBakeRayHit
     float Confidence = 0.0f;
 };
 
-struct DWC_API FDWCBakeTexelSamplingSettings
+struct FDWCRevealBakeTexelSamplingSettings
 {
     FIntPoint Resolution = FIntPoint(8192, 8192);
     int32 MaterialSlotIndex = INDEX_NONE;
 };
 
-struct DWC_API FDWCBakeRayProjectionSettings
+struct FDWCRevealBakeRayProjectionSettings
 {
     float RayStartOffset = 0.01f;
     float RayLengthScale = 1.0f;
@@ -42,13 +42,13 @@ struct DWC_API FDWCBakeRayProjectionSettings
     bool bRespectBlockers = true;
 };
 
-class DWC_API FDWCBakeTexelSampler
+class FDWCRevealBakeTexelSampler
 {
   public:
     static bool BuildOuterTexelSamples(
-        const FDWCBakeSurface&               OuterSurface,
-        const FDWCBakeTexelSamplingSettings& Settings,
-        TArray<FDWCBakeTexelSample>&         OutSamples,
+        const FDWCRevealBakeSurface&               OuterSurface,
+        const FDWCRevealBakeTexelSamplingSettings& Settings,
+        TArray<FDWCRevealBakeTexelSample>&         OutSamples,
         FString*                             OutErrorMessage = nullptr);
 
   private:
@@ -60,7 +60,7 @@ class DWC_API FDWCBakeTexelSampler
         const FVector  Values[3]);
 
     static FIntRect MakePixelBoundsFromUVTriangle(
-        const FDWCBakeSurfaceTriangle& Triangle,
+        const FDWCRevealBakeSurfaceTriangle& Triangle,
         const FIntPoint&               Resolution);
 
     static int32 MakePixelKey(
@@ -70,21 +70,21 @@ class DWC_API FDWCBakeTexelSampler
 
     static bool ComputeBarycentricInUV(
         const FVector2D&                 UV,
-        const FDWCBakeSurfaceTriangle&   Triangle,
+        const FDWCRevealBakeSurfaceTriangle&   Triangle,
         FVector&                         OutBarycentric);
 
     static void SetError(FString* OutErrorMessage, const TCHAR* InMessage);
 };
 
-class DWC_API FDWCBakeRayProjector
+class FDWCRevealBakeRayProjector
 {
   public:
     static bool ProjectSamplesToSources(
-        const FDWCBakeSurface&                  OuterSurface,
-        const TArray<FDWCBakeSurface>&          SourceSurfaces,
-        const TArray<FDWCBakeTexelSample>&      Samples,
-        const FDWCBakeRayProjectionSettings&    Settings,
-        TArray<FDWCBakeRayHit>&                 OutHits,
+        const FDWCRevealBakeSurface&                  OuterSurface,
+        const TArray<FDWCRevealBakeSurface>&          SourceSurfaces,
+        const TArray<FDWCRevealBakeTexelSample>&      Samples,
+        const FDWCRevealBakeRayProjectionSettings&    Settings,
+        TArray<FDWCRevealBakeRayHit>&                 OutHits,
         FString*                                OutErrorMessage = nullptr);
 
   private:
@@ -93,8 +93,8 @@ class DWC_API FDWCBakeRayProjector
 
     struct FCandidateHit
     {
-        const FDWCBakeSurface* SourceSurface = nullptr;
-        const FDWCBakeSurfaceTriangle* Triangle = nullptr;
+        const FDWCRevealBakeSurface* SourceSurface = nullptr;
+        const FDWCRevealBakeSurfaceTriangle* Triangle = nullptr;
         FVector Barycentric = FVector::ZeroVector;
         FVector Position = FVector::ZeroVector;
         FVector Normal = FVector::UpVector;
@@ -103,8 +103,8 @@ class DWC_API FDWCBakeRayProjector
 
     struct FBakeProjectionTriangleRef
     {
-        const FDWCBakeSurface* SourceSurface = nullptr;
-        const FDWCBakeSurfaceTriangle* Triangle = nullptr;
+        const FDWCRevealBakeSurface* SourceSurface = nullptr;
+        const FDWCRevealBakeSurfaceTriangle* Triangle = nullptr;
         FBox Bounds = FBox(ForceInit);
         FVector Center = FVector::ZeroVector;
     };
@@ -124,9 +124,9 @@ class DWC_API FDWCBakeRayProjector
     {
       public:
         bool Build(
-            const FDWCBakeSurface&              OuterSurface,
-            const TArray<FDWCBakeSurface>&      SourceSurfaces,
-            const FDWCBakeRayProjectionSettings& Settings);
+            const FDWCRevealBakeSurface&              OuterSurface,
+            const TArray<FDWCRevealBakeSurface>&      SourceSurfaces,
+            const FDWCRevealBakeRayProjectionSettings& Settings);
 
         void QueryRay(
             const FVector& RayOrigin,
@@ -165,13 +165,13 @@ class DWC_API FDWCBakeRayProjector
     static bool IntersectRayTriangle(
         const FVector&                  RayOrigin,
         const FVector&                  RayDirection,
-        const FDWCBakeSurfaceTriangle&  Triangle,
+        const FDWCRevealBakeSurfaceTriangle&  Triangle,
         float                           MaxDistance,
         float&                          OutDistance,
         FVector&                        OutBarycentric);
 
-    static FDWCBakeRayHit MakeRayHit(
-        const FDWCBakeTexelSample& Sample,
+    static FDWCRevealBakeRayHit MakeRayHit(
+        const FDWCRevealBakeTexelSample& Sample,
         const FCandidateHit&       Candidate,
         float                      MaxRevealDistance);
 

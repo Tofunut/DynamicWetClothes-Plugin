@@ -1,10 +1,10 @@
-#include "Bake/DWCBakeSurface.h"
+#include "WetClothing/TransparencyBake/RevealBake/DWCRevealBakeSurface.h"
 
 #include "Runtime/Engine/Classes/Engine/SkeletalMesh.h"
 #include "Runtime/Engine/Public/Rendering/SkeletalMeshLODRenderData.h"
 #include "Runtime/Engine/Public/Rendering/SkeletalMeshRenderData.h"
 
-void FDWCBakeSurface::Reset()
+void FDWCRevealBakeSurface::Reset()
 {
     LayerId = NAME_None;
     LayerOrder = 0;
@@ -19,11 +19,11 @@ void FDWCBakeSurface::Reset()
     Bounds = FBox(ForceInit);
 }
 
-bool FDWCBakeSurfaceBuilder::BuildReferencePoseSurface(
+bool FDWCRevealBakeSurfaceBuilder::BuildReferencePoseSurface(
     const FDWCBakeResolvedLayer& ResolvedLayer,
     const int32                  LODIndex,
     const int32                  UVChannelIndex,
-    FDWCBakeSurface&             OutSurface,
+    FDWCRevealBakeSurface&             OutSurface,
     FString*                     OutErrorMessage)
 {
     OutSurface.Reset();
@@ -109,7 +109,7 @@ bool FDWCBakeSurfaceBuilder::BuildReferencePoseSurface(
                 continue;
             }
 
-            FDWCBakeSurfaceTriangle Triangle;
+            FDWCRevealBakeSurfaceTriangle Triangle;
             Triangle.TriangleIndex = TriangleIndexInSurface++;
             Triangle.MaterialSlotIndex = Section.MaterialIndex;
             Triangle.Bounds = FBox(ForceInit);
@@ -144,7 +144,7 @@ bool FDWCBakeSurfaceBuilder::BuildReferencePoseSurface(
     return true;
 }
 
-void FDWCBakeSurfaceBuilder::SetError(FString* OutErrorMessage, const TCHAR* InMessage)
+void FDWCRevealBakeSurfaceBuilder::SetError(FString* OutErrorMessage, const TCHAR* InMessage)
 {
     if (OutErrorMessage != nullptr)
     {

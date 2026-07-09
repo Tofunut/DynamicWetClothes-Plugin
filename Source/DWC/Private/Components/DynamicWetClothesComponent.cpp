@@ -7,7 +7,7 @@
 #include "WetInputSystem/Sampling/WetClothingMeshSampler.h"
 #include "WetRendering/WetRenderStage.h"
 #include "WetRendering/WetMaterialParameters.h"
-#include "RuntimeData/WetClothingRuntimeData.h"
+#include "RuntimeState/WetClothingRuntimeData.h"
 #include "WetSimulation/WetSimulationStage.h"
 #include "WetSimulation/AbsorbedWetness/AbsorbedWetnessSimulationState.h"
 #include "Runtime/Engine/Public/Rendering/SkeletalMeshLODRenderData.h"
@@ -84,6 +84,23 @@ namespace
 
         return false;
     }
+    bool IsMaterialSlotWettableForRuntime(const UWetClothingAsset* WetClothingAsset, const int32 MaterialSlotIndex, const FString& ComponentPath)
+    {
+        if (WetClothingAsset == nullptr || MaterialSlotIndex == INDEX_NONE)
+        {
+            return false;
+        }
+
+        const FWetClothingWettableMaterialSlotState* State = WetClothingAsset->PartData.EditableWetPartData.WettableMaterialSlots.FindByPredicate(
+            [MaterialSlotIndex, &ComponentPath](const FWetClothingWettableMaterialSlotState& Candidate)
+            {
+                return Candidate.MaterialSlotIndex == MaterialSlotIndex &&
+                       (Candidate.ComponentPath == ComponentPath || Candidate.ComponentPath.IsEmpty());
+            });
+
+        return State != nullptr && State->bIsWettableSlot;
+    }
+
 } // namespace
 
 UDynamicWetClothesComponent::UDynamicWetClothesComponent()
@@ -138,12 +155,23 @@ bool UDynamicWetClothesComponent::InitializeWetRuntime()
         return false;
     }
 
-    for (const TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver : Receivers)
+    for (TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver : Receivers)
     {
-        if (Receiver.IsValid())
+        if (Receiver.IsValid() && !InitializeWetMeshReceiverRuntime(*Receiver))
         {
-            InitializeWetMeshReceiverRuntime(*Receiver);
+            Receiver.Reset();
         }
+    }
+
+    Receivers.RemoveAll([](const TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver)
+    {
+        return !Receiver.IsValid();
+    });
+
+    if (Receivers.IsEmpty())
+    {
+        UE_LOG(LogTemp, Error, TEXT("DynamicWetClothesComponent: No wet mesh receiver could be initialized on %s. Open the Wet Clothing Asset and save it to update precomputed simulation data."), *GetNameSafe(GetOwner()));
+        return false;
     }
 
     ApplyGeneratedWetMaterialOverrides();
@@ -243,9 +271,22 @@ bool UDynamicWetClothesComponent::InitializeWetMeshReceiverRuntime(FDWCWetMeshRe
 
     FWetRuntimeDataBuildArgs RuntimeDataBuildArgs = MakeRuntimeDataBuildArgs(Receiver);
     Receiver.RuntimeDataBuilder->InitializeAbsorbedWetnessData(RuntimeDataBuildArgs);
-    Receiver.RuntimeDataBuilder->InitializeWetPartVertexData(RuntimeDataBuildArgs);
-    Receiver.RuntimeDataBuilder->BuildBoneOptimizationCache(RuntimeDataBuildArgs, 0);
-    Receiver.RuntimeDataBuilder->BuildNeighborGraph(RuntimeDataBuildArgs);
+
+    if (!Receiver.RuntimeDataBuilder->InitializeWetPartVertexData(RuntimeDataBuildArgs))
+    {
+        return false;
+    }
+
+    if (!Receiver.RuntimeDataBuilder->InitializeBoneOptimizationCacheFromPrecomputedData(RuntimeDataBuildArgs, 0))
+    {
+        return false;
+    }
+
+    if (!Receiver.RuntimeDataBuilder->InitializeNeighborGraphFromPrecomputedData(RuntimeDataBuildArgs))
+    {
+        return false;
+    }
+
     return true;
 }
 
@@ -295,8 +336,6 @@ FWetRuntimeDataBuildArgs UDynamicWetClothesComponent::MakeRuntimeDataBuildArgs(F
     const bool bLegacySingleMeshScope = Receiver.ComponentPath.IsEmpty();
     Args.bUsePrecomputedSimulationData = bLegacySingleMeshScope;
     Args.bUsePrecomputedBoneOptimizationCache = bLegacySingleMeshScope;
-    Args.bAllowRuntimeFallbackBuild = true;
-    Args.CoincidentVertexNeighborTolerance = WetnessSettings.CoincidentVertexNeighborTolerance;
     return Args;
 }
 
@@ -486,7 +525,8 @@ void UDynamicWetClothesComponent::ApplyGeneratedWetMaterialOverrides()
         {
             if (MaterialOverride.MaterialSlotIndex == INDEX_NONE ||
                 MaterialOverride.WetMaterial == nullptr ||
-                MaterialOverride.ComponentPath != Receiver->ComponentPath)
+                MaterialOverride.ComponentPath != Receiver->ComponentPath ||
+                !IsMaterialSlotWettableForRuntime(ReceiverWetClothingAsset, MaterialOverride.MaterialSlotIndex, Receiver->ComponentPath))
             {
                 continue;
             }
@@ -815,7 +855,10 @@ void UDynamicWetClothesComponent::RefreshWetVertexColors()
         }
 
         Receiver->RuntimeDataBuilder->EnsureWetnessBufferSize(RuntimeDataBuildArgs, LODData->GetNumVertices());
-        Receiver->RuntimeDataBuilder->InitializeWetPartVertexData(RuntimeDataBuildArgs);
+        if (!Receiver->RuntimeDataBuilder->InitializeWetPartVertexData(RuntimeDataBuildArgs))
+        {
+            continue;
+        }
         Receiver->SimulationState->MarkAllWetVertexColorsDirty();
 
         FWetRenderStageArgs RenderArgs = MakeWetRenderStageArgs(*Receiver);

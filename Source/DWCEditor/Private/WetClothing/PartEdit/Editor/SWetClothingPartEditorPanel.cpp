@@ -129,7 +129,7 @@ namespace SWetClothingPartEditorPanelLocal
         return PreviewTriangles;
     }
 
-    bool IsWetPartEntryRelevantForWetSetup(const FWetClothingWetPartEntry& Entry)
+    bool IsWetPartEntryRelevantForVisualBake(const FWetClothingWetPartEntry& Entry)
     {
         return Entry.MaterialSlotIndex != INDEX_NONE &&
                Entry.UVChannelIndex != INDEX_NONE &&
@@ -1317,6 +1317,33 @@ TSet<int32> SWetClothingPartEditorPanel::BuildHiddenUVIslandIDSet() const
     return Result;
 }
 
+FText SWetClothingPartEditorPanel::GetMaterialSlotStatusText(const int32 MaterialSlotIndex) const
+{
+    const UWetClothingAsset* WetClothingAssetPtr = WetClothingAsset.Get();
+    if (WetClothingAssetPtr == nullptr || MaterialSlotIndex == INDEX_NONE)
+    {
+        return FText::GetEmpty();
+    }
+
+    int32 PartCount = 0;
+    for (const FWetClothingWetPartEntry& Entry : WetClothingAssetPtr->PartData.EditableWetPartData.WetPartEntries)
+    {
+        if (Entry.MaterialSlotIndex == MaterialSlotIndex && Entry.AssignedUVIslandIDs.Num() > 0)
+        {
+            ++PartCount;
+        }
+    }
+
+    if (PartCount <= 0)
+    {
+        return NSLOCTEXT("SWetClothingPartEditorPanel", "MaterialSlotStatusNoParts", "No Parts");
+    }
+
+    return PartCount == 1
+        ? NSLOCTEXT("SWetClothingPartEditorPanel", "MaterialSlotStatusOnePart", "1 Part")
+        : FText::Format(NSLOCTEXT("SWetClothingPartEditorPanel", "MaterialSlotStatusManyParts", "{0} Parts"), FText::AsNumber(PartCount));
+}
+
 TSharedRef<ITableRow> SWetClothingPartEditorPanel::GenerateMaterialSlotRow(FMaterialSlotItemPtr Item, const TSharedRef<STableViewBase>& OwnerTable)
 {
     FWetClothingMaterialSlotRowArgs Args;
@@ -1327,6 +1354,10 @@ TSharedRef<ITableRow> SWetClothingPartEditorPanel::GenerateMaterialSlotRow(FMate
     Args.ThumbnailPool = MaterialThumbnailPool;
     Args.ThumbnailSink = &MaterialSlotThumbnails;
     Args.OnWettableSlotClicked = FOnWettableMaterialSlotClicked::CreateSP(this, &SWetClothingPartEditorPanel::HandleWettableMaterialSlotClicked);
+    Args.GetMaterialSlotStatusText = [this](const int32 MaterialSlotIndex)
+    {
+        return GetMaterialSlotStatusText(MaterialSlotIndex);
+    };
 
     return FWetClothingEditorCommonWidgets::GenerateMaterialSlotRow(Item, OwnerTable, Args);
 }
@@ -3162,14 +3193,14 @@ void SWetClothingPartEditorPanel::SaveTextureSelection(int32 MaterialSlotIndex, 
     FWetClothingMaterialTextureResolver::SaveTextureSelection(WetClothingAsset.Get(), MaterialSlotIndex, UVChannelIndex, Texture);
 }
 
-bool SWetClothingPartEditorPanel::HasPendingWetSetupTasks(FString* OutSummary) const
+bool SWetClothingPartEditorPanel::HasPendingVisualBakeTasks(FString* OutSummary) const
 {
     const UWetClothingAsset* WetClothingAssetPtr = WetClothingAsset.Get();
     if (WetClothingAssetPtr == nullptr || WetClothingAssetPtr->TargetMesh == nullptr)
     {
         if (OutSummary != nullptr)
         {
-            *OutSummary = TEXT("Wet setup has no pending work.");
+            *OutSummary = TEXT("Visual maps have no pending work.");
         }
         return false;
     }
@@ -3179,14 +3210,25 @@ bool SWetClothingPartEditorPanel::HasPendingWetSetupTasks(FString* OutSummary) c
     TSet<FString>   ExpectedTextureUvKeys;
     for (const FWetClothingWetPartEntry& Entry : WetClothingAssetPtr->PartData.EditableWetPartData.WetPartEntries)
     {
-        if (SWetClothingPartEditorPanelLocal::IsWetPartEntryRelevantForWetSetup(Entry))
+        if (SWetClothingPartEditorPanelLocal::IsWetPartEntryRelevantForVisualBake(Entry) &&
+            FWetClothingEditorCommonWidgets::IsMaterialSlotWettable(WetClothingAssetPtr, Entry.MaterialSlotIndex))
         {
             WetMaterialSlots.Add(Entry.MaterialSlotIndex);
             WetPartScopePairs.Add(FIntPoint(Entry.MaterialSlotIndex, Entry.UVChannelIndex));
         }
     }
 
-    TArray<FString>                  PendingLines;
+    TArray<FString> PendingLines;
+
+    for (const FWetClothingGeneratedWetMaterialOverride& MaterialOverride : WetClothingAssetPtr->PartData.GeneratedWetMaterialOverrides)
+    {
+        if (MaterialOverride.MaterialSlotIndex != INDEX_NONE &&
+            !FWetClothingEditorCommonWidgets::IsMaterialSlotWettable(WetClothingAssetPtr, MaterialOverride.MaterialSlotIndex))
+        {
+            PendingLines.Add(FString::Printf(TEXT("Stale wet material override will be removed for non-wettable slot %d."), MaterialOverride.MaterialSlotIndex));
+        }
+    }
+
     const TArray<FSkeletalMaterial>& Materials = WetClothingAssetPtr->TargetMesh->GetMaterials();
     for (const int32 MaterialSlotIndex : WetMaterialSlots)
     {
@@ -3274,14 +3316,14 @@ bool SWetClothingPartEditorPanel::HasPendingWetSetupTasks(FString* OutSummary) c
     if (OutSummary != nullptr)
     {
         *OutSummary = PendingLines.Num() == 0
-                          ? TEXT("Wet setup is up to date.")
-                          : FString::Printf(TEXT("Pending Wet Setup:\n- %s"), *FString::Join(PendingLines, TEXT("\n- ")));
+                          ? TEXT("Visual maps are up to date.")
+                          : FString::Printf(TEXT("Pending Visual Bake:\n- %s"), *FString::Join(PendingLines, TEXT("\n- ")));
     }
 
     return PendingLines.Num() > 0;
 }
 
-bool SWetClothingPartEditorPanel::BuildWetSetup(FString& OutSummary, bool* OutHadWarnings)
+bool SWetClothingPartEditorPanel::BakeWetnessProfileMapsAndUpdateMaterials(FString& OutSummary, bool* OutHadWarnings)
 {
     if (OutHadWarnings != nullptr)
     {
@@ -3291,7 +3333,7 @@ bool SWetClothingPartEditorPanel::BuildWetSetup(FString& OutSummary, bool* OutHa
     UWetClothingAsset* WetClothingAssetPtr = WetClothingAsset.Get();
     if (WetClothingAssetPtr == nullptr || WetClothingAssetPtr->TargetMesh == nullptr)
     {
-        OutSummary = TEXT("Assign a TargetMesh before building wet setup.");
+        OutSummary = TEXT("Assign a TargetMesh before baking visual maps.");
         return false;
     }
 
@@ -3299,7 +3341,8 @@ bool SWetClothingPartEditorPanel::BuildWetSetup(FString& OutSummary, bool* OutHa
     TSet<FIntPoint> WetPartScopePairs;
     for (const FWetClothingWetPartEntry& Entry : WetClothingAssetPtr->PartData.EditableWetPartData.WetPartEntries)
     {
-        if (SWetClothingPartEditorPanelLocal::IsWetPartEntryRelevantForWetSetup(Entry))
+        if (SWetClothingPartEditorPanelLocal::IsWetPartEntryRelevantForVisualBake(Entry) &&
+            FWetClothingEditorCommonWidgets::IsMaterialSlotWettable(WetClothingAssetPtr, Entry.MaterialSlotIndex))
         {
             WetMaterialSlots.Add(Entry.MaterialSlotIndex);
             WetPartScopePairs.Add(FIntPoint(Entry.MaterialSlotIndex, Entry.UVChannelIndex));
@@ -3317,6 +3360,18 @@ bool SWetClothingPartEditorPanel::BuildWetSetup(FString& OutSummary, bool* OutHa
     TArray<FString> RemovedStaleWetnessProfileMaps;
     TArray<FString> Skipped;
     TArray<FString> Warnings;
+
+    WetClothingAssetPtr->Modify();
+    const int32 RemovedOverrideCount = WetClothingAssetPtr->PartData.GeneratedWetMaterialOverrides.RemoveAll(
+        [WetClothingAssetPtr](const FWetClothingGeneratedWetMaterialOverride& MaterialOverride)
+        {
+            return MaterialOverride.MaterialSlotIndex != INDEX_NONE &&
+                   !FWetClothingEditorCommonWidgets::IsMaterialSlotWettable(WetClothingAssetPtr, MaterialOverride.MaterialSlotIndex);
+        });
+    if (RemovedOverrideCount > 0)
+    {
+        WetClothingAssetPtr->MarkPackageDirty();
+    }
 
     const TArray<FSkeletalMaterial>& Materials = WetClothingAssetPtr->TargetMesh->GetMaterials();
     for (const int32 MaterialSlotIndex : WetMaterialSlots)
@@ -3497,10 +3552,10 @@ bool SWetClothingPartEditorPanel::BuildWetSetup(FString& OutSummary, bool* OutHa
 
     if (Warnings.Num() > 0)
     {
-        Sections.Insert(TEXT("Build completed with warnings. Successful outputs were kept."), 0);
+        Sections.Insert(TEXT("Bake Maps completed with warnings. Successful outputs were kept."), 0);
     }
 
-    OutSummary = Sections.Num() > 0 ? FString::Join(Sections, TEXT("\n\n")) : TEXT("Wet setup is already up to date.");
+    OutSummary = Sections.Num() > 0 ? FString::Join(Sections, TEXT("\n\n")) : TEXT("Visual maps are already up to date.");
 
     if (OutHadWarnings != nullptr)
     {
@@ -3515,7 +3570,7 @@ bool SWetClothingPartEditorPanel::BuildWetSetup(FString& OutSummary, bool* OutHa
     return true;
 }
 
-bool SWetClothingPartEditorPanel::SaveWetSetupAssets() const
+bool SWetClothingPartEditorPanel::SaveBakedWetnessAssets() const
 {
     UWetClothingAsset* WetClothingAssetPtr = WetClothingAsset.Get();
     if (WetClothingAssetPtr == nullptr)
@@ -3585,7 +3640,10 @@ void SWetClothingPartEditorPanel::CollectMaterialSlotsForWetnessProfileMap(UText
 
     for (const FWetClothingSourceTextureSelection& Selection : WetClothingAssetPtr->PartData.EditableWetPartData.SourceTextureSelections)
     {
-        if (Selection.Texture == SourceTexture && Selection.UVChannelIndex == UVChannelIndex && Selection.MaterialSlotIndex != INDEX_NONE)
+        if (Selection.Texture == SourceTexture &&
+            Selection.UVChannelIndex == UVChannelIndex &&
+            Selection.MaterialSlotIndex != INDEX_NONE &&
+            FWetClothingEditorCommonWidgets::IsMaterialSlotWettable(WetClothingAssetPtr, Selection.MaterialSlotIndex))
         {
             OutMaterialSlotIndices.AddUnique(Selection.MaterialSlotIndex);
         }

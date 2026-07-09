@@ -6,7 +6,7 @@
 
 #include "WetInputSystem/Sampling/WetClothingMeshSampler.h"
 #include "WetInputSystem/WetInputStage.h"
-#include "RuntimeData/WetClothingRuntimeData.h"
+#include "RuntimeState/WetClothingRuntimeData.h"
 #include "WetSimulation/AbsorbedWetness/AbsorbedWetnessSimulationState.h"
 
 namespace
@@ -79,7 +79,10 @@ float FWetSimulationStage::CalculateDryMultiplier(const float DryRatePerSecond, 
 float FWetSimulationStage::AbsorbWetnessAtVertex(FWetInputStageArgs& Receiver, const int32 VertexIndex, const float Amount, bool& bDirty)
 {
     if (!Receiver.SimulationState || !Receiver.WetnessSettings ||
-        !Receiver.SimulationState->AbsorbedWetnessPerVertex.IsValidIndex(VertexIndex) || FMath::IsNearlyZero(Amount))
+        !Receiver.SimulationState->AbsorbedWetnessPerVertex.IsValidIndex(VertexIndex) ||
+        !Receiver.RuntimeData ||
+        !Receiver.RuntimeData->IsVertexWettable(VertexIndex) ||
+        FMath::IsNearlyZero(Amount))
     {
         return 0.0f;
     }
@@ -115,6 +118,8 @@ void FWetSimulationStage::QueuePendingWetness(FWetInputStageArgs& Receiver, cons
 {
     if (!Receiver.SimulationState || !Receiver.WetnessSettings ||
         !Receiver.SimulationState->AbsorbedWetnessPerVertex.IsValidIndex(VertexIndex) ||
+        !Receiver.RuntimeData ||
+        !Receiver.RuntimeData->IsVertexWettable(VertexIndex) ||
         !Receiver.SimulationState->UpdatingPendingWetnessAmounts.IsValidIndex(VertexIndex) ||
         !Receiver.SimulationState->bPendingWetnessQueued.IsValidIndex(VertexIndex) ||
         Amount <= Receiver.WetnessSettings->MinPendingWetnessAmount)
@@ -141,7 +146,10 @@ void FWetSimulationStage::QueuePendingWetness(FWetInputStageArgs& Receiver, cons
 
 float FWetSimulationStage::AbsorbWetnessAtVertex(FWetSimulationStageArgs& Receiver, const int32 VertexIndex, const float Amount, bool& bDirty)
 {
-    if (!Receiver.SimulationState->AbsorbedWetnessPerVertex.IsValidIndex(VertexIndex) || FMath::IsNearlyZero(Amount))
+    if (!Receiver.SimulationState->AbsorbedWetnessPerVertex.IsValidIndex(VertexIndex) ||
+        !Receiver.RuntimeData ||
+        !Receiver.RuntimeData->IsVertexWettable(VertexIndex) ||
+        FMath::IsNearlyZero(Amount))
     {
         return 0.0f;
     }
@@ -172,6 +180,8 @@ float FWetSimulationStage::AbsorbWetnessAtVertex(FWetSimulationStageArgs& Receiv
 void FWetSimulationStage::QueuePendingWetness(FWetSimulationStageArgs& Receiver, const int32 VertexIndex, const float Amount)
 {
     if (!Receiver.SimulationState->AbsorbedWetnessPerVertex.IsValidIndex(VertexIndex) ||
+        !Receiver.RuntimeData ||
+        !Receiver.RuntimeData->IsVertexWettable(VertexIndex) ||
         !Receiver.SimulationState->UpdatingPendingWetnessAmounts.IsValidIndex(VertexIndex) ||
         !Receiver.SimulationState->bPendingWetnessQueued.IsValidIndex(VertexIndex) ||
         Amount <= Receiver.WetnessSettings->MinPendingWetnessAmount)
@@ -223,6 +233,11 @@ void FWetSimulationStage::DryOutWetness(FWetSimulationStageArgs& Receiver, bool&
 {
     for (int32 VertexIndex = 0; VertexIndex < Receiver.SimulationState->AbsorbedWetnessPerVertex.Num(); ++VertexIndex)
     {
+        if (!Receiver.RuntimeData || !Receiver.RuntimeData->IsVertexWettable(VertexIndex))
+        {
+            continue;
+        }
+
         if (Receiver.SimulationState->WetnessDryHoldTimePerVertex.IsValidIndex(VertexIndex) &&
             Receiver.SimulationState->WetnessDryHoldTimePerVertex[VertexIndex] > 0.0f)
         {
@@ -348,6 +363,8 @@ int32 FWetSimulationStage::ProcessCurrentPendingWetness(FWetSimulationStageArgs&
         ++ProcessedVertices;
 
         if (!Receiver.SimulationState->AbsorbedWetnessPerVertex.IsValidIndex(VertexIndex) ||
+            !Receiver.RuntimeData ||
+            !Receiver.RuntimeData->IsVertexWettable(VertexIndex) ||
             !Receiver.SimulationState->CurrentPendingWetnessAmounts.IsValidIndex(CurrentAmountIndex))
         {
             continue;
@@ -396,7 +413,9 @@ int32 FWetSimulationStage::ProcessCurrentPendingWetness(FWetSimulationStageArgs&
 
 void FWetSimulationStage::SpreadPendingWetnessToNeighbors(FWetSimulationStageArgs& Receiver, const int32 VertexIndex, const float SpreadableWetness, const float SpreadAlpha, const float GravityFlowStrength, const bool bUseGravityBias)
 {
-    if (!Receiver.RuntimeData->NeighborGraph.IsValidIndex(VertexIndex))
+    if (!Receiver.RuntimeData ||
+        !Receiver.RuntimeData->IsVertexWettable(VertexIndex) ||
+        !Receiver.RuntimeData->NeighborGraph.IsValidIndex(VertexIndex))
     {
         return;
     }
@@ -417,7 +436,8 @@ void FWetSimulationStage::SpreadPendingWetnessToNeighbors(FWetSimulationStageArg
     for (int32 NeighborArrayIndex = 0; NeighborArrayIndex < Neighbors.Num(); ++NeighborArrayIndex)
     {
         const int32 NeighborIndex = Neighbors[NeighborArrayIndex];
-        if (!Receiver.SimulationState->AbsorbedWetnessPerVertex.IsValidIndex(NeighborIndex))
+        if (!Receiver.SimulationState->AbsorbedWetnessPerVertex.IsValidIndex(NeighborIndex) ||
+            !Receiver.RuntimeData->IsVertexWettable(NeighborIndex))
         {
             continue;
         }

@@ -11,7 +11,7 @@ uint32 GetTypeHash(const FDWCRevealBakeSurfaceCacheKey& Key)
     return Hash;
 }
 
-const FDWCBakeSurface* FDWCRevealBakeSurfaceCache::FindOrBuild(
+const FDWCRevealBakeSurface* FDWCRevealBakeSurfaceCache::FindOrBuild(
     const FDWCBakeResolvedLayer& Layer,
     const int32                  LayerIndex,
     const int32                  LODIndex,
@@ -19,7 +19,7 @@ const FDWCBakeSurface* FDWCRevealBakeSurfaceCache::FindOrBuild(
     FString&                     OutErrorMessage)
 {
     const FDWCRevealBakeSurfaceCacheKey Key{ LayerIndex, LODIndex, UVChannelIndex };
-    if (const FDWCBakeSurface* CachedSurface = Surfaces.Find(Key))
+    if (const FDWCRevealBakeSurface* CachedSurface = Surfaces.Find(Key))
     {
         UE_LOG(
             LogDWCRevealBake,
@@ -32,8 +32,8 @@ const FDWCBakeSurface* FDWCRevealBakeSurfaceCache::FindOrBuild(
     }
 
     const double BuildStartTime = FPlatformTime::Seconds();
-    FDWCBakeSurface BuiltSurface;
-    if (!FDWCBakeSurfaceBuilder::BuildReferencePoseSurface(
+    FDWCRevealBakeSurface BuiltSurface;
+    if (!FDWCRevealBakeSurfaceBuilder::BuildReferencePoseSurface(
             Layer,
             LODIndex,
             UVChannelIndex,

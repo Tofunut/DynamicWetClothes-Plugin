@@ -29,9 +29,6 @@ struct DWC_API FWetClothingSettings
     UPROPERTY(EditAnywhere, Category = "Wetness|Capillary", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float CrossWetPartSpreadScale = 1.0f;
 
-    UPROPERTY(EditAnywhere, Category = "Wetness|Capillary", meta = (ClampMin = "0.0"))
-    float CoincidentVertexNeighborTolerance = 0.001f;
-
     UPROPERTY(EditAnywhere, Category = "Wetness|Rain", meta = (ClampMin = "-1.0", ClampMax = "1.0"))
     float RainExposureMin = 0.5f;
 

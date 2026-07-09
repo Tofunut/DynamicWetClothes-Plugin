@@ -1,15 +1,12 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
-#include "RuntimeData/WetRuntimeDataBuilder.h"
+#include "RuntimeState/WetRuntimeDataBuilder.h"
 
-#include "RuntimeData/WetPrecomputedSimulationDataBridge.h"
-#include "RuntimeData/WetBoneOptimizationCacheBuilder.h"
-#include "RuntimeData/WetClothingRuntimeData.h"
-#include "RuntimeData/WetNeighborGraphBuilder.h"
+#include "RuntimeState/WetPrecomputedSimulationDataBridge.h"
+#include "RuntimeState/WetClothingRuntimeData.h"
 
 #include "Runtime/Engine/Classes/Components/SkeletalMeshComponent.h"
 
-#include "RuntimeData/Build/WetMeshAnalysis.h"
 #include "WetInputSystem/Sampling/WetClothingMeshSampler.h"
 #include "WetInputSystem/WetInputStage.h"
 #include "WetRendering/WetRenderStage.h"
@@ -74,16 +71,17 @@ void FWetRuntimeDataBuilder::InitializeAbsorbedWetnessData(FWetRuntimeDataBuildA
     Receiver.TargetSkeletalMesh->MarkRenderStateDirty();
 }
 
-void FWetRuntimeDataBuilder::InitializeWetPartVertexData(FWetRuntimeDataBuildArgs& Receiver)
+bool FWetRuntimeDataBuilder::InitializeWetPartVertexData(FWetRuntimeDataBuildArgs& Receiver)
 {
     FSkeletalMeshLODRenderData* LODData = nullptr;
     if (!GetLODRenderData(Receiver.TargetSkeletalMesh, Receiver.LODIndex, LODData))
     {
-        return;
+        return false;
     }
 
     const int32 VertexCount = LODData->GetNumVertices();
     Receiver.RuntimeData->VertexWetPartIDs.Init(INDEX_NONE, VertexCount);
+    Receiver.RuntimeData->VertexWettableFlags.Init(false, VertexCount);
     Receiver.RuntimeData->VertexWetnessProfileParameters.SetNum(VertexCount);
     Receiver.RuntimeData->VertexWetPartDebugColors.Init(Receiver.UnassignedWetPartDebugColor, VertexCount);
 
@@ -98,12 +96,17 @@ void FWetRuntimeDataBuilder::InitializeWetPartVertexData(FWetRuntimeDataBuildArg
         VertexParameters = DefaultParameters;
     }
 
-    if (!Receiver.WetClothingAsset)
+    if (!Receiver.WetClothingAsset || !Receiver.TargetSkeletalMesh)
     {
-        return;
+        UE_LOG(
+            LogTemp,
+            Error,
+            TEXT("DynamicWetClothesComponent: Missing WetClothingAsset or target mesh on %s. Wet simulation disabled."),
+            *GetNameSafe(Receiver.OwnerForLogs));
+        return false;
     }
 
-    USkeletalMesh* SkeletalMesh = Receiver.TargetSkeletalMesh ? Receiver.TargetSkeletalMesh->GetSkeletalMeshAsset() : nullptr;
+    USkeletalMesh* SkeletalMesh = Receiver.TargetSkeletalMesh->GetSkeletalMeshAsset();
     if (Receiver.ComponentPath.IsEmpty() && Receiver.WetClothingAsset->TargetMesh && Receiver.WetClothingAsset->TargetMesh != SkeletalMesh)
     {
         UE_LOG(
@@ -113,107 +116,30 @@ void FWetRuntimeDataBuilder::InitializeWetPartVertexData(FWetRuntimeDataBuildArg
             *GetNameSafe(Receiver.OwnerForLogs));
     }
 
-    TMap<int32, FWetnessProfileParameters> ResolvedWetPartParametersByEntryIndex;
-    for (int32 EntryIndex = 0; EntryIndex < Receiver.WetClothingAsset->PartData.EditableWetPartData.WetPartEntries.Num(); ++EntryIndex)
+    if (!Receiver.bUsePrecomputedSimulationData)
     {
-        const FWetClothingWetPartEntry& WetPartEntry = Receiver.WetClothingAsset->PartData.EditableWetPartData.WetPartEntries[EntryIndex];
-        if (!DoesWetPartEntryMatchReceiverScope(Receiver, WetPartEntry))
-        {
-            continue;
-        }
-
-        FWetnessProfileParameters ResolvedParameters;
-        if (ResolveWetPartSourceProfileParameters(WetPartEntry, ResolvedParameters))
-        {
-            ResolvedWetPartParametersByEntryIndex.Add(EntryIndex, ResolvedParameters);
-        }
+        UE_LOG(
+            LogTemp,
+            Error,
+            TEXT("DynamicWetClothesComponent: Runtime UV analysis fallback was removed. Precomputed simulation data is required for %s."),
+            *GetNameSafe(Receiver.OwnerForLogs));
+        return false;
     }
 
-    TMap<FIntPoint, TArray<int32>> WetPartEntryIndicesByScope;
-    for (int32 EntryIndex = 0; EntryIndex < Receiver.WetClothingAsset->PartData.EditableWetPartData.WetPartEntries.Num(); ++EntryIndex)
+    if (!InitializeWetPartVertexDataFromPrecomputedData(Receiver, VertexCount, DefaultParameters))
     {
-        const FWetClothingWetPartEntry& WetPartEntry = Receiver.WetClothingAsset->PartData.EditableWetPartData.WetPartEntries[EntryIndex];
-        if (!DoesWetPartEntryMatchReceiverScope(Receiver, WetPartEntry) ||
-            WetPartEntry.MaterialSlotIndex == INDEX_NONE ||
-            WetPartEntry.UVChannelIndex < 0 ||
-            WetPartEntry.AssignedUVIslandIDs.Num() == 0 ||
-            !ResolvedWetPartParametersByEntryIndex.Contains(EntryIndex))
-        {
-            continue;
-        }
-
-        const FIntPoint WetPartScopeKey(WetPartEntry.MaterialSlotIndex, WetPartEntry.UVChannelIndex);
-        WetPartEntryIndicesByScope.FindOrAdd(WetPartScopeKey).Add(EntryIndex);
+        UE_LOG(
+            LogTemp,
+            Error,
+            TEXT("DynamicWetClothesComponent: Failed to initialize wet part vertex data from precomputed simulation data on %s. Open the Wet Clothing Asset and save it to update runtime-ready data."),
+            *GetNameSafe(Receiver.OwnerForLogs));
+        return false;
     }
 
-    for (const TPair<FIntPoint, TArray<int32>>& ScopePair : WetPartEntryIndicesByScope)
-    {
-        const int32 MaterialSlotIndex = ScopePair.Key.X;
-        const int32 UVChannelIndex = ScopePair.Key.Y;
-
-        TArray<FWetUVIsland> Islands;
-        if (!FWetMeshAnalysis::BuildMaterialSlotUVIslands(
-                SkeletalMesh,
-                0,
-                UVChannelIndex,
-                MaterialSlotIndex,
-                Islands))
-        {
-            continue;
-        }
-
-        TArray<FWetVertexIslandMembership> VertexMembership;
-        if (!FWetMeshAnalysis::BuildVertexIslandMembership(
-                Islands,
-                VertexCount,
-                UVChannelIndex,
-                VertexMembership))
-        {
-            continue;
-        }
-
-        TMap<int32, int32> UVIslandToWetPartEntryIndex;
-        for (const int32 WetPartEntryIndex : ScopePair.Value)
-        {
-            if (!Receiver.WetClothingAsset->PartData.EditableWetPartData.WetPartEntries.IsValidIndex(WetPartEntryIndex))
-            {
-                continue;
-            }
-
-            const FWetClothingWetPartEntry& WetPartEntry = Receiver.WetClothingAsset->PartData.EditableWetPartData.WetPartEntries[WetPartEntryIndex];
-            for (const int32 UVIslandID : WetPartEntry.AssignedUVIslandIDs)
-            {
-                UVIslandToWetPartEntryIndex.Add(UVIslandID, WetPartEntryIndex);
-            }
-        }
-
-        for (int32 VertexIndex = 0; VertexIndex < VertexMembership.Num(); ++VertexIndex)
-        {
-            const FWetVertexIslandMembership& Membership = VertexMembership[VertexIndex];
-            if (Membership.UVIslandID == INDEX_NONE)
-            {
-                continue;
-            }
-
-            const int32* WetPartEntryIndex = UVIslandToWetPartEntryIndex.Find(Membership.UVIslandID);
-            if (WetPartEntryIndex == nullptr ||
-                !Receiver.WetClothingAsset->PartData.EditableWetPartData.WetPartEntries.IsValidIndex(*WetPartEntryIndex) ||
-                !Receiver.RuntimeData->VertexWetPartIDs.IsValidIndex(VertexIndex) ||
-                !Receiver.RuntimeData->VertexWetnessProfileParameters.IsValidIndex(VertexIndex))
-            {
-                continue;
-            }
-
-            const FWetClothingWetPartEntry& WetPartEntry = Receiver.WetClothingAsset->PartData.EditableWetPartData.WetPartEntries[*WetPartEntryIndex];
-            Receiver.RuntimeData->VertexWetPartIDs[VertexIndex] = WetPartEntry.WetPartID;
-            Receiver.RuntimeData->VertexWetnessProfileParameters[VertexIndex] =
-                ResolvedWetPartParametersByEntryIndex[*WetPartEntryIndex];
-            Receiver.RuntimeData->VertexWetPartDebugColors[VertexIndex] = WetPartEntry.Color;
-        }
-    }
+    return true;
 }
 
-bool FWetRuntimeDataBuilder::InitializeWetPartVertexDataFromBakedProfile(
+bool FWetRuntimeDataBuilder::InitializeWetPartVertexDataFromPrecomputedData(
     FWetRuntimeDataBuildArgs&        Receiver,
     const int32                      VertexCount,
     const FWetnessProfileParameters& DefaultParameters)
@@ -224,14 +150,14 @@ bool FWetRuntimeDataBuilder::InitializeWetPartVertexDataFromBakedProfile(
     }
 
     const USkeletalMesh* SkeletalMesh = Receiver.TargetSkeletalMesh->GetSkeletalMeshAsset();
-    if (!Receiver.WetClothingAsset->IsPrecomputedSimulationDataValidForMesh(SkeletalMesh, 0))
+    if (!Receiver.WetClothingAsset->IsPrecomputedSimulationDataValidForMesh(SkeletalMesh, Receiver.LODIndex))
     {
         if (Receiver.WetClothingAsset->GetPrecomputedSimulationData().bIsValid)
         {
             UE_LOG(
                 LogTemp,
                 Warning,
-                TEXT("DynamicWetClothesComponent: WetClothingAsset precomputed simulation data is stale for %s. Falling back to runtime UV analysis."),
+                TEXT("DynamicWetClothesComponent: WetClothingAsset precomputed simulation data is stale for %s."),
                 *GetNameSafe(Receiver.OwnerForLogs));
         }
         return false;
@@ -243,7 +169,7 @@ bool FWetRuntimeDataBuilder::InitializeWetPartVertexDataFromBakedProfile(
         UE_LOG(
             LogTemp,
             Warning,
-            TEXT("DynamicWetClothesComponent: WetClothingAsset precomputed simulation data vertex count mismatch on %s. Falling back to runtime UV analysis."),
+            TEXT("DynamicWetClothesComponent: WetClothingAsset precomputed simulation data vertex count mismatch on %s."),
             *GetNameSafe(Receiver.OwnerForLogs));
         return false;
     }
@@ -268,13 +194,15 @@ bool FWetRuntimeDataBuilder::InitializeWetPartVertexDataFromBakedProfile(
     {
         const FWetClothingPrecomputedVertexData& PrecomputedVertex = PrecomputedData.Vertices[VertexIndex];
         if (!Receiver.RuntimeData->VertexWetPartIDs.IsValidIndex(VertexIndex) ||
+            !Receiver.RuntimeData->VertexWettableFlags.IsValidIndex(VertexIndex) ||
             !Receiver.RuntimeData->VertexWetnessProfileParameters.IsValidIndex(VertexIndex) ||
             !Receiver.RuntimeData->VertexWetPartDebugColors.IsValidIndex(VertexIndex))
         {
             continue;
         }
 
-        if (Receiver.WetClothingAsset->PartData.EditableWetPartData.WetPartEntries.IsValidIndex(PrecomputedVertex.WetPartEntryIndex) &&
+        if (PrecomputedVertex.bIsWettable &&
+            Receiver.WetClothingAsset->PartData.EditableWetPartData.WetPartEntries.IsValidIndex(PrecomputedVertex.WetPartEntryIndex) &&
             ResolvedWetPartParametersByEntryIndex.Contains(PrecomputedVertex.WetPartEntryIndex))
         {
             const FWetClothingWetPartEntry& WetPartEntry =
@@ -283,6 +211,7 @@ bool FWetRuntimeDataBuilder::InitializeWetPartVertexDataFromBakedProfile(
             {
                 continue;
             }
+            Receiver.RuntimeData->VertexWettableFlags[VertexIndex] = true;
             Receiver.RuntimeData->VertexWetPartIDs[VertexIndex] = PrecomputedVertex.WetPartID;
             Receiver.RuntimeData->VertexWetnessProfileParameters[VertexIndex] =
                 ResolvedWetPartParametersByEntryIndex[PrecomputedVertex.WetPartEntryIndex];
@@ -293,122 +222,38 @@ bool FWetRuntimeDataBuilder::InitializeWetPartVertexDataFromBakedProfile(
     return true;
 }
 
-void FWetRuntimeDataBuilder::BuildNeighborGraph(FWetRuntimeDataBuildArgs& Receiver)
+bool FWetRuntimeDataBuilder::InitializeNeighborGraphFromPrecomputedData(FWetRuntimeDataBuildArgs& Receiver)
 {
     FSkeletalMeshLODRenderData* LODData = nullptr;
     if (!GetLODRenderData(Receiver.TargetSkeletalMesh, Receiver.LODIndex, LODData))
     {
-        return;
+        return false;
     }
 
     const int32 VertexCount = LODData->GetNumVertices();
     Receiver.RuntimeData->ResetNeighborGraph();
 
-    USkeletalMesh* SkeletalMesh = Receiver.TargetSkeletalMesh ? Receiver.TargetSkeletalMesh->GetSkeletalMeshAsset() : nullptr;
-    if (Receiver.bUsePrecomputedSimulationData && Receiver.WetClothingAsset)
-    {
-        FString BakedGraphErrorMessage;
-        if (FWetPrecomputedSimulationDataBridge::TryCopyPrecomputedNeighborGraph(
-                Receiver.WetClothingAsset,
-                SkeletalMesh,
-                Receiver.LODIndex,
-                VertexCount,
-                Receiver.RuntimeData->NeighborGraph,
-                &BakedGraphErrorMessage))
-        {
-            Receiver.RuntimeData->bHasNeighborGraph = true;
-            return;
-        }
-
-        if (!BakedGraphErrorMessage.IsEmpty())
-        {
-            UE_LOG(
-                LogTemp,
-                Verbose,
-                TEXT("DynamicWetClothesComponent: Precomputed neighbor graph was not used on %s. %s"),
-                *GetNameSafe(Receiver.OwnerForLogs),
-                *BakedGraphErrorMessage);
-        }
-    }
-
-    if (!Receiver.bAllowRuntimeFallbackBuild)
-    {
-        return;
-    }
-
-    UE_LOG(
-        LogTemp,
-        Log,
-        TEXT("DynamicWetClothesComponent: Building neighbor graph at runtime fallback on %s."),
-        *GetNameSafe(Receiver.OwnerForLogs));
-
-    FString ErrorMessage;
-    if (FWetNeighborGraphBuilder::BuildRuntimeGraph(
-            *LODData,
-            Receiver.CoincidentVertexNeighborTolerance,
-            Receiver.RuntimeData->NeighborGraph,
-            &ErrorMessage))
-    {
-        Receiver.RuntimeData->bHasNeighborGraph = true;
-    }
-    else
-    {
-        UE_LOG(
-            LogTemp,
-            Warning,
-            TEXT("DynamicWetClothesComponent: Failed to build neighbor graph on %s. %s"),
-            *GetNameSafe(Receiver.OwnerForLogs),
-            *ErrorMessage);
-    }
-}
-
-bool FWetRuntimeDataBuilder::BuildNeighborGraphFromBakedProfile(
-    FWetRuntimeDataBuildArgs& Receiver,
-    const int32               VertexCount)
-{
     const USkeletalMesh* SkeletalMesh = Receiver.TargetSkeletalMesh ? Receiver.TargetSkeletalMesh->GetSkeletalMeshAsset() : nullptr;
-    Receiver.RuntimeData->ResetNeighborGraph();
+    FString ErrorMessage;
     if (!FWetPrecomputedSimulationDataBridge::TryCopyPrecomputedNeighborGraph(
             Receiver.WetClothingAsset,
             SkeletalMesh,
             Receiver.LODIndex,
             VertexCount,
             Receiver.RuntimeData->NeighborGraph,
-            nullptr))
+            &ErrorMessage))
     {
+        UE_LOG(
+            LogTemp,
+            Error,
+            TEXT("DynamicWetClothesComponent: Failed to initialize neighbor graph from precomputed simulation data on %s. %s Open the Wet Clothing Asset and save it to update runtime-ready data."),
+            *GetNameSafe(Receiver.OwnerForLogs),
+            *ErrorMessage);
         return false;
     }
 
     Receiver.RuntimeData->bHasNeighborGraph = true;
     return true;
-}
-
-void FWetRuntimeDataBuilder::AddNeighbor(
-    FWetClothingRuntimeData& RuntimeData,
-    int32                    VertexIndex,
-    int32                    NeighborIndex)
-{
-    if (!RuntimeData.NeighborGraph.IsValidIndex(VertexIndex))
-    {
-        return;
-    }
-
-    if (!RuntimeData.NeighborGraph.IsValidIndex(NeighborIndex))
-    {
-        return;
-    }
-
-    if (VertexIndex == NeighborIndex)
-    {
-        return;
-    }
-
-    TArray<int32>& Neighbors = RuntimeData.NeighborGraph[VertexIndex].Neighbors;
-
-    if (!Neighbors.Contains(NeighborIndex))
-    {
-        Neighbors.Add(NeighborIndex);
-    }
 }
 
 void FWetRuntimeDataBuilder::EnsureWetnessBufferSize(FWetRuntimeDataBuildArgs& Receiver, const int32 VertexCount)
@@ -417,6 +262,7 @@ void FWetRuntimeDataBuilder::EnsureWetnessBufferSize(FWetRuntimeDataBuildArgs& R
     {
         Receiver.SimulationState->AbsorbedWetnessPerVertex.Reset();
         Receiver.RuntimeData->VertexWetPartIDs.Reset();
+        Receiver.RuntimeData->VertexWettableFlags.Reset();
         Receiver.RuntimeData->VertexWetnessProfileParameters.Reset();
         Receiver.RuntimeData->VertexWetPartDebugColors.Reset();
         Receiver.SimulationState->UpdatingPendingWetnessAmounts.Reset();
@@ -434,10 +280,18 @@ void FWetRuntimeDataBuilder::EnsureWetnessBufferSize(FWetRuntimeDataBuildArgs& R
     }
 
     if (Receiver.RuntimeData->VertexWetPartIDs.Num() != VertexCount ||
+        Receiver.RuntimeData->VertexWettableFlags.Num() != VertexCount ||
         Receiver.RuntimeData->VertexWetnessProfileParameters.Num() != VertexCount ||
         Receiver.RuntimeData->VertexWetPartDebugColors.Num() != VertexCount)
     {
-        InitializeWetPartVertexData(Receiver);
+        if (!InitializeWetPartVertexData(Receiver))
+        {
+            UE_LOG(
+                LogTemp,
+                Error,
+                TEXT("DynamicWetClothesComponent: Failed to refresh precomputed wet part data on %s."),
+                *GetNameSafe(Receiver.OwnerForLogs));
+        }
     }
 
     if (Receiver.SimulationState->UpdatingPendingWetnessAmounts.Num() != VertexCount)
@@ -475,6 +329,7 @@ void FWetRuntimeDataBuilder::EnsureWetnessBufferSize(FWetInputStageArgs& Receive
         if (Receiver.RuntimeData)
         {
             Receiver.RuntimeData->VertexWetPartIDs.Reset();
+            Receiver.RuntimeData->VertexWettableFlags.Reset();
             Receiver.RuntimeData->VertexWetnessProfileParameters.Reset();
             Receiver.RuntimeData->VertexWetPartDebugColors.Reset();
         }
@@ -508,6 +363,10 @@ void FWetRuntimeDataBuilder::EnsureWetnessBufferSize(FWetInputStageArgs& Receive
         if (Receiver.RuntimeData->VertexWetPartIDs.Num() != VertexCount)
         {
             Receiver.RuntimeData->VertexWetPartIDs.Init(INDEX_NONE, VertexCount);
+        }
+        if (Receiver.RuntimeData->VertexWettableFlags.Num() != VertexCount)
+        {
+            Receiver.RuntimeData->VertexWettableFlags.Init(false, VertexCount);
         }
         if (Receiver.RuntimeData->VertexWetnessProfileParameters.Num() != VertexCount)
         {
@@ -550,7 +409,7 @@ bool FWetRuntimeDataBuilder::GetLODRenderData(
     return true;
 }
 
-bool FWetRuntimeDataBuilder::BuildBoneOptimizationCache(
+bool FWetRuntimeDataBuilder::InitializeBoneOptimizationCacheFromPrecomputedData(
     FWetRuntimeDataBuildArgs& Receiver,
     const int32               LODIndex)
 {
@@ -567,51 +426,30 @@ bool FWetRuntimeDataBuilder::BuildBoneOptimizationCache(
         return false;
     }
 
-    if (Receiver.bUsePrecomputedBoneOptimizationCache && Receiver.WetClothingAsset)
-    {
-        FString PrecomputedCacheErrorMessage;
-        if (FWetPrecomputedSimulationDataBridge::TryCopyPrecomputedBoneOptimizationCache(
-                Receiver.WetClothingAsset,
-                SkeletalMesh,
-                LODIndex,
-                Receiver.RuntimeData->BoneOptimizationCache,
-                &PrecomputedCacheErrorMessage))
-        {
-            Receiver.RuntimeData->bHasBoneOptimizationCache = true;
-            return true;
-        }
-
-        if (!PrecomputedCacheErrorMessage.IsEmpty())
-        {
-            UE_LOG(
-                LogTemp,
-                Verbose,
-                TEXT("DynamicWetClothesComponent: Precomputed bone optimization cache was not used on %s. %s"),
-                *GetNameSafe(Receiver.OwnerForLogs),
-                *PrecomputedCacheErrorMessage);
-        }
-    }
-
-    if (!Receiver.bAllowRuntimeFallbackBuild)
-    {
-        return false;
-    }
-
-    TArray<FWetBoneIncludeRule> IncludeRules;
-    FString                     ErrorMessage;
-    if (!FWetBoneOptimizationCacheBuilder::Build(
-            SkeletalMesh,
-            LODIndex,
-            IncludeRules,
-            Receiver.RuntimeData->BoneOptimizationCache,
-            &ErrorMessage))
+    if (!Receiver.bUsePrecomputedBoneOptimizationCache || !Receiver.WetClothingAsset)
     {
         UE_LOG(
             LogTemp,
-            Warning,
-            TEXT("DynamicWetClothesComponent: Failed to build bone optimization cache on %s. %s"),
+            Error,
+            TEXT("DynamicWetClothesComponent: Precomputed bone optimization cache is required on %s. Runtime fallback was removed."),
+            *GetNameSafe(Receiver.OwnerForLogs));
+        return false;
+    }
+
+    FString PrecomputedCacheErrorMessage;
+    if (!FWetPrecomputedSimulationDataBridge::TryCopyPrecomputedBoneOptimizationCache(
+            Receiver.WetClothingAsset,
+            SkeletalMesh,
+            LODIndex,
+            Receiver.RuntimeData->BoneOptimizationCache,
+            &PrecomputedCacheErrorMessage))
+    {
+        UE_LOG(
+            LogTemp,
+            Error,
+            TEXT("DynamicWetClothesComponent: Failed to initialize bone optimization cache from precomputed simulation data on %s. %s Open the Wet Clothing Asset and save it to update runtime-ready data."),
             *GetNameSafe(Receiver.OwnerForLogs),
-            *ErrorMessage);
+            *PrecomputedCacheErrorMessage);
         return false;
     }
 

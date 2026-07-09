@@ -1,4 +1,4 @@
-#include "WetClothing/BakeSource/DWCBakeBlueprintSnapshotResolver.h"
+#include "WetClothing/TransparencyBake/SourceSnapshot/DWCBakeBlueprintSnapshotResolver.h"
 
 #include "Components/DWCBakeComponent.h"
 #include "Engine/World.h"

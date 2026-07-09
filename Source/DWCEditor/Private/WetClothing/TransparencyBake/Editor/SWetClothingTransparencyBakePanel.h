@@ -40,18 +40,18 @@ class SWetClothingTransparencyBakePanel : public SCompoundWidget
     void Construct(const FArguments& InArgs);
     void RefreshFromAsset();
     bool HasPendingTransparencySetup(FString* OutSummary = nullptr) const;
-    bool BuildTransparencySetup(FString& OutSummary, bool* OutHadWarnings = nullptr);
+    bool BakeTransparencyRevealAssets(FString& OutSummary, bool* OutHadWarnings = nullptr);
     bool SaveTransparencySetupAssets() const;
     void RebuildEditorLayout();
 
   private:
     const UClass* GetSelectedSourceClass() const;
     void HandleSourceClassChanged(const UClass* NewClass);
-    FReply HandleBuildAndSaveClicked();
+    FReply HandleBakeAndSaveClicked();
     FReply HandleFocusPreviewClicked();
     FReply HandleRevealMapPreviewClicked(UObject* Texture, FText Label, FText Detail);
     FText GetStatusText() const;
-    FText GetBuildButtonText() const;
+    FText GetBakeButtonText() const;
     FText GetTargetMeshText() const;
     FText GetInnerSourceStatusText() const;
     float GetWetnessPreviewPercent() const;
@@ -60,7 +60,7 @@ class SWetClothingTransparencyBakePanel : public SCompoundWidget
     void HandlePreviewModeChanged(ECheckBoxState NewState, EWetClothingTransparencyPreviewMode Mode);
     ECheckBoxState IsRevealMapTypeChecked(EDWCTransparencyRevealMapType MapType) const;
     void HandleRevealMapTypeChanged(ECheckBoxState NewState, EDWCTransparencyRevealMapType MapType);
-    bool IsBuildEnabled() const;
+    bool IsBakeEnabled() const;
     void UpdateInnerSourceStatus();
 
     FText GetRevealSourceTypeText() const;
@@ -77,7 +77,7 @@ class SWetClothingTransparencyBakePanel : public SCompoundWidget
     TSharedRef<SWidget> BuildTargetSection();
     TSharedRef<SWidget> BuildInnerSourceSection();
     TSharedRef<SWidget> BuildGeneratedOutputsSection();
-    TSharedRef<SWidget> BuildBuildSection();
+    TSharedRef<SWidget> BuildBakeSection();
     TSharedRef<SWidget> BuildTransparencyPreviewSection();
     TSharedRef<SWidget> BuildPreviewSettingsSection();
     TSharedRef<SWidget> BuildPreviewModeButton(EWetClothingTransparencyPreviewMode Mode, const FText& Label);

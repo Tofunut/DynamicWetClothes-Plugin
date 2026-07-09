@@ -1,7 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "RuntimeData/WetBoneOptimizationCache.h"
+#include "RuntimeState/WetBoneOptimizationCache.h"
 
 class UWetClothingAsset;
 class USkeletalMesh;

@@ -7,8 +7,8 @@
 #include "WetInputSystem/WetContactTypes.h"
 #include "WetSimulation/WetSimulationStage.h"
 #include "WetInputSystem/Sampling/WetClothingMeshSampler.h"
-#include "RuntimeData/WetClothingRuntimeData.h"
-#include "RuntimeData/WetRuntimeDataBuilder.h"
+#include "RuntimeState/WetClothingRuntimeData.h"
+#include "RuntimeState/WetRuntimeDataBuilder.h"
 #include "WetSimulation/AbsorbedWetness/AbsorbedWetnessSimulationState.h"
 #include "Runtime/Engine/Classes/Engine/SkeletalMesh.h"
 #include "Runtime/Engine/Public/Rendering/SkeletalMeshLODRenderData.h"
@@ -186,7 +186,9 @@ namespace
         bool&                            bDirty,
         bool&                            bQueuedWetness)
     {
-        if (!Receiver.SimulationState->AbsorbedWetnessPerVertex.IsValidIndex(VertexIndex))
+        if (!Receiver.SimulationState->AbsorbedWetnessPerVertex.IsValidIndex(VertexIndex) ||
+            !Receiver.RuntimeData ||
+            !Receiver.RuntimeData->IsVertexWettable(VertexIndex))
         {
             return false;
         }
@@ -237,7 +239,9 @@ namespace
         bool bApplied = false;
         auto ApplyVertex = [&](const int32 VertexIndex, const bool bCheckBoneName)
         {
-            if (!Receiver.MeshSampler->CachedSkinnedPositions.IsValidIndex(VertexIndex))
+            if (!Receiver.MeshSampler->CachedSkinnedPositions.IsValidIndex(VertexIndex) ||
+                !Receiver.RuntimeData ||
+                !Receiver.RuntimeData->IsVertexWettable(VertexIndex))
             {
                 return;
             }
@@ -336,6 +340,11 @@ namespace
             }
 
             const int32 VertexIndex = FlatVertexIndices[CandidateOffset];
+            if (!Receiver.RuntimeData || !Receiver.RuntimeData->IsVertexWettable(VertexIndex))
+            {
+                continue;
+            }
+
             FVector3f   SkinnedPosition = FVector3f::ZeroVector;
             if (!Receiver.MeshSampler->ComputeSkinnedPosition(
                     *PreparedData.LODData,
@@ -426,6 +435,11 @@ void FWetInputStage::ApplyWetAll(FWetInputStageArgs& Receiver, float Amount)
 
     for (int32 VertexIndex = 0; VertexIndex < Receiver.SimulationState->AbsorbedWetnessPerVertex.Num(); ++VertexIndex)
     {
+        if (!Receiver.RuntimeData || !Receiver.RuntimeData->IsVertexWettable(VertexIndex))
+        {
+            continue;
+        }
+
         if (EffectiveAmount > 0.0f)
         {
             Receiver.SimulationStage->QueuePendingWetness(Receiver, VertexIndex, EffectiveAmount * Receiver.GetAbsorptionMultiplierForVertex(VertexIndex));
@@ -477,7 +491,9 @@ bool FWetInputStage::ApplyWetSurface(FWetInputStageArgs& Receiver, const FDWCWat
 
     for (int32 VertexIndex = 0; VertexIndex < Receiver.MeshSampler->CachedSkinnedPositions.Num(); ++VertexIndex)
     {
-        if (!Receiver.SimulationState->AbsorbedWetnessPerVertex.IsValidIndex(VertexIndex))
+        if (!Receiver.SimulationState->AbsorbedWetnessPerVertex.IsValidIndex(VertexIndex) ||
+            !Receiver.RuntimeData ||
+            !Receiver.RuntimeData->IsVertexWettable(VertexIndex))
         {
             continue;
         }
@@ -569,7 +585,9 @@ bool FWetInputStage::ApplyWetArea(FWetInputStageArgs&    Receiver,
 
     auto ApplyRainToVertex = [&](const int32 VertexIndex)
     {
-        if (!Receiver.SimulationState->AbsorbedWetnessPerVertex.IsValidIndex(VertexIndex))
+        if (!Receiver.SimulationState->AbsorbedWetnessPerVertex.IsValidIndex(VertexIndex) ||
+            !Receiver.RuntimeData ||
+            !Receiver.RuntimeData->IsVertexWettable(VertexIndex))
         {
             return;
         }

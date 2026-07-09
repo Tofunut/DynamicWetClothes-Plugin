@@ -1,8 +1,9 @@
-#include "RuntimeData/WetClothingRuntimeData.h"
+#include "RuntimeState/WetClothingRuntimeData.h"
 
 void FWetClothingRuntimeData::ResetWetPartData()
 {
     VertexWetPartIDs.Reset();
+    VertexWettableFlags.Reset();
     VertexWetnessProfileParameters.Reset();
     VertexWetPartDebugColors.Reset();
 }

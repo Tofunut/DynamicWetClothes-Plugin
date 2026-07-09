@@ -2,7 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "DataAssets/WetnessProfile.h"
-#include "RuntimeData/WetBoneOptimizationCache.h"
+#include "RuntimeState/WetBoneOptimizationCache.h"
 
 struct FWetnessProfileParameters;
 
@@ -19,6 +19,7 @@ class DWC_API FWetClothingRuntimeData
     void ResetBoneOptimizationCache();
 
     TArray<int32>                     VertexWetPartIDs;
+    TArray<bool>                      VertexWettableFlags;
     TArray<FWetnessProfileParameters> VertexWetnessProfileParameters;
     TArray<FLinearColor>              VertexWetPartDebugColors;
     TArray<FWetVertexNeighbors>       NeighborGraph;
@@ -26,4 +27,9 @@ class DWC_API FWetClothingRuntimeData
 
     FWetBoneOptimizationCache BoneOptimizationCache;
     bool                      bHasBoneOptimizationCache = false;
+
+    bool IsVertexWettable(int32 VertexIndex) const
+    {
+        return VertexWettableFlags.IsValidIndex(VertexIndex) && VertexWettableFlags[VertexIndex];
+    }
 };

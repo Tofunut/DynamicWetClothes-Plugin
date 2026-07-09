@@ -185,6 +185,9 @@ struct DWC_API FWetClothingPrecomputedVertexData
 
     UPROPERTY(VisibleAnywhere, Category = "Precomputed Simulation Data")
     int32 UVIslandID = INDEX_NONE;
+
+    UPROPERTY(VisibleAnywhere, Category = "Precomputed Simulation Data")
+    bool bIsWettable = false;
 };
 
 USTRUCT(BlueprintType)
@@ -211,7 +214,17 @@ struct DWC_API FWetClothingPrecomputedSimulationData
     int32 VertexCount = 0;
 
     UPROPERTY(VisibleAnywhere, Category = "Precomputed Simulation Data")
-    FString MeshBuildSignature;
+    FString MeshSignature;
+
+    // Kept for assets saved before MeshSignature / SourceDataSignature validation was introduced.
+    UPROPERTY()
+    FString MeshBuildSignature_DEPRECATED;
+
+    UPROPERTY(VisibleAnywhere, Category = "Precomputed Simulation Data")
+    FString SourceDataSignature;
+
+    UPROPERTY(VisibleAnywhere, Category = "Precomputed Simulation Data")
+    int32 DataVersion = 1;
 
     UPROPERTY(VisibleAnywhere, Category = "Precomputed Simulation Data")
     TArray<FWetClothingPrecomputedVertexData> Vertices;

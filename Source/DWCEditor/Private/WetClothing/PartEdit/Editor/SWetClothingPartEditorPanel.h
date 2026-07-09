@@ -31,9 +31,9 @@ class SWetClothingPartEditorPanel : public SCompoundWidget
     void Construct(const FArguments& InArgs);
 
     void RefreshFromAsset();
-    bool HasPendingWetSetupTasks(FString* OutSummary = nullptr) const;
-    bool BuildWetSetup(FString& OutSummary, bool* OutHadWarnings = nullptr);
-    bool SaveWetSetupAssets() const;
+    bool HasPendingVisualBakeTasks(FString* OutSummary = nullptr) const;
+    bool BakeWetnessProfileMapsAndUpdateMaterials(FString& OutSummary, bool* OutHadWarnings = nullptr);
+    bool SaveBakedWetnessAssets() const;
 
   private:
     using FMaterialSlotItemPtr = TSharedPtr<FWetClothingMaterialSlotItem>;
@@ -128,6 +128,7 @@ class SWetClothingPartEditorPanel : public SCompoundWidget
 
     FText                                          GetMaterialSlotCountText() const;
     FText                                          GetSelectedMaterialSlotText() const;
+    FText                                          GetMaterialSlotStatusText(int32 MaterialSlotIndex) const;
     FText                                          GetSelectedTextureText() const;
     FText                                          GetWetnessProfileMapBakeSourceText() const;
     FText                                          GetWetnessProfileMapBakeSlotsText() const;

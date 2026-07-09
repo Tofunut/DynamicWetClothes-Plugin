@@ -492,8 +492,8 @@ TSharedRef<SWidget> FWetClothingEditorCommonWidgets::BuildBakeMapsMenu(const FWe
             }
         })));
     MenuBuilder.AddMenuEntry(
-        NSLOCTEXT("WetClothingEditorCommonWidgets", "BuildTransparencyRevealMapsMenuItem", "Build & Save Transparency Reveal Maps"),
-        NSLOCTEXT("WetClothingEditorCommonWidgets", "BuildTransparencyRevealMapsMenuItemTooltip", "Build reveal textures/materials for Transparency mode and save the generated assets."),
+        NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeTransparencyRevealMapsMenuItem", "Bake & Save Transparency Reveal Maps"),
+        NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeTransparencyRevealMapsMenuItemTooltip", "Bake reveal textures/materials for Transparency mode and save the generated assets."),
         FSlateIcon(),
         FUIAction(FExecuteAction::CreateLambda([OnBakeTransparencyRevealMaps = Args.OnBakeTransparencyRevealMaps]()
         {
@@ -616,12 +616,24 @@ TSharedRef<ITableRow> FWetClothingEditorCommonWidgets::GenerateMaterialSlotRow(
     RowContent->AddSlot()
         .FillWidth(1.0f)
         .VAlign(VAlign_Center)
+        .Padding(2.0f, 0.0f, 10.0f, 0.0f)
             [SNew(STextBlock)
                  .Text(SlotTitle)
+                 .Font(FAppStyle::GetFontStyle(TEXT("NormalFontBold")))
                  .OverflowPolicy(ETextOverflowPolicy::Ellipsis)];
 
     if (!bIsAllSlotsRow)
     {
+        const FText StatusText = Args.GetMaterialSlotStatusText ? Args.GetMaterialSlotStatusText(MaterialSlotIndex) : FText::GetEmpty();
+        RowContent->AddSlot()
+            .AutoWidth()
+            .VAlign(VAlign_Center)
+            .Padding(0.0f, 0.0f, 10.0f, 0.0f)
+                [SNew(STextBlock)
+                     .Text(StatusText)
+                     .Font(FAppStyle::GetFontStyle(TEXT("SmallFont")))
+                     .ColorAndOpacity(FSlateColor(FLinearColor(0.58f, 0.58f, 0.58f, 1.0f)))];
+
         const bool bWettable = Item.IsValid() && Item->bIsWettableSlot;
         const FSlateColor WettableColor = bWettable
                                                ? FSlateColor(FLinearColor(0.35f, 0.85f, 1.0f, 1.0f))
@@ -633,7 +645,7 @@ TSharedRef<ITableRow> FWetClothingEditorCommonWidgets::GenerateMaterialSlotRow(
         RowContent->AddSlot()
             .AutoWidth()
             .VAlign(VAlign_Center)
-            .Padding(8.0f, 0.0f, 0.0f, 0.0f)
+            .Padding(0.0f, 0.0f, 2.0f, 0.0f)
                 [SNew(SButton)
                      .ButtonStyle(FAppStyle::Get(), TEXT("NoBorder"))
                      .ContentPadding(FMargin(4.0f, 2.0f))
@@ -737,6 +749,14 @@ void FWetClothingEditorCommonWidgets::SetMaterialSlotWettable(UWetClothingAsset*
     }
 
     State->bIsWettableSlot = bIsWettableSlot;
+    if (!bIsWettableSlot)
+    {
+        WetClothingAsset->PartData.GeneratedWetMaterialOverrides.RemoveAll(
+            [MaterialSlotIndex](const FWetClothingGeneratedWetMaterialOverride& MaterialOverride)
+            {
+                return MaterialOverride.MaterialSlotIndex == MaterialSlotIndex;
+            });
+    }
     WetClothingAsset->MarkPackageDirty();
 }
 

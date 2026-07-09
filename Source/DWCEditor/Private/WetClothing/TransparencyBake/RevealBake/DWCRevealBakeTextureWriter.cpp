@@ -78,7 +78,7 @@ void FDWCRevealBakeTextureWriter::BuildSourceTextureReadbacks(
 }
 
 bool FDWCRevealBakeTextureWriter::WriteTextures(
-    const TArray<FDWCBakeRayHit>&              Hits,
+    const TArray<FDWCRevealBakeRayHit>&              Hits,
     const FDWCRevealBakeTextureWriteSettings& Settings,
     FDWCRevealBakeTextureSet&                 OutTextures,
     FString*                                  OutErrorMessage)
@@ -121,7 +121,7 @@ bool FDWCRevealBakeTextureWriter::WriteTextures(
     TMap<FName, FWetClothingTextureReadback> SourceTextureDataByLayerId;
     BuildSourceTextureReadbacks(Settings, SourceTextureDataByLayerId);
 
-    for (const FDWCBakeRayHit& Hit : Hits)
+    for (const FDWCRevealBakeRayHit& Hit : Hits)
     {
         if (Hit.Pixel.X < 0 || Hit.Pixel.Y < 0 || Hit.Pixel.X >= Width || Hit.Pixel.Y >= Height)
         {

@@ -1,14 +1,14 @@
-#include "Bake/DWCBakeProjection.h"
+#include "WetClothing/TransparencyBake/RevealBake/DWCRevealBakeProjection.h"
 
 #include "Algo/Sort.h"
 
-FVector FDWCBakeTexelSampler::InterpolateVector(const FVector& Barycentric, const FVector Values[3])
+FVector FDWCRevealBakeTexelSampler::InterpolateVector(const FVector& Barycentric, const FVector Values[3])
 {
     return Values[0] * Barycentric.X + Values[1] * Barycentric.Y + Values[2] * Barycentric.Z;
 }
 
-FIntRect FDWCBakeTexelSampler::MakePixelBoundsFromUVTriangle(
-    const FDWCBakeSurfaceTriangle& Triangle,
+FIntRect FDWCRevealBakeTexelSampler::MakePixelBoundsFromUVTriangle(
+    const FDWCRevealBakeSurfaceTriangle& Triangle,
     const FIntPoint&               Resolution)
 {
     FBox2D UVBounds(ForceInit);
@@ -24,22 +24,22 @@ FIntRect FDWCBakeTexelSampler::MakePixelBoundsFromUVTriangle(
     return FIntRect(MinX, MinY, MaxX + 1, MaxY + 1);
 }
 
-int32 FDWCBakeTexelSampler::MakePixelKey(const int32 X, const int32 Y, const int32 Width)
+int32 FDWCRevealBakeTexelSampler::MakePixelKey(const int32 X, const int32 Y, const int32 Width)
 {
     return Y * Width + X;
 }
 
-FVector FDWCBakeRayProjector::InterpolateVector(const FVector& Barycentric, const FVector Values[3])
+FVector FDWCRevealBakeRayProjector::InterpolateVector(const FVector& Barycentric, const FVector Values[3])
 {
     return Values[0] * Barycentric.X + Values[1] * Barycentric.Y + Values[2] * Barycentric.Z;
 }
 
-FVector2D FDWCBakeRayProjector::InterpolateVector2D(const FVector& Barycentric, const FVector2D Values[3])
+FVector2D FDWCRevealBakeRayProjector::InterpolateVector2D(const FVector& Barycentric, const FVector2D Values[3])
 {
     return Values[0] * Barycentric.X + Values[1] * Barycentric.Y + Values[2] * Barycentric.Z;
 }
 
-bool FDWCBakeRayProjector::IntersectRayAabb(
+bool FDWCRevealBakeRayProjector::IntersectRayAabb(
     const FVector& RayOrigin,
     const FVector& RayDirection,
     const FBox&    Bounds,
@@ -88,22 +88,22 @@ bool FDWCBakeRayProjector::IntersectRayAabb(
     return MaxAllowedDistance > RayIntersectionEpsilon;
 }
 
-bool FDWCBakeRayProjector::FBakeProjectionBvhNode::IsLeaf() const
+bool FDWCRevealBakeRayProjector::FBakeProjectionBvhNode::IsLeaf() const
 {
     return LeftChildIndex == INDEX_NONE && RightChildIndex == INDEX_NONE;
 }
 
-bool FDWCBakeRayProjector::FBakeProjectionBvh::Build(
-    const FDWCBakeSurface&               OuterSurface,
-    const TArray<FDWCBakeSurface>&       SourceSurfaces,
-    const FDWCBakeRayProjectionSettings& Settings)
+bool FDWCRevealBakeRayProjector::FBakeProjectionBvh::Build(
+    const FDWCRevealBakeSurface&               OuterSurface,
+    const TArray<FDWCRevealBakeSurface>&       SourceSurfaces,
+    const FDWCRevealBakeRayProjectionSettings& Settings)
 {
     TriangleRefs.Reset();
     Nodes.Reset();
     LeafTriangleRefIndices.Reset();
 
     TArray<int32> RootTriangleRefIndices;
-    for (const FDWCBakeSurface& SourceSurface : SourceSurfaces)
+    for (const FDWCRevealBakeSurface& SourceSurface : SourceSurfaces)
     {
         if (Settings.bRespectSourceLayerOrder && SourceSurface.LayerOrder >= OuterSurface.LayerOrder)
         {
@@ -115,7 +115,7 @@ bool FDWCBakeRayProjector::FBakeProjectionBvh::Build(
             continue;
         }
 
-        for (const FDWCBakeSurfaceTriangle& Triangle : SourceSurface.Triangles)
+        for (const FDWCRevealBakeSurfaceTriangle& Triangle : SourceSurface.Triangles)
         {
             FBakeProjectionTriangleRef TriangleRef;
             TriangleRef.SourceSurface = &SourceSurface;
@@ -137,7 +137,7 @@ bool FDWCBakeRayProjector::FBakeProjectionBvh::Build(
     return Nodes.Num() > 0;
 }
 
-void FDWCBakeRayProjector::FBakeProjectionBvh::QueryRay(
+void FDWCRevealBakeRayProjector::FBakeProjectionBvh::QueryRay(
     const FVector& RayOrigin,
     const FVector& RayDirection,
     const float    MaxDistance,
@@ -162,7 +162,7 @@ void FDWCBakeRayProjector::FBakeProjectionBvh::QueryRay(
         }
 
         const FBakeProjectionBvhNode& Node = Nodes[NodeIndex];
-        if (!FDWCBakeRayProjector::IntersectRayAabb(RayOrigin, RayDirection, Node.Bounds, MaxDistance))
+        if (!FDWCRevealBakeRayProjector::IntersectRayAabb(RayOrigin, RayDirection, Node.Bounds, MaxDistance))
         {
             continue;
         }
@@ -191,19 +191,19 @@ void FDWCBakeRayProjector::FBakeProjectionBvh::QueryRay(
     }
 }
 
-const FDWCBakeRayProjector::FBakeProjectionTriangleRef* FDWCBakeRayProjector::FBakeProjectionBvh::GetTriangleRef(
+const FDWCRevealBakeRayProjector::FBakeProjectionTriangleRef* FDWCRevealBakeRayProjector::FBakeProjectionBvh::GetTriangleRef(
     const int32 TriangleRefIndex) const
 {
     return TriangleRefs.IsValidIndex(TriangleRefIndex) ? &TriangleRefs[TriangleRefIndex] : nullptr;
 }
 
-int32 FDWCBakeRayProjector::FBakeProjectionBvh::BuildNode(TArray<int32>& TriangleRefIndices)
+int32 FDWCRevealBakeRayProjector::FBakeProjectionBvh::BuildNode(TArray<int32>& TriangleRefIndices)
 {
     const int32 NodeIndex = Nodes.AddDefaulted();
     FBakeProjectionBvhNode& Node = Nodes[NodeIndex];
     Node.Bounds = CalculateBounds(TriangleRefIndices);
 
-    if (TriangleRefIndices.Num() <= FDWCBakeRayProjector::BvhLeafTriangleCount || !CanSplit(TriangleRefIndices))
+    if (TriangleRefIndices.Num() <= FDWCRevealBakeRayProjector::BvhLeafTriangleCount || !CanSplit(TriangleRefIndices))
     {
         Node.FirstTriangleIndex = LeafTriangleRefIndices.Num();
         Node.TriangleCount = TriangleRefIndices.Num();
@@ -233,7 +233,7 @@ int32 FDWCBakeRayProjector::FBakeProjectionBvh::BuildNode(TArray<int32>& Triangl
     return NodeIndex;
 }
 
-FBox FDWCBakeRayProjector::FBakeProjectionBvh::CalculateBounds(const TArray<int32>& TriangleRefIndices) const
+FBox FDWCRevealBakeRayProjector::FBakeProjectionBvh::CalculateBounds(const TArray<int32>& TriangleRefIndices) const
 {
     FBox Bounds(ForceInit);
     for (const int32 TriangleRefIndex : TriangleRefIndices)
@@ -246,7 +246,7 @@ FBox FDWCBakeRayProjector::FBakeProjectionBvh::CalculateBounds(const TArray<int3
     return Bounds;
 }
 
-FBox FDWCBakeRayProjector::FBakeProjectionBvh::CalculateCenterBounds(const TArray<int32>& TriangleRefIndices) const
+FBox FDWCRevealBakeRayProjector::FBakeProjectionBvh::CalculateCenterBounds(const TArray<int32>& TriangleRefIndices) const
 {
     FBox Bounds(ForceInit);
     for (const int32 TriangleRefIndex : TriangleRefIndices)
@@ -259,12 +259,12 @@ FBox FDWCBakeRayProjector::FBakeProjectionBvh::CalculateCenterBounds(const TArra
     return Bounds;
 }
 
-bool FDWCBakeRayProjector::FBakeProjectionBvh::CanSplit(const TArray<int32>& TriangleRefIndices) const
+bool FDWCRevealBakeRayProjector::FBakeProjectionBvh::CanSplit(const TArray<int32>& TriangleRefIndices) const
 {
     return CalculateCenterBounds(TriangleRefIndices).GetExtent().GetMax() > KINDA_SMALL_NUMBER;
 }
 
-int32 FDWCBakeRayProjector::FBakeProjectionBvh::FindLongestAxis(const FBox& Bounds) const
+int32 FDWCRevealBakeRayProjector::FBakeProjectionBvh::FindLongestAxis(const FBox& Bounds) const
 {
     const FVector Extent = Bounds.GetExtent();
     if (Extent.X >= Extent.Y && Extent.X >= Extent.Z)
@@ -278,10 +278,10 @@ int32 FDWCBakeRayProjector::FBakeProjectionBvh::FindLongestAxis(const FBox& Boun
     return 2;
 }
 
-bool FDWCBakeTexelSampler::BuildOuterTexelSamples(
-    const FDWCBakeSurface&               OuterSurface,
-    const FDWCBakeTexelSamplingSettings& Settings,
-    TArray<FDWCBakeTexelSample>&         OutSamples,
+bool FDWCRevealBakeTexelSampler::BuildOuterTexelSamples(
+    const FDWCRevealBakeSurface&               OuterSurface,
+    const FDWCRevealBakeTexelSamplingSettings& Settings,
+    TArray<FDWCRevealBakeTexelSample>&         OutSamples,
     FString*                             OutErrorMessage)
 {
     OutSamples.Reset();
@@ -302,7 +302,7 @@ bool FDWCBakeTexelSampler::BuildOuterTexelSamples(
     OccupiedPixels.Reserve(Settings.Resolution.X * Settings.Resolution.Y / 2);
     OutSamples.Reserve(Settings.Resolution.X * Settings.Resolution.Y / 2);
 
-    for (const FDWCBakeSurfaceTriangle& Triangle : OuterSurface.Triangles)
+    for (const FDWCRevealBakeSurfaceTriangle& Triangle : OuterSurface.Triangles)
     {
         if (Settings.MaterialSlotIndex != INDEX_NONE && Triangle.MaterialSlotIndex != Settings.MaterialSlotIndex)
         {
@@ -335,7 +335,7 @@ bool FDWCBakeTexelSampler::BuildOuterTexelSamples(
                     continue;
                 }
 
-                FDWCBakeTexelSample Sample;
+                FDWCRevealBakeTexelSample Sample;
                 Sample.Pixel = FIntPoint(X, Y);
                 Sample.UV = UV;
                 Sample.Position = InterpolateVector(Barycentric, Triangle.Positions);
@@ -360,9 +360,9 @@ bool FDWCBakeTexelSampler::BuildOuterTexelSamples(
     return true;
 }
 
-bool FDWCBakeTexelSampler::ComputeBarycentricInUV(
+bool FDWCRevealBakeTexelSampler::ComputeBarycentricInUV(
     const FVector2D&               UV,
-    const FDWCBakeSurfaceTriangle& Triangle,
+    const FDWCRevealBakeSurfaceTriangle& Triangle,
     FVector&                       OutBarycentric)
 {
     const FVector2D A = Triangle.UVs[0];
@@ -392,7 +392,7 @@ bool FDWCBakeTexelSampler::ComputeBarycentricInUV(
     return true;
 }
 
-void FDWCBakeTexelSampler::SetError(FString* OutErrorMessage, const TCHAR* InMessage)
+void FDWCRevealBakeTexelSampler::SetError(FString* OutErrorMessage, const TCHAR* InMessage)
 {
     if (OutErrorMessage != nullptr)
     {
@@ -400,12 +400,12 @@ void FDWCBakeTexelSampler::SetError(FString* OutErrorMessage, const TCHAR* InMes
     }
 }
 
-bool FDWCBakeRayProjector::ProjectSamplesToSources(
-    const FDWCBakeSurface&               OuterSurface,
-    const TArray<FDWCBakeSurface>&       SourceSurfaces,
-    const TArray<FDWCBakeTexelSample>&   Samples,
-    const FDWCBakeRayProjectionSettings& Settings,
-    TArray<FDWCBakeRayHit>&              OutHits,
+bool FDWCRevealBakeRayProjector::ProjectSamplesToSources(
+    const FDWCRevealBakeSurface&               OuterSurface,
+    const TArray<FDWCRevealBakeSurface>&       SourceSurfaces,
+    const TArray<FDWCRevealBakeTexelSample>&   Samples,
+    const FDWCRevealBakeRayProjectionSettings& Settings,
+    TArray<FDWCRevealBakeRayHit>&              OutHits,
     FString*                             OutErrorMessage)
 {
     OutHits.Reset();
@@ -439,7 +439,7 @@ bool FDWCBakeRayProjector::ProjectSamplesToSources(
     }
 
     TArray<int32> CandidateTriangleRefIndices;
-    for (const FDWCBakeTexelSample& Sample : Samples)
+    for (const FDWCRevealBakeTexelSample& Sample : Samples)
     {
         const FVector RayDirection = -Sample.Normal.GetSafeNormal();
         const FVector RayOrigin = Sample.Position + RayDirection * Settings.RayStartOffset;
@@ -483,7 +483,7 @@ bool FDWCBakeRayProjector::ProjectSamplesToSources(
                 return Left.Distance < Right.Distance;
             });
 
-        FDWCBakeRayHit SelectedHit;
+        FDWCRevealBakeRayHit SelectedHit;
         SelectedHit.Pixel = Sample.Pixel;
 
         for (const FCandidateHit& Candidate : CandidateHits)
@@ -512,10 +512,10 @@ bool FDWCBakeRayProjector::ProjectSamplesToSources(
     return true;
 }
 
-bool FDWCBakeRayProjector::IntersectRayTriangle(
+bool FDWCRevealBakeRayProjector::IntersectRayTriangle(
     const FVector&                 RayOrigin,
     const FVector&                 RayDirection,
-    const FDWCBakeSurfaceTriangle& Triangle,
+    const FDWCRevealBakeSurfaceTriangle& Triangle,
     const float                    MaxDistance,
     float&                         OutDistance,
     FVector&                       OutBarycentric)
@@ -556,12 +556,12 @@ bool FDWCBakeRayProjector::IntersectRayTriangle(
     return true;
 }
 
-FDWCBakeRayHit FDWCBakeRayProjector::MakeRayHit(
-    const FDWCBakeTexelSample& Sample,
+FDWCRevealBakeRayHit FDWCRevealBakeRayProjector::MakeRayHit(
+    const FDWCRevealBakeTexelSample& Sample,
     const FCandidateHit&       Candidate,
     const float                MaxRevealDistance)
 {
-    FDWCBakeRayHit Hit;
+    FDWCRevealBakeRayHit Hit;
     Hit.bHit = true;
     Hit.Pixel = Sample.Pixel;
     Hit.SourceLayerId = Candidate.SourceSurface != nullptr ? Candidate.SourceSurface->LayerId : NAME_None;
@@ -580,7 +580,7 @@ FDWCBakeRayHit FDWCBakeRayProjector::MakeRayHit(
     return Hit;
 }
 
-void FDWCBakeRayProjector::SetError(FString* OutErrorMessage, const TCHAR* InMessage)
+void FDWCRevealBakeRayProjector::SetError(FString* OutErrorMessage, const TCHAR* InMessage)
 {
     if (OutErrorMessage != nullptr)
     {

@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Engine/DataAsset.h"
+#include "UObject/ObjectSaveContext.h"
 #include "DataAssets/WetClothingPartData.h"
 #include "DataAssets/WetClothingWrinkleData.h"
 #include "DataAssets/WetClothingTransparencyData.h"
@@ -15,7 +16,10 @@ class DWC_API UWetClothingAsset : public UDataAsset
     GENERATED_BODY()
 
   public:
+#if WITH_EDITOR
+    virtual void PreSave(FObjectPreSaveContext SaveContext) override;
     bool RebuildPrecomputedSimulationData(FString* OutErrorMessage = nullptr, int32 LODIndex = 0);
+#endif
     void ClearPrecomputedSimulationData();
     bool IsPrecomputedSimulationDataValidForMesh(const USkeletalMesh* SkeletalMesh, int32 LODIndex = 0) const;
     const FWetClothingPrecomputedSimulationData& GetPrecomputedSimulationData() const { return PartData.PrecomputedSimulationData; }

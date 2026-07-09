@@ -2330,6 +2330,36 @@ void SWetWrinkleEditorPanel::HandleMaterialSlotComboChanged(TSharedPtr<int32> It
 }
 
 
+FText SWetWrinkleEditorPanel::GetMaterialSlotStatusText(const int32 MaterialSlotIndex) const
+{
+    const UWetClothingAsset* Asset = WetClothingAsset.Get();
+    if (Asset == nullptr || MaterialSlotIndex == INDEX_NONE)
+    {
+        return FText::GetEmpty();
+    }
+
+    int32 PatchCount = 0;
+    for (const FWetWrinklePatchStroke& Stroke : Asset->WrinkleData.EditablePatchStrokes)
+    {
+        for (const FWetWrinklePatchPlacement& Patch : Stroke.PatchPlacements)
+        {
+            if (Patch.MaterialSlotIndex == MaterialSlotIndex)
+            {
+                ++PatchCount;
+            }
+        }
+    }
+
+    if (PatchCount <= 0)
+    {
+        return NSLOCTEXT("SWetWrinkleEditorPanel", "MaterialSlotStatusNoPatches", "No Patches");
+    }
+
+    return PatchCount == 1
+        ? NSLOCTEXT("SWetWrinkleEditorPanel", "MaterialSlotStatusOnePatch", "1 Patch")
+        : FText::Format(NSLOCTEXT("SWetWrinkleEditorPanel", "MaterialSlotStatusManyPatches", "{0} Patches"), FText::AsNumber(PatchCount));
+}
+
 TSharedRef<ITableRow> SWetWrinkleEditorPanel::GenerateMaterialSlotRow(FMaterialSlotItemPtr Item, const TSharedRef<STableViewBase>& OwnerTable)
 {
     FWetClothingMaterialSlotRowArgs Args;
@@ -2339,6 +2369,10 @@ TSharedRef<ITableRow> SWetWrinkleEditorPanel::GenerateMaterialSlotRow(FMaterialS
     Args.ThumbnailPool = MaterialThumbnailPool;
     Args.ThumbnailSink = &MaterialSlotThumbnails;
     Args.OnWettableSlotClicked = FOnWettableMaterialSlotClicked::CreateSP(this, &SWetWrinkleEditorPanel::HandleWettableMaterialSlotClicked);
+    Args.GetMaterialSlotStatusText = [this](const int32 MaterialSlotIndex)
+    {
+        return GetMaterialSlotStatusText(MaterialSlotIndex);
+    };
 
     return FWetClothingEditorCommonWidgets::GenerateMaterialSlotRow(Item, OwnerTable, Args);
 }

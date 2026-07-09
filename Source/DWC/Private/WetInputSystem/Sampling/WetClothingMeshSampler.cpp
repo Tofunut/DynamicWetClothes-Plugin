@@ -2,7 +2,7 @@
 
 #include "Runtime/Engine/Classes/Components/SkeletalMeshComponent.h"
 
-#include "RuntimeData/WetClothingRuntimeData.h"
+#include "RuntimeState/WetClothingRuntimeData.h"
 #include "Runtime/Engine/Public/Rendering/SkeletalMeshLODRenderData.h"
 #include "Runtime/Engine/Public/Rendering/SkinWeightVertexBuffer.h"
 #include "Runtime/Engine/Public/Rendering/SkeletalMeshRenderData.h"

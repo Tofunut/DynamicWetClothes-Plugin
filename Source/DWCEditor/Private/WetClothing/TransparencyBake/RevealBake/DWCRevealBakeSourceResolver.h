@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Bake/DWCBakeSurface.h"
+#include "WetClothing/TransparencyBake/RevealBake/DWCRevealBakeSurface.h"
 #include "CoreMinimal.h"
 #include "DataAssets/DWCBakeLayer.h"
 
@@ -13,7 +13,7 @@ struct FDWCRevealBakeTextureWriteSettings;
 class FDWCRevealBakeSourceResolver
 {
   public:
-    static TArray<FName> BuildRevealSourceLayerIds(const TArray<FDWCBakeSurface>& SourceSurfaces);
+    static TArray<FName> BuildRevealSourceLayerIds(const TArray<FDWCRevealBakeSurface>& SourceSurfaces);
 
     static const FDWCBakeResolvedLayer* FindResolvedLayerById(
         const FDWCBakeSnapshot& Snapshot,

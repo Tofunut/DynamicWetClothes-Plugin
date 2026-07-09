@@ -3,7 +3,7 @@
 #include "Engine/SkeletalMesh.h"
 #include "Rendering/SkeletalMeshLODRenderData.h"
 #include "Rendering/SkeletalMeshRenderData.h"
-#include "RuntimeData/WetBoneOptimizationCacheBuilder.h"
+#include "RuntimeState/WetBoneOptimizationCacheBuilder.h"
 #include "Utility/DWCError.h"
 
 namespace
@@ -134,7 +134,7 @@ namespace
         }
     }
 
-    FString MakeMeshBuildSignature(const USkeletalMesh* SkeletalMesh, const FSkeletalMeshLODRenderData& LODData, int32 LODIndex)
+    FString MakeMeshSignature(const USkeletalMesh* SkeletalMesh, const FSkeletalMeshLODRenderData& LODData, int32 LODIndex)
     {
         TArray<uint32> IndexBuffer;
         LODData.MultiSizeIndexContainer.GetIndexBuffer(IndexBuffer);
@@ -146,6 +146,67 @@ namespace
             LODData.GetNumVertices(),
             IndexBuffer.Num(),
             SkeletalMesh != nullptr ? SkeletalMesh->GetMaterials().Num() : 0);
+    }
+
+    bool IsMaterialSlotWettable(const FWetClothingEditableWetPartData& EditableWetPartData, const int32 MaterialSlotIndex)
+    {
+        if (MaterialSlotIndex == INDEX_NONE)
+        {
+            return false;
+        }
+
+        const FWetClothingWettableMaterialSlotState* State = EditableWetPartData.WettableMaterialSlots.FindByPredicate(
+            [MaterialSlotIndex](const FWetClothingWettableMaterialSlotState& Candidate)
+            {
+                return Candidate.MaterialSlotIndex == MaterialSlotIndex;
+            });
+
+        return State != nullptr && State->bIsWettableSlot;
+    }
+
+    FString MakeSourceDataSignature(const FWetClothingEditableWetPartData& EditableWetPartData)
+    {
+        TArray<FString> WettableSlotSignatures;
+        WettableSlotSignatures.Reserve(EditableWetPartData.WettableMaterialSlots.Num());
+        for (const FWetClothingWettableMaterialSlotState& SlotState : EditableWetPartData.WettableMaterialSlots)
+        {
+            WettableSlotSignatures.Add(FString::Printf(
+                TEXT("Component=%s|Slot=%d|Wettable=%d"),
+                *SlotState.ComponentPath,
+                SlotState.MaterialSlotIndex,
+                SlotState.bIsWettableSlot ? 1 : 0));
+        }
+        WettableSlotSignatures.Sort();
+
+        TArray<FString> EntrySignatures;
+        EntrySignatures.Reserve(EditableWetPartData.WetPartEntries.Num());
+
+        for (const FWetClothingWetPartEntry& Entry : EditableWetPartData.WetPartEntries)
+        {
+            TArray<int32> SortedIslandIDs = Entry.AssignedUVIslandIDs;
+            SortedIslandIDs.Sort();
+
+            TArray<FString> IslandStrings;
+            IslandStrings.Reserve(SortedIslandIDs.Num());
+            for (const int32 IslandID : SortedIslandIDs)
+            {
+                IslandStrings.Add(FString::FromInt(IslandID));
+            }
+
+            EntrySignatures.Add(FString::Printf(
+                TEXT("Component=%s|Slot=%d|UV=%d|Part=%d|Islands=%s"),
+                *Entry.ComponentPath,
+                Entry.MaterialSlotIndex,
+                Entry.UVChannelIndex,
+                Entry.WetPartID,
+                *FString::Join(IslandStrings, TEXT(","))));
+        }
+
+        EntrySignatures.Sort();
+        return FString::Printf(
+            TEXT("PrecomputedDataVersion=1|WettableSlots=%s|Entries=%s"),
+            *FString::Join(WettableSlotSignatures, TEXT(";")),
+            *FString::Join(EntrySignatures, TEXT(";")));
     }
 
     bool BuildRawTriangles(
@@ -296,6 +357,7 @@ namespace
 
     void ConnectCoincidentPositionNeighbors(
         const FSkeletalMeshLODRenderData&              LODData,
+        const TArray<FWetClothingPrecomputedVertexData>& VertexData,
         TArray<FWetClothingPrecomputedVertexNeighbors>& NeighborGraph)
     {
         TMap<FIntVector, TArray<int32>> VerticesByPosition;
@@ -304,6 +366,11 @@ namespace
 
         for (int32 VertexIndex = 0; VertexIndex < VertexCount; ++VertexIndex)
         {
+            if (!VertexData.IsValidIndex(VertexIndex) || !VertexData[VertexIndex].bIsWettable)
+            {
+                continue;
+            }
+
             const FVector3f Position = LODData.StaticVertexBuffers.PositionVertexBuffer.VertexPosition(VertexIndex);
             VerticesByPosition.FindOrAdd(MakeCoincidentVertexPositionKey(Position)).Add(VertexIndex);
         }
@@ -336,6 +403,7 @@ namespace
     void BuildNeighborGraph(
         const FSkeletalMeshLODRenderData&              LODData,
         const TArray<uint32>&                          IndexBuffer,
+        const TArray<FWetClothingPrecomputedVertexData>& VertexData,
         TArray<FWetClothingPrecomputedVertexNeighbors>& OutNeighborGraph)
     {
         OutNeighborGraph.SetNum(LODData.GetNumVertices());
@@ -356,23 +424,126 @@ namespace
                 const int32 Index1 = static_cast<int32>(IndexBuffer[TriangleIndex + 1]);
                 const int32 Index2 = static_cast<int32>(IndexBuffer[TriangleIndex + 2]);
 
-                AddNeighbor(OutNeighborGraph, Index0, Index1);
-                AddNeighbor(OutNeighborGraph, Index0, Index2);
-                AddNeighbor(OutNeighborGraph, Index1, Index0);
-                AddNeighbor(OutNeighborGraph, Index1, Index2);
-                AddNeighbor(OutNeighborGraph, Index2, Index0);
-                AddNeighbor(OutNeighborGraph, Index2, Index1);
+                const bool b0 = VertexData.IsValidIndex(Index0) && VertexData[Index0].bIsWettable;
+                const bool b1 = VertexData.IsValidIndex(Index1) && VertexData[Index1].bIsWettable;
+                const bool b2 = VertexData.IsValidIndex(Index2) && VertexData[Index2].bIsWettable;
+
+                if (b0 && b1)
+                {
+                    AddNeighbor(OutNeighborGraph, Index0, Index1);
+                    AddNeighbor(OutNeighborGraph, Index1, Index0);
+                }
+                if (b0 && b2)
+                {
+                    AddNeighbor(OutNeighborGraph, Index0, Index2);
+                    AddNeighbor(OutNeighborGraph, Index2, Index0);
+                }
+                if (b1 && b2)
+                {
+                    AddNeighbor(OutNeighborGraph, Index1, Index2);
+                    AddNeighbor(OutNeighborGraph, Index2, Index1);
+                }
             }
         }
 
-        ConnectCoincidentPositionNeighbors(LODData, OutNeighborGraph);
+        ConnectCoincidentPositionNeighbors(LODData, VertexData, OutNeighborGraph);
     }
+    void FilterBoneOptimizationCacheByWettableVertices(
+        FWetBoneOptimizationCache& RuntimeBoneOptimizationCache,
+        const TArray<FWetClothingPrecomputedVertexData>& VertexData)
+    {
+        FWetBonePrimaryVertexCache& PrimaryCache = RuntimeBoneOptimizationCache.PrimaryVertexCache;
+        if (PrimaryCache.BoneCount <= 0 || PrimaryCache.BoneStartOffsets.Num() != PrimaryCache.BoneCount + 1)
+        {
+            return;
+        }
+
+        TArray<int32> VertexCountsByBone;
+        VertexCountsByBone.Init(0, PrimaryCache.BoneCount);
+
+        for (int32 BoneIndex = 0; BoneIndex < PrimaryCache.BoneCount; ++BoneIndex)
+        {
+            const int32 StartOffset = PrimaryCache.BoneStartOffsets[BoneIndex];
+            const int32 EndOffset = PrimaryCache.BoneStartOffsets[BoneIndex + 1];
+            for (int32 Offset = StartOffset; Offset < EndOffset; ++Offset)
+            {
+                if (!PrimaryCache.FlatVertexIndices.IsValidIndex(Offset))
+                {
+                    continue;
+                }
+
+                const int32 VertexIndex = PrimaryCache.FlatVertexIndices[Offset];
+                if (VertexData.IsValidIndex(VertexIndex) && VertexData[VertexIndex].bIsWettable)
+                {
+                    ++VertexCountsByBone[BoneIndex];
+                }
+            }
+        }
+
+        TArray<int32> NewStartOffsets;
+        NewStartOffsets.SetNumZeroed(PrimaryCache.BoneCount + 1);
+        for (int32 BoneIndex = 0; BoneIndex < PrimaryCache.BoneCount; ++BoneIndex)
+        {
+            NewStartOffsets[BoneIndex + 1] = NewStartOffsets[BoneIndex] + VertexCountsByBone[BoneIndex];
+        }
+
+        TArray<int32> NewFlatVertexIndices;
+        NewFlatVertexIndices.SetNumUninitialized(NewStartOffsets.Last());
+
+        TArray<int32> WriteOffsets = NewStartOffsets;
+        for (int32 BoneIndex = 0; BoneIndex < PrimaryCache.BoneCount; ++BoneIndex)
+        {
+            const int32 StartOffset = PrimaryCache.BoneStartOffsets[BoneIndex];
+            const int32 EndOffset = PrimaryCache.BoneStartOffsets[BoneIndex + 1];
+            for (int32 Offset = StartOffset; Offset < EndOffset; ++Offset)
+            {
+                if (!PrimaryCache.FlatVertexIndices.IsValidIndex(Offset))
+                {
+                    continue;
+                }
+
+                const int32 VertexIndex = PrimaryCache.FlatVertexIndices[Offset];
+                if (VertexData.IsValidIndex(VertexIndex) && VertexData[VertexIndex].bIsWettable)
+                {
+                    NewFlatVertexIndices[WriteOffsets[BoneIndex]++] = VertexIndex;
+                }
+            }
+        }
+
+        PrimaryCache.BoneStartOffsets = MoveTemp(NewStartOffsets);
+        PrimaryCache.FlatVertexIndices = MoveTemp(NewFlatVertexIndices);
+    }
+
 } // namespace
 
 void UWetClothingAsset::ClearPrecomputedSimulationData()
 {
     PartData.PrecomputedSimulationData = FWetClothingPrecomputedSimulationData();
 }
+
+
+#if WITH_EDITOR
+void UWetClothingAsset::PreSave(FObjectPreSaveContext SaveContext)
+{
+    Super::PreSave(SaveContext);
+
+    if (TargetMesh == nullptr || IsPrecomputedSimulationDataValidForMesh(TargetMesh, 0))
+    {
+        return;
+    }
+
+    FString ErrorMessage;
+    if (!RebuildPrecomputedSimulationData(&ErrorMessage, 0))
+    {
+        UE_LOG(
+            LogTemp,
+            Warning,
+            TEXT("WetClothingAsset: Failed to update precomputed simulation data before saving %s. %s"),
+            *GetNameSafe(this),
+            *ErrorMessage);
+    }
+}
+#endif // WITH_EDITOR
 
 bool UWetClothingAsset::IsPrecomputedSimulationDataValidForMesh(const USkeletalMesh* SkeletalMesh, int32 LODIndex) const
 {
@@ -388,11 +559,14 @@ bool UWetClothingAsset::IsPrecomputedSimulationDataValidForMesh(const USkeletalM
     }
 
     const FSkeletalMeshLODRenderData& LODData = RenderData->LODRenderData[LODIndex];
-    return PartData.PrecomputedSimulationData.LODIndex == LODIndex &&
+    return PartData.PrecomputedSimulationData.DataVersion == 1 &&
+           PartData.PrecomputedSimulationData.LODIndex == LODIndex &&
            PartData.PrecomputedSimulationData.VertexCount == LODData.GetNumVertices() &&
-           PartData.PrecomputedSimulationData.MeshBuildSignature == MakeMeshBuildSignature(SkeletalMesh, LODData, LODIndex);
+           PartData.PrecomputedSimulationData.MeshSignature == MakeMeshSignature(SkeletalMesh, LODData, LODIndex) &&
+           PartData.PrecomputedSimulationData.SourceDataSignature == MakeSourceDataSignature(PartData.EditableWetPartData);
 }
 
+#if WITH_EDITOR
 bool UWetClothingAsset::RebuildPrecomputedSimulationData(FString* OutErrorMessage, int32 LODIndex)
 {
     ClearPrecomputedSimulationData();
@@ -426,12 +600,20 @@ bool UWetClothingAsset::RebuildPrecomputedSimulationData(FString* OutErrorMessag
         return false;
     }
 
+    PartData.GeneratedWetMaterialOverrides.RemoveAll(
+        [this](const FWetClothingGeneratedWetMaterialOverride& MaterialOverride)
+        {
+            return MaterialOverride.MaterialSlotIndex != INDEX_NONE &&
+                   !IsMaterialSlotWettable(PartData.EditableWetPartData, MaterialOverride.MaterialSlotIndex);
+        });
+
     PartData.PrecomputedSimulationData.bIsValid = true;
     PartData.PrecomputedSimulationData.LODIndex = LODIndex;
     PartData.PrecomputedSimulationData.VertexCount = LODData.GetNumVertices();
-    PartData.PrecomputedSimulationData.MeshBuildSignature = MakeMeshBuildSignature(TargetMesh, LODData, LODIndex);
+    PartData.PrecomputedSimulationData.MeshSignature = MakeMeshSignature(TargetMesh, LODData, LODIndex);
+    PartData.PrecomputedSimulationData.SourceDataSignature = MakeSourceDataSignature(PartData.EditableWetPartData);
+    PartData.PrecomputedSimulationData.DataVersion = 1;
     PartData.PrecomputedSimulationData.Vertices.SetNum(PartData.PrecomputedSimulationData.VertexCount);
-    BuildNeighborGraph(LODData, IndexBuffer, PartData.PrecomputedSimulationData.NeighborGraph);
 
     TMap<FWetPartScopeKey, TArray<int32>> EntryIndicesByScope;
     for (int32 EntryIndex = 0; EntryIndex < PartData.EditableWetPartData.WetPartEntries.Num(); ++EntryIndex)
@@ -439,7 +621,8 @@ bool UWetClothingAsset::RebuildPrecomputedSimulationData(FString* OutErrorMessag
         const FWetClothingWetPartEntry& Entry = PartData.EditableWetPartData.WetPartEntries[EntryIndex];
         if (!Entry.ComponentPath.IsEmpty() ||
             Entry.MaterialSlotIndex == INDEX_NONE ||
-            Entry.UVChannelIndex == INDEX_NONE)
+            Entry.UVChannelIndex == INDEX_NONE ||
+            !IsMaterialSlotWettable(PartData.EditableWetPartData, Entry.MaterialSlotIndex))
         {
             continue;
         }
@@ -511,9 +694,16 @@ bool UWetClothingAsset::RebuildPrecomputedSimulationData(FString* OutErrorMessag
                 VertexData.MaterialSlotIndex = ScopePair.Key.MaterialSlotIndex;
                 VertexData.UVChannelIndex = ScopePair.Key.UVChannelIndex;
                 VertexData.UVIslandID = Island.UVIslandID;
+                VertexData.bIsWettable = true;
             }
         }
     }
+
+    BuildNeighborGraph(
+        LODData,
+        IndexBuffer,
+        PartData.PrecomputedSimulationData.Vertices,
+        PartData.PrecomputedSimulationData.NeighborGraph);
 
     FWetBoneOptimizationCache   RuntimeBoneOptimizationCache;
     TArray<FWetBoneIncludeRule> IncludeRules;
@@ -525,10 +715,14 @@ bool UWetClothingAsset::RebuildPrecomputedSimulationData(FString* OutErrorMessag
             RuntimeBoneOptimizationCache,
             &BoneCacheErrorMessage))
     {
+        FilterBoneOptimizationCacheByWettableVertices(
+            RuntimeBoneOptimizationCache,
+            PartData.PrecomputedSimulationData.Vertices);
+
         PartData.PrecomputedSimulationData.BoneOptimizationCache.BuildFromRuntimeCache(
             TargetMesh,
             RuntimeBoneOptimizationCache,
-            PartData.PrecomputedSimulationData.MeshBuildSignature,
+            PartData.PrecomputedSimulationData.MeshSignature,
             nullptr);
     }
     else
@@ -545,3 +739,4 @@ bool UWetClothingAsset::RebuildPrecomputedSimulationData(FString* OutErrorMessag
     DWC::Error::SetMessage(OutErrorMessage, TEXT(""));
     return true;
 }
+#endif // WITH_EDITOR

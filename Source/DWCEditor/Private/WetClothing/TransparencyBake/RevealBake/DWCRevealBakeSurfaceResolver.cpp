@@ -2,13 +2,13 @@
 
 #include "WetClothing/TransparencyBake/RevealBake/DWCRevealBakeSurfaceCache.h"
 
-TArray<FDWCBakeSurface> FDWCRevealBakeSurfaceResolver::BuildSourceSurfacesForOuter(
+TArray<FDWCRevealBakeSurface> FDWCRevealBakeSurfaceResolver::BuildSourceSurfacesForOuter(
     const FDWCBakeSnapshot&      Snapshot,
     const FDWCBakeResolvedLayer& OuterLayer,
     FDWCRevealBakeSurfaceCache&  SurfaceCache,
     FString&                     OutErrorMessage)
 {
-    TArray<FDWCBakeSurface> SourceSurfaces;
+    TArray<FDWCRevealBakeSurface> SourceSurfaces;
 
     for (int32 LayerIndex = 0; LayerIndex < Snapshot.Layers.Num(); ++LayerIndex)
     {
@@ -23,7 +23,7 @@ TArray<FDWCBakeSurface> FDWCRevealBakeSurfaceResolver::BuildSourceSurfacesForOut
             continue;
         }
 
-        const FDWCBakeSurface* SourceSurface = SurfaceCache.FindOrBuild(
+        const FDWCRevealBakeSurface* SourceSurface = SurfaceCache.FindOrBuild(
             CandidateLayer,
             LayerIndex,
             0,
@@ -31,7 +31,7 @@ TArray<FDWCBakeSurface> FDWCRevealBakeSurfaceResolver::BuildSourceSurfacesForOut
             OutErrorMessage);
         if (SourceSurface == nullptr)
         {
-            return TArray<FDWCBakeSurface>();
+            return TArray<FDWCRevealBakeSurface>();
         }
 
         SourceSurfaces.Add(*SourceSurface);
@@ -40,10 +40,10 @@ TArray<FDWCBakeSurface> FDWCRevealBakeSurfaceResolver::BuildSourceSurfacesForOut
     return SourceSurfaces;
 }
 
-int32 FDWCRevealBakeSurfaceResolver::CountTriangles(const TArray<FDWCBakeSurface>& Surfaces)
+int32 FDWCRevealBakeSurfaceResolver::CountTriangles(const TArray<FDWCRevealBakeSurface>& Surfaces)
 {
     int32 TriangleCount = 0;
-    for (const FDWCBakeSurface& Surface : Surfaces)
+    for (const FDWCRevealBakeSurface& Surface : Surfaces)
     {
         TriangleCount += Surface.Triangles.Num();
     }

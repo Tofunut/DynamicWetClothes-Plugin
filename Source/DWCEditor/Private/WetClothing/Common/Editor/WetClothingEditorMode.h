@@ -4,7 +4,7 @@
 
 enum class EWetClothingEditorMode : uint8
 {
-    Part,
-    Wrinkle,
-    Transparency
+    PartEdit,
+    WrinkleEdit,
+    TransparencyBake
 };

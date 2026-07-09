@@ -2,9 +2,9 @@
 
 #include "DataAssets/WetClothingAsset.h"
 #include "IDetailsView.h"
-#include "WetClothing/PartMode/Editor/SWetClothingPartEditorPanel.h"
-#include "WetClothing/TransparencyMode/Editor/SWetClothingTransparencyEditorPanel.h"
-#include "WetClothing/WrinkleMode/Editor/SWetWrinkleEditorPanel.h"
+#include "WetClothing/PartEdit/Editor/SWetClothingPartEditorPanel.h"
+#include "WetClothing/TransparencyBake/Editor/SWetClothingTransparencyBakePanel.h"
+#include "WetClothing/WrinkleEdit/Editor/SWetWrinkleEditorPanel.h"
 #include "Widgets/Layout/SWidgetSwitcher.h"
 
 #define LOCTEXT_NAMESPACE "WetClothingAssetEditorPanel"
@@ -28,11 +28,11 @@ void SWetClothingAssetEditorPanel::Construct(const FArguments& InArgs)
                     .DetailsView(DetailsView)]
 
          + SWidgetSwitcher::Slot()
-               [SAssignNew(TransparencyEditorPanel, SWetClothingTransparencyEditorPanel)
+               [SAssignNew(TransparencyBakePanel, SWetClothingTransparencyBakePanel)
                     .WetClothingAsset(WetClothingAsset.Get())
                     .DetailsView(DetailsView)]];
 
-    SetEditorMode(EWetClothingEditorMode::Part);
+    SetEditorMode(EWetClothingEditorMode::PartEdit);
 }
 
 void SWetClothingAssetEditorPanel::RefreshFromAsset()
@@ -45,9 +45,9 @@ void SWetClothingAssetEditorPanel::RefreshFromAsset()
     {
         WrinkleEditorPanel->RefreshFromAsset();
     }
-    if (TransparencyEditorPanel.IsValid())
+    if (TransparencyBakePanel.IsValid())
     {
-        TransparencyEditorPanel->RefreshFromAsset();
+        TransparencyBakePanel->RefreshFromAsset();
     }
 }
 
@@ -61,7 +61,7 @@ bool SWetClothingAssetEditorPanel::HasPendingWetSetupTasks(FString* OutSummary) 
     }
 
     FString TransparencySummary;
-    if (TransparencyEditorPanel.IsValid() && TransparencyEditorPanel->HasPendingTransparencySetup(&TransparencySummary))
+    if (TransparencyBakePanel.IsValid() && TransparencyBakePanel->HasPendingTransparencySetup(&TransparencySummary))
     {
         PendingSections.Add(TransparencySummary);
     }
@@ -94,11 +94,11 @@ bool SWetClothingAssetEditorPanel::BuildWetSetup(FString& OutSummary, bool* OutH
         Sections.Add(PartSummary);
     }
 
-    if (TransparencyEditorPanel.IsValid() && WetClothingAsset.IsValid() && !WetClothingAsset->TransparencyData.SourceBlueprintClass.IsNull())
+    if (TransparencyBakePanel.IsValid() && WetClothingAsset.IsValid() && !WetClothingAsset->TransparencyData.SourceBlueprintClass.IsNull())
     {
         FString TransparencySummary;
         bool bTransparencyHadWarnings = false;
-        if (!TransparencyEditorPanel->BuildTransparencySetup(TransparencySummary, &bTransparencyHadWarnings))
+        if (!TransparencyBakePanel->BuildTransparencySetup(TransparencySummary, &bTransparencyHadWarnings))
         {
             OutSummary = TransparencySummary;
             return false;
@@ -137,14 +137,14 @@ bool SWetClothingAssetEditorPanel::BuildPendingWetSetup(FString& OutSummary, boo
         }
     }
 
-    if (TransparencyEditorPanel.IsValid())
+    if (TransparencyBakePanel.IsValid())
     {
         FString TransparencyPendingSummary;
-        if (TransparencyEditorPanel->HasPendingTransparencySetup(&TransparencyPendingSummary))
+        if (TransparencyBakePanel->HasPendingTransparencySetup(&TransparencyPendingSummary))
         {
             FString TransparencySummary;
             bool bTransparencyHadWarnings = false;
-            if (!TransparencyEditorPanel->BuildTransparencySetup(TransparencySummary, &bTransparencyHadWarnings))
+            if (!TransparencyBakePanel->BuildTransparencySetup(TransparencySummary, &bTransparencyHadWarnings))
             {
                 OutSummary = TransparencySummary;
                 return false;
@@ -164,7 +164,7 @@ bool SWetClothingAssetEditorPanel::BuildPendingWetSetup(FString& OutSummary, boo
 
 bool SWetClothingAssetEditorPanel::BuildTransparencySetup(FString& OutSummary, bool* OutHadWarnings)
 {
-    if (!TransparencyEditorPanel.IsValid())
+    if (!TransparencyBakePanel.IsValid())
     {
         OutSummary = TEXT("Transparency editor is not available.");
         if (OutHadWarnings != nullptr)
@@ -174,12 +174,12 @@ bool SWetClothingAssetEditorPanel::BuildTransparencySetup(FString& OutSummary, b
         return false;
     }
 
-    return TransparencyEditorPanel->BuildTransparencySetup(OutSummary, OutHadWarnings);
+    return TransparencyBakePanel->BuildTransparencySetup(OutSummary, OutHadWarnings);
 }
 
 bool SWetClothingAssetEditorPanel::SaveTransparencySetupAssets() const
 {
-    return TransparencyEditorPanel.IsValid() ? TransparencyEditorPanel->SaveTransparencySetupAssets() : true;
+    return TransparencyBakePanel.IsValid() ? TransparencyBakePanel->SaveTransparencySetupAssets() : true;
 }
 
 bool SWetClothingAssetEditorPanel::SaveWetSetupAssets() const
@@ -189,26 +189,26 @@ bool SWetClothingAssetEditorPanel::SaveWetSetupAssets() const
     {
         bSaved &= PartEditorPanel->SaveWetSetupAssets();
     }
-    if (TransparencyEditorPanel.IsValid())
+    if (TransparencyBakePanel.IsValid())
     {
-        bSaved &= TransparencyEditorPanel->SaveTransparencySetupAssets();
+        bSaved &= TransparencyBakePanel->SaveTransparencySetupAssets();
     }
     return bSaved;
 }
 
 void SWetClothingAssetEditorPanel::SetEditorMode(EWetClothingEditorMode NewMode)
 {
-    if (NewMode == EWetClothingEditorMode::Part && PartEditorPanel.IsValid())
+    if (NewMode == EWetClothingEditorMode::PartEdit && PartEditorPanel.IsValid())
     {
         PartEditorPanel->RefreshFromAsset();
     }
-    else if (NewMode == EWetClothingEditorMode::Wrinkle && WrinkleEditorPanel.IsValid())
+    else if (NewMode == EWetClothingEditorMode::WrinkleEdit && WrinkleEditorPanel.IsValid())
     {
         WrinkleEditorPanel->RefreshFromAsset();
     }
-    else if (NewMode == EWetClothingEditorMode::Transparency && TransparencyEditorPanel.IsValid())
+    else if (NewMode == EWetClothingEditorMode::TransparencyBake && TransparencyBakePanel.IsValid())
     {
-        TransparencyEditorPanel->RefreshFromAsset();
+        TransparencyBakePanel->RefreshFromAsset();
     }
 
     if (ModeContentSwitcher.IsValid())
@@ -221,11 +221,11 @@ int32 SWetClothingAssetEditorPanel::GetModeIndex(EWetClothingEditorMode Mode) co
 {
     switch (Mode)
     {
-    case EWetClothingEditorMode::Part:
+    case EWetClothingEditorMode::PartEdit:
         return 0;
-    case EWetClothingEditorMode::Wrinkle:
+    case EWetClothingEditorMode::WrinkleEdit:
         return 1;
-    case EWetClothingEditorMode::Transparency:
+    case EWetClothingEditorMode::TransparencyBake:
         return 2;
     default:
         return 0;

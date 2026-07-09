@@ -376,27 +376,27 @@ TSharedRef<SWidget> FWetClothingAssetEditor::BuildModeToolbarWidget()
                    .VAlign(VAlign_Center)
                    .Padding(0.0f, 0.0f, 16.0f, 0.0f)
                        [BuildModeToggleButton(
-                           EWetClothingEditorMode::Part,
+                           EWetClothingEditorMode::PartEdit,
                            TEXT("DWCEditor.Mode.Part"),
-                           LOCTEXT("PartModeTooltip", "Part Edit"))]
+                           LOCTEXT("PartEditModeTooltip", "Part Edit Mode"))]
 
              + SHorizontalBox::Slot()
                    .AutoWidth()
                    .VAlign(VAlign_Center)
                    .Padding(0.0f, 0.0f, 16.0f, 0.0f)
                        [BuildModeToggleButton(
-                           EWetClothingEditorMode::Wrinkle,
+                           EWetClothingEditorMode::WrinkleEdit,
                            TEXT("DWCEditor.Mode.Wrinkle"),
-                           LOCTEXT("WrinkleModeTooltip", "Wrinkle Edit"))]
+                           LOCTEXT("WrinkleEditModeTooltip", "Wrinkle Edit Mode"))]
 
              + SHorizontalBox::Slot()
                    .AutoWidth()
                    .VAlign(VAlign_Center)
                    .Padding(0.0f)
                        [BuildModeToggleButton(
-                           EWetClothingEditorMode::Transparency,
+                           EWetClothingEditorMode::TransparencyBake,
                            TEXT("DWCEditor.Mode.Transparency"),
-                           LOCTEXT("TransparencyModeTooltip", "Transparency"))]];
+                           LOCTEXT("TransparencyBakeModeTooltip", "Transparency Bake Mode"))]];
 }
 
 TSharedRef<SWidget> FWetClothingAssetEditor::BuildModeToggleButton(EWetClothingEditorMode Mode, FName IconName, const FText& ToolTipText)
@@ -455,11 +455,11 @@ FSlateColor FWetClothingAssetEditor::GetModeIconColor(EWetClothingEditorMode Mod
 
     switch (Mode)
     {
-    case EWetClothingEditorMode::Part:
+    case EWetClothingEditorMode::PartEdit:
         return FSlateColor(FLinearColor(1.0f, 0.66f, 0.78f, 1.0f));
-    case EWetClothingEditorMode::Wrinkle:
+    case EWetClothingEditorMode::WrinkleEdit:
         return FSlateColor(FLinearColor(0.62f, 0.95f, 0.62f, 1.0f));
-    case EWetClothingEditorMode::Transparency:
+    case EWetClothingEditorMode::TransparencyBake:
         return FSlateColor(FLinearColor(0.45f, 0.78f, 1.0f, 1.0f));
     default:
         return FSlateColor::UseForeground();

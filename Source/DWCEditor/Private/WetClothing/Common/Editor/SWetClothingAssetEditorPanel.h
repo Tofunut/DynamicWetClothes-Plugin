@@ -6,7 +6,7 @@
 
 class IDetailsView;
 class SWetClothingPartEditorPanel;
-class SWetClothingTransparencyEditorPanel;
+class SWetClothingTransparencyBakePanel;
 class SWetWrinkleEditorPanel;
 class SWidgetSwitcher;
 class UWetClothingAsset;
@@ -39,5 +39,5 @@ class SWetClothingAssetEditorPanel : public SCompoundWidget
     TSharedPtr<SWidgetSwitcher> ModeContentSwitcher;
     TSharedPtr<SWetClothingPartEditorPanel> PartEditorPanel;
     TSharedPtr<SWetWrinkleEditorPanel> WrinkleEditorPanel;
-    TSharedPtr<SWetClothingTransparencyEditorPanel> TransparencyEditorPanel;
+    TSharedPtr<SWetClothingTransparencyBakePanel> TransparencyBakePanel;
 };

@@ -61,5 +61,5 @@ class FWetClothingAssetEditor : public FAssetEditorToolkit
     TSharedPtr<FWorkspaceItem>               WorkspaceMenuCategory;
     FDelegateHandle                          ObjectPropertyChangedHandle;
     TSharedPtr<FExtender>                    ToolbarExtender;
-    EWetClothingEditorMode                   CurrentMode = EWetClothingEditorMode::Part;
+    EWetClothingEditorMode                   CurrentMode = EWetClothingEditorMode::PartEdit;
 };

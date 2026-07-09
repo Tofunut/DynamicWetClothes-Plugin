@@ -24,9 +24,10 @@ class SWetClothingAssetEditorPanel : public SCompoundWidget
     void RefreshFromAsset();
     bool HasPendingWetSetupTasks(FString* OutSummary = nullptr) const;
     bool BuildWetSetup(FString& OutSummary, bool* OutHadWarnings = nullptr);
+    bool BuildPendingWetSetup(FString& OutSummary, bool* OutHadWarnings = nullptr);
+    bool BuildTransparencySetup(FString& OutSummary, bool* OutHadWarnings = nullptr);
     bool SaveWetSetupAssets() const;
-    FReply ExecuteBakeWrinkleNormalMap();
-    FReply ExecuteBakeWrinkleMask();
+    bool SaveTransparencySetupAssets() const;
     void SetEditorMode(EWetClothingEditorMode NewMode);
 
   private:

@@ -438,42 +438,47 @@ void SWetClothingPartEditorPanel::Construct(const FArguments& InArgs)
                                         + SVerticalBox::Slot()
                                               .AutoHeight()
                                               .Padding(0.0f, 0.0f, 0.0f, 6.0f)
-                                                  [SNew(SHorizontalBox)
+                                                  [FWetClothingEditorCommonWidgets::BuildUVViewTextureAndViewRow(
+                                                      SAssignNew(TextureSelectionContainer, SBox),
+                                                      FWetClothingEditorCommonWidgets::BuildUVViewOptionsButton(
+                                                                 &UVDisplayModeItems,
+                                                                 SelectedUVDisplayModeItem,
+                                                                 TAttribute<FText>::Create(TAttribute<FText>::FGetter::CreateSP(this, &SWetClothingPartEditorPanel::GetSelectedUVDisplayModeText)),
+                                                                 [this](FUVDisplayModeItemPtr Item)
+                                                                 {
+                                                                     HandleUVDisplayModeSelectionChanged(Item, ESelectInfo::Direct);
+                                                                 },
+                                                                 TAttribute<float>::Create(TAttribute<float>::FGetter::CreateSP(this, &SWetClothingPartEditorPanel::GetUVViewBackgroundTextureOpacity)),
+                                                                 [this](float NewValue)
+                                                                 {
+                                                                     HandleUVViewBackgroundTextureOpacityChanged(NewValue);
+                                                                 },
+                                                                 TAttribute<float>::Create(TAttribute<float>::FGetter::CreateSP(this, &SWetClothingPartEditorPanel::GetUVViewIslandLineOpacity)),
+                                                                 [this](float NewValue)
+                                                                 {
+                                                                     HandleUVViewIslandLineOpacityChanged(NewValue);
+                                                                 },
+                                                                 TAttribute<float>::Create(TAttribute<float>::FGetter::CreateSP(this, &SWetClothingPartEditorPanel::GetUVViewIslandLineThicknessScale)),
+                                                                 [this](float NewValue)
+                                                                 {
+                                                                     HandleUVViewIslandLineThicknessScaleChanged(NewValue);
+                                                                 }))]
 
-                                                   + SHorizontalBox::Slot()
-                                                         .FillWidth(1.0f)
-                                                             [SNew(SBorder)
-                                                                  .Padding(6.0f)
-                                                                  .BorderImage(FAppStyle::Get().GetBrush(TEXT("ToolPanel.GroupBorder")))
-                                                                      [SAssignNew(TextureSelectionContainer, SBox)]]
+                                        + SVerticalBox::Slot()
+                                              .AutoHeight()
+                                              .Padding(0.0f, 0.0f, 0.0f, 8.0f)
+                                                  [SNew(SHorizontalBox)
 
                                                    + SHorizontalBox::Slot()
                                                          .AutoWidth()
                                                          .VAlign(VAlign_Center)
-                                                         .Padding(10.0f, 0.0f, 4.0f, 0.0f)
+                                                         .Padding(0.0f, 0.0f, 4.0f, 0.0f)
                                                              [SNew(STextBlock)
                                                                   .Text(LOCTEXT("UVSelectionToolLabel", "Tool:"))]
 
                                                    + SHorizontalBox::Slot()
                                                          .AutoWidth()
                                                              [SelectionToolButtonRow]
-
-                                                   + SHorizontalBox::Slot()
-                                                         .AutoWidth()
-                                                         .VAlign(VAlign_Center)
-                                                         .Padding(10.0f, 0.0f, 4.0f, 0.0f)
-                                                             [SNew(STextBlock)
-                                                                  .Text(LOCTEXT("UVDisplayModeLabel", "View:"))]
-
-                                                   + SHorizontalBox::Slot()
-                                                         .AutoWidth()
-                                                             [SAssignNew(UVDisplayModeComboBox, SComboBox<FUVDisplayModeItemPtr>)
-                                                                  .OptionsSource(&UVDisplayModeItems)
-                                                                  .InitiallySelectedItem(SelectedUVDisplayModeItem)
-                                                                  .OnGenerateWidget(this, &SWetClothingPartEditorPanel::GenerateUVDisplayModeComboItem)
-                                                                  .OnSelectionChanged(this, &SWetClothingPartEditorPanel::HandleUVDisplayModeSelectionChanged)
-                                                                      [SNew(STextBlock)
-                                                                           .Text(this, &SWetClothingPartEditorPanel::GetSelectedUVDisplayModeText)]]
 
                                                    + SHorizontalBox::Slot()
                                                          .AutoWidth()
@@ -643,7 +648,11 @@ void SWetClothingPartEditorPanel::RefreshMaterialSlotItems()
 
     MaterialSlotItems.Reset();
     MaterialSlotThumbnails.Reset();
-    SelectedMaterialSlotIndex = INDEX_NONE;
+
+    FMaterialSlotItemPtr AllSlotsItem = MakeShared<FWetClothingMaterialSlotItem>();
+    AllSlotsItem->SlotIndex = INDEX_NONE;
+    AllSlotsItem->SlotName = TEXT("All Slots");
+    MaterialSlotItems.Add(AllSlotsItem);
 
     if (const UWetClothingAsset* WetClothingAssetPtr = WetClothingAsset.Get())
     {
@@ -665,18 +674,16 @@ void SWetClothingPartEditorPanel::RefreshMaterialSlotItems()
         }
     }
 
-    if (MaterialSlotItems.IsValidIndex(PreviousSelection))
-    {
-        SelectedMaterialSlotIndex = PreviousSelection;
-    }
+    SelectedMaterialSlotIndex = FindMaterialSlotItem(PreviousSelection).IsValid() ? PreviousSelection : INDEX_NONE;
 
     if (MaterialSlotListView.IsValid())
     {
         MaterialSlotListView->RequestListRefresh();
 
-        if (MaterialSlotItems.IsValidIndex(SelectedMaterialSlotIndex))
+        const FMaterialSlotItemPtr SelectedItem = FindMaterialSlotItem(SelectedMaterialSlotIndex);
+        if (SelectedItem.IsValid())
         {
-            MaterialSlotListView->SetSelection(MaterialSlotItems[SelectedMaterialSlotIndex], ESelectInfo::Direct);
+            MaterialSlotListView->SetSelection(SelectedItem, ESelectInfo::Direct);
         }
         else
         {
@@ -688,53 +695,14 @@ void SWetClothingPartEditorPanel::RefreshMaterialSlotItems()
 void SWetClothingPartEditorPanel::RefreshMaterialTextures()
 {
     const int32 UVChannelIndex = GetSelectedUVChannelIndex();
-    const bool  bHasSavedSelection = HasSavedTextureSelection(SelectedMaterialSlotIndex, UVChannelIndex);
-    UTexture*   SavedTexture = FindSavedTextureSelection(SelectedMaterialSlotIndex, UVChannelIndex);
-    TextureItems.Reset();
+
     TextureThumbnails.Reset();
-    SelectedTextureItem.Reset();
-
-    if (MaterialSlotItems.IsValidIndex(SelectedMaterialSlotIndex))
-    {
-        const FMaterialSlotItemPtr& MaterialSlotItem = MaterialSlotItems[SelectedMaterialSlotIndex];
-        if (MaterialSlotItem.IsValid() && MaterialSlotItem->Material.IsValid())
-        {
-            FWetClothingMaterialTextureResolver::BuildTextureItems(MaterialSlotItem->Material.Get(), TextureItems);
-
-            if (bHasSavedSelection)
-            {
-                for (const FTextureItemPtr& TextureItem : TextureItems)
-                {
-                    if (TextureItem.IsValid() && TextureItem->Texture.Get() == SavedTexture)
-                    {
-                        SelectedTextureItem = TextureItem;
-                        break;
-                    }
-                }
-            }
-            else
-            {
-                for (const FTextureItemPtr& TextureItem : TextureItems)
-                {
-                    if (TextureItem.IsValid() && TextureItem->Texture.IsValid())
-                    {
-                        SelectedTextureItem = TextureItem;
-                        break;
-                    }
-                }
-            }
-        }
-    }
-
-    if (!SelectedTextureItem.IsValid() && TextureItems.Num() > 0)
-    {
-        SelectedTextureItem = TextureItems[0];
-    }
-
-    if (!bHasSavedSelection && SelectedTextureItem.IsValid() && SelectedTextureItem->Texture.IsValid())
-    {
-        SaveTextureSelection(SelectedMaterialSlotIndex, UVChannelIndex, SelectedTextureItem->Texture.Get());
-    }
+    FWetClothingMaterialTextureResolver::BuildTextureItemsForMaterialSlot(
+        WetClothingAsset.Get(),
+        SelectedMaterialSlotIndex,
+        UVChannelIndex,
+        TextureItems,
+        SelectedTextureItem);
 
     bShowMaterialTextureInUVView = SelectedTextureItem.IsValid() && SelectedTextureItem->Texture.IsValid();
 
@@ -751,7 +719,16 @@ void SWetClothingPartEditorPanel::RefreshTextureToggleWidgets()
         return;
     }
 
-    if (!MaterialSlotItems.IsValidIndex(SelectedMaterialSlotIndex))
+    if (SelectedMaterialSlotIndex == INDEX_NONE)
+    {
+        TextureSelectionContainer->SetContent(
+            SNew(STextBlock)
+                .Text(LOCTEXT("AllSlotsPreviewOnlyTextureNotice", "All Slots is preview-only. Select a single material slot to choose its texture."))
+                .ColorAndOpacity(FSlateColor(FStyleColors::ForegroundHover)));
+        return;
+    }
+
+    if (!FindMaterialSlotItem(SelectedMaterialSlotIndex).IsValid())
     {
         TextureSelectionContainer->SetContent(
             SNew(STextBlock)
@@ -773,15 +750,17 @@ void SWetClothingPartEditorPanel::RefreshTextureToggleWidgets()
     }
 
     TextureSelectionContainer->SetContent(
-        SAssignNew(TextureComboBox, SComboBox<FTextureItemPtr>)
-            .OptionsSource(&TextureItems)
-            .InitiallySelectedItem(SelectedTextureItem)
-            .OnGenerateWidget(this, &SWetClothingPartEditorPanel::GenerateTextureComboItem)
-            .OnSelectionChanged(this, &SWetClothingPartEditorPanel::HandleTextureSelectionChanged)
-            .MaxListHeight(360.0f)
-            .ContentPadding(FMargin(6.0f, 4.0f))
-                [SAssignNew(SelectedTextureComboContentBox, SBox)
-                     [BuildTextureComboContent(SelectedTextureItem, 24.0f, true)]]);
+        FWetClothingEditorCommonWidgets::BuildUVViewTextureSelector(
+            &TextureItems,
+            SelectedTextureItem,
+            MaterialThumbnailPool,
+            &TextureThumbnails,
+            &TextureComboBox,
+            &SelectedTextureComboContentBox,
+            [this](FTextureItemPtr Item, ESelectInfo::Type SelectInfo)
+            {
+                HandleTextureSelectionChanged(Item, SelectInfo);
+            }));
 }
 
 void SWetClothingPartEditorPanel::RefreshUVChannels()
@@ -902,14 +881,31 @@ void SWetClothingPartEditorPanel::RefreshUVView()
         return;
     }
 
+    UVView->SetNormalizeToContentBounds(true);
+    UVView->SetSelectionTool(CurrentUVSelectionTool);
+    UVView->SetDisplayMode(CurrentUVDisplayMode);
+    UVView->SetBackgroundTextureOpacity(UVViewBackgroundTextureOpacity);
+    UVView->SetUVIslandLineOpacity(UVViewIslandLineOpacity);
+    UVView->SetUVIslandLineThicknessScale(UVViewIslandLineThicknessScale);
+
+    if (SelectedMaterialSlotIndex == INDEX_NONE)
+    {
+        UVView->SetBackgroundTexture(nullptr);
+        UVView->SetDrawBackgroundTexture(false);
+        UVView->SetIslands(TArray<FUVIslandItemPtr>());
+        UVView->SetIslandColors(TMap<int32, FLinearColor>());
+        UVView->SetHiddenUVIslandIDs(TSet<int32>());
+        UVView->SetSelectedIslands(TSet<int32>());
+        RefreshPreviewWetPartOverlay();
+        return;
+    }
+
     UVView->SetBackgroundTexture(ResolveTextureAddressTexture());
     UVView->SetDrawBackgroundTexture(bShowMaterialTextureInUVView && ResolveSelectedMaterialTexture() != nullptr);
     UVView->SetIslands(UVIslandItems);
     UVView->SetIslandColors(BuildUVIslandColorMap());
     UVView->SetHiddenUVIslandIDs(BuildHiddenUVIslandIDSet());
     UVView->SetSelectedIslands(SelectedUVIslandIDs);
-    UVView->SetSelectionTool(CurrentUVSelectionTool);
-    UVView->SetDisplayMode(CurrentUVDisplayMode);
 
     RefreshPreviewWetPartOverlay();
 }
@@ -1125,6 +1121,19 @@ SWetClothingPartEditorPanel::FWetPartEntryPtr SWetClothingPartEditorPanel::FindW
     for (const FWetPartEntryPtr& Item : CurrentWetPartItems)
     {
         if (Item.IsValid() && Item->WetPartID == WetPartID)
+        {
+            return Item;
+        }
+    }
+
+    return nullptr;
+}
+
+SWetClothingPartEditorPanel::FMaterialSlotItemPtr SWetClothingPartEditorPanel::FindMaterialSlotItem(int32 MaterialSlotIndex) const
+{
+    for (const FMaterialSlotItemPtr& Item : MaterialSlotItems)
+    {
+        if (Item.IsValid() && Item->SlotIndex == MaterialSlotIndex)
         {
             return Item;
         }
@@ -1376,9 +1385,9 @@ void SWetClothingPartEditorPanel::MarkSelectedMaterialSlotWettable()
     }
 
     FWetClothingEditorCommonWidgets::MarkMaterialSlotWettable(WetClothingAssetPtr, SelectedMaterialSlotIndex);
-    if (MaterialSlotItems.IsValidIndex(SelectedMaterialSlotIndex))
+    if (FMaterialSlotItemPtr SelectedItem = FindMaterialSlotItem(SelectedMaterialSlotIndex))
     {
-        MaterialSlotItems[SelectedMaterialSlotIndex]->bIsWettableSlot = true;
+        SelectedItem->bIsWettableSlot = true;
     }
 
     if (MaterialSlotListView.IsValid())
@@ -1389,7 +1398,7 @@ void SWetClothingPartEditorPanel::MarkSelectedMaterialSlotWettable()
 
 TSharedRef<SWidget> SWetClothingPartEditorPanel::GenerateTextureComboItem(FTextureItemPtr Item)
 {
-    return BuildTextureComboContent(Item, 36.0f, false);
+    return FWetClothingEditorCommonWidgets::GenerateTextureComboItem(Item, MaterialThumbnailPool, &TextureThumbnails);
 }
 
 void SWetClothingPartEditorPanel::HandleTextureSelectionChanged(FTextureItemPtr Item, ESelectInfo::Type SelectInfo)
@@ -1401,7 +1410,8 @@ void SWetClothingPartEditorPanel::HandleTextureSelectionChanged(FTextureItemPtr 
 
     if (SelectedTextureComboContentBox.IsValid())
     {
-        SelectedTextureComboContentBox->SetContent(BuildTextureComboContent(SelectedTextureItem, 24.0f, true));
+        SelectedTextureComboContentBox->SetContent(
+            FWetClothingEditorCommonWidgets::BuildTextureComboContent(SelectedTextureItem, 24.0f, true, MaterialThumbnailPool, &TextureThumbnails));
     }
 
     if (MaterialSlotListView.IsValid())
@@ -1414,24 +1424,7 @@ void SWetClothingPartEditorPanel::HandleTextureSelectionChanged(FTextureItemPtr 
 
 TSharedRef<SWidget> SWetClothingPartEditorPanel::BuildTextureComboContent(FTextureItemPtr Item, float ThumbnailSize, bool bCompactLayout)
 {
-    TSharedRef<SWidget> ThumbnailWidget =
-        SNew(SBorder)
-            .Padding(0.0f)
-            .BorderImage(FAppStyle::Get().GetBrush(TEXT("WhiteBrush")))
-            .BorderBackgroundColor(FLinearColor(0.06f, 0.06f, 0.06f, 1.0f));
-
-    if (Item.IsValid() && Item->Texture.IsValid() && MaterialThumbnailPool.IsValid())
-    {
-        const uint32                ThumbnailDimension = static_cast<uint32>(FMath::RoundToInt(ThumbnailSize));
-        TSharedPtr<FAssetThumbnail> Thumbnail = MakeShared<FAssetThumbnail>(Item->Texture.Get(), ThumbnailDimension, ThumbnailDimension, MaterialThumbnailPool);
-        TextureThumbnails.Add(Thumbnail);
-
-        FAssetThumbnailConfig ThumbnailConfig;
-        ThumbnailConfig.bAllowFadeIn = false;
-        ThumbnailWidget = Thumbnail->MakeThumbnailWidget(ThumbnailConfig);
-    }
-
-    return SNew(SHorizontalBox) + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)[SNew(SBox).WidthOverride(ThumbnailSize).HeightOverride(ThumbnailSize)[ThumbnailWidget]] + SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center).Padding(bCompactLayout ? FMargin(8.0f, 0.0f, 18.0f, 0.0f) : FMargin(8.0f, 0.0f, 6.0f, 0.0f))[SNew(STextBlock).Text(Item.IsValid() ? FText::FromString(Item->Label) : LOCTEXT("SelectTextureComboItem", "Select Texture")).OverflowPolicy(ETextOverflowPolicy::Ellipsis)];
+    return FWetClothingEditorCommonWidgets::BuildTextureComboContent(Item, ThumbnailSize, bCompactLayout, MaterialThumbnailPool, &TextureThumbnails);
 }
 
 FReply SWetClothingPartEditorPanel::HandleApplyMaterialSetupClicked()
@@ -1451,7 +1444,7 @@ FReply SWetClothingPartEditorPanel::HandleApplyMaterialSetupClicked()
 
     FWetClothingMaterialSetupResult Result = FWetClothingMaterialSetup::DuplicateAndApplyToMaterialInterface(
         SourceMaterial,
-        WetClothingAssetPtr != nullptr ? WetClothingAssetPtr->WrinkleData.WrinkleUVChannelIndex : INDEX_NONE);
+        0);
 
     if (Result.bSucceeded && Result.ConfiguredMaterial != nullptr && SourceMaterial != nullptr)
     {
@@ -1568,12 +1561,7 @@ void SWetClothingPartEditorPanel::HandleUVChannelSelectionChanged(FUVChannelItem
 
 TSharedRef<SWidget> SWetClothingPartEditorPanel::GenerateUVDisplayModeComboItem(FUVDisplayModeItemPtr Item)
 {
-    const FText Label = (!Item.IsValid() || *Item == EWetClothingAssetUVDisplayMode::Normal)
-                            ? LOCTEXT("UVDisplayModeNormal", "Normal")
-                            : LOCTEXT("UVDisplayModeOutline", "Outline");
-
-    return SNew(STextBlock)
-        .Text(Label);
+    return FWetClothingEditorCommonWidgets::GenerateUVDisplayModeComboItem(Item);
 }
 
 void SWetClothingPartEditorPanel::HandleUVDisplayModeSelectionChanged(FUVDisplayModeItemPtr Item, ESelectInfo::Type SelectInfo)
@@ -2504,9 +2492,9 @@ void SWetClothingPartEditorPanel::ApplyAutoPartitionClusters(const TArray<FWetPa
     SelectedWetPartID = Clusters.Num() > 0 ? 1 : 0;
     SelectedAssignWetPartID = SelectedWetPartID;
 
-    if (MaterialSlotItems.IsValidIndex(SelectedMaterialSlotIndex) && MaterialSlotListView.IsValid())
+    if (MaterialSlotListView.IsValid())
     {
-        MaterialSlotListView->SetSelection(MaterialSlotItems[SelectedMaterialSlotIndex], ESelectInfo::Direct);
+        MaterialSlotListView->SetSelection(FindMaterialSlotItem(SelectedMaterialSlotIndex), ESelectInfo::Direct);
     }
 
     RefreshWetPartList();
@@ -2555,20 +2543,34 @@ FReply SWetClothingPartEditorPanel::HandleAssignSelectedUVIslandToWetPartClicked
 
 FText SWetClothingPartEditorPanel::GetMaterialSlotCountText() const
 {
+    int32 SlotCount = 0;
+    for (const FMaterialSlotItemPtr& Item : MaterialSlotItems)
+    {
+        if (Item.IsValid() && Item->SlotIndex != INDEX_NONE)
+        {
+            ++SlotCount;
+        }
+    }
+
     return FText::Format(
         LOCTEXT("MaterialSlotCount", "{0} Slots"),
-        FText::AsNumber(MaterialSlotItems.Num()));
+        FText::AsNumber(SlotCount));
 }
 
 FText SWetClothingPartEditorPanel::GetSelectedMaterialSlotText() const
 {
-    if (!MaterialSlotItems.IsValidIndex(SelectedMaterialSlotIndex))
+    const FMaterialSlotItemPtr Item = FindMaterialSlotItem(SelectedMaterialSlotIndex);
+    if (!Item.IsValid())
     {
         return LOCTEXT("NoMaterialSlotSelected", "Select a material slot to isolate its coverage on the preview mesh.");
     }
 
-    const FMaterialSlotItemPtr& Item = MaterialSlotItems[SelectedMaterialSlotIndex];
-    const FString               MaterialName = Item->Material.IsValid() ? Item->Material->GetName() : TEXT("None");
+    if (Item->SlotIndex == INDEX_NONE)
+    {
+        return LOCTEXT("SelectedAllMaterialSlots", "Selected: All Slots (preview only)");
+    }
+
+    const FString MaterialName = Item->Material.IsValid() ? Item->Material->GetName() : TEXT("None");
 
     return FText::Format(
         LOCTEXT("SelectedMaterialSlot", "Selected: [{0}] {1} ({2})"),
@@ -2591,12 +2593,50 @@ FText SWetClothingPartEditorPanel::GetSelectedUVChannelText() const
 
 FText SWetClothingPartEditorPanel::GetSelectedUVDisplayModeText() const
 {
-    if (!SelectedUVDisplayModeItem.IsValid() || *SelectedUVDisplayModeItem == EWetClothingAssetUVDisplayMode::Normal)
-    {
-        return LOCTEXT("SelectedUVDisplayModeNormal", "Normal");
-    }
+    return FWetClothingEditorCommonWidgets::GetUVDisplayModeLabel(
+        SelectedUVDisplayModeItem.IsValid() ? *SelectedUVDisplayModeItem : EWetClothingAssetUVDisplayMode::Normal);
+}
 
-    return LOCTEXT("SelectedUVDisplayModeOutline", "Outline");
+float SWetClothingPartEditorPanel::GetUVViewBackgroundTextureOpacity() const
+{
+    return UVViewBackgroundTextureOpacity;
+}
+
+float SWetClothingPartEditorPanel::GetUVViewIslandLineOpacity() const
+{
+    return UVViewIslandLineOpacity;
+}
+
+float SWetClothingPartEditorPanel::GetUVViewIslandLineThicknessScale() const
+{
+    return UVViewIslandLineThicknessScale;
+}
+
+void SWetClothingPartEditorPanel::HandleUVViewBackgroundTextureOpacityChanged(float NewValue)
+{
+    UVViewBackgroundTextureOpacity = FMath::Clamp(NewValue, 0.0f, 1.0f);
+    if (UVView.IsValid())
+    {
+        UVView->SetBackgroundTextureOpacity(UVViewBackgroundTextureOpacity);
+    }
+}
+
+void SWetClothingPartEditorPanel::HandleUVViewIslandLineOpacityChanged(float NewValue)
+{
+    UVViewIslandLineOpacity = FMath::Clamp(NewValue, 0.0f, 1.0f);
+    if (UVView.IsValid())
+    {
+        UVView->SetUVIslandLineOpacity(UVViewIslandLineOpacity);
+    }
+}
+
+void SWetClothingPartEditorPanel::HandleUVViewIslandLineThicknessScaleChanged(float NewValue)
+{
+    UVViewIslandLineThicknessScale = FMath::Clamp(NewValue, 0.25f, 6.0f);
+    if (UVView.IsValid())
+    {
+        UVView->SetUVIslandLineThicknessScale(UVViewIslandLineThicknessScale);
+    }
 }
 
 FText SWetClothingPartEditorPanel::GetSelectedTextureText() const
@@ -2923,39 +2963,6 @@ FReply SWetClothingPartEditorPanel::HandleSaveAssetClicked()
     return FReply::Handled();
 }
 
-TSharedRef<SWidget> SWetClothingPartEditorPanel::BuildBakeMapsMenu()
-{
-    return SNew(SVerticalBox)
-
-        + SVerticalBox::Slot()
-              .AutoHeight()
-              .Padding(4.0f, 2.0f)
-                  [SNew(SButton)
-                       .Text(LOCTEXT("BakeAllMapsMenuItem", "Bake All Maps"))
-                       .OnClicked(this, &SWetClothingPartEditorPanel::HandleBakeAllMapsClicked)]
-
-        + SVerticalBox::Slot()
-              .AutoHeight()
-              .Padding(4.0f, 2.0f)
-                  [SNew(SButton)
-                       .Text(LOCTEXT("BakeWetnessProfileMapsMenuItem", "Bake Wetness Profile Maps"))
-                       .OnClicked(this, &SWetClothingPartEditorPanel::HandleBakeAllWetnessProfileMapsClicked)]
-
-        + SVerticalBox::Slot()
-              .AutoHeight()
-              .Padding(4.0f, 2.0f)
-                  [SNew(SButton)
-                       .Text(LOCTEXT("BakeWrinkleNormalMapMenuItem", "Bake Wrinkle Normal Map"))
-                       .OnClicked(this, &SWetClothingPartEditorPanel::HandleBakeWrinkleNormalMapClicked)]
-
-        + SVerticalBox::Slot()
-              .AutoHeight()
-              .Padding(4.0f, 2.0f)
-                  [SNew(SButton)
-                       .Text(LOCTEXT("BakeWrinkleMaskMenuItem", "Bake Wrinkle Mask"))
-                       .OnClicked(this, &SWetClothingPartEditorPanel::HandleBakeWrinkleMaskClicked)];
-}
-
 FReply SWetClothingPartEditorPanel::HandleBakeAllMapsClicked()
 {
     return HandleBakeAllWetnessProfileMapsClicked();
@@ -3137,99 +3144,22 @@ UTexture* SWetClothingPartEditorPanel::ResolveTextureAddressTexture() const
 
 UTexture* SWetClothingPartEditorPanel::FindSavedTextureSelection(int32 MaterialSlotIndex, int32 UVChannelIndex) const
 {
-    const UWetClothingAsset* WetClothingAssetPtr = WetClothingAsset.Get();
-    if (WetClothingAssetPtr == nullptr || MaterialSlotIndex == INDEX_NONE || UVChannelIndex == INDEX_NONE)
-    {
-        return nullptr;
-    }
-
-    for (const FWetClothingSourceTextureSelection& Selection : WetClothingAssetPtr->PartData.EditableWetPartData.SourceTextureSelections)
-    {
-        if (Selection.MaterialSlotIndex == MaterialSlotIndex && Selection.UVChannelIndex == UVChannelIndex)
-        {
-            return Selection.Texture;
-        }
-    }
-
-    return nullptr;
+    return FWetClothingMaterialTextureResolver::FindSavedTextureSelection(WetClothingAsset.Get(), MaterialSlotIndex, UVChannelIndex);
 }
 
 UTexture* SWetClothingPartEditorPanel::ResolveOrSaveTextureSelection(int32 MaterialSlotIndex, int32 UVChannelIndex)
 {
-    if (UTexture* SavedTexture = FindSavedTextureSelection(MaterialSlotIndex, UVChannelIndex))
-    {
-        return SavedTexture;
-    }
-
-    UWetClothingAsset* WetClothingAssetPtr = WetClothingAsset.Get();
-    if (WetClothingAssetPtr == nullptr || WetClothingAssetPtr->TargetMesh == nullptr)
-    {
-        return nullptr;
-    }
-
-    const TArray<FSkeletalMaterial>& Materials = WetClothingAssetPtr->TargetMesh->GetMaterials();
-    if (!Materials.IsValidIndex(MaterialSlotIndex) || Materials[MaterialSlotIndex].MaterialInterface == nullptr)
-    {
-        return nullptr;
-    }
-
-    TArray<FTextureItemPtr> ResolvedTextureItems;
-    FWetClothingMaterialTextureResolver::BuildTextureItems(Materials[MaterialSlotIndex].MaterialInterface, ResolvedTextureItems);
-    for (const FTextureItemPtr& TextureItem : ResolvedTextureItems)
-    {
-        if (TextureItem.IsValid() && TextureItem->Texture.IsValid())
-        {
-            UTexture* ResolvedTexture = TextureItem->Texture.Get();
-            SaveTextureSelection(MaterialSlotIndex, UVChannelIndex, ResolvedTexture);
-            return ResolvedTexture;
-        }
-    }
-
-    return nullptr;
+    return FWetClothingMaterialTextureResolver::ResolveOrSaveTextureSelection(WetClothingAsset.Get(), MaterialSlotIndex, UVChannelIndex);
 }
 
 bool SWetClothingPartEditorPanel::HasSavedTextureSelection(int32 MaterialSlotIndex, int32 UVChannelIndex) const
 {
-    const UWetClothingAsset* WetClothingAssetPtr = WetClothingAsset.Get();
-    if (WetClothingAssetPtr == nullptr || MaterialSlotIndex == INDEX_NONE || UVChannelIndex == INDEX_NONE)
-    {
-        return false;
-    }
-
-    return WetClothingAssetPtr->PartData.EditableWetPartData.SourceTextureSelections.ContainsByPredicate(
-        [MaterialSlotIndex, UVChannelIndex](const FWetClothingSourceTextureSelection& Selection)
-        {
-            return Selection.MaterialSlotIndex == MaterialSlotIndex && Selection.UVChannelIndex == UVChannelIndex;
-        });
+    return FWetClothingMaterialTextureResolver::HasSavedTextureSelection(WetClothingAsset.Get(), MaterialSlotIndex, UVChannelIndex);
 }
 
 void SWetClothingPartEditorPanel::SaveTextureSelection(int32 MaterialSlotIndex, int32 UVChannelIndex, UTexture* Texture)
 {
-    UWetClothingAsset* WetClothingAssetPtr = WetClothingAsset.Get();
-    if (WetClothingAssetPtr == nullptr || MaterialSlotIndex == INDEX_NONE || UVChannelIndex == INDEX_NONE)
-    {
-        return;
-    }
-
-    WetClothingAssetPtr->Modify();
-
-    for (int32 SelectionIndex = WetClothingAssetPtr->PartData.EditableWetPartData.SourceTextureSelections.Num() - 1; SelectionIndex >= 0; --SelectionIndex)
-    {
-        FWetClothingSourceTextureSelection& Selection = WetClothingAssetPtr->PartData.EditableWetPartData.SourceTextureSelections[SelectionIndex];
-        if (Selection.MaterialSlotIndex == MaterialSlotIndex && Selection.UVChannelIndex == UVChannelIndex)
-        {
-            Selection.Texture = Texture;
-            WetClothingAssetPtr->MarkPackageDirty();
-            return;
-        }
-    }
-
-    FWetClothingSourceTextureSelection NewSelection;
-    NewSelection.MaterialSlotIndex = MaterialSlotIndex;
-    NewSelection.UVChannelIndex = UVChannelIndex;
-    NewSelection.Texture = Texture;
-    WetClothingAssetPtr->PartData.EditableWetPartData.SourceTextureSelections.Add(NewSelection);
-    WetClothingAssetPtr->MarkPackageDirty();
+    FWetClothingMaterialTextureResolver::SaveTextureSelection(WetClothingAsset.Get(), MaterialSlotIndex, UVChannelIndex, Texture);
 }
 
 bool SWetClothingPartEditorPanel::HasPendingWetSetupTasks(FString* OutSummary) const
@@ -3417,7 +3347,7 @@ bool SWetClothingPartEditorPanel::BuildWetSetup(FString& OutSummary, bool* OutHa
         {
             FWetClothingMaterialSetupResult RefreshResult = FWetClothingMaterialSetup::DuplicateAndApplyToMaterialInterface(
                 ExistingOverride->WetMaterial,
-                WetClothingAssetPtr->WrinkleData.WrinkleUVChannelIndex);
+                0);
             if (!RefreshResult.bSucceeded)
             {
                 Warnings.Add(FString::Printf(TEXT("Slot %d existing wet material refresh failed: %s"), MaterialSlotIndex, *RefreshResult.Message));
@@ -3428,14 +3358,14 @@ bool SWetClothingPartEditorPanel::BuildWetSetup(FString& OutSummary, bool* OutHa
                     TEXT("Slot %d already has '%s'. Refreshed wrinkle UV channel %d."),
                     MaterialSlotIndex,
                     *GetNameSafe(ExistingOverride->WetMaterial),
-                    FMath::Max(WetClothingAssetPtr->WrinkleData.WrinkleUVChannelIndex, 0)));
+                    0));
             }
             continue;
         }
 
         FWetClothingMaterialSetupResult Result = FWetClothingMaterialSetup::DuplicateAndApplyToMaterialInterface(
             SourceMaterial,
-            WetClothingAssetPtr->WrinkleData.WrinkleUVChannelIndex);
+            0);
         if (!Result.bSucceeded || Result.ConfiguredMaterial == nullptr)
         {
             Warnings.Add(FString::Printf(TEXT("Slot %d material setup failed: %s"), MaterialSlotIndex, *Result.Message));

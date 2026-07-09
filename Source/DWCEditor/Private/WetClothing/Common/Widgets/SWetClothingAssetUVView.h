@@ -56,6 +56,10 @@ class SWetClothingAssetUVView : public SLeafWidget
     void                             SetCircleMarkers(const TArray<FWetClothingAssetUVViewCircleMarker>& InCircleMarkers);
     void                             SetBackgroundTexture(UTexture* InTexture);
     void                             SetDrawBackgroundTexture(bool bInDrawBackgroundTexture);
+    void                             SetBackgroundTextureOpacity(float InOpacity);
+    void                             SetUVIslandLineOpacity(float InOpacity);
+    void                             SetUVIslandLineThicknessScale(float InThicknessScale);
+    void                             SetNormalizeToContentBounds(bool bInNormalizeToContentBounds);
     void                             SetSelectionTool(EWetClothingAssetUVSelectionTool InSelectionTool);
     void                             SetDisplayMode(EWetClothingAssetUVDisplayMode InDisplayMode);
     EWetClothingAssetUVSelectionTool GetSelectionTool() const { return SelectionTool; }
@@ -88,6 +92,7 @@ class SWetClothingAssetUVView : public SLeafWidget
 
   private:
     FBox2D ComputeUVBounds() const;
+    FBox2D ComputeContentUVBounds() const;
     double GetTextureAspectRatio() const;
 
     FVector2D UVToLocal(
@@ -150,6 +155,10 @@ class SWetClothingAssetUVView : public SLeafWidget
     FSlateBrush                            BackgroundTextureBrush;
     TWeakObjectPtr<UTexture>               BackgroundTexture;
     bool                                   bDrawBackgroundTexture = true;
+    float                                  BackgroundTextureOpacity = 0.75f;
+    float                                  UVIslandLineOpacity = 1.0f;
+    float                                  UVIslandLineThicknessScale = 1.0f;
+    bool                                   bNormalizeToContentBounds = false;
     float                                  Padding = 16.0f;
     double                                 ZoomAmount = 1.0;
     FVector2D                              ViewOffset = FVector2D::ZeroVector;

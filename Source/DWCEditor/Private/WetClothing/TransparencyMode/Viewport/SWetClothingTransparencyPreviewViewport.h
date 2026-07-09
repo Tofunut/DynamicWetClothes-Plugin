@@ -48,6 +48,7 @@ class SWetClothingTransparencyPreviewViewport : public SEditorViewport, public F
     void ConfigurePreviewMeshComponent(USkeletalMeshComponent* MeshComponent);
     void ApplyRevealMaterials(USkeletalMeshComponent* MeshComponent);
     void ApplyWetnessPreview(USkeletalMeshComponent* MeshComponent);
+    void InvalidatePreviewViewport();
     USkeletalMeshComponent* FindFocusMeshComponent() const;
 
   private:

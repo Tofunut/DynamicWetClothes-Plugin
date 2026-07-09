@@ -28,6 +28,25 @@ enum class EWetWrinklePreviewMaterialStatus : uint8
     Failed
 };
 
+
+struct FWetWrinkleCachedHitTriangle
+{
+    int32 MaterialSlotIndex = INDEX_NONE;
+    int32 TriangleID = INDEX_NONE;
+    int32 UVIslandID = INDEX_NONE;
+    FVector LocalPositions[3] = { FVector::ZeroVector, FVector::ZeroVector, FVector::ZeroVector };
+    FVector WorldPositions[3] = { FVector::ZeroVector, FVector::ZeroVector, FVector::ZeroVector };
+    FVector2D UVs[3] = { FVector2D::ZeroVector, FVector2D::ZeroVector, FVector2D::ZeroVector };
+    FVector WorldNormal = FVector::UpVector;
+    FVector WorldTangent = FVector::ForwardVector;
+    FVector WorldBitangent = FVector::RightVector;
+    FVector LocalNormal = FVector::UpVector;
+    FVector LocalTangent = FVector::ForwardVector;
+    FVector LocalBitangent = FVector::RightVector;
+    FBox WorldBounds = FBox(ForceInit);
+    FBox2D UVBounds = FBox2D(ForceInit);
+};
+
 struct FWetWrinkleProjectedSurface
 {
     int32 MaterialSlotIndex = INDEX_NONE;
@@ -69,6 +88,8 @@ class SWetWrinkleViewport : public SEditorViewport, public FGCObject
   public:
     SLATE_BEGIN_ARGS(SWetWrinkleViewport) {}
     SLATE_ARGUMENT(UWetClothingAsset*, WetClothingAsset)
+    SLATE_ARGUMENT(bool, UseDefaultPreviewMaterial)
+    SLATE_ARGUMENT(bool, UseOriginalMeshMaterialForPreview)
     SLATE_EVENT(FOnWetWrinkleSurfaceHitChanged, OnSurfaceHitChanged)
     SLATE_EVENT(FOnWetWrinklePaintStrokeStarted, OnPaintStrokeStarted)
     SLATE_EVENT(FOnWetWrinklePaintStampRequested, OnPaintStampRequested)
@@ -88,6 +109,8 @@ class SWetWrinkleViewport : public SEditorViewport, public FGCObject
     void SetBrushSettings(const FWetWrinkleBrushSettings& InBrushSettings);
     void RefreshStoredStampOverlay(bool bRebuildAccumulatedPreview = true);
     void AppendAccumulatedPreviewStamp(const FWetWrinklePatchPlacement& Stamp);
+    void SetGeneratedNormalPreviewTexture(int32 MaterialSlotIndex, int32 UVChannelIndex, UTexture2D* GeneratedNormalTexture);
+    void ClearGeneratedNormalPreviewTexture();
     void SetSelectedStrokeGuid(const FGuid& InStrokeGuid);
     void PreviewBrushAtUV(int32 MaterialSlotIndex, int32 UVChannelIndex, const FVector2D& UV);
     void ClearExternalBrushPreview();
@@ -111,6 +134,8 @@ class SWetWrinkleViewport : public SEditorViewport, public FGCObject
     void EndPaintStrokeFromClient();
     void RefreshBrushCursor();
     void ClearBrushCursor();
+    void EnsureBrushCursorMesh();
+    void RefreshWrinklePreviewHoverParameters();
     UMaterialInterface* ResolveCursorMaterial();
     float CalculateBrushCursorWorldRadius() const;
     FText GetViewportHintText() const;
@@ -145,15 +170,23 @@ class SWetWrinkleViewport : public SEditorViewport, public FGCObject
     TSharedPtr<FAdvancedPreviewScene> PreviewScene;
     TSharedPtr<FWetWrinkleViewportClient> ViewportClient;
     TObjectPtr<USkeletalMeshComponent> PreviewMeshComponent = nullptr;
+    TObjectPtr<UTexture2D> GeneratedNormalPreviewTexture = nullptr;
+    int32 GeneratedNormalPreviewMaterialSlotIndex = INDEX_NONE;
+    int32 GeneratedNormalPreviewUVChannelIndex = INDEX_NONE;
     TObjectPtr<UProceduralMeshComponent> BrushCursorComponent = nullptr;
     TObjectPtr<UMaterialInterface> CursorMaterial = nullptr;
     TArray<FWetWrinklePreviewMaterialSlotState> PreviewMaterialSlots;
     TArray<FWetWrinkleAccumulatedPreviewState> AccumulatedPreviewStates;
     TSharedPtr<SRichTextBlock> OverlayText;
     TArray<FWetClothingAssetUVTriangle> HitTriangles;
+    TArray<FWetWrinkleCachedHitTriangle> CachedHitTriangles;
     int32 HitTriangleUVChannelIndex = INDEX_NONE;
     int32 LastAppliedActivePreviewMaterialSlot = INDEX_NONE;
+    int32 LastHoverPreviewMaterialSlotIndex = INDEX_NONE;
     bool bPreviewMaterialsNeedReapply = true;
+    bool bUseDefaultPreviewMaterial = false;
+    bool bUseOriginalMeshMaterialForPreview = false;
+    bool bBrushCursorMeshBuilt = false;
     FWetWrinkleBrushSettings BrushSettings;
     FWetWrinkleSurfaceHit CurrentSurfaceHit;
     FGuid SelectedStrokeGuid;

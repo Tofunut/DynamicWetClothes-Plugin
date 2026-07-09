@@ -115,6 +115,73 @@ bool SWetClothingAssetEditorPanel::BuildWetSetup(FString& OutSummary, bool* OutH
     return true;
 }
 
+bool SWetClothingAssetEditorPanel::BuildPendingWetSetup(FString& OutSummary, bool* OutHadWarnings)
+{
+    bool bHadWarnings = false;
+    TArray<FString> Sections;
+
+    if (PartEditorPanel.IsValid())
+    {
+        FString PartPendingSummary;
+        if (PartEditorPanel->HasPendingWetSetupTasks(&PartPendingSummary))
+        {
+            FString PartSummary;
+            bool bPartHadWarnings = false;
+            if (!PartEditorPanel->BuildWetSetup(PartSummary, &bPartHadWarnings))
+            {
+                OutSummary = PartSummary;
+                return false;
+            }
+            bHadWarnings |= bPartHadWarnings;
+            Sections.Add(PartSummary);
+        }
+    }
+
+    if (TransparencyEditorPanel.IsValid())
+    {
+        FString TransparencyPendingSummary;
+        if (TransparencyEditorPanel->HasPendingTransparencySetup(&TransparencyPendingSummary))
+        {
+            FString TransparencySummary;
+            bool bTransparencyHadWarnings = false;
+            if (!TransparencyEditorPanel->BuildTransparencySetup(TransparencySummary, &bTransparencyHadWarnings))
+            {
+                OutSummary = TransparencySummary;
+                return false;
+            }
+            bHadWarnings |= bTransparencyHadWarnings;
+            Sections.Add(TransparencySummary);
+        }
+    }
+
+    OutSummary = Sections.Num() > 0 ? FString::Join(Sections, TEXT("\n\n")) : TEXT("Wet setup is already up to date.");
+    if (OutHadWarnings != nullptr)
+    {
+        *OutHadWarnings = bHadWarnings;
+    }
+    return true;
+}
+
+bool SWetClothingAssetEditorPanel::BuildTransparencySetup(FString& OutSummary, bool* OutHadWarnings)
+{
+    if (!TransparencyEditorPanel.IsValid())
+    {
+        OutSummary = TEXT("Transparency editor is not available.");
+        if (OutHadWarnings != nullptr)
+        {
+            *OutHadWarnings = false;
+        }
+        return false;
+    }
+
+    return TransparencyEditorPanel->BuildTransparencySetup(OutSummary, OutHadWarnings);
+}
+
+bool SWetClothingAssetEditorPanel::SaveTransparencySetupAssets() const
+{
+    return TransparencyEditorPanel.IsValid() ? TransparencyEditorPanel->SaveTransparencySetupAssets() : true;
+}
+
 bool SWetClothingAssetEditorPanel::SaveWetSetupAssets() const
 {
     bool bSaved = true;
@@ -127,26 +194,6 @@ bool SWetClothingAssetEditorPanel::SaveWetSetupAssets() const
         bSaved &= TransparencyEditorPanel->SaveTransparencySetupAssets();
     }
     return bSaved;
-}
-
-FReply SWetClothingAssetEditorPanel::ExecuteBakeWrinkleNormalMap()
-{
-    if (!WrinkleEditorPanel.IsValid())
-    {
-        return FReply::Handled();
-    }
-
-    return WrinkleEditorPanel->ExecuteBakeWrinkleNormalMap();
-}
-
-FReply SWetClothingAssetEditorPanel::ExecuteBakeWrinkleMask()
-{
-    if (!WrinkleEditorPanel.IsValid())
-    {
-        return FReply::Handled();
-    }
-
-    return WrinkleEditorPanel->ExecuteBakeWrinkleMask();
 }
 
 void SWetClothingAssetEditorPanel::SetEditorMode(EWetClothingEditorMode NewMode)

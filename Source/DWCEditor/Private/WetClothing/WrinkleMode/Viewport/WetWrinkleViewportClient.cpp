@@ -60,6 +60,16 @@ void FWetWrinkleViewportClient::Tick(float DeltaSeconds)
 
 bool FWetWrinkleViewportClient::InputKey(const FInputKeyEventArgs& EventArgs)
 {
+    if (EventArgs.Event == IE_Pressed && (EventArgs.Key == EKeys::MouseScrollUp || EventArgs.Key == EKeys::MouseScrollDown))
+    {
+        const FVector LookAtLocation = GetLookAtLocation();
+        const float CurrentDistance = FMath::Max(static_cast<float>(FVector::Dist(GetViewLocation(), LookAtLocation)), 8.0f);
+        const float ZoomScale = EventArgs.Key == EKeys::MouseScrollUp ? 0.85f : 1.15f;
+        SetViewLocationForOrbiting(LookAtLocation, FMath::Clamp(CurrentDistance * ZoomScale, 8.0f, 100000.0f));
+        Invalidate();
+        return true;
+    }
+
     const bool bIsLeftMouseButton = EventArgs.Key == EKeys::LeftMouseButton;
     const bool bIsCameraModifierDown =
         Viewport != nullptr &&

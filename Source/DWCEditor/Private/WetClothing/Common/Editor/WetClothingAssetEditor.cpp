@@ -7,7 +7,6 @@
 #include "SWetClothingAssetEditorPanel.h"
 #include "DetailsViewArgs.h"
 #include "Framework/Application/SlateApplication.h"
-#include "Framework/MultiBox/MultiBoxBuilder.h"
 #include "IDetailsView.h"
 #include "Modules/ModuleManager.h"
 #include "Misc/MessageDialog.h"
@@ -19,6 +18,7 @@
 #include "Styling/ToolBarStyle.h"
 #include "UObject/UnrealType.h"
 #include "UObject/UObjectGlobals.h"
+#include "WetClothing/Common/Widgets/WetClothingEditorCommonWidgets.h"
 #include "Widgets/Docking/SDockTab.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SCheckBox.h"
@@ -96,7 +96,7 @@ namespace
                                       .AutoWidth()
                                       .Padding(0.0f, 0.0f, 6.0f, 0.0f)
                                           [SNew(SButton)
-                                               .Text(LOCTEXT("PendingWetSetupSave", "Save"))
+                                               .Text(LOCTEXT("PendingWetSetupSave", "Build & Save"))
                                                .OnClicked_Lambda([&Choice, DialogWindow]()
                                                                  {
                                                     Choice = EWetClothingPendingCloseChoice::Save;
@@ -232,6 +232,15 @@ bool FWetClothingAssetEditor::OnRequestClose(EAssetEditorCloseReason InCloseReas
 
             if (Choice == EWetClothingPendingCloseChoice::Save)
             {
+                FString Summary;
+                bool bHadWarnings = false;
+                if (!EditorPanel->BuildPendingWetSetup(Summary, &bHadWarnings))
+                {
+                    FMessageDialog::Open(EAppMsgType::Ok, FText::FromString(Summary));
+                    return false;
+                }
+
+                EditorPanel->SaveWetSetupAssets();
                 DWCEditorUtils::SaveAsset(WetClothingAsset.Get());
             }
         }
@@ -287,31 +296,13 @@ void FWetClothingAssetEditor::FillAssetToolbar(FToolBarBuilder& ToolbarBuilder)
 
 TSharedRef<SWidget> FWetClothingAssetEditor::BuildBakeMapsMenu()
 {
-    return SNew(SVerticalBox)
-
-        + SVerticalBox::Slot()
-              .AutoHeight()
-                  [SNew(SButton)
-                       .Text(LOCTEXT("BakeAllMapsMenuItem", "Bake All Maps"))
-                       .OnClicked(this, &FWetClothingAssetEditor::HandleBakeAllMapsClicked)]
-
-        + SVerticalBox::Slot()
-              .AutoHeight()
-                  [SNew(SButton)
-                       .Text(LOCTEXT("BakeWetnessProfileMapsMenuItem", "Bake Wetness Profile Maps"))
-                       .OnClicked(this, &FWetClothingAssetEditor::HandleBakeWetnessProfileMapsClicked)]
-
-        + SVerticalBox::Slot()
-              .AutoHeight()
-                  [SNew(SButton)
-                       .Text(LOCTEXT("BakeWrinkleNormalMapMenuItem", "Bake Wrinkle Normal Map"))
-                       .OnClicked(this, &FWetClothingAssetEditor::HandleBakeWrinkleNormalMapClicked)]
-
-        + SVerticalBox::Slot()
-              .AutoHeight()
-                  [SNew(SButton)
-                       .Text(LOCTEXT("BakeWrinkleMaskMenuItem", "Bake Wrinkle Mask"))
-                       .OnClicked(this, &FWetClothingAssetEditor::HandleBakeWrinkleMaskClicked)];
+    FWetClothingBakeMapsMenuArgs Args;
+    Args.OnBakeAllMaps = FSimpleDelegate::CreateLambda([this]() { HandleBakeAllMapsClicked(); });
+    Args.OnBakeWetnessProfileMaps = FSimpleDelegate::CreateLambda([this]() { HandleBakeWetnessProfileMapsClicked(); });
+    Args.OnBakeTransparencyRevealMaps = FSimpleDelegate::CreateLambda([this]() { HandleBakeTransparencyRevealMapsClicked(); });
+    Args.OnBakeWrinkleNormalMap = FSimpleDelegate::CreateLambda([this]() { HandleBakeWrinkleNormalMapClicked(); });
+    Args.OnBakeWrinkleMask = FSimpleDelegate::CreateLambda([this]() { HandleBakeWrinkleMaskClicked(); });
+    return FWetClothingEditorCommonWidgets::BuildBakeMapsMenu(Args);
 }
 
 FReply FWetClothingAssetEditor::HandleBakeAllMapsClicked()
@@ -341,24 +332,38 @@ FReply FWetClothingAssetEditor::HandleBakeWetnessProfileMapsClicked()
     return FReply::Handled();
 }
 
-FReply FWetClothingAssetEditor::HandleBakeWrinkleNormalMapClicked()
+FReply FWetClothingAssetEditor::HandleBakeTransparencyRevealMapsClicked()
 {
     if (!EditorPanel.IsValid())
     {
         return FReply::Handled();
     }
 
-    return EditorPanel->ExecuteBakeWrinkleNormalMap();
+    FString Summary;
+    bool bHadWarnings = false;
+    if (!EditorPanel->BuildTransparencySetup(Summary, &bHadWarnings))
+    {
+        FMessageDialog::Open(EAppMsgType::Ok, FText::FromString(Summary));
+        return FReply::Handled();
+    }
+
+    EditorPanel->SaveTransparencySetupAssets();
+
+    const EAppMsgCategory MessageCategory = bHadWarnings ? EAppMsgCategory::Warning : EAppMsgCategory::Success;
+    FMessageDialog::Open(MessageCategory, EAppMsgType::Ok, FText::FromString(Summary));
+    return FReply::Handled();
+}
+
+FReply FWetClothingAssetEditor::HandleBakeWrinkleNormalMapClicked()
+{
+    FMessageDialog::Open(EAppMsgType::Ok, LOCTEXT("BakeWrinkleNormalMapPending", "Wrinkle Normal Map baking is not implemented yet."));
+    return FReply::Handled();
 }
 
 FReply FWetClothingAssetEditor::HandleBakeWrinkleMaskClicked()
 {
-    if (!EditorPanel.IsValid())
-    {
-        return FReply::Handled();
-    }
-
-    return EditorPanel->ExecuteBakeWrinkleMask();
+    FMessageDialog::Open(EAppMsgType::Ok, LOCTEXT("BakeWrinkleMaskPending", "Wrinkle Mask baking is not implemented yet."));
+    return FReply::Handled();
 }
 
 TSharedRef<SWidget> FWetClothingAssetEditor::BuildModeToolbarWidget()

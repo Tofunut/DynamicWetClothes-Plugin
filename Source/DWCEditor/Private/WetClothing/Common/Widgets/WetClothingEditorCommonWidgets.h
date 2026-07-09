@@ -2,11 +2,13 @@
 
 #include "CoreMinimal.h"
 #include "WetClothing/Common/Editor/WetClothingAssetEditorTypes.h"
+#include "Widgets/Input/SComboBox.h"
 
 class FAssetThumbnail;
 class FAssetThumbnailPool;
 class ITableRow;
 class SWidget;
+class SBox;
 class STableViewBase;
 class USkeletalMesh;
 class UTexture;
@@ -27,6 +29,15 @@ struct FWetClothingMaterialSlotRowArgs
     FOnWettableMaterialSlotClicked OnWettableSlotClicked;
 };
 
+struct FWetClothingBakeMapsMenuArgs
+{
+    FSimpleDelegate OnBakeAllMaps;
+    FSimpleDelegate OnBakeWetnessProfileMaps;
+    FSimpleDelegate OnBakeTransparencyRevealMaps;
+    FSimpleDelegate OnBakeWrinkleNormalMap;
+    FSimpleDelegate OnBakeWrinkleMask;
+};
+
 class FWetClothingEditorCommonWidgets
 {
   public:
@@ -38,6 +49,48 @@ class FWetClothingEditorCommonWidgets
         const TSharedRef<SWidget>& PreviewContent,
         const FOnWetClothingPreviewFocusClicked& OnFocusClicked,
         TSharedPtr<SWidget> ExtraToolbarContent = TSharedPtr<SWidget>());
+    static TSharedRef<SWidget> BuildBakeMapsMenu(const FWetClothingBakeMapsMenuArgs& Args);
+
+    static FText GetUVDisplayModeLabel(EWetClothingAssetUVDisplayMode DisplayMode);
+    static TSharedRef<SWidget> GenerateUVDisplayModeComboItem(TSharedPtr<EWetClothingAssetUVDisplayMode> Item);
+
+
+    static TSharedRef<SWidget> BuildTextureComboContent(
+        TSharedPtr<FWetClothingTextureItem> Item,
+        float ThumbnailSize,
+        bool bCompactLayout,
+        TSharedPtr<FAssetThumbnailPool> ThumbnailPool,
+        TArray<TSharedPtr<FAssetThumbnail>>* ThumbnailSink);
+
+    static TSharedRef<SWidget> GenerateTextureComboItem(
+        TSharedPtr<FWetClothingTextureItem> Item,
+        TSharedPtr<FAssetThumbnailPool> ThumbnailPool,
+        TArray<TSharedPtr<FAssetThumbnail>>* ThumbnailSink);
+
+    static TSharedRef<SWidget> BuildUVViewTextureSelector(
+        TArray<TSharedPtr<FWetClothingTextureItem>>* TextureItems,
+        TSharedPtr<FWetClothingTextureItem> SelectedTextureItem,
+        TSharedPtr<FAssetThumbnailPool> ThumbnailPool,
+        TArray<TSharedPtr<FAssetThumbnail>>* ThumbnailSink,
+        TSharedPtr<SComboBox<TSharedPtr<FWetClothingTextureItem>>>* OutComboBox,
+        TSharedPtr<SBox>* OutSelectedContentBox,
+        TFunction<void(TSharedPtr<FWetClothingTextureItem>, ESelectInfo::Type)> OnSelectionChanged);
+
+    static TSharedRef<SWidget> BuildUVViewTextureAndViewRow(
+        const TSharedRef<SWidget>& TextureSelector,
+        const TSharedRef<SWidget>& ViewOptionsButton);
+
+    static TSharedRef<SWidget> BuildUVViewOptionsButton(
+        TArray<TSharedPtr<EWetClothingAssetUVDisplayMode>>* DisplayModeItems,
+        TSharedPtr<EWetClothingAssetUVDisplayMode> SelectedDisplayModeItem,
+        TAttribute<FText> SelectedDisplayModeText,
+        TFunction<void(TSharedPtr<EWetClothingAssetUVDisplayMode>)> OnDisplayModeChanged,
+        TAttribute<float> BackgroundTextureOpacity,
+        TFunction<void(float)> OnBackgroundTextureOpacityChanged,
+        TAttribute<float> UVIslandLineOpacity,
+        TFunction<void(float)> OnUVIslandLineOpacityChanged,
+        TAttribute<float> UVIslandLineThicknessScale,
+        TFunction<void(float)> OnUVIslandLineThicknessScaleChanged);
 
     static TSharedRef<ITableRow> GenerateMaterialSlotRow(
         TSharedPtr<FWetClothingMaterialSlotItem> Item,

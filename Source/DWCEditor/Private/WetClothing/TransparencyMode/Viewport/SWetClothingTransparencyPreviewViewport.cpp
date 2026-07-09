@@ -176,7 +176,7 @@ void SWetClothingTransparencyPreviewViewport::SetWetnessPreviewPercent(const flo
     {
         ApplyWetnessPreview(MeshComponent);
     }
-    Invalidate();
+    InvalidatePreviewViewport();
 }
 
 TSharedRef<FEditorViewportClient> SWetClothingTransparencyPreviewViewport::MakeEditorViewportClient()
@@ -337,6 +337,8 @@ void SWetClothingTransparencyPreviewViewport::ApplyWetnessPreview(USkeletalMeshC
     TArray<FLinearColor> Colors;
     Colors.Init(FLinearColor(Wetness, Wetness, 0.0f, 1.0f), VertexCount);
     MeshComponent->SetVertexColorOverride_LinearColor(0, Colors);
+    MeshComponent->MarkRenderStateDirty();
+    MeshComponent->MarkRenderDynamicDataDirty();
 
     for (UMaterialInstanceDynamic* MID : PreviewMIDs)
     {
@@ -345,6 +347,16 @@ void SWetClothingTransparencyPreviewViewport::ApplyWetnessPreview(USkeletalMeshC
             MID->SetScalarParameterValue(UseRevealPreviewParameterName, Wetness > 0.0f ? 1.0f : 0.0f);
         }
     }
+}
+
+void SWetClothingTransparencyPreviewViewport::InvalidatePreviewViewport()
+{
+    if (ViewportClient.IsValid())
+    {
+        ViewportClient->Invalidate();
+    }
+
+    Invalidate();
 }
 
 USkeletalMeshComponent* SWetClothingTransparencyPreviewViewport::FindFocusMeshComponent() const

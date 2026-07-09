@@ -8,7 +8,6 @@
 #include "Misc/SecureHash.h"
 #include "ObjectTools.h"
 #include "UObject/Package.h"
-#include "WetClothing/Common/Analysis/WetClothingAssetMeshAnalyzer.h"
 
 namespace
 {
@@ -156,38 +155,6 @@ namespace
     {
         return static_cast<uint8>(FMath::RoundToInt(FMath::Clamp(Value, 0.0f, 1.0f) * 255.0f));
     }
-
-    FVector3f BlendAngleCorrectedNormals(const FVector3f& BaseNormal, const FVector3f& DetailNormal)
-    {
-        const FVector Base = FVector(BaseNormal).GetSafeNormal(UE_SMALL_NUMBER, FVector(0.0f, 0.0f, 1.0f));
-        const FVector Detail = FVector(DetailNormal).GetSafeNormal(UE_SMALL_NUMBER, FVector(0.0f, 0.0f, 1.0f));
-        const FVector Blended =
-            FVector(
-                Base.X + Detail.X,
-                Base.Y + Detail.Y,
-                Base.Z * Detail.Z)
-                .GetSafeNormal(UE_SMALL_NUMBER, FVector(0.0f, 0.0f, 1.0f));
-        return FVector3f(Blended);
-    }
-
-    bool IsUVPointInsideTriangle(
-        const FVector2D& Point,
-        const FVector2D& A,
-        const FVector2D& B,
-        const FVector2D& C)
-    {
-        const auto Sign = [](const FVector2D& P1, const FVector2D& P2, const FVector2D& P3)
-        {
-            return (P1.X - P3.X) * (P2.Y - P3.Y) - (P2.X - P3.X) * (P1.Y - P3.Y);
-        };
-
-        const double D1 = Sign(Point, A, B);
-        const double D2 = Sign(Point, B, C);
-        const double D3 = Sign(Point, C, A);
-        const bool bHasNegative = D1 < 0.0 || D2 < 0.0 || D3 < 0.0;
-        const bool bHasPositive = D1 > 0.0 || D2 > 0.0 || D3 > 0.0;
-        return !(bHasNegative && bHasPositive);
-    }
 }
 
 struct FWetWrinkleNormalMapBaker::FBakeGroup
@@ -220,25 +187,10 @@ bool FWetWrinkleNormalMapBaker::BakeMaterialSlot(
         return false;
     }
 
-    if (WetClothingAsset->TargetMesh == nullptr)
-    {
-        OutErrorMessage = TEXT("Assign a Target Mesh before baking wrinkle maps.");
-        return false;
-    }
+    const int32 WrinkleUVChannelIndex = 0;
 
-    if (!WetClothingAsset->TargetMesh->GetMaterials().IsValidIndex(MaterialSlotIndex))
-    {
-        OutErrorMessage = FString::Printf(
-            TEXT("The selected material slot (%d) is not valid for the current Target Mesh."),
-            MaterialSlotIndex);
-        return false;
-    }
-
-    TArray<int32> BakeUVChannelIndices;
-    if (!ResolveBakeUVChannelIndices(*WetClothingAsset, MaterialSlotIndex, Settings, BakeUVChannelIndices, OutErrorMessage))
-    {
-        return false;
-    }
+    TSet<int32> TargetSlots;
+    TargetSlots.Add(MaterialSlotIndex);
 
     TArray<int32> LODIndices = WetClothingAsset->WrinkleData.BakeSettings.TargetLODIndices;
     if (LODIndices.Num() == 0)
@@ -248,605 +200,54 @@ bool FWetWrinkleNormalMapBaker::BakeMaterialSlot(
 
     for (const int32 LODIndex : LODIndices)
     {
-        for (const int32 BakeUVChannelIndex : BakeUVChannelIndices)
-        {
-            FBakeGroup Group;
-            if (!BuildBakeGroupForMaterialSlot(
-                    *WetClothingAsset,
-                    MaterialSlotIndex,
-                    BakeUVChannelIndex,
-                    FMath::Max(0, LODIndex),
-                    Settings,
-                    Group,
-                    OutErrorMessage))
-            {
-                return false;
-            }
+        FBakeGroup Group;
+        Group.LODIndex = FMath::Max(0, LODIndex);
+        Group.MaterialSlotIndex = MaterialSlotIndex;
+        Group.UVChannelIndex = WrinkleUVChannelIndex;
 
-            if (Group.Stamps.Num() > 0 && !BakeGroup(*WetClothingAsset, Group, Settings, OutResult, OutErrorMessage))
-            {
-                return false;
-            }
-        }
-    }
-
-    if (OutResult.BakedMapCount == 0)
-    {
-        OutErrorMessage = TEXT("No wrinkle patches were found for the selected material slot on the active wrinkle UV channel. Add at least one patch to this slot before baking.");
-        return false;
-    }
-
-    OutErrorMessage.Reset();
-    return true;
-}
-
-bool FWetWrinkleNormalMapBaker::ResolveBakeUVChannelIndices(
-    const UWetClothingAsset& WetClothingAsset,
-    const int32 MaterialSlotIndex,
-    const FWetWrinkleNormalMapBakeSettings& Settings,
-    TArray<int32>& OutUVChannelIndices,
-    FString& OutErrorMessage)
-{
-    TSet<int32> UniqueUVChannels;
-
-    for (const FWetWrinklePatchStroke& Stroke : WetClothingAsset.WrinkleData.EditablePatchStrokes)
-    {
-        if (!Stroke.bEnabled && !Settings.bIncludeDisabledPatchStrokes)
-        {
-            continue;
-        }
-
-        for (const FWetWrinklePatchPlacement& Patch : Stroke.PatchPlacements)
-        {
-            if (Patch.MaterialSlotIndex != MaterialSlotIndex || Patch.NormalPatchTexture == nullptr)
-            {
-                continue;
-            }
-
-            UniqueUVChannels.Add(Patch.UVChannelIndex);
-        }
-    }
-
-    if (UniqueUVChannels.Num() == 0)
-    {
-        OutErrorMessage = TEXT("No wrinkle patches were found for the selected material slot.");
-        return false;
-    }
-
-    if (Settings.PreferredUVChannelIndex != INDEX_NONE)
-    {
-        OutUVChannelIndices = {Settings.PreferredUVChannelIndex};
-        OutErrorMessage.Reset();
-        return true;
-    }
-
-    if (WetClothingAsset.WrinkleData.WrinkleUVChannelIndex != INDEX_NONE)
-    {
-        OutUVChannelIndices = {WetClothingAsset.WrinkleData.WrinkleUVChannelIndex};
-        OutErrorMessage.Reset();
-        return true;
-    }
-
-    OutUVChannelIndices.Reset();
-    OutUVChannelIndices.Reserve(UniqueUVChannels.Num());
-    for (const int32 UVChannelIndex : UniqueUVChannels)
-    {
-        OutUVChannelIndices.Add(UVChannelIndex);
-    }
-    OutUVChannelIndices.Sort();
-    OutErrorMessage.Reset();
-    return true;
-}
-
-bool FWetWrinkleNormalMapBaker::BuildBakeGroupForMaterialSlot(
-    const UWetClothingAsset& WetClothingAsset,
-    const int32 MaterialSlotIndex,
-    const int32 UVChannelIndex,
-    const int32 LODIndex,
-    const FWetWrinkleNormalMapBakeSettings& Settings,
-    FBakeGroup& OutGroup,
-    FString& OutErrorMessage)
-{
-    OutGroup = FBakeGroup();
-    OutGroup.LODIndex = FMath::Max(0, LODIndex);
-    OutGroup.MaterialSlotIndex = MaterialSlotIndex;
-    OutGroup.UVChannelIndex = UVChannelIndex;
-
-    auto TryAppendPatch = [&OutGroup, MaterialSlotIndex, UVChannelIndex, &OutErrorMessage](const FWetWrinklePatchPlacement& Patch) -> bool
-    {
-        if (Patch.MaterialSlotIndex != MaterialSlotIndex || Patch.NormalPatchTexture == nullptr)
-        {
-            return true;
-        }
-
-        if (OutGroup.SourceTexture == nullptr)
-        {
-            OutGroup.SourceTexture = Patch.SourceTexture.Get();
-        }
-        else if (Patch.SourceTexture != nullptr && OutGroup.SourceTexture != Patch.SourceTexture)
-        {
-            OutErrorMessage = FString::Printf(
-                TEXT("Material slot %d / UV %d contains wrinkle patches that reference multiple source textures. This is not yet supported by the wrinkle normal map baker."),
-                MaterialSlotIndex,
-                UVChannelIndex);
-            return false;
-        }
-
-        OutGroup.Stamps.Add(&Patch);
-        return true;
-    };
-
-    bool bFoundExactUVMatch = false;
-    for (const FWetWrinklePatchStroke& Stroke : WetClothingAsset.WrinkleData.EditablePatchStrokes)
-    {
-        if (!Stroke.bEnabled && !Settings.bIncludeDisabledPatchStrokes)
-        {
-            continue;
-        }
-
-        for (const FWetWrinklePatchPlacement& Patch : Stroke.PatchPlacements)
-        {
-            if (Patch.MaterialSlotIndex != MaterialSlotIndex || Patch.UVChannelIndex != UVChannelIndex)
-            {
-                continue;
-            }
-
-            bFoundExactUVMatch = true;
-            if (!TryAppendPatch(Patch))
-            {
-                return false;
-            }
-        }
-    }
-
-    const bool bAllowLegacyUV0Fallback =
-        !bFoundExactUVMatch &&
-        OutGroup.Stamps.Num() == 0 &&
-        UVChannelIndex != 0 &&
-        WetClothingAsset.WrinkleData.WrinkleUVChannelIndex == UVChannelIndex;
-
-    if (bAllowLegacyUV0Fallback)
-    {
-        for (const FWetWrinklePatchStroke& Stroke : WetClothingAsset.WrinkleData.EditablePatchStrokes)
+        for (const FWetWrinklePatchStroke& Stroke : WetClothingAsset->WrinkleData.EditablePatchStrokes)
         {
             if (!Stroke.bEnabled && !Settings.bIncludeDisabledPatchStrokes)
             {
                 continue;
             }
 
-            for (const FWetWrinklePatchPlacement& Patch : Stroke.PatchPlacements)
+            for (const FWetWrinklePatchPlacement& Stamp : Stroke.PatchPlacements)
             {
-                if (Patch.MaterialSlotIndex != MaterialSlotIndex || Patch.UVChannelIndex != 0)
+                if (Stamp.MaterialSlotIndex != MaterialSlotIndex ||
+                    Stamp.UVChannelIndex != Group.UVChannelIndex ||
+                    Stamp.NormalPatchTexture == nullptr ||
+                    Stamp.SourceTexture == nullptr)
                 {
                     continue;
                 }
 
-                if (!TryAppendPatch(Patch))
+                if (Group.SourceTexture == nullptr)
                 {
-                    return false;
+                    Group.SourceTexture = Stamp.SourceTexture;
+                }
+
+                if (Group.SourceTexture == Stamp.SourceTexture)
+                {
+                    Group.Stamps.Add(&Stamp);
                 }
             }
         }
-    }
 
-    OutErrorMessage.Reset();
-    return true;
-}
-
-void FWetWrinkleNormalMapBaker::InitializeIntermediateBuffers(
-    FIntermediateBakeResult& OutIntermediateResult,
-    const int32 Width,
-    const int32 Height,
-    const int32 Resolution)
-{
-    OutIntermediateResult.Width = Width;
-    OutIntermediateResult.Height = Height;
-    OutIntermediateResult.Resolution = Resolution;
-    OutIntermediateResult.NormalBuffer.Init(FVector3f(0.0f, 0.0f, 1.0f), Width * Height);
-    OutIntermediateResult.IslandMask.Init(false, Width * Height);
-    OutIntermediateResult.PatchCoverageBuffer.Init(0.0f, Width * Height);
-}
-
-bool FWetWrinkleNormalMapBaker::BuildTrianglesAndIslands(
-    const UWetClothingAsset& WetClothingAsset,
-    const int32 LODIndex,
-    const int32 MaterialSlotIndex,
-    const int32 UVChannelIndex,
-    TArray<FWetClothingAssetUVIsland>& OutIslands,
-    TArray<FWetClothingAssetUVTriangle>& OutTriangles,
-    FString& OutErrorMessage)
-{
-    OutIslands.Reset();
-    OutTriangles.Reset();
-
-    if (WetClothingAsset.TargetMesh == nullptr)
-    {
-        OutErrorMessage = TEXT("Assign a TargetMesh before baking a wrinkle normal map.");
-        return false;
-    }
-
-    if (!FWetClothingAssetMeshAnalyzer::BuildMaterialSlotUVIslands(
-            WetClothingAsset.TargetMesh,
-            LODIndex,
-            UVChannelIndex,
-            MaterialSlotIndex,
-            OutIslands,
-            &OutErrorMessage))
-    {
-        if (OutErrorMessage.IsEmpty())
-        {
-            OutErrorMessage = FString::Printf(
-                TEXT("Failed to build UV triangles for material slot %d on UV channel %d (LOD %d)."),
-                MaterialSlotIndex,
-                UVChannelIndex,
-                LODIndex);
-        }
-        return false;
-    }
-
-    for (const FWetClothingAssetUVIsland& Island : OutIslands)
-    {
-        OutTriangles.Append(Island.UVTriangles);
-    }
-
-    if (OutTriangles.Num() == 0)
-    {
-        OutErrorMessage = FString::Printf(
-            TEXT("The selected material slot does not contain any usable UV triangles on UV channel %d (LOD %d)."),
-            UVChannelIndex,
-            LODIndex);
-        return false;
-    }
-
-    OutErrorMessage.Reset();
-    return true;
-}
-
-int32 FWetWrinkleNormalMapBaker::RasterizeTriangleMask(
-    TArray<bool>& OutMask,
-    const int32 Width,
-    const int32 Height,
-    const FWetClothingAssetUVTriangle& Triangle)
-{
-    const FVector2D& A = Triangle.UVs[0];
-    const FVector2D& B = Triangle.UVs[1];
-    const FVector2D& C = Triangle.UVs[2];
-
-    const double MinU = FMath::Min3(A.X, B.X, C.X);
-    const double MaxU = FMath::Max3(A.X, B.X, C.X);
-    const double MinV = FMath::Min3(A.Y, B.Y, C.Y);
-    const double MaxV = FMath::Max3(A.Y, B.Y, C.Y);
-
-    const int32 MinX = FMath::Clamp(FMath::FloorToInt(MinU * Width), 0, Width - 1);
-    const int32 MaxX = FMath::Clamp(FMath::FloorToInt(MaxU * Width), 0, Width - 1);
-    const int32 MinY = FMath::Clamp(FMath::FloorToInt(MinV * Height), 0, Height - 1);
-    const int32 MaxY = FMath::Clamp(FMath::FloorToInt(MaxV * Height), 0, Height - 1);
-
-    int32 PaintedPixelCount = 0;
-    for (int32 PixelY = MinY; PixelY <= MaxY; ++PixelY)
-    {
-        for (int32 PixelX = MinX; PixelX <= MaxX; ++PixelX)
-        {
-            const FVector2D SampleUV(
-                (static_cast<double>(PixelX) + 0.5) / Width,
-                (static_cast<double>(PixelY) + 0.5) / Height);
-
-            if (!IsUVPointInsideTriangle(SampleUV, A, B, C))
-            {
-                continue;
-            }
-
-            const int32 PixelIndex = PixelY * Width + PixelX;
-            if (!OutMask[PixelIndex])
-            {
-                OutMask[PixelIndex] = true;
-                ++PaintedPixelCount;
-            }
-        }
-    }
-
-    if (PaintedPixelCount == 0)
-    {
-        const FVector2D CenterUV = (A + B + C) / 3.0f;
-        const int32 FallbackX = FMath::Clamp(FMath::FloorToInt(CenterUV.X * Width), 0, Width - 1);
-        const int32 FallbackY = FMath::Clamp(FMath::FloorToInt(CenterUV.Y * Height), 0, Height - 1);
-        const int32 PixelIndex = FallbackY * Width + FallbackX;
-        if (!OutMask[PixelIndex])
-        {
-            OutMask[PixelIndex] = true;
-            ++PaintedPixelCount;
-        }
-    }
-
-    return PaintedPixelCount;
-}
-
-void FWetWrinkleNormalMapBaker::RasterizeIslandMask(FIntermediateBakeResult& InOutIntermediateResult)
-{
-    for (const FWetClothingAssetUVTriangle& Triangle : InOutIntermediateResult.UVTriangles)
-    {
-        RasterizeTriangleMask(
-            InOutIntermediateResult.IslandMask,
-            InOutIntermediateResult.Width,
-            InOutIntermediateResult.Height,
-            Triangle);
-    }
-}
-
-bool FWetWrinkleNormalMapBaker::RasterizeSinglePatch(
-    FIntermediateBakeResult& InOutIntermediateResult,
-    const FWetWrinklePatchPlacement& Patch,
-    FString& OutErrorMessage)
-{
-    if (!InOutIntermediateResult.IsInitialized())
-    {
-        OutErrorMessage = TEXT("Intermediate wrinkle bake buffers are not initialized.");
-        return false;
-    }
-
-    FWetWrinkleNormalSource NormalSource(Patch.NormalPatchTexture.Get());
-    if (!NormalSource.IsValid())
-    {
-        OutErrorMessage = FString::Printf(
-            TEXT("Patch '%s' uses a normal texture that does not expose readable source data. Reimport or resave the texture with source data before baking."),
-            *Patch.PatchGuid.ToString());
-        return false;
-    }
-
-    if (Patch.BrushRadiusUV <= 0.0f || Patch.Strength <= 0.0f)
-    {
-        OutErrorMessage.Reset();
-        return true;
-    }
-
-    const FVector2D WrappedCenter = WrapUV(Patch.PositionUV);
-    const FVector2D SafeScale(
-        FMath::Max(FMath::Abs(Patch.Scale.X), UE_SMALL_NUMBER),
-        FMath::Max(FMath::Abs(Patch.Scale.Y), UE_SMALL_NUMBER));
-    const float EdgeFadeStart = FMath::Clamp(1.0f - Patch.Falloff, 0.0f, 0.98f);
-    const float CosRotation = FMath::Cos(Patch.RotationRadians);
-    const float SinRotation = FMath::Sin(Patch.RotationRadians);
-
-    for (int32 TileOffsetY = -1; TileOffsetY <= 1; ++TileOffsetY)
-    {
-        for (int32 TileOffsetX = -1; TileOffsetX <= 1; ++TileOffsetX)
-        {
-            const FVector2D TileCenter = WrappedCenter + FVector2D(static_cast<float>(TileOffsetX), static_cast<float>(TileOffsetY));
-            const int32 MinX = FMath::Clamp(FMath::FloorToInt((TileCenter.X - Patch.BrushRadiusUV) * InOutIntermediateResult.Width), 0, InOutIntermediateResult.Width - 1);
-            const int32 MaxX = FMath::Clamp(FMath::CeilToInt((TileCenter.X + Patch.BrushRadiusUV) * InOutIntermediateResult.Width), 0, InOutIntermediateResult.Width - 1);
-            const int32 MinY = FMath::Clamp(FMath::FloorToInt((TileCenter.Y - Patch.BrushRadiusUV) * InOutIntermediateResult.Height), 0, InOutIntermediateResult.Height - 1);
-            const int32 MaxY = FMath::Clamp(FMath::CeilToInt((TileCenter.Y + Patch.BrushRadiusUV) * InOutIntermediateResult.Height), 0, InOutIntermediateResult.Height - 1);
-            if (MinX > MaxX || MinY > MaxY)
-            {
-                continue;
-            }
-
-            for (int32 PixelY = MinY; PixelY <= MaxY; ++PixelY)
-            {
-                for (int32 PixelX = MinX; PixelX <= MaxX; ++PixelX)
-                {
-                    const int32 PixelIndex = PixelY * InOutIntermediateResult.Width + PixelX;
-                    if (!InOutIntermediateResult.IslandMask[PixelIndex])
-                    {
-                        continue;
-                    }
-
-                    const FVector2D PixelUV(
-                        (static_cast<float>(PixelX) + 0.5f) / static_cast<float>(InOutIntermediateResult.Width),
-                        (static_cast<float>(PixelY) + 0.5f) / static_cast<float>(InOutIntermediateResult.Height));
-                    const FVector2D DeltaUV(
-                        WrappedDelta(PixelUV.X - TileCenter.X),
-                        WrappedDelta(PixelUV.Y - TileCenter.Y));
-                    const FVector2D Local = DeltaUV / FMath::Max(Patch.BrushRadiusUV, UE_SMALL_NUMBER);
-                    const float DistanceFromCenter = Local.Size();
-                    if (DistanceFromCenter > 1.0f)
-                    {
-                        continue;
-                    }
-
-                    const float EdgeFade = 1.0f - SmoothStep(EdgeFadeStart, 1.0f, DistanceFromCenter);
-                    if (EdgeFade <= UE_SMALL_NUMBER)
-                    {
-                        continue;
-                    }
-
-                    const float BrushLocalX = (CosRotation * Local.X + SinRotation * Local.Y) / SafeScale.X;
-                    const float BrushLocalY = (-SinRotation * Local.X + CosRotation * Local.Y) / SafeScale.Y;
-                    if (FMath::Abs(BrushLocalX) > 1.0f || FMath::Abs(BrushLocalY) > 1.0f)
-                    {
-                        continue;
-                    }
-
-                    const FVector2D BrushTextureUV(BrushLocalX * 0.5f + 0.5f, BrushLocalY * 0.5f + 0.5f);
-                    const FVector BrushNormalTS = NormalSource.SampleNormalTS(BrushTextureUV);
-                    const FVector RotatedBrushNormalTS(
-                        BrushNormalTS.X * CosRotation - BrushNormalTS.Y * SinRotation,
-                        BrushNormalTS.X * SinRotation + BrushNormalTS.Y * CosRotation,
-                        BrushNormalTS.Z);
-                    const float StrengthScale = FMath::Max(Patch.Strength * EdgeFade, 0.0f);
-                    const FVector3f WeightedPatchNormalTS = FVector3f(
-                        FVector(
-                            RotatedBrushNormalTS.X * StrengthScale,
-                            RotatedBrushNormalTS.Y * StrengthScale,
-                            RotatedBrushNormalTS.Z)
-                            .GetSafeNormal(UE_SMALL_NUMBER, FVector(0.0f, 0.0f, 1.0f)));
-
-                    InOutIntermediateResult.NormalBuffer[PixelIndex] =
-                        BlendAngleCorrectedNormals(InOutIntermediateResult.NormalBuffer[PixelIndex], WeightedPatchNormalTS);
-                    InOutIntermediateResult.PatchCoverageBuffer[PixelIndex] =
-                        FMath::Max(InOutIntermediateResult.PatchCoverageBuffer[PixelIndex], EdgeFade);
-                }
-            }
-        }
-    }
-
-    OutErrorMessage.Reset();
-    return true;
-}
-
-bool FWetWrinkleNormalMapBaker::BuildIntermediateBakeResult(
-    UWetClothingAsset& WetClothingAsset,
-    const FBakeGroup& Group,
-    const FWetWrinkleNormalMapBakeSettings& Settings,
-    FIntermediateBakeResult& OutIntermediateResult,
-    FString& OutErrorMessage)
-{
-    OutIntermediateResult = FIntermediateBakeResult();
-    OutIntermediateResult.LODIndex = Group.LODIndex;
-    OutIntermediateResult.MaterialSlotIndex = Group.MaterialSlotIndex;
-    OutIntermediateResult.UVChannelIndex = Group.UVChannelIndex;
-    OutIntermediateResult.SourceTexture = Group.SourceTexture;
-    OutIntermediateResult.FilteredPatchPlacements = Group.Stamps;
-
-    if (Group.Stamps.Num() == 0)
-    {
-        OutErrorMessage = FString::Printf(
-            TEXT("No wrinkle patches were found for material slot %d and UV channel %d."),
-            Group.MaterialSlotIndex,
-            Group.UVChannelIndex);
-        return false;
-    }
-
-    const int32 MaxResolution = FMath::Clamp(Settings.Resolution, 16, 8192);
-    const int32 SourceWidth = FMath::Max(Group.SourceTexture != nullptr ? Group.SourceTexture->GetSurfaceWidth() : MaxResolution, 1);
-    const int32 SourceHeight = FMath::Max(Group.SourceTexture != nullptr ? Group.SourceTexture->GetSurfaceHeight() : MaxResolution, 1);
-    const double ResolutionScale = static_cast<double>(MaxResolution) / FMath::Max(SourceWidth, SourceHeight);
-    const int32 Width = FMath::Clamp(FMath::RoundToInt(SourceWidth * ResolutionScale), 1, 8192);
-    const int32 Height = FMath::Clamp(FMath::RoundToInt(SourceHeight * ResolutionScale), 1, 8192);
-
-    InitializeIntermediateBuffers(OutIntermediateResult, Width, Height, MaxResolution);
-
-    if (!BuildTrianglesAndIslands(
-            WetClothingAsset,
-            Group.LODIndex,
-            Group.MaterialSlotIndex,
-            Group.UVChannelIndex,
-            OutIntermediateResult.UVIslands,
-            OutIntermediateResult.UVTriangles,
-            OutErrorMessage))
-    {
-        return false;
-    }
-
-    RasterizeIslandMask(OutIntermediateResult);
-
-    for (const FWetWrinklePatchPlacement* Patch : Group.Stamps)
-    {
-        if (Patch == nullptr)
-        {
-            continue;
-        }
-
-        if (!RasterizeSinglePatch(OutIntermediateResult, *Patch, OutErrorMessage))
+        if (Group.Stamps.Num() > 0 && !BakeGroup(*WetClothingAsset, Group, Settings, OutResult, OutErrorMessage))
         {
             return false;
         }
     }
 
-    const bool bAnyPatchPixelsRasterized = OutIntermediateResult.PatchCoverageBuffer.ContainsByPredicate(
-        [](const float Coverage)
-        {
-            return Coverage > UE_SMALL_NUMBER;
-        });
-
-    if (!bAnyPatchPixelsRasterized)
+    if (OutResult.BakedMapCount == 0)
     {
-        OutErrorMessage = FString::Printf(
-            TEXT("The selected material slot did not receive any wrinkle pixels during bake on UV channel %d. Check that the patches were placed on this slot and that the active wrinkle UV channel matches the bake target."),
-            Group.UVChannelIndex);
+        OutErrorMessage = TEXT("No wrinkle stamps were found for the selected material slot.");
         return false;
     }
 
-    DilateBakedNormals(OutIntermediateResult, Settings.PaddingPixels);
-
     OutErrorMessage.Reset();
     return true;
-}
-
-void FWetWrinkleNormalMapBaker::DilateBakedNormals(
-    FIntermediateBakeResult& InOutIntermediateResult,
-    const int32 PaddingPixels)
-{
-    const int32 ClampedPaddingPixels = FMath::Clamp(PaddingPixels, 0, 64);
-    if (!InOutIntermediateResult.IsInitialized() || ClampedPaddingPixels <= 0)
-    {
-        return;
-    }
-
-    TArray<bool> FilledMask = InOutIntermediateResult.IslandMask;
-    for (int32 PaddingStep = 0; PaddingStep < ClampedPaddingPixels; ++PaddingStep)
-    {
-        const TArray<FVector3f> PreviousNormals = InOutIntermediateResult.NormalBuffer;
-        const TArray<bool> PreviousMask = FilledMask;
-        bool bWrotePixel = false;
-
-        for (int32 Y = 0; Y < InOutIntermediateResult.Height; ++Y)
-        {
-            for (int32 X = 0; X < InOutIntermediateResult.Width; ++X)
-            {
-                const int32 PixelIndex = Y * InOutIntermediateResult.Width + X;
-                if (PreviousMask[PixelIndex])
-                {
-                    continue;
-                }
-
-                for (int32 OffsetY = -1; OffsetY <= 1; ++OffsetY)
-                {
-                    for (int32 OffsetX = -1; OffsetX <= 1; ++OffsetX)
-                    {
-                        if (OffsetX == 0 && OffsetY == 0)
-                        {
-                            continue;
-                        }
-
-                        const int32 NeighborX = X + OffsetX;
-                        const int32 NeighborY = Y + OffsetY;
-                        if (NeighborX < 0 ||
-                            NeighborY < 0 ||
-                            NeighborX >= InOutIntermediateResult.Width ||
-                            NeighborY >= InOutIntermediateResult.Height)
-                        {
-                            continue;
-                        }
-
-                        const int32 NeighborIndex = NeighborY * InOutIntermediateResult.Width + NeighborX;
-                        if (!PreviousMask[NeighborIndex])
-                        {
-                            continue;
-                        }
-
-                        InOutIntermediateResult.NormalBuffer[PixelIndex] = PreviousNormals[NeighborIndex];
-                        FilledMask[PixelIndex] = true;
-                        bWrotePixel = true;
-                        OffsetX = 2;
-                        OffsetY = 2;
-                    }
-                }
-            }
-        }
-
-        if (!bWrotePixel)
-        {
-            break;
-        }
-    }
-}
-
-void FWetWrinkleNormalMapBaker::ConvertIntermediateToPixels(
-    const FIntermediateBakeResult& IntermediateResult,
-    TArray<FColor>& OutNormalPixels,
-    TArray<FColor>& OutMaskPixels)
-{
-    const int32 PixelCount = IntermediateResult.Width * IntermediateResult.Height;
-    OutNormalPixels.SetNumUninitialized(PixelCount);
-    OutMaskPixels.SetNumUninitialized(PixelCount);
-
-    for (int32 PixelIndex = 0; PixelIndex < PixelCount; ++PixelIndex)
-    {
-        OutNormalPixels[PixelIndex] = EncodeNormal(FVector(IntermediateResult.NormalBuffer[PixelIndex]));
-        const uint8 MaskValue = EncodeUnit(IntermediateResult.PatchCoverageBuffer[PixelIndex]);
-        OutMaskPixels[PixelIndex] = FColor(MaskValue, MaskValue, MaskValue, 255);
-    }
 }
 
 bool FWetWrinkleNormalMapBaker::BakeGroup(
@@ -862,30 +263,123 @@ bool FWetWrinkleNormalMapBaker::BakeGroup(
         return false;
     }
 
-    if (Group.Stamps.Num() == 0)
+    if (Group.SourceTexture == nullptr || Group.Stamps.Num() == 0)
     {
         return true;
     }
 
-    FIntermediateBakeResult IntermediateResult;
-    if (!BuildIntermediateBakeResult(WetClothingAsset, Group, Settings, IntermediateResult, OutErrorMessage))
-    {
-        return false;
-    }
-
-    if (IntermediateResult.FilteredPatchPlacements.Num() == 0)
-    {
-        return true;
-    }
+    const int32 MaxResolution = FMath::Clamp(Settings.Resolution, 16, 8192);
+    const int32 SourceWidth = FMath::Max(Group.SourceTexture->GetSurfaceWidth(), 1);
+    const int32 SourceHeight = FMath::Max(Group.SourceTexture->GetSurfaceHeight(), 1);
+    const double ResolutionScale = static_cast<double>(MaxResolution) / FMath::Max(SourceWidth, SourceHeight);
+    const int32 Width = FMath::Clamp(FMath::RoundToInt(SourceWidth * ResolutionScale), 1, 8192);
+    const int32 Height = FMath::Clamp(FMath::RoundToInt(SourceHeight * ResolutionScale), 1, 8192);
 
     TArray<FColor> NormalPixels;
     TArray<FColor> MaskPixels;
-    ConvertIntermediateToPixels(IntermediateResult, NormalPixels, MaskPixels);
+    NormalPixels.Init(EncodeNormal(FVector(0.0f, 0.0f, 1.0f)), Width * Height);
+    MaskPixels.Init(FColor(0, 0, 0, 255), Width * Height);
 
-    const int32 Width = IntermediateResult.Width;
-    const int32 Height = IntermediateResult.Height;
-    const int32 MaxResolution = IntermediateResult.Resolution;
-    const int32 BakedStampCount = IntermediateResult.FilteredPatchPlacements.Num();
+    int32 BakedStampCount = 0;
+    for (const FWetWrinklePatchPlacement* StampPtr : Group.Stamps)
+    {
+        const FWetWrinklePatchPlacement& Stamp = *StampPtr;
+        FWetWrinkleNormalSource NormalSource(Stamp.NormalPatchTexture);
+        if (!NormalSource.IsValid() || Stamp.BrushRadiusUV <= 0.0f || Stamp.Strength <= 0.0f)
+        {
+            continue;
+        }
+
+        ++BakedStampCount;
+
+        const FVector2D WrappedCenter = WrapUV(Stamp.PositionUV);
+        const FVector2D SafeScale(
+            FMath::Max(FMath::Abs(Stamp.Scale.X), UE_SMALL_NUMBER),
+            FMath::Max(FMath::Abs(Stamp.Scale.Y), UE_SMALL_NUMBER));
+        const float EdgeFadeStart = FMath::Clamp(1.0f - Stamp.Falloff, 0.0f, 0.98f);
+        const float CosRotation = FMath::Cos(Stamp.RotationRadians);
+        const float SinRotation = FMath::Sin(Stamp.RotationRadians);
+
+        for (int32 TileOffsetY = -1; TileOffsetY <= 1; ++TileOffsetY)
+        {
+            for (int32 TileOffsetX = -1; TileOffsetX <= 1; ++TileOffsetX)
+            {
+                const FVector2D TileCenter = WrappedCenter + FVector2D(static_cast<float>(TileOffsetX), static_cast<float>(TileOffsetY));
+                const int32 MinX = FMath::Clamp(FMath::FloorToInt((TileCenter.X - Stamp.BrushRadiusUV) * Width), 0, Width - 1);
+                const int32 MaxX = FMath::Clamp(FMath::CeilToInt((TileCenter.X + Stamp.BrushRadiusUV) * Width), 0, Width - 1);
+                const int32 MinY = FMath::Clamp(FMath::FloorToInt((TileCenter.Y - Stamp.BrushRadiusUV) * Height), 0, Height - 1);
+                const int32 MaxY = FMath::Clamp(FMath::CeilToInt((TileCenter.Y + Stamp.BrushRadiusUV) * Height), 0, Height - 1);
+                if (MinX > MaxX || MinY > MaxY)
+                {
+                    continue;
+                }
+
+                for (int32 PixelY = MinY; PixelY <= MaxY; ++PixelY)
+                {
+                    for (int32 PixelX = MinX; PixelX <= MaxX; ++PixelX)
+                    {
+                        const FVector2D PixelUV(
+                            (static_cast<float>(PixelX) + 0.5f) / static_cast<float>(Width),
+                            (static_cast<float>(PixelY) + 0.5f) / static_cast<float>(Height));
+                        const FVector2D DeltaUV(
+                            WrappedDelta(PixelUV.X - TileCenter.X),
+                            WrappedDelta(PixelUV.Y - TileCenter.Y));
+                        const FVector2D Local = DeltaUV / FMath::Max(Stamp.BrushRadiusUV, UE_SMALL_NUMBER);
+                        const float DistanceFromCenter = Local.Size();
+                        if (DistanceFromCenter > 1.0f)
+                        {
+                            continue;
+                        }
+
+                        const float EdgeFade = 1.0f - SmoothStep(EdgeFadeStart, 1.0f, DistanceFromCenter);
+                        if (EdgeFade <= UE_SMALL_NUMBER)
+                        {
+                            continue;
+                        }
+
+                        const float BrushLocalX = (CosRotation * Local.X + SinRotation * Local.Y) / SafeScale.X;
+                        const float BrushLocalY = (-SinRotation * Local.X + CosRotation * Local.Y) / SafeScale.Y;
+                        if (FMath::Abs(BrushLocalX) > 1.0f || FMath::Abs(BrushLocalY) > 1.0f)
+                        {
+                            continue;
+                        }
+
+                        const FVector2D BrushTextureUV(BrushLocalX * 0.5f + 0.5f, BrushLocalY * 0.5f + 0.5f);
+                        const FVector BrushNormalTS = NormalSource.SampleNormalTS(BrushTextureUV);
+                        const FVector RotatedBrushNormalTS(
+                            BrushNormalTS.X * CosRotation - BrushNormalTS.Y * SinRotation,
+                            BrushNormalTS.X * SinRotation + BrushNormalTS.Y * CosRotation,
+                            BrushNormalTS.Z);
+                        const float StrengthScale = FMath::Max(Stamp.Strength * EdgeFade, 0.0f);
+                        const FVector StampNormalTS =
+                            FVector(
+                                RotatedBrushNormalTS.X * StrengthScale,
+                                RotatedBrushNormalTS.Y * StrengthScale,
+                                RotatedBrushNormalTS.Z)
+                                .GetSafeNormal(UE_SMALL_NUMBER, FVector(0.0f, 0.0f, 1.0f));
+
+                        const int32 PixelIndex = PixelY * Width + PixelX;
+                        const FVector ExistingNormalTS = DecodeNormal(NormalPixels[PixelIndex]);
+                        const FVector BlendedNormalTS =
+                            FVector(
+                                ExistingNormalTS.X + StampNormalTS.X,
+                                ExistingNormalTS.Y + StampNormalTS.Y,
+                                ExistingNormalTS.Z * StampNormalTS.Z)
+                                .GetSafeNormal(UE_SMALL_NUMBER, FVector(0.0f, 0.0f, 1.0f));
+                        NormalPixels[PixelIndex] = EncodeNormal(BlendedNormalTS);
+
+                        const uint8 MaskValue = EncodeUnit(FMath::Max(static_cast<float>(MaskPixels[PixelIndex].R) / 255.0f, EdgeFade));
+                        MaskPixels[PixelIndex] = FColor(MaskValue, MaskValue, MaskValue, 255);
+                    }
+                }
+            }
+        }
+    }
+
+    if (BakedStampCount == 0)
+    {
+        return true;
+    }
 
     const FString BaseSuffix = FString::Printf(
         TEXT("Slot%d_UV%d_LOD%d"),
@@ -959,7 +453,6 @@ bool FWetWrinkleNormalMapBaker::BakeGroup(
 
     InOutResult.BakedMapCount++;
     InOutResult.BakedStampCount += BakedStampCount;
-    InOutResult.BakedUVChannelIndices.AddUnique(Group.UVChannelIndex);
     if (NormalTexture != nullptr)
     {
         InOutResult.BakedNormalMaps.Add(NormalTexture);
@@ -981,7 +474,7 @@ FString FWetWrinkleNormalMapBaker::MakeBuildSignature(
 {
     FString Canonical;
     Canonical.Reserve(4096);
-    Canonical += TEXT("DWC.WrinkleNormalMap.v2|");
+    Canonical += TEXT("DWC.WrinkleNormalMap.v1|");
     Canonical += WetClothingAsset.GetPathName();
     Canonical += FString::Printf(
         TEXT("|Slot=%d|UV=%d|LOD=%d|Size=%dx%d|Source=%s"),
@@ -1057,8 +550,8 @@ UTexture2D* FWetWrinkleNormalMapBaker::CreateOrUpdateTextureAsset(
     Texture->CompressionSettings = bNormalMap ? TC_Normalmap : TC_Grayscale;
     Texture->MipGenSettings = TMGS_NoMipmaps;
     Texture->Filter = TF_Bilinear;
-    Texture->AddressX = TA_Clamp;
-    Texture->AddressY = TA_Clamp;
+    Texture->AddressX = TA_Wrap;
+    Texture->AddressY = TA_Wrap;
     Texture->PostEditChange();
     Texture->UpdateResource();
     Texture->MarkPackageDirty();

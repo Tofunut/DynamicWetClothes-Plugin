@@ -4,12 +4,16 @@
 #include "DataAssets/WetClothingAsset.h"
 #include "Engine/SkeletalMesh.h"
 #include "Core/DWCEditorStyle.h"
+#include "Framework/MultiBox/MultiBoxBuilder.h"
 #include "Styling/AppStyle.h"
 #include "Styling/CoreStyle.h"
 #include "WetClothing/Common/Analysis/WetClothingAssetMeshAnalyzer.h"
 #include "WetClothing/Common/Texture/WetClothingMaterialTextureResolver.h"
 #include "WetClothing/Common/Widgets/SWetClothingMaterialSlotPreview.h"
 #include "Widgets/Input/SButton.h"
+#include "Widgets/Input/SComboBox.h"
+#include "Widgets/Input/SComboButton.h"
+#include "Widgets/Input/SSlider.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SSeparator.h"
@@ -23,20 +27,36 @@ namespace
     TArray<FWetClothingAssetUVTriangle> BuildMaterialSlotPreviewTriangles(const USkeletalMesh* SkeletalMesh, int32 MaterialSlotIndex)
     {
         TArray<FWetClothingAssetUVTriangle> PreviewTriangles;
-        if (SkeletalMesh == nullptr || MaterialSlotIndex == INDEX_NONE)
+        if (SkeletalMesh == nullptr)
         {
             return PreviewTriangles;
         }
 
-        TArray<FWetClothingAssetUVIsland> BuiltIslands;
-        if (!FWetClothingAssetMeshAnalyzer::BuildMaterialSlotUVIslands(SkeletalMesh, 0, 0, MaterialSlotIndex, BuiltIslands, nullptr))
+        auto AppendMaterialSlotTriangles = [SkeletalMesh, &PreviewTriangles](int32 SlotIndex)
         {
-            return PreviewTriangles;
-        }
+            TArray<FWetClothingAssetUVIsland> BuiltIslands;
+            if (!FWetClothingAssetMeshAnalyzer::BuildMaterialSlotUVIslands(SkeletalMesh, 0, 0, SlotIndex, BuiltIslands, nullptr))
+            {
+                return;
+            }
 
-        for (const FWetClothingAssetUVIsland& Island : BuiltIslands)
+            for (const FWetClothingAssetUVIsland& Island : BuiltIslands)
+            {
+                PreviewTriangles.Append(Island.UVTriangles);
+            }
+        };
+
+        if (MaterialSlotIndex == INDEX_NONE)
         {
-            PreviewTriangles.Append(Island.UVTriangles);
+            const int32 MaterialCount = SkeletalMesh->GetMaterials().Num();
+            for (int32 SlotIndex = 0; SlotIndex < MaterialCount; ++SlotIndex)
+            {
+                AppendMaterialSlotTriangles(SlotIndex);
+            }
+        }
+        else
+        {
+            AppendMaterialSlotTriangles(MaterialSlotIndex);
         }
 
         return PreviewTriangles;
@@ -78,6 +98,313 @@ TSharedRef<SWidget> FWetClothingEditorCommonWidgets::BuildSectionHeader(const TA
     }
 
     return Header;
+}
+
+FText FWetClothingEditorCommonWidgets::GetUVDisplayModeLabel(EWetClothingAssetUVDisplayMode DisplayMode)
+{
+    return DisplayMode == EWetClothingAssetUVDisplayMode::OutlineOnly
+               ? NSLOCTEXT("WetClothingEditorCommonWidgets", "UVDisplayModeOutline", "Outline")
+               : NSLOCTEXT("WetClothingEditorCommonWidgets", "UVDisplayModeNormal", "Normal");
+}
+
+TSharedRef<SWidget> FWetClothingEditorCommonWidgets::GenerateUVDisplayModeComboItem(TSharedPtr<EWetClothingAssetUVDisplayMode> Item)
+{
+    return SNew(STextBlock)
+        .Text(GetUVDisplayModeLabel(Item.IsValid() ? *Item : EWetClothingAssetUVDisplayMode::Normal));
+}
+
+
+TSharedRef<SWidget> FWetClothingEditorCommonWidgets::BuildTextureComboContent(
+    TSharedPtr<FWetClothingTextureItem> Item,
+    float ThumbnailSize,
+    bool bCompactLayout,
+    TSharedPtr<FAssetThumbnailPool> ThumbnailPool,
+    TArray<TSharedPtr<FAssetThumbnail>>* ThumbnailSink)
+{
+    TSharedRef<SWidget> ThumbnailWidget =
+        SNew(SBorder)
+        .Padding(0.0f)
+        .BorderImage(FAppStyle::Get().GetBrush(TEXT("WhiteBrush")))
+        .BorderBackgroundColor(FLinearColor(0.06f, 0.06f, 0.06f, 1.0f));
+
+    if (Item.IsValid() && Item->Texture.IsValid() && ThumbnailPool.IsValid())
+    {
+        const uint32 ThumbnailDimension = static_cast<uint32>(FMath::RoundToInt(ThumbnailSize));
+        TSharedPtr<FAssetThumbnail> Thumbnail = MakeShared<FAssetThumbnail>(Item->Texture.Get(), ThumbnailDimension, ThumbnailDimension, ThumbnailPool);
+        if (ThumbnailSink != nullptr)
+        {
+            ThumbnailSink->Add(Thumbnail);
+        }
+
+        FAssetThumbnailConfig ThumbnailConfig;
+        ThumbnailConfig.bAllowFadeIn = false;
+        ThumbnailWidget = Thumbnail->MakeThumbnailWidget(ThumbnailConfig);
+    }
+
+    return SNew(SHorizontalBox)
+        + SHorizontalBox::Slot()
+              .AutoWidth()
+              .VAlign(VAlign_Center)
+                  [SNew(SBox)
+                       .WidthOverride(ThumbnailSize)
+                       .HeightOverride(ThumbnailSize)
+                           [ThumbnailWidget]]
+        + SHorizontalBox::Slot()
+              .FillWidth(1.0f)
+              .VAlign(VAlign_Center)
+              .Padding(bCompactLayout ? FMargin(8.0f, 0.0f, 18.0f, 0.0f) : FMargin(8.0f, 0.0f, 6.0f, 0.0f))
+                  [SNew(STextBlock)
+                       .Text(Item.IsValid() ? FText::FromString(Item->Label) : NSLOCTEXT("WetClothingEditorCommonWidgets", "SelectTextureComboItem", "Select Texture"))
+                       .OverflowPolicy(ETextOverflowPolicy::Ellipsis)];
+}
+
+TSharedRef<SWidget> FWetClothingEditorCommonWidgets::GenerateTextureComboItem(
+    TSharedPtr<FWetClothingTextureItem> Item,
+    TSharedPtr<FAssetThumbnailPool> ThumbnailPool,
+    TArray<TSharedPtr<FAssetThumbnail>>* ThumbnailSink)
+{
+    return BuildTextureComboContent(Item, 36.0f, false, ThumbnailPool, ThumbnailSink);
+}
+
+TSharedRef<SWidget> FWetClothingEditorCommonWidgets::BuildUVViewTextureSelector(
+    TArray<TSharedPtr<FWetClothingTextureItem>>* TextureItems,
+    TSharedPtr<FWetClothingTextureItem> SelectedTextureItem,
+    TSharedPtr<FAssetThumbnailPool> ThumbnailPool,
+    TArray<TSharedPtr<FAssetThumbnail>>* ThumbnailSink,
+    TSharedPtr<SComboBox<TSharedPtr<FWetClothingTextureItem>>>* OutComboBox,
+    TSharedPtr<SBox>* OutSelectedContentBox,
+    TFunction<void(TSharedPtr<FWetClothingTextureItem>, ESelectInfo::Type)> OnSelectionChanged)
+{
+    TSharedPtr<SComboBox<TSharedPtr<FWetClothingTextureItem>>> LocalComboBox;
+    TSharedPtr<SBox> LocalSelectedContentBox;
+
+    TSharedRef<SWidget> ComboWidget =
+        SAssignNew(LocalComboBox, SComboBox<TSharedPtr<FWetClothingTextureItem>>)
+        .OptionsSource(TextureItems)
+        .InitiallySelectedItem(SelectedTextureItem)
+        .OnGenerateWidget_Lambda([ThumbnailPool, ThumbnailSink](TSharedPtr<FWetClothingTextureItem> Item)
+        {
+            return FWetClothingEditorCommonWidgets::GenerateTextureComboItem(Item, ThumbnailPool, ThumbnailSink);
+        })
+        .OnSelectionChanged_Lambda([OnSelectionChanged](TSharedPtr<FWetClothingTextureItem> Item, ESelectInfo::Type SelectInfo)
+        {
+            if (OnSelectionChanged)
+            {
+                OnSelectionChanged(Item, SelectInfo);
+            }
+        })
+        .MaxListHeight(360.0f)
+        .ContentPadding(FMargin(6.0f, 4.0f))
+            [SAssignNew(LocalSelectedContentBox, SBox)
+                 [BuildTextureComboContent(SelectedTextureItem, 24.0f, true, ThumbnailPool, ThumbnailSink)]];
+
+    if (OutComboBox != nullptr)
+    {
+        *OutComboBox = LocalComboBox;
+    }
+    if (OutSelectedContentBox != nullptr)
+    {
+        *OutSelectedContentBox = LocalSelectedContentBox;
+    }
+
+    return ComboWidget;
+}
+
+TSharedRef<SWidget> FWetClothingEditorCommonWidgets::BuildUVViewTextureAndViewRow(
+    const TSharedRef<SWidget>& TextureSelector,
+    const TSharedRef<SWidget>& ViewOptionsButton)
+{
+    return SNew(SHorizontalBox)
+        + SHorizontalBox::Slot()
+              .FillWidth(1.0f)
+                  [SNew(SBorder)
+                       .Padding(6.0f)
+                       .BorderImage(FAppStyle::Get().GetBrush(TEXT("ToolPanel.GroupBorder")))
+                           [TextureSelector]]
+        + SHorizontalBox::Slot()
+              .AutoWidth()
+              .VAlign(VAlign_Center)
+              .Padding(10.0f, 0.0f, 0.0f, 0.0f)
+                  [ViewOptionsButton];
+}
+
+TSharedRef<SWidget> FWetClothingEditorCommonWidgets::BuildUVViewOptionsButton(
+    TArray<TSharedPtr<EWetClothingAssetUVDisplayMode>>* DisplayModeItems,
+    TSharedPtr<EWetClothingAssetUVDisplayMode> SelectedDisplayModeItem,
+    TAttribute<FText> SelectedDisplayModeText,
+    TFunction<void(TSharedPtr<EWetClothingAssetUVDisplayMode>)> OnDisplayModeChanged,
+    TAttribute<float> BackgroundTextureOpacity,
+    TFunction<void(float)> OnBackgroundTextureOpacityChanged,
+    TAttribute<float> UVIslandLineOpacity,
+    TFunction<void(float)> OnUVIslandLineOpacityChanged,
+    TAttribute<float> UVIslandLineThicknessScale,
+    TFunction<void(float)> OnUVIslandLineThicknessScaleChanged)
+{
+    const FSlateFontInfo LabelFont = FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 9);
+
+    auto BuildPercentText = [](const TAttribute<float>& ValueAttribute)
+    {
+        return TAttribute<FText>::Create(TAttribute<FText>::FGetter::CreateLambda([ValueAttribute]()
+        {
+            const float Value = ValueAttribute.IsSet() ? ValueAttribute.Get() : 1.0f;
+            return FText::Format(
+                NSLOCTEXT("WetClothingEditorCommonWidgets", "UVViewOpacityPercent", "{0}%"),
+                FText::AsNumber(FMath::RoundToInt(FMath::Clamp(Value, 0.0f, 1.0f) * 100.0f)));
+        }));
+    };
+
+    auto BuildLineWeightText = [](const TAttribute<float>& ValueAttribute)
+    {
+        return TAttribute<FText>::Create(TAttribute<FText>::FGetter::CreateLambda([ValueAttribute]()
+        {
+            const float Value = ValueAttribute.IsSet() ? ValueAttribute.Get() : 1.0f;
+            FNumberFormattingOptions Options;
+            Options.MinimumFractionalDigits = 1;
+            Options.MaximumFractionalDigits = 1;
+            return FText::Format(
+                NSLOCTEXT("WetClothingEditorCommonWidgets", "UVViewLineWeightValue", "{0}x"),
+                FText::AsNumber(FMath::Clamp(Value, 0.25f, 6.0f), &Options));
+        }));
+    };
+
+    return SNew(SComboButton)
+        .ContentPadding(FMargin(8.0f, 3.0f))
+        .ButtonContent()
+            [SNew(STextBlock)
+                 .Text(NSLOCTEXT("WetClothingEditorCommonWidgets", "UVViewOptionsButton", "View"))]
+        .MenuContent()
+            [SNew(SBox)
+                 .WidthOverride(270.0f)
+                 .Padding(10.0f)
+                     [SNew(SVerticalBox)
+
+                      + SVerticalBox::Slot()
+                            .AutoHeight()
+                            .Padding(0.0f, 0.0f, 0.0f, 6.0f)
+                                [SNew(STextBlock)
+                                     .Text(NSLOCTEXT("WetClothingEditorCommonWidgets", "UVViewModeLabel", "Mode"))
+                                     .Font(LabelFont)]
+
+                      + SVerticalBox::Slot()
+                            .AutoHeight()
+                            .Padding(0.0f, 0.0f, 0.0f, 12.0f)
+                                [SNew(SComboBox<TSharedPtr<EWetClothingAssetUVDisplayMode>>)
+                                     .OptionsSource(DisplayModeItems)
+                                     .InitiallySelectedItem(SelectedDisplayModeItem)
+                                     .OnGenerateWidget_Lambda([](TSharedPtr<EWetClothingAssetUVDisplayMode> Item)
+                                     {
+                                         return FWetClothingEditorCommonWidgets::GenerateUVDisplayModeComboItem(Item);
+                                     })
+                                     .OnSelectionChanged_Lambda([OnDisplayModeChanged](TSharedPtr<EWetClothingAssetUVDisplayMode> Item, ESelectInfo::Type)
+                                     {
+                                         if (Item.IsValid() && OnDisplayModeChanged)
+                                         {
+                                             OnDisplayModeChanged(Item);
+                                         }
+                                     })
+                                         [SNew(STextBlock)
+                                              .Text(SelectedDisplayModeText)]]
+
+                      + SVerticalBox::Slot()
+                            .AutoHeight()
+                            .Padding(0.0f, 0.0f, 0.0f, 4.0f)
+                                [SNew(SHorizontalBox)
+
+                                 + SHorizontalBox::Slot()
+                                       .FillWidth(1.0f)
+                                       .VAlign(VAlign_Center)
+                                           [SNew(STextBlock)
+                                                .Text(NSLOCTEXT("WetClothingEditorCommonWidgets", "UVViewBackgroundOpacityLabel", "Background Texture Opacity"))
+                                                .Font(LabelFont)]
+
+                                 + SHorizontalBox::Slot()
+                                       .AutoWidth()
+                                       .VAlign(VAlign_Center)
+                                           [SNew(STextBlock)
+                                                .Text(BuildPercentText(BackgroundTextureOpacity))
+                                                .Font(LabelFont)]]
+
+                      + SVerticalBox::Slot()
+                            .AutoHeight()
+                            .Padding(0.0f, 0.0f, 0.0f, 12.0f)
+                                [SNew(SSlider)
+                                     .MinValue(0.0f)
+                                     .MaxValue(1.0f)
+                                     .Value(BackgroundTextureOpacity)
+                                     .OnValueChanged_Lambda([OnBackgroundTextureOpacityChanged](float NewValue)
+                                     {
+                                         if (OnBackgroundTextureOpacityChanged)
+                                         {
+                                             OnBackgroundTextureOpacityChanged(NewValue);
+                                         }
+                                     })]
+
+                      + SVerticalBox::Slot()
+                            .AutoHeight()
+                            .Padding(0.0f, 0.0f, 0.0f, 4.0f)
+                                [SNew(SHorizontalBox)
+
+                                 + SHorizontalBox::Slot()
+                                       .FillWidth(1.0f)
+                                       .VAlign(VAlign_Center)
+                                           [SNew(STextBlock)
+                                                .Text(NSLOCTEXT("WetClothingEditorCommonWidgets", "UVViewIslandLineOpacityLabel", "UV Island Line Opacity"))
+                                                .Font(LabelFont)]
+
+                                 + SHorizontalBox::Slot()
+                                       .AutoWidth()
+                                       .VAlign(VAlign_Center)
+                                           [SNew(STextBlock)
+                                                .Text(BuildPercentText(UVIslandLineOpacity))
+                                                .Font(LabelFont)]]
+
+                      + SVerticalBox::Slot()
+                            .AutoHeight()
+                            .Padding(0.0f, 0.0f, 0.0f, 12.0f)
+                                [SNew(SSlider)
+                                     .MinValue(0.0f)
+                                     .MaxValue(1.0f)
+                                     .Value(UVIslandLineOpacity)
+                                     .OnValueChanged_Lambda([OnUVIslandLineOpacityChanged](float NewValue)
+                                     {
+                                         if (OnUVIslandLineOpacityChanged)
+                                         {
+                                             OnUVIslandLineOpacityChanged(NewValue);
+                                         }
+                                     })]
+
+                      + SVerticalBox::Slot()
+                            .AutoHeight()
+                            .Padding(0.0f, 0.0f, 0.0f, 4.0f)
+                                [SNew(SHorizontalBox)
+
+                                 + SHorizontalBox::Slot()
+                                       .FillWidth(1.0f)
+                                       .VAlign(VAlign_Center)
+                                           [SNew(STextBlock)
+                                                .Text(NSLOCTEXT("WetClothingEditorCommonWidgets", "UVViewLineWeightLabel", "Line Weight"))
+                                                .Font(LabelFont)]
+
+                                 + SHorizontalBox::Slot()
+                                       .AutoWidth()
+                                       .VAlign(VAlign_Center)
+                                           [SNew(STextBlock)
+                                                .Text(BuildLineWeightText(UVIslandLineThicknessScale))
+                                                .Font(LabelFont)]]
+
+                      + SVerticalBox::Slot()
+                            .AutoHeight()
+                                [SNew(SSlider)
+                                     .MinValue(0.25f)
+                                     .MaxValue(6.0f)
+                                     .Value(UVIslandLineThicknessScale)
+                                     .OnValueChanged_Lambda([OnUVIslandLineThicknessScaleChanged](float NewValue)
+                                     {
+                                         if (OnUVIslandLineThicknessScaleChanged)
+                                         {
+                                             OnUVIslandLineThicknessScaleChanged(NewValue);
+                                         }
+                                     })]]];
 }
 
 TSharedRef<SWidget> FWetClothingEditorCommonWidgets::BuildPreviewSection(
@@ -134,14 +461,83 @@ TSharedRef<SWidget> FWetClothingEditorCommonWidgets::BuildPreviewSection(
                        [PreviewContent]];
 }
 
+TSharedRef<SWidget> FWetClothingEditorCommonWidgets::BuildBakeMapsMenu(const FWetClothingBakeMapsMenuArgs& Args)
+{
+    FMenuBuilder MenuBuilder(true, nullptr);
+
+    MenuBuilder.BeginSection(TEXT("BakeAll"), NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeAllMapsMenuSection", "BAKE"));
+    MenuBuilder.AddMenuEntry(
+        NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeAllMapsMenuItem", "Bake All Maps"),
+        NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeAllMapsMenuItemTooltip", "Bake every map supported by the current editor mode."),
+        FSlateIcon(),
+        FUIAction(FExecuteAction::CreateLambda([OnBakeAllMaps = Args.OnBakeAllMaps]()
+        {
+            if (OnBakeAllMaps.IsBound())
+            {
+                OnBakeAllMaps.Execute();
+            }
+        })));
+    MenuBuilder.EndSection();
+
+    MenuBuilder.BeginSection(TEXT("BakeMapTypes"), NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeMapTypesMenuSection", "MAP TYPES"));
+    MenuBuilder.AddMenuEntry(
+        NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeWetnessProfileMapsMenuItem", "Bake Wetness Profile Maps"),
+        NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeWetnessProfileMapsMenuItemTooltip", "Bake wetness profile maps."),
+        FSlateIcon(),
+        FUIAction(FExecuteAction::CreateLambda([OnBakeWetnessProfileMaps = Args.OnBakeWetnessProfileMaps]()
+        {
+            if (OnBakeWetnessProfileMaps.IsBound())
+            {
+                OnBakeWetnessProfileMaps.Execute();
+            }
+        })));
+    MenuBuilder.AddMenuEntry(
+        NSLOCTEXT("WetClothingEditorCommonWidgets", "BuildTransparencyRevealMapsMenuItem", "Build & Save Transparency Reveal Maps"),
+        NSLOCTEXT("WetClothingEditorCommonWidgets", "BuildTransparencyRevealMapsMenuItemTooltip", "Build reveal textures/materials for Transparency mode and save the generated assets."),
+        FSlateIcon(),
+        FUIAction(FExecuteAction::CreateLambda([OnBakeTransparencyRevealMaps = Args.OnBakeTransparencyRevealMaps]()
+        {
+            if (OnBakeTransparencyRevealMaps.IsBound())
+            {
+                OnBakeTransparencyRevealMaps.Execute();
+            }
+        })));
+    MenuBuilder.AddMenuEntry(
+        NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeWrinkleNormalMapMenuItem", "Bake Wrinkle Normal Map"),
+        NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeWrinkleNormalMapMenuItemTooltip", "Bake a wrinkle normal map."),
+        FSlateIcon(),
+        FUIAction(FExecuteAction::CreateLambda([OnBakeWrinkleNormalMap = Args.OnBakeWrinkleNormalMap]()
+        {
+            if (OnBakeWrinkleNormalMap.IsBound())
+            {
+                OnBakeWrinkleNormalMap.Execute();
+            }
+        })));
+    MenuBuilder.AddMenuEntry(
+        NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeWrinkleMaskMenuItem", "Bake Wrinkle Mask"),
+        NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeWrinkleMaskMenuItemTooltip", "Bake a wrinkle mask."),
+        FSlateIcon(),
+        FUIAction(FExecuteAction::CreateLambda([OnBakeWrinkleMask = Args.OnBakeWrinkleMask]()
+        {
+            if (OnBakeWrinkleMask.IsBound())
+            {
+                OnBakeWrinkleMask.Execute();
+            }
+        })));
+    MenuBuilder.EndSection();
+
+    return MenuBuilder.MakeWidget();
+}
+
 TSharedRef<ITableRow> FWetClothingEditorCommonWidgets::GenerateMaterialSlotRow(
     TSharedPtr<FWetClothingMaterialSlotItem> Item,
     const TSharedRef<STableViewBase>& OwnerTable,
     const FWetClothingMaterialSlotRowArgs& Args)
 {
-    UMaterialInterface* MaterialObject = Item.IsValid() ? Item->Material.Get() : nullptr;
     const int32 MaterialSlotIndex = Item.IsValid() ? Item->SlotIndex : INDEX_NONE;
-    const FText SlotTitle = Item.IsValid() && MaterialSlotIndex == INDEX_NONE
+    const bool  bIsAllSlotsRow = Item.IsValid() && MaterialSlotIndex == INDEX_NONE;
+    UMaterialInterface* MaterialObject = !bIsAllSlotsRow && Item.IsValid() ? Item->Material.Get() : nullptr;
+    const FText SlotTitle = bIsAllSlotsRow
                                 ? NSLOCTEXT("WetClothingEditorCommonWidgets", "AllMaterialSlotsTitle", "All Slots")
                                 : Item.IsValid()
                                 ? FText::Format(
@@ -155,7 +551,19 @@ TSharedRef<ITableRow> FWetClothingEditorCommonWidgets::GenerateMaterialSlotRow(
         .BorderImage(FAppStyle::Get().GetBrush(TEXT("WhiteBrush")))
         .BorderBackgroundColor(FLinearColor(0.06f, 0.06f, 0.06f, 1.0f));
 
-    if (MaterialObject != nullptr && Args.ThumbnailPool.IsValid())
+    if (bIsAllSlotsRow && Args.TargetMesh != nullptr && Args.ThumbnailPool.IsValid())
+    {
+        TSharedPtr<FAssetThumbnail> MeshThumbnail = MakeShared<FAssetThumbnail>(Args.TargetMesh, 48, 48, Args.ThumbnailPool);
+        if (Args.ThumbnailSink != nullptr)
+        {
+            Args.ThumbnailSink->Add(MeshThumbnail);
+        }
+
+        FAssetThumbnailConfig ThumbnailConfig;
+        ThumbnailConfig.bAllowFadeIn = false;
+        ThumbnailWidget = MeshThumbnail->MakeThumbnailWidget(ThumbnailConfig);
+    }
+    else if (MaterialObject != nullptr && Args.ThumbnailPool.IsValid())
     {
         TSharedPtr<FAssetThumbnail> Thumbnail = MakeShared<FAssetThumbnail>(MaterialObject, 48, 48, Args.ThumbnailPool);
         if (Args.ThumbnailSink != nullptr)
@@ -168,9 +576,9 @@ TSharedRef<ITableRow> FWetClothingEditorCommonWidgets::GenerateMaterialSlotRow(
         ThumbnailWidget = Thumbnail->MakeThumbnailWidget(ThumbnailConfig);
     }
 
-    UTexture* SlotPreviewTexture = Args.OverridePreviewTexture != nullptr && MaterialSlotIndex == Args.SelectedMaterialSlotIndex
+    UTexture* SlotPreviewTexture = !bIsAllSlotsRow && Args.OverridePreviewTexture != nullptr && MaterialSlotIndex == Args.SelectedMaterialSlotIndex
                                        ? Args.OverridePreviewTexture
-                                       : FWetClothingMaterialTextureResolver::ResolveBestMaterialTexture(MaterialObject);
+                                       : (!bIsAllSlotsRow ? FWetClothingMaterialTextureResolver::ResolveBestMaterialTexture(MaterialObject) : nullptr);
 
     TArray<FWetClothingAssetUVTriangle> SlotPreviewTriangles = BuildMaterialSlotPreviewTriangles(Args.TargetMesh, MaterialSlotIndex);
     TSharedRef<SWidget> SlotPreviewWidget =
@@ -179,66 +587,75 @@ TSharedRef<ITableRow> FWetClothingEditorCommonWidgets::GenerateMaterialSlotRow(
         .BorderImage(FAppStyle::Get().GetBrush(TEXT("Brushes.Panel")))
             [SNew(SWetClothingMaterialSlotPreview)
                  .Triangles(MoveTemp(SlotPreviewTriangles))
-                 .PreviewTexture(SlotPreviewTexture)];
+                 .PreviewTexture(SlotPreviewTexture)
+                 .DrawWireframe(true)];
 
-    const bool bWettable = Item.IsValid() && Item->bIsWettableSlot;
-    const FSlateColor WettableColor = bWettable
-                                           ? FSlateColor(FLinearColor(0.35f, 0.85f, 1.0f, 1.0f))
-                                           : FSlateColor(FLinearColor(1.0f, 0.36f, 0.36f, 1.0f));
-    const FName WettableBrushName = bWettable
-                                        ? TEXT("DWCEditor.Part.IsWettable.True")
-                                        : TEXT("DWCEditor.Part.IsWettable.False");
+    TSharedRef<SHorizontalBox> RowContent = SNew(SHorizontalBox);
+
+    RowContent->AddSlot()
+        .AutoWidth()
+        .VAlign(VAlign_Center)
+        .Padding(0.0f, 0.0f, 8.0f, 0.0f)
+            [SNew(SBox)
+                 .WidthOverride(52.0f)
+                 .HeightOverride(52.0f)
+                     [ThumbnailWidget]];
+
+    if (!bIsAllSlotsRow)
+    {
+        RowContent->AddSlot()
+            .AutoWidth()
+            .VAlign(VAlign_Center)
+            .Padding(0.0f, 0.0f, 8.0f, 0.0f)
+                [SNew(SBox)
+                     .WidthOverride(52.0f)
+                     .HeightOverride(52.0f)
+                         [SlotPreviewWidget]];
+    }
+
+    RowContent->AddSlot()
+        .FillWidth(1.0f)
+        .VAlign(VAlign_Center)
+            [SNew(STextBlock)
+                 .Text(SlotTitle)
+                 .OverflowPolicy(ETextOverflowPolicy::Ellipsis)];
+
+    if (!bIsAllSlotsRow)
+    {
+        const bool bWettable = Item.IsValid() && Item->bIsWettableSlot;
+        const FSlateColor WettableColor = bWettable
+                                               ? FSlateColor(FLinearColor(0.35f, 0.85f, 1.0f, 1.0f))
+                                               : FSlateColor(FLinearColor(1.0f, 0.36f, 0.36f, 1.0f));
+        const FName WettableBrushName = bWettable
+                                            ? TEXT("DWCEditor.Part.IsWettable.True")
+                                            : TEXT("DWCEditor.Part.IsWettable.False");
+
+        RowContent->AddSlot()
+            .AutoWidth()
+            .VAlign(VAlign_Center)
+            .Padding(8.0f, 0.0f, 0.0f, 0.0f)
+                [SNew(SButton)
+                     .ButtonStyle(FAppStyle::Get(), TEXT("NoBorder"))
+                     .ContentPadding(FMargin(4.0f, 2.0f))
+                     .ToolTipText(NSLOCTEXT("WetClothingEditorCommonWidgets", "WettableSlotTooltip", "Toggle whether this material slot can be wetted."))
+                     .OnClicked_Lambda([OnClicked = Args.OnWettableSlotClicked, MaterialSlotIndex]()
+                     {
+                         return OnClicked.IsBound() ? OnClicked.Execute(MaterialSlotIndex) : FReply::Handled();
+                     })
+                         [SNew(SBox)
+                              .WidthOverride(30.0f)
+                              .HeightOverride(30.0f)
+                              .HAlign(HAlign_Center)
+                              .VAlign(VAlign_Center)
+                                  [SNew(SImage)
+                                       .DesiredSizeOverride(FVector2D(30.0f, 30.0f))
+                                       .Image(FDWCEditorStyle::GetBrush(WettableBrushName))
+                                       .ColorAndOpacity(WettableColor)]]];
+    }
 
     return SNew(STableRow<TSharedPtr<FWetClothingMaterialSlotItem>>, OwnerTable)
         .Padding(4.0f)
-            [SNew(SHorizontalBox)
-
-             + SHorizontalBox::Slot()
-                   .AutoWidth()
-                   .VAlign(VAlign_Center)
-                   .Padding(0.0f, 0.0f, 8.0f, 0.0f)
-                       [SNew(SBox)
-                            .WidthOverride(52.0f)
-                            .HeightOverride(52.0f)
-                                [ThumbnailWidget]]
-
-             + SHorizontalBox::Slot()
-                   .AutoWidth()
-                   .VAlign(VAlign_Center)
-                   .Padding(0.0f, 0.0f, 8.0f, 0.0f)
-                       [SNew(SBox)
-                            .WidthOverride(52.0f)
-                            .HeightOverride(52.0f)
-                                [SlotPreviewWidget]]
-
-             + SHorizontalBox::Slot()
-                   .FillWidth(1.0f)
-                   .VAlign(VAlign_Center)
-                       [SNew(STextBlock)
-                            .Text(SlotTitle)
-                            .OverflowPolicy(ETextOverflowPolicy::Ellipsis)]
-
-             + SHorizontalBox::Slot()
-                   .AutoWidth()
-                   .VAlign(VAlign_Center)
-                   .Padding(8.0f, 0.0f, 0.0f, 0.0f)
-                       [SNew(SButton)
-                            .ButtonStyle(FAppStyle::Get(), TEXT("NoBorder"))
-                            .ContentPadding(FMargin(4.0f, 2.0f))
-                            .ToolTipText(NSLOCTEXT("WetClothingEditorCommonWidgets", "WettableSlotTooltip", "Toggle whether this material slot can be wetted."))
-                            .OnClicked_Lambda([OnClicked = Args.OnWettableSlotClicked, MaterialSlotIndex]()
-                            {
-                                return OnClicked.IsBound() ? OnClicked.Execute(MaterialSlotIndex) : FReply::Handled();
-                            })
-                                [SNew(SBox)
-                                     .WidthOverride(30.0f)
-                                     .HeightOverride(30.0f)
-                                     .HAlign(HAlign_Center)
-                                     .VAlign(VAlign_Center)
-                                         [SNew(SImage)
-                                              .DesiredSizeOverride(FVector2D(30.0f, 30.0f))
-                                              .Image(FDWCEditorStyle::GetBrush(WettableBrushName))
-                                              .ColorAndOpacity(WettableColor)]]]];
+            [RowContent];
 }
 
 TSharedRef<ITableRow> FWetClothingEditorCommonWidgets::GeneratePartMapRow(

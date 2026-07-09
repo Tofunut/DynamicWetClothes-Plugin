@@ -321,6 +321,36 @@ void SWetClothingAssetUVView::SetDrawBackgroundTexture(bool bInDrawBackgroundTex
     Invalidate(EInvalidateWidget::Paint);
 }
 
+void SWetClothingAssetUVView::SetBackgroundTextureOpacity(float InOpacity)
+{
+    BackgroundTextureOpacity = FMath::Clamp(InOpacity, 0.0f, 1.0f);
+    Invalidate(EInvalidateWidget::Paint);
+}
+
+void SWetClothingAssetUVView::SetUVIslandLineOpacity(float InOpacity)
+{
+    UVIslandLineOpacity = FMath::Clamp(InOpacity, 0.0f, 1.0f);
+    Invalidate(EInvalidateWidget::Paint);
+}
+
+void SWetClothingAssetUVView::SetUVIslandLineThicknessScale(float InThicknessScale)
+{
+    UVIslandLineThicknessScale = FMath::Clamp(InThicknessScale, 0.25f, 6.0f);
+    Invalidate(EInvalidateWidget::Paint);
+}
+
+void SWetClothingAssetUVView::SetNormalizeToContentBounds(bool bInNormalizeToContentBounds)
+{
+    if (bNormalizeToContentBounds == bInNormalizeToContentBounds)
+    {
+        return;
+    }
+
+    bNormalizeToContentBounds = bInNormalizeToContentBounds;
+    ResetView();
+    Invalidate(EInvalidateWidget::Paint);
+}
+
 void SWetClothingAssetUVView::SetSelectionTool(EWetClothingAssetUVSelectionTool InSelectionTool)
 {
     SelectionTool = InSelectionTool;
@@ -369,6 +399,9 @@ int32 SWetClothingAssetUVView::OnPaint(
     const FLinearColor SelectedIslandLineColor(1.0f, 0.45f, 0.08f, 1.0f);
     const FLinearColor SelectedIslandFillColor(1.0f, 0.45f, 0.08f, 0.16f);
     const bool         bOutlineOnly = DisplayMode == EWetClothingAssetUVDisplayMode::OutlineOnly;
+    const float        BackgroundOpacity = FMath::Clamp(BackgroundTextureOpacity, 0.0f, 1.0f);
+    const float        LineOpacity = FMath::Clamp(UVIslandLineOpacity, 0.0f, 1.0f);
+    const float        LineThicknessScale = FMath::Clamp(UVIslandLineThicknessScale, 0.25f, 6.0f);
 
     FSlateDrawElement::MakeBox(
         OutDrawElements,
@@ -410,15 +443,26 @@ int32 SWetClothingAssetUVView::OnPaint(
             AllottedGeometry.ToPaintGeometry(TextureSize, FSlateLayoutTransform(TexturePosition)),
             &BackgroundTextureBrush,
             ESlateDrawEffect::None,
-            FLinearColor(1.0f, 1.0f, 1.0f, 0.75f));
+            FLinearColor(1.0f, 1.0f, 1.0f, BackgroundOpacity));
+    }
+
+    FBox2D FrameBounds(ForceInit);
+    if (bNormalizeToContentBounds)
+    {
+        FrameBounds = ComputeContentUVBounds();
+    }
+    if (!FrameBounds.bIsValid)
+    {
+        FrameBounds += FVector2D(0.0, 0.0);
+        FrameBounds += FVector2D(1.0, 1.0);
     }
 
     const TArray<FVector2D> BorderPoints = {
-        UVToLocal(FVector2D(0.0, 0.0), AllottedGeometry, UVBounds, ZoomAmount, ClampedViewOffset),
-        UVToLocal(FVector2D(1.0, 0.0), AllottedGeometry, UVBounds, ZoomAmount, ClampedViewOffset),
-        UVToLocal(FVector2D(1.0, 1.0), AllottedGeometry, UVBounds, ZoomAmount, ClampedViewOffset),
-        UVToLocal(FVector2D(0.0, 1.0), AllottedGeometry, UVBounds, ZoomAmount, ClampedViewOffset),
-        UVToLocal(FVector2D(0.0, 0.0), AllottedGeometry, UVBounds, ZoomAmount, ClampedViewOffset)
+        UVToLocal(FVector2D(FrameBounds.Min.X, FrameBounds.Min.Y), AllottedGeometry, UVBounds, ZoomAmount, ClampedViewOffset),
+        UVToLocal(FVector2D(FrameBounds.Max.X, FrameBounds.Min.Y), AllottedGeometry, UVBounds, ZoomAmount, ClampedViewOffset),
+        UVToLocal(FVector2D(FrameBounds.Max.X, FrameBounds.Max.Y), AllottedGeometry, UVBounds, ZoomAmount, ClampedViewOffset),
+        UVToLocal(FVector2D(FrameBounds.Min.X, FrameBounds.Max.Y), AllottedGeometry, UVBounds, ZoomAmount, ClampedViewOffset),
+        UVToLocal(FVector2D(FrameBounds.Min.X, FrameBounds.Min.Y), AllottedGeometry, UVBounds, ZoomAmount, ClampedViewOffset)
     };
 
     FSlateDrawElement::MakeLines(
@@ -427,9 +471,9 @@ int32 SWetClothingAssetUVView::OnPaint(
         AllottedGeometry.ToPaintGeometry(),
         BorderPoints,
         ESlateDrawEffect::None,
-        FLinearColor(0.25f, 0.25f, 0.25f, 1.0f),
+        FLinearColor(0.25f, 0.25f, 0.25f, LineOpacity),
         true,
-        1.0f);
+        1.0f * LineThicknessScale);
 
     for (const FWetClothingAssetUVIsland& Island : Islands)
     {
@@ -443,12 +487,14 @@ int32 SWetClothingAssetUVView::OnPaint(
         const FLinearColor* AssignedColor = IslandColors.Find(Island.UVIslandID);
         const bool          bHasAssignedColor = AssignedColor != nullptr;
         const bool          bIsDefaultGrayOverlay = bHasAssignedColor && AssignedColor->A < 0.75f;
-        const FLinearColor  LineColor = bSelected
+        FLinearColor        LineColor = bSelected
                                             ? SelectedIslandLineColor
                                             : (bHasAssignedColor ? *AssignedColor : (bOutlineOnly ? FLinearColor(0.72f, 0.72f, 0.72f, 0.95f) : FLinearColor(0.45f, 0.45f, 0.45f, 0.25f)));
-        const float         Thickness = bOutlineOnly
-                                            ? (bSelected ? 2.3f : (bHasAssignedColor ? 1.7f : 1.45f))
-                                            : (bSelected ? 1.15f : (bIsDefaultGrayOverlay ? 0.35f : (bHasAssignedColor ? 0.75f : 0.35f)));
+        LineColor.A *= LineOpacity;
+        const float         BaseThickness = bOutlineOnly
+                                                ? (bSelected ? 2.3f : (bHasAssignedColor ? 1.7f : 1.45f))
+                                                : (bSelected ? 1.15f : (bIsDefaultGrayOverlay ? 0.35f : (bHasAssignedColor ? 0.75f : 0.35f)));
+        const float         Thickness = FMath::Max(0.25f, BaseThickness * LineThicknessScale);
         const int32         DrawLayer = bSelected ? SelectedLayer : WireLayer;
 
         if (bSelected && !bOutlineOnly)
@@ -521,7 +567,7 @@ int32 SWetClothingAssetUVView::OnPaint(
                     AllottedGeometry.ToPaintGeometry(),
                     EdgeLine,
                     ESlateDrawEffect::None,
-                    FLinearColor(0.02f, 0.02f, 0.02f, 1.0f),
+                    FLinearColor(0.02f, 0.02f, 0.02f, LineOpacity),
                     true,
                     Thickness + 1.2f);
 
@@ -931,19 +977,9 @@ FReply SWetClothingAssetUVView::OnMouseWheel(const FGeometry& MyGeometry, const 
     return FReply::Handled();
 }
 
-FBox2D SWetClothingAssetUVView::ComputeUVBounds() const
+FBox2D SWetClothingAssetUVView::ComputeContentUVBounds() const
 {
     FBox2D Bounds(ForceInit);
-
-    Bounds += FVector2D(0.0f, 0.0f);
-    Bounds += FVector2D(1.0f, 1.0f);
-
-    for (const FWetClothingAssetUVViewCircleMarker& Marker : CircleMarkers)
-    {
-        const double SafeRadius = FMath::Max(static_cast<double>(Marker.RadiusUV), 0.0);
-        Bounds += Marker.CenterUV - FVector2D(SafeRadius, SafeRadius);
-        Bounds += Marker.CenterUV + FVector2D(SafeRadius, SafeRadius);
-    }
 
     for (const FWetClothingAssetUVIsland& Island : Islands)
     {
@@ -953,6 +989,19 @@ FBox2D SWetClothingAssetUVView::ComputeUVBounds() const
             Bounds += Triangle.UVs[1];
             Bounds += Triangle.UVs[2];
         }
+    }
+
+    return Bounds;
+}
+
+FBox2D SWetClothingAssetUVView::ComputeUVBounds() const
+{
+    FBox2D Bounds = ComputeContentUVBounds();
+
+    if (!bNormalizeToContentBounds || !Bounds.bIsValid)
+    {
+        Bounds += FVector2D(0.0f, 0.0f);
+        Bounds += FVector2D(1.0f, 1.0f);
     }
 
     if (!Bounds.bIsValid)

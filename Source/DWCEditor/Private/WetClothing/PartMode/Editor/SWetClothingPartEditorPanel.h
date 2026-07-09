@@ -64,6 +64,7 @@ class SWetClothingPartEditorPanel : public SCompoundWidget
     const FWetClothingWetPartEntry* FindWetPartEntryForUVIsland(int32 UVIslandID) const;
     const FWetClothingWetPartEntry* FindEffectiveWetPartEntryForUVIsland(int32 UVIslandID) const;
     FWetPartEntryPtr                     FindWetPartItemByID(int32 WetPartID) const;
+    FMaterialSlotItemPtr                  FindMaterialSlotItem(int32 MaterialSlotIndex) const;
     TSet<int32>                          GetUVIslandIDsForWetPart(int32 WetPartID) const;
     int32                                GetEffectiveWetPartForUVIsland(int32 UVIslandID) const;
     FLinearColor                         GetDefaultWetPartColor(int32 WetPartID) const;
@@ -134,6 +135,12 @@ class SWetClothingPartEditorPanel : public SCompoundWidget
     FText                                          GetWetnessProfileMapBakeSettingsText() const;
     FText                                          GetSelectedUVChannelText() const;
     FText                                          GetSelectedUVDisplayModeText() const;
+    float                                          GetUVViewBackgroundTextureOpacity() const;
+    float                                          GetUVViewIslandLineOpacity() const;
+    float                                          GetUVViewIslandLineThicknessScale() const;
+    void                                           HandleUVViewBackgroundTextureOpacityChanged(float NewValue);
+    void                                           HandleUVViewIslandLineOpacityChanged(float NewValue);
+    void                                           HandleUVViewIslandLineThicknessScaleChanged(float NewValue);
     FText                                          GetUVIslandCountText() const;
     FText                                          GetSelectedUVIslandText() const;
     FText                                          GetUVStatusText() const;
@@ -150,7 +157,6 @@ class SWetClothingPartEditorPanel : public SCompoundWidget
     void                                           HandleAutoPartitionToleranceChanged(float InValue);
     float                                          GetSelectionLineThicknessScale() const;
     void                                           HandleSelectionLineThicknessChanged(float InValue);
-    TSharedRef<SWidget>                            BuildBakeMapsMenu();
     FReply                                         HandleFocusPreviewClicked();
     FReply                                         HandleSaveAssetClicked();
     FReply                                         HandleBakeAllMapsClicked();
@@ -201,6 +207,9 @@ class SWetClothingPartEditorPanel : public SCompoundWidget
     TSharedPtr<SWetClothingAssetUVView>                UVView;
     EWetClothingAssetUVSelectionTool                   CurrentUVSelectionTool = EWetClothingAssetUVSelectionTool::Select;
     EWetClothingAssetUVDisplayMode                     CurrentUVDisplayMode = EWetClothingAssetUVDisplayMode::Normal;
+    float                                              UVViewBackgroundTextureOpacity = 0.70f;
+    float                                              UVViewIslandLineOpacity = 1.0f;
+    float                                              UVViewIslandLineThicknessScale = 1.0f;
     TArray<FUVSelectionToolItemPtr>                    UVSelectionToolItems;
     FUVSelectionToolItemPtr                            SelectedUVSelectionToolItem;
     TArray<FAutoPartitionColorModeItemPtr>             AutoPartitionColorModeItems;

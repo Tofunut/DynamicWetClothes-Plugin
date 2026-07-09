@@ -4,6 +4,9 @@
 
 #include "WetClothing/Common/Texture/WetClothingMaterialTextureResolver.h"
 
+#include "DataAssets/WetClothingAsset.h"
+#include "Engine/SkeletalMesh.h"
+
 #include "Materials/MaterialInterface.h"
 #include "WetClothing/Common/Editor/WetClothingAssetEditorTypes.h"
 #include "WetClothing/Common/Texture/WetClothingTextureReadback.h"
@@ -300,4 +303,166 @@ double FWetClothingMaterialTextureResolver::ScoreTexturePreviewSuitability(UText
     }
 
     return Score;
+}
+
+
+UTexture* FWetClothingMaterialTextureResolver::FindSavedTextureSelection(
+    const UWetClothingAsset* WetClothingAsset,
+    int32 MaterialSlotIndex,
+    int32 UVChannelIndex)
+{
+    if (WetClothingAsset == nullptr || MaterialSlotIndex == INDEX_NONE || UVChannelIndex == INDEX_NONE)
+    {
+        return nullptr;
+    }
+
+    for (const FWetClothingSourceTextureSelection& Selection : WetClothingAsset->PartData.EditableWetPartData.SourceTextureSelections)
+    {
+        if (Selection.MaterialSlotIndex == MaterialSlotIndex && Selection.UVChannelIndex == UVChannelIndex)
+        {
+            return Selection.Texture;
+        }
+    }
+
+    return nullptr;
+}
+
+bool FWetClothingMaterialTextureResolver::HasSavedTextureSelection(
+    const UWetClothingAsset* WetClothingAsset,
+    int32 MaterialSlotIndex,
+    int32 UVChannelIndex)
+{
+    if (WetClothingAsset == nullptr || MaterialSlotIndex == INDEX_NONE || UVChannelIndex == INDEX_NONE)
+    {
+        return false;
+    }
+
+    return WetClothingAsset->PartData.EditableWetPartData.SourceTextureSelections.ContainsByPredicate(
+        [MaterialSlotIndex, UVChannelIndex](const FWetClothingSourceTextureSelection& Selection)
+        {
+            return Selection.MaterialSlotIndex == MaterialSlotIndex && Selection.UVChannelIndex == UVChannelIndex;
+        });
+}
+
+void FWetClothingMaterialTextureResolver::SaveTextureSelection(
+    UWetClothingAsset* WetClothingAsset,
+    int32 MaterialSlotIndex,
+    int32 UVChannelIndex,
+    UTexture* Texture)
+{
+    if (WetClothingAsset == nullptr || MaterialSlotIndex == INDEX_NONE || UVChannelIndex == INDEX_NONE)
+    {
+        return;
+    }
+
+    WetClothingAsset->Modify();
+
+    for (FWetClothingSourceTextureSelection& Selection : WetClothingAsset->PartData.EditableWetPartData.SourceTextureSelections)
+    {
+        if (Selection.MaterialSlotIndex == MaterialSlotIndex && Selection.UVChannelIndex == UVChannelIndex)
+        {
+            Selection.Texture = Texture;
+            WetClothingAsset->MarkPackageDirty();
+            return;
+        }
+    }
+
+    FWetClothingSourceTextureSelection NewSelection;
+    NewSelection.MaterialSlotIndex = MaterialSlotIndex;
+    NewSelection.UVChannelIndex = UVChannelIndex;
+    NewSelection.Texture = Texture;
+    WetClothingAsset->PartData.EditableWetPartData.SourceTextureSelections.Add(NewSelection);
+    WetClothingAsset->MarkPackageDirty();
+}
+
+UTexture* FWetClothingMaterialTextureResolver::ResolveOrSaveTextureSelection(
+    UWetClothingAsset* WetClothingAsset,
+    int32 MaterialSlotIndex,
+    int32 UVChannelIndex)
+{
+    if (UTexture* SavedTexture = FindSavedTextureSelection(WetClothingAsset, MaterialSlotIndex, UVChannelIndex))
+    {
+        return SavedTexture;
+    }
+
+    if (WetClothingAsset == nullptr || WetClothingAsset->TargetMesh == nullptr)
+    {
+        return nullptr;
+    }
+
+    const TArray<FSkeletalMaterial>& Materials = WetClothingAsset->TargetMesh->GetMaterials();
+    if (!Materials.IsValidIndex(MaterialSlotIndex) || Materials[MaterialSlotIndex].MaterialInterface == nullptr)
+    {
+        return nullptr;
+    }
+
+    TArray<TSharedPtr<FWetClothingTextureItem>> ResolvedTextureItems;
+    BuildTextureItems(Materials[MaterialSlotIndex].MaterialInterface, ResolvedTextureItems);
+    for (const TSharedPtr<FWetClothingTextureItem>& TextureItem : ResolvedTextureItems)
+    {
+        if (TextureItem.IsValid() && TextureItem->Texture.IsValid())
+        {
+            UTexture* ResolvedTexture = TextureItem->Texture.Get();
+            SaveTextureSelection(WetClothingAsset, MaterialSlotIndex, UVChannelIndex, ResolvedTexture);
+            return ResolvedTexture;
+        }
+    }
+
+    return nullptr;
+}
+
+void FWetClothingMaterialTextureResolver::BuildTextureItemsForMaterialSlot(
+    UWetClothingAsset* WetClothingAsset,
+    int32 MaterialSlotIndex,
+    int32 UVChannelIndex,
+    TArray<TSharedPtr<FWetClothingTextureItem>>& OutItems,
+    TSharedPtr<FWetClothingTextureItem>& OutSelectedItem)
+{
+    OutItems.Reset();
+    OutSelectedItem.Reset();
+
+    const bool bHasSavedSelection = HasSavedTextureSelection(WetClothingAsset, MaterialSlotIndex, UVChannelIndex);
+    UTexture* SavedTexture = FindSavedTextureSelection(WetClothingAsset, MaterialSlotIndex, UVChannelIndex);
+
+    if (WetClothingAsset != nullptr && WetClothingAsset->TargetMesh != nullptr && MaterialSlotIndex != INDEX_NONE)
+    {
+        const TArray<FSkeletalMaterial>& Materials = WetClothingAsset->TargetMesh->GetMaterials();
+        if (Materials.IsValidIndex(MaterialSlotIndex) && Materials[MaterialSlotIndex].MaterialInterface != nullptr)
+        {
+            BuildTextureItems(Materials[MaterialSlotIndex].MaterialInterface, OutItems);
+
+            if (bHasSavedSelection)
+            {
+                for (const TSharedPtr<FWetClothingTextureItem>& TextureItem : OutItems)
+                {
+                    if (TextureItem.IsValid() && TextureItem->Texture.Get() == SavedTexture)
+                    {
+                        OutSelectedItem = TextureItem;
+                        break;
+                    }
+                }
+            }
+            else
+            {
+                for (const TSharedPtr<FWetClothingTextureItem>& TextureItem : OutItems)
+                {
+                    if (TextureItem.IsValid() && TextureItem->Texture.IsValid())
+                    {
+                        OutSelectedItem = TextureItem;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    if (!OutSelectedItem.IsValid() && OutItems.Num() > 0)
+    {
+        OutSelectedItem = OutItems[0];
+    }
+
+    if (!bHasSavedSelection && OutSelectedItem.IsValid() && OutSelectedItem->Texture.IsValid())
+    {
+        SaveTextureSelection(WetClothingAsset, MaterialSlotIndex, UVChannelIndex, OutSelectedItem->Texture.Get());
+    }
 }

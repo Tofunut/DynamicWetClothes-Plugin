@@ -184,9 +184,9 @@ struct DWC_API FWetClothingWrinkleData
 {
     GENERATED_BODY()
 
-    // Dedicated mesh UV channel used by wet wrinkle maps. Generation is tracked per material slot below.
+    // Dedicated mesh UV channel used by wet wrinkle maps. For now DWC always uses imported UV 0.
     UPROPERTY(EditAnywhere, Category = "Editable")
-    int32 WrinkleUVChannelIndex = INDEX_NONE;
+    int32 WrinkleUVChannelIndex = 0;
 
 #if WITH_EDITORONLY_DATA
     // Number of UV channels that existed before DWC started appending wrinkle UV channels.

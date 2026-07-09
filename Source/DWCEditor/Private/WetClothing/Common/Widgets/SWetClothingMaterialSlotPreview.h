@@ -17,6 +17,7 @@ class SWetClothingMaterialSlotPreview : public SLeafWidget
     SLATE_BEGIN_ARGS(SWetClothingMaterialSlotPreview) {}
     SLATE_ARGUMENT(TArray<FWetClothingAssetUVTriangle>, Triangles)
     SLATE_ARGUMENT(UTexture*, PreviewTexture)
+    SLATE_ARGUMENT(bool, DrawWireframe)
     SLATE_END_ARGS()
 
     void Construct(const FArguments& InArgs);
@@ -35,5 +36,6 @@ class SWetClothingMaterialSlotPreview : public SLeafWidget
   private:
     TArray<FWetClothingAssetUVTriangle> Triangles;
     TWeakObjectPtr<UTexture>            PreviewTexture;
+    bool                                bDrawWireframe = true;
     FWetClothingTextureReadback         PreviewTextureData;
 };

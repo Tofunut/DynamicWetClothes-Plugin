@@ -15,6 +15,7 @@ void SWetClothingMaterialSlotPreview::Construct(const FArguments& InArgs)
 {
     Triangles = InArgs._Triangles;
     PreviewTexture = InArgs._PreviewTexture;
+    bDrawWireframe = InArgs._DrawWireframe;
 
     if (UTexture2D* PreviewTexture2D = Cast<UTexture2D>(PreviewTexture.Get()))
     {
@@ -113,77 +114,83 @@ int32 SWetClothingMaterialSlotPreview::OnPaint(
         (LocalSize.X - ScaledSize.X) * 0.5f,
         (LocalSize.Y - ScaledSize.Y) * 0.5f);
 
-    if (PreviewTextureData.IsValid())
+    const FSlateRenderTransform RenderTransform = AllottedGeometry.GetAccumulatedRenderTransform();
+    const FSlateResourceHandle  ResourceHandle = FSlateApplication::Get().GetRenderer()->GetResourceHandle(*WhiteBrush);
+    if (ResourceHandle.IsValid())
     {
-        const FSlateRenderTransform RenderTransform = AllottedGeometry.GetAccumulatedRenderTransform();
-        const FSlateResourceHandle  ResourceHandle = FSlateApplication::Get().GetRenderer()->GetResourceHandle(*WhiteBrush);
-        if (ResourceHandle.IsValid())
+        TArray<FSlateVertex> FillVerts;
+        TArray<SlateIndex>   FillIndices;
+        FillVerts.Reserve(ProjectedTriangles.Num() * 3);
+        FillIndices.Reserve(ProjectedTriangles.Num() * 3);
+
+        for (const FProjectedTriangle& ProjectedTriangle : ProjectedTriangles)
         {
-            TArray<FSlateVertex> FillVerts;
-            TArray<SlateIndex>   FillIndices;
-            FillVerts.Reserve(ProjectedTriangles.Num() * 3);
-            FillIndices.Reserve(ProjectedTriangles.Num() * 3);
+            const SlateIndex StartVertexIndex = static_cast<SlateIndex>(FillVerts.Num());
 
-            for (const FProjectedTriangle& ProjectedTriangle : ProjectedTriangles)
+            for (int32 CornerIndex = 0; CornerIndex < 3; ++CornerIndex)
             {
-                const SlateIndex StartVertexIndex = static_cast<SlateIndex>(FillVerts.Num());
+                const FVector2D PaintedPosition = (ProjectedTriangle.Positions[CornerIndex] - MinPoint) * UniformScale + Offset;
+                FColor          VertexColor = FLinearColor(0.28f, 0.28f, 0.28f, 1.0f).ToFColor(true);
 
-                for (int32 CornerIndex = 0; CornerIndex < 3; ++CornerIndex)
+                if (PreviewTextureData.IsValid())
                 {
-                    const FVector2D PaintedPosition = (ProjectedTriangle.Positions[CornerIndex] - MinPoint) * UniformScale + Offset;
                     const FVector2D UV(
                         ProjectedTriangle.UVs[CornerIndex].X - FMath::FloorToDouble(ProjectedTriangle.UVs[CornerIndex].X),
                         ProjectedTriangle.UVs[CornerIndex].Y - FMath::FloorToDouble(ProjectedTriangle.UVs[CornerIndex].Y));
-                    const int32  SampleX = FMath::RoundToInt(UV.X * (PreviewTextureData.Width - 1));
-                    const int32  SampleY = FMath::RoundToInt((1.0f - UV.Y) * (PreviewTextureData.Height - 1));
-                    const FColor VertexColor = PreviewTextureData.GetLinearColor(SampleX, SampleY).ToFColor(true);
-                    FillVerts.Add(FSlateVertex::Make<ESlateVertexRounding::Disabled>(
-                        RenderTransform,
-                        FVector2f(PaintedPosition),
-                        FVector2f::ZeroVector,
-                        VertexColor));
+                    const int32 SampleX = FMath::RoundToInt(UV.X * (PreviewTextureData.Width - 1));
+                    const int32 SampleY = FMath::RoundToInt((1.0f - UV.Y) * (PreviewTextureData.Height - 1));
+                    VertexColor = PreviewTextureData.GetLinearColor(SampleX, SampleY).ToFColor(true);
                 }
 
-                FillIndices.Add(StartVertexIndex);
-                FillIndices.Add(StartVertexIndex + 1);
-                FillIndices.Add(StartVertexIndex + 2);
+                FillVerts.Add(FSlateVertex::Make<ESlateVertexRounding::Disabled>(
+                    RenderTransform,
+                    FVector2f(PaintedPosition),
+                    FVector2f::ZeroVector,
+                    VertexColor));
             }
 
-            FSlateDrawElement::MakeCustomVerts(
-                OutDrawElements,
-                LayerId + 1,
-                ResourceHandle,
-                FillVerts,
-                FillIndices,
-                nullptr,
-                0,
-                0,
-                ESlateDrawEffect::None);
+            FillIndices.Add(StartVertexIndex);
+            FillIndices.Add(StartVertexIndex + 1);
+            FillIndices.Add(StartVertexIndex + 2);
         }
+
+        FSlateDrawElement::MakeCustomVerts(
+            OutDrawElements,
+            LayerId + 1,
+            ResourceHandle,
+            FillVerts,
+            FillIndices,
+            nullptr,
+            0,
+            0,
+            ESlateDrawEffect::None);
     }
 
-    const FLinearColor LineColor(0.92f, 0.92f, 0.92f, 1.0f);
-    for (const FProjectedTriangle& ProjectedTriangle : ProjectedTriangles)
+    if (bDrawWireframe)
     {
-        TArray<FVector2D> PaintedLinePoints;
-        PaintedLinePoints.Reserve(4);
-
-        for (int32 CornerIndex = 0; CornerIndex < 3; ++CornerIndex)
+        const FLinearColor LineColor(0.92f, 0.92f, 0.92f, 1.0f);
+        for (const FProjectedTriangle& ProjectedTriangle : ProjectedTriangles)
         {
-            PaintedLinePoints.Add((ProjectedTriangle.Positions[CornerIndex] - MinPoint) * UniformScale + Offset);
-        }
-        const FVector2D FirstPoint = PaintedLinePoints[0];
-        PaintedLinePoints.Add(FirstPoint);
+            TArray<FVector2D> PaintedLinePoints;
+            PaintedLinePoints.Reserve(4);
 
-        FSlateDrawElement::MakeLines(
-            OutDrawElements,
-            LayerId + 2,
-            AllottedGeometry.ToPaintGeometry(),
-            PaintedLinePoints,
-            ESlateDrawEffect::None,
-            LineColor,
-            true,
-            0.1f);
+            for (int32 CornerIndex = 0; CornerIndex < 3; ++CornerIndex)
+            {
+                PaintedLinePoints.Add((ProjectedTriangle.Positions[CornerIndex] - MinPoint) * UniformScale + Offset);
+            }
+            const FVector2D FirstPoint = PaintedLinePoints[0];
+            PaintedLinePoints.Add(FirstPoint);
+
+            FSlateDrawElement::MakeLines(
+                OutDrawElements,
+                LayerId + 2,
+                AllottedGeometry.ToPaintGeometry(),
+                PaintedLinePoints,
+                ESlateDrawEffect::None,
+                LineColor,
+                true,
+                0.1f);
+        }
     }
 
     return LayerId + 2;

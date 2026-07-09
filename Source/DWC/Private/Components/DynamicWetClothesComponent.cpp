@@ -540,7 +540,7 @@ void UDynamicWetClothesComponent::ApplyGeneratedWetMaterialOverrides()
 
         if (bLogWrinkleRuntimeBindings)
         {
-            const int32 PreferredUVChannelIndex = ReceiverWetClothingAsset->WrinkleData.WrinkleUVChannelIndex;
+            const int32 PreferredUVChannelIndex = 0;
             for (int32 MaterialSlotIndex = 0; MaterialSlotIndex < OverrideTargetMesh->GetNumMaterials(); ++MaterialSlotIndex)
             {
                 const FWetWrinkleBakedMapSet* BakedWrinkleMap =

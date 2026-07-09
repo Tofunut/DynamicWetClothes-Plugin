@@ -243,7 +243,7 @@ void FWetRenderStage::ApplyWetWrinkleNormalMapParameters(FWetRenderStageArgs& Re
 
     if (Receiver.WetClothingAsset != nullptr)
     {
-        const int32 PreferredUVChannelIndex = Receiver.WetClothingAsset->WrinkleData.WrinkleUVChannelIndex;
+        const int32 PreferredUVChannelIndex = 0;
         for (int32 MaterialSlotIndex = 0; MaterialSlotIndex < Receiver.WetMaterialInstances->Num(); ++MaterialSlotIndex)
         {
             if (!Receiver.WetMaterialInstances->IsValidIndex(MaterialSlotIndex) ||
@@ -371,7 +371,7 @@ void FWetRenderStage::ApplyWetWrinkleNormalMapParameters(FWetRenderStageArgs& Re
                     MaterialSlotIndex,
                     bHasAnyBakedEntryForSlot ? TEXT("true") : TEXT("false"),
                     bHasAnyUsableNormalForSlot ? TEXT("true") : TEXT("false"),
-                    Receiver.WetClothingAsset != nullptr ? Receiver.WetClothingAsset->WrinkleData.WrinkleUVChannelIndex : INDEX_NONE,
+                    Receiver.WetClothingAsset != nullptr ? 0 : INDEX_NONE,
                     *GetNameSafe(Receiver.TargetSkeletalMesh != nullptr ? Receiver.TargetSkeletalMesh->GetMaterial(MaterialSlotIndex) : nullptr));
             }
 

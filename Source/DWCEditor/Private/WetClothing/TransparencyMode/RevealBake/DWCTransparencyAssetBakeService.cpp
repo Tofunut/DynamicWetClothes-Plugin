@@ -9,6 +9,7 @@
 #include "GameFramework/Actor.h"
 #include "Materials/MaterialInterface.h"
 #include "PreviewScene.h"
+#include "UObject/Package.h"
 #include "WetClothing/Common/Material/WetClothingMaterialSetup.h"
 #include "WetClothing/TransparencyMode/RevealBake/DWCRevealBakeMaterialBuilder.h"
 #include "WetClothing/TransparencyMode/RevealBake/DWCRevealBakeSourceResolver.h"
@@ -418,6 +419,48 @@ bool FDWCTransparencyAssetBakeService::HasPendingTransparencySetup(UWetClothingA
         if (OutSummary != nullptr)
         {
             *OutSummary = TEXT("Transparency reveal textures have not been built.");
+        }
+        return true;
+    }
+
+    auto IsOutputPackageDirty = [](const UObject* Object)
+    {
+        const UPackage* Package = Object != nullptr ? Object->GetOutermost() : nullptr;
+        return Package != nullptr && Package->IsDirty();
+    };
+
+    TArray<FString> DirtyOutputs;
+    for (const FWetClothingBakedTransparencyRevealLayer& BakedLayer : WetClothingAsset->TransparencyData.BakedRevealLayers)
+    {
+        if (IsOutputPackageDirty(BakedLayer.LookupMap.Get()))
+        {
+            DirtyOutputs.AddUnique(GetNameSafe(BakedLayer.LookupMap.Get()));
+        }
+        if (IsOutputPackageDirty(BakedLayer.ColorMap.Get()))
+        {
+            DirtyOutputs.AddUnique(GetNameSafe(BakedLayer.ColorMap.Get()));
+        }
+        if (IsOutputPackageDirty(BakedLayer.MaskMap.Get()))
+        {
+            DirtyOutputs.AddUnique(GetNameSafe(BakedLayer.MaskMap.Get()));
+        }
+        if (IsOutputPackageDirty(BakedLayer.ConfidenceMap.Get()))
+        {
+            DirtyOutputs.AddUnique(GetNameSafe(BakedLayer.ConfidenceMap.Get()));
+        }
+        if (IsOutputPackageDirty(BakedLayer.RevealMaterial.Get()))
+        {
+            DirtyOutputs.AddUnique(GetNameSafe(BakedLayer.RevealMaterial.Get()));
+        }
+    }
+
+    if (DirtyOutputs.Num() > 0)
+    {
+        if (OutSummary != nullptr)
+        {
+            *OutSummary = FString::Printf(
+                TEXT("Transparency reveal outputs have not been saved:\n- %s"),
+                *FString::Join(DirtyOutputs, TEXT("\n- ")));
         }
         return true;
     }

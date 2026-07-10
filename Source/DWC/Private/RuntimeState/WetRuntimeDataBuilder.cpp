@@ -19,31 +19,23 @@
 
 namespace
 {
-    bool ResolveWetPartSourceProfileParameters(
+    bool ResolveWetPartProfileParameters(
         const FWetClothingWetPartEntry& WetPartEntry,
         FWetnessProfileParameters&           OutParameters)
     {
-        if (!WetPartEntry.ProfileAssignment.SourceProfile.IsValid())
+        if (WetPartEntry.ProfileAssignment.SourceProfile.IsValid())
         {
-            return false;
+            const UWetnessProfile* SourceProfile =
+                Cast<UWetnessProfile>(WetPartEntry.ProfileAssignment.SourceProfile.TryLoad());
+            if (SourceProfile != nullptr)
+            {
+                OutParameters = SourceProfile->GetParameters();
+                return true;
+            }
         }
 
-        const UWetnessProfile* SourceProfile =
-            Cast<UWetnessProfile>(WetPartEntry.ProfileAssignment.SourceProfile.TryLoad());
-        if (SourceProfile == nullptr)
-        {
-            return false;
-        }
-
-        OutParameters = SourceProfile->GetParameters();
+        OutParameters = WetPartEntry.ProfileAssignment.Parameters;
         return true;
-    }
-
-    bool DoesWetPartEntryMatchReceiverScope(
-        const FWetRuntimeDataBuildArgs& Receiver,
-        const FWetClothingWetPartEntry& WetPartEntry)
-    {
-        return WetPartEntry.ComponentPath == Receiver.ComponentPath;
     }
 } // namespace
 
@@ -107,7 +99,7 @@ bool FWetRuntimeDataBuilder::InitializeWetPartVertexData(FWetRuntimeDataBuildArg
     }
 
     USkeletalMesh* SkeletalMesh = Receiver.TargetSkeletalMesh->GetSkeletalMeshAsset();
-    if (Receiver.ComponentPath.IsEmpty() && Receiver.WetClothingAsset->TargetMesh && Receiver.WetClothingAsset->TargetMesh != SkeletalMesh)
+    if (Receiver.WetClothingAsset->TargetMesh && Receiver.WetClothingAsset->TargetMesh != SkeletalMesh)
     {
         UE_LOG(
             LogTemp,
@@ -178,17 +170,16 @@ bool FWetRuntimeDataBuilder::InitializeWetPartVertexDataFromPrecomputedData(
     for (int32 EntryIndex = 0; EntryIndex < Receiver.WetClothingAsset->PartData.EditableWetPartData.WetPartEntries.Num(); ++EntryIndex)
     {
         const FWetClothingWetPartEntry& WetPartEntry = Receiver.WetClothingAsset->PartData.EditableWetPartData.WetPartEntries[EntryIndex];
-        if (!DoesWetPartEntryMatchReceiverScope(Receiver, WetPartEntry))
-        {
-            continue;
-        }
 
         FWetnessProfileParameters ResolvedParameters;
-        if (ResolveWetPartSourceProfileParameters(WetPartEntry, ResolvedParameters))
+        if (ResolveWetPartProfileParameters(WetPartEntry, ResolvedParameters))
         {
             ResolvedWetPartParametersByEntryIndex.Add(EntryIndex, ResolvedParameters);
         }
     }
+
+    int32 PrecomputedWettableVertexCount = 0;
+    int32 RuntimeWettableVertexCount = 0;
 
     for (int32 VertexIndex = 0; VertexIndex < PrecomputedData.Vertices.Num(); ++VertexIndex)
     {
@@ -201,22 +192,42 @@ bool FWetRuntimeDataBuilder::InitializeWetPartVertexDataFromPrecomputedData(
             continue;
         }
 
+        if (PrecomputedVertex.bIsWettable)
+        {
+            ++PrecomputedWettableVertexCount;
+        }
+
         if (PrecomputedVertex.bIsWettable &&
             Receiver.WetClothingAsset->PartData.EditableWetPartData.WetPartEntries.IsValidIndex(PrecomputedVertex.WetPartEntryIndex) &&
             ResolvedWetPartParametersByEntryIndex.Contains(PrecomputedVertex.WetPartEntryIndex))
         {
             const FWetClothingWetPartEntry& WetPartEntry =
                 Receiver.WetClothingAsset->PartData.EditableWetPartData.WetPartEntries[PrecomputedVertex.WetPartEntryIndex];
-            if (!DoesWetPartEntryMatchReceiverScope(Receiver, WetPartEntry))
-            {
-                continue;
-            }
             Receiver.RuntimeData->VertexWettableFlags[VertexIndex] = true;
             Receiver.RuntimeData->VertexWetPartIDs[VertexIndex] = PrecomputedVertex.WetPartID;
             Receiver.RuntimeData->VertexWetnessProfileParameters[VertexIndex] =
                 ResolvedWetPartParametersByEntryIndex[PrecomputedVertex.WetPartEntryIndex];
             Receiver.RuntimeData->VertexWetPartDebugColors[VertexIndex] = WetPartEntry.Color;
+            ++RuntimeWettableVertexCount;
         }
+    }
+
+    if (PrecomputedWettableVertexCount == 0)
+    {
+        UE_LOG(
+            LogTemp,
+            Warning,
+            TEXT("DynamicWetClothesComponent: Precomputed simulation data contains no wettable vertices on %s. Check wettable material slots and wet part assignments."),
+            *GetNameSafe(Receiver.OwnerForLogs));
+    }
+    else if (RuntimeWettableVertexCount == 0)
+    {
+        UE_LOG(
+            LogTemp,
+            Warning,
+            TEXT("DynamicWetClothesComponent: Runtime initialized 0 wettable vertices from %d precomputed wettable vertices on %s."),
+            PrecomputedWettableVertexCount,
+            *GetNameSafe(Receiver.OwnerForLogs));
     }
 
     return true;
@@ -521,6 +532,33 @@ bool FWetRuntimeDataBuilder::DoesVertexMatchBoneName(const USkeletalMeshComponen
         return false;
     }
 
+    FSkeletalMeshLODRenderData* LODData = nullptr;
+    if (!GetLODRenderData(TargetSkeletalMesh, 0, LODData) || !LODData)
+    {
+        return false;
+    }
+
+    const int32 VertexCount = static_cast<int32>(LODData->GetNumVertices());
+    if (VertexIndex < 0 || VertexIndex >= VertexCount)
+    {
+        return false;
+    }
+
+    int32 SectionIndex = INDEX_NONE;
+    int32 SectionVertexIndex = INDEX_NONE;
+    LODData->GetSectionFromVertexIndex(VertexIndex, SectionIndex, SectionVertexIndex);
+    if (!LODData->RenderSections.IsValidIndex(SectionIndex) || SectionVertexIndex < 0)
+    {
+        return false;
+    }
+
+    const FSkelMeshRenderSection& Section = LODData->RenderSections[SectionIndex];
+    const int32 BufferVertexIndex = Section.GetVertexBufferIndex() + SectionVertexIndex;
+    if (BufferVertexIndex < 0 || BufferVertexIndex >= VertexCount)
+    {
+        return false;
+    }
+
     const FSkinWeightVertexBuffer* SkinWeightBuffer = TargetSkeletalMesh->GetSkinWeightBuffer(0);
     if (!SkinWeightBuffer)
     {
@@ -530,12 +568,18 @@ bool FWetRuntimeDataBuilder::DoesVertexMatchBoneName(const USkeletalMeshComponen
     const uint32 MaxInfluences = SkinWeightBuffer->GetMaxBoneInfluences();
     for (uint32 InfluenceIndex = 0; InfluenceIndex < MaxInfluences; ++InfluenceIndex)
     {
-        if (SkinWeightBuffer->GetBoneWeight(VertexIndex, InfluenceIndex) == 0)
+        if (SkinWeightBuffer->GetBoneWeight(BufferVertexIndex, InfluenceIndex) == 0)
         {
             continue;
         }
 
-        if (static_cast<int32>(SkinWeightBuffer->GetBoneIndex(VertexIndex, InfluenceIndex)) == BoneIndex)
+        const int32 BoneMapIndex = static_cast<int32>(SkinWeightBuffer->GetBoneIndex(BufferVertexIndex, InfluenceIndex));
+        if (!Section.BoneMap.IsValidIndex(BoneMapIndex))
+        {
+            continue;
+        }
+
+        if (static_cast<int32>(Section.BoneMap[BoneMapIndex]) == BoneIndex)
         {
             return true;
         }

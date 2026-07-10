@@ -1,8 +1,8 @@
 using UnrealBuildTool;
 
-public class DWCWater : ModuleRules
+public class DWCWaterSystemIntegration : ModuleRules
 {
-	public DWCWater(ReadOnlyTargetRules Target) : base(Target)
+	public DWCWaterSystemIntegration(ReadOnlyTargetRules Target) : base(Target)
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 

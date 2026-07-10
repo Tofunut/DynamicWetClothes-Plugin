@@ -24,28 +24,9 @@ class USkeletalMesh;
 class UMaterialInstanceDynamic;
 class UWetnessProfile;
 
-USTRUCT(BlueprintType)
-struct FDWCWetMeshBinding
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, Category = "Wetness")
-    FName ComponentName = NAME_None;
-
-    UPROPERTY(EditAnywhere, Category = "Wetness")
-    TObjectPtr<USkeletalMesh> TargetMesh = nullptr;
-
-    UPROPERTY(EditAnywhere, Category = "Wetness")
-    TObjectPtr<UWetClothingAsset> WetClothingAsset = nullptr;
-
-    UPROPERTY(EditAnywhere, Category = "Wetness")
-    bool bEnabled = true;
-};
-
 struct FDWCWetMeshReceiverRuntime
 {
     FName ReceiverId = NAME_None;
-    FString ComponentPath;
     TWeakObjectPtr<USkeletalMeshComponent> MeshComponent;
     TWeakObjectPtr<UWetClothingAsset> WetClothingAsset;
 
@@ -117,7 +98,6 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
     USkeletalMeshComponent* ResolveTargetSkeletalMesh() const;
     UWetClothingAsset*      ResolveWetClothingAssetForMesh(const USkeletalMeshComponent& MeshComponent) const;
     void                    ApplyGeneratedWetMaterialOverrides();
-    bool                    HasWetDataForMeshComponent(const USkeletalMeshComponent& MeshComponent, const FString& ComponentPath, const UWetClothingAsset* MeshWetClothingAsset) const;
     bool                    ShouldReceiverConsiderContact(const FDWCWetMeshReceiverRuntime& Receiver, const FDWCWetContact& Contact) const;
     bool                    ShouldReceiverConsiderSurface(const FDWCWetMeshReceiverRuntime& Receiver, const FDWCWaterSurfaceData& WaterSurfaceData) const;
 
@@ -133,9 +113,6 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
 
     UPROPERTY(EditAnywhere, Category = "Wetness")
     TObjectPtr<UWetClothingAsset> WetClothingAsset = nullptr;
-
-    UPROPERTY(EditAnywhere, Category = "Wetness")
-    TArray<FDWCWetMeshBinding> WetMeshBindings;
 
     UPROPERTY(EditAnywhere, Category = "Wetness", meta = (ShowOnlyInnerProperties))
     FWetClothingSettings WetnessSettings;

@@ -43,7 +43,7 @@ namespace
 
 namespace
 {
-    bool IsMaterialSlotWettableForRender(const UWetClothingAsset* WetClothingAsset, const int32 MaterialSlotIndex, const FString& ComponentPath)
+    bool IsMaterialSlotWettableForRender(const UWetClothingAsset* WetClothingAsset, const int32 MaterialSlotIndex)
     {
         if (WetClothingAsset == nullptr || MaterialSlotIndex == INDEX_NONE)
         {
@@ -51,10 +51,9 @@ namespace
         }
 
         const FWetClothingWettableMaterialSlotState* State = WetClothingAsset->PartData.EditableWetPartData.WettableMaterialSlots.FindByPredicate(
-            [MaterialSlotIndex, &ComponentPath](const FWetClothingWettableMaterialSlotState& Candidate)
+            [MaterialSlotIndex](const FWetClothingWettableMaterialSlotState& Candidate)
             {
-                return Candidate.MaterialSlotIndex == MaterialSlotIndex &&
-                       (Candidate.ComponentPath == ComponentPath || Candidate.ComponentPath.IsEmpty());
+                return Candidate.MaterialSlotIndex == MaterialSlotIndex;
             });
 
         return State != nullptr && State->bIsWettableSlot;
@@ -169,8 +168,7 @@ void FWetRenderStage::ApplyWetnessProfileMapParameters(FWetRenderStageArgs& Rece
     {
         for (const FWetClothingBakedWetnessProfileMap& BakedWetnessProfileMap : Receiver.WetClothingAsset->PartData.BakedWetnessProfileMaps)
         {
-            if (BakedWetnessProfileMap.ComponentPath != Receiver.ComponentPath ||
-                BakedWetnessProfileMap.WetnessProfileMap0 == nullptr)
+            if (BakedWetnessProfileMap.WetnessProfileMap0 == nullptr)
             {
                 continue;
             }
@@ -178,7 +176,7 @@ void FWetRenderStage::ApplyWetnessProfileMapParameters(FWetRenderStageArgs& Rece
             for (const int32 MaterialSlotIndex : BakedWetnessProfileMap.MaterialSlotIndices)
             {
                 if (!Receiver.WetMaterialInstances->IsValidIndex(MaterialSlotIndex) ||
-                    !IsMaterialSlotWettableForRender(Receiver.WetClothingAsset, MaterialSlotIndex, Receiver.ComponentPath))
+                    !IsMaterialSlotWettableForRender(Receiver.WetClothingAsset, MaterialSlotIndex))
                 {
                     continue;
                 }
@@ -266,7 +264,7 @@ void FWetRenderStage::ApplyWetWrinkleNormalMapParameters(FWetRenderStageArgs& Re
         {
             if (!Receiver.WetMaterialInstances->IsValidIndex(MaterialSlotIndex) ||
                 bWrinkleNormalMapAssigned[MaterialSlotIndex] ||
-                !IsMaterialSlotWettableForRender(Receiver.WetClothingAsset, MaterialSlotIndex, Receiver.ComponentPath))
+                !IsMaterialSlotWettableForRender(Receiver.WetClothingAsset, MaterialSlotIndex))
             {
                 continue;
             }

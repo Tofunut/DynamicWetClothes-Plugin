@@ -1,8 +1,9 @@
-#include "Examples/Particles/NiagaraWetContactBridgeComponent.h"
+#include "Components/DWCDemoNiagaraWetContactSourceComponent.h"
 
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/DynamicWetClothesComponent.h"
 #include "Engine/World.h"
+#include "EngineUtils.h"
 #include "GameFramework/Actor.h"
 #include "NiagaraComponent.h"
 
@@ -17,11 +18,11 @@ namespace
     }
 
     void CollectSphereSweepBoneNames(
-        UWorld&                                  World,
-        const UNiagaraWetContactBridgeComponent& Bridge,
-        const USkeletalMeshComponent&            HitSkeletalMesh,
-        const FDWCWetContact&                    Contact,
-        TArray<FName>&                           InOutBoneNames)
+        UWorld&                                         World,
+        const UDWCDemoNiagaraWetContactSourceComponent& Source,
+        const USkeletalMeshComponent&                   HitSkeletalMesh,
+        const FDWCWetContact&                           Contact,
+        TArray<FName>&                                  InOutBoneNames)
     {
         if (Contact.Radius <= 0.0f)
         {
@@ -34,7 +35,7 @@ namespace
             SweepNormal = FVector::UpVector;
         }
 
-        FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(NiagaraWetContactBridgeBoneSweep), false);
+        FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(DWCDemoNiagaraWetContactSourceBoneSweep), false);
         QueryParams.bReturnPhysicalMaterial = false;
 
         const float           SweepHalfDistance = FMath::Max(1.0f, Contact.Radius * 0.1f);
@@ -48,7 +49,7 @@ namespace
                 SweepStart,
                 SweepEnd,
                 FQuat::Identity,
-                Bridge.TraceChannel,
+                Source.TraceChannel,
                 SweepShape,
                 QueryParams))
         {
@@ -74,12 +75,12 @@ namespace
     }
 } // namespace
 
-UNiagaraWetContactBridgeComponent::UNiagaraWetContactBridgeComponent()
+UDWCDemoNiagaraWetContactSourceComponent::UDWCDemoNiagaraWetContactSourceComponent()
 {
     PrimaryComponentTick.bCanEverTick = false;
 }
 
-void UNiagaraWetContactBridgeComponent::BeginPlay()
+void UDWCDemoNiagaraWetContactSourceComponent::BeginPlay()
 {
     Super::BeginPlay();
 
@@ -97,9 +98,25 @@ void UNiagaraWetContactBridgeComponent::BeginPlay()
     {
         BindCallbackUserParameter();
     }
+
+    if (bEnableDebugLogging)
+    {
+        UE_LOG(
+            LogTemp,
+            Warning,
+            TEXT("DWC Demo Niagara Wet Contact Source: BeginPlay owner=%s receiver=%s niagara=%s callbackParam=%s amount=%.3f radius=%.1f traceChannel=%d requireBone=%s"),
+            *GetNameSafe(GetOwner()),
+            *GetNameSafe(Receiver.Get()),
+            *GetNameSafe(NiagaraComponent.Get()),
+            *CallbackUserParameterName.ToString(),
+            ContactAmount,
+            ContactRadius,
+            static_cast<int32>(TraceChannel.GetValue()),
+            bRequireBoneNameForContact ? TEXT("true") : TEXT("false"));
+    }
 }
 
-void UNiagaraWetContactBridgeComponent::ReceiveParticleData_Implementation(
+void UDWCDemoNiagaraWetContactSourceComponent::ReceiveParticleData_Implementation(
     const TArray<FBasicParticleData>& Data,
     UNiagaraSystem*,
     const FVector& SimulationPositionOffset)
@@ -111,39 +128,85 @@ void UNiagaraWetContactBridgeComponent::ReceiveParticleData_Implementation(
         Receiver = TargetReceiver;
     }
 
-    if (!TargetReceiver || FMath::IsNearlyZero(ContactAmount) || Data.IsEmpty())
+    if (FMath::IsNearlyZero(ContactAmount) || Data.IsEmpty())
     {
+        if (ShouldLogDebug())
+        {
+            UE_LOG(
+                LogTemp,
+                Warning,
+                TEXT("DWC Demo Niagara Wet Contact Source: skipped callback owner=%s particles=%d contactAmount=%.3f"),
+                *GetNameSafe(GetOwner()),
+                Data.Num(),
+                ContactAmount);
+        }
         return;
     }
 
     const int32 MaxParticles = FMath::Max(0, MaxParticlesPerCallback);
     const int32 ParticleCount = MaxParticles > 0 ? FMath::Min(Data.Num(), MaxParticles) : Data.Num();
 
-    TArray<FDWCWetContact> ParticleContacts;
-    TArray<FDWCWetContact> ContactsToApply;
-    ContactsToApply.Reserve(ParticleCount);
+    TArray<FDWCWetContact>                                                    ParticleContacts;
+    TMap<TWeakObjectPtr<UDynamicWetClothesComponent>, TArray<FDWCWetContact>> ContactsByReceiver;
+    int32                                                                     RejectedParticles = 0;
+    int32                                                                     BuiltContacts = 0;
 
     for (int32 ParticleIndex = 0; ParticleIndex < ParticleCount; ++ParticleIndex)
     {
-        if (BuildContactsFromParticle(Data[ParticleIndex], SimulationPositionOffset, ParticleContacts))
+        UDynamicWetClothesComponent* ParticleReceiver = TargetReceiver;
+        if (BuildContactsFromParticle(Data[ParticleIndex], SimulationPositionOffset, ParticleReceiver, ParticleContacts) &&
+            IsValid(ParticleReceiver))
         {
+            TArray<FDWCWetContact>& ContactsToApply = ContactsByReceiver.FindOrAdd(ParticleReceiver);
             ContactsToApply.Append(ParticleContacts);
+            BuiltContacts += ParticleContacts.Num();
+        }
+        else
+        {
+            ++RejectedParticles;
         }
     }
 
-    if (!ContactsToApply.IsEmpty())
+    int32 AppliedReceiverCount = 0;
+    int32 AppliedContactCount = 0;
+    for (TPair<TWeakObjectPtr<UDynamicWetClothesComponent>, TArray<FDWCWetContact>>& Pair : ContactsByReceiver)
     {
-        TargetReceiver->ApplyWetContacts(ContactsToApply, true);
+        UDynamicWetClothesComponent* ReceiverToApply = Pair.Key.Get();
+        if (IsValid(ReceiverToApply) && !Pair.Value.IsEmpty())
+        {
+            if (ReceiverToApply->ApplyWetContacts(Pair.Value, true))
+            {
+                ++AppliedReceiverCount;
+                AppliedContactCount += Pair.Value.Num();
+            }
+        }
+    }
+
+    if (ShouldLogDebug())
+    {
+        UE_LOG(
+            LogTemp,
+            Warning,
+            TEXT("DWC Demo Niagara Wet Contact Source: callback owner=%s particles=%d used=%d rejected=%d builtContacts=%d receiverGroups=%d appliedReceivers=%d appliedContacts=%d explicitReceiver=%s"),
+            *GetNameSafe(GetOwner()),
+            Data.Num(),
+            ParticleCount,
+            RejectedParticles,
+            BuiltContacts,
+            ContactsByReceiver.Num(),
+            AppliedReceiverCount,
+            AppliedContactCount,
+            *GetNameSafe(TargetReceiver));
     }
 }
 
-UDynamicWetClothesComponent* UNiagaraWetContactBridgeComponent::ResolveReceiver() const
+UDynamicWetClothesComponent* UDWCDemoNiagaraWetContactSourceComponent::ResolveReceiver() const
 {
     const AActor* Owner = GetOwner();
     return Owner ? Owner->FindComponentByClass<UDynamicWetClothesComponent>() : nullptr;
 }
 
-UNiagaraComponent* UNiagaraWetContactBridgeComponent::ResolveNiagaraComponent() const
+UNiagaraComponent* UDWCDemoNiagaraWetContactSourceComponent::ResolveNiagaraComponent() const
 {
     const AActor* Owner = GetOwner();
     if (!Owner)
@@ -164,20 +227,94 @@ UNiagaraComponent* UNiagaraWetContactBridgeComponent::ResolveNiagaraComponent() 
     return nullptr;
 }
 
-void UNiagaraWetContactBridgeComponent::BindCallbackUserParameter()
+void UDWCDemoNiagaraWetContactSourceComponent::BindCallbackUserParameter()
 {
     if (!NiagaraComponent || CallbackUserParameterName.IsNone())
     {
+        if (bEnableDebugLogging)
+        {
+            UE_LOG(
+                LogTemp,
+                Warning,
+                TEXT("DWC Demo Niagara Wet Contact Source: cannot bind callback owner=%s niagara=%s callbackParam=%s"),
+                *GetNameSafe(GetOwner()),
+                *GetNameSafe(NiagaraComponent.Get()),
+                *CallbackUserParameterName.ToString());
+        }
         return;
     }
 
     NiagaraComponent->SetVariableObject(CallbackUserParameterName, this);
 }
 
-bool UNiagaraWetContactBridgeComponent::BuildContactsFromParticle(
-    const FBasicParticleData& Particle,
-    const FVector&            SimulationPositionOffset,
-    TArray<FDWCWetContact>&   OutContacts) const
+bool UDWCDemoNiagaraWetContactSourceComponent::ShouldLogDebug() const
+{
+    if (!bEnableDebugLogging)
+    {
+        return false;
+    }
+
+    const UWorld* World = GetWorld();
+    const double  Now = World ? World->GetTimeSeconds() : FPlatformTime::Seconds();
+    if (Now - LastDebugLogTime < FMath::Max(0.1f, DebugLogInterval))
+    {
+        return false;
+    }
+
+    LastDebugLogTime = Now;
+    return true;
+}
+
+UDynamicWetClothesComponent* UDWCDemoNiagaraWetContactSourceComponent::FindNearestReceiver(
+    const FVector& Location,
+    const float    MaxDistance) const
+{
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return nullptr;
+    }
+
+    UDynamicWetClothesComponent* BestReceiver = nullptr;
+    double                       BestDistanceSq = FMath::Square(FMath::Max(0.0f, MaxDistance));
+
+    for (TActorIterator<AActor> It(World); It; ++It)
+    {
+        AActor* CandidateActor = *It;
+        if (!IsValid(CandidateActor) || CandidateActor == GetOwner())
+        {
+            continue;
+        }
+
+        UDynamicWetClothesComponent* CandidateReceiver =
+            CandidateActor->FindComponentByClass<UDynamicWetClothesComponent>();
+        if (!IsValid(CandidateReceiver))
+        {
+            continue;
+        }
+
+        FBox WetBounds(ForceInit);
+        if (!CandidateReceiver->GetWetnessWorldBounds(WetBounds) || !WetBounds.IsValid)
+        {
+            continue;
+        }
+
+        const double DistanceSq = WetBounds.ComputeSquaredDistanceToPoint(Location);
+        if (DistanceSq <= BestDistanceSq)
+        {
+            BestDistanceSq = DistanceSq;
+            BestReceiver = CandidateReceiver;
+        }
+    }
+
+    return BestReceiver;
+}
+
+bool UDWCDemoNiagaraWetContactSourceComponent::BuildContactsFromParticle(
+    const FBasicParticleData&     Particle,
+    const FVector&                SimulationPositionOffset,
+    UDynamicWetClothesComponent*& InOutReceiver,
+    TArray<FDWCWetContact>&       OutContacts) const
 {
     OutContacts.Reset();
 
@@ -206,9 +343,14 @@ bool UNiagaraWetContactBridgeComponent::BuildContactsFromParticle(
     BaseContact.Normal = FVector::UpVector;
     BaseContact.BoneName = NAME_None;
 
-    const bool bShouldTraceForContactData = bTraceForWaterSurfaceData || bRequireBoneNameForContact;
+    const bool bShouldTraceForContactData = bTraceForContactData || bRequireBoneNameForContact;
     if (!bShouldTraceForContactData)
     {
+        if (!IsValid(InOutReceiver))
+        {
+            return false;
+        }
+
         OutContacts.Add(BaseContact);
         return true;
     }
@@ -221,18 +363,23 @@ bool UNiagaraWetContactBridgeComponent::BuildContactsFromParticle(
             return false;
         }
 
+        if (!IsValid(InOutReceiver))
+        {
+            return false;
+        }
+
         OutContacts.Add(BaseContact);
         return true;
     }
 
-    FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(NiagaraWetContactBridge), bTraceComplex);
+    FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(DWCDemoNiagaraWetContactSource), bTraceComplex);
     QueryParams.AddIgnoredActor(GetOwner());
 
     const FVector TraceStart = ParticlePosition - ContactDirection * TraceDistance;
     const FVector TraceEnd = ParticlePosition + ContactDirection * TraceDistance;
 
     USkeletalMeshComponent* ReceiverSkeletalMesh =
-        Receiver ? Receiver->TargetSkeletalMesh.Get() : nullptr;
+        IsValid(InOutReceiver) ? InOutReceiver->TargetSkeletalMesh.Get() : nullptr;
 
     FHitResult              Hit;
     USkeletalMeshComponent* HitSkeletalMesh = nullptr;
@@ -283,6 +430,19 @@ bool UNiagaraWetContactBridgeComponent::BuildContactsFromParticle(
 
     if (bHit)
     {
+        if (!IsValid(InOutReceiver) && HitSkeletalMesh)
+        {
+            if (AActor* HitOwner = HitSkeletalMesh->GetOwner())
+            {
+                InOutReceiver = HitOwner->FindComponentByClass<UDynamicWetClothesComponent>();
+            }
+        }
+
+        if (!IsValid(InOutReceiver))
+        {
+            return false;
+        }
+
         BaseContact.Location = Hit.ImpactPoint.IsNearlyZero() ? Hit.Location : Hit.ImpactPoint;
         BaseContact.Normal = Hit.ImpactNormal.IsNearlyZero() ? BaseContact.Normal : Hit.ImpactNormal;
         BaseContact.BoneName = Hit.BoneName;
@@ -311,6 +471,13 @@ bool UNiagaraWetContactBridgeComponent::BuildContactsFromParticle(
         }
     }
 
+    if (OutContacts.IsEmpty() && !IsValid(InOutReceiver))
+    {
+        const float FallbackDistance = FMath::Max(TraceDistance + ContactRadius, ContactRadius * 2.0f);
+        InOutReceiver = FindNearestReceiver(BaseContact.Location, FallbackDistance);
+        ReceiverSkeletalMesh = IsValid(InOutReceiver) ? InOutReceiver->TargetSkeletalMesh.Get() : nullptr;
+    }
+
     if (OutContacts.IsEmpty() && bRequireBoneNameForContact && ReceiverSkeletalMesh)
     {
         BaseContact.BoneName = ReceiverSkeletalMesh->FindClosestBone(BaseContact.Location);
@@ -322,6 +489,11 @@ bool UNiagaraWetContactBridgeComponent::BuildContactsFromParticle(
 
     if (OutContacts.IsEmpty() && !bRequireBoneNameForContact)
     {
+        if (!IsValid(InOutReceiver))
+        {
+            return false;
+        }
+
         OutContacts.Add(BaseContact);
     }
 

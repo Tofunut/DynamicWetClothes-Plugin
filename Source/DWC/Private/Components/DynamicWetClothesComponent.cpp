@@ -17,74 +17,7 @@
 
 namespace
 {
-    bool HasScopedWetDataForComponent(const UWetClothingAsset* WetClothingAsset, const FString& ComponentPath)
-    {
-        if (WetClothingAsset == nullptr || ComponentPath.IsEmpty())
-        {
-            return false;
-        }
-
-        for (const FWetClothingWetPartEntry& WetPartEntry : WetClothingAsset->PartData.EditableWetPartData.WetPartEntries)
-        {
-            if (WetPartEntry.ComponentPath == ComponentPath)
-            {
-                return true;
-            }
-        }
-
-        for (const FWetClothingGeneratedWetMaterialOverride& MaterialOverride : WetClothingAsset->PartData.GeneratedWetMaterialOverrides)
-        {
-            if (MaterialOverride.ComponentPath == ComponentPath)
-            {
-                return true;
-            }
-        }
-
-        for (const FWetClothingBakedWetnessProfileMap& BakedWetnessProfileMap : WetClothingAsset->PartData.BakedWetnessProfileMaps)
-        {
-            if (BakedWetnessProfileMap.ComponentPath == ComponentPath)
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    bool HasLegacyUnscopedWetData(const UWetClothingAsset* WetClothingAsset)
-    {
-        if (WetClothingAsset == nullptr)
-        {
-            return false;
-        }
-
-        for (const FWetClothingWetPartEntry& WetPartEntry : WetClothingAsset->PartData.EditableWetPartData.WetPartEntries)
-        {
-            if (WetPartEntry.ComponentPath.IsEmpty())
-            {
-                return true;
-            }
-        }
-
-        for (const FWetClothingGeneratedWetMaterialOverride& MaterialOverride : WetClothingAsset->PartData.GeneratedWetMaterialOverrides)
-        {
-            if (MaterialOverride.ComponentPath.IsEmpty())
-            {
-                return true;
-            }
-        }
-
-        for (const FWetClothingBakedWetnessProfileMap& BakedWetnessProfileMap : WetClothingAsset->PartData.BakedWetnessProfileMaps)
-        {
-            if (BakedWetnessProfileMap.ComponentPath.IsEmpty())
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-    bool IsMaterialSlotWettableForRuntime(const UWetClothingAsset* WetClothingAsset, const int32 MaterialSlotIndex, const FString& ComponentPath)
+    bool IsMaterialSlotWettableForRuntime(const UWetClothingAsset* WetClothingAsset, const int32 MaterialSlotIndex)
     {
         if (WetClothingAsset == nullptr || MaterialSlotIndex == INDEX_NONE)
         {
@@ -92,10 +25,9 @@ namespace
         }
 
         const FWetClothingWettableMaterialSlotState* State = WetClothingAsset->PartData.EditableWetPartData.WettableMaterialSlots.FindByPredicate(
-            [MaterialSlotIndex, &ComponentPath](const FWetClothingWettableMaterialSlotState& Candidate)
+            [MaterialSlotIndex](const FWetClothingWettableMaterialSlotState& Candidate)
             {
-                return Candidate.MaterialSlotIndex == MaterialSlotIndex &&
-                       (Candidate.ComponentPath == ComponentPath || Candidate.ComponentPath.IsEmpty());
+                return Candidate.MaterialSlotIndex == MaterialSlotIndex;
             });
 
         return State != nullptr && State->bIsWettableSlot;
@@ -203,62 +135,34 @@ bool UDynamicWetClothesComponent::RebuildWetMeshReceivers()
     Receivers.Reset();
     TargetSkeletalMesh = nullptr;
 
-    AActor* Owner = GetOwner();
-    if (Owner == nullptr)
+    USkeletalMeshComponent* Mesh = ResolveTargetSkeletalMesh();
+    if (Mesh == nullptr || Mesh->GetSkeletalMeshAsset() == nullptr)
     {
+        UE_LOG(LogTemp, Warning, TEXT("DynamicWetClothesComponent: Target skeletal mesh could not be resolved on %s."), *GetNameSafe(GetOwner()));
         return false;
     }
 
-    TArray<USkeletalMeshComponent*> Meshes;
-    Owner->GetComponents<USkeletalMeshComponent>(Meshes);
-
-    for (USkeletalMeshComponent* Mesh : Meshes)
+    UWetClothingAsset* ResolvedWetClothingAsset = ResolveWetClothingAssetForMesh(*Mesh);
+    if (ResolvedWetClothingAsset == nullptr)
     {
-        if (Mesh == nullptr || Mesh->GetSkeletalMeshAsset() == nullptr)
-        {
-            continue;
-        }
-
-        if (!TargetSkeletalMeshName.IsNone() && Mesh->GetFName() != TargetSkeletalMeshName)
-        {
-            continue;
-        }
-
-        const FString ComponentPath = Mesh->GetPathName(Owner);
-        UWetClothingAsset* MeshWetClothingAsset = ResolveWetClothingAssetForMesh(*Mesh);
-        if (!HasWetDataForMeshComponent(*Mesh, ComponentPath, MeshWetClothingAsset))
-        {
-            continue;
-        }
-
-        TUniquePtr<FDWCWetMeshReceiverRuntime> Receiver = MakeUnique<FDWCWetMeshReceiverRuntime>();
-        const bool bUsesScopedData = HasScopedWetDataForComponent(MeshWetClothingAsset, ComponentPath);
-        Receiver->ReceiverId = Mesh->GetFName();
-        Receiver->ComponentPath = bUsesScopedData ? ComponentPath : FString();
-        Receiver->MeshComponent = Mesh;
-        Receiver->WetClothingAsset = MeshWetClothingAsset;
-        Receiver->RuntimeData = MakeUnique<FWetClothingRuntimeData>();
-        Receiver->RuntimeDataBuilder = MakeUnique<FWetRuntimeDataBuilder>();
-        Receiver->SimulationState = MakeUnique<FAbsorbedWetnessSimulationState>();
-        Receiver->SimulationStage = MakeUnique<FWetSimulationStage>();
-        Receiver->InputStage = MakeUnique<FWetInputStage>();
-        Receiver->MeshSampler = MakeUnique<FWetClothingMeshSampler>();
-        Receiver->RenderStage = MakeUnique<FWetRenderStage>();
-
-        if (TargetSkeletalMesh == nullptr)
-        {
-            TargetSkeletalMesh = Mesh;
-        }
-
-        Receivers.Add(MoveTemp(Receiver));
-    }
-
-    if (Receivers.IsEmpty())
-    {
-        UE_LOG(LogTemp, Warning, TEXT("DynamicWetClothesComponent: No wet mesh receivers found on %s."), *GetNameSafe(Owner));
+        UE_LOG(LogTemp, Warning, TEXT("DynamicWetClothesComponent: Wet Clothing Asset is missing or does not match the target mesh on %s."), *GetNameSafe(GetOwner()));
         return false;
     }
 
+    TUniquePtr<FDWCWetMeshReceiverRuntime> Receiver = MakeUnique<FDWCWetMeshReceiverRuntime>();
+    Receiver->ReceiverId = Mesh->GetFName();
+    Receiver->MeshComponent = Mesh;
+    Receiver->WetClothingAsset = ResolvedWetClothingAsset;
+    Receiver->RuntimeData = MakeUnique<FWetClothingRuntimeData>();
+    Receiver->RuntimeDataBuilder = MakeUnique<FWetRuntimeDataBuilder>();
+    Receiver->SimulationState = MakeUnique<FAbsorbedWetnessSimulationState>();
+    Receiver->SimulationStage = MakeUnique<FWetSimulationStage>();
+    Receiver->InputStage = MakeUnique<FWetInputStage>();
+    Receiver->MeshSampler = MakeUnique<FWetClothingMeshSampler>();
+    Receiver->RenderStage = MakeUnique<FWetRenderStage>();
+
+    TargetSkeletalMesh = Mesh;
+    Receivers.Add(MoveTemp(Receiver));
     return true;
 }
 
@@ -324,7 +228,6 @@ FWetRuntimeDataBuildArgs UDynamicWetClothesComponent::MakeRuntimeDataBuildArgs(F
     FWetRuntimeDataBuildArgs Args;
     Args.OwnerForLogs = GetOwner();
     Args.TargetSkeletalMesh = Receiver.MeshComponent.Get();
-    Args.ComponentPath = Receiver.ComponentPath;
     Args.WetClothingAsset = Receiver.WetClothingAsset.Get();
     Args.WetnessProfiles = &WetnessProfiles;
     Args.RuntimeData = Receiver.RuntimeData.Get();
@@ -333,9 +236,8 @@ FWetRuntimeDataBuildArgs UDynamicWetClothesComponent::MakeRuntimeDataBuildArgs(F
     Args.UnassignedWetPartDebugColor = UnassignedWetPartDebugColor;
     Args.LODIndex = 0;
 
-    const bool bLegacySingleMeshScope = Receiver.ComponentPath.IsEmpty();
-    Args.bUsePrecomputedSimulationData = bLegacySingleMeshScope;
-    Args.bUsePrecomputedBoneOptimizationCache = bLegacySingleMeshScope;
+    Args.bUsePrecomputedSimulationData = true;
+    Args.bUsePrecomputedBoneOptimizationCache = true;
     return Args;
 }
 
@@ -386,7 +288,6 @@ FWetRenderStageArgs UDynamicWetClothesComponent::MakeWetRenderStageArgs(FDWCWetM
 
     FWetRenderStageArgs Args;
     Args.TargetSkeletalMesh = Receiver.MeshComponent.Get();
-    Args.ComponentPath = Receiver.ComponentPath;
     Args.WetClothingAsset = Receiver.WetClothingAsset.Get();
     Args.WetnessSettings = &WetnessSettings;
     Args.RuntimeData = Receiver.RuntimeData.Get();
@@ -449,60 +350,17 @@ USkeletalMeshComponent* UDynamicWetClothesComponent::ResolveTargetSkeletalMesh()
 UWetClothingAsset* UDynamicWetClothesComponent::ResolveWetClothingAssetForMesh(const USkeletalMeshComponent& MeshComponent) const
 {
     USkeletalMesh* SkeletalMesh = MeshComponent.GetSkeletalMeshAsset();
-    if (SkeletalMesh == nullptr)
+    if (SkeletalMesh == nullptr || WetClothingAsset == nullptr)
     {
         return nullptr;
     }
 
-    for (const FDWCWetMeshBinding& Binding : WetMeshBindings)
+    if (WetClothingAsset->TargetMesh != nullptr && WetClothingAsset->TargetMesh != SkeletalMesh)
     {
-        if (!Binding.bEnabled || Binding.WetClothingAsset == nullptr)
-        {
-            continue;
-        }
-
-        if (!Binding.ComponentName.IsNone() && Binding.ComponentName == MeshComponent.GetFName())
-        {
-            return Binding.WetClothingAsset;
-        }
+        return nullptr;
     }
 
-    for (const FDWCWetMeshBinding& Binding : WetMeshBindings)
-    {
-        if (!Binding.bEnabled || Binding.WetClothingAsset == nullptr)
-        {
-            continue;
-        }
-
-        if (Binding.TargetMesh != nullptr && Binding.TargetMesh == SkeletalMesh)
-        {
-            return Binding.WetClothingAsset;
-        }
-    }
-
-    for (const FDWCWetMeshBinding& Binding : WetMeshBindings)
-    {
-        if (!Binding.bEnabled || Binding.WetClothingAsset == nullptr)
-        {
-            continue;
-        }
-
-        if (Binding.ComponentName.IsNone() &&
-            Binding.TargetMesh == nullptr &&
-            Binding.WetClothingAsset->TargetMesh == SkeletalMesh)
-        {
-            return Binding.WetClothingAsset;
-        }
-    }
-
-    if (WetMeshBindings.IsEmpty() &&
-        WetClothingAsset != nullptr &&
-        (WetClothingAsset->TargetMesh == nullptr || WetClothingAsset->TargetMesh == SkeletalMesh))
-    {
-        return WetClothingAsset;
-    }
-
-    return nullptr;
+    return WetClothingAsset;
 }
 
 void UDynamicWetClothesComponent::ApplyGeneratedWetMaterialOverrides()
@@ -525,8 +383,7 @@ void UDynamicWetClothesComponent::ApplyGeneratedWetMaterialOverrides()
         {
             if (MaterialOverride.MaterialSlotIndex == INDEX_NONE ||
                 MaterialOverride.WetMaterial == nullptr ||
-                MaterialOverride.ComponentPath != Receiver->ComponentPath ||
-                !IsMaterialSlotWettableForRuntime(ReceiverWetClothingAsset, MaterialOverride.MaterialSlotIndex, Receiver->ComponentPath))
+                !IsMaterialSlotWettableForRuntime(ReceiverWetClothingAsset, MaterialOverride.MaterialSlotIndex))
             {
                 continue;
             }
@@ -549,11 +406,10 @@ void UDynamicWetClothesComponent::ApplyGeneratedWetMaterialOverrides()
                 UE_LOG(
                     LogDWC,
                     Log,
-                    TEXT("DWC wrinkle runtime: applied generated wet material override '%s' to mesh '%s' slot %d (component '%s')."),
+                    TEXT("DWC wrinkle runtime: applied generated wet material override '%s' to mesh '%s' slot %d."),
                     *GetNameSafe(MaterialOverride.WetMaterial),
                     *GetNameSafe(OverrideTargetMesh),
-                    MaterialOverride.MaterialSlotIndex,
-                    *Receiver->ComponentPath);
+                    MaterialOverride.MaterialSlotIndex);
             }
         }
 
@@ -592,11 +448,10 @@ void UDynamicWetClothesComponent::ApplyGeneratedWetMaterialOverrides()
 
                 const FWetClothingGeneratedWetMaterialOverride* MatchingOverride =
                     ReceiverWetClothingAsset->PartData.GeneratedWetMaterialOverrides.FindByPredicate(
-                        [ComponentPath = Receiver->ComponentPath, MaterialSlotIndex](const FWetClothingGeneratedWetMaterialOverride& Candidate)
+                        [MaterialSlotIndex](const FWetClothingGeneratedWetMaterialOverride& Candidate)
                         {
                             return Candidate.MaterialSlotIndex == MaterialSlotIndex &&
-                                   Candidate.WetMaterial != nullptr &&
-                                   Candidate.ComponentPath == ComponentPath;
+                                   Candidate.WetMaterial != nullptr;
                         });
 
                 if (MatchingOverride == nullptr)
@@ -614,27 +469,6 @@ void UDynamicWetClothesComponent::ApplyGeneratedWetMaterialOverrides()
             }
         }
     }
-}
-
-bool UDynamicWetClothesComponent::HasWetDataForMeshComponent(
-    const USkeletalMeshComponent& MeshComponent,
-    const FString&                ComponentPath,
-    const UWetClothingAsset*      MeshWetClothingAsset) const
-{
-    const USkeletalMesh* SkeletalMesh = MeshComponent.GetSkeletalMeshAsset();
-    if (SkeletalMesh == nullptr)
-    {
-        return false;
-    }
-
-    if (MeshWetClothingAsset == nullptr)
-    {
-        return false;
-    }
-
-    return HasScopedWetDataForComponent(MeshWetClothingAsset, ComponentPath) ||
-           ((MeshWetClothingAsset->TargetMesh == nullptr || MeshWetClothingAsset->TargetMesh == SkeletalMesh) &&
-            HasLegacyUnscopedWetData(MeshWetClothingAsset));
 }
 
 bool UDynamicWetClothesComponent::ShouldReceiverConsiderContact(
@@ -1050,13 +884,11 @@ void UDynamicWetClothesComponent::PostEditChangeProperty(FPropertyChangedEvent& 
         PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, UnderColorBlendStrengthParameterName) ||
         PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, UnassignedWetPartDebugColor) ||
         PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, TargetSkeletalMeshName) ||
-        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, WetClothingAsset) ||
-        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, WetMeshBindings))
+        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, WetClothingAsset))
     {
         const bool bRequiresRuntimeRebuild =
             PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, TargetSkeletalMeshName) ||
-            PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, WetClothingAsset) ||
-            PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, WetMeshBindings);
+            PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, WetClothingAsset);
 
         if (bRequiresRuntimeRebuild || Receivers.IsEmpty())
         {

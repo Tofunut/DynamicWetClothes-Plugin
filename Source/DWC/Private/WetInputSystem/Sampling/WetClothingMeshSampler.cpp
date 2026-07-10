@@ -188,8 +188,23 @@ bool FWetClothingMeshSampler::UpdateSkinnedNormals(USkeletalMeshComponent* Targe
 
     for (int32 VertexIndex = 0; VertexIndex < VertexCount; ++VertexIndex)
     {
+        int32 SectionIndex = INDEX_NONE;
+        int32 SectionVertexIndex = INDEX_NONE;
+        LODData->GetSectionFromVertexIndex(VertexIndex, SectionIndex, SectionVertexIndex);
+        if (!LODData->RenderSections.IsValidIndex(SectionIndex) || SectionVertexIndex < 0)
+        {
+            continue;
+        }
+
+        const FSkelMeshRenderSection& Section = LODData->RenderSections[SectionIndex];
+        const int32 BufferVertexIndex = Section.GetVertexBufferIndex() + SectionVertexIndex;
+        if (BufferVertexIndex < 0 || BufferVertexIndex >= VertexCount)
+        {
+            continue;
+        }
+
         const FVector3f LocalNormal =
-            LODData->StaticVertexBuffers.StaticMeshVertexBuffer.VertexTangentZ(VertexIndex).GetSafeNormal();
+            LODData->StaticVertexBuffers.StaticMeshVertexBuffer.VertexTangentZ(BufferVertexIndex).GetSafeNormal();
 
         if (LocalNormal.IsNearlyZero())
         {
@@ -200,15 +215,20 @@ bool FWetClothingMeshSampler::UpdateSkinnedNormals(USkeletalMeshComponent* Targe
 
         for (uint32 InfluenceIndex = 0; InfluenceIndex < MaxInfluences; ++InfluenceIndex)
         {
-            const uint16 BoneWeight = SkinWeightBuffer->GetBoneWeight(VertexIndex, InfluenceIndex);
+            const uint16 BoneWeight = SkinWeightBuffer->GetBoneWeight(BufferVertexIndex, InfluenceIndex);
 
             if (BoneWeight == 0)
             {
                 continue;
             }
 
-            const uint32 BoneIndex = SkinWeightBuffer->GetBoneIndex(VertexIndex, InfluenceIndex);
+            const int32 BoneMapIndex = static_cast<int32>(SkinWeightBuffer->GetBoneIndex(BufferVertexIndex, InfluenceIndex));
+            if (!Section.BoneMap.IsValidIndex(BoneMapIndex))
+            {
+                continue;
+            }
 
+            const int32 BoneIndex = Section.BoneMap[BoneMapIndex];
             if (!CachedRefToLocalMatrices.IsValidIndex(BoneIndex))
             {
                 continue;

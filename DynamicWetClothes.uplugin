@@ -17,7 +17,11 @@
         "Type": "Editor"
     },
     {
-        "Name": "DWCWater",
+        "Name": "DWCWaterSystemIntegration",
+        "Type": "Runtime"
+    },
+    {
+        "Name": "DWCDemo",
         "Type": "Runtime"
     }
     ],

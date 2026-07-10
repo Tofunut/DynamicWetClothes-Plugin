@@ -1,8 +1,8 @@
 using UnrealBuildTool;
 
-public class DWC : ModuleRules
+public class DWCDemo : ModuleRules
 {
-	public DWC(ReadOnlyTargetRules Target) : base(Target)
+	public DWCDemo(ReadOnlyTargetRules Target) : base(Target)
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 
@@ -11,14 +11,14 @@ public class DWC : ModuleRules
 			{
 				"Core",
 				"CoreUObject",
-				"Engine"
+				"Engine",
+				"DWC",
+				"Niagara"
 			});
 
 		PrivateDependencyModuleNames.AddRange(
 			new string[]
 			{
-				"RHI",
-				"RenderCore"
 			});
 	}
 }

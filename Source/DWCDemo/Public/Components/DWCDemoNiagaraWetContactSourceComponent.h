@@ -4,20 +4,20 @@
 #include "Components/ActorComponent.h"
 #include "WetInputSystem/WetContactTypes.h"
 #include "NiagaraDataInterfaceExport.h"
-#include "NiagaraWetContactBridgeComponent.generated.h"
+#include "DWCDemoNiagaraWetContactSourceComponent.generated.h"
 
 class UDynamicWetClothesComponent;
 class UNiagaraComponent;
 
-UCLASS(ClassGroup = (Wetness), DisplayName = "Niagara Wet Contact Bridge", meta = (BlueprintSpawnableComponent))
-class DWC_API UNiagaraWetContactBridgeComponent
+UCLASS(ClassGroup = (Wetness), DisplayName = "DWC Demo Niagara Wet Contact Source", meta = (BlueprintSpawnableComponent))
+class DWCDEMO_API UDWCDemoNiagaraWetContactSourceComponent
     : public UActorComponent,
       public INiagaraParticleCallbackHandler
 {
     GENERATED_BODY()
 
   public:
-    UNiagaraWetContactBridgeComponent();
+    UDWCDemoNiagaraWetContactSourceComponent();
 
     virtual void BeginPlay() override;
 
@@ -30,9 +30,12 @@ class DWC_API UNiagaraWetContactBridgeComponent
     UDynamicWetClothesComponent* ResolveReceiver() const;
     UNiagaraComponent*           ResolveNiagaraComponent() const;
     void                         BindCallbackUserParameter();
+    bool                         ShouldLogDebug() const;
+    UDynamicWetClothesComponent* FindNearestReceiver(const FVector& Location, float MaxDistance) const;
     bool                         BuildContactsFromParticle(
                                 const FBasicParticleData& Particle,
                                 const FVector&            SimulationPositionOffset,
+                                UDynamicWetClothesComponent*& InOutReceiver,
                                 TArray<FDWCWetContact>&   OutContacts) const;
 
   public:
@@ -73,18 +76,26 @@ class DWC_API UNiagaraWetContactBridgeComponent
     bool bRequireBoneNameForContact = true;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Trace")
-    bool bTraceForWaterSurfaceData = false;
+    bool bTraceForContactData = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Trace", meta = (EditCondition = "bTraceForWaterSurfaceData"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Trace", meta = (EditCondition = "bTraceForContactData"))
     TEnumAsByte<ECollisionChannel> TraceChannel = ECC_Visibility;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Trace", meta = (ClampMin = "0.0", EditCondition = "bTraceForWaterSurfaceData"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Trace", meta = (ClampMin = "0.0", EditCondition = "bTraceForContactData"))
     float TraceDistance = 25.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Trace", meta = (EditCondition = "bTraceForWaterSurfaceData"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Trace", meta = (EditCondition = "bTraceForContactData"))
     bool bTraceComplex = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Debug")
+    bool bEnableDebugLogging = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Debug", meta = (ClampMin = "0.1"))
+    float DebugLogInterval = 1.0f;
 
   private:
     UPROPERTY(Transient)
     TObjectPtr<UNiagaraComponent> NiagaraComponent = nullptr;
+
+    mutable double LastDebugLogTime = -1000000.0;
 };

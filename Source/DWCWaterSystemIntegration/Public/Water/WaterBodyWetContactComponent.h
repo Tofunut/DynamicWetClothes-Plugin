@@ -11,7 +11,7 @@ class UWaterBodyComponent;
 struct FDWCWaterSurfaceData;
 
 UCLASS(ClassGroup = (Wetness), DisplayName = "Water Body Wet Contact", meta = (BlueprintSpawnableComponent))
-class DWCWATER_API UWaterBodyWetContactComponent : public UActorComponent
+class DWCWATERSYSTEMINTEGRATION_API UWaterBodyWetContactComponent : public UActorComponent
 {
     GENERATED_BODY()
 

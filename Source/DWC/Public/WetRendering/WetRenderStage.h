@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "CoreMinimal.h"
 #include "WetRendering/WetMaterialParameters.h"
@@ -23,7 +23,6 @@ WetRenderStage �행�요�자 묶음�다.
 struct DWC_API FWetRenderStageArgs
 {
     USkeletalMeshComponent*     TargetSkeletalMesh = nullptr;
-    FString                     ComponentPath;
     const UWetClothingAsset*    WetClothingAsset = nullptr;
     const FWetClothingSettings* WetnessSettings = nullptr;
 

@@ -171,8 +171,7 @@ namespace
         for (const FWetClothingWettableMaterialSlotState& SlotState : EditableWetPartData.WettableMaterialSlots)
         {
             WettableSlotSignatures.Add(FString::Printf(
-                TEXT("Component=%s|Slot=%d|Wettable=%d"),
-                *SlotState.ComponentPath,
+                TEXT("Slot=%d|Wettable=%d"),
                 SlotState.MaterialSlotIndex,
                 SlotState.bIsWettableSlot ? 1 : 0));
         }
@@ -194,8 +193,7 @@ namespace
             }
 
             EntrySignatures.Add(FString::Printf(
-                TEXT("Component=%s|Slot=%d|UV=%d|Part=%d|Islands=%s"),
-                *Entry.ComponentPath,
+                TEXT("Slot=%d|UV=%d|Part=%d|Islands=%s"),
                 Entry.MaterialSlotIndex,
                 Entry.UVChannelIndex,
                 Entry.WetPartID,
@@ -619,8 +617,7 @@ bool UWetClothingAsset::RebuildPrecomputedSimulationData(FString* OutErrorMessag
     for (int32 EntryIndex = 0; EntryIndex < PartData.EditableWetPartData.WetPartEntries.Num(); ++EntryIndex)
     {
         const FWetClothingWetPartEntry& Entry = PartData.EditableWetPartData.WetPartEntries[EntryIndex];
-        if (!Entry.ComponentPath.IsEmpty() ||
-            Entry.MaterialSlotIndex == INDEX_NONE ||
+        if (Entry.MaterialSlotIndex == INDEX_NONE ||
             Entry.UVChannelIndex == INDEX_NONE ||
             !IsMaterialSlotWettable(PartData.EditableWetPartData, Entry.MaterialSlotIndex))
         {

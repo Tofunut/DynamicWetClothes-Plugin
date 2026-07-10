@@ -22,7 +22,6 @@ struct DWC_API FWetRuntimeDataBuildArgs
 {
     UObject*                        OwnerForLogs = nullptr;
     USkeletalMeshComponent*         TargetSkeletalMesh = nullptr;
-    FString                         ComponentPath;
     const UWetClothingAsset*        WetClothingAsset = nullptr;
     const TArray<UWetnessProfile*>* WetnessProfiles = nullptr;
 

@@ -1,14 +1,15 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
-#include "Examples/Volumes/RainVolume.h"
+#include "Actors/DWCDemoRainWetAreaSource.h"
 
 #include "Components/BoxComponent.h"
 #include "Components/DynamicWetClothesComponent.h"
 #include "Engine/World.h"
+#include "EngineUtils.h"
 #include "NiagaraComponent.h"
 #include "TimerManager.h"
 
-ARainVolume::ARainVolume()
+ADWCDemoRainWetAreaSource::ADWCDemoRainWetAreaSource()
 {
     PrimaryActorTick.bCanEverTick = false;
 
@@ -26,7 +27,7 @@ ARainVolume::ARainVolume()
     RainNiagara->SetupAttachment(RootComponent);
 }
 
-void ARainVolume::BeginPlay()
+void ADWCDemoRainWetAreaSource::BeginPlay()
 {
     Super::BeginPlay();
 
@@ -37,28 +38,43 @@ void ARainVolume::BeginPlay()
 
     RainBounds->OnComponentBeginOverlap.AddUniqueDynamic(
         this,
-        &ARainVolume::OnRainBeginOverlap);
+        &ADWCDemoRainWetAreaSource::OnRainBeginOverlap);
 
     RainBounds->OnComponentEndOverlap.AddUniqueDynamic(
         this,
-        &ARainVolume::OnRainEndOverlap);
+        &ADWCDemoRainWetAreaSource::OnRainEndOverlap);
 
     RefreshExistingOverlaps();
+    RefreshReceiversInsideBounds();
 
     if (GetWorld() && UpdateInterval > 0.0f)
     {
         GetWorldTimerManager().SetTimer(
             WetnessTimer,
             this,
-            &ARainVolume::ApplyWetnessTick,
+            &ADWCDemoRainWetAreaSource::ApplyWetnessTick,
             UpdateInterval,
             true);
     }
 
     ApplyRainNiagaraParameters();
+
+    if (bEnableDebugLogging)
+    {
+        UE_LOG(
+            LogTemp,
+            Warning,
+            TEXT("DWC Demo Rain Wet Area Source: BeginPlay actor=%s bounds=%s receivers=%d wetPerSecond=%.3f interval=%.3f samples=%d"),
+            *GetNameSafe(this),
+            RainBounds ? *RainBounds->GetScaledBoxExtent().ToString() : TEXT("None"),
+            ReceiverOverlapCounts.Num(),
+            WetAmountPerSecond,
+            UpdateInterval,
+            RainSamplesPerTick);
+    }
 }
 
-void ARainVolume::EndPlay(const EEndPlayReason::Type EndPlayReason)
+void ADWCDemoRainWetAreaSource::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
     if (GetWorld())
     {
@@ -69,11 +85,11 @@ void ARainVolume::EndPlay(const EEndPlayReason::Type EndPlayReason)
     {
         RainBounds->OnComponentBeginOverlap.RemoveDynamic(
             this,
-            &ARainVolume::OnRainBeginOverlap);
+            &ADWCDemoRainWetAreaSource::OnRainBeginOverlap);
 
         RainBounds->OnComponentEndOverlap.RemoveDynamic(
             this,
-            &ARainVolume::OnRainEndOverlap);
+            &ADWCDemoRainWetAreaSource::OnRainEndOverlap);
     }
 
     ReceiverOverlapCounts.Reset();
@@ -81,14 +97,14 @@ void ARainVolume::EndPlay(const EEndPlayReason::Type EndPlayReason)
     Super::EndPlay(EndPlayReason);
 }
 
-void ARainVolume::OnConstruction(const FTransform& Transform)
+void ADWCDemoRainWetAreaSource::OnConstruction(const FTransform& Transform)
 {
     Super::OnConstruction(Transform);
 
     ApplyRainNiagaraParameters();
 }
 
-void ARainVolume::RefreshExistingOverlaps()
+void ADWCDemoRainWetAreaSource::RefreshExistingOverlaps()
 {
     if (!RainBounds)
     {
@@ -105,11 +121,63 @@ void ARainVolume::RefreshExistingOverlaps()
     }
 }
 
-void ARainVolume::ApplyWetnessTick()
+void ADWCDemoRainWetAreaSource::RefreshReceiversInsideBounds()
+{
+    UWorld* World = GetWorld();
+    if (!World || !RainBounds)
+    {
+        return;
+    }
+
+    const FBox RainWorldBounds = RainBounds->Bounds.GetBox();
+    for (TActorIterator<AActor> It(World); It; ++It)
+    {
+        AActor* CandidateActor = *It;
+        if (!IsValid(CandidateActor) || CandidateActor == this)
+        {
+            continue;
+        }
+
+        UDynamicWetClothesComponent* Receiver =
+            CandidateActor->FindComponentByClass<UDynamicWetClothesComponent>();
+        if (!IsValid(Receiver))
+        {
+            continue;
+        }
+
+        FBox WetBounds(ForceInit);
+        if (!Receiver->GetWetnessWorldBounds(WetBounds) || !WetBounds.IsValid)
+        {
+            continue;
+        }
+
+        if (RainWorldBounds.Intersect(WetBounds))
+        {
+            int32& OverlapCount = ReceiverOverlapCounts.FindOrAdd(Receiver);
+            OverlapCount = FMath::Max(OverlapCount, 1);
+        }
+    }
+}
+
+void ADWCDemoRainWetAreaSource::ApplyWetnessTick()
 {
     if (ReceiverOverlapCounts.Num() == 0)
     {
-        return;
+        RefreshExistingOverlaps();
+        RefreshReceiversInsideBounds();
+        if (ReceiverOverlapCounts.Num() == 0)
+        {
+            if (ShouldLogDebug())
+            {
+                UE_LOG(
+                    LogTemp,
+                    Warning,
+                    TEXT("DWC Demo Rain Wet Area Source: no wet receivers actor=%s bounds=%s"),
+                    *GetNameSafe(this),
+                    RainBounds ? *RainBounds->Bounds.GetBox().ToString() : TEXT("None"));
+            }
+            return;
+        }
     }
 
     for (auto It = ReceiverOverlapCounts.CreateIterator(); It; ++It)
@@ -125,7 +193,7 @@ void ARainVolume::ApplyWetnessTick()
     }
 }
 
-void ARainVolume::AddReceiverFromActor(AActor* OtherActor)
+void ADWCDemoRainWetAreaSource::AddReceiverFromActor(AActor* OtherActor)
 {
     if (!IsValid(OtherActor) || OtherActor == this)
     {
@@ -142,7 +210,7 @@ void ARainVolume::AddReceiverFromActor(AActor* OtherActor)
     ++OverlapCount;
 }
 
-void ARainVolume::RemoveReceiverFromActor(AActor* OtherActor)
+void ADWCDemoRainWetAreaSource::RemoveReceiverFromActor(AActor* OtherActor)
 {
     if (!IsValid(OtherActor))
     {
@@ -168,10 +236,22 @@ void ARainVolume::RemoveReceiverFromActor(AActor* OtherActor)
     }
 }
 
-void ARainVolume::ApplyRainToReceiver(UDynamicWetClothesComponent& Receiver) const
+void ADWCDemoRainWetAreaSource::ApplyRainToReceiver(UDynamicWetClothesComponent& Receiver) const
 {
     if (!RainBounds || WetAmountPerSecond <= 0.0f || UpdateInterval <= 0.0f)
     {
+        if (ShouldLogDebug())
+        {
+            UE_LOG(
+                LogTemp,
+                Warning,
+                TEXT("DWC Demo Rain Wet Area Source: skipped apply actor=%s receiver=%s bounds=%s wetPerSecond=%.3f interval=%.3f"),
+                *GetNameSafe(this),
+                *GetNameSafe(&Receiver),
+                RainBounds ? TEXT("valid") : TEXT("null"),
+                WetAmountPerSecond,
+                UpdateInterval);
+        }
         return;
     }
 
@@ -187,10 +267,23 @@ void ARainVolume::ApplyRainToReceiver(UDynamicWetClothesComponent& Receiver) con
     AreaData.bUseNormalExposure = bUseNormalExposure;
     AreaData.bUseSkinnedNormalsForExposure = bUseSkinnedNormalsForExposure;
 
-    Receiver.ApplyWetArea(AreaData, false);
+    const bool bChanged = Receiver.ApplyWetArea(AreaData, false);
+    if (ShouldLogDebug())
+    {
+        UE_LOG(
+            LogTemp,
+            Warning,
+            TEXT("DWC Demo Rain Wet Area Source: apply actor=%s receiver=%s changed=%s amount=%.3f samples=%d receivers=%d"),
+            *GetNameSafe(this),
+            *GetNameSafe(&Receiver),
+            bChanged ? TEXT("true") : TEXT("false"),
+            AreaData.Amount,
+            AreaData.SampleCount,
+            ReceiverOverlapCounts.Num());
+    }
 }
 
-void ARainVolume::ApplyRainNiagaraParameters() const
+void ADWCDemoRainWetAreaSource::ApplyRainNiagaraParameters() const
 {
     if (!IsValid(RainNiagara) || !IsValid(RainBounds))
     {
@@ -202,7 +295,7 @@ void ARainVolume::ApplyRainNiagaraParameters() const
     RainNiagara->SetVariableFloat(RainIntensityParameterName, WetAmountPerSecond);
 }
 
-void ARainVolume::OnRainBeginOverlap(
+void ADWCDemoRainWetAreaSource::OnRainBeginOverlap(
     UPrimitiveComponent* OverlappedComponent,
     AActor*              OtherActor,
     UPrimitiveComponent* OtherComp,
@@ -213,11 +306,29 @@ void ARainVolume::OnRainBeginOverlap(
     AddReceiverFromActor(OtherActor);
 }
 
-void ARainVolume::OnRainEndOverlap(
+void ADWCDemoRainWetAreaSource::OnRainEndOverlap(
     UPrimitiveComponent* OverlappedComponent,
     AActor*              OtherActor,
     UPrimitiveComponent* OtherComp,
     int32                OtherBodyIndex)
 {
     RemoveReceiverFromActor(OtherActor);
+}
+
+bool ADWCDemoRainWetAreaSource::ShouldLogDebug() const
+{
+    if (!bEnableDebugLogging)
+    {
+        return false;
+    }
+
+    const UWorld* World = GetWorld();
+    const double  Now = World ? World->GetTimeSeconds() : FPlatformTime::Seconds();
+    if (Now - LastDebugLogTime < FMath::Max(0.1f, DebugLogInterval))
+    {
+        return false;
+    }
+
+    LastDebugLogTime = Now;
+    return true;
 }

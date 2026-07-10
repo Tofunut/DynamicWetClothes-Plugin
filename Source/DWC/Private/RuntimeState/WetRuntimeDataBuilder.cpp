@@ -424,26 +424,43 @@ bool FWetRuntimeDataBuilder::InitializeBoneOptimizationCacheFromPrecomputedData(
     FWetRuntimeDataBuildArgs& Receiver,
     const int32               LODIndex)
 {
+    if (!Receiver.RuntimeData)
+    {
+        return false;
+    }
+
     Receiver.RuntimeData->ResetBoneOptimizationCache();
+
+    auto SetFallbackReason = [&Receiver](const FString& Reason)
+    {
+        if (Receiver.RuntimeData)
+        {
+            Receiver.RuntimeData->BoneOptimizationCacheFallbackReason = Reason;
+        }
+    };
 
     if (!Receiver.TargetSkeletalMesh)
     {
+        SetFallbackReason(TEXT("The target SkeletalMeshComponent is unavailable."));
         return false;
     }
 
     USkeletalMesh* SkeletalMesh = Receiver.TargetSkeletalMesh->GetSkeletalMeshAsset();
     if (!SkeletalMesh)
     {
+        SetFallbackReason(TEXT("The target SkeletalMesh asset is unavailable."));
         return false;
     }
 
-    if (!Receiver.bUsePrecomputedBoneOptimizationCache || !Receiver.WetClothingAsset)
+    if (!Receiver.bUsePrecomputedBoneOptimizationCache)
     {
-        UE_LOG(
-            LogTemp,
-            Error,
-            TEXT("DynamicWetClothesComponent: Precomputed bone optimization cache is required on %s. Runtime fallback was removed."),
-            *GetNameSafe(Receiver.OwnerForLogs));
+        SetFallbackReason(TEXT("Precomputed bone optimization cache usage is disabled."));
+        return false;
+    }
+
+    if (!Receiver.WetClothingAsset)
+    {
+        SetFallbackReason(TEXT("No WetClothingAsset is assigned, so no precomputed bone cache is registered."));
         return false;
     }
 
@@ -455,135 +472,211 @@ bool FWetRuntimeDataBuilder::InitializeBoneOptimizationCacheFromPrecomputedData(
             Receiver.RuntimeData->BoneOptimizationCache,
             &PrecomputedCacheErrorMessage))
     {
-        UE_LOG(
-            LogTemp,
-            Error,
-            TEXT("DynamicWetClothesComponent: Failed to initialize bone optimization cache from precomputed simulation data on %s. %s Open the Wet Clothing Asset and save it to update runtime-ready data."),
-            *GetNameSafe(Receiver.OwnerForLogs),
-            *PrecomputedCacheErrorMessage);
+        SetFallbackReason(
+            PrecomputedCacheErrorMessage.IsEmpty()
+                ? FString(TEXT("The precomputed bone optimization cache is unavailable or invalid."))
+                : PrecomputedCacheErrorMessage);
+        return false;
+    }
+
+    const FWetBonePrimaryVertexCache& PrimaryCache =
+        Receiver.RuntimeData->BoneOptimizationCache.PrimaryVertexCache;
+    if (PrimaryCache.SourceMesh != SkeletalMesh ||
+        PrimaryCache.LODIndex != LODIndex ||
+        PrimaryCache.BoneCount <= 0 ||
+        PrimaryCache.VertexCount <= 0 ||
+        PrimaryCache.BoneStartOffsets.Num() != PrimaryCache.BoneCount + 1)
+    {
+        Receiver.RuntimeData->ResetBoneOptimizationCache();
+        SetFallbackReason(TEXT("The copied precomputed bone cache contains no valid LOD primary-bone data."));
         return false;
     }
 
     Receiver.RuntimeData->bHasBoneOptimizationCache = true;
+    Receiver.RuntimeData->BoneOptimizationCacheFallbackReason.Reset();
     return true;
 }
 
-bool FWetRuntimeDataBuilder::GetBoneCandidateVertexRange(
+bool FWetRuntimeDataBuilder::ResolveSpecificBonesToLoopThrough(
     const FWetClothingRuntimeData& RuntimeData,
     const USkeletalMeshComponent*  TargetSkeletalMesh,
-    const FName                    BoneName,
-    int32&                         OutStartOffset,
-    int32&                         OutEndOffset) const
+    const FName                    HitBoneName,
+    TArray<int32>&                 OutBoneIndices,
+    FString*                       OutFallbackReason,
+    const bool                     bRequireFullVertexTraversal) const
 {
-    OutStartOffset = INDEX_NONE;
-    OutEndOffset = INDEX_NONE;
+    OutBoneIndices.Reset();
 
-    if (BoneName.IsNone() || !RuntimeData.bHasBoneOptimizationCache || !TargetSkeletalMesh)
+    auto Fail = [OutFallbackReason](const FString& Reason)
     {
+        if (OutFallbackReason)
+        {
+            *OutFallbackReason = Reason;
+        }
         return false;
+    };
+
+    if (OutFallbackReason)
+    {
+        OutFallbackReason->Reset();
     }
 
-    const USkeletalMesh* SkeletalMesh = TargetSkeletalMesh->GetSkeletalMeshAsset();
-    if (!SkeletalMesh)
+    if (bRequireFullVertexTraversal)
     {
-        return false;
+        return Fail(TEXT("The current request requires complete vertex information."));
     }
 
-    const FWetBonePrimaryVertexCache& PrimaryVertexCache =
-        RuntimeData.BoneOptimizationCache.PrimaryVertexCache;
-    if (PrimaryVertexCache.SourceMesh != SkeletalMesh)
+    if (HitBoneName.IsNone())
     {
-        return false;
-    }
-
-    const int32 BoneIndex = SkeletalMesh->GetRefSkeleton().FindBoneIndex(BoneName);
-    if (BoneIndex == INDEX_NONE || !PrimaryVertexCache.BoneStartOffsets.IsValidIndex(BoneIndex + 1))
-    {
-        return false;
-    }
-
-    OutStartOffset = PrimaryVertexCache.BoneStartOffsets[BoneIndex];
-    OutEndOffset = PrimaryVertexCache.BoneStartOffsets[BoneIndex + 1];
-    return OutStartOffset >= 0 && OutEndOffset >= OutStartOffset &&
-           OutEndOffset <= PrimaryVertexCache.FlatVertexIndices.Num();
-}
-
-bool FWetRuntimeDataBuilder::DoesVertexMatchBoneName(const USkeletalMeshComponent* TargetSkeletalMesh, const int32 VertexIndex, const FName BoneName) const
-{
-    if (BoneName.IsNone())
-    {
-        return true;
+        return Fail(TEXT("HitResult did not provide a HitBone/BoneName."));
     }
 
     if (!TargetSkeletalMesh)
     {
-        return false;
+        return Fail(TEXT("The target SkeletalMeshComponent is unavailable."));
     }
 
     const USkeletalMesh* SkeletalMesh = TargetSkeletalMesh->GetSkeletalMeshAsset();
     if (!SkeletalMesh)
     {
-        return false;
+        return Fail(TEXT("The target SkeletalMesh asset is unavailable."));
     }
 
-    const int32 BoneIndex = SkeletalMesh->GetRefSkeleton().FindBoneIndex(BoneName);
-    if (BoneIndex == INDEX_NONE)
+    if (!RuntimeData.bHasBoneOptimizationCache)
     {
-        return false;
+        return Fail(
+            RuntimeData.BoneOptimizationCacheFallbackReason.IsEmpty()
+                ? FString(TEXT("No usable precomputed bone optimization cache is registered."))
+                : RuntimeData.BoneOptimizationCacheFallbackReason);
     }
 
-    FSkeletalMeshLODRenderData* LODData = nullptr;
-    if (!GetLODRenderData(TargetSkeletalMesh, 0, LODData) || !LODData)
+    const FWetBonePrimaryVertexCache& PrimaryCache = RuntimeData.BoneOptimizationCache.PrimaryVertexCache;
+    const int32                       BoneCount = SkeletalMesh->GetRefSkeleton().GetNum();
+    if (PrimaryCache.SourceMesh != SkeletalMesh ||
+        PrimaryCache.BoneCount != BoneCount ||
+        PrimaryCache.VertexCount <= 0 ||
+        PrimaryCache.BoneStartOffsets.Num() != BoneCount + 1 ||
+        PrimaryCache.FlatVertexIndices.IsEmpty())
     {
-        return false;
+        return Fail(TEXT("The precomputed bone cache is empty, stale, or belongs to a different SkeletalMesh."));
     }
 
-    const int32 VertexCount = static_cast<int32>(LODData->GetNumVertices());
-    if (VertexIndex < 0 || VertexIndex >= VertexCount)
+    const int32 HitBoneIndex = SkeletalMesh->GetRefSkeleton().FindBoneIndex(HitBoneName);
+    if (HitBoneIndex == INDEX_NONE)
     {
-        return false;
+        return Fail(FString::Printf(
+            TEXT("HitBone '%s' does not exist in the target reference skeleton."),
+            *HitBoneName.ToString()));
     }
 
-    int32 SectionIndex = INDEX_NONE;
-    int32 SectionVertexIndex = INDEX_NONE;
-    LODData->GetSectionFromVertexIndex(VertexIndex, SectionIndex, SectionVertexIndex);
-    if (!LODData->RenderSections.IsValidIndex(SectionIndex) || SectionVertexIndex < 0)
+    TSet<int32> UniqueBoneIndices;
+    auto AddBoneIndex = [&UniqueBoneIndices, &OutBoneIndices, BoneCount](const int32 BoneIndex)
     {
-        return false;
-    }
-
-    const FSkelMeshRenderSection& Section = LODData->RenderSections[SectionIndex];
-    const int32 BufferVertexIndex = Section.GetVertexBufferIndex() + SectionVertexIndex;
-    if (BufferVertexIndex < 0 || BufferVertexIndex >= VertexCount)
-    {
-        return false;
-    }
-
-    const FSkinWeightVertexBuffer* SkinWeightBuffer = TargetSkeletalMesh->GetSkinWeightBuffer(0);
-    if (!SkinWeightBuffer)
-    {
-        return false;
-    }
-
-    const uint32 MaxInfluences = SkinWeightBuffer->GetMaxBoneInfluences();
-    for (uint32 InfluenceIndex = 0; InfluenceIndex < MaxInfluences; ++InfluenceIndex)
-    {
-        if (SkinWeightBuffer->GetBoneWeight(BufferVertexIndex, InfluenceIndex) == 0)
+        if (BoneIndex < 0 || BoneIndex >= BoneCount || UniqueBoneIndices.Contains(BoneIndex))
         {
-            continue;
+            return;
         }
 
-        const int32 BoneMapIndex = static_cast<int32>(SkinWeightBuffer->GetBoneIndex(BufferVertexIndex, InfluenceIndex));
-        if (!Section.BoneMap.IsValidIndex(BoneMapIndex))
-        {
-            continue;
-        }
+        UniqueBoneIndices.Add(BoneIndex);
+        OutBoneIndices.Add(BoneIndex);
+    };
 
-        if (static_cast<int32>(Section.BoneMap[BoneMapIndex]) == BoneIndex)
+    AddBoneIndex(HitBoneIndex);
+
+    if (const FWetResolvedBoneIncludeRule* IncludeRule =
+            RuntimeData.BoneOptimizationCache.ResolvedIncludeRules.FindByPredicate(
+                [HitBoneIndex](const FWetResolvedBoneIncludeRule& Candidate)
+                {
+                    return Candidate.TargetBoneIndex == HitBoneIndex;
+                }))
+    {
+        for (const int32 IncludedBoneIndex : IncludeRule->IncludedBoneIndices)
         {
-            return true;
+            AddBoneIndex(IncludedBoneIndex);
         }
     }
 
-    return false;
+    if (OutBoneIndices.IsEmpty())
+    {
+        return Fail(TEXT("The resolved specific-bone candidate list is empty."));
+    }
+
+    if (OutBoneIndices.Num() >= BoneCount)
+    {
+        OutBoneIndices.Reset();
+        return Fail(TEXT("The resolved specific-bone candidates cover the entire reference skeleton."));
+    }
+
+    return true;
+}
+
+bool FWetRuntimeDataBuilder::GetBoneCandidateVertexIndices(
+    const FWetClothingRuntimeData& RuntimeData,
+    const USkeletalMeshComponent*  TargetSkeletalMesh,
+    const FName                    HitBoneName,
+    TArray<int32>&                 OutVertexIndices,
+    FString*                       OutFallbackReason,
+    const bool                     bRequireFullVertexTraversal) const
+{
+    OutVertexIndices.Reset();
+
+    TArray<int32> ResolvedBoneIndices;
+    if (!ResolveSpecificBonesToLoopThrough(
+            RuntimeData,
+            TargetSkeletalMesh,
+            HitBoneName,
+            ResolvedBoneIndices,
+            OutFallbackReason,
+            bRequireFullVertexTraversal))
+    {
+        return false;
+    }
+
+    const FWetBonePrimaryVertexCache& PrimaryCache = RuntimeData.BoneOptimizationCache.PrimaryVertexCache;
+    for (const int32 BoneIndex : ResolvedBoneIndices)
+    {
+        if (!PrimaryCache.BoneStartOffsets.IsValidIndex(BoneIndex + 1))
+        {
+            OutVertexIndices.Reset();
+            if (OutFallbackReason)
+            {
+                *OutFallbackReason = TEXT("A resolved bone has no valid precomputed vertex range.");
+            }
+            return false;
+        }
+
+        const int32 StartOffset = PrimaryCache.BoneStartOffsets[BoneIndex];
+        const int32 EndOffset = PrimaryCache.BoneStartOffsets[BoneIndex + 1];
+        if (StartOffset < 0 || EndOffset < StartOffset || EndOffset > PrimaryCache.FlatVertexIndices.Num())
+        {
+            OutVertexIndices.Reset();
+            if (OutFallbackReason)
+            {
+                *OutFallbackReason = TEXT("A precomputed primary-bone vertex range is corrupt.");
+            }
+            return false;
+        }
+
+        OutVertexIndices.Reserve(OutVertexIndices.Num() + (EndOffset - StartOffset));
+        for (int32 Offset = StartOffset; Offset < EndOffset; ++Offset)
+        {
+            const int32 VertexIndex = PrimaryCache.FlatVertexIndices[Offset];
+            if (VertexIndex < 0 || VertexIndex >= PrimaryCache.VertexCount)
+            {
+                OutVertexIndices.Reset();
+                if (OutFallbackReason)
+                {
+                    *OutFallbackReason = TEXT("The precomputed bone cache contains an invalid vertex index.");
+                }
+                return false;
+            }
+
+            OutVertexIndices.Add(VertexIndex);
+        }
+    }
+
+    // A valid specific-bone lookup may legitimately resolve to no Influence-0
+    // vertices. This is a cache-search miss, not a cache-unavailable condition,
+    // so the caller must not retry by traversing the entire LOD.
+    return true;
 }

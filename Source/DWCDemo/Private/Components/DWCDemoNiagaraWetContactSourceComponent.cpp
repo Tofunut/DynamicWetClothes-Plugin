@@ -7,74 +7,6 @@
 #include "GameFramework/Actor.h"
 #include "NiagaraComponent.h"
 
-namespace
-{
-    void AddUniqueBoneName(TArray<FName>& BoneNames, const FName BoneName)
-    {
-        if (!BoneName.IsNone())
-        {
-            BoneNames.AddUnique(BoneName);
-        }
-    }
-
-    void CollectSphereSweepBoneNames(
-        UWorld&                                         World,
-        const UDWCDemoNiagaraWetContactSourceComponent& Source,
-        const USkeletalMeshComponent&                   HitSkeletalMesh,
-        const FDWCWetContact&                           Contact,
-        TArray<FName>&                                  InOutBoneNames)
-    {
-        if (Contact.Radius <= 0.0f)
-        {
-            return;
-        }
-
-        FVector SweepNormal = Contact.Normal.GetSafeNormal();
-        if (SweepNormal.IsNearlyZero())
-        {
-            SweepNormal = FVector::UpVector;
-        }
-
-        FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(DWCDemoNiagaraWetContactSourceBoneSweep), false);
-        QueryParams.bReturnPhysicalMaterial = false;
-
-        const float           SweepHalfDistance = FMath::Max(1.0f, Contact.Radius * 0.1f);
-        const FVector         SweepStart = Contact.Location - SweepNormal * SweepHalfDistance;
-        const FVector         SweepEnd = Contact.Location + SweepNormal * SweepHalfDistance;
-        const FCollisionShape SweepShape = FCollisionShape::MakeSphere(Contact.Radius);
-
-        TArray<FHitResult> SweepHits;
-        if (!World.SweepMultiByChannel(
-                SweepHits,
-                SweepStart,
-                SweepEnd,
-                FQuat::Identity,
-                Source.TraceChannel,
-                SweepShape,
-                QueryParams))
-        {
-            return;
-        }
-
-        for (const FHitResult& SweepHit : SweepHits)
-        {
-            if (SweepHit.GetComponent() != &HitSkeletalMesh)
-            {
-                continue;
-            }
-
-            FName BoneName = SweepHit.BoneName;
-            if (BoneName.IsNone())
-            {
-                const FVector QueryLocation = SweepHit.ImpactPoint.IsNearlyZero() ? Contact.Location : SweepHit.ImpactPoint;
-                BoneName = HitSkeletalMesh.FindClosestBone(QueryLocation);
-            }
-
-            AddUniqueBoneName(InOutBoneNames, BoneName);
-        }
-    }
-} // namespace
-
 UDWCDemoNiagaraWetContactSourceComponent::UDWCDemoNiagaraWetContactSourceComponent()
 {
     PrimaryComponentTick.bCanEverTick = false;
@@ -104,15 +36,15 @@ void UDWCDemoNiagaraWetContactSourceComponent::BeginPlay()
         UE_LOG(
             LogTemp,
             Warning,
-            TEXT("DWC Demo Niagara Wet Contact Source: BeginPlay owner=%s receiver=%s niagara=%s callbackParam=%s amount=%.3f radius=%.1f traceChannel=%d requireBone=%s"),
+            TEXT("DWC Demo Niagara Wet Contact Source: BeginPlay owner=%s receiver=%s niagara=%s callbackParam=%s amount=%.3f radius=%.1f traceEnabled=%s traceChannel=%d"),
             *GetNameSafe(GetOwner()),
             *GetNameSafe(Receiver.Get()),
             *GetNameSafe(NiagaraComponent.Get()),
             *CallbackUserParameterName.ToString(),
             ContactAmount,
             ContactRadius,
-            static_cast<int32>(TraceChannel.GetValue()),
-            bRequireBoneNameForContact ? TEXT("true") : TEXT("false"));
+            bTraceForContactData ? TEXT("true") : TEXT("false"),
+            static_cast<int32>(TraceChannel.GetValue()));
     }
 }
 
@@ -332,43 +264,39 @@ bool UDWCDemoNiagaraWetContactSourceComponent::BuildContactsFromParticle(
             ? FVector::DownVector
             : ParticleVelocity.GetSafeNormal();
 
-    FDWCWetContact BaseContact;
-    BaseContact.Amount = ContactAmount;
-    BaseContact.Location = ParticlePosition;
-    BaseContact.Direction = ContactDirection;
-    BaseContact.Radius =
+    FDWCWetContact Contact;
+    Contact.Amount = ContactAmount;
+    Contact.Location = ParticlePosition;
+    Contact.Direction = ContactDirection;
+    Contact.Radius =
         bUseParticleSizeAsRadius
             ? FMath::Max(ContactRadius, Particle.Size * ParticleSizeRadiusScale)
             : ContactRadius;
-    BaseContact.Normal = FVector::UpVector;
-    BaseContact.BoneName = NAME_None;
+    Contact.Normal = FVector::UpVector;
+    Contact.BoneName = NAME_None;
 
-    const bool bShouldTraceForContactData = bTraceForContactData || bRequireBoneNameForContact;
-    if (!bShouldTraceForContactData)
+    // Without a trace there is intentionally no synthetic closest-bone lookup.
+    // WetInputStage will log and perform a full-vertex fallback for NAME_None.
+    if (!bTraceForContactData)
     {
         if (!IsValid(InOutReceiver))
         {
             return false;
         }
 
-        OutContacts.Add(BaseContact);
+        OutContacts.Add(Contact);
         return true;
     }
 
     UWorld* World = GetWorld();
     if (!World)
     {
-        if (bRequireBoneNameForContact)
-        {
-            return false;
-        }
-
         if (!IsValid(InOutReceiver))
         {
             return false;
         }
 
-        OutContacts.Add(BaseContact);
+        OutContacts.Add(Contact);
         return true;
     }
 
@@ -403,7 +331,8 @@ bool UDWCDemoNiagaraWetContactSourceComponent::BuildContactsFromParticle(
         {
             for (const FHitResult& TraceHit : TraceHits)
             {
-                USkeletalMeshComponent* CandidateSkeletalMesh = Cast<USkeletalMeshComponent>(TraceHit.GetComponent());
+                USkeletalMeshComponent* CandidateSkeletalMesh =
+                    Cast<USkeletalMeshComponent>(TraceHit.GetComponent());
                 if (!CandidateSkeletalMesh)
                 {
                     continue;
@@ -418,12 +347,6 @@ bool UDWCDemoNiagaraWetContactSourceComponent::BuildContactsFromParticle(
                 HitSkeletalMesh = CandidateSkeletalMesh;
                 bHit = true;
                 break;
-            }
-
-            if (!bHit && !bRequireBoneNameForContact)
-            {
-                Hit = TraceHits.Last();
-                bHit = true;
             }
         }
     }
@@ -443,64 +366,25 @@ bool UDWCDemoNiagaraWetContactSourceComponent::BuildContactsFromParticle(
             return false;
         }
 
-        BaseContact.Location = Hit.ImpactPoint.IsNearlyZero() ? Hit.Location : Hit.ImpactPoint;
-        BaseContact.Normal = Hit.ImpactNormal.IsNearlyZero() ? BaseContact.Normal : Hit.ImpactNormal;
-        BaseContact.BoneName = Hit.BoneName;
-
-        if (BaseContact.BoneName.IsNone())
-        {
-            if (HitSkeletalMesh)
-            {
-                BaseContact.BoneName = HitSkeletalMesh->FindClosestBone(BaseContact.Location);
-            }
-        }
-
-        TArray<FName> CandidateBoneNames;
-        AddUniqueBoneName(CandidateBoneNames, BaseContact.BoneName);
-
-        if (HitSkeletalMesh)
-        {
-            CollectSphereSweepBoneNames(*World, *this, *HitSkeletalMesh, BaseContact, CandidateBoneNames);
-        }
-
-        for (const FName CandidateBoneName : CandidateBoneNames)
-        {
-            FDWCWetContact Contact = BaseContact;
-            Contact.BoneName = CandidateBoneName;
-            OutContacts.Add(Contact);
-        }
+        Contact.Location = Hit.ImpactPoint.IsNearlyZero() ? Hit.Location : Hit.ImpactPoint;
+        Contact.Normal = Hit.ImpactNormal.IsNearlyZero() ? Contact.Normal : Hit.ImpactNormal;
+        Contact.BoneName = Hit.BoneName;
+        OutContacts.Add(Contact);
+        return true;
     }
 
-    if (OutContacts.IsEmpty() && !IsValid(InOutReceiver))
+    if (!IsValid(InOutReceiver))
     {
         const float FallbackDistance = FMath::Max(TraceDistance + ContactRadius, ContactRadius * 2.0f);
-        InOutReceiver = FindNearestReceiver(BaseContact.Location, FallbackDistance);
-        ReceiverSkeletalMesh = IsValid(InOutReceiver) ? InOutReceiver->TargetSkeletalMesh.Get() : nullptr;
+        InOutReceiver = FindNearestReceiver(Contact.Location, FallbackDistance);
     }
 
-    if (OutContacts.IsEmpty() && bRequireBoneNameForContact && ReceiverSkeletalMesh)
-    {
-        BaseContact.BoneName = ReceiverSkeletalMesh->FindClosestBone(BaseContact.Location);
-        if (!BaseContact.BoneName.IsNone())
-        {
-            OutContacts.Add(BaseContact);
-        }
-    }
-
-    if (OutContacts.IsEmpty() && !bRequireBoneNameForContact)
-    {
-        if (!IsValid(InOutReceiver))
-        {
-            return false;
-        }
-
-        OutContacts.Add(BaseContact);
-    }
-
-    if (bRequireBoneNameForContact && OutContacts.IsEmpty())
+    if (!IsValid(InOutReceiver))
     {
         return false;
     }
 
-    return !OutContacts.IsEmpty();
+    // Trace miss or missing HitBone uses the defined full-vertex fallback path.
+    OutContacts.Add(Contact);
+    return true;
 }

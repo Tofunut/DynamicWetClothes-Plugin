@@ -27,6 +27,7 @@ class DWC_API FWetClothingRuntimeData
 
     FWetBoneOptimizationCache BoneOptimizationCache;
     bool                      bHasBoneOptimizationCache = false;
+    FString                   BoneOptimizationCacheFallbackReason;
 
     bool IsVertexWettable(int32 VertexIndex) const
     {

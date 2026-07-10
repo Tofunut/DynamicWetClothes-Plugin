@@ -72,11 +72,8 @@ class DWCDEMO_API UDWCDemoNiagaraWetContactSourceComponent
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Contact", meta = (ClampMin = "0.0"))
     float MinVelocityForContact = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Contact")
-    bool bRequireBoneNameForContact = true;
-
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Trace")
-    bool bTraceForContactData = false;
+    bool bTraceForContactData = true;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Trace", meta = (EditCondition = "bTraceForContactData"))
     TEnumAsByte<ECollisionChannel> TraceChannel = ECC_Visibility;

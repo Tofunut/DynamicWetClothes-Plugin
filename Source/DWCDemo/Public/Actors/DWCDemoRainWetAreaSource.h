@@ -66,10 +66,10 @@ class DWCDEMO_API ADWCDemoRainWetAreaSource : public AActor
     int32 RainSamplesPerTick = 300;
 
     UPROPERTY(EditAnywhere, Category = "DWC Demo|Rain Wet Area Source|Sampling")
-    bool bUseNormalExposure = false;
+    bool bUseNormalExposure = true;
 
     UPROPERTY(EditAnywhere, Category = "DWC Demo|Rain Wet Area Source|Sampling", meta = (EditCondition = "bUseNormalExposure"))
-    bool bUseSkinnedNormalsForExposure = false;
+    bool bUseSkinnedNormalsForExposure = true;
 
     UPROPERTY(EditAnywhere, Category = "DWC Demo|Rain Wet Area Source")
     FVector RainDirection = FVector(0.0f, 0.0f, -1.0f);

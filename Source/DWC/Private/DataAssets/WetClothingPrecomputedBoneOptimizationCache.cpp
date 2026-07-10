@@ -61,12 +61,13 @@ bool FWetClothingPrecomputedBoneOptimizationCache::BuildFromRuntimeCache(
     }
 
     bIsValid = true;
+    CacheFormatVersion = 2;
     LODIndex = PrimaryCache.LODIndex;
     VertexCount = PrimaryCache.VertexCount;
     BoneCount = PrimaryCache.BoneCount;
     MeshBuildSignature = InMeshBuildSignature;
     SkeletonSignature = MakeSkeletonSignature(SkeletalMesh);
-    SkinWeightSignature = FString::Printf(TEXT("LOD=%d|Vertices=%d|Bones=%d|Flat=%d"), LODIndex, VertexCount, BoneCount, PrimaryCache.FlatVertexIndices.Num());
+    SkinWeightSignature = FString::Printf(TEXT("Format=2|PrimaryInfluence=0|LOD=%d|Vertices=%d|Bones=%d|Flat=%d"), LODIndex, VertexCount, BoneCount, PrimaryCache.FlatVertexIndices.Num());
 
     BoneNames.SetNum(BoneCount);
     for (int32 BoneIndex = 0; BoneIndex < BoneCount; ++BoneIndex)
@@ -96,7 +97,7 @@ bool FWetClothingPrecomputedBoneOptimizationCache::IsValidForMesh(
     const int32          InVertexCount,
     const FString&       InMeshBuildSignature) const
 {
-    if (!bIsValid || SkeletalMesh == nullptr)
+    if (!bIsValid || CacheFormatVersion != 2 || SkeletalMesh == nullptr)
     {
         return false;
     }
@@ -120,6 +121,22 @@ bool FWetClothingPrecomputedBoneOptimizationCache::IsValidForMesh(
         }
     }
 
+    for (const FWetClothingPrecomputedResolvedBoneIncludeRule& Rule : ResolvedIncludeRules)
+    {
+        if (Rule.TargetBoneIndex < 0 || Rule.TargetBoneIndex >= BoneCount)
+        {
+            return false;
+        }
+
+        for (const int32 IncludedBoneIndex : Rule.IncludedBoneIndices)
+        {
+            if (IncludedBoneIndex < 0 || IncludedBoneIndex >= BoneCount)
+            {
+                return false;
+            }
+        }
+    }
+
     return SkeletonSignature == MakeSkeletonSignature(SkeletalMesh);
 }
 
@@ -128,7 +145,7 @@ bool FWetClothingPrecomputedBoneOptimizationCache::CopyToRuntimeCache(
     FWetBoneOptimizationCache& OutRuntimeCache) const
 {
     OutRuntimeCache = FWetBoneOptimizationCache();
-    if (!bIsValid || SkeletalMesh == nullptr)
+    if (!bIsValid || CacheFormatVersion != 2 || SkeletalMesh == nullptr)
     {
         return false;
     }

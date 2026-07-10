@@ -42,10 +42,10 @@ struct DWC_API FDWCWetAreaData
     int32 SampleCount = 300;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wet Area")
-    bool bUseNormalExposure = false;
+    bool bUseNormalExposure = true;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wet Area")
-    bool bUseSkinnedNormalsForExposure = false;
+    bool bUseSkinnedNormalsForExposure = true;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wet Area")
     bool bOverrideRandomSeed = false;

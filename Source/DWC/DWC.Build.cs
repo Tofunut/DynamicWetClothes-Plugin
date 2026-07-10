@@ -18,7 +18,8 @@ public class DWC : ModuleRules
 			new string[]
 			{
 				"RHI",
-				"RenderCore"
+				"RenderCore",
+				"PhysicsCore"
 			});
 	}
 }

@@ -18,4 +18,5 @@ void FWetClothingRuntimeData::ResetBoneOptimizationCache()
 {
     BoneOptimizationCache = FWetBoneOptimizationCache();
     bHasBoneOptimizationCache = false;
+    BoneOptimizationCacheFallbackReason.Reset();
 }

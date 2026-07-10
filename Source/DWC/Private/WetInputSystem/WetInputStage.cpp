@@ -14,6 +14,8 @@
 #include "Runtime/Engine/Public/Rendering/SkeletalMeshLODRenderData.h"
 #include "Runtime/Engine/Public/Rendering/SkeletalMeshRenderData.h"
 #include "Runtime/Engine/Public/Rendering/SkinWeightVertexBuffer.h"
+#include "Utility/DWCLog.h"
+#include "Misc/ScopeLock.h"
 
 float FWetInputStageArgs::GetAbsorptionMultiplierForVertex(const int32 VertexIndex) const
 {
@@ -37,27 +39,23 @@ namespace
         const FSkinWeightVertexBuffer* SkinWeightBuffer = nullptr;
     };
 
-    struct FBoneCandidateVertexRange
-    {
-        int32 StartOffset = INDEX_NONE;
-        int32 EndOffset = INDEX_NONE;
-
-        bool IsValid() const
-        {
-            return StartOffset >= 0 && EndOffset > StartOffset;
-        }
-    };
-
     struct FResolvedBoneCandidateContact
     {
-        const FDWCWetContact*     Contact = nullptr;
-        FBoneCandidateVertexRange Range;
+        const FDWCWetContact* Contact = nullptr;
+        TArray<int32>         CandidateVertexIndices;
+        bool                  bUseFullVertexFallback = false;
+        FString               FallbackReason;
     };
 
     struct FWetContactEvaluationData
     {
         explicit FWetContactEvaluationData(const FDWCWetContact& InContact)
-            : Contact(InContact), EffectiveAmount(InContact.Amount), SafeDirection(InContact.Direction.IsNearlyZero() ? FVector::ZeroVector : InContact.Direction.GetSafeNormal()), SafeNormal(InContact.Normal.IsNearlyZero() ? FVector::ZeroVector : InContact.Normal.GetSafeNormal()), SafeRadius(FMath::Max(InContact.Radius, KINDA_SMALL_NUMBER)), SafeRadiusSquared(SafeRadius * SafeRadius)
+            : Contact(InContact),
+              EffectiveAmount(InContact.Amount),
+              SafeDirection(InContact.Direction.IsNearlyZero() ? FVector::ZeroVector : InContact.Direction.GetSafeNormal()),
+              SafeNormal(InContact.Normal.IsNearlyZero() ? FVector::ZeroVector : InContact.Normal.GetSafeNormal()),
+              SafeRadius(FMath::Max(InContact.Radius, KINDA_SMALL_NUMBER)),
+              SafeRadiusSquared(SafeRadius * SafeRadius)
         {
         }
 
@@ -69,28 +67,81 @@ namespace
         float                 SafeRadiusSquared = KINDA_SMALL_NUMBER * KINDA_SMALL_NUMBER;
     };
 
-    bool TryGetBoneCandidateVertexRange(
-        FWetInputStageArgs&        Receiver,
-        const FDWCWetContact&      Contact,
-        FBoneCandidateVertexRange& OutRange)
+    void LogFullVertexFallback(
+        const FWetInputStageArgs& Receiver,
+        const FDWCWetContact&     Contact,
+        const FString&            Reason)
     {
-        OutRange = FBoneCandidateVertexRange();
-        return Receiver.RuntimeDataBuilder->GetBoneCandidateVertexRange(
-                   *Receiver.RuntimeData,
-                   Receiver.TargetSkeletalMesh,
-                   Contact.BoneName,
-                   OutRange.StartOffset,
-                   OutRange.EndOffset) &&
-               OutRange.IsValid();
+        FString EffectiveReason = Reason;
+        if (EffectiveReason.IsEmpty())
+        {
+            EffectiveReason = TEXT("Unknown bone-cache failure.");
+        }
+        const FString WarningKey = FString::Printf(
+            TEXT("%p|%p|%s|%s"),
+            static_cast<const void*>(Receiver.OwnerForLogs),
+            static_cast<const void*>(Receiver.TargetSkeletalMesh),
+            *Contact.BoneName.ToString(),
+            *EffectiveReason);
+
+        // Niagara and batched contacts can hit the same fallback every frame.
+        // Keep the required warning without flooding the log for the same cause.
+        static FCriticalSection LoggedFallbackKeysGuard;
+        static TSet<FString>    LoggedFallbackKeys;
+        {
+            FScopeLock Lock(&LoggedFallbackKeysGuard);
+            if (LoggedFallbackKeys.Contains(WarningKey))
+            {
+                return;
+            }
+            LoggedFallbackKeys.Add(WarningKey);
+        }
+
+        UE_LOG(
+            LogDWC,
+            Warning,
+            TEXT("WetInputStage: Bone-cache lookup fell back to a full LOD vertex traversal on %s (%s). HitBone=%s. Reason: %s"),
+            *GetNameSafe(Receiver.OwnerForLogs),
+            *GetNameSafe(Receiver.TargetSkeletalMesh),
+            *Contact.BoneName.ToString(),
+            *EffectiveReason);
     }
 
-    bool TryResolveBoneCandidateContacts(
+    bool ResolveBoneCandidateContact(
+        FWetInputStageArgs&             Receiver,
+        const FDWCWetContact&           Contact,
+        FResolvedBoneCandidateContact&  OutResolvedContact)
+    {
+        OutResolvedContact = FResolvedBoneCandidateContact();
+        OutResolvedContact.Contact = &Contact;
+
+        if (!Receiver.RuntimeData || !Receiver.RuntimeDataBuilder)
+        {
+            OutResolvedContact.bUseFullVertexFallback = true;
+            OutResolvedContact.FallbackReason = TEXT("RuntimeData or RuntimeDataBuilder is unavailable.");
+            return true;
+        }
+
+        OutResolvedContact.bUseFullVertexFallback =
+            !Receiver.RuntimeDataBuilder->GetBoneCandidateVertexIndices(
+                *Receiver.RuntimeData,
+                Receiver.TargetSkeletalMesh,
+                Contact.BoneName,
+                OutResolvedContact.CandidateVertexIndices,
+                &OutResolvedContact.FallbackReason,
+                Receiver.bRequireFullVertexTraversal);
+        return true;
+    }
+
+    bool ResolveBoneCandidateContacts(
         FWetInputStageArgs&                    Receiver,
         const TArray<FDWCWetContact>&          Contacts,
-        TArray<FResolvedBoneCandidateContact>& OutResolvedContacts)
+        TArray<FResolvedBoneCandidateContact>& OutResolvedContacts,
+        bool&                                  bOutAllContactsUseCache)
     {
         OutResolvedContacts.Reset();
         OutResolvedContacts.Reserve(Contacts.Num());
+        bOutAllContactsUseCache = true;
 
         for (const FDWCWetContact& Contact : Contacts)
         {
@@ -99,16 +150,9 @@ namespace
                 continue;
             }
 
-            FBoneCandidateVertexRange Range;
-            if (!TryGetBoneCandidateVertexRange(Receiver, Contact, Range))
-            {
-                OutResolvedContacts.Reset();
-                return false;
-            }
-
             FResolvedBoneCandidateContact& ResolvedContact = OutResolvedContacts.AddDefaulted_GetRef();
-            ResolvedContact.Contact = &Contact;
-            ResolvedContact.Range = Range;
+            ResolveBoneCandidateContact(Receiver, Contact, ResolvedContact);
+            bOutAllContactsUseCache &= !ResolvedContact.bUseFullVertexFallback;
         }
 
         return !OutResolvedContacts.IsEmpty();
@@ -225,6 +269,7 @@ namespace
     bool ApplyPreparedWetContact(
         FWetInputStageArgs&            Receiver,
         const FDWCWetContact&          Contact,
+        const TArray<int32>*           CandidateVertexIndices,
         const FPreparedWetContactData& PreparedData,
         bool&                          bDirty,
         bool&                          bQueuedWetness)
@@ -237,16 +282,11 @@ namespace
         const FWetContactEvaluationData Evaluation(Contact);
 
         bool bApplied = false;
-        auto ApplyVertex = [&](const int32 VertexIndex, const bool bCheckBoneName)
+        auto ApplyVertex = [&](const int32 VertexIndex)
         {
             if (!Receiver.MeshSampler->CachedSkinnedPositions.IsValidIndex(VertexIndex) ||
                 !Receiver.RuntimeData ||
                 !Receiver.RuntimeData->IsVertexWettable(VertexIndex))
-            {
-                return;
-            }
-
-            if (bCheckBoneName && !Receiver.RuntimeDataBuilder->DoesVertexMatchBoneName(Receiver.TargetSkeletalMesh, VertexIndex, Contact.BoneName))
             {
                 return;
             }
@@ -265,7 +305,8 @@ namespace
             const FVector* WorldNormalPtr = nullptr;
             if (PreparedData.bHasNormals && Receiver.MeshSampler->CachedSkinnedNormals.IsValidIndex(VertexIndex))
             {
-                WorldNormal = PreparedData.ComponentTransform.TransformVectorNoScale(FVector(Receiver.MeshSampler->CachedSkinnedNormals[VertexIndex])).GetSafeNormal();
+                WorldNormal = PreparedData.ComponentTransform.TransformVectorNoScale(
+                    FVector(Receiver.MeshSampler->CachedSkinnedNormals[VertexIndex])).GetSafeNormal();
                 WorldNormalPtr = &WorldNormal;
             }
 
@@ -282,30 +323,20 @@ namespace
             }
         };
 
-        int32      CandidateStartOffset = INDEX_NONE;
-        int32      CandidateEndOffset = INDEX_NONE;
-        const bool bUseBoneCandidates =
-            Receiver.RuntimeDataBuilder->GetBoneCandidateVertexRange(*Receiver.RuntimeData, Receiver.TargetSkeletalMesh, Contact.BoneName, CandidateStartOffset, CandidateEndOffset) && CandidateStartOffset < CandidateEndOffset;
-
-        if (bUseBoneCandidates)
+        if (CandidateVertexIndices != nullptr)
         {
-            const TArray<int32>& FlatVertexIndices =
-                Receiver.RuntimeData->BoneOptimizationCache.PrimaryVertexCache.FlatVertexIndices;
-            for (int32 CandidateOffset = CandidateStartOffset; CandidateOffset < CandidateEndOffset; ++CandidateOffset)
+            for (const int32 VertexIndex : *CandidateVertexIndices)
             {
-                if (!FlatVertexIndices.IsValidIndex(CandidateOffset))
-                {
-                    continue;
-                }
-
-                ApplyVertex(FlatVertexIndices[CandidateOffset], false);
+                ApplyVertex(VertexIndex);
             }
         }
         else
         {
+            // This is the only full-vertex fallback pass. A cached candidate pass
+            // that finds no matching spatial vertex never reaches this branch.
             for (int32 VertexIndex = 0; VertexIndex < Receiver.MeshSampler->CachedSkinnedPositions.Num(); ++VertexIndex)
             {
-                ApplyVertex(VertexIndex, true);
+                ApplyVertex(VertexIndex);
             }
         }
 
@@ -315,37 +346,28 @@ namespace
     bool ApplyDirectSkinnedWetContact(
         FWetInputStageArgs&                 Receiver,
         const FDWCWetContact&               Contact,
-        const FBoneCandidateVertexRange&    CandidateRange,
+        const TArray<int32>&                CandidateVertexIndices,
         const FDirectSkinnedWetContactData& PreparedData,
         bool&                               bDirty,
         bool&                               bQueuedWetness)
     {
-        if (FMath::IsNearlyZero(Contact.Amount) || !CandidateRange.IsValid() ||
+        if (FMath::IsNearlyZero(Contact.Amount) || CandidateVertexIndices.IsEmpty() ||
             !PreparedData.LODData || !PreparedData.SkinWeightBuffer)
         {
             return false;
         }
 
         const FWetContactEvaluationData Evaluation(Contact);
+        bool                            bApplied = false;
 
-        bool                 bApplied = false;
-        const TArray<int32>& FlatVertexIndices =
-            Receiver.RuntimeData->BoneOptimizationCache.PrimaryVertexCache.FlatVertexIndices;
-
-        for (int32 CandidateOffset = CandidateRange.StartOffset; CandidateOffset < CandidateRange.EndOffset; ++CandidateOffset)
+        for (const int32 VertexIndex : CandidateVertexIndices)
         {
-            if (!FlatVertexIndices.IsValidIndex(CandidateOffset))
-            {
-                continue;
-            }
-
-            const int32 VertexIndex = FlatVertexIndices[CandidateOffset];
             if (!Receiver.RuntimeData || !Receiver.RuntimeData->IsVertexWettable(VertexIndex))
             {
                 continue;
             }
 
-            FVector3f   SkinnedPosition = FVector3f::ZeroVector;
+            FVector3f SkinnedPosition = FVector3f::ZeroVector;
             if (!Receiver.MeshSampler->ComputeSkinnedPosition(
                     *PreparedData.LODData,
                     *PreparedData.SkinWeightBuffer,
@@ -689,13 +711,13 @@ bool FWetInputStage::ApplyWetContact(
         return false;
     }
 
-    const float               EffectiveAmount = Contact.Amount;
-    FBoneCandidateVertexRange CandidateRange;
-    if (!FMath::IsNearlyZero(EffectiveAmount) &&
-        TryGetBoneCandidateVertexRange(Receiver, Contact, CandidateRange))
+    FResolvedBoneCandidateContact ResolvedContact;
+    ResolveBoneCandidateContact(Receiver, Contact, ResolvedContact);
+
+    if (!ResolvedContact.bUseFullVertexFallback)
     {
         FSkeletalMeshLODRenderData*    LODData = nullptr;
-        const FSkinWeightVertexBuffer* SkinWeightBuffer = Receiver.TargetSkeletalMesh->GetSkinWeightBuffer(0);
+        const FSkinWeightVertexBuffer* SkinWeightBuffer = Receiver.TargetSkeletalMesh->GetSkinWeightBuffer(Receiver.LODIndex);
         if (SkinWeightBuffer &&
             Receiver.RuntimeDataBuilder->GetLODRenderData(Receiver.TargetSkeletalMesh, Receiver.LODIndex, LODData) &&
             LODData &&
@@ -717,20 +739,22 @@ bool FWetInputStage::ApplyWetContact(
             ApplyDirectSkinnedWetContact(
                 Receiver,
                 Contact,
-                CandidateRange,
+                ResolvedContact.CandidateVertexIndices,
                 PreparedData,
                 bDirty,
                 bQueuedWetness);
 
-            if (bDirty && bApplyMaterial)
-            {
-            }
-
+            // Deliberately return the cached-search result. A spatial miss inside
+            // valid bone candidates does not trigger a full-vertex second pass.
             return bDirty || bQueuedWetness;
         }
     }
+    else
+    {
+        LogFullVertexFallback(Receiver, Contact, ResolvedContact.FallbackReason);
+    }
 
-    if (FMath::IsNearlyZero(EffectiveAmount) || !Receiver.MeshSampler->UpdateSkinnedPositions(Receiver.TargetSkeletalMesh, Receiver.LODIndex))
+    if (!Receiver.MeshSampler->UpdateSkinnedPositions(Receiver.TargetSkeletalMesh, Receiver.LODIndex))
     {
         return false;
     }
@@ -751,6 +775,7 @@ bool FWetInputStage::ApplyWetContact(
     ApplyPreparedWetContact(
         Receiver,
         Contact,
+        ResolvedContact.bUseFullVertexFallback ? nullptr : &ResolvedContact.CandidateVertexIndices,
         PreparedData,
         bDirty,
         bQueuedWetness);
@@ -765,11 +790,17 @@ bool FWetInputStage::ApplyWetContacts(FWetInputStageArgs& Receiver, const TArray
         return false;
     }
 
-    TArray<FResolvedBoneCandidateContact> ResolvedCandidateContacts;
-    if (TryResolveBoneCandidateContacts(Receiver, Contacts, ResolvedCandidateContacts))
+    TArray<FResolvedBoneCandidateContact> ResolvedContacts;
+    bool                                  bAllContactsUseCache = false;
+    if (!ResolveBoneCandidateContacts(Receiver, Contacts, ResolvedContacts, bAllContactsUseCache))
+    {
+        return false;
+    }
+
+    if (bAllContactsUseCache)
     {
         FSkeletalMeshLODRenderData*    LODData = nullptr;
-        const FSkinWeightVertexBuffer* SkinWeightBuffer = Receiver.TargetSkeletalMesh->GetSkinWeightBuffer(0);
+        const FSkinWeightVertexBuffer* SkinWeightBuffer = Receiver.TargetSkeletalMesh->GetSkinWeightBuffer(Receiver.LODIndex);
         if (SkinWeightBuffer &&
             Receiver.RuntimeDataBuilder->GetLODRenderData(Receiver.TargetSkeletalMesh, Receiver.LODIndex, LODData) &&
             LODData &&
@@ -788,7 +819,7 @@ bool FWetInputStage::ApplyWetContacts(FWetInputStageArgs& Receiver, const TArray
 
             bool bDirty = false;
             bool bQueuedWetness = false;
-            for (const FResolvedBoneCandidateContact& ResolvedContact : ResolvedCandidateContacts)
+            for (const FResolvedBoneCandidateContact& ResolvedContact : ResolvedContacts)
             {
                 if (!ResolvedContact.Contact)
                 {
@@ -798,16 +829,14 @@ bool FWetInputStage::ApplyWetContacts(FWetInputStageArgs& Receiver, const TArray
                 ApplyDirectSkinnedWetContact(
                     Receiver,
                     *ResolvedContact.Contact,
-                    ResolvedContact.Range,
+                    ResolvedContact.CandidateVertexIndices,
                     PreparedData,
                     bDirty,
                     bQueuedWetness);
             }
 
-            if ((bDirty || bQueuedWetness) && bApplyMaterial)
-            {
-            }
-
+            // No full retry is performed when every contact had a valid cache,
+            // even if none of the candidate vertices passed the spatial filters.
             return bDirty || bQueuedWetness;
         }
     }
@@ -830,11 +859,22 @@ bool FWetInputStage::ApplyWetContacts(FWetInputStageArgs& Receiver, const TArray
 
     bool bDirty = false;
     bool bQueuedWetness = false;
-    for (const FDWCWetContact& Contact : Contacts)
+    for (const FResolvedBoneCandidateContact& ResolvedContact : ResolvedContacts)
     {
+        if (!ResolvedContact.Contact)
+        {
+            continue;
+        }
+
+        if (ResolvedContact.bUseFullVertexFallback)
+        {
+            LogFullVertexFallback(Receiver, *ResolvedContact.Contact, ResolvedContact.FallbackReason);
+        }
+
         ApplyPreparedWetContact(
             Receiver,
-            Contact,
+            *ResolvedContact.Contact,
+            ResolvedContact.bUseFullVertexFallback ? nullptr : &ResolvedContact.CandidateVertexIndices,
             PreparedData,
             bDirty,
             bQueuedWetness);

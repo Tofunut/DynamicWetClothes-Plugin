@@ -27,6 +27,9 @@ struct DWC_API FWetClothingPrecomputedBoneOptimizationCache
     bool bIsValid = false;
 
     UPROPERTY(VisibleAnywhere, Category = "Precomputed Bone Cache")
+    int32 CacheFormatVersion = 0;
+
+    UPROPERTY(VisibleAnywhere, Category = "Precomputed Bone Cache")
     int32 LODIndex = INDEX_NONE;
 
     UPROPERTY(VisibleAnywhere, Category = "Precomputed Bone Cache")

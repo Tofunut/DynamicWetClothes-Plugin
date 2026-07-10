@@ -69,12 +69,36 @@ class DWC_API FWetRuntimeDataBuilder
         const USkeletalMeshComponent* TargetSkeletalMesh,
         int32                         LODIndex,
         FSkeletalMeshLODRenderData*&  OutLODData) const;
+
+    /*
+    Failure does not disable the receiver. It records why the runtime must use
+    full-vertex traversal when a wet contact is processed.
+    */
     bool InitializeBoneOptimizationCacheFromPrecomputedData(FWetRuntimeDataBuildArgs& Args, int32 LODIndex = 0);
-    bool GetBoneCandidateVertexRange(
+
+    /*
+    Resolves HitResult::BoneName to the target bone plus the pre-flattened
+    collisionless parent/child include bones. No runtime recursion is performed.
+    */
+    bool ResolveSpecificBonesToLoopThrough(
         const FWetClothingRuntimeData& RuntimeData,
         const USkeletalMeshComponent*  TargetSkeletalMesh,
-        FName                          BoneName,
-        int32&                         OutStartOffset,
-        int32&                         OutEndOffset) const;
-    bool DoesVertexMatchBoneName(const USkeletalMeshComponent* TargetSkeletalMesh, int32 VertexIndex, FName BoneName) const;
+        FName                          HitBoneName,
+        TArray<int32>&                 OutBoneIndices,
+        FString*                       OutFallbackReason = nullptr,
+        bool                           bRequireFullVertexTraversal = false) const;
+
+    /*
+    Returns cached candidate vertices for the resolved bones. False means the
+    caller must perform one full LOD vertex traversal and emit a fallback warning.
+    Once this returns true, a geometric search miss must not trigger a second
+    full-vertex pass.
+    */
+    bool GetBoneCandidateVertexIndices(
+        const FWetClothingRuntimeData& RuntimeData,
+        const USkeletalMeshComponent*  TargetSkeletalMesh,
+        FName                          HitBoneName,
+        TArray<int32>&                 OutVertexIndices,
+        FString*                       OutFallbackReason = nullptr,
+        bool                           bRequireFullVertexTraversal = false) const;
 };

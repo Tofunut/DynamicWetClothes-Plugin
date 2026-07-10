@@ -703,12 +703,10 @@ bool UWetClothingAsset::RebuildPrecomputedSimulationData(FString* OutErrorMessag
         PartData.PrecomputedSimulationData.NeighborGraph);
 
     FWetBoneOptimizationCache   RuntimeBoneOptimizationCache;
-    TArray<FWetBoneIncludeRule> IncludeRules;
     FString                     BoneCacheErrorMessage;
     if (FWetBoneOptimizationCacheBuilder::Build(
             TargetMesh,
             LODIndex,
-            IncludeRules,
             RuntimeBoneOptimizationCache,
             &BoneCacheErrorMessage))
     {

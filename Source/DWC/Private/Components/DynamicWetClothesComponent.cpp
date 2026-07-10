@@ -181,10 +181,9 @@ bool UDynamicWetClothesComponent::InitializeWetMeshReceiverRuntime(FDWCWetMeshRe
         return false;
     }
 
-    if (!Receiver.RuntimeDataBuilder->InitializeBoneOptimizationCacheFromPrecomputedData(RuntimeDataBuildArgs, 0))
-    {
-        return false;
-    }
+    // Bone-cache failure is non-fatal. WetInputStage will perform a logged
+    // full-vertex traversal fallback for contacts that cannot use the cache.
+    Receiver.RuntimeDataBuilder->InitializeBoneOptimizationCacheFromPrecomputedData(RuntimeDataBuildArgs, 0);
 
     if (!Receiver.RuntimeDataBuilder->InitializeNeighborGraphFromPrecomputedData(RuntimeDataBuildArgs))
     {

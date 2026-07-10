@@ -1,6 +1,8 @@
 #include "RuntimeState/WetBoneOptimizationCacheBuilder.h"
 
 #include "Engine/SkeletalMesh.h"
+#include "PhysicsEngine/PhysicsAsset.h"
+#include "PhysicsEngine/SkeletalBodySetup.h"
 #include "ReferenceSkeleton.h"
 #include "Rendering/SkeletalMeshLODRenderData.h"
 #include "Rendering/SkeletalMeshRenderData.h"
@@ -10,8 +12,8 @@
 namespace WetClothingSkeletalMeshCacheBuilderInternal
 {
     static bool AddValidUniqueBoneIndex(
-        int32          BoneIndex,
-        int32          BoneCount,
+        const int32    BoneIndex,
+        const int32    BoneCount,
         TSet<int32>&   UniqueBoneIndices,
         TArray<int32>& OutBoneIndices)
     {
@@ -25,9 +27,167 @@ namespace WetClothingSkeletalMeshCacheBuilderInternal
         return true;
     }
 
+    static bool BoneHasCollisionShape(
+        const UPhysicsAsset*      PhysicsAsset,
+        const FReferenceSkeleton& RefSkeleton,
+        const int32               BoneIndex)
+    {
+        if (PhysicsAsset == nullptr || BoneIndex < 0 || BoneIndex >= RefSkeleton.GetNum())
+        {
+            return false;
+        }
+
+        const int32 BodyIndex = PhysicsAsset->FindBodyIndex(RefSkeleton.GetBoneName(BoneIndex));
+        if (!PhysicsAsset->SkeletalBodySetups.IsValidIndex(BodyIndex))
+        {
+            return false;
+        }
+
+        const USkeletalBodySetup* BodySetup = PhysicsAsset->SkeletalBodySetups[BodyIndex];
+        return BodySetup != nullptr && BodySetup->AggGeom.GetElementCount() > 0;
+    }
+
+    static void CollectCollisionlessParentsRecursive(
+        const int32                 ChildBoneIndex,
+        const UPhysicsAsset*        PhysicsAsset,
+        const FReferenceSkeleton&   RefSkeleton,
+        TSet<int32>&                UniqueBoneIndices,
+        TArray<int32>&              OutIncludedBoneIndices)
+    {
+        const int32 ParentBoneIndex = RefSkeleton.GetParentIndex(ChildBoneIndex);
+        if (ParentBoneIndex == INDEX_NONE ||
+            BoneHasCollisionShape(PhysicsAsset, RefSkeleton, ParentBoneIndex))
+        {
+            return;
+        }
+
+        AddValidUniqueBoneIndex(
+            ParentBoneIndex,
+            RefSkeleton.GetNum(),
+            UniqueBoneIndices,
+            OutIncludedBoneIndices);
+
+        CollectCollisionlessParentsRecursive(
+            ParentBoneIndex,
+            PhysicsAsset,
+            RefSkeleton,
+            UniqueBoneIndices,
+            OutIncludedBoneIndices);
+    }
+
+    static void CollectCollisionlessChildrenDepthFirst(
+        const int32                       ParentBoneIndex,
+        const UPhysicsAsset*              PhysicsAsset,
+        const FReferenceSkeleton&         RefSkeleton,
+        const TArray<TArray<int32>>&      ChildBoneIndices,
+        TSet<int32>&                      UniqueBoneIndices,
+        TArray<int32>&                    OutIncludedBoneIndices)
+    {
+        if (!ChildBoneIndices.IsValidIndex(ParentBoneIndex))
+        {
+            return;
+        }
+
+        for (const int32 ChildBoneIndex : ChildBoneIndices[ParentBoneIndex])
+        {
+            // A bone with a collision shape can be hit directly. Do not include it
+            // under the current target and do not cross it during this DFS branch.
+            if (BoneHasCollisionShape(PhysicsAsset, RefSkeleton, ChildBoneIndex))
+            {
+                continue;
+            }
+
+            AddValidUniqueBoneIndex(
+                ChildBoneIndex,
+                RefSkeleton.GetNum(),
+                UniqueBoneIndices,
+                OutIncludedBoneIndices);
+
+            CollectCollisionlessChildrenDepthFirst(
+                ChildBoneIndex,
+                PhysicsAsset,
+                RefSkeleton,
+                ChildBoneIndices,
+                UniqueBoneIndices,
+                OutIncludedBoneIndices);
+        }
+    }
+
+    static void BuildAutomaticIncludeRules(
+        const USkeletalMesh*                 SkeletalMesh,
+        TArray<FWetResolvedBoneIncludeRule>& OutResolvedIncludeRules)
+    {
+        OutResolvedIncludeRules.Reset();
+
+        if (SkeletalMesh == nullptr)
+        {
+            return;
+        }
+
+        const FReferenceSkeleton& RefSkeleton = SkeletalMesh->GetRefSkeleton();
+        const int32               BoneCount = RefSkeleton.GetNum();
+        const UPhysicsAsset*      PhysicsAsset = SkeletalMesh->GetPhysicsAsset();
+
+        if (BoneCount <= 0 || PhysicsAsset == nullptr)
+        {
+            return;
+        }
+
+        TArray<TArray<int32>> ChildBoneIndices;
+        ChildBoneIndices.SetNum(BoneCount);
+        for (int32 BoneIndex = 0; BoneIndex < BoneCount; ++BoneIndex)
+        {
+            const int32 ParentBoneIndex = RefSkeleton.GetParentIndex(BoneIndex);
+            if (ChildBoneIndices.IsValidIndex(ParentBoneIndex))
+            {
+                ChildBoneIndices[ParentBoneIndex].Add(BoneIndex);
+            }
+        }
+
+        for (int32 TargetBoneIndex = 0; TargetBoneIndex < BoneCount; ++TargetBoneIndex)
+        {
+            // Runtime HitResult::BoneName can directly identify only collision bones.
+            if (!BoneHasCollisionShape(PhysicsAsset, RefSkeleton, TargetBoneIndex))
+            {
+                continue;
+            }
+
+            FWetResolvedBoneIncludeRule ResolvedRule;
+            ResolvedRule.TargetBoneIndex = TargetBoneIndex;
+
+            TSet<int32> UniqueBoneIndices;
+            AddValidUniqueBoneIndex(
+                TargetBoneIndex,
+                BoneCount,
+                UniqueBoneIndices,
+                ResolvedRule.IncludedBoneIndices);
+
+            // The parent side is a single branch, but it is still resolved
+            // recursively so both directions share the same precompute model.
+            CollectCollisionlessParentsRecursive(
+                TargetBoneIndex,
+                PhysicsAsset,
+                RefSkeleton,
+                UniqueBoneIndices,
+                ResolvedRule.IncludedBoneIndices);
+
+            // Child branches are expanded recursively with DFS and flattened into
+            // the same runtime include array.
+            CollectCollisionlessChildrenDepthFirst(
+                TargetBoneIndex,
+                PhysicsAsset,
+                RefSkeleton,
+                ChildBoneIndices,
+                UniqueBoneIndices,
+                ResolvedRule.IncludedBoneIndices);
+
+            OutResolvedIncludeRules.Add(MoveTemp(ResolvedRule));
+        }
+    }
+
     static bool BuildPrimaryVertexCache(
         const USkeletalMesh*              SkeletalMesh,
-        int32                             LODIndex,
+        const int32                       LODIndex,
         const FSkeletalMeshLODRenderData& LODData,
         FWetBonePrimaryVertexCache&       OutCache,
         FString*                          OutErrorMessage)
@@ -53,8 +213,7 @@ namespace WetClothingSkeletalMeshCacheBuilderInternal
             return false;
         }
 
-        const uint32 MaxInfluences = SkinWeightBuffer->GetMaxBoneInfluences();
-        if (MaxInfluences == 0)
+        if (SkinWeightBuffer->GetMaxBoneInfluences() == 0)
         {
             DWC::Error::SetMessage(OutErrorMessage, TEXT("TargetMesh skin weight buffer has no bone influences."));
             return false;
@@ -64,6 +223,8 @@ namespace WetClothingSkeletalMeshCacheBuilderInternal
         TArray<int32> VertexCountsByBone;
         PrimaryBoneByVertex.Init(INDEX_NONE, VertexCount);
         VertexCountsByBone.Init(0, BoneCount);
+
+        constexpr uint32 PrimaryInfluenceIndex = 0;
 
         for (const FSkelMeshRenderSection& Section : LODData.RenderSections)
         {
@@ -76,38 +237,26 @@ namespace WetClothingSkeletalMeshCacheBuilderInternal
             const int32 SectionVertexEnd = FMath::Min(SectionVertexStart + Section.GetNumVertices(), VertexCount);
             for (int32 VertexIndex = SectionVertexStart; VertexIndex < SectionVertexEnd; ++VertexIndex)
             {
-                uint16 MaxBoneWeight = 0;
-                int32  PrimaryBoneIndex = INDEX_NONE;
-
-                for (uint32 InfluenceIndex = 0; InfluenceIndex < MaxInfluences; ++InfluenceIndex)
+                if (SkinWeightBuffer->GetBoneWeight(VertexIndex, PrimaryInfluenceIndex) == 0)
                 {
-                    const uint16 BoneWeight = SkinWeightBuffer->GetBoneWeight(VertexIndex, InfluenceIndex);
-                    if (BoneWeight == 0 || BoneWeight <= MaxBoneWeight)
-                    {
-                        continue;
-                    }
-
-                    const int32 SectionBoneIndex = static_cast<int32>(SkinWeightBuffer->GetBoneIndex(VertexIndex, InfluenceIndex));
-                    if (!Section.BoneMap.IsValidIndex(SectionBoneIndex))
-                    {
-                        continue;
-                    }
-
-                    const int32 BoneIndex = static_cast<int32>(Section.BoneMap[SectionBoneIndex]);
-                    if (BoneIndex < 0 || BoneIndex >= BoneCount)
-                    {
-                        continue;
-                    }
-
-                    MaxBoneWeight = BoneWeight;
-                    PrimaryBoneIndex = BoneIndex;
+                    continue;
                 }
 
-                if (PrimaryBoneIndex != INDEX_NONE)
+                const int32 SectionBoneIndex = static_cast<int32>(
+                    SkinWeightBuffer->GetBoneIndex(VertexIndex, PrimaryInfluenceIndex));
+                if (!Section.BoneMap.IsValidIndex(SectionBoneIndex))
                 {
-                    PrimaryBoneByVertex[VertexIndex] = PrimaryBoneIndex;
-                    ++VertexCountsByBone[PrimaryBoneIndex];
+                    continue;
                 }
+
+                const int32 PrimaryBoneIndex = static_cast<int32>(Section.BoneMap[SectionBoneIndex]);
+                if (PrimaryBoneIndex < 0 || PrimaryBoneIndex >= BoneCount)
+                {
+                    continue;
+                }
+
+                PrimaryBoneByVertex[VertexIndex] = PrimaryBoneIndex;
+                ++VertexCountsByBone[PrimaryBoneIndex];
             }
         }
 
@@ -115,16 +264,15 @@ namespace WetClothingSkeletalMeshCacheBuilderInternal
         OutCache.LODIndex = LODIndex;
         OutCache.BoneCount = BoneCount;
         OutCache.VertexCount = VertexCount;
-        OutCache.BoneStartOffsets.Reset();
         OutCache.BoneStartOffsets.SetNumZeroed(BoneCount + 1);
 
         for (int32 BoneIndex = 0; BoneIndex < BoneCount; ++BoneIndex)
         {
-            OutCache.BoneStartOffsets[BoneIndex + 1] = OutCache.BoneStartOffsets[BoneIndex] + VertexCountsByBone[BoneIndex];
+            OutCache.BoneStartOffsets[BoneIndex + 1] =
+                OutCache.BoneStartOffsets[BoneIndex] + VertexCountsByBone[BoneIndex];
         }
 
         const int32 AssignedVertexCount = OutCache.BoneStartOffsets.Last();
-        OutCache.FlatVertexIndices.Reset();
         OutCache.FlatVertexIndices.SetNumUninitialized(AssignedVertexCount);
 
         TArray<int32> WriteOffsets = OutCache.BoneStartOffsets;
@@ -136,58 +284,18 @@ namespace WetClothingSkeletalMeshCacheBuilderInternal
                 continue;
             }
 
-            const int32 WriteIndex = WriteOffsets[PrimaryBoneIndex]++;
-            OutCache.FlatVertexIndices[WriteIndex] = VertexIndex;
+            OutCache.FlatVertexIndices[WriteOffsets[PrimaryBoneIndex]++] = VertexIndex;
         }
 
         return true;
     }
-
-    static void ResolveIncludeRules(
-        const USkeletalMesh*                 SkeletalMesh,
-        const TArray<FWetBoneIncludeRule>&   IncludeRules,
-        TArray<FWetResolvedBoneIncludeRule>& OutResolvedIncludeRules)
-    {
-        OutResolvedIncludeRules.Reset();
-
-        const FReferenceSkeleton& RefSkeleton = SkeletalMesh->GetRefSkeleton();
-        const int32               BoneCount = RefSkeleton.GetNum();
-
-        for (const FWetBoneIncludeRule& IncludeRule : IncludeRules)
-        {
-            const int32 TargetBoneIndex = RefSkeleton.FindBoneIndex(IncludeRule.TargetBoneDisplayName);
-            if (TargetBoneIndex == INDEX_NONE)
-            {
-                continue;
-            }
-
-            FWetResolvedBoneIncludeRule ResolvedRule;
-            ResolvedRule.TargetBoneIndex = TargetBoneIndex;
-
-            TSet<int32> UniqueBoneIndices;
-            AddValidUniqueBoneIndex(TargetBoneIndex, BoneCount, UniqueBoneIndices, ResolvedRule.IncludedBoneIndices);
-
-            for (const FName ParentBoneName : IncludeRule.ParentBoneNamesToInclude)
-            {
-                AddValidUniqueBoneIndex(RefSkeleton.FindBoneIndex(ParentBoneName), BoneCount, UniqueBoneIndices, ResolvedRule.IncludedBoneIndices);
-            }
-
-            for (const FName ChildBoneName : IncludeRule.ChildBoneNamesToInclude)
-            {
-                AddValidUniqueBoneIndex(RefSkeleton.FindBoneIndex(ChildBoneName), BoneCount, UniqueBoneIndices, ResolvedRule.IncludedBoneIndices);
-            }
-
-            OutResolvedIncludeRules.Add(ResolvedRule);
-        }
-    }
 } // namespace WetClothingSkeletalMeshCacheBuilderInternal
 
 bool FWetBoneOptimizationCacheBuilder::Build(
-    const USkeletalMesh*               SkeletalMesh,
-    int32                              LODIndex,
-    const TArray<FWetBoneIncludeRule>& IncludeRules,
-    FWetBoneOptimizationCache&         OutCache,
-    FString*                           OutErrorMessage)
+    const USkeletalMesh*       SkeletalMesh,
+    const int32                LODIndex,
+    FWetBoneOptimizationCache& OutCache,
+    FString*                   OutErrorMessage)
 {
     using namespace WetClothingSkeletalMeshCacheBuilderInternal;
 
@@ -218,7 +326,7 @@ bool FWetBoneOptimizationCacheBuilder::Build(
         return false;
     }
 
-    ResolveIncludeRules(SkeletalMesh, IncludeRules, OutCache.ResolvedIncludeRules);
+    BuildAutomaticIncludeRules(SkeletalMesh, OutCache.ResolvedIncludeRules);
     DWC::Error::SetMessage(OutErrorMessage, TEXT(""));
     return true;
 }

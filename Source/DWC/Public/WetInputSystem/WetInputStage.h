@@ -37,6 +37,10 @@ struct DWC_API FWetInputStageArgs
 
     int32 LODIndex = 0;
 
+    // Set by callers that need complete per-vertex callback/output data.
+    // Such requests intentionally bypass the bone cache.
+    bool bRequireFullVertexTraversal = false;
+
     float GetAbsorptionMultiplierForVertex(int32 VertexIndex) const;
 };
 

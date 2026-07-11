@@ -8,6 +8,7 @@
 #include "EngineUtils.h"
 #include "NiagaraComponent.h"
 #include "TimerManager.h"
+#include "Utility/DWCProfiling.h"
 
 ADWCDemoRainWetAreaSource::ADWCDemoRainWetAreaSource()
 {
@@ -106,6 +107,8 @@ void ADWCDemoRainWetAreaSource::OnConstruction(const FTransform& Transform)
 
 void ADWCDemoRainWetAreaSource::RefreshExistingOverlaps()
 {
+    DWC_PROFILE_SCOPE(DWC_DemoRain_RefreshExistingOverlaps);
+
     if (!RainBounds)
     {
         return;
@@ -123,6 +126,8 @@ void ADWCDemoRainWetAreaSource::RefreshExistingOverlaps()
 
 void ADWCDemoRainWetAreaSource::RefreshReceiversInsideBounds()
 {
+    DWC_PROFILE_SCOPE(DWC_DemoRain_RefreshReceiversInsideBounds);
+
     UWorld* World = GetWorld();
     if (!World || !RainBounds)
     {
@@ -161,6 +166,8 @@ void ADWCDemoRainWetAreaSource::RefreshReceiversInsideBounds()
 
 void ADWCDemoRainWetAreaSource::ApplyWetnessTick()
 {
+    DWC_PROFILE_SCOPE(DWC_DemoRain_ApplyWetnessTick);
+
     if (ReceiverOverlapCounts.Num() == 0)
     {
         RefreshExistingOverlaps();
@@ -238,6 +245,8 @@ void ADWCDemoRainWetAreaSource::RemoveReceiverFromActor(AActor* OtherActor)
 
 void ADWCDemoRainWetAreaSource::ApplyRainToReceiver(UDynamicWetClothesComponent& Receiver) const
 {
+    DWC_PROFILE_SCOPE(DWC_DemoRain_ApplyRainToReceiver);
+
     if (!RainBounds || WetAmountPerSecond <= 0.0f || UpdateInterval <= 0.0f)
     {
         if (ShouldLogDebug())

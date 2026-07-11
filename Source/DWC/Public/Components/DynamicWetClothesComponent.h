@@ -23,6 +23,8 @@ class USkeletalMeshComponent;
 class USkeletalMesh;
 class UMaterialInstanceDynamic;
 class UWetnessProfile;
+class FDWCTaskQueue;
+struct FDWCSkinningTaskResult;
 
 struct FDWCWetMeshReceiverRuntime
 {
@@ -68,6 +70,7 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
     void RefreshWetVertexColors();
     bool GetWetnessWorldBounds(FBox& OutBounds) const;
     int32 GetWetSurfaceSampleResolution() const;
+    void CommitCpuSkinningTaskResult(FDWCSkinningTaskResult&& Result);
 
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
@@ -93,6 +96,7 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
     void                     UpdateWetRendering();
     void                     RequestWetRenderingUpdate();
     void                     RequestWetRenderingUpdate(FDWCWetMeshReceiverRuntime& Receiver);
+    void                     FlushAsyncTaskQueueGameThread();
     bool                     FlushPendingWetContacts();
 
     USkeletalMeshComponent* ResolveTargetSkeletalMesh() const;
@@ -187,6 +191,7 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
     bool bLogWrinkleRuntimeBindings = false;
 
   private:
+    TUniquePtr<FDWCTaskQueue> AsyncTaskQueue;
     TArray<TUniquePtr<FDWCWetMeshReceiverRuntime>> Receivers;
 
     FTimerHandle           WetnessSimulationTimer;

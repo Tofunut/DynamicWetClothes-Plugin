@@ -40,6 +40,7 @@ namespace
 #include "DataAssets/WetClothingAsset.h"
 #include "DataAssets/WetClothingWrinkleData.h"
 #include "Utility/DWCLog.h"
+#include "Utility/DWCProfiling.h"
 
 namespace
 {
@@ -94,6 +95,8 @@ void FWetRenderStage::InitializeCachedVertexColors(const int32 VertexCount)
 
 void FWetRenderStage::InitializeWetMaterialInstance(FWetRenderStageArgs& Receiver)
 {
+    DWC_PROFILE_SCOPE(DWC_Render_InitializeWetMaterialInstance);
+
     Receiver.WetMaterialInstances->Reset();
 
     if (!Receiver.TargetSkeletalMesh)
@@ -115,6 +118,8 @@ void FWetRenderStage::InitializeWetMaterialInstance(FWetRenderStageArgs& Receive
 
 void FWetRenderStage::ApplyWetMaterialParameters(FWetRenderStageArgs& Receiver)
 {
+    DWC_PROFILE_SCOPE(DWC_Render_ApplyWetMaterialParameters);
+
     for (int32 MaterialSlotIndex = 0; MaterialSlotIndex < Receiver.WetMaterialInstances->Num(); ++MaterialSlotIndex)
     {
         UMaterialInstanceDynamic* MID = (*Receiver.WetMaterialInstances)[MaterialSlotIndex];
@@ -156,6 +161,8 @@ void FWetRenderStage::ApplyWetMaterialParameters(FWetRenderStageArgs& Receiver)
 
 void FWetRenderStage::ApplyWetnessProfileMapParameters(FWetRenderStageArgs& Receiver)
 {
+    DWC_PROFILE_SCOPE(DWC_Render_ApplyWetnessProfileMapParameters);
+
     if (Receiver.WetnessProfileMap0ParameterName.IsNone() && Receiver.UseWetnessProfileMap0ParameterName.IsNone())
     {
         return;
@@ -224,6 +231,8 @@ void FWetRenderStage::ApplyWetnessProfileMapParameters(FWetRenderStageArgs& Rece
 
 void FWetRenderStage::ApplyWetWrinkleNormalMapParameters(FWetRenderStageArgs& Receiver)
 {
+    DWC_PROFILE_SCOPE(DWC_Render_ApplyWetWrinkleNormalMapParameters);
+
     if (Receiver.WetMaterialInstances == nullptr)
     {
         return;
@@ -444,6 +453,8 @@ FLinearColor FWetRenderStage::MakeWetVertexColor(
 
 void FWetRenderStage::ApplyWetnessToMaterial(FWetRenderStageArgs& Receiver)
 {
+    DWC_PROFILE_SCOPE(DWC_Render_ApplyWetnessToMaterial);
+
     FSkeletalMeshLODRenderData* LODData = nullptr;
     if (!GetWetRenderStageLODRenderData(Receiver.TargetSkeletalMesh, Receiver.LODIndex, LODData))
     {
@@ -478,31 +489,44 @@ void FWetRenderStage::ApplyWetnessToMaterial(FWetRenderStageArgs& Receiver)
         return;
     }
 
-    for (int32 VertexIndex : Receiver.SimulationState->DirtyWetVertexIndices)
     {
-        if (!Receiver.SimulationState->AbsorbedWetnessPerVertex.IsValidIndex(VertexIndex) ||
-            !CachedWetVertexColors.IsValidIndex(VertexIndex))
+        DWC_PROFILE_SCOPE(DWC_Render_UpdateWetVertexColors);
+
+        for (int32 VertexIndex : Receiver.SimulationState->DirtyWetVertexIndices)
         {
-            continue;
+            if (!Receiver.SimulationState->AbsorbedWetnessPerVertex.IsValidIndex(VertexIndex) ||
+                !CachedWetVertexColors.IsValidIndex(VertexIndex))
+            {
+                continue;
+            }
+
+            if (Receiver.RuntimeData == nullptr || !Receiver.RuntimeData->IsVertexWettable(VertexIndex))
+            {
+                CachedWetVertexColors[VertexIndex] = FLinearColor::Black;
+                continue;
+            }
+
+            const float SafeVisualSaturationWetness = FMath::Max(Receiver.WetnessSettings->VisualSaturationWetness, KINDA_SMALL_NUMBER);
+            const float Wetness = FMath::Clamp(
+                Receiver.SimulationState->AbsorbedWetnessPerVertex[VertexIndex] / SafeVisualSaturationWetness,
+                0.0f,
+                1.0f);
+
+            CachedWetVertexColors[VertexIndex] = MakeWetVertexColor(Receiver, VertexIndex, Wetness);
         }
-
-        if (Receiver.RuntimeData == nullptr || !Receiver.RuntimeData->IsVertexWettable(VertexIndex))
-        {
-            CachedWetVertexColors[VertexIndex] = FLinearColor::Black;
-            continue;
-        }
-
-        const float SafeVisualSaturationWetness = FMath::Max(Receiver.WetnessSettings->VisualSaturationWetness, KINDA_SMALL_NUMBER);
-        const float Wetness = FMath::Clamp(
-            Receiver.SimulationState->AbsorbedWetnessPerVertex[VertexIndex] / SafeVisualSaturationWetness,
-            0.0f,
-            1.0f);
-
-        CachedWetVertexColors[VertexIndex] = MakeWetVertexColor(Receiver, VertexIndex, Wetness);
     }
 
     Receiver.SimulationState->DirtyWetVertexIndices.Reset();
 
-    Receiver.TargetSkeletalMesh->SetVertexColorOverride_LinearColor(0, CachedWetVertexColors);
-    Receiver.TargetSkeletalMesh->MarkRenderStateDirty();
+    {
+        DWC_PROFILE_SCOPE(DWC_Render_SetVertexColorOverride);
+
+        Receiver.TargetSkeletalMesh->SetVertexColorOverride_LinearColor(0, CachedWetVertexColors);
+    }
+
+    {
+        DWC_PROFILE_SCOPE(DWC_Render_MarkRenderStateDirty);
+
+        Receiver.TargetSkeletalMesh->MarkRenderStateDirty();
+    }
 }

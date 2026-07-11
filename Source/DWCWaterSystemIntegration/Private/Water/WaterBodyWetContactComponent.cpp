@@ -6,6 +6,7 @@
 #include "Components/DynamicWetClothesComponent.h"
 #include "WaterBodyComponent.h"
 #include "WaterBodyTypes.h"
+#include "Utility/DWCProfiling.h"
 
 UWaterBodyWetContactComponent::UWaterBodyWetContactComponent()
 {
@@ -61,6 +62,8 @@ void UWaterBodyWetContactComponent::TickComponent(
     const ELevelTick                   TickType,
     FActorComponentTickFunction* const ThisTickFunction)
 {
+    DWC_PROFILE_SCOPE(DWC_Water_TickComponent);
+
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
     ApplyWetnessTick(DeltaTime);
@@ -158,6 +161,8 @@ void UWaterBodyWetContactComponent::RefreshExistingOverlaps()
 
 void UWaterBodyWetContactComponent::ApplyWetnessTick(const float DeltaTime)
 {
+    DWC_PROFILE_SCOPE(DWC_Water_ApplyWetnessTick);
+
     if (!IsValid(WaterBodyComponent) || ReceiverOverlapCounts.Num() == 0)
     {
         return;
@@ -187,7 +192,11 @@ void UWaterBodyWetContactComponent::ApplyWetnessTick(const float DeltaTime)
 
         const double BuildEndSeconds = FPlatformTime::Seconds();
         const double ApplyStartSeconds = BuildEndSeconds;
-        Receiver->ApplyWetSurface(WaterSurfaceData, WetAmount, false);
+        {
+            DWC_PROFILE_SCOPE(DWC_Water_ApplyWetSurface);
+
+            Receiver->ApplyWetSurface(WaterSurfaceData, WetAmount, false);
+        }
         const double ApplyEndSeconds = FPlatformTime::Seconds();
 
         if (bEnablePerformanceLogging)
@@ -293,6 +302,8 @@ bool UWaterBodyWetContactComponent::BuildWaterSurfaceDataForReceiver(
     const UDynamicWetClothesComponent& Receiver,
     FDWCWaterSurfaceData&              OutWaterSurfaceData) const
 {
+    DWC_PROFILE_SCOPE(DWC_Water_BuildWaterSurfaceDataForReceiver);
+
     FBox ReceiverBounds(ForceInit);
     if (!Receiver.GetWetnessWorldBounds(ReceiverBounds))
     {

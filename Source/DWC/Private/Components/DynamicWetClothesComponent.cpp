@@ -2,6 +2,8 @@
 
 #include "Components/DynamicWetClothesComponent.h"
 
+#include "Async/DWCSkinningTasks.h"
+#include "Async/DWCTaskQueue.h"
 #include "Runtime/Engine/Classes/Components/SkeletalMeshComponent.h"
 #include "WetInputSystem/WetInputStage.h"
 #include "WetInputSystem/Sampling/WetClothingMeshSampler.h"
@@ -14,6 +16,7 @@
 #include "UObject/UnrealType.h"
 #include "DataAssets/WetnessProfile.h"
 #include "Utility/DWCLog.h"
+#include "Utility/DWCProfiling.h"
 
 namespace
 {
@@ -51,6 +54,8 @@ UDynamicWetClothesComponent::UDynamicWetClothesComponent()
     WrinkleStrength = DWCWetMaterialParameters::DefaultWrinkleStrength();
     WrinkleWetnessMin = DWCWetMaterialParameters::DefaultWrinkleWetnessMin();
     WrinkleWetnessMax = DWCWetMaterialParameters::DefaultWrinkleWetnessMax();
+
+    AsyncTaskQueue = MakeUnique<FDWCTaskQueue>();
 }
 
 UDynamicWetClothesComponent::~UDynamicWetClothesComponent() = default;
@@ -71,6 +76,11 @@ void UDynamicWetClothesComponent::BeginPlay()
 
 void UDynamicWetClothesComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+    if (AsyncTaskQueue.IsValid())
+    {
+        AsyncTaskQueue->Shutdown();
+    }
+
     if (GetWorld())
     {
         GetWorld()->GetTimerManager().ClearTimer(WetnessSimulationTimer);
@@ -730,6 +740,40 @@ int32 UDynamicWetClothesComponent::GetWetSurfaceSampleResolution() const
     return FMath::Max(2, WetSurfaceSampleResolution);
 }
 
+void UDynamicWetClothesComponent::CommitCpuSkinningTaskResult(FDWCSkinningTaskResult&& Result)
+{
+    DWC_PROFILE_SCOPE(DWC_Component_CommitCpuSkinningTaskResult);
+
+    if (!Result.HasPositions() && !Result.HasNormals())
+    {
+        return;
+    }
+
+    for (const TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver : Receivers)
+    {
+        if (!Receiver.IsValid() ||
+            !Receiver->MeshSampler.IsValid() ||
+            Receiver->ReceiverId != Result.VertexTarget.Target.TargetId)
+        {
+            continue;
+        }
+
+        USkeletalMeshComponent* Mesh = Receiver->MeshComponent.Get();
+        if (Mesh == nullptr)
+        {
+            return;
+        }
+
+        Receiver->MeshSampler->CommitSkinnedCacheFromTask(
+            Mesh,
+            Result.VertexTarget.LODIndex,
+            Result.FrameNumber,
+            MoveTemp(Result.SkinnedPositions),
+            MoveTemp(Result.SkinnedNormals));
+        return;
+    }
+}
+
 void UDynamicWetClothesComponent::RequestWetRenderingUpdate()
 {
     bWetRenderDirty = true;
@@ -747,6 +791,14 @@ void UDynamicWetClothesComponent::RequestWetRenderingUpdate(FDWCWetMeshReceiverR
 {
     Receiver.bWetRenderDirty = true;
     bWetRenderDirty = true;
+}
+
+void UDynamicWetClothesComponent::FlushAsyncTaskQueueGameThread()
+{
+    if (AsyncTaskQueue.IsValid())
+    {
+        AsyncTaskQueue->FlushGameThread();
+    }
 }
 
 bool UDynamicWetClothesComponent::FlushPendingWetContacts()
@@ -808,6 +860,8 @@ bool UDynamicWetClothesComponent::FlushPendingWetContacts()
 
 void UDynamicWetClothesComponent::UpdateWetness()
 {
+    FlushAsyncTaskQueueGameThread();
+
     FlushPendingWetContacts();
 
     for (const TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver : Receivers)
@@ -828,6 +882,8 @@ void UDynamicWetClothesComponent::UpdateWetness()
 
 void UDynamicWetClothesComponent::UpdateWetRendering()
 {
+    FlushAsyncTaskQueueGameThread();
+
     for (const TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver : Receivers)
     {
         if (!Receiver.IsValid() || !Receiver->RenderStage.IsValid() || !Receiver->SimulationState.IsValid())
@@ -852,6 +908,7 @@ void UDynamicWetClothesComponent::TickComponent(float DeltaTime, ELevelTick Tick
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
+    FlushAsyncTaskQueueGameThread();
     FlushPendingWetContacts();
     SetComponentTickEnabled(false);
 }

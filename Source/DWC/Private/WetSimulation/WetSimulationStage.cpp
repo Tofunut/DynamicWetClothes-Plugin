@@ -8,6 +8,7 @@
 #include "WetInputSystem/WetInputStage.h"
 #include "RuntimeState/WetClothingRuntimeData.h"
 #include "WetSimulation/AbsorbedWetness/AbsorbedWetnessSimulationState.h"
+#include "Utility/DWCProfiling.h"
 
 namespace
 {
@@ -231,6 +232,8 @@ void FWetSimulationStage::ClearPendingWetness(FWetSimulationStageArgs& Receiver)
 
 void FWetSimulationStage::DryOutWetness(FWetSimulationStageArgs& Receiver, bool& bDirty, const float EffectiveDryRatePerSecond)
 {
+    DWC_PROFILE_SCOPE(DWC_Simulation_DryOutWetness);
+
     for (int32 VertexIndex = 0; VertexIndex < Receiver.SimulationState->AbsorbedWetnessPerVertex.Num(); ++VertexIndex)
     {
         if (!Receiver.RuntimeData || !Receiver.RuntimeData->IsVertexWettable(VertexIndex))
@@ -273,6 +276,8 @@ void FWetSimulationStage::DryOutWetness(FWetSimulationStageArgs& Receiver, bool&
 
 bool FWetSimulationStage::PreparePendingWetnessProcessing(FWetSimulationStageArgs& Receiver, const float EffectiveSpreadRatePerSecond, float& OutSpreadAlpha, float& OutGravityFlowStrength, bool& bOutUseGravityBias, bool& bOutCanSpread)
 {
+    DWC_PROFILE_SCOPE(DWC_Simulation_PreparePendingWetnessProcessing);
+
     if (Receiver.SimulationState->AbsorbedWetnessPerVertex.Num() == 0)
     {
         return false;
@@ -349,6 +354,8 @@ void FWetSimulationStage::SnapshotPendingWetnessForCurrentUpdate(FWetSimulationS
 
 int32 FWetSimulationStage::ProcessCurrentPendingWetness(FWetSimulationStageArgs& Receiver, bool& bDirty, const float SpreadAlpha, const float GravityFlowStrength, const bool bUseGravityBias, const bool bCanSpread)
 {
+    DWC_PROFILE_SCOPE(DWC_Simulation_ProcessCurrentPendingWetness);
+
     (void)SpreadAlpha;
     (void)GravityFlowStrength;
 
@@ -530,6 +537,8 @@ float FWetSimulationStage::CalculateNeighborGravityBias(const FWetSimulationStag
 
 void FWetSimulationStage::RequeueUnprocessedPendingWetness(FWetSimulationStageArgs& Receiver, const int32 QueueReadIndex)
 {
+    DWC_PROFILE_SCOPE(DWC_Simulation_RequeueUnprocessedPendingWetness);
+
     for (int32 RemainingQueueIndex = QueueReadIndex;
          RemainingQueueIndex < Receiver.SimulationState->CurrentPendingWetnessVertexIndexQueue.Num();
          ++RemainingQueueIndex)
@@ -544,6 +553,8 @@ void FWetSimulationStage::RequeueUnprocessedPendingWetness(FWetSimulationStageAr
 
 void FWetSimulationStage::ProcessPendingWetness(FWetSimulationStageArgs& Receiver, bool& bDirty, const float EffectiveSpreadRatePerSecond)
 {
+    DWC_PROFILE_SCOPE(DWC_Simulation_ProcessPendingWetness);
+
     float SpreadAlpha = 0.0f;
     float GravityFlowStrength = 0.0f;
     bool  bUseGravityBias = false;
@@ -576,6 +587,8 @@ void FWetSimulationStage::ProcessPendingWetness(FWetSimulationStageArgs& Receive
 
 bool FWetSimulationStage::UpdateWetness(FWetSimulationStageArgs& Receiver)
 {
+    DWC_PROFILE_SCOPE(DWC_Simulation_UpdateWetness);
+
     bool        bDirty = false;
     const float EffectiveDryRatePerSecond = Receiver.GetDryRatePerSecond();
     const float EffectiveSpreadRatePerSecond = Receiver.GetSpreadRatePerSecond();

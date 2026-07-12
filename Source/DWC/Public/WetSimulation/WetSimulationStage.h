@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Core/WetClothingSettings.h"
+#include "Templates/Function.h"
 
 class USkeletalMeshComponent;
 class FWetClothingRuntimeData;
@@ -29,6 +30,9 @@ struct DWC_API FWetSimulationStageArgs
     FWetClothingMeshSampler* MeshSampler = nullptr;
 
     int32 LODIndex = 0;
+    bool  bAsyncSkinningRequested = false;
+
+    TFunction<bool(bool bComputePositions, bool bComputeNormals)> RequestAsyncSkinning;
 
     float GetDryRatePerSecond() const;
     float GetSpreadRatePerSecond() const;

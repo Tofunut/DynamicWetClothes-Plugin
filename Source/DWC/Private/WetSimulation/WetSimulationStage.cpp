@@ -12,6 +12,31 @@
 
 namespace
 {
+    bool RequestAsyncSkinning(FWetSimulationStageArgs& Receiver, const bool bComputePositions, const bool bComputeNormals)
+    {
+        if (!Receiver.RequestAsyncSkinning)
+        {
+            return false;
+        }
+
+        const bool bRequested = Receiver.RequestAsyncSkinning(bComputePositions, bComputeNormals);
+        Receiver.bAsyncSkinningRequested |= bRequested;
+        return bRequested;
+    }
+
+    bool EnsureCachedSkinnedPositions(FWetSimulationStageArgs& Receiver)
+    {
+        if (Receiver.MeshSampler != nullptr &&
+            Receiver.SimulationState != nullptr &&
+            Receiver.MeshSampler->CachedSkinnedPositions.Num() == Receiver.SimulationState->AbsorbedWetnessPerVertex.Num())
+        {
+            return true;
+        }
+
+        RequestAsyncSkinning(Receiver, true, false);
+        return false;
+    }
+
     const FWetnessProfileParameters* FindFirstVertexParameters(const FWetClothingRuntimeData* RuntimeData)
     {
         if (RuntimeData == nullptr)
@@ -314,9 +339,7 @@ bool FWetSimulationStage::PreparePendingWetnessProcessing(FWetSimulationStageArg
 
     if (bOutUseGravityBias)
     {
-        bOutUseGravityBias =
-            Receiver.MeshSampler->UpdateSkinnedPositions(Receiver.TargetSkeletalMesh, Receiver.LODIndex) &&
-            Receiver.MeshSampler->CachedSkinnedPositions.Num() == Receiver.SimulationState->AbsorbedWetnessPerVertex.Num();
+        bOutUseGravityBias = EnsureCachedSkinnedPositions(Receiver);
     }
 
     OutSpreadAlpha = FMath::Clamp(

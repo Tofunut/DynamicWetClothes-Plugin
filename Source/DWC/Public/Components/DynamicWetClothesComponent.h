@@ -42,6 +42,9 @@ struct FDWCWetMeshReceiverRuntime
     TArray<TObjectPtr<UMaterialInstanceDynamic>> WetMaterialInstances;
 
     bool bWetRenderDirty = false;
+    bool bCpuSkinningTaskPending = false;
+    bool bCpuSkinningTaskRequestedAgain = false;
+    bool bCpuSkinningTaskNeedsNormals = false;
 };
 
 UCLASS(ClassGroup = (Wetness), DisplayName = "Dynamic Wet Clothes", meta = (BlueprintSpawnableComponent))
@@ -96,6 +99,7 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
     void                     UpdateWetRendering();
     void                     RequestWetRenderingUpdate();
     void                     RequestWetRenderingUpdate(FDWCWetMeshReceiverRuntime& Receiver);
+    bool                     RequestCpuSkinningTask(FDWCWetMeshReceiverRuntime& Receiver, bool bComputePositions, bool bComputeNormals);
     void                     FlushAsyncTaskQueueGameThread();
     bool                     FlushPendingWetContacts();
 

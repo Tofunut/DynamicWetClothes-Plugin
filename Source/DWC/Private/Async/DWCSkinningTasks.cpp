@@ -59,6 +59,11 @@ void FDWCCpuSkinningTask::ExecuteWorker()
 
     SetStatus(EDWCTaskStatus::Running);
 
+    Result.VertexTarget = Snapshot.VertexTarget;
+    Result.FrameNumber = Snapshot.FrameNumber;
+    Result.SkinnedPositions.Reset();
+    Result.SkinnedNormals.Reset();
+
     const int32 VertexCount = Snapshot.VertexTarget.VertexCount;
     if (VertexCount <= 0 ||
         Snapshot.Vertices.Num() != VertexCount ||
@@ -68,11 +73,6 @@ void FDWCCpuSkinningTask::ExecuteWorker()
         SetStatus(EDWCTaskStatus::Failed);
         return;
     }
-
-    Result.VertexTarget = Snapshot.VertexTarget;
-    Result.FrameNumber = Snapshot.FrameNumber;
-    Result.SkinnedPositions.Reset();
-    Result.SkinnedNormals.Reset();
 
     if (Snapshot.bComputePositions)
     {
@@ -156,7 +156,7 @@ void FDWCCpuSkinningTask::CommitGameThread()
 {
     DWC_PROFILE_SCOPE(DWC_CpuSkinningTask_CommitGameThread);
 
-    if (!Owner.IsValid() || GetStatus() != EDWCTaskStatus::Completed)
+    if (!Owner.IsValid())
     {
         return;
     }

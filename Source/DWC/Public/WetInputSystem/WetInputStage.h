@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "Core/WetClothingSettings.h"
 #include "WetInputSystem/WetContactTypes.h"
+#include "Templates/Function.h"
 
 class USkeletalMeshComponent;
 class FWetClothingRuntimeData;
@@ -40,6 +41,9 @@ struct DWC_API FWetInputStageArgs
     // Set by callers that need complete per-vertex callback/output data.
     // Such requests intentionally bypass the bone cache.
     bool bRequireFullVertexTraversal = false;
+    bool bAsyncSkinningRequested = false;
+
+    TFunction<bool(bool bComputePositions, bool bComputeNormals)> RequestAsyncSkinning;
 
     float GetAbsorptionMultiplierForVertex(int32 VertexIndex) const;
 };

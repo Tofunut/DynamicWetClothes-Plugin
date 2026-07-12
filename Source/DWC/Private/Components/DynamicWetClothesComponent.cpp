@@ -268,6 +268,10 @@ FWetInputStageArgs UDynamicWetClothesComponent::MakeWetInputStageArgs(FDWCWetMes
     Args.MeshSampler = Receiver.MeshSampler.Get();
     Args.SimulationStage = Receiver.SimulationStage.Get();
     Args.LODIndex = 0;
+    Args.RequestAsyncSkinning = [this, &Receiver](const bool bComputePositions, const bool bComputeNormals)
+    {
+        return RequestCpuSkinningTask(Receiver, bComputePositions, bComputeNormals);
+    };
     return Args;
 }
 
@@ -286,6 +290,10 @@ FWetSimulationStageArgs UDynamicWetClothesComponent::MakeWetSimulationStageArgs(
     Args.RuntimeDataBuilder = Receiver.RuntimeDataBuilder.Get();
     Args.MeshSampler = Receiver.MeshSampler.Get();
     Args.LODIndex = 0;
+    Args.RequestAsyncSkinning = [this, &Receiver](const bool bComputePositions, const bool bComputeNormals)
+    {
+        return RequestCpuSkinningTask(Receiver, bComputePositions, bComputeNormals);
+    };
     return Args;
 }
 
@@ -744,11 +752,6 @@ void UDynamicWetClothesComponent::CommitCpuSkinningTaskResult(FDWCSkinningTaskRe
 {
     DWC_PROFILE_SCOPE(DWC_Component_CommitCpuSkinningTaskResult);
 
-    if (!Result.HasPositions() && !Result.HasNormals())
-    {
-        return;
-    }
-
     for (const TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver : Receivers)
     {
         if (!Receiver.IsValid() ||
@@ -764,12 +767,26 @@ void UDynamicWetClothesComponent::CommitCpuSkinningTaskResult(FDWCSkinningTaskRe
             return;
         }
 
-        Receiver->MeshSampler->CommitSkinnedCacheFromTask(
-            Mesh,
-            Result.VertexTarget.LODIndex,
-            Result.FrameNumber,
-            MoveTemp(Result.SkinnedPositions),
-            MoveTemp(Result.SkinnedNormals));
+        if (Result.HasPositions() || Result.HasNormals())
+        {
+            Receiver->MeshSampler->CommitSkinnedCacheFromTask(
+                Mesh,
+                Result.VertexTarget.LODIndex,
+                Result.FrameNumber,
+                MoveTemp(Result.SkinnedPositions),
+                MoveTemp(Result.SkinnedNormals));
+        }
+
+        Receiver->bCpuSkinningTaskPending = false;
+        if (Receiver->bCpuSkinningTaskRequestedAgain)
+        {
+            const bool bNeedsNormals = Receiver->bCpuSkinningTaskNeedsNormals;
+            Receiver->bCpuSkinningTaskRequestedAgain = false;
+            Receiver->bCpuSkinningTaskNeedsNormals = false;
+            RequestCpuSkinningTask(*Receiver, true, bNeedsNormals);
+        }
+
+        SetComponentTickEnabled(true);
         return;
     }
 }
@@ -791,6 +808,56 @@ void UDynamicWetClothesComponent::RequestWetRenderingUpdate(FDWCWetMeshReceiverR
 {
     Receiver.bWetRenderDirty = true;
     bWetRenderDirty = true;
+}
+
+bool UDynamicWetClothesComponent::RequestCpuSkinningTask(
+    FDWCWetMeshReceiverRuntime& Receiver,
+    const bool                  bComputePositions,
+    const bool                  bComputeNormals)
+{
+    DWC_PROFILE_SCOPE(DWC_Component_RequestCpuSkinningTask);
+
+    if (!AsyncTaskQueue.IsValid() ||
+        !Receiver.MeshSampler.IsValid() ||
+        (!bComputePositions && !bComputeNormals))
+    {
+        return false;
+    }
+
+    if (Receiver.bCpuSkinningTaskPending)
+    {
+        Receiver.bCpuSkinningTaskRequestedAgain = true;
+        Receiver.bCpuSkinningTaskNeedsNormals |= bComputeNormals;
+        SetComponentTickEnabled(true);
+        return true;
+    }
+
+    USkeletalMeshComponent* Mesh = Receiver.MeshComponent.Get();
+    if (Mesh == nullptr)
+    {
+        return false;
+    }
+
+    FDWCSkinningTaskSnapshot Snapshot;
+    const FDWCTaskTargetSnapshot TargetSnapshot{Receiver.ReceiverId, 0};
+    if (!BuildDWCSkinningTaskSnapshot(
+            Mesh,
+            0,
+            TargetSnapshot,
+            bComputePositions,
+            bComputeNormals,
+            Snapshot))
+    {
+        return false;
+    }
+
+    Receiver.bCpuSkinningTaskPending = true;
+    Receiver.bCpuSkinningTaskRequestedAgain = false;
+    Receiver.bCpuSkinningTaskNeedsNormals = bComputeNormals;
+
+    AsyncTaskQueue->Enqueue(MakeShared<FDWCCpuSkinningTask, ESPMode::ThreadSafe>(this, MoveTemp(Snapshot)));
+    SetComponentTickEnabled(true);
+    return true;
 }
 
 void UDynamicWetClothesComponent::FlushAsyncTaskQueueGameThread()
@@ -822,6 +889,7 @@ bool UDynamicWetClothesComponent::FlushPendingWetContacts()
     }
 
     bool bAnyChanged = false;
+    bool bRequestedAsyncSkinning = false;
     for (const TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver : Receivers)
     {
         if (!Receiver.IsValid() || !Receiver->InputStage.IsValid())
@@ -846,6 +914,7 @@ bool UDynamicWetClothesComponent::FlushPendingWetContacts()
 
         FWetInputStageArgs InputArgs = MakeWetInputStageArgs(*Receiver);
         const bool bChanged = Receiver->InputStage->ApplyWetContacts(InputArgs, ReceiverContacts, bApplyMaterial);
+        bRequestedAsyncSkinning |= InputArgs.bAsyncSkinningRequested;
         if (bChanged)
         {
             bAnyChanged = true;
@@ -855,6 +924,14 @@ bool UDynamicWetClothesComponent::FlushPendingWetContacts()
             }
         }
     }
+
+    if (!bAnyChanged && bRequestedAsyncSkinning)
+    {
+        PendingWetContacts = MoveTemp(ContactsToApply);
+        bPendingWetContactsApplyMaterial |= bApplyMaterial;
+        SetComponentTickEnabled(true);
+    }
+
     return bAnyChanged;
 }
 

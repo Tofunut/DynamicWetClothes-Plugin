@@ -39,6 +39,50 @@ namespace
         const FSkinWeightVertexBuffer* SkinWeightBuffer = nullptr;
     };
 
+    bool RequestAsyncSkinning(FWetInputStageArgs& Receiver, const bool bComputePositions, const bool bComputeNormals)
+    {
+        if (!Receiver.RequestAsyncSkinning)
+        {
+            return false;
+        }
+
+        const bool bRequested = Receiver.RequestAsyncSkinning(bComputePositions, bComputeNormals);
+        Receiver.bAsyncSkinningRequested |= bRequested;
+        return bRequested;
+    }
+
+    bool HasCachedSkinnedPositions(const FWetInputStageArgs& Receiver)
+    {
+        return Receiver.MeshSampler != nullptr && Receiver.MeshSampler->CachedSkinnedPositions.Num() > 0;
+    }
+
+    bool HasCachedSkinnedNormals(const FWetInputStageArgs& Receiver)
+    {
+        return Receiver.MeshSampler != nullptr && Receiver.MeshSampler->CachedSkinnedNormals.Num() > 0;
+    }
+
+    bool EnsureCachedSkinnedPositions(FWetInputStageArgs& Receiver)
+    {
+        if (HasCachedSkinnedPositions(Receiver))
+        {
+            return true;
+        }
+
+        RequestAsyncSkinning(Receiver, true, false);
+        return false;
+    }
+
+    bool EnsureCachedSkinnedNormals(FWetInputStageArgs& Receiver)
+    {
+        if (HasCachedSkinnedNormals(Receiver))
+        {
+            return true;
+        }
+
+        RequestAsyncSkinning(Receiver, false, true);
+        return false;
+    }
+
     struct FResolvedBoneCandidateContact
     {
         const FDWCWetContact* Contact = nullptr;
@@ -497,7 +541,7 @@ bool FWetInputStage::ApplyWetSurface(FWetInputStageArgs& Receiver, const FDWCWat
 
     const float EffectiveAmount = Amount;
 
-    if (FMath::IsNearlyZero(EffectiveAmount) || !Receiver.MeshSampler->UpdateSkinnedPositionsDirect(Receiver.TargetSkeletalMesh, Receiver.LODIndex))
+    if (FMath::IsNearlyZero(EffectiveAmount) || !EnsureCachedSkinnedPositions(Receiver))
     {
         return false;
     }
@@ -582,7 +626,7 @@ bool FWetInputStage::ApplyWetArea(FWetInputStageArgs&    Receiver,
     const bool bHasSkinnedNormals =
         bWantsNormalExposure &&
         AreaData.bUseSkinnedNormalsForExposure &&
-        Receiver.MeshSampler->UpdateSkinnedNormals(Receiver.TargetSkeletalMesh, Receiver.LODIndex);
+        EnsureCachedSkinnedNormals(Receiver);
 
     const FTransform ComponentTransform = Receiver.TargetSkeletalMesh->GetComponentTransform();
     const FVector    SafeDirection =
@@ -754,12 +798,12 @@ bool FWetInputStage::ApplyWetContact(
         LogFullVertexFallback(Receiver, Contact, ResolvedContact.FallbackReason);
     }
 
-    if (!Receiver.MeshSampler->UpdateSkinnedPositions(Receiver.TargetSkeletalMesh, Receiver.LODIndex))
+    if (!EnsureCachedSkinnedPositions(Receiver))
     {
         return false;
     }
 
-    const bool bHasNormals = Receiver.MeshSampler->UpdateSkinnedNormals(Receiver.TargetSkeletalMesh, Receiver.LODIndex);
+    const bool bHasNormals = EnsureCachedSkinnedNormals(Receiver);
 
     if (Receiver.SimulationState->AbsorbedWetnessPerVertex.Num() != Receiver.MeshSampler->CachedSkinnedPositions.Num())
     {
@@ -841,12 +885,12 @@ bool FWetInputStage::ApplyWetContacts(FWetInputStageArgs& Receiver, const TArray
         }
     }
 
-    if (!Receiver.MeshSampler->UpdateSkinnedPositions(Receiver.TargetSkeletalMesh, Receiver.LODIndex))
+    if (!EnsureCachedSkinnedPositions(Receiver))
     {
         return false;
     }
 
-    const bool bHasNormals = Receiver.MeshSampler->UpdateSkinnedNormals(Receiver.TargetSkeletalMesh, Receiver.LODIndex);
+    const bool bHasNormals = EnsureCachedSkinnedNormals(Receiver);
 
     if (Receiver.SimulationState->AbsorbedWetnessPerVertex.Num() != Receiver.MeshSampler->CachedSkinnedPositions.Num())
     {

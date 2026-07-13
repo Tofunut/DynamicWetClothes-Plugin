@@ -30,6 +30,7 @@ class DWCDEMO_API ADWCDemoRainWetAreaSource : public AActor
     void ApplyWetnessTick();
     void AddReceiverFromActor(AActor* OtherActor);
     void RemoveReceiverFromActor(AActor* OtherActor);
+    bool IsReceiverInsideRainBounds(const UDynamicWetClothesComponent& Receiver) const;
     void ApplyRainToReceiver(UDynamicWetClothesComponent& Receiver) const;
     void ApplyRainNiagaraParameters() const;
     bool ShouldLogDebug() const;

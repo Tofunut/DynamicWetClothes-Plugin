@@ -190,7 +190,7 @@ void ADWCDemoRainWetAreaSource::ApplyWetnessTick()
     for (auto It = ReceiverOverlapCounts.CreateIterator(); It; ++It)
     {
         UDynamicWetClothesComponent* Receiver = It.Key().Get();
-        if (!IsValid(Receiver) || It.Value() <= 0)
+        if (!IsValid(Receiver) || It.Value() <= 0 || !IsReceiverInsideRainBounds(*Receiver))
         {
             It.RemoveCurrent();
             continue;
@@ -241,6 +241,22 @@ void ADWCDemoRainWetAreaSource::RemoveReceiverFromActor(AActor* OtherActor)
     {
         ReceiverOverlapCounts.Remove(Receiver);
     }
+}
+
+bool ADWCDemoRainWetAreaSource::IsReceiverInsideRainBounds(const UDynamicWetClothesComponent& Receiver) const
+{
+    if (!RainBounds)
+    {
+        return false;
+    }
+
+    FBox WetBounds(ForceInit);
+    if (!Receiver.GetWetnessWorldBounds(WetBounds) || !WetBounds.IsValid)
+    {
+        return false;
+    }
+
+    return RainBounds->Bounds.GetBox().Intersect(WetBounds);
 }
 
 void ADWCDemoRainWetAreaSource::ApplyRainToReceiver(UDynamicWetClothesComponent& Receiver) const

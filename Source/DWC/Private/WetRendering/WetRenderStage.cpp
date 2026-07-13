@@ -7,8 +7,10 @@
 #include "RuntimeState/WetClothingRuntimeData.h"
 #include "Core/WetClothingSettings.h"
 #include "WetSimulation/AbsorbedWetness/AbsorbedWetnessSimulationState.h"
+#include "WetRendering/WetVertexColorBuffer.h"
 #include "Runtime/Engine/Public/Rendering/SkeletalMeshLODRenderData.h"
 #include "Runtime/Engine/Public/Rendering/SkeletalMeshRenderData.h"
+#include "Utility/DWCProfiling.h"
 
 namespace
 {
@@ -40,7 +42,6 @@ namespace
 #include "DataAssets/WetClothingAsset.h"
 #include "DataAssets/WetClothingWrinkleData.h"
 #include "Utility/DWCLog.h"
-#include "Utility/DWCProfiling.h"
 
 namespace
 {
@@ -518,15 +519,8 @@ void FWetRenderStage::ApplyWetnessToMaterial(FWetRenderStageArgs& Receiver)
 
     Receiver.SimulationState->DirtyWetVertexIndices.Reset();
 
-    {
-        DWC_PROFILE_SCOPE(DWC_Render_SetVertexColorOverride);
-
-        Receiver.TargetSkeletalMesh->SetVertexColorOverride_LinearColor(0, CachedWetVertexColors);
-    }
-
-    {
-        DWC_PROFILE_SCOPE(DWC_Render_MarkRenderStateDirty);
-
-        Receiver.TargetSkeletalMesh->MarkRenderStateDirty();
-    }
+    FWetVertexColorBuffer::ApplyVertexColorOverride(
+        *Receiver.TargetSkeletalMesh,
+        Receiver.LODIndex,
+        CachedWetVertexColors);
 }

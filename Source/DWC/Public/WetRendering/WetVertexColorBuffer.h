@@ -1,18 +1,49 @@
 #pragma once
 
+#include "CoreMinimal.h"
+
 // dummy
 /*
-Wetness ê°’ì„ VertexColorë¡œ ë°˜ì˜í•˜ê¸° ìœ„í•œ ì„ì‹œ ë²„í¼ì™€ ë¶€ë¶„ ê°±ì‹  ì •ì±…ì„ ê´€ë¦¬í•  ì˜ˆì •ì´ë‹¤.
+Wetness °ªÀ» VertexColor·Î ¹İ¿µÇÏ±â À§ÇÑ ÀÓ½Ã ¹öÆÛ¿Í ºÎºĞ °»½Å Á¤Ã¥À» °ü¸®ÇÒ ¿¹Á¤ÀÌ´Ù.
 
-ì˜ˆìƒ ë‚´ìš©:
+¿¹»ó ³»¿ë:
 - CachedWetVertexColors
-- DirtyVertexIndices ê¸°ë°˜ ë¶€ë¶„ ê°±ì‹ 
-- wetness-only color ëª¨ë“œ
-- WetPart debug color + wetness mask ì¡°í•© ëª¨ë“œ
-- vertex count mismatch ì‹œ ì•ˆì „í•œ resize ì •ì±…
-- SetVertexColorOverride_LinearColor í˜¸ì¶œ ì „ ê²€ì¦
+- DirtyVertexIndices ±â¹İ ºÎºĞ °»½Å
+- wetness-only color ¸ğµå
+- WetPart debug color + wetness mask Á¶ÇÕ ¸ğµå
+- vertex count mismatch ½Ã ¾ÈÀüÇÑ resize Á¤Ã¥
+- SetVertexColorOverride_LinearColor È£Ãâ Àü °ËÁõ
 
-ë¶„ë¦¬ ì´ìœ :
-- RenderStageê°€ Material parameter ì²˜ë¦¬ì™€ VertexColor ë²„í¼ ì²˜ë¦¬ë¥¼ ëª¨ë‘ ë§¡ìœ¼ë©´ ë¹„ëŒ€í•´ì§„ë‹¤.
-- VertexColor ì—…ë°ì´íŠ¸ ì •ì±…ì€ WetRendering ì•ˆì—ì„œë„ ë…ë¦½ëœ ì±…ì„ìœ¼ë¡œ ë³´ëŠ” ê²ƒì´ ì¢‹ë‹¤.
+ºĞ¸® ÀÌÀ¯:
+- RenderStage°¡ Material parameter Ã³¸®¿Í VertexColor ¹öÆÛ Ã³¸®¸¦ ¸ğµÎ ¸ÃÀ¸¸é ºñ´ëÇØÁø´Ù.
+- VertexColor ¾÷µ¥ÀÌÆ® Á¤Ã¥Àº WetRendering ¾È¿¡¼­µµ µ¶¸³µÈ Ã¥ÀÓÀ¸·Î º¸´Â °ÍÀÌ ÁÁ´Ù.
+
+-----------------------------
+[Optimization Note]
+¾ğ¸®¾ó ±âº» API´Â ÀüÃ¼ FLinearColor ¹è¿­À» FColor·Î º¯È¯ÇÏ°í, ±âÁ¸ override color buffer¸¦
+ºí·ÎÅ· release °æ·Î·Î ÇØÁ¦ÇÑ µÚ, »õ FColorVertexBuffer¸¦ »ı¼º/ÃÊ±âÈ­ÇÏ°í mesh render state¸¦
+dirty Ã³¸®ÇÑ´Ù. Á¥À½ °ªÀÌ ÀÚÁÖ °»½ÅµÇ´Â »óÈ²¿¡¼­´Â ½ÇÁ¦ dirty vertex ¼ö°¡ Àû´õ¶óµµ ÀÌ ÀüÃ¼
+override °æ·Î°¡ Game ThreadÀÇ ÁÖ¿ä º´¸ñÀÌ µÉ ¼ö ÀÖ´Ù.
+
+µû¶ó¼­ ·±Å¸ÀÓ °»½Å¿¡¼­´Â FColorVertexBuffer¸¦ Á÷Á¢ »ı¼ºÇÑ µÚ
+LODInfo[LODIndex].OverrideVertexColors¿¡ ±³Ã¼ÇÑ´Ù. ±âÁ¸ ¹öÆÛ´Â render thread¿¡¼­ ºñµ¿±â releaseÇÑ´Ù.
+À¯È¿ÇÏÁö ¾Ê°Å³ª Áö¿øµÇÁö ¾Ê´Â »óÅÂ¿¡¼­´Â ±âÁ¸ ¿£Áø API¸¦ fallbackÀ¸·Î »ç¿ëÇÑ´Ù.
+
 */
+
+class USkeletalMeshComponent;
+
+class DWC_API FWetVertexColorBuffer
+{
+  public:
+    static void ApplyVertexColorOverride(
+        USkeletalMeshComponent&     TargetSkeletalMesh,
+        int32                       LODIndex,
+        const TArray<FLinearColor>& VertexColors);
+
+  private:
+    static bool ApplyVertexColorOverrideByDirectBufferSwap(
+        USkeletalMeshComponent&     TargetSkeletalMesh,
+        int32                       LODIndex,
+        const TArray<FLinearColor>& VertexColors);
+};

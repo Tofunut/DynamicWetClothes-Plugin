@@ -10,6 +10,7 @@
 #include "WetInputSystem/Sampling/WetClothingMeshSampler.h"
 #include "WetInputSystem/WetInputStage.h"
 #include "WetRendering/WetRenderStage.h"
+#include "WetRendering/WetVertexColorBuffer.h"
 #include "WetSimulation/AbsorbedWetness/AbsorbedWetnessSimulationState.h"
 #include "Runtime/Engine/Classes/Engine/SkeletalMesh.h"
 #include "Runtime/Engine/Public/Rendering/SkeletalMeshLODRenderData.h"
@@ -59,8 +60,10 @@ void FWetRuntimeDataBuilder::InitializeAbsorbedWetnessData(FWetRuntimeDataBuildA
     Receiver.CachedWetVertexColors->Init(FLinearColor::Black, VertexCount);
     Receiver.SimulationState->DirtyWetVertexIndices.Reset();
 
-    Receiver.TargetSkeletalMesh->SetVertexColorOverride_LinearColor(0, *Receiver.CachedWetVertexColors);
-    Receiver.TargetSkeletalMesh->MarkRenderStateDirty();
+    FWetVertexColorBuffer::ApplyVertexColorOverride(
+        *Receiver.TargetSkeletalMesh,
+        Receiver.LODIndex,
+        *Receiver.CachedWetVertexColors);
 }
 
 bool FWetRuntimeDataBuilder::InitializeWetPartVertexData(FWetRuntimeDataBuildArgs& Receiver)

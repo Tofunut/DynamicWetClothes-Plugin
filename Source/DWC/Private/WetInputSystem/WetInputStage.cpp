@@ -7,6 +7,7 @@
 #include "WetInputSystem/WetContactTypes.h"
 #include "WetSimulation/WetSimulationStage.h"
 #include "WetInputSystem/Sampling/WetClothingMeshSampler.h"
+#include "Async/ParallelFor.h"
 #include "RuntimeState/WetClothingRuntimeData.h"
 #include "RuntimeState/WetRuntimeDataBuilder.h"
 #include "WetSimulation/AbsorbedWetness/AbsorbedWetnessSimulationState.h"
@@ -15,6 +16,7 @@
 #include "Runtime/Engine/Public/Rendering/SkeletalMeshRenderData.h"
 #include "Runtime/Engine/Public/Rendering/SkinWeightVertexBuffer.h"
 #include "Utility/DWCLog.h"
+#include "Utility/DWCProfiling.h"
 #include "Misc/ScopeLock.h"
 
 float FWetInputStageArgs::GetAbsorptionMultiplierForVertex(const int32 VertexIndex) const
@@ -37,6 +39,12 @@ namespace
         FTransform                     ComponentTransform;
         FSkeletalMeshLODRenderData*    LODData = nullptr;
         const FSkinWeightVertexBuffer* SkinWeightBuffer = nullptr;
+    };
+
+    struct FWetSurfaceVertexHit
+    {
+        int32 VertexIndex = INDEX_NONE;
+        float Amount = 0.0f;
     };
 
     bool RequestAsyncSkinning(FWetInputStageArgs& Receiver, const bool bComputePositions, const bool bComputeNormals)
@@ -554,41 +562,64 @@ bool FWetInputStage::ApplyWetSurface(FWetInputStageArgs& Receiver, const FDWCWat
     bool             bDirty = false;
     bool             bQueuedWetness = false;
     const FTransform ComponentTransform = Receiver.TargetSkeletalMesh->GetComponentTransform();
+    const int32      VertexCount = Receiver.MeshSampler->CachedSkinnedPositions.Num();
 
-    for (int32 VertexIndex = 0; VertexIndex < Receiver.MeshSampler->CachedSkinnedPositions.Num(); ++VertexIndex)
+    constexpr int32 ChunkVertexCount = 512;
+    const int32 ChunkCount = FMath::DivideAndRoundUp(VertexCount, ChunkVertexCount);
+    TArray<TArray<FWetSurfaceVertexHit>> ChunkHits;
+    ChunkHits.SetNum(ChunkCount);
+
+    ParallelFor(ChunkCount, [&Receiver, &WaterSurfaceData, EffectiveAmount, ComponentTransform, &ChunkHits, VertexCount](const int32 ChunkIndex)
     {
-        if (!Receiver.SimulationState->AbsorbedWetnessPerVertex.IsValidIndex(VertexIndex) ||
-            !Receiver.RuntimeData ||
-            !Receiver.RuntimeData->IsVertexWettable(VertexIndex))
-        {
-            continue;
-        }
+        const int32 BeginVertexIndex = ChunkIndex * ChunkVertexCount;
+        const int32 EndVertexIndex = FMath::Min(BeginVertexIndex + ChunkVertexCount, VertexCount);
+        TArray<FWetSurfaceVertexHit>& LocalHits = ChunkHits[ChunkIndex];
 
-        const FVector WorldPosition =
-            ComponentTransform.TransformPosition(
-                FVector(Receiver.MeshSampler->CachedSkinnedPositions[VertexIndex]));
-
-        float SurfaceZ = 0.0f;
-        if (!QueryWaterSurfaceData(WaterSurfaceData, WorldPosition, SurfaceZ) ||
-            WorldPosition.Z > SurfaceZ)
+        for (int32 VertexIndex = BeginVertexIndex; VertexIndex < EndVertexIndex; ++VertexIndex)
         {
-            continue;
-        }
-
-        if (EffectiveAmount > 0.0f)
-        {
-            const float VertexAmount = EffectiveAmount * Receiver.GetAbsorptionMultiplierForVertex(VertexIndex);
-            Receiver.SimulationStage->QueuePendingWetness(Receiver, VertexIndex, VertexAmount);
-            bQueuedWetness = true;
-        }
-        else
-        {
-            if (Receiver.SimulationState->AbsorbedWetnessPerVertex[VertexIndex] <= 0.0f)
+            if (!Receiver.SimulationState->AbsorbedWetnessPerVertex.IsValidIndex(VertexIndex) ||
+                !Receiver.RuntimeData ||
+                !Receiver.RuntimeData->IsVertexWettable(VertexIndex))
             {
                 continue;
             }
 
-            Receiver.SimulationStage->AbsorbWetnessAtVertex(Receiver, VertexIndex, EffectiveAmount, bDirty);
+            const FVector WorldPosition =
+                ComponentTransform.TransformPosition(
+                    FVector(Receiver.MeshSampler->CachedSkinnedPositions[VertexIndex]));
+
+            float SurfaceZ = 0.0f;
+            if (!FWetInputStage::QueryWaterSurfaceData(WaterSurfaceData, WorldPosition, SurfaceZ) ||
+                WorldPosition.Z > SurfaceZ)
+            {
+                continue;
+            }
+
+            if (EffectiveAmount > 0.0f)
+            {
+                const float VertexAmount = EffectiveAmount * Receiver.GetAbsorptionMultiplierForVertex(VertexIndex);
+                LocalHits.Add({VertexIndex, VertexAmount});
+            }
+            else if (Receiver.SimulationState->AbsorbedWetnessPerVertex[VertexIndex] > 0.0f)
+            {
+                LocalHits.Add({VertexIndex, EffectiveAmount});
+            }
+        }
+    });
+
+    for (const TArray<FWetSurfaceVertexHit>& LocalHits : ChunkHits)
+    {
+        for (const FWetSurfaceVertexHit& Hit : LocalHits)
+        {
+            if (EffectiveAmount > 0.0f)
+            {
+                Receiver.SimulationStage->QueuePendingWetness(Receiver, Hit.VertexIndex, Hit.Amount);
+                bQueuedWetness = true;
+            }
+            else
+            {
+                Receiver.SimulationStage->AbsorbWetnessAtVertex(Receiver, Hit.VertexIndex, Hit.Amount, bDirty);
+            }
         }
     }
 

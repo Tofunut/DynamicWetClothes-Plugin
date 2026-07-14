@@ -456,11 +456,31 @@ void FWetSimulationStage::SpreadPendingWetnessToNeighbors(FWetSimulationStageArg
         return;
     }
 
-    const FTransform ComponentTransform = Receiver.TargetSkeletalMesh->GetComponentTransform();
-    const FVector    GravityDirection = FVector::DownVector;
+    const float TotalFlowAmount = SpreadableWetness * SpreadAlpha;
+    if (TotalFlowAmount <= Receiver.WetnessSettings->MinPendingWetnessAmount)
+    {
+        return;
+    }
 
-    TArray<float, TInlineAllocator<16>> NeighborWeights;
-    NeighborWeights.SetNumZeroed(Neighbors.Num());
+    const bool       bCanUseGravityBias = bUseGravityBias &&
+                                    Receiver.TargetSkeletalMesh &&
+                                    Receiver.MeshSampler &&
+                                    Receiver.MeshSampler->CachedSkinnedPositions.IsValidIndex(VertexIndex);
+    const FTransform ComponentTransform = bCanUseGravityBias
+                                              ? Receiver.TargetSkeletalMesh->GetComponentTransform()
+                                              : FTransform::Identity;
+    const FVector    GravityDirection = FVector::DownVector;
+    const FVector    SourceWorldPosition = bCanUseGravityBias
+                                               ? ComponentTransform.TransformPosition(FVector(Receiver.MeshSampler->CachedSkinnedPositions[VertexIndex]))
+                                               : FVector::ZeroVector;
+
+    struct FNeighborFlow
+    {
+        int32 NeighborIndex = INDEX_NONE;
+        float Weight = 0.0f;
+    };
+
+    TArray<FNeighborFlow, TInlineAllocator<16>> ValidNeighborFlows;
     float TotalWeight = 0.0f;
 
     for (int32 NeighborArrayIndex = 0; NeighborArrayIndex < Neighbors.Num(); ++NeighborArrayIndex)
@@ -473,21 +493,20 @@ void FWetSimulationStage::SpreadPendingWetnessToNeighbors(FWetSimulationStageArg
         }
 
         const float TargetCapacity = Receiver.WetnessSettings->MaxWetness - Receiver.SimulationState->AbsorbedWetnessPerVertex[NeighborIndex];
-        // if (TargetCapacity <= Receiver.WetnessSettings->MinPendingWetnessAmount)
-        // {
-        //     //RefreshWetnessDryHold(Receiver, NeighborIndex);
-        //     continue;
-        // }
+        if (TargetCapacity <= Receiver.WetnessSettings->MinPendingWetnessAmount)
+        {
+            // RefreshWetnessDryHold(Receiver, NeighborIndex);
+            continue;
+        }
 
-        const float GravityBias =
-            bUseGravityBias
-                ? CalculateNeighborGravityBias(Receiver,
-                                               VertexIndex,
-                                               NeighborIndex,
-                                               GravityFlowStrength,
-                                               ComponentTransform,
-                                               GravityDirection)
-                : 1.0f;
+        const float GravityBias = bCanUseGravityBias
+                                      ? CalculateNeighborGravityBias(Receiver,
+                                                                     SourceWorldPosition,
+                                                                     NeighborIndex,
+                                                                     GravityFlowStrength,
+                                                                     ComponentTransform,
+                                                                     GravityDirection)
+                                      : 1.0f;
 
         float PartBoundaryScale = 1.0f;
         if (Receiver.RuntimeData->VertexWetPartIDs.IsValidIndex(VertexIndex) &&
@@ -503,7 +522,7 @@ void FWetSimulationStage::SpreadPendingWetnessToNeighbors(FWetSimulationStageArg
             continue;
         }
 
-        NeighborWeights[NeighborArrayIndex] = Weight;
+        ValidNeighborFlows.Add({NeighborIndex, Weight});
         TotalWeight += Weight;
     }
 
@@ -512,36 +531,24 @@ void FWetSimulationStage::SpreadPendingWetnessToNeighbors(FWetSimulationStageArg
         return;
     }
 
-    const float TotalFlowAmount = SpreadableWetness * SpreadAlpha;
-
-    for (int32 NeighborArrayIndex = 0; NeighborArrayIndex < Neighbors.Num(); ++NeighborArrayIndex)
+    for (const FNeighborFlow& Flow : ValidNeighborFlows)
     {
-        const float Weight = NeighborWeights[NeighborArrayIndex];
-        if (Weight <= KINDA_SMALL_NUMBER)
-        {
-            continue;
-        }
-
-        const int32 NeighborIndex = Neighbors[NeighborArrayIndex];
-        const float FlowAmount = TotalFlowAmount * (Weight / TotalWeight);
+        const float FlowAmount = TotalFlowAmount * (Flow.Weight / TotalWeight);
 
         if (FlowAmount > Receiver.WetnessSettings->MinPendingWetnessAmount)
         {
-            QueuePendingWetness(Receiver, NeighborIndex, FlowAmount);
+            QueuePendingWetness(Receiver, Flow.NeighborIndex, FlowAmount);
         }
     }
 }
 
-float FWetSimulationStage::CalculateNeighborGravityBias(const FWetSimulationStageArgs& Receiver, const int32 SourceVertexIndex, const int32 NeighborIndex, const float GravityFlowStrength, const FTransform& ComponentTransform, const FVector& GravityDirection)
+float FWetSimulationStage::CalculateNeighborGravityBias(const FWetSimulationStageArgs& Receiver, const FVector& SourceWorldPosition, const int32 NeighborIndex, const float GravityFlowStrength, const FTransform& ComponentTransform, const FVector& GravityDirection)
 {
-    if (!Receiver.MeshSampler->CachedSkinnedPositions.IsValidIndex(SourceVertexIndex) ||
+    if (!Receiver.MeshSampler ||
         !Receiver.MeshSampler->CachedSkinnedPositions.IsValidIndex(NeighborIndex))
     {
         return 1.0f;
     }
-
-    const FVector SourceWorldPosition = ComponentTransform.TransformPosition(
-        FVector(Receiver.MeshSampler->CachedSkinnedPositions[SourceVertexIndex]));
 
     const FVector TargetWorldPosition = ComponentTransform.TransformPosition(
         FVector(Receiver.MeshSampler->CachedSkinnedPositions[NeighborIndex]));

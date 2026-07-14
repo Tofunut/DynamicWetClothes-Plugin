@@ -77,7 +77,7 @@ class DWC_API FWetSimulationStage
         bool                     bUseGravityBias);
     float CalculateNeighborGravityBias(
         const FWetSimulationStageArgs& Args,
-        int32                          SourceVertexIndex,
+        const FVector&                 SourceWorldPosition,
         int32                          NeighborIndex,
         float                          GravityFlowStrength,
         const FTransform&              ComponentTransform,

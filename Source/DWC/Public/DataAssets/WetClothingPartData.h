@@ -185,6 +185,12 @@ struct DWC_API FWetClothingPrecomputedVertexData
 
     UPROPERTY(VisibleAnywhere, Category = "Precomputed Simulation Data")
     int32 UVIslandID = INDEX_NONE;
+    
+    UPROPERTY(VisibleAnywhere, Category = "Precomputed Simulation Data")
+    FVector2D SurfaceWaterUV = FVector2D::ZeroVector;
+    
+    UPROPERTY(VisibleAnywhere, Category = "Precomputed Simulation Data")
+    bool bHasSurfaceWaterUV = false;
 
     UPROPERTY(VisibleAnywhere, Category = "Precomputed Simulation Data")
     bool bIsWettable = false;

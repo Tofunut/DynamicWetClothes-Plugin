@@ -15,6 +15,7 @@
 #include "WetRendering/WetRenderStage.h"
 #include "WetSimulation/WetSimulationStage.h"
 #include "WetSimulation/AbsorbedWetness/AbsorbedWetnessSimulationState.h"
+#include "WetSimulation/SurfaceWater/SurfaceWaterSimulationState.h"
 #include "Templates/UniquePtr.h"
 
 #include "DynamicWetClothesComponent.generated.h"
@@ -36,6 +37,8 @@ struct FDWCWetMeshReceiverRuntime
     TUniquePtr<FWetClothingRuntimeData> RuntimeData;
     TUniquePtr<FWetRuntimeDataBuilder> RuntimeDataBuilder;
     TUniquePtr<FAbsorbedWetnessSimulationState> SimulationState;
+    TMap<int32, TUniquePtr<FSurfaceWaterSimulationState>> SurfaceWaterStatesByMaterialSlot;
+    TMap<int32, FSurfaceWaterProfileParameters> SurfaceWaterProfilesByMaterialSlot;
     TUniquePtr<FWetSimulationStage> SimulationStage;
     TUniquePtr<FWetInputStage> InputStage;
     TUniquePtr<FWetClothingMeshSampler> MeshSampler;
@@ -73,6 +76,15 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
     void SetWetPartDebugVertexColorsEnabled(bool bEnabled);
     UFUNCTION(BlueprintCallable, Category = "Wetness|Debug")
     void RefreshWetVertexColors();
+    UFUNCTION(BlueprintCallable, Category = "Wetness|Debug")
+    bool DebugApplySurfaceWaterAtVertex(int32 VertexIndex, float Amount = 1.0f, float RadiusPixels = 12.0f, bool bFlowStamp = false);
+    UFUNCTION(BlueprintCallable, Category = "Wetness|Debug")
+    void SetSurfaceWaterDebugView(ESurfaceWaterDebugView DebugView);
+    UFUNCTION(BlueprintPure, Category = "Wetness|Debug")
+    int64 GetSurfaceWaterEstimatedGpuMemoryBytes() const;
+    UFUNCTION(BlueprintCallable, Category = "Wetness|Debug") void SetSurfaceWaterSimulationPaused(bool bPaused);
+    UFUNCTION(BlueprintCallable, Category = "Wetness|Debug") void StepSurfaceWaterSimulation();
+    UFUNCTION(BlueprintCallable, Category = "Wetness|Debug") void ClearSurfaceWater();
     bool GetWetnessWorldBounds(FBox& OutBounds) const;
     int32 GetWetSurfaceSampleResolution() const;
     void CommitCpuSkinningTaskResult(FDWCSkinningTaskResult&& Result);
@@ -98,6 +110,7 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
     bool                     InitializeWetMeshReceiverRuntime(FDWCWetMeshReceiverRuntime& Receiver);
     void                     StartWetnessTimers();
     void                     UpdateWetness();
+    void                     UpdateSurfaceWater();
     void                     UpdateWetRendering();
     void                     RequestWetRenderingUpdate();
     void                     RequestWetRenderingUpdate(FDWCWetMeshReceiverRuntime& Receiver);
@@ -149,6 +162,19 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Visual")
     FName UnderColorBlendStrengthParameterName = TEXT("DWC_UnderColorBlendStrength");
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Surface Water")
+    FName SurfaceWaterRTParameterName = TEXT("DWC_SurfaceWaterRT");
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Surface Water")
+    FName SurfaceDropletRTParameterName = TEXT("DWC_SurfaceDropletRT");
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Surface Water")
+    FName SurfaceFlowRTParameterName = TEXT("DWC_SurfaceFlowRT");
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Surface Water")
+    FName SurfaceWaterTimeParameterName = TEXT("DWC_SurfaceWaterTime");
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Surface Water")
+    FName SurfaceWaterTexelSizeParameterName = TEXT("DWC_SurfaceWaterTexelSize");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Debug")
+    ESurfaceWaterDebugView SurfaceWaterDebugView = ESurfaceWaterDebugView::None;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Debug")
     bool bEnableWetPartDebugVertexColors = false;
@@ -203,6 +229,7 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
     TArray<TUniquePtr<FDWCWetMeshReceiverRuntime>> Receivers;
 
     FTimerHandle           WetnessSimulationTimer;
+    FTimerHandle           SurfaceWaterSimulationTimer;
     FTimerHandle           WetnessRenderTimer;
     TArray<FDWCWetContact> PendingWetContacts;
     bool                   bPendingWetContactsApplyMaterial = false;

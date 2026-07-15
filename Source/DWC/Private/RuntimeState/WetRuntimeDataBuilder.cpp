@@ -79,8 +79,13 @@ bool FWetRuntimeDataBuilder::InitializeWetPartVertexData(FWetRuntimeDataBuildArg
     const int32 VertexCount = LODData->GetNumVertices();
     Receiver.RuntimeData->VertexWetPartIDs.Init(INDEX_NONE, VertexCount);
     Receiver.RuntimeData->VertexWettableFlags.Init(false, VertexCount);
+    Receiver.RuntimeData->VertexAbsorbedWetnessFlags.Init(false, VertexCount);
+    Receiver.RuntimeData->VertexSurfaceWaterFlags.Init(false, VertexCount);
     Receiver.RuntimeData->VertexWetnessProfileParameters.SetNum(VertexCount);
     Receiver.RuntimeData->VertexWetPartDebugColors.Init(Receiver.UnassignedWetPartDebugColor, VertexCount);
+    Receiver.RuntimeData->SurfaceWaterUVs.SetNum(VertexCount);
+    Receiver.RuntimeData->SurfaceWaterUVValidFlags.Init(false,VertexCount);
+    Receiver.RuntimeData->SurfaceWaterMaterialSlotIndices.Init(INDEX_NONE, VertexCount);
 
     FWetnessProfileParameters DefaultParameters;
     if (const UWetnessProfile* WetnessProfile = Receiver.GetActiveWetnessProfile())
@@ -191,6 +196,8 @@ bool FWetRuntimeDataBuilder::InitializeWetPartVertexDataFromPrecomputedData(
         const FWetClothingPrecomputedVertexData& PrecomputedVertex = PrecomputedData.Vertices[VertexIndex];
         if (!Receiver.RuntimeData->VertexWetPartIDs.IsValidIndex(VertexIndex) ||
             !Receiver.RuntimeData->VertexWettableFlags.IsValidIndex(VertexIndex) ||
+            !Receiver.RuntimeData->VertexAbsorbedWetnessFlags.IsValidIndex(VertexIndex) ||
+            !Receiver.RuntimeData->VertexSurfaceWaterFlags.IsValidIndex(VertexIndex) ||
             !Receiver.RuntimeData->VertexWetnessProfileParameters.IsValidIndex(VertexIndex) ||
             !Receiver.RuntimeData->VertexWetPartDebugColors.IsValidIndex(VertexIndex))
         {
@@ -212,8 +219,19 @@ bool FWetRuntimeDataBuilder::InitializeWetPartVertexDataFromPrecomputedData(
             Receiver.RuntimeData->VertexWetPartIDs[VertexIndex] = PrecomputedVertex.WetPartID;
             Receiver.RuntimeData->VertexWetnessProfileParameters[VertexIndex] =
                 ResolvedWetPartParametersByEntryIndex[PrecomputedVertex.WetPartEntryIndex];
+            Receiver.RuntimeData->VertexAbsorbedWetnessFlags[VertexIndex] =
+                Receiver.RuntimeData->VertexWetnessProfileParameters[VertexIndex].SupportsAbsorbedWetness();
             Receiver.RuntimeData->VertexWetPartDebugColors[VertexIndex] = WetPartEntry.Color;
             ++RuntimeWettableVertexCount;
+        }
+        if (PrecomputedVertex.bHasSurfaceWaterUV && PrecomputedVertex.SurfaceWaterUV.ContainsNaN() == false)
+        {
+            Receiver.RuntimeData->SurfaceWaterUVs[VertexIndex] = FVector2f(PrecomputedVertex.SurfaceWaterUV);
+            Receiver.RuntimeData->SurfaceWaterUVValidFlags[VertexIndex] = true;
+            Receiver.RuntimeData->SurfaceWaterMaterialSlotIndices[VertexIndex] = PrecomputedVertex.MaterialSlotIndex;
+            Receiver.RuntimeData->VertexSurfaceWaterFlags[VertexIndex] =
+                Receiver.RuntimeData->VertexWetnessProfileParameters.IsValidIndex(VertexIndex) &&
+                Receiver.RuntimeData->VertexWetnessProfileParameters[VertexIndex].SupportsSurfaceWater();
         }
     }
 
@@ -280,6 +298,8 @@ void FWetRuntimeDataBuilder::EnsureWetnessBufferSize(FWetRuntimeDataBuildArgs& R
         Receiver.SimulationState->AbsorbedWetnessPerVertex.Reset();
         Receiver.RuntimeData->VertexWetPartIDs.Reset();
         Receiver.RuntimeData->VertexWettableFlags.Reset();
+        Receiver.RuntimeData->VertexAbsorbedWetnessFlags.Reset();
+        Receiver.RuntimeData->VertexSurfaceWaterFlags.Reset();
         Receiver.RuntimeData->VertexWetnessProfileParameters.Reset();
         Receiver.RuntimeData->VertexWetPartDebugColors.Reset();
         Receiver.SimulationState->UpdatingPendingWetnessAmounts.Reset();
@@ -301,6 +321,8 @@ void FWetRuntimeDataBuilder::EnsureWetnessBufferSize(FWetRuntimeDataBuildArgs& R
 
     if (Receiver.RuntimeData->VertexWetPartIDs.Num() != VertexCount ||
         Receiver.RuntimeData->VertexWettableFlags.Num() != VertexCount ||
+        Receiver.RuntimeData->VertexAbsorbedWetnessFlags.Num() != VertexCount ||
+        Receiver.RuntimeData->VertexSurfaceWaterFlags.Num() != VertexCount ||
         Receiver.RuntimeData->VertexWetnessProfileParameters.Num() != VertexCount ||
         Receiver.RuntimeData->VertexWetPartDebugColors.Num() != VertexCount)
     {
@@ -365,6 +387,8 @@ void FWetRuntimeDataBuilder::EnsureWetnessBufferSize(FWetInputStageArgs& Receive
         {
             Receiver.RuntimeData->VertexWetPartIDs.Reset();
             Receiver.RuntimeData->VertexWettableFlags.Reset();
+            Receiver.RuntimeData->VertexAbsorbedWetnessFlags.Reset();
+            Receiver.RuntimeData->VertexSurfaceWaterFlags.Reset();
             Receiver.RuntimeData->VertexWetnessProfileParameters.Reset();
             Receiver.RuntimeData->VertexWetPartDebugColors.Reset();
         }
@@ -413,6 +437,14 @@ void FWetRuntimeDataBuilder::EnsureWetnessBufferSize(FWetInputStageArgs& Receive
         if (Receiver.RuntimeData->VertexWettableFlags.Num() != VertexCount)
         {
             Receiver.RuntimeData->VertexWettableFlags.Init(false, VertexCount);
+        }
+        if (Receiver.RuntimeData->VertexAbsorbedWetnessFlags.Num() != VertexCount)
+        {
+            Receiver.RuntimeData->VertexAbsorbedWetnessFlags.Init(false, VertexCount);
+        }
+        if (Receiver.RuntimeData->VertexSurfaceWaterFlags.Num() != VertexCount)
+        {
+            Receiver.RuntimeData->VertexSurfaceWaterFlags.Init(false, VertexCount);
         }
         if (Receiver.RuntimeData->VertexWetnessProfileParameters.Num() != VertexCount)
         {

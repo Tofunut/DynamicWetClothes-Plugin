@@ -164,7 +164,7 @@ namespace
         return State != nullptr && State->bIsWettableSlot;
     }
 
-    FString MakeSourceDataSignature(const FWetClothingEditableWetPartData& EditableWetPartData)
+    FString MakeSourceDataSignature(const FWetClothingEditableWetPartData& EditableWetPartData, const FSurfaceWaterSimulationSettings& SurfaceWaterSettings)
     {
         TArray<FString> WettableSlotSignatures;
         WettableSlotSignatures.Reserve(EditableWetPartData.WettableMaterialSlots.Num());
@@ -176,6 +176,13 @@ namespace
                 SlotState.bIsWettableSlot ? 1 : 0));
         }
         WettableSlotSignatures.Sort();
+
+        TArray<FString> SurfaceWaterSlotSignatures;
+        for (const FSurfaceWaterMaterialSlotData& SlotData : SurfaceWaterSettings.SurfaceWaterMaterialSlots)
+        {
+            SurfaceWaterSlotSignatures.Add(FString::Printf(TEXT("Slot=%d|Enabled=%d|UV=%d"), SlotData.MaterialSlotIndex, SlotData.bEnabled ? 1 : 0, SlotData.UVChannelIndex));
+        }
+        SurfaceWaterSlotSignatures.Sort();
 
         TArray<FString> EntrySignatures;
         EntrySignatures.Reserve(EditableWetPartData.WetPartEntries.Num());
@@ -202,7 +209,9 @@ namespace
 
         EntrySignatures.Sort();
         return FString::Printf(
-            TEXT("PrecomputedDataVersion=1|WettableSlots=%s|Entries=%s"),
+            TEXT("PrecomputedDataVersion=3|SurfaceWater=%d,%d,%d,%.6f,%.6f,%.6f|SurfaceWaterSlots=%s|WettableSlots=%s|Entries=%s"),
+            SurfaceWaterSettings.bEnabled ? 1 : 0, SurfaceWaterSettings.UVChannelIndexToConstruct, SurfaceWaterSettings.RenderTargetResolution, SurfaceWaterSettings.InputFraction, SurfaceWaterSettings.StampRadiusPixels, SurfaceWaterSettings.StampIntensityMultiplier,
+            *FString::Join(SurfaceWaterSlotSignatures, TEXT(";")),
             *FString::Join(WettableSlotSignatures, TEXT(";")),
             *FString::Join(EntrySignatures, TEXT(";")));
     }
@@ -557,11 +566,11 @@ bool UWetClothingAsset::IsPrecomputedSimulationDataValidForMesh(const USkeletalM
     }
 
     const FSkeletalMeshLODRenderData& LODData = RenderData->LODRenderData[LODIndex];
-    return PartData.PrecomputedSimulationData.DataVersion == 1 &&
+    return PartData.PrecomputedSimulationData.DataVersion == 3 &&
            PartData.PrecomputedSimulationData.LODIndex == LODIndex &&
            PartData.PrecomputedSimulationData.VertexCount == LODData.GetNumVertices() &&
            PartData.PrecomputedSimulationData.MeshSignature == MakeMeshSignature(SkeletalMesh, LODData, LODIndex) &&
-           PartData.PrecomputedSimulationData.SourceDataSignature == MakeSourceDataSignature(PartData.EditableWetPartData);
+           PartData.PrecomputedSimulationData.SourceDataSignature == MakeSourceDataSignature(PartData.EditableWetPartData, SurfaceWaterSettings);
 }
 
 #if WITH_EDITOR
@@ -609,10 +618,10 @@ bool UWetClothingAsset::RebuildPrecomputedSimulationData(FString* OutErrorMessag
     PartData.PrecomputedSimulationData.LODIndex = LODIndex;
     PartData.PrecomputedSimulationData.VertexCount = LODData.GetNumVertices();
     PartData.PrecomputedSimulationData.MeshSignature = MakeMeshSignature(TargetMesh, LODData, LODIndex);
-    PartData.PrecomputedSimulationData.SourceDataSignature = MakeSourceDataSignature(PartData.EditableWetPartData);
-    PartData.PrecomputedSimulationData.DataVersion = 1;
+    PartData.PrecomputedSimulationData.SourceDataSignature = MakeSourceDataSignature(PartData.EditableWetPartData, SurfaceWaterSettings);
+    PartData.PrecomputedSimulationData.DataVersion = 3;
     PartData.PrecomputedSimulationData.Vertices.SetNum(PartData.PrecomputedSimulationData.VertexCount);
-
+    
     TMap<FWetPartScopeKey, TArray<int32>> EntryIndicesByScope;
     for (int32 EntryIndex = 0; EntryIndex < PartData.EditableWetPartData.WetPartEntries.Num(); ++EntryIndex)
     {
@@ -686,6 +695,11 @@ bool UWetClothingAsset::RebuildPrecomputedSimulationData(FString* OutErrorMessag
                 }
 
                 FWetClothingPrecomputedVertexData& VertexData = PartData.PrecomputedSimulationData.Vertices[VertexIndex];
+                // Vertex-only contacts have no section context. Use the lowest slot as a deterministic primary binding.
+                if (VertexData.MaterialSlotIndex != INDEX_NONE && VertexData.MaterialSlotIndex <= ScopePair.Key.MaterialSlotIndex)
+                {
+                    continue;
+                }
                 VertexData.WetPartID = Entry.WetPartID;
                 VertexData.WetPartEntryIndex = EffectiveEntryIndex;
                 VertexData.MaterialSlotIndex = ScopePair.Key.MaterialSlotIndex;
@@ -693,6 +707,29 @@ bool UWetClothingAsset::RebuildPrecomputedSimulationData(FString* OutErrorMessag
                 VertexData.UVIslandID = Island.UVIslandID;
                 VertexData.bIsWettable = true;
             }
+        }
+    }
+
+    if (SurfaceWaterSettings.bEnabled)
+    {
+        for (int32 VertexIndex = 0; VertexIndex < PartData.PrecomputedSimulationData.Vertices.Num(); ++VertexIndex)
+        {
+            FWetClothingPrecomputedVertexData& Vertex = PartData.PrecomputedSimulationData.Vertices[VertexIndex];
+            if (!Vertex.bIsWettable || Vertex.MaterialSlotIndex == INDEX_NONE) continue;
+            const FSurfaceWaterMaterialSlotData* SlotData = SurfaceWaterSettings.FindMaterialSlot(Vertex.MaterialSlotIndex);
+            if (SlotData && !SlotData->bEnabled) continue;
+            const int32 SurfaceWaterUVChannel = SlotData ? SlotData->UVChannelIndex : SurfaceWaterSettings.UVChannelIndexToConstruct;
+            if (SurfaceWaterUVChannel < 0 || SurfaceWaterUVChannel >= static_cast<int32>(LODData.GetNumTexCoords()))
+            {
+                const FString ErrorMessage = FString::Printf(TEXT("Surface Water UV channel %d is unavailable for material slot %d."), SurfaceWaterUVChannel, Vertex.MaterialSlotIndex);
+                DWC::Error::SetMessage(OutErrorMessage, *ErrorMessage);
+                ClearPrecomputedSimulationData();
+                return false;
+            }
+            const FVector2f UV = LODData.StaticVertexBuffers.StaticMeshVertexBuffer.GetVertexUV(VertexIndex, SurfaceWaterUVChannel);
+            if (UV.ContainsNaN() || !FMath::IsFinite(UV.X) || !FMath::IsFinite(UV.Y) || UV.X < 0.f || UV.X > 1.f || UV.Y < 0.f || UV.Y > 1.f) continue;
+            Vertex.SurfaceWaterUV = FVector2D(UV);
+            Vertex.bHasSurfaceWaterUV = true;
         }
     }
 

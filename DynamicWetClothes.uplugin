@@ -10,7 +10,8 @@
     "Modules": [
     {
         "Name": "DWC",
-        "Type": "Runtime"
+        "Type": "Runtime",
+        "LoadingPhase": "PostConfigInit"
     },
     {
         "Name": "DWCEditor",

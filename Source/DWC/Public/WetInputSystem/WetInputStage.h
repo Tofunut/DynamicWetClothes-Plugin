@@ -11,6 +11,8 @@ class FWetRuntimeDataBuilder;
 class FWetClothingMeshSampler;
 class FWetSimulationStage;
 class FAbsorbedWetnessSimulationState;
+class FSurfaceWaterSimulationState;
+struct FSurfaceWaterSimulationSettings;
 
 /*
 WetInputStage 실행에 필요한 인자 묶음이다.
@@ -31,6 +33,9 @@ struct DWC_API FWetInputStageArgs
 
     FWetClothingRuntimeData*         RuntimeData = nullptr;
     FAbsorbedWetnessSimulationState* SimulationState = nullptr;
+    TMap<int32, TUniquePtr<FSurfaceWaterSimulationState>>* SurfaceWaterStatesByMaterialSlot = nullptr;
+    const FSurfaceWaterSimulationSettings* SurfaceWaterSettings = nullptr;
+    FRandomStream* SurfaceWaterRandomStream = nullptr;
 
     FWetRuntimeDataBuilder*  RuntimeDataBuilder = nullptr;
     FWetClothingMeshSampler* MeshSampler = nullptr;
@@ -77,4 +82,9 @@ class DWC_API FWetInputStage
         const FDWCWaterSurfaceData& WaterSurfaceData,
         const FVector&              WorldPosition,
         float&                      OutSurfaceZ);
+
+    FRandomStream& GetSurfaceWaterRandomStream() { return SurfaceWaterRandomStream; }
+
+  private:
+    FRandomStream SurfaceWaterRandomStream = FRandomStream(0x445743);
 };

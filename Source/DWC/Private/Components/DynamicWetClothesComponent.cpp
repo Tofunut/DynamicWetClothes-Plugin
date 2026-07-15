@@ -12,14 +12,51 @@
 #include "RuntimeState/WetClothingRuntimeData.h"
 #include "WetSimulation/WetSimulationStage.h"
 #include "WetSimulation/AbsorbedWetness/AbsorbedWetnessSimulationState.h"
+#include "WetSimulation/SurfaceWater/SurfaceWaterSimulationState.h"
 #include "Runtime/Engine/Public/Rendering/SkeletalMeshLODRenderData.h"
 #include "UObject/UnrealType.h"
 #include "DataAssets/WetnessProfile.h"
+#include "Engine/Texture2D.h"
 #include "Utility/DWCLog.h"
 #include "Utility/DWCProfiling.h"
 
 namespace
 {
+    void ReleaseSurfaceWaterStates(FDWCWetMeshReceiverRuntime& Receiver)
+    {
+        for (TPair<int32, TUniquePtr<FSurfaceWaterSimulationState>>& Pair : Receiver.SurfaceWaterStatesByMaterialSlot)
+        {
+            if (Pair.Value.IsValid()) Pair.Value->Release();
+        }
+        Receiver.SurfaceWaterStatesByMaterialSlot.Reset();
+        Receiver.SurfaceWaterProfilesByMaterialSlot.Reset();
+    }
+
+    bool HasEquivalentSurfacePresentation(
+        const FSurfaceWaterProfileParameters& A,
+        const FSurfaceWaterProfileParameters& B)
+    {
+        return FMath::IsNearlyEqual(A.MaterialTimeUpdateInterval, B.MaterialTimeUpdateInterval) &&
+               FMath::IsNearlyEqual(A.NormalStrength, B.NormalStrength) &&
+               FMath::IsNearlyEqual(A.SurfaceRoughness, B.SurfaceRoughness) &&
+               FMath::IsNearlyEqual(A.FlowTiling, B.FlowTiling) &&
+               FMath::IsNearlyEqual(A.FlowPanningX, B.FlowPanningX) &&
+               FMath::IsNearlyEqual(A.FlowPanningY, B.FlowPanningY) &&
+               FMath::IsNearlyEqual(A.FlowNormalStrength, B.FlowNormalStrength) &&
+               FMath::IsNearlyEqual(A.FlowRoughness, B.FlowRoughness) &&
+               FMath::IsNearlyEqual(A.FlowMaskMin, B.FlowMaskMin) &&
+               FMath::IsNearlyEqual(A.FlowMaskMax, B.FlowMaskMax) &&
+               A.FlowMaskTexture == B.FlowMaskTexture &&
+               A.FlowNormalTexture == B.FlowNormalTexture &&
+               FMath::IsNearlyEqual(A.DropletTiling, B.DropletTiling) &&
+               FMath::IsNearlyEqual(A.SurfaceAmountThresholdMin, B.SurfaceAmountThresholdMin) &&
+               FMath::IsNearlyEqual(A.SurfaceAmountThresholdMax, B.SurfaceAmountThresholdMax) &&
+               FMath::IsNearlyEqual(A.DropletMaskMin, B.DropletMaskMin) &&
+               FMath::IsNearlyEqual(A.DropletMaskMax, B.DropletMaskMax) &&
+               A.DropletMaskTexture == B.DropletMaskTexture &&
+               A.DropletNormalTexture == B.DropletNormalTexture;
+    }
+
     bool IsMaterialSlotWettableForRuntime(const UWetClothingAsset* WetClothingAsset, const int32 MaterialSlotIndex)
     {
         if (WetClothingAsset == nullptr || MaterialSlotIndex == INDEX_NONE)
@@ -85,8 +122,17 @@ void UDynamicWetClothesComponent::EndPlay(const EEndPlayReason::Type EndPlayReas
     if (GetWorld())
     {
         GetWorld()->GetTimerManager().ClearTimer(WetnessSimulationTimer);
+        GetWorld()->GetTimerManager().ClearTimer(SurfaceWaterSimulationTimer);
         GetWorld()->GetTimerManager().ClearTimer(WetnessRenderTimer);
     }
+
+    // TStrongObjectPtr roots the transient RT. It must be released before PIE world GC.
+    for (const TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver : Receivers)
+    {
+        if (Receiver.IsValid()) ReleaseSurfaceWaterStates(*Receiver);
+    }
+    Receivers.Reset();
+    TargetSkeletalMesh = nullptr;
 
     Super::EndPlay(EndPlayReason);
 }
@@ -143,6 +189,10 @@ bool UDynamicWetClothesComponent::InitializeWetRuntime()
 
 bool UDynamicWetClothesComponent::RebuildWetMeshReceivers()
 {
+    for (const TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver : Receivers)
+    {
+        if (Receiver.IsValid()) ReleaseSurfaceWaterStates(*Receiver);
+    }
     Receivers.Reset();
     TargetSkeletalMesh = nullptr;
 
@@ -215,6 +265,75 @@ bool UDynamicWetClothesComponent::InitializeWetMeshReceiverRuntime(FDWCWetMeshRe
             *GetNameSafe(GetOwner()));
     }
 
+    const FSurfaceWaterSimulationSettings& SurfaceSimulationSettings = Receiver.WetClothingAsset->SurfaceWaterSettings;
+    if (SurfaceSimulationSettings.bEnabled)
+    {
+        TSet<int32> SurfaceEnabledMaterialSlots;
+        TSet<int32> ConflictingProfileSlots;
+        for (int32 VertexIndex = 0; VertexIndex < Receiver.RuntimeData->SurfaceWaterMaterialSlotIndices.Num(); ++VertexIndex)
+        {
+            if (!Receiver.RuntimeData->SupportsSurfaceWater(VertexIndex)) continue;
+            const int32 MaterialSlotIndex = Receiver.RuntimeData->SurfaceWaterMaterialSlotIndices[VertexIndex];
+            if (MaterialSlotIndex == INDEX_NONE) continue;
+            SurfaceEnabledMaterialSlots.Add(MaterialSlotIndex);
+
+            if (Receiver.RuntimeData->VertexWetnessProfileParameters.IsValidIndex(VertexIndex))
+            {
+                const FSurfaceWaterProfileParameters& Candidate =
+                    Receiver.RuntimeData->VertexWetnessProfileParameters[VertexIndex].SurfaceWater;
+                FSurfaceWaterProfileParameters* Existing =
+                    Receiver.SurfaceWaterProfilesByMaterialSlot.Find(MaterialSlotIndex);
+                if (!Existing)
+                {
+                    Receiver.SurfaceWaterProfilesByMaterialSlot.Add(MaterialSlotIndex, Candidate);
+                }
+                else if (!HasEquivalentSurfacePresentation(*Existing, Candidate) &&
+                         !ConflictingProfileSlots.Contains(MaterialSlotIndex))
+                {
+                    ConflictingProfileSlots.Add(MaterialSlotIndex);
+                    UE_LOG(
+                        LogDWC,
+                        Warning,
+                        TEXT("DWC Surface Water: material slot %d uses multiple presentation profiles. "
+                             "The first deterministic profile is used for slot-wide rendering parameters; "
+                             "split the material slot to render different droplet styles."),
+                        MaterialSlotIndex);
+                }
+            }
+        }
+
+        for (const int32 MaterialSlotIndex : SurfaceEnabledMaterialSlots)
+        {
+            const FSurfaceWaterMaterialSlotData* SlotData = SurfaceSimulationSettings.FindMaterialSlot(MaterialSlotIndex);
+            if (SlotData && !SlotData->bEnabled) continue;
+
+            TUniquePtr<FSurfaceWaterSimulationState> State = MakeUnique<FSurfaceWaterSimulationState>();
+            if (State->Initialize(this, SurfaceSimulationSettings.RenderTargetResolution))
+            {
+                Receiver.SurfaceWaterStatesByMaterialSlot.Add(MaterialSlotIndex, MoveTemp(State));
+            }
+            else
+            {
+                UE_LOG(LogTemp, Warning, TEXT("DynamicWetClothesComponent: Surface Water RTs for material slot %d could not be initialized; absorbed wetness remains active."), MaterialSlotIndex);
+            }
+        }
+        uint64 EstimatedGpuMemoryBytes = 0;
+        for (const TPair<int32, TUniquePtr<FSurfaceWaterSimulationState>>& Pair : Receiver.SurfaceWaterStatesByMaterialSlot)
+        {
+            if (Pair.Value.IsValid()) EstimatedGpuMemoryBytes += Pair.Value->GetEstimatedGpuMemoryBytes();
+        }
+        UE_LOG(
+            LogDWC,
+            Log,
+            TEXT("DWC Surface Water: receiver '%s' initialized %d material-slot state(s), %d render targets, estimated RT memory %.2f MiB at %dx%d."),
+            *Receiver.ReceiverId.ToString(),
+            Receiver.SurfaceWaterStatesByMaterialSlot.Num(),
+            Receiver.SurfaceWaterStatesByMaterialSlot.Num() * 2,
+            static_cast<double>(EstimatedGpuMemoryBytes) / (1024.0 * 1024.0),
+            SurfaceSimulationSettings.RenderTargetResolution,
+            SurfaceSimulationSettings.RenderTargetResolution);
+    }
+
     return true;
 }
 
@@ -227,6 +346,20 @@ void UDynamicWetClothesComponent::StartWetnessTimers()
 
     const float SimulationInterval = FMath::Max(KINDA_SMALL_NUMBER, WetnessSettings.WetnessUpdateInterval);
     const float RenderInterval = FMath::Max(KINDA_SMALL_NUMBER, WetnessSettings.WetnessRenderUpdateInterval);
+    float SurfaceWaterInterval = 1.0f / 30.0f;
+    bool bFoundSurfaceProfile = false;
+    for (const TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver : Receivers)
+    {
+        if (!Receiver.IsValid()) continue;
+        for (const TPair<int32, FSurfaceWaterProfileParameters>& Pair : Receiver->SurfaceWaterProfilesByMaterialSlot)
+        {
+            const float CandidateInterval = FMath::Max(KINDA_SMALL_NUMBER, Pair.Value.MaterialTimeUpdateInterval);
+            SurfaceWaterInterval = bFoundSurfaceProfile
+                ? FMath::Min(SurfaceWaterInterval, CandidateInterval)
+                : CandidateInterval;
+            bFoundSurfaceProfile = true;
+        }
+    }
 
     GetWorld()->GetTimerManager().SetTimer(
         WetnessSimulationTimer,
@@ -241,6 +374,7 @@ void UDynamicWetClothesComponent::StartWetnessTimers()
         &UDynamicWetClothesComponent::UpdateWetRendering,
         RenderInterval,
         true);
+    GetWorld()->GetTimerManager().SetTimer(SurfaceWaterSimulationTimer, this, &UDynamicWetClothesComponent::UpdateSurfaceWater, SurfaceWaterInterval, true);
 }
 
 FWetRuntimeDataBuildArgs UDynamicWetClothesComponent::MakeRuntimeDataBuildArgs(FDWCWetMeshReceiverRuntime& Receiver)
@@ -279,6 +413,9 @@ FWetInputStageArgs UDynamicWetClothesComponent::MakeWetInputStageArgs(FDWCWetMes
     Args.WetnessSettings = &WetnessSettings;
     Args.RuntimeData = Receiver.RuntimeData.Get();
     Args.SimulationState = Receiver.SimulationState.Get();
+    Args.SurfaceWaterStatesByMaterialSlot = &Receiver.SurfaceWaterStatesByMaterialSlot;
+    Args.SurfaceWaterSettings = Receiver.WetClothingAsset.IsValid() ? &Receiver.WetClothingAsset->SurfaceWaterSettings : nullptr;
+    Args.SurfaceWaterRandomStream = &Receiver.InputStage->GetSurfaceWaterRandomStream();
     Args.RuntimeDataBuilder = Receiver.RuntimeDataBuilder.Get();
     Args.MeshSampler = Receiver.MeshSampler.Get();
     Args.SimulationStage = Receiver.SimulationStage.Get();
@@ -316,7 +453,16 @@ FWetRenderStageArgs UDynamicWetClothesComponent::MakeWetRenderStageArgs(FDWCWetM
     Args.WetnessSettings = &WetnessSettings;
     Args.RuntimeData = Receiver.RuntimeData.Get();
     Args.SimulationState = Receiver.SimulationState.Get();
+    Args.SurfaceWaterStatesByMaterialSlot = &Receiver.SurfaceWaterStatesByMaterialSlot;
+    Args.SurfaceWaterProfilesByMaterialSlot = &Receiver.SurfaceWaterProfilesByMaterialSlot;
     Args.WetMaterialInstances = &Receiver.WetMaterialInstances;
+    Args.SurfaceWaterRTParameterName = SurfaceWaterRTParameterName;
+    Args.SurfaceDropletRTParameterName = SurfaceDropletRTParameterName;
+    Args.SurfaceFlowRTParameterName = SurfaceFlowRTParameterName;
+    Args.SurfaceWaterTimeParameterName = SurfaceWaterTimeParameterName;
+    Args.SurfaceWaterTexelSizeParameterName = SurfaceWaterTexelSizeParameterName;
+    Args.SurfaceWaterTimeSeconds = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
+    Args.SurfaceWaterDebugView = SurfaceWaterDebugView;
     Args.UnassignedWetPartDebugColor = UnassignedWetPartDebugColor;
     Args.bEnableWetPartDebugVertexColors = bEnableWetPartDebugVertexColors;
     Args.bWetPartDebugUseWetnessMask = bWetPartDebugUseWetnessMask;
@@ -342,6 +488,7 @@ FWetRenderStageArgs UDynamicWetClothesComponent::MakeWetRenderStageArgs(FDWCWetM
     Args.UnderColorBlendStrengthParameterName = UnderColorBlendStrengthParameterName;
     Args.UnderColor = FallbackUnderColor;
     Args.UnderColorBlendStrength = WetUnderColorBlendStrength;
+    Args.SurfaceWaterRTParameterName = SurfaceWaterRTParameterName;
     return Args;
 }
 
@@ -994,6 +1141,31 @@ void UDynamicWetClothesComponent::UpdateWetness()
     }
 }
 
+void UDynamicWetClothesComponent::UpdateSurfaceWater()
+{
+    const float CurrentSurfaceTimeSeconds = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
+    for (const TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver : Receivers)
+    {
+        if (!Receiver.IsValid() || !Receiver->WetClothingAsset.IsValid()) continue;
+        const FSurfaceWaterSimulationSettings& Settings = Receiver->WetClothingAsset->SurfaceWaterSettings;
+        if (!Settings.bEnabled) continue;
+        bool bAnyChanged = false;
+        for (TPair<int32, TUniquePtr<FSurfaceWaterSimulationState>>& Pair : Receiver->SurfaceWaterStatesByMaterialSlot)
+        {
+            if (!Pair.Value.IsValid()) continue;
+            const FSurfaceWaterMaterialSlotData* SlotData = Settings.FindMaterialSlot(Pair.Key);
+            const FSurfaceWaterBakedFlowMapData* FlowData = SlotData ? &SlotData->BakedFlowMap : nullptr;
+            UTexture2D* FlowMap = FlowData && FlowData->bIsValid && FlowData->bEnabled && FlowData->Resolution == Pair.Value->GetResolution() ? FlowData->FlowMap.Get() : nullptr;
+            bAnyChanged |= Pair.Value->FlushStamps(FlowMap, CurrentSurfaceTimeSeconds);
+        }
+        if (bAnyChanged || !Receiver->SurfaceWaterStatesByMaterialSlot.IsEmpty())
+        {
+            FWetRenderStageArgs RenderArgs = MakeWetRenderStageArgs(*Receiver);
+            Receiver->RenderStage->ApplyWetMaterialParameters(RenderArgs);
+        }
+    }
+}
+
 void UDynamicWetClothesComponent::UpdateWetRendering()
 {
     FlushAsyncTaskQueueGameThread();
@@ -1018,6 +1190,86 @@ void UDynamicWetClothesComponent::UpdateWetRendering()
     bWetRenderDirty = false;
 }
 
+bool UDynamicWetClothesComponent::DebugApplySurfaceWaterAtVertex(
+    int32 VertexIndex,
+    float Amount,
+    float RadiusPixels,
+    bool bFlowStamp)
+{
+    bool bQueued = false;
+    for (const TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver : Receivers)
+    {
+        if (!Receiver.IsValid() || !Receiver->RuntimeData.IsValid() || !Receiver->WetClothingAsset.IsValid()) continue;
+        FVector2f UV;
+        int32 MaterialSlotIndex = INDEX_NONE;
+        if (!Receiver->RuntimeData->TryGetSurfaceWaterBinding(VertexIndex, MaterialSlotIndex, UV)) continue;
+        TUniquePtr<FSurfaceWaterSimulationState>* State = Receiver->SurfaceWaterStatesByMaterialSlot.Find(MaterialSlotIndex);
+        if (!State || !State->IsValid()) continue;
+        const FSurfaceWaterProfileParameters* SurfaceProfile =
+            Receiver->SurfaceWaterProfilesByMaterialSlot.Find(MaterialSlotIndex);
+        const FSurfaceWaterProfileParameters DefaultSurfaceProfile;
+        if (!SurfaceProfile) SurfaceProfile = &DefaultSurfaceProfile;
+        if (bFlowStamp)
+        {
+            (*State)->QueueFlowStamp(
+                UV,
+                FMath::Max(0.0f, Amount),
+                SurfaceProfile->FlowWidthPixels,
+                SurfaceProfile->FlowLengthPixels,
+                SurfaceProfile->FlowLifetimeSeconds);
+        }
+        else
+        {
+            (*State)->QueueDropletStamp(
+                UV,
+                FMath::Max(0.0f, Amount),
+                RadiusPixels,
+                SurfaceProfile->DropletLifetimeSeconds);
+        }
+        bQueued = true;
+    }
+    if (bQueued) UpdateSurfaceWater();
+    return bQueued;
+}
+
+void UDynamicWetClothesComponent::SetSurfaceWaterDebugView(const ESurfaceWaterDebugView DebugView)
+{
+    SurfaceWaterDebugView = DebugView;
+    for (const TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver : Receivers)
+    {
+        if (!Receiver.IsValid() || !Receiver->RenderStage.IsValid()) continue;
+        FWetRenderStageArgs RenderArgs = MakeWetRenderStageArgs(*Receiver);
+        Receiver->RenderStage->ApplyWetMaterialParameters(RenderArgs);
+    }
+}
+
+int64 UDynamicWetClothesComponent::GetSurfaceWaterEstimatedGpuMemoryBytes() const
+{
+    uint64 TotalBytes = 0;
+    for (const TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver : Receivers)
+    {
+        if (!Receiver.IsValid()) continue;
+        for (const TPair<int32, TUniquePtr<FSurfaceWaterSimulationState>>& Pair : Receiver->SurfaceWaterStatesByMaterialSlot)
+        {
+            if (Pair.Value.IsValid()) TotalBytes += Pair.Value->GetEstimatedGpuMemoryBytes();
+        }
+    }
+    return TotalBytes > static_cast<uint64>(MAX_int64) ? MAX_int64 : static_cast<int64>(TotalBytes);
+}
+
+void UDynamicWetClothesComponent::SetSurfaceWaterSimulationPaused(bool bPaused)
+{
+    for (const TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver : Receivers) if (Receiver.IsValid()) for (TPair<int32, TUniquePtr<FSurfaceWaterSimulationState>>& Pair : Receiver->SurfaceWaterStatesByMaterialSlot) if (Pair.Value.IsValid()) Pair.Value->SetSimulationPaused(bPaused);
+}
+void UDynamicWetClothesComponent::StepSurfaceWaterSimulation()
+{
+    SetSurfaceWaterSimulationPaused(false); UpdateSurfaceWater(); SetSurfaceWaterSimulationPaused(true);
+}
+void UDynamicWetClothesComponent::ClearSurfaceWater()
+{
+    for (const TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver : Receivers) if (Receiver.IsValid()) for (TPair<int32, TUniquePtr<FSurfaceWaterSimulationState>>& Pair : Receiver->SurfaceWaterStatesByMaterialSlot) if (Pair.Value.IsValid()) Pair.Value->Reset();
+}
+
 void UDynamicWetClothesComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
@@ -1034,6 +1286,7 @@ void UDynamicWetClothesComponent::PostEditChangeProperty(FPropertyChangedEvent& 
 
     const FName PropertyName = PropertyChangedEvent.GetPropertyName();
     if (PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, bEnableWetPartDebugVertexColors) ||
+        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, SurfaceWaterDebugView) ||
         PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, bWetPartDebugUseWetnessMask) ||
         PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, WetPartDebugStrengthParameterName) ||
         PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, WetPartDebugUseWetnessMaskParameterName) ||

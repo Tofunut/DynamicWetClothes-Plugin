@@ -19,10 +19,10 @@ struct FWetWrinkleUVChannelGenerationSettings
 struct FWetWrinkleUVChannelGenerationResult
 {
     bool bSucceeded = false;
-    int32 UVChannelIndex = INDEX_NONE;
-    int32 MaterialSlotIndex = INDEX_NONE;
-    int32 IslandCount = 0;
-    FString Message;
+    int32 UVChannelIndex = INDEX_NONE; //Result Saved Channel
+    int32 MaterialSlotIndex = INDEX_NONE; //Material Slot
+    int32 PackedIslandCount = 0;
+    FString Message; //Succeed or Failed Description
 };
 
 class FWetWrinkleUVChannelGenerator
@@ -40,7 +40,18 @@ class FWetWrinkleUVChannelGenerator
         int32 SourceUVChannelIndex = 0,
         int32 PreferredUVChannelIndex = 2,
         bool bAllowOverwriteExistingChannel = false,
-        int32 TargetMaterialSlotIndex = INDEX_NONE);
+        int32 TargetMaterialSlotIndex = INDEX_NONE,
+        double TargetTexelsPerWorldUnit = 0.0);
+
+    static bool CalculateSharedWorldTexelDensity(
+        USkeletalMesh* SkeletalMesh,
+        int32 LODIndex,
+        int32 Resolution,
+        int32 PaddingPixels,
+        int32 SourceUVChannelIndex,
+        const TArray<int32>& TargetMaterialSlotIndices,
+        double& OutTexelsPerWorldUnit,
+        FString& OutError);
 
     static FWetWrinkleUVChannelGenerationResult DeleteUVChannelForAsset(
         UWetClothingAsset* Asset,

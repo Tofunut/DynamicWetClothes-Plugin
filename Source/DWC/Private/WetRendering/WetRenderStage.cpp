@@ -11,6 +11,7 @@
 #include "Runtime/Engine/Public/Rendering/SkeletalMeshLODRenderData.h"
 #include "Runtime/Engine/Public/Rendering/SkeletalMeshRenderData.h"
 #include "Utility/DWCProfiling.h"
+#include "RHI.h"
 
 namespace
 {
@@ -41,6 +42,7 @@ namespace
 #include "Runtime/Engine/Public/Materials/MaterialInstanceDynamic.h"
 #include "DataAssets/WetClothingAsset.h"
 #include "DataAssets/WetClothingWrinkleData.h"
+#include "WetSimulation/SurfaceWater/SurfaceWaterSimulationState.h"
 #include "Utility/DWCLog.h"
 
 namespace
@@ -128,7 +130,107 @@ void FWetRenderStage::ApplyWetMaterialParameters(FWetRenderStageArgs& Receiver)
         {
             continue;
         }
-
+        const FSurfaceWaterProfileParameters DefaultSurfaceProfile;
+        const FSurfaceWaterProfileParameters* SurfaceProfile =
+            Receiver.SurfaceWaterProfilesByMaterialSlot
+                ? Receiver.SurfaceWaterProfilesByMaterialSlot->Find(MaterialSlotIndex)
+                : nullptr;
+        if (!SurfaceProfile)
+        {
+            SurfaceProfile = &DefaultSurfaceProfile;
+        }
+        if (!Receiver.SurfaceWaterRTParameterName.IsNone())
+        {
+            FSurfaceWaterSimulationState* SlotState = nullptr;
+            if (Receiver.SurfaceWaterStatesByMaterialSlot)
+            {
+                if (const TUniquePtr<FSurfaceWaterSimulationState>* Found = Receiver.SurfaceWaterStatesByMaterialSlot->Find(MaterialSlotIndex))
+                {
+                    SlotState = Found->Get();
+                }
+            }
+            MID->SetTextureParameterValue(Receiver.SurfaceWaterRTParameterName, SlotState ? SlotState->GetDropletRenderTarget() : nullptr);
+        }
+        FSurfaceWaterSimulationState* SurfaceState = nullptr;
+        if (Receiver.SurfaceWaterStatesByMaterialSlot)
+        {
+            if (const TUniquePtr<FSurfaceWaterSimulationState>* Found = Receiver.SurfaceWaterStatesByMaterialSlot->Find(MaterialSlotIndex))
+            {
+                SurfaceState = Found->Get();
+            }
+        }
+        if (!Receiver.SurfaceDropletRTParameterName.IsNone())
+        {
+            MID->SetTextureParameterValue(Receiver.SurfaceDropletRTParameterName, SurfaceState ? SurfaceState->GetDropletRenderTarget() : nullptr);
+        }
+        if (!Receiver.SurfaceFlowRTParameterName.IsNone())
+        {
+            MID->SetTextureParameterValue(Receiver.SurfaceFlowRTParameterName, SurfaceState ? SurfaceState->GetFlowRenderTarget() : nullptr);
+        }
+        if (!Receiver.SurfaceWaterTimeParameterName.IsNone())
+        {
+            MID->SetScalarParameterValue(Receiver.SurfaceWaterTimeParameterName, Receiver.SurfaceWaterTimeSeconds);
+        }
+        if (!Receiver.SurfaceWaterTexelSizeParameterName.IsNone())
+        {
+            MID->SetScalarParameterValue(
+                Receiver.SurfaceWaterTexelSizeParameterName,
+                SurfaceState && SurfaceState->GetResolution() > 0
+                    ? 1.0f / static_cast<float>(SurfaceState->GetResolution())
+                    : 0.0f);
+        }
+        if (!Receiver.SurfaceWaterNormalStrengthParameterName.IsNone())
+        {
+            MID->SetScalarParameterValue(Receiver.SurfaceWaterNormalStrengthParameterName, FMath::Max(0.0f, SurfaceProfile->NormalStrength));
+        }
+        if (!Receiver.SurfaceWaterRoughnessParameterName.IsNone())
+        {
+            MID->SetScalarParameterValue(Receiver.SurfaceWaterRoughnessParameterName, FMath::Clamp(SurfaceProfile->SurfaceRoughness, 0.0f, 1.0f));
+        }
+        const float ThresholdMin = FMath::Clamp(
+            FMath::Min(SurfaceProfile->SurfaceAmountThresholdMin, SurfaceProfile->SurfaceAmountThresholdMax), 0.0f, 1.0f);
+        const float ThresholdMax = FMath::Clamp(
+            FMath::Max(SurfaceProfile->SurfaceAmountThresholdMin, SurfaceProfile->SurfaceAmountThresholdMax), ThresholdMin + KINDA_SMALL_NUMBER, 1.0f);
+        const float MaskMin = FMath::Clamp(
+            FMath::Min(SurfaceProfile->DropletMaskMin, SurfaceProfile->DropletMaskMax), 0.0f, 1.0f);
+        const float MaskMax = FMath::Clamp(
+            FMath::Max(SurfaceProfile->DropletMaskMin, SurfaceProfile->DropletMaskMax), MaskMin + KINDA_SMALL_NUMBER, 1.0f);
+        const float FlowMaskMin = FMath::Clamp(
+            FMath::Min(SurfaceProfile->FlowMaskMin, SurfaceProfile->FlowMaskMax), 0.0f, 1.0f);
+        const float FlowMaskMax = FMath::Clamp(
+            FMath::Max(SurfaceProfile->FlowMaskMin, SurfaceProfile->FlowMaskMax), FlowMaskMin + KINDA_SMALL_NUMBER, 1.0f);
+        MID->SetScalarParameterValue(Receiver.SurfaceDropletTilingParameterName, FMath::Max(0.01f, SurfaceProfile->DropletTiling));
+        MID->SetScalarParameterValue(Receiver.SurfaceAmountThresholdMinParameterName, ThresholdMin);
+        MID->SetScalarParameterValue(Receiver.SurfaceAmountThresholdMaxParameterName, ThresholdMax);
+        MID->SetScalarParameterValue(Receiver.SurfaceDropletMaskMinParameterName, MaskMin);
+        MID->SetScalarParameterValue(Receiver.SurfaceDropletMaskMaxParameterName, MaskMax);
+        MID->SetScalarParameterValue(Receiver.SurfaceFlowTilingParameterName, FMath::Max(0.01f, SurfaceProfile->FlowTiling));
+        MID->SetScalarParameterValue(Receiver.SurfaceFlowPanningXParameterName, SurfaceProfile->FlowPanningX);
+        MID->SetScalarParameterValue(Receiver.SurfaceFlowPanningYParameterName, SurfaceProfile->FlowPanningY);
+        MID->SetScalarParameterValue(Receiver.SurfaceFlowNormalStrengthParameterName, FMath::Max(0.0f, SurfaceProfile->FlowNormalStrength));
+        MID->SetScalarParameterValue(Receiver.SurfaceFlowRoughnessParameterName, FMath::Clamp(SurfaceProfile->FlowRoughness, 0.0f, 1.0f));
+        MID->SetScalarParameterValue(Receiver.SurfaceFlowMaskMinParameterName, FlowMaskMin);
+        MID->SetScalarParameterValue(Receiver.SurfaceFlowMaskMaxParameterName, FlowMaskMax);
+        if (SurfaceProfile->DropletMaskTexture)
+        {
+            MID->SetTextureParameterValue(Receiver.SurfaceDropletMaskTextureParameterName, SurfaceProfile->DropletMaskTexture);
+        }
+        if (SurfaceProfile->DropletNormalTexture)
+        {
+            MID->SetTextureParameterValue(Receiver.SurfaceDropletNormalTextureParameterName, SurfaceProfile->DropletNormalTexture);
+        }
+        if (SurfaceProfile->FlowMaskTexture)
+        {
+            MID->SetTextureParameterValue(Receiver.SurfaceFlowMaskTextureParameterName, SurfaceProfile->FlowMaskTexture);
+        }
+        if (SurfaceProfile->FlowNormalTexture)
+        {
+            MID->SetTextureParameterValue(Receiver.SurfaceFlowNormalTextureParameterName, SurfaceProfile->FlowNormalTexture);
+        }
+        if (!Receiver.SurfaceWaterDebugModeParameterName.IsNone())
+        {
+            MID->SetScalarParameterValue(Receiver.SurfaceWaterDebugModeParameterName, static_cast<float>(Receiver.SurfaceWaterDebugView));
+        }
         if (!Receiver.WetPartDebugStrengthParameterName.IsNone())
         {
             MID->SetScalarParameterValue(

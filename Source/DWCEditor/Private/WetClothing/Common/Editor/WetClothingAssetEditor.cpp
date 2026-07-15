@@ -19,6 +19,8 @@
 #include "UObject/UnrealType.h"
 #include "UObject/UObjectGlobals.h"
 #include "WetClothing/Common/Widgets/WetClothingEditorCommonWidgets.h"
+#include "WetClothing/SurfaceWater/WetClothingSurfaceWaterFlowMapBaker.h"
+#include "WetClothing/SurfaceWater/WetClothingSurfaceWaterUVGenerator.h"
 #include "Widgets/Docking/SDockTab.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SCheckBox.h"
@@ -155,13 +157,21 @@ void FWetClothingAssetEditor::Initialize(const EToolkitMode::Type Mode, const TS
     DetailsView->SetIsPropertyVisibleDelegate(FIsPropertyVisible::CreateLambda(
         [](const FPropertyAndParent& PropertyAndParent)
         {
-            return PropertyAndParent.Property.GetFName() == GET_MEMBER_NAME_CHECKED(UWetClothingAsset, TargetMesh);
+            const FName PropertyName = PropertyAndParent.Property.GetFName();
+            if (PropertyName == GET_MEMBER_NAME_CHECKED(UWetClothingAsset, TargetMesh) ||
+                PropertyName == GET_MEMBER_NAME_CHECKED(UWetClothingAsset, SurfaceWaterSettings))
+            {
+                return true;
+            }
+
+            const FString Category = PropertyAndParent.Property.GetMetaData(TEXT("Category"));
+            return Category.StartsWith(TEXT("Surface Water"));
         }));
     DetailsView->SetObject(InWetClothingAsset);
     DetailsView->OnFinishedChangingProperties().AddSP(this, &FWetClothingAssetEditor::HandleFinishedChangingProperties);
     ObjectPropertyChangedHandle = FCoreUObjectDelegates::OnObjectPropertyChanged.AddSP(this, &FWetClothingAssetEditor::HandleObjectPropertyChanged);
 
-    const TSharedRef<FTabManager::FLayout> Layout = FTabManager::NewLayout("Standalone_WetClothingAssetEditor_Layout_v3")
+    const TSharedRef<FTabManager::FLayout> Layout = FTabManager::NewLayout("Standalone_WetClothingAssetEditor_Layout_v4")
                                                         ->AddArea(
                                                             FTabManager::NewPrimaryArea()->SetOrientation(Orient_Vertical)->Split(FTabManager::NewStack()->SetHideTabWell(true)->AddTab(MainTabId, ETabState::OpenedTab)));
 
@@ -285,6 +295,12 @@ void FWetClothingAssetEditor::PostRegenerateMenusAndToolbars()
 void FWetClothingAssetEditor::FillAssetToolbar(FToolBarBuilder& ToolbarBuilder)
 {
     ToolbarBuilder.AddSeparator();
+    ToolbarBuilder.AddToolBarButton(
+        FUIAction(FExecuteAction::CreateSP(this, &FWetClothingAssetEditor::HandleGenerateSurfaceWaterUVClicked)),
+        NAME_None,
+        LOCTEXT("GenerateSurfaceWaterUVLabel", "Generate Water UV"),
+        LOCTEXT("GenerateSurfaceWaterUVTooltip", "Generate independently packed Surface Water UVs for every Wettable Material Slot in the configured UV Channel Index."),
+        FSlateIcon(FDWCEditorStyle::GetStyleSetName(), TEXT("DWCEditor.Bake")));
     ToolbarBuilder.AddComboButton(
         FUIAction(),
         FOnGetContent::CreateSP(this, &FWetClothingAssetEditor::BuildBakeMapsMenu),
@@ -307,7 +323,46 @@ TSharedRef<SWidget> FWetClothingAssetEditor::BuildBakeMapsMenu()
 
 FReply FWetClothingAssetEditor::HandleBakeAllMapsClicked()
 {
-    return HandleBakeWetnessProfileMapsClicked();
+    HandleBakeWetnessProfileMapsClicked();
+
+    UWetClothingAsset* Asset = WetClothingAsset.Get();
+    if (Asset == nullptr)
+    {
+        return FReply::Handled();
+    }
+
+    FString ErrorMessage;
+    if (!FWetClothingSurfaceWaterFlowMapBaker::Bake(Asset, ErrorMessage))
+    {
+        FMessageDialog::Open(
+            EAppMsgType::Ok,
+            FText::FromString(FString::Printf(TEXT("Surface Water Flow Map bake failed: %s"), *ErrorMessage)));
+    }
+
+    return FReply::Handled();
+}
+
+void FWetClothingAssetEditor::HandleGenerateSurfaceWaterUVClicked()
+{
+    UWetClothingAsset* Asset = WetClothingAsset.Get();
+    if (!Asset) return;
+
+    const FSurfaceWaterSimulationSettings& Settings = Asset->SurfaceWaterSettings;
+    const FWetClothingSurfaceWaterUVGenerationResult Result = FWetClothingSurfaceWaterUVGenerator::Generate(
+        Asset, //Editing WCA
+        0, //Use LOD0 Mesh
+        0, //Use UV0 Island Structure
+        Settings.UVChannelIndexToConstruct, //Channel to Struct
+        Settings.RenderTargetResolution, //Surface Water RT Resoluition
+        Settings.BakedFlowMap.PaddingPixels, //Padding Between UV Island
+        Settings.bAllowOverwriteExistingSurfaceWaterUVChannel,
+        Settings.TargetSurfaceWaterTexelsPerCentimeter);
+
+    FMessageDialog::Open(
+        Result.bSucceeded ? EAppMsgCategory::Success : EAppMsgCategory::Error,
+        EAppMsgType::Ok,
+        FText::FromString(Result.Message));
+    if (Result.bSucceeded && EditorPanel.IsValid()) EditorPanel->RefreshFromAsset();
 }
 
 FReply FWetClothingAssetEditor::HandleBakeWetnessProfileMapsClicked()

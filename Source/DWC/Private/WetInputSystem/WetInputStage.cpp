@@ -11,6 +11,8 @@
 #include "RuntimeState/WetClothingRuntimeData.h"
 #include "RuntimeState/WetRuntimeDataBuilder.h"
 #include "WetSimulation/AbsorbedWetness/AbsorbedWetnessSimulationState.h"
+#include "WetSimulation/SurfaceWater/SurfaceWaterSimulationState.h"
+#include "WetSimulation/SurfaceWater/SurfaceWaterSimulationSettings.h"
 #include "Runtime/Engine/Classes/Engine/SkeletalMesh.h"
 #include "Runtime/Engine/Public/Rendering/SkeletalMeshLODRenderData.h"
 #include "Runtime/Engine/Public/Rendering/SkeletalMeshRenderData.h"
@@ -19,15 +21,15 @@
 #include "Utility/DWCProfiling.h"
 #include "Misc/ScopeLock.h"
 
-float FWetInputStageArgs::GetAbsorptionMultiplierForVertex(const int32 VertexIndex) const
-{
-    return RuntimeData && RuntimeData->VertexWetnessProfileParameters.IsValidIndex(VertexIndex)
-               ? RuntimeData->VertexWetnessProfileParameters[VertexIndex].GetAbsorptionMultiplier()
-               : 1.0f;
-}
-
 namespace
 {
+    void QueuePositiveWetness(FWetInputStageArgs& Receiver, int32 VertexIndex, float Amount)
+    {
+        if (Amount > 0.0f)
+        {
+            Receiver.SimulationStage->QueuePendingWetness(Receiver, VertexIndex, Amount);
+        }
+    }
     struct FPreparedWetContactData
     {
         FTransform ComponentTransform;
@@ -119,6 +121,24 @@ namespace
         FVector               SafeNormal = FVector::ZeroVector;
         float                 SafeRadius = KINDA_SMALL_NUMBER;
         float                 SafeRadiusSquared = KINDA_SMALL_NUMBER * KINDA_SMALL_NUMBER;
+    };
+
+    struct FWaterInputVertexSample
+    {
+        int32 VertexIndex = INDEX_NONE;
+        int32 MaterialSlotIndex = INDEX_NONE;
+        FVector2f SurfaceUV = FVector2f::ZeroVector;
+        float Influence = 0.0f;
+        const FWetnessProfileParameters* Profile = nullptr;
+    };
+
+    struct FSurfaceWaterInputAccumulator
+    {
+        float TotalSurfaceAmount = 0.0f;
+        float BestInfluence = -1.0f;
+        FVector2f BestUV = FVector2f::ZeroVector;
+        FSurfaceWaterProfileParameters Profile;
+        bool bHasProfile = false;
     };
 
     void LogFullVertexFallback(
@@ -276,48 +296,177 @@ namespace
         return BackfaceDepth <= BackfaceDepthTolerance;
     }
 
-    bool ApplyWetContactInfluence(
-        FWetInputStageArgs&              Receiver,
-        const FWetContactEvaluationData& Evaluation,
-        const int32                      VertexIndex,
-        const float                      Influence,
-        bool&                            bDirty,
-        bool&                            bQueuedWetness)
+    float RouteAbsorbedWater(
+        FWetInputStageArgs& Receiver,
+        const FWaterInputVertexSample& Sample,
+        const float IncomingAmount)
     {
-        if (!Receiver.SimulationState->AbsorbedWetnessPerVertex.IsValidIndex(VertexIndex) ||
-            !Receiver.RuntimeData ||
-            !Receiver.RuntimeData->IsVertexWettable(VertexIndex))
+        if (!Sample.Profile || !Receiver.RuntimeData->SupportsAbsorbedWetness(Sample.VertexIndex))
+        {
+            return 0.0f;
+        }
+
+        // Preserve the server simulation contract: queue the complete absorbed-channel
+        // request so the simulation stage can retain local capacity and propagate the
+        // remainder as capillary/overflow wetness. Clamping here would silently discard
+        // the water that is supposed to drive spreading from saturated vertices.
+        const float RequestedAmount = IncomingAmount * Sample.Profile->GetAbsorptionMultiplier();
+        if (RequestedAmount <= Receiver.WetnessSettings->MinPendingWetnessAmount)
+        {
+            return 0.0f;
+        }
+
+        QueuePositiveWetness(Receiver, Sample.VertexIndex, RequestedAmount);
+        return RequestedAmount;
+    }
+
+    void InitializeWaterSample(
+        const FWetInputStageArgs& Receiver,
+        const int32 VertexIndex,
+        const float Influence,
+        FWaterInputVertexSample& OutSample)
+    {
+        OutSample.VertexIndex = VertexIndex;
+        OutSample.Influence = Influence;
+        OutSample.Profile = Receiver.RuntimeData->VertexWetnessProfileParameters.IsValidIndex(VertexIndex)
+            ? &Receiver.RuntimeData->VertexWetnessProfileParameters[VertexIndex]
+            : nullptr;
+        if (Receiver.RuntimeData->SupportsSurfaceWater(VertexIndex))
+        {
+            Receiver.RuntimeData->TryGetSurfaceWaterBinding(
+                VertexIndex, OutSample.MaterialSlotIndex, OutSample.SurfaceUV);
+        }
+    }
+
+    bool ApplyWaterSamples(
+        FWetInputStageArgs& Receiver,
+        const float InputAmount,
+        const TArray<FWaterInputVertexSample>& Samples,
+        const bool bNormalizePositiveInfluence,
+        bool& bDirty,
+        bool& bQueuedWetness)
+    {
+        if (Samples.IsEmpty())
         {
             return false;
         }
 
-        if ((Evaluation.EffectiveAmount > 0.0f && Receiver.SimulationState->AbsorbedWetnessPerVertex[VertexIndex] >= Receiver.WetnessSettings->MaxWetness) ||
-            (Evaluation.EffectiveAmount < 0.0f && Receiver.SimulationState->AbsorbedWetnessPerVertex[VertexIndex] <= 0.0f))
+        if (InputAmount < 0.0f)
+        {
+            bool bApplied = false;
+            for (const FWaterInputVertexSample& Sample : Samples)
+            {
+                if (!Receiver.RuntimeData->SupportsAbsorbedWetness(Sample.VertexIndex))
+                {
+                    continue;
+                }
+                const float RemovedAmount = Receiver.SimulationStage->AbsorbWetnessAtVertex(
+                    Receiver, Sample.VertexIndex, InputAmount * Sample.Influence, bDirty);
+                bApplied |= !FMath::IsNearlyZero(RemovedAmount);
+            }
+            return bApplied;
+        }
+
+        float TotalInfluence = 0.0f;
+        for (const FWaterInputVertexSample& Sample : Samples)
+        {
+            TotalInfluence += Sample.Influence;
+        }
+        if (TotalInfluence <= KINDA_SMALL_NUMBER)
         {
             return false;
         }
 
-        if (Influence <= KINDA_SMALL_NUMBER)
+        TMap<int32, FSurfaceWaterInputAccumulator> SurfaceAccumulators;
+        bool bApplied = false;
+        for (const FWaterInputVertexSample& Sample : Samples)
         {
-            return false;
+            //Calculate How Much Water will absorbed
+            const float IncomingAmount = InputAmount *
+                (bNormalizePositiveInfluence ? Sample.Influence / TotalInfluence : Sample.Influence);
+            const float ActualAbsorbedAmount = RouteAbsorbedWater(Receiver, Sample, IncomingAmount);
+            if (ActualAbsorbedAmount > 0.0f)
+            {
+                bQueuedWetness = true;
+                bApplied = true;
+            }
+
+            if (!Sample.Profile || Sample.MaterialSlotIndex == INDEX_NONE ||
+                !Receiver.RuntimeData->SupportsSurfaceWater(Sample.VertexIndex))
+            {
+                continue;
+            }
+            
+            // Fraction alone routes water between absorbed and surface channels.
+            // Absorption Rate remains the legacy absorbed-wetness response multiplier
+            // and must not change the amount assigned to the surface channel.
+            const FSurfaceWaterProfileParameters& Surface = Sample.Profile->SurfaceWater;
+            const float RejectedAmount = IncomingAmount * Sample.Profile->GetRejectedWaterFraction();
+            const float SurfaceAmount = RejectedAmount * FMath::Clamp(Surface.SurfaceRepresentationFraction, 0.0f, 1.0f);
+            if (SurfaceAmount <= 0.0f)
+            {
+                continue;
+            }
+            //TODO : Maybe this will be bad for concise expression
+            FSurfaceWaterInputAccumulator& Accumulator = SurfaceAccumulators.FindOrAdd(Sample.MaterialSlotIndex);
+            Accumulator.TotalSurfaceAmount += SurfaceAmount;
+            if (Sample.Influence > Accumulator.BestInfluence)
+            {
+                Accumulator.BestInfluence = Sample.Influence;
+                Accumulator.BestUV = Sample.SurfaceUV;
+                Accumulator.Profile = Surface;
+                Accumulator.bHasProfile = true;
+            }
         }
 
-        const float VertexAmount =
-            (Evaluation.EffectiveAmount > 0.0f
-                 ? Evaluation.EffectiveAmount * Receiver.GetAbsorptionMultiplierForVertex(VertexIndex)
-                 : Evaluation.EffectiveAmount) *
-            Influence;
-        if (VertexAmount > 0.0f)
+        if (!Receiver.SurfaceWaterSettings || !Receiver.SurfaceWaterSettings->bEnabled ||
+            !Receiver.SurfaceWaterStatesByMaterialSlot)
         {
-            Receiver.SimulationStage->QueuePendingWetness(Receiver, VertexIndex, VertexAmount);
-            bQueuedWetness = true;
-        }
-        else
-        {
-            Receiver.SimulationStage->AbsorbWetnessAtVertex(Receiver, VertexIndex, VertexAmount, bDirty);
+            return bApplied;
         }
 
-        return true;
+        static FRandomStream FallbackRandomStream(0x445743);
+        FRandomStream& RandomStream = Receiver.SurfaceWaterRandomStream
+            ? *Receiver.SurfaceWaterRandomStream
+            : FallbackRandomStream;
+        // For each material slot, use the highest-influence sample's UV and profile
+        // as the representative stamp data, and use the accumulated surface amount
+        // to queue droplet and flow stamps.
+        for (const TPair<int32, FSurfaceWaterInputAccumulator>& Pair : SurfaceAccumulators)
+        {
+            const FSurfaceWaterInputAccumulator& Accumulator = Pair.Value;
+            TUniquePtr<FSurfaceWaterSimulationState>* StatePtr = Receiver.SurfaceWaterStatesByMaterialSlot->Find(Pair.Key);
+            if (!Accumulator.bHasProfile || !StatePtr || !StatePtr->IsValid())
+            {
+                continue;
+            }
+
+            const FSurfaceWaterProfileParameters& Surface = Accumulator.Profile;
+            if (RandomStream.FRand() < FMath::Clamp(Surface.DropletSpawnProbability, 0.0f, 1.0f))
+            {
+                (*StatePtr)->QueueDropletStamp(
+                    Accumulator.BestUV,
+                    Accumulator.TotalSurfaceAmount * FMath::Max(0.0f, Surface.DropletIntensityMultiplier),
+                    Surface.DropletRadiusPixels,
+                    Surface.DropletLifetimeSeconds);
+                bQueuedWetness = true;
+                bApplied = true;
+            }
+
+            if (Accumulator.TotalSurfaceAmount >= FMath::Max(0.0f, Surface.MinimumFlowSurfaceAmount) &&
+                RandomStream.FRand() < FMath::Clamp(Surface.FlowSpawnProbability, 0.0f, 1.0f))
+            {
+                (*StatePtr)->QueueFlowStamp(
+                    Accumulator.BestUV,
+                    Accumulator.TotalSurfaceAmount * FMath::Max(0.0f, Surface.FlowIntensityMultiplier),
+                    Surface.FlowWidthPixels,
+                    Surface.FlowLengthPixels,
+                    Surface.FlowLifetimeSeconds);
+                bQueuedWetness = true;
+                bApplied = true;
+            }
+        }
+        return bApplied;
     }
 
     bool ApplyPreparedWetContact(
@@ -335,12 +484,14 @@ namespace
 
         const FWetContactEvaluationData Evaluation(Contact);
 
-        bool bApplied = false;
+        TArray<FWaterInputVertexSample> Samples;
         auto ApplyVertex = [&](const int32 VertexIndex)
         {
             if (!Receiver.MeshSampler->CachedSkinnedPositions.IsValidIndex(VertexIndex) ||
                 !Receiver.RuntimeData ||
-                !Receiver.RuntimeData->IsVertexWettable(VertexIndex))
+                (Evaluation.EffectiveAmount > 0.0f
+                     ? !Receiver.RuntimeData->SupportsWaterContact(VertexIndex)
+                     : !Receiver.RuntimeData->SupportsAbsorbedWetness(VertexIndex)))
             {
                 return;
             }
@@ -370,11 +521,14 @@ namespace
             }
 
             ApplyWetContactNormalExposure(Receiver, Evaluation, WorldNormalPtr, Influence);
-
-            if (ApplyWetContactInfluence(Receiver, Evaluation, VertexIndex, Influence, bDirty, bQueuedWetness))
+            if (Influence <= KINDA_SMALL_NUMBER ||
+                !Receiver.RuntimeData->VertexWetnessProfileParameters.IsValidIndex(VertexIndex))
             {
-                bApplied = true;
+                return;
             }
+
+            InitializeWaterSample(
+                Receiver, VertexIndex, Influence, Samples.AddDefaulted_GetRef());
         };
 
         if (CandidateVertexIndices != nullptr)
@@ -394,7 +548,8 @@ namespace
             }
         }
 
-        return bApplied;
+        return ApplyWaterSamples(
+            Receiver, Evaluation.EffectiveAmount, Samples, true, bDirty, bQueuedWetness);
     }
 
     bool ApplyDirectSkinnedWetContact(
@@ -412,11 +567,13 @@ namespace
         }
 
         const FWetContactEvaluationData Evaluation(Contact);
-        bool                            bApplied = false;
-
+        TArray<FWaterInputVertexSample> Samples;
         for (const int32 VertexIndex : CandidateVertexIndices)
         {
-            if (!Receiver.RuntimeData || !Receiver.RuntimeData->IsVertexWettable(VertexIndex))
+            if (!Receiver.RuntimeData ||
+                (Evaluation.EffectiveAmount > 0.0f
+                     ? !Receiver.RuntimeData->SupportsWaterContact(VertexIndex)
+                     : !Receiver.RuntimeData->SupportsAbsorbedWetness(VertexIndex)))
             {
                 continue;
             }
@@ -458,14 +615,18 @@ namespace
             }
 
             ApplyWetContactNormalExposure(Receiver, Evaluation, WorldNormalPtr, Influence);
-
-            if (ApplyWetContactInfluence(Receiver, Evaluation, VertexIndex, Influence, bDirty, bQueuedWetness))
+            if (Influence <= KINDA_SMALL_NUMBER ||
+                !Receiver.RuntimeData->VertexWetnessProfileParameters.IsValidIndex(VertexIndex))
             {
-                bApplied = true;
+                continue;
             }
+
+            InitializeWaterSample(
+                Receiver, VertexIndex, Influence, Samples.AddDefaulted_GetRef());
         }
 
-        return bApplied;
+        return ApplyWaterSamples(
+            Receiver, Evaluation.EffectiveAmount, Samples, true, bDirty, bQueuedWetness);
     }
 } // namespace
 
@@ -508,27 +669,24 @@ void FWetInputStage::ApplyWetAll(FWetInputStageArgs& Receiver, float Amount)
     }
 
     bool bDirty = false;
+    bool bQueuedWetness = false;
+    TArray<FWaterInputVertexSample> Samples;
+    Samples.Reserve(Receiver.SimulationState->AbsorbedWetnessPerVertex.Num());
 
     for (int32 VertexIndex = 0; VertexIndex < Receiver.SimulationState->AbsorbedWetnessPerVertex.Num(); ++VertexIndex)
     {
-        if (!Receiver.RuntimeData || !Receiver.RuntimeData->IsVertexWettable(VertexIndex))
+        if (!Receiver.RuntimeData ||
+            (EffectiveAmount > 0.0f
+                 ? !Receiver.RuntimeData->SupportsWaterContact(VertexIndex)
+                 : !Receiver.RuntimeData->SupportsAbsorbedWetness(VertexIndex)))
         {
             continue;
         }
 
-        if (EffectiveAmount > 0.0f)
-        {
-            Receiver.SimulationStage->QueuePendingWetness(Receiver, VertexIndex, EffectiveAmount * Receiver.GetAbsorptionMultiplierForVertex(VertexIndex));
-        }
-        else
-        {
-            Receiver.SimulationStage->AbsorbWetnessAtVertex(Receiver, VertexIndex, EffectiveAmount, bDirty);
-        }
+        InitializeWaterSample(Receiver, VertexIndex, 1.0f, Samples.AddDefaulted_GetRef());
     }
 
-    if (bDirty)
-    {
-    }
+    ApplyWaterSamples(Receiver, EffectiveAmount, Samples, false, bDirty, bQueuedWetness);
 }
 
 bool FWetInputStage::ApplyWetSurface(FWetInputStageArgs& Receiver, const FDWCWaterSurfaceData& WaterSurfaceData, const float Amount, const bool bApplyMaterial)
@@ -563,6 +721,8 @@ bool FWetInputStage::ApplyWetSurface(FWetInputStageArgs& Receiver, const FDWCWat
 
     bool             bDirty = false;
     bool             bQueuedWetness = false;
+    TArray<FWaterInputVertexSample> Samples;
+    Samples.Reserve(Receiver.MeshSampler->CachedSkinnedPositions.Num());
     const FTransform ComponentTransform = Receiver.TargetSkeletalMesh->GetComponentTransform();
     const int32      VertexCount = Receiver.MeshSampler->CachedSkinnedPositions.Num();
 
@@ -581,7 +741,9 @@ bool FWetInputStage::ApplyWetSurface(FWetInputStageArgs& Receiver, const FDWCWat
         {
             if (!Receiver.SimulationState->AbsorbedWetnessPerVertex.IsValidIndex(VertexIndex) ||
                 !Receiver.RuntimeData ||
-                !Receiver.RuntimeData->IsVertexWettable(VertexIndex))
+                (EffectiveAmount > 0.0f
+                     ? !Receiver.RuntimeData->SupportsWaterContact(VertexIndex)
+                     : !Receiver.RuntimeData->SupportsAbsorbedWetness(VertexIndex)))
             {
                 continue;
             }
@@ -597,15 +759,13 @@ bool FWetInputStage::ApplyWetSurface(FWetInputStageArgs& Receiver, const FDWCWat
                 continue;
             }
 
-            if (EffectiveAmount > 0.0f)
+            if (EffectiveAmount < 0.0f &&
+                Receiver.SimulationState->AbsorbedWetnessPerVertex[VertexIndex] <= 0.0f)
             {
-                const float VertexAmount = EffectiveAmount * Receiver.GetAbsorptionMultiplierForVertex(VertexIndex);
-                LocalHits.Add({VertexIndex, VertexAmount});
+                continue;
             }
-            else if (Receiver.SimulationState->AbsorbedWetnessPerVertex[VertexIndex] > 0.0f)
-            {
-                LocalHits.Add({VertexIndex, EffectiveAmount});
-            }
+
+            LocalHits.Add({VertexIndex, EffectiveAmount});
         }
     });
 
@@ -613,19 +773,12 @@ bool FWetInputStage::ApplyWetSurface(FWetInputStageArgs& Receiver, const FDWCWat
     {
         for (const FWetSurfaceVertexHit& Hit : LocalHits)
         {
-            if (EffectiveAmount > 0.0f)
-            {
-                Receiver.SimulationStage->QueuePendingWetness(Receiver, Hit.VertexIndex, Hit.Amount);
-                bQueuedWetness = true;
-            }
-            else
-            {
-                Receiver.SimulationStage->AbsorbWetnessAtVertex(Receiver, Hit.VertexIndex, Hit.Amount, bDirty);
-            }
+            InitializeWaterSample(Receiver, Hit.VertexIndex, 1.0f, Samples.AddDefaulted_GetRef());
         }
     }
 
-    return bDirty || bQueuedWetness;
+    return ApplyWaterSamples(
+        Receiver, EffectiveAmount, Samples, false, bDirty, bQueuedWetness);
 }
 
 bool FWetInputStage::ApplyWetArea(FWetInputStageArgs&    Receiver,
@@ -681,18 +834,22 @@ bool FWetInputStage::ApplyWetArea(FWetInputStageArgs&    Receiver,
 
     bool bDirty = false;
     bool bQueuedWetness = false;
+    TArray<FWaterInputVertexSample> Samples;
+    Samples.Reserve(SamplesToProcess);
 
     auto ApplyRainToVertex = [&](const int32 VertexIndex)
     {
         if (!Receiver.SimulationState->AbsorbedWetnessPerVertex.IsValidIndex(VertexIndex) ||
             !Receiver.RuntimeData ||
-            !Receiver.RuntimeData->IsVertexWettable(VertexIndex))
+            (AreaData.Amount > 0.0f
+                 ? !Receiver.RuntimeData->SupportsWaterContact(VertexIndex)
+                 : !Receiver.RuntimeData->SupportsAbsorbedWetness(VertexIndex)))
         {
             return;
         }
 
-        if ((AreaData.Amount > 0.0f && Receiver.SimulationState->AbsorbedWetnessPerVertex[VertexIndex] >= Receiver.WetnessSettings->MaxWetness) ||
-            (AreaData.Amount < 0.0f && Receiver.SimulationState->AbsorbedWetnessPerVertex[VertexIndex] <= 0.0f))
+        if (AreaData.Amount < 0.0f &&
+            Receiver.SimulationState->AbsorbedWetnessPerVertex[VertexIndex] <= 0.0f)
         {
             return;
         }
@@ -732,21 +889,7 @@ bool FWetInputStage::ApplyWetArea(FWetInputStageArgs&    Receiver,
             }
         }
 
-        const float VertexAmount =
-            (AreaData.Amount > 0.0f
-                 ? AreaData.Amount * Receiver.GetAbsorptionMultiplierForVertex(VertexIndex)
-                 : AreaData.Amount) *
-            Exposure;
-
-        if (VertexAmount > 0.0f)
-        {
-            Receiver.SimulationStage->QueuePendingWetness(Receiver, VertexIndex, VertexAmount);
-            bQueuedWetness = true;
-        }
-        else
-        {
-            Receiver.SimulationStage->AbsorbWetnessAtVertex(Receiver, VertexIndex, VertexAmount, bDirty);
-        }
+        InitializeWaterSample(Receiver, VertexIndex, Exposure, Samples.AddDefaulted_GetRef());
     };
 
     if (SamplesToProcess == VertexCount)
@@ -775,7 +918,8 @@ bool FWetInputStage::ApplyWetArea(FWetInputStageArgs&    Receiver,
         }
     }
 
-    return bDirty || bQueuedWetness;
+    return ApplyWaterSamples(
+        Receiver, AreaData.Amount, Samples, false, bDirty, bQueuedWetness);
 }
 
 bool FWetInputStage::ApplyWetContact(

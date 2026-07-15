@@ -40,6 +40,7 @@ class FWetClothingAssetEditor : public FAssetEditorToolkit
     void                 FillAssetToolbar(FToolBarBuilder& ToolbarBuilder);
     TSharedRef<SWidget>  BuildBakeMapsMenu();
     FReply               HandleBakeAllMapsClicked();
+    void                 HandleGenerateSurfaceWaterUVClicked();
     FReply               HandleBakeWetnessProfileMapsClicked();
     FReply               HandleBakeTransparencyRevealMapsClicked();
     FReply               HandleBakeWrinkleNormalMapClicked();

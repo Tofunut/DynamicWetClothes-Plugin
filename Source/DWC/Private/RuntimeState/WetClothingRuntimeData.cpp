@@ -4,8 +4,13 @@ void FWetClothingRuntimeData::ResetWetPartData()
 {
     VertexWetPartIDs.Reset();
     VertexWettableFlags.Reset();
+    VertexAbsorbedWetnessFlags.Reset();
+    VertexSurfaceWaterFlags.Reset();
     VertexWetnessProfileParameters.Reset();
     VertexWetPartDebugColors.Reset();
+    SurfaceWaterUVs.Reset();
+    SurfaceWaterUVValidFlags.Reset();
+    SurfaceWaterMaterialSlotIndices.Reset();
 }
 
 void FWetClothingRuntimeData::ResetNeighborGraph()

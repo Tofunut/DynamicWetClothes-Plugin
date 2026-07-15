@@ -1,16 +1,112 @@
-// dummy
-/*
-Surface Water Simulation 계산에 필요한 설정값을 정의할 예정이다.
+#pragma once
 
-예상 내용:
-- accumulation rate: 표면에 물이 쌓이는 정도
-- runoff strength: 중력 방향으로 흘러내리는 강도
-- dripping threshold: 일정량 이상 모이면 물방울이 떨어지는 기준
-- evaporation rate: 표면 물이 사라지는 속도
-- transfer to absorbed wetness rate: 표면 물이 내부 젖음으로 전환되는 비율
-- surface tension / flow damping: 물막이 급격히 퍼지지 않도록 안정화하는 값
+#include "CoreMinimal.h"
+#include "SurfaceWaterSimulationSettings.generated.h"
 
-주의:
-- 이 값들은 WetSimulationStage 전용이다.
-- Absorbed Wetness의 absorption/spread/dry와 섞지 않는다.
-*/
+class UTexture2D;
+
+UENUM(BlueprintType)
+enum class ESurfaceWaterDebugView : uint8
+{
+    None = 0,
+    DropletAmount = 1,
+    FlowAmount = 2,
+    VisibleMask = 3,
+    SurfaceAmountGate = 4,
+    StaticDropletMask = 5,
+    SurfaceWaterNormal = 6
+};
+
+USTRUCT(BlueprintType)
+struct DWC_API FSurfaceWaterBakedFlowMapData
+{
+    GENERATED_BODY()
+    UPROPERTY(EditAnywhere, Category="Surface Water|Flow Map") 
+    bool bEnabled = true;
+    UPROPERTY(VisibleAnywhere, Category="Surface Water|Flow Map") 
+    bool bIsValid = false;
+    UPROPERTY(VisibleAnywhere, Category="Surface Water|Flow Map") 
+    int32 SourceLODIndex = 0;
+    UPROPERTY(VisibleAnywhere, Category="Surface Water|Flow Map") 
+    int32 Resolution = 512;
+    UPROPERTY(EditAnywhere, Category="Surface Water|Flow Map", meta=(ClampMin="0", ClampMax="64")) 
+    int32 PaddingPixels = 4;
+    UPROPERTY(VisibleAnywhere, Category="Surface Water|Flow Map") 
+    TObjectPtr<UTexture2D> FlowMap = nullptr;
+    UPROPERTY(VisibleAnywhere, Category="Surface Water|Flow Map") 
+    FString BuildSignature;
+    UPROPERTY(VisibleAnywhere, Category="Surface Water|Flow Map") 
+    FGuid BakeGuid;
+};
+
+USTRUCT(BlueprintType)
+struct DWC_API FSurfaceWaterMaterialSlotData
+{
+    GENERATED_BODY()
+
+    UPROPERTY(VisibleAnywhere, Category="Surface Water|Material Slot")
+    int32 MaterialSlotIndex = INDEX_NONE;
+
+    UPROPERTY(EditAnywhere, Category="Surface Water|Material Slot")
+    bool bEnabled = true;
+
+    UPROPERTY(EditAnywhere, Category="Surface Water|Material Slot", meta=(ClampMin="0"))
+    int32 UVChannelIndex = 1;
+
+    UPROPERTY(VisibleAnywhere, Category="Surface Water|Material Slot", meta=(ShowOnlyInnerProperties))
+    FSurfaceWaterBakedFlowMapData BakedFlowMap;
+};
+
+USTRUCT(BlueprintType)
+struct DWC_API FSurfaceWaterSimulationSettings
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, Category="Surface Water") 
+    bool bEnabled = true;
+    UPROPERTY(EditAnywhere, Category="Surface Water", meta=(ClampMin="0", ClampMax="3")) 
+    int32 UVChannelIndexToConstruct = 1;
+    // Editor pipeline state. Kept serialized but intentionally hidden from the
+    // compact WCA Surface Water infrastructure panel.
+    UPROPERTY()
+    bool bAllowOverwriteExistingSurfaceWaterUVChannel = false;
+    UPROPERTY()
+    float TargetSurfaceWaterTexelsPerCentimeter = 0.0f;
+    UPROPERTY(EditAnywhere, Category="Surface Water", meta=(ClampMin="16", ClampMax="4096")) 
+    int32 RenderTargetResolution = 1024;
+
+    // Serialized only so existing precomputed assets keep their source signature.
+    // These values no longer participate in water routing or rendering.
+    UPROPERTY(meta=(DeprecatedProperty, DeprecationMessage="Surface routing is controlled by FSurfaceWaterProfileParameters."))
+    float InputFraction = 0.5f;
+    UPROPERTY(meta=(DeprecatedProperty, DeprecationMessage="Use DropletRadiusPixels."))
+    float StampRadiusPixels = 16.0f;
+    UPROPERTY(meta=(DeprecatedProperty, DeprecationMessage="Use per-profile droplet and flow intensity multipliers."))
+    float StampIntensityMultiplier = 1.0f;
+    UPROPERTY(meta=(DeprecatedProperty, DeprecationMessage="Use SurfaceWaterMaterialSlots"))
+    FSurfaceWaterBakedFlowMapData BakedFlowMap;
+
+    UPROPERTY(VisibleAnywhere, Category="Surface Water|Material Slots", meta=(TitleProperty="Material Slot {MaterialSlotIndex}"))
+    TArray<FSurfaceWaterMaterialSlotData> SurfaceWaterMaterialSlots;
+
+    UPROPERTY()
+    bool bHasGeneratedSurfaceWaterUV = false;
+
+    UPROPERTY()
+    int32 GeneratedSurfaceWaterUVChannelIndex = INDEX_NONE;
+
+    UPROPERTY()
+    int32 GeneratedSurfaceWaterSourceUVChannelIndex = 0;
+
+    UPROPERTY()
+    FGuid GeneratedSurfaceWaterUVBuildGuid;
+
+    const FSurfaceWaterMaterialSlotData* FindMaterialSlot(int32 MaterialSlotIndex) const
+    {
+        return SurfaceWaterMaterialSlots.FindByPredicate(
+            [MaterialSlotIndex](const FSurfaceWaterMaterialSlotData& Data)
+            {
+                return Data.MaterialSlotIndex == MaterialSlotIndex;
+            });
+    }
+};

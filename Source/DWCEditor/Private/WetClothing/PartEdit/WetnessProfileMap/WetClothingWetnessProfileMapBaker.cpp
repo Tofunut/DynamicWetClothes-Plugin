@@ -102,15 +102,16 @@ void FWetClothingWetnessProfileMapBaker::AppendProfileParametersSignature(
     const FWetnessProfileParameters& Parameters)
 {
     Signature += FString::Printf(
-        TEXT("A=%.9g;S=%.9g;D=%.9g;G=%.9g;WV=%.9g;T=%.9g;SW=%.9g;R=%.9g;"),
-        Parameters.Absorption,
-        Parameters.SpreadRate,
-        Parameters.DryRate,
-        Parameters.GravityFlowStrength,
-        Parameters.WetVisualStrength,
-        Parameters.TransparencyStrength,
-        Parameters.SurfaceWaterStrength,
-        Parameters.RunoffStrength);
+        TEXT("AF=%.9g;AR=%.9g;S=%.9g;D=%.9g;G=%.9g;WV=%.9g;T=%.9g;SW=%.9g;R=%.9g;"),
+        Parameters.GetAbsorptionFraction(),
+        Parameters.GetAbsorptionRate(),
+        Parameters.AbsorbedWetness.SpreadRate,
+        Parameters.AbsorbedWetness.DryRate,
+        Parameters.AbsorbedWetness.GravityFlowStrength,
+        Parameters.AbsorbedWetness.WetVisualStrength,
+        Parameters.AbsorbedWetness.TransparencyStrength,
+        Parameters.GetSurfaceWaterStrength(),
+        Parameters.SurfaceWater.FlowIntensityMultiplier);
 }
 
 const FWetClothingWetPartEntry* FWetClothingWetnessProfileMapBaker::FindWetPartEntryForUVIsland(

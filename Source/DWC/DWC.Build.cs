@@ -19,7 +19,9 @@ public class DWC : ModuleRules
 			{
 				"RHI",
 				"RenderCore",
-				"PhysicsCore"
+				"PhysicsCore",
+				"Renderer",
+				"Projects"
 			});
 	}
 }

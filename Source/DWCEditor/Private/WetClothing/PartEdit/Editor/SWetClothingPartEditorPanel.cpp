@@ -19,6 +19,7 @@
 #include "Engine/SkeletalMesh.h"
 #include "Engine/Texture.h"
 #include "Engine/Texture2D.h"
+#include "WetClothing/SurfaceWater/WetClothingSurfaceWaterFlowMapBaker.h"
 #include "Framework/Application/SlateApplication.h"
 #include "IDetailsView.h"
 #include "FileHelpers.h"
@@ -261,7 +262,10 @@ void SWetClothingPartEditorPanel::Construct(const FArguments& InArgs)
                             [SNew(SVerticalBox)
 
                              + SVerticalBox::Slot()
-                                   .AutoHeight()
+                                   // Constrain the Details panel so IDetailsView's built-in
+                                   // scrollbar receives a real viewport instead of expanding
+                                   // to its full desired height and pushing settings off-screen.
+                                   .FillHeight(0.40f)
                                    .Padding(0.0f, 0.0f, 0.0f, 10.0f)
                                        [DetailsView.IsValid()
                                             ? StaticCastSharedRef<SWidget>(DetailsView.ToSharedRef())
@@ -302,7 +306,7 @@ void SWetClothingPartEditorPanel::Construct(const FArguments& InArgs)
                                                                 .ColorAndOpacity(FSlateColor(FStyleColors::ForegroundHover))]]]
 
                              + SVerticalBox::Slot()
-                                   .FillHeight(1.0f)
+                                   .FillHeight(0.60f)
                                        [SNew(SSplitter)
                                             .Orientation(Orient_Vertical)
 
@@ -1472,10 +1476,22 @@ FReply SWetClothingPartEditorPanel::HandleApplyMaterialSetupClicked()
 
     UMaterialInterface* SourceMaterial = SelectedMaterial;
     UWetClothingAsset*  WetClothingAssetPtr = WetClothingAsset.Get();
+    int32 SurfaceWaterUVChannelIndex = WetClothingAssetPtr
+        ? WetClothingAssetPtr->SurfaceWaterSettings.UVChannelIndexToConstruct
+        : 1;
+    if (WetClothingAssetPtr)
+    {
+        if (const FSurfaceWaterMaterialSlotData* SlotData =
+                WetClothingAssetPtr->SurfaceWaterSettings.FindMaterialSlot(SelectedMaterialSlotIndex))
+        {
+            SurfaceWaterUVChannelIndex = SlotData->UVChannelIndex;
+        }
+    }
 
     FWetClothingMaterialSetupResult Result = FWetClothingMaterialSetup::DuplicateAndApplyToMaterialInterface(
         SourceMaterial,
-        0);
+        0,
+        SurfaceWaterUVChannelIndex);
 
     if (Result.bSucceeded && Result.ConfiguredMaterial != nullptr && SourceMaterial != nullptr)
     {
@@ -2996,7 +3012,16 @@ FReply SWetClothingPartEditorPanel::HandleSaveAssetClicked()
 
 FReply SWetClothingPartEditorPanel::HandleBakeAllMapsClicked()
 {
-    return HandleBakeAllWetnessProfileMapsClicked();
+    HandleBakeAllWetnessProfileMapsClicked();
+    if (UWetClothingAsset* Asset = WetClothingAsset.Get())
+    {
+        FString Error;
+        if (!FWetClothingSurfaceWaterFlowMapBaker::Bake(Asset, Error))
+        {
+            FMessageDialog::Open(EAppMsgType::Ok, FText::FromString(FString::Printf(TEXT("Surface Water Flow Map bake failed: %s"), *Error)));
+        }
+    }
+    return FReply::Handled();
 }
 
 FReply SWetClothingPartEditorPanel::HandleBakeWrinkleNormalMapClicked()
@@ -3395,32 +3420,21 @@ bool SWetClothingPartEditorPanel::BakeWetnessProfileMapsAndUpdateMaterials(FStri
                 return MaterialOverride.MaterialSlotIndex == MaterialSlotIndex;
             });
 
-        if (ExistingOverride != nullptr &&
+        const bool bRepairExistingOverride = ExistingOverride != nullptr &&
             ExistingOverride->SourceMaterial == SourceMaterial &&
             ExistingOverride->WetMaterial != nullptr &&
-            FWetClothingMaterialSetup::IsMaterialConfiguredForDwc(ExistingOverride->WetMaterial))
-        {
-            FWetClothingMaterialSetupResult RefreshResult = FWetClothingMaterialSetup::DuplicateAndApplyToMaterialInterface(
-                ExistingOverride->WetMaterial,
-                0);
-            if (!RefreshResult.bSucceeded)
-            {
-                Warnings.Add(FString::Printf(TEXT("Slot %d existing wet material refresh failed: %s"), MaterialSlotIndex, *RefreshResult.Message));
-            }
-            else
-            {
-                Skipped.Add(FString::Printf(
-                    TEXT("Slot %d already has '%s'. Refreshed wrinkle UV channel %d."),
-                    MaterialSlotIndex,
-                    *GetNameSafe(ExistingOverride->WetMaterial),
-                    0));
-            }
-            continue;
-        }
+            FWetClothingMaterialSetup::IsMaterialConfiguredForDwc(ExistingOverride->WetMaterial);
 
+        int32 SurfaceWaterUVChannelIndex = WetClothingAssetPtr->SurfaceWaterSettings.UVChannelIndexToConstruct;
+        if (const FSurfaceWaterMaterialSlotData* SlotData =
+                WetClothingAssetPtr->SurfaceWaterSettings.FindMaterialSlot(MaterialSlotIndex))
+        {
+            SurfaceWaterUVChannelIndex = SlotData->UVChannelIndex;
+        }
         FWetClothingMaterialSetupResult Result = FWetClothingMaterialSetup::DuplicateAndApplyToMaterialInterface(
-            SourceMaterial,
-            0);
+            bRepairExistingOverride ? ExistingOverride->WetMaterial.Get() : SourceMaterial,
+            0,
+            SurfaceWaterUVChannelIndex);
         if (!Result.bSucceeded || Result.ConfiguredMaterial == nullptr)
         {
             Warnings.Add(FString::Printf(TEXT("Slot %d material setup failed: %s"), MaterialSlotIndex, *Result.Message));
@@ -3437,7 +3451,10 @@ bool SWetClothingPartEditorPanel::BakeWetnessProfileMapsAndUpdateMaterials(FStri
         ExistingOverride->WetMaterial = Result.ConfiguredMaterial;
         WetClothingAssetPtr->MarkPackageDirty();
 
-        CreatedOrUpdatedMaterials.Add(FString::Printf(TEXT("Slot %d -> %s"), MaterialSlotIndex, *GetNameSafe(Result.ConfiguredMaterial)));
+        const FString MaterialUpdateMessage = bRepairExistingOverride
+            ? FString::Printf(TEXT("Slot %d repaired -> %s"), MaterialSlotIndex, *GetNameSafe(Result.ConfiguredMaterial))
+            : FString::Printf(TEXT("Slot %d -> %s"), MaterialSlotIndex, *GetNameSafe(Result.ConfiguredMaterial));
+        CreatedOrUpdatedMaterials.Add(MaterialUpdateMessage);
     }
 
     TSet<FString> BakedTextureUvKeys;

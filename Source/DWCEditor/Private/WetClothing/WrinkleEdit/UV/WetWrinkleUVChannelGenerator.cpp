@@ -3,18 +3,19 @@
 #include "DataAssets/WetClothingAsset.h"
 #include "Engine/SkeletalMesh.h"
 #include "MeshDescription.h"
+#include "MeshUVChannelInfo.h"
 #include "SkeletalMeshAttributes.h"
 
 namespace WetWrinkleUVChannelGeneratorInternal
 {
     struct FTriangleRecord
     {
-        FTriangleID TriangleID;
-        int32 MaterialSlotIndex = INDEX_NONE;
-        FVertexInstanceID VertexInstances[3];
-        FVertexID Vertices[3];
-        FVector Positions[3] = { FVector::ZeroVector, FVector::ZeroVector, FVector::ZeroVector };
-        FVector2D SourceUVs[3] = { FVector2D::ZeroVector, FVector2D::ZeroVector, FVector2D::ZeroVector };
+        FTriangleID TriangleID; //Triangle ID for Identifying Triangle (in each Mesh)
+        int32 MaterialSlotIndex = INDEX_NONE; //Which Material Slot it takes (in Mesh)
+        FVertexInstanceID VertexInstances[3]; //The Datas That can be different by each same Vertex
+        FVertexID Vertices[3]; // Vertex Indices
+        FVector Positions[3] = { FVector::ZeroVector, FVector::ZeroVector, FVector::ZeroVector }; //Mesh Local Space Location of Vertex
+        FVector2D SourceUVs[3] = { FVector2D::ZeroVector, FVector2D::ZeroVector, FVector2D::ZeroVector };// Source Channel UV Coordinate
     };
 
     struct FIslandRecord
@@ -24,6 +25,8 @@ namespace WetWrinkleUVChannelGeneratorInternal
         TMap<int32, FVector2D> RawUVByVertexInstance;
         FBox2D RawBounds;
         double RawArea = 0.0;
+        double WorldArea = 0.0;
+        double WorldDensityScale = 1.0;
     };
 
 
@@ -249,6 +252,11 @@ namespace WetWrinkleUVChannelGeneratorInternal
         return FMath::Abs((B.X - A.X) * (C.Y - A.Y) - (B.Y - A.Y) * (C.X - A.X)) * 0.5;
     }
 
+    static double ComputeTriangleArea3D(const FVector& A, const FVector& B, const FVector& C)
+    {
+        return FVector::CrossProduct(B - A, C - A).Length() * 0.5;
+    }
+
     static void BuildConnectedIslandsForSlot(
         const TArray<FTriangleRecord>& Triangles,
         const TArray<int32>& SlotTriangleIndices,
@@ -311,6 +319,8 @@ namespace WetWrinkleUVChannelGeneratorInternal
     {
         Island.RawBounds = FBox2D(ForceInit);
         Island.RawArea = 0.0;
+        Island.WorldArea = 0.0;
+        Island.WorldDensityScale = 1.0;
         Island.RawUVByVertexInstance.Reset();
 
         for (int32 TriangleIndex : Island.TriangleIndices)
@@ -325,6 +335,15 @@ namespace WetWrinkleUVChannelGeneratorInternal
             }
 
             Island.RawArea += ComputeTriangleArea2D(Triangle.SourceUVs[0], Triangle.SourceUVs[1], Triangle.SourceUVs[2]);
+            Island.WorldArea += ComputeTriangleArea3D(Triangle.Positions[0], Triangle.Positions[1], Triangle.Positions[2]);
+        }
+
+        if (Island.RawArea > UE_DOUBLE_SMALL_NUMBER && Island.WorldArea > UE_DOUBLE_SMALL_NUMBER)
+        {
+            // Uniformly scale the source parameterization so its UV area equals
+            // the island's local-space surface area. A later common scale then
+            // maps one Unreal Unit to the same number of pixels for every island.
+            Island.WorldDensityScale = FMath::Sqrt(Island.WorldArea / Island.RawArea);
         }
 
         if (!Island.RawBounds.bIsValid || Island.RawBounds.GetSize().IsNearlyZero())
@@ -333,18 +352,104 @@ namespace WetWrinkleUVChannelGeneratorInternal
         }
     }
 
-    static void PackIslandsIntoUnitSquare(
+    static FVector2D GetDensityNormalizedIslandSize(const FIslandRecord& Island, bool bUseWorldDensity)
+    {
+        const double DensityScale = bUseWorldDensity ? Island.WorldDensityScale : 1.0;
+        FVector2D Size = Island.RawBounds.GetSize() * DensityScale;
+        Size.X = FMath::Max(Size.X, 1.0e-4);
+        Size.Y = FMath::Max(Size.Y, 1.0e-4);
+        return Size;
+    }
+
+    static void SortIslandsForPacking(TArray<FIslandRecord>& Islands, bool bUseWorldDensity)
+    {
+        Islands.Sort(
+            [bUseWorldDensity](const FIslandRecord& A, const FIslandRecord& B)
+            {
+                const FVector2D ASize = GetDensityNormalizedIslandSize(A, bUseWorldDensity);
+                const FVector2D BSize = GetDensityNormalizedIslandSize(B, bUseWorldDensity);
+                if (!FMath::IsNearlyEqual(ASize.Y, BSize.Y)) return ASize.Y > BSize.Y;
+                if (!FMath::IsNearlyEqual(ASize.X, BSize.X)) return ASize.X > BSize.X;
+                return A.WorldArea > B.WorldArea;
+            });
+    }
+
+    static bool TryShelfPack(
+        const TArray<FIslandRecord>& Islands,
+        double PaddingUV,
+        double Scale,
+        bool bUseWorldDensity,
+        TArray<FVector2D>* OutPackedMins)
+    {
+        TArray<FVector2D> LocalPackedMins;
+        LocalPackedMins.SetNum(Islands.Num());
+        double CursorX = PaddingUV;
+        double CursorY = PaddingUV;
+        double RowHeight = 0.0;
+
+        for (int32 IslandIndex = 0; IslandIndex < Islands.Num(); ++IslandIndex)
+        {
+            const FVector2D PackedSize = GetDensityNormalizedIslandSize(Islands[IslandIndex], bUseWorldDensity) * Scale;
+            if (PackedSize.X > 1.0 - PaddingUV * 2.0 || PackedSize.Y > 1.0 - PaddingUV * 2.0)
+            {
+                return false;
+            }
+            if (CursorX + PackedSize.X + PaddingUV > 1.0)
+            {
+                CursorX = PaddingUV;
+                CursorY += RowHeight + PaddingUV;
+                RowHeight = 0.0;
+            }
+            if (CursorY + PackedSize.Y + PaddingUV > 1.0)
+            {
+                return false;
+            }
+
+            LocalPackedMins[IslandIndex] = FVector2D(CursorX, CursorY);
+            CursorX += PackedSize.X + PaddingUV;
+            RowHeight = FMath::Max(RowHeight, PackedSize.Y);
+        }
+
+        if (OutPackedMins) *OutPackedMins = MoveTemp(LocalPackedMins);
+        return true;
+    }
+
+    static double FindMaximumPackingScale(
+        const TArray<FIslandRecord>& Islands,
+        double PaddingUV,
+        bool bUseWorldDensity)
+    {
+        double MaxDimension = 1.0e-4;
+        for (const FIslandRecord& Island : Islands)
+        {
+            const FVector2D Size = GetDensityNormalizedIslandSize(Island, bUseWorldDensity);
+            MaxDimension = FMath::Max(MaxDimension, FMath::Max(Size.X, Size.Y));
+        }
+
+        double LowScale = 0.0;
+        double HighScale = (1.0 - PaddingUV * 2.0) / MaxDimension;
+        for (int32 Iteration = 0; Iteration < 40; ++Iteration)
+        {
+            const double CandidateScale = (LowScale + HighScale) * 0.5;
+            if (TryShelfPack(Islands, PaddingUV, CandidateScale, bUseWorldDensity, nullptr)) LowScale = CandidateScale;
+            else HighScale = CandidateScale;
+        }
+        return LowScale;
+    }
+
+    static bool PackIslandsIntoUnitSquare(
         const TArray<FTriangleRecord>& Triangles,
         TArray<FIslandRecord>& Islands,
         int32 Resolution,
         int32 PaddingPixels,
-        TMap<int32, FVector2f>& OutPackedUVByVertexInstance)
+        TMap<int32, FVector2f>& OutPackedUVByVertexInstance,
+        double TargetTexelsPerWorldUnit = 0.0)
     {
         OutPackedUVByVertexInstance.Reset();
 
         if (Islands.Num() == 0)
         {
-            return;
+            return false;
         }
 
         for (FIslandRecord& Island : Islands)
@@ -352,59 +457,38 @@ namespace WetWrinkleUVChannelGeneratorInternal
             BuildRawIslandUVs(Triangles, Island);
         }
 
-        Islands.Sort(
-            [](const FIslandRecord& A, const FIslandRecord& B)
-            {
-                if (A.MaterialSlotIndex != B.MaterialSlotIndex)
-                {
-                    return A.MaterialSlotIndex < B.MaterialSlotIndex;
-                }
-
-                return A.RawArea > B.RawArea;
-            });
-
-        const int32 IslandCount = Islands.Num();
-        const int32 Columns = FMath::Max(1, FMath::CeilToInt(FMath::Sqrt(static_cast<float>(IslandCount))));
-        const int32 Rows = FMath::Max(1, FMath::CeilToInt(static_cast<float>(IslandCount) / static_cast<float>(Columns)));
-        const float CellWidth = 1.0f / static_cast<float>(Columns);
-        const float CellHeight = 1.0f / static_cast<float>(Rows);
         const float RequestedPaddingUV = Resolution > 0 ? static_cast<float>(PaddingPixels) / static_cast<float>(Resolution) : 0.0f;
-        const float PaddingUV = FMath::Clamp(RequestedPaddingUV, 0.0f, FMath::Min(CellWidth, CellHeight) * 0.35f);
+        const double PaddingUV = FMath::Clamp(static_cast<double>(RequestedPaddingUV), 0.0, 0.05);
+
+        const bool bUseWorldDensity = TargetTexelsPerWorldUnit > 0.0;
+        // Wrinkle UVs keep their established source-density behavior. Surface
+        // Water supplies a shared world-density scale across material slots.
+        SortIslandsForPacking(Islands, bUseWorldDensity);
+        const double PackingScale = bUseWorldDensity
+            ? TargetTexelsPerWorldUnit / FMath::Max(Resolution, 1)
+            : FindMaximumPackingScale(Islands, PaddingUV, false);
+
+        TArray<FVector2D> PackedMins;
+        if (!TryShelfPack(Islands, PaddingUV, PackingScale, bUseWorldDensity, &PackedMins))
+        {
+            return false;
+        }
 
         for (int32 IslandIndex = 0; IslandIndex < Islands.Num(); ++IslandIndex)
         {
             FIslandRecord& Island = Islands[IslandIndex];
-            const int32 Column = IslandIndex % Columns;
-            const int32 Row = IslandIndex / Columns;
-
-            const FVector2D CellMin(CellWidth * static_cast<float>(Column), CellHeight * static_cast<float>(Row));
-            const FVector2D CellMax(CellMin.X + CellWidth, CellMin.Y + CellHeight);
-            FVector2D InnerMin = CellMin + FVector2D(PaddingUV, PaddingUV);
-            FVector2D InnerMax = CellMax - FVector2D(PaddingUV, PaddingUV);
-            if (InnerMax.X <= InnerMin.X || InnerMax.Y <= InnerMin.Y)
-            {
-                InnerMin = CellMin + FVector2D(CellWidth * 0.08f, CellHeight * 0.08f);
-                InnerMax = CellMax - FVector2D(CellWidth * 0.08f, CellHeight * 0.08f);
-            }
-
-            FVector2D RawMin = Island.RawBounds.Min;
-            FVector2D RawSize = Island.RawBounds.GetSize();
-            RawSize.X = FMath::Max(RawSize.X, 1.0e-4);
-            RawSize.Y = FMath::Max(RawSize.Y, 1.0e-4);
-
-            const FVector2D InnerSize = InnerMax - InnerMin;
-            const double UniformScale = FMath::Min(InnerSize.X / RawSize.X, InnerSize.Y / RawSize.Y);
-            const FVector2D PackedSize = RawSize * UniformScale;
-            const FVector2D PackedMin = InnerMin + (InnerSize - PackedSize) * 0.5;
+            const double DensityScale = bUseWorldDensity ? Island.WorldDensityScale : 1.0;
 
             for (const TPair<int32, FVector2D>& Pair : Island.RawUVByVertexInstance)
             {
-                FVector2D PackedUV = PackedMin + (Pair.Value - RawMin) * UniformScale;
-                PackedUV.X = FMath::Clamp(PackedUV.X, CellMin.X + PaddingUV * 0.5f, CellMax.X - PaddingUV * 0.5f);
-                PackedUV.Y = FMath::Clamp(PackedUV.Y, CellMin.Y + PaddingUV * 0.5f, CellMax.Y - PaddingUV * 0.5f);
+                FVector2D PackedUV = PackedMins[IslandIndex]
+                    + (Pair.Value - Island.RawBounds.Min) * DensityScale * PackingScale;
+                PackedUV.X = FMath::Clamp(PackedUV.X, 0.0, 1.0);
+                PackedUV.Y = FMath::Clamp(PackedUV.Y, 0.0, 1.0);
                 OutPackedUVByVertexInstance.Add(Pair.Key, FVector2f(static_cast<float>(PackedUV.X), static_cast<float>(PackedUV.Y)));
             }
         }
+        return true;
     }
 } // namespace WetWrinkleUVChannelGeneratorInternal
 
@@ -640,6 +724,120 @@ FWetWrinkleUVChannelGenerationResult FWetWrinkleUVChannelGenerator::DeleteUVChan
     return Result;
 }
 
+bool FWetWrinkleUVChannelGenerator::CalculateSharedWorldTexelDensity(
+    USkeletalMesh* SkeletalMesh,
+    int32 LODIndex,
+    int32 Resolution,
+    int32 PaddingPixels,
+    int32 SourceUVChannelIndex,
+    const TArray<int32>& TargetMaterialSlotIndices,
+    double& OutTexelsPerWorldUnit,
+    FString& OutError)
+{
+    using namespace WetWrinkleUVChannelGeneratorInternal;
+
+    OutTexelsPerWorldUnit = 0.0;
+    OutError.Reset();
+    if (SkeletalMesh == nullptr || TargetMaterialSlotIndices.IsEmpty())
+    {
+        OutError = TEXT("A skeletal mesh and at least one material slot are required.");
+        return false;
+    }
+
+    FMeshDescription* MeshDescription = SkeletalMesh->GetMeshDescription(LODIndex);
+    if (MeshDescription == nullptr)
+    {
+        OutError = FString::Printf(TEXT("LOD %d has no editable mesh description."), LODIndex);
+        return false;
+    }
+
+    FSkeletalMeshAttributes Attributes(*MeshDescription);
+    Attributes.Register();
+    const auto VertexPositions = Attributes.GetVertexPositions();
+    const auto VertexInstanceUVs = Attributes.GetVertexInstanceUVs();
+    if (SourceUVChannelIndex < 0 || SourceUVChannelIndex >= VertexInstanceUVs.GetNumChannels())
+    {
+        OutError = FString::Printf(TEXT("Source UV Channel %d does not exist."), SourceUVChannelIndex);
+        return false;
+    }
+
+    TSet<int32> TargetSlots;
+    TargetSlots.Reserve(TargetMaterialSlotIndices.Num());
+    for (const int32 MaterialSlotIndex : TargetMaterialSlotIndices)
+    {
+        TargetSlots.Add(MaterialSlotIndex);
+    }
+    TArray<FTriangleRecord> Triangles;
+    TMap<int32, TArray<int32>> SlotToTriangleIndices;
+    for (const FTriangleID TriangleID : MeshDescription->Triangles().GetElementIDs())
+    {
+        const int32 MaterialSlotIndex = ResolveMaterialSlotIndex(SkeletalMesh, *MeshDescription, Attributes, TriangleID);
+        if (!TargetSlots.Contains(MaterialSlotIndex))
+        {
+            continue;
+        }
+
+        const auto VertexInstances = MeshDescription->GetTriangleVertexInstances(TriangleID);
+        if (VertexInstances.Num() < 3)
+        {
+            continue;
+        }
+
+        FTriangleRecord Triangle;
+        Triangle.TriangleID = TriangleID;
+        Triangle.MaterialSlotIndex = MaterialSlotIndex;
+        for (int32 CornerIndex = 0; CornerIndex < 3; ++CornerIndex)
+        {
+            Triangle.VertexInstances[CornerIndex] = VertexInstances[CornerIndex];
+            Triangle.Vertices[CornerIndex] = MeshDescription->GetVertexInstanceVertex(VertexInstances[CornerIndex]);
+            Triangle.Positions[CornerIndex] = FVector(VertexPositions[Triangle.Vertices[CornerIndex]]);
+            const FVector2f SourceUV = VertexInstanceUVs.Get(VertexInstances[CornerIndex], SourceUVChannelIndex);
+            Triangle.SourceUVs[CornerIndex] = FVector2D(SourceUV.X, SourceUV.Y);
+        }
+
+        const int32 TriangleIndex = Triangles.Add(Triangle);
+        SlotToTriangleIndices.FindOrAdd(MaterialSlotIndex).Add(TriangleIndex);
+    }
+
+    const double PaddingUV = FMath::Clamp(
+        Resolution > 0 ? static_cast<double>(PaddingPixels) / static_cast<double>(Resolution) : 0.0,
+        0.0,
+        0.05);
+    double SharedMaximumPackingScale = TNumericLimits<double>::Max();
+    for (const int32 MaterialSlotIndex : TargetMaterialSlotIndices)
+    {
+        const TArray<int32>* SlotTriangles = SlotToTriangleIndices.Find(MaterialSlotIndex);
+        if (SlotTriangles == nullptr || SlotTriangles->IsEmpty())
+        {
+            OutError = FString::Printf(TEXT("Material Slot %d has no triangles to pack."), MaterialSlotIndex);
+            return false;
+        }
+
+        TArray<FIslandRecord> SlotIslands;
+        BuildConnectedIslandsForSlot(Triangles, *SlotTriangles, SlotIslands);
+        for (FIslandRecord& Island : SlotIslands)
+        {
+            BuildRawIslandUVs(Triangles, Island);
+        }
+        SortIslandsForPacking(SlotIslands, true);
+        SharedMaximumPackingScale = FMath::Min(
+            SharedMaximumPackingScale,
+            FindMaximumPackingScale(SlotIslands, PaddingUV, true));
+    }
+
+    if (!FMath::IsFinite(SharedMaximumPackingScale) || SharedMaximumPackingScale <= UE_DOUBLE_SMALL_NUMBER)
+    {
+        OutError = TEXT("No positive shared world-space texel density fits the requested material slots.");
+        return false;
+    }
+
+    // Unreal mesh positions are centimeters by convention, so the world-unit
+    // density reported here is texels per centimeter.
+    OutTexelsPerWorldUnit = SharedMaximumPackingScale * FMath::Max(Resolution, 1);
+    return true;
+}
+
+//For one Target Slot
 FWetWrinkleUVChannelGenerationResult FWetWrinkleUVChannelGenerator::GenerateForSkeletalMesh(
     USkeletalMesh* SkeletalMesh,
     int32 LODIndex,
@@ -648,18 +846,21 @@ FWetWrinkleUVChannelGenerationResult FWetWrinkleUVChannelGenerator::GenerateForS
     int32 SourceUVChannelIndex,
     int32 PreferredUVChannelIndex,
     bool bAllowOverwriteExistingChannel,
-    int32 TargetMaterialSlotIndex)
+    int32 TargetMaterialSlotIndex,
+    double TargetTexelsPerWorldUnit)
 {
     using namespace WetWrinkleUVChannelGeneratorInternal;
 
     FWetWrinkleUVChannelGenerationResult Result;
 
+    //Error : If Skeletal Mesh is nullptr
     if (SkeletalMesh == nullptr)
     {
         SetFailure(Result, TEXT("No skeletal mesh is assigned."));
         return Result;
     }
 
+    //Error : If There is no Appropriate LOD INdex
     FMeshDescription* MeshDescription = SkeletalMesh->GetMeshDescription(LODIndex);
     if (MeshDescription == nullptr)
     {
@@ -667,16 +868,32 @@ FWetWrinkleUVChannelGenerationResult FWetWrinkleUVChannelGenerator::GenerateForS
         return Result;
     }
 
+    //Tell Unreal That I`m gonna Change Skeletal Mesh Information
     SkeletalMesh->Modify();
 
     FSkeletalMeshAttributes Attributes(*MeshDescription);
     Attributes.Register();
 
+    //1. Setup New UV Coordinate get in
     auto VertexPositions = Attributes.GetVertexPositions();
     auto VertexInstanceUVs = Attributes.GetVertexInstanceUVs();
+    /*
+     * 
+    [ Vertex Instance UVs ]
+                   0번 채널      1번 채널      2번 채널 (Wet/Wrinkle)
+                 ┌────────────┬────────────┬────────────┐
+VertexInstance_0 │ (0.0, 0.0) │ (1.0, 0.5) │ (0.1, 0.2) │
+VertexInstance_1 │ (0.5, 0.0) │ (0.0, 0.0) │ (0.4, 0.8) │
+VertexInstance_2 │ (1.0, 1.0) │ (0.5, 0.5) │ (0.9, 0.1) │
+VertexInstance_3 │ ...        │ ...        │ ...        │
+                 └────────────┴────────────┴────────────┘
+                 
+                 
+                 * SetNumChannels(Current+1)은 가로로 채널 하나를 더 늘림
+    * */
 
-    const int32 ExistingUVChannelCount = VertexInstanceUVs.GetNumChannels();
-    const int32 SafeSourceUVChannelIndex = FMath::Clamp(SourceUVChannelIndex, 0, 7);
+    const int32 ExistingUVChannelCount = VertexInstanceUVs.GetNumChannels(); // How many UVChannels Is this Skeletal Mesh Using?
+    const int32 SafeSourceUVChannelIndex = FMath::Clamp(SourceUVChannelIndex, 0, MAX_TEXCOORDS - 1); //For safty Clamp Between Unreal MAX_UVChannel Count
     if (SafeSourceUVChannelIndex >= ExistingUVChannelCount)
     {
         SetFailure(Result, FString::Printf(
@@ -685,7 +902,7 @@ FWetWrinkleUVChannelGenerationResult FWetWrinkleUVChannelGenerator::GenerateForS
         return Result;
     }
 
-    const int32 SafePreferredUVChannelIndex = FMath::Clamp(PreferredUVChannelIndex, 0, 7);
+    const int32 SafePreferredUVChannelIndex = FMath::Clamp(PreferredUVChannelIndex, 0, MAX_TEXCOORDS - 1);
 
     int32 NewUVChannelIndex = INDEX_NONE;
     bool bOverwritingExistingChannel = false;
@@ -703,11 +920,12 @@ FWetWrinkleUVChannelGenerationResult FWetWrinkleUVChannelGenerator::GenerateForS
     }
     else
     {
-        if (ExistingUVChannelCount >= 8)
+        if (ExistingUVChannelCount >= MAX_TEXCOORDS)
         {
             SetFailure(Result, FString::Printf(
-                TEXT("UV Channel %d already exists and is not marked as generated by DWC. The target mesh also already has 8 UV channels, so a new safe wrinkle UV channel cannot be appended."),
-                SafePreferredUVChannelIndex));
+                TEXT("UV Channel %d already exists and is not marked as generated by DWC. The target mesh also already has the maximum %d UV channels, so a new safe wrinkle UV channel cannot be appended."),
+                SafePreferredUVChannelIndex,
+                MAX_TEXCOORDS));
             return Result;
         }
 
@@ -716,11 +934,14 @@ FWetWrinkleUVChannelGenerationResult FWetWrinkleUVChannelGenerator::GenerateForS
         VertexInstanceUVs.SetNumChannels(ExistingUVChannelCount + 1);
     }
 
-    TArray<FTriangleRecord> Triangles;
-    TMap<int32, TArray<int32>> SlotToTriangleIndices;
+    //2. Collect Geometry and Source UV Datas
+    TArray<FTriangleRecord> Triangles; // Polygon Triangles
+    TMap<int32, TArray<int32>> SlotToTriangleIndices; //Slot -> Trignale
 
     for (const FTriangleID TriangleID : MeshDescription->Triangles().GetElementIDs())
     {
+        //Find Triangle's Associated Material Slot
+        //TODO : Maybe this Can be Improved by O(n)
         const int32 MaterialSlotIndex = ResolveMaterialSlotIndex(SkeletalMesh, *MeshDescription, Attributes, TriangleID);
         if (MaterialSlotIndex == INDEX_NONE)
         {
@@ -768,7 +989,9 @@ FWetWrinkleUVChannelGenerationResult FWetWrinkleUVChannelGenerator::GenerateForS
         return Result;
     }
 
-    TArray<FIslandRecord> Islands;
+    
+    //3. Make Island. (Triangles for Mesh is all collected.) 
+    TArray<FIslandRecord> ResultIslands;
     TArray<int32> SortedSlotIndices;
     SlotToTriangleIndices.GenerateKeyArray(SortedSlotIndices);
     SortedSlotIndices.Sort();
@@ -778,18 +1001,31 @@ FWetWrinkleUVChannelGenerationResult FWetWrinkleUVChannelGenerator::GenerateForS
         const TArray<int32>* SlotTriangleIndices = SlotToTriangleIndices.Find(MaterialSlotIndex);
         if (SlotTriangleIndices != nullptr)
         {
-            BuildConnectedIslandsForSlot(Triangles, *SlotTriangleIndices, Islands);
+            BuildConnectedIslandsForSlot(Triangles, *SlotTriangleIndices, ResultIslands);
         }
     }
 
-    if (Islands.Num() == 0)
+    if (ResultIslands.Num() == 0)
     {
         SetFailure(Result, TEXT("No connected surface islands could be generated."));
         return Result;
     }
 
     TMap<int32, FVector2f> PackedUVByVertexInstance;
-    PackIslandsIntoUnitSquare(Triangles, Islands, Resolution, PaddingPixels, PackedUVByVertexInstance);
+    if (!PackIslandsIntoUnitSquare(
+            Triangles,
+            ResultIslands,
+            Resolution,
+            PaddingPixels,
+            PackedUVByVertexInstance,
+            TargetTexelsPerWorldUnit))
+    {
+        SetFailure(Result, FString::Printf(
+            TEXT("The requested %.3f texels per world unit could not be packed for Material Slot %d."),
+            TargetTexelsPerWorldUnit,
+            TargetMaterialSlotIndex));
+        return Result;
+    }
 
     for (const TPair<int32, FVector2f>& Pair : PackedUVByVertexInstance)
     {
@@ -807,7 +1043,7 @@ FWetWrinkleUVChannelGenerationResult FWetWrinkleUVChannelGenerator::GenerateForS
     Result.bSucceeded = true;
     Result.UVChannelIndex = NewUVChannelIndex;
     Result.MaterialSlotIndex = TargetMaterialSlotIndex;
-    Result.IslandCount = Islands.Num();
+    Result.PackedIslandCount = ResultIslands.Num();
 
     const FString TargetLabel = TargetMaterialSlotIndex != INDEX_NONE
                                     ? FString::Printf(TEXT("Material Slot %d"), TargetMaterialSlotIndex)
@@ -818,7 +1054,7 @@ FWetWrinkleUVChannelGenerationResult FWetWrinkleUVChannelGenerator::GenerateForS
             TEXT("Regenerated %s in DWC-owned wrinkle UV channel %d with %d packed source UV island(s)."),
             *TargetLabel,
             NewUVChannelIndex,
-            Islands.Num());
+            ResultIslands.Num());
     }
     else if (bAppendedBecausePreferredChannelWasOccupied)
     {
@@ -827,7 +1063,7 @@ FWetWrinkleUVChannelGenerationResult FWetWrinkleUVChannelGenerator::GenerateForS
             SafePreferredUVChannelIndex,
             NewUVChannelIndex,
             *TargetLabel,
-            Islands.Num());
+            ResultIslands.Num());
     }
     else
     {
@@ -835,7 +1071,7 @@ FWetWrinkleUVChannelGenerationResult FWetWrinkleUVChannelGenerator::GenerateForS
             TEXT("Created wrinkle UV channel %d and generated %s with %d packed source UV island(s)."),
             NewUVChannelIndex,
             *TargetLabel,
-            Islands.Num());
+            ResultIslands.Num());
     }
     return Result;
 }

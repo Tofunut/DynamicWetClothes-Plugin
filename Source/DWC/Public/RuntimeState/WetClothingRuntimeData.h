@@ -29,18 +29,46 @@ class DWC_API FWetClothingRuntimeData
 
     TArray<int32>                     VertexWetPartIDs;
     TArray<bool>                      VertexWettableFlags;
+    TArray<bool>                      VertexAbsorbedWetnessFlags;
+    TArray<bool>                      VertexSurfaceWaterFlags;
     TArray<FWetnessProfileParameters> VertexWetnessProfileParameters;
     TArray<FLinearColor>              VertexWetPartDebugColors;
     TArray<FWetVertexNeighborRange>   NeighborRanges;
     TArray<int32>                     FlatNeighborIndices;
+    TArray<FVector2f>                 SurfaceWaterUVs;
+    TArray<bool>                      SurfaceWaterUVValidFlags;
+    TArray<int32>                     SurfaceWaterMaterialSlotIndices;
     bool                              bHasNeighborGraph = false;
 
     FWetBoneOptimizationCache BoneOptimizationCache;
     bool                      bHasBoneOptimizationCache = false;
     FString                   BoneOptimizationCacheFallbackReason;
 
+    bool SupportsAbsorbedWetness(int32 VertexIndex) const
+    {
+        return VertexAbsorbedWetnessFlags.IsValidIndex(VertexIndex) && VertexAbsorbedWetnessFlags[VertexIndex];
+    }
+    bool SupportsSurfaceWater(int32 VertexIndex) const
+    {
+        return VertexSurfaceWaterFlags.IsValidIndex(VertexIndex) && VertexSurfaceWaterFlags[VertexIndex];
+    }
+    bool SupportsWaterContact(int32 VertexIndex) const
+    {
+        return SupportsAbsorbedWetness(VertexIndex) || SupportsSurfaceWater(VertexIndex);
+    }
     bool IsVertexWettable(int32 VertexIndex) const
     {
-        return VertexWettableFlags.IsValidIndex(VertexIndex) && VertexWettableFlags[VertexIndex];
+        return SupportsAbsorbedWetness(VertexIndex);
+    }
+    bool TryGetSurfaceWaterUV(int32 VertexIndex, FVector2f& OutUV) const
+    {
+        if (!SurfaceWaterUVs.IsValidIndex(VertexIndex) || !SurfaceWaterUVValidFlags.IsValidIndex(VertexIndex) || !SurfaceWaterUVValidFlags[VertexIndex]) return false;
+        OutUV = SurfaceWaterUVs[VertexIndex]; return true;
+    }
+    bool TryGetSurfaceWaterBinding(int32 VertexIndex, int32& OutMaterialSlotIndex, FVector2f& OutUV) const
+    {
+        if (!SupportsSurfaceWater(VertexIndex) || !TryGetSurfaceWaterUV(VertexIndex, OutUV) || !SurfaceWaterMaterialSlotIndices.IsValidIndex(VertexIndex)) return false;
+        OutMaterialSlotIndex = SurfaceWaterMaterialSlotIndices[VertexIndex];
+        return OutMaterialSlotIndex != INDEX_NONE;
     }
 };

@@ -6,6 +6,7 @@
 #include "DataAssets/WetClothingPartData.h"
 #include "DataAssets/WetClothingWrinkleData.h"
 #include "DataAssets/WetClothingTransparencyData.h"
+#include "WetSimulation/SurfaceWater/SurfaceWaterSimulationSettings.h"
 #include "WetClothingAsset.generated.h"
 
 class USkeletalMesh;
@@ -35,6 +36,9 @@ class DWC_API UWetClothingAsset : public UDataAsset
 
     UPROPERTY(EditAnywhere, Category = "Wet Clothing|Transparency")
     FWetClothingTransparencyData TransparencyData;
+
+    UPROPERTY(EditAnywhere, Category = "Surface Water", meta = (ShowOnlyInnerProperties))
+    FSurfaceWaterSimulationSettings SurfaceWaterSettings;
 
 #if WITH_EDITORONLY_DATA
     UPROPERTY(EditAnywhere, Category = "Wet Clothing")

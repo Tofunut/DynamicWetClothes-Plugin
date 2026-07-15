@@ -10,7 +10,8 @@ void FWetClothingRuntimeData::ResetWetPartData()
 
 void FWetClothingRuntimeData::ResetNeighborGraph()
 {
-    NeighborGraph.Reset();
+    NeighborRanges.Reset();
+    FlatNeighborIndices.Reset();
     bHasNeighborGraph = false;
 }
 

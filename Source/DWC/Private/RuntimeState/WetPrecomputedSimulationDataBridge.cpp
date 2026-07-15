@@ -48,14 +48,16 @@ bool FWetPrecomputedSimulationDataBridge::TryCopyPrecomputedBoneOptimizationCach
 }
 
 bool FWetPrecomputedSimulationDataBridge::TryCopyPrecomputedNeighborGraph(
-    const UWetClothingAsset*     WetClothingAsset,
-    const USkeletalMesh*         SkeletalMesh,
-    const int32                  LODIndex,
-    const int32                  VertexCount,
-    TArray<FWetVertexNeighbors>& OutNeighborGraph,
-    FString*                     OutErrorMessage)
+    const UWetClothingAsset*         WetClothingAsset,
+    const USkeletalMesh*             SkeletalMesh,
+    const int32                      LODIndex,
+    const int32                      VertexCount,
+    TArray<FWetVertexNeighborRange>& OutNeighborRanges,
+    TArray<int32>&                   OutFlatNeighborIndices,
+    FString*                         OutErrorMessage)
 {
-    OutNeighborGraph.Reset();
+    OutNeighborRanges.Reset();
+    OutFlatNeighborIndices.Reset();
 
     if (WetClothingAsset == nullptr || SkeletalMesh == nullptr)
     {
@@ -76,20 +78,39 @@ bool FWetPrecomputedSimulationDataBridge::TryCopyPrecomputedNeighborGraph(
         return false;
     }
 
-    OutNeighborGraph.SetNum(VertexCount);
+    int64 TotalNeighborCount = 0;
     for (int32 VertexIndex = 0; VertexIndex < VertexCount; ++VertexIndex)
     {
-        for (const int32 NeighborIndex : PrecomputedData.NeighborGraph[VertexIndex].Neighbors)
+        TotalNeighborCount += PrecomputedData.NeighborGraph[VertexIndex].Neighbors.Num();
+    }
+
+    if (TotalNeighborCount > TNumericLimits<int32>::Max())
+    {
+        DWC::Error::SetMessage(OutErrorMessage, TEXT("Precomputed neighbor graph is too large for the runtime flat adjacency buffer."));
+        return false;
+    }
+
+    OutNeighborRanges.SetNum(VertexCount);
+    OutFlatNeighborIndices.Reserve(static_cast<int32>(TotalNeighborCount));
+    for (int32 VertexIndex = 0; VertexIndex < VertexCount; ++VertexIndex)
+    {
+        const TArray<int32>& PrecomputedNeighbors = PrecomputedData.NeighborGraph[VertexIndex].Neighbors;
+        FWetVertexNeighborRange& RuntimeRange = OutNeighborRanges[VertexIndex];
+        RuntimeRange.StartOffset = OutFlatNeighborIndices.Num();
+        RuntimeRange.Count = PrecomputedNeighbors.Num();
+
+        for (const int32 NeighborIndex : PrecomputedNeighbors)
         {
-            if (!OutNeighborGraph.IsValidIndex(NeighborIndex))
+            if (!OutNeighborRanges.IsValidIndex(NeighborIndex))
             {
-                OutNeighborGraph.Reset();
+                OutNeighborRanges.Reset();
+                OutFlatNeighborIndices.Reset();
                 DWC::Error::SetMessage(OutErrorMessage, TEXT("Precomputed neighbor graph contains an invalid vertex index."));
                 return false;
             }
-        }
 
-        OutNeighborGraph[VertexIndex].Neighbors = PrecomputedData.NeighborGraph[VertexIndex].Neighbors;
+            OutFlatNeighborIndices.Add(NeighborIndex);
+        }
     }
 
     DWC::Error::SetMessage(OutErrorMessage, TEXT(""));

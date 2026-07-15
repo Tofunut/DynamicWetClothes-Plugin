@@ -16,6 +16,7 @@ class FAbsorbedWetnessSimulationState
     TArray<int32> UpdatingPendingWetnessVertexIndexQueue;
     TArray<int32> CurrentPendingWetnessVertexIndexQueue;
     TArray<float> CurrentPendingWetnessAmounts;
+    int32 CurrentPendingWetnessReadIndex = 0;
     TArray<bool>  bPendingWetnessQueued;
 
     TArray<int32> DirtyWetVertexIndices;

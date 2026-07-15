@@ -5,7 +5,7 @@
 
 class UWetClothingAsset;
 class USkeletalMesh;
-struct FWetVertexNeighbors;
+struct FWetVertexNeighborRange;
 
 class DWC_API FWetPrecomputedSimulationDataBridge
 {
@@ -18,10 +18,11 @@ class DWC_API FWetPrecomputedSimulationDataBridge
         FString*                   OutErrorMessage = nullptr);
 
     static bool TryCopyPrecomputedNeighborGraph(
-        const UWetClothingAsset*     WetClothingAsset,
-        const USkeletalMesh*         SkeletalMesh,
-        int32                        LODIndex,
-        int32                        VertexCount,
-        TArray<FWetVertexNeighbors>& OutNeighborGraph,
-        FString*                     OutErrorMessage = nullptr);
+        const UWetClothingAsset*         WetClothingAsset,
+        const USkeletalMesh*             SkeletalMesh,
+        int32                            LODIndex,
+        int32                            VertexCount,
+        TArray<FWetVertexNeighborRange>& OutNeighborRanges,
+        TArray<int32>&                   OutFlatNeighborIndices,
+        FString*                         OutErrorMessage = nullptr);
 };

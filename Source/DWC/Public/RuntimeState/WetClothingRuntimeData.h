@@ -6,9 +6,18 @@
 
 struct FWetnessProfileParameters;
 
-struct FWetVertexNeighbors
+struct FWetVertexNeighborRange
 {
-    TArray<int32> Neighbors;
+    int32 StartOffset = 0;
+    int32 Count = 0;
+
+    bool IsValidFor(const TArray<int32>& FlatNeighborIndices) const
+    {
+        return StartOffset >= 0 &&
+               Count >= 0 &&
+               StartOffset <= FlatNeighborIndices.Num() &&
+               Count <= FlatNeighborIndices.Num() - StartOffset;
+    }
 };
 
 class DWC_API FWetClothingRuntimeData
@@ -22,7 +31,8 @@ class DWC_API FWetClothingRuntimeData
     TArray<bool>                      VertexWettableFlags;
     TArray<FWetnessProfileParameters> VertexWetnessProfileParameters;
     TArray<FLinearColor>              VertexWetPartDebugColors;
-    TArray<FWetVertexNeighbors>       NeighborGraph;
+    TArray<FWetVertexNeighborRange>   NeighborRanges;
+    TArray<int32>                     FlatNeighborIndices;
     bool                              bHasNeighborGraph = false;
 
     FWetBoneOptimizationCache BoneOptimizationCache;

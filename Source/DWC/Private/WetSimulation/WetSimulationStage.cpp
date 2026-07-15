@@ -248,6 +248,7 @@ void FWetSimulationStage::ClearPendingWetness(FWetSimulationStageArgs& Receiver)
     Receiver.SimulationState->UpdatingPendingWetnessVertexIndexQueue.Reset();
     Receiver.SimulationState->CurrentPendingWetnessVertexIndexQueue.Reset();
     Receiver.SimulationState->CurrentPendingWetnessAmounts.Reset();
+    Receiver.SimulationState->CurrentPendingWetnessReadIndex = 0;
 
     for (bool& bQueued : Receiver.SimulationState->bPendingWetnessQueued)
     {
@@ -314,7 +315,12 @@ bool FWetSimulationStage::PreparePendingWetnessProcessing(FWetSimulationStageArg
         return false;
     }
 
-    if (Receiver.SimulationState->UpdatingPendingWetnessVertexIndexQueue.Num() == 0)
+    const bool bHasCurrentPendingWetness =
+        Receiver.SimulationState->CurrentPendingWetnessReadIndex <
+        Receiver.SimulationState->CurrentPendingWetnessVertexIndexQueue.Num();
+
+    if (Receiver.SimulationState->UpdatingPendingWetnessVertexIndexQueue.Num() == 0 &&
+        !bHasCurrentPendingWetness)
     {
         return false;
     }
@@ -331,11 +337,24 @@ bool FWetSimulationStage::PreparePendingWetnessProcessing(FWetSimulationStageArg
                 break;
             }
         }
+
+        for (int32 QueueIndex = Receiver.SimulationState->CurrentPendingWetnessReadIndex;
+             !bOutUseGravityBias &&
+             QueueIndex < Receiver.SimulationState->CurrentPendingWetnessVertexIndexQueue.Num();
+             ++QueueIndex)
+        {
+            const int32 VertexIndex = Receiver.SimulationState->CurrentPendingWetnessVertexIndexQueue[QueueIndex];
+            if (Receiver.GetGravityFlowStrengthForVertex(VertexIndex) > 0.0f)
+            {
+                bOutUseGravityBias = true;
+                break;
+            }
+        }
     }
 
     bOutCanSpread =
         Receiver.RuntimeData->bHasNeighborGraph &&
-        Receiver.RuntimeData->NeighborGraph.Num() == Receiver.SimulationState->AbsorbedWetnessPerVertex.Num();
+        Receiver.RuntimeData->NeighborRanges.Num() == Receiver.SimulationState->AbsorbedWetnessPerVertex.Num();
 
     if (bOutUseGravityBias)
     {
@@ -352,8 +371,15 @@ bool FWetSimulationStage::PreparePendingWetnessProcessing(FWetSimulationStageArg
 
 void FWetSimulationStage::SnapshotPendingWetnessForCurrentUpdate(FWetSimulationStageArgs& Receiver)
 {
+    if (Receiver.SimulationState->CurrentPendingWetnessReadIndex <
+        Receiver.SimulationState->CurrentPendingWetnessVertexIndexQueue.Num())
+    {
+        return;
+    }
+
     Receiver.SimulationState->CurrentPendingWetnessVertexIndexQueue.Reset();
     Receiver.SimulationState->CurrentPendingWetnessAmounts.Reset();
+    Receiver.SimulationState->CurrentPendingWetnessReadIndex = 0;
     Swap(Receiver.SimulationState->CurrentPendingWetnessVertexIndexQueue, Receiver.SimulationState->UpdatingPendingWetnessVertexIndexQueue);
     Receiver.SimulationState->CurrentPendingWetnessAmounts.Reserve(Receiver.SimulationState->CurrentPendingWetnessVertexIndexQueue.Num());
 
@@ -382,7 +408,7 @@ int32 FWetSimulationStage::ProcessCurrentPendingWetness(FWetSimulationStageArgs&
     (void)SpreadAlpha;
     (void)GravityFlowStrength;
 
-    int32 QueueReadIndex = 0;
+    int32 QueueReadIndex = Receiver.SimulationState->CurrentPendingWetnessReadIndex;
     int32 ProcessedVertices = 0;
 
     while (QueueReadIndex < Receiver.SimulationState->CurrentPendingWetnessVertexIndexQueue.Num() &&
@@ -445,13 +471,14 @@ void FWetSimulationStage::SpreadPendingWetnessToNeighbors(FWetSimulationStageArg
 {
     if (!Receiver.RuntimeData ||
         !Receiver.RuntimeData->IsVertexWettable(VertexIndex) ||
-        !Receiver.RuntimeData->NeighborGraph.IsValidIndex(VertexIndex))
+        !Receiver.RuntimeData->NeighborRanges.IsValidIndex(VertexIndex))
     {
         return;
     }
 
-    const TArray<int32>& Neighbors = Receiver.RuntimeData->NeighborGraph[VertexIndex].Neighbors;
-    if (Neighbors.Num() == 0)
+    const FWetVertexNeighborRange& NeighborRange = Receiver.RuntimeData->NeighborRanges[VertexIndex];
+    if (NeighborRange.Count == 0 ||
+        !NeighborRange.IsValidFor(Receiver.RuntimeData->FlatNeighborIndices))
     {
         return;
     }
@@ -483,9 +510,10 @@ void FWetSimulationStage::SpreadPendingWetnessToNeighbors(FWetSimulationStageArg
     TArray<FNeighborFlow, TInlineAllocator<16>> ValidNeighborFlows;
     float TotalWeight = 0.0f;
 
-    for (int32 NeighborArrayIndex = 0; NeighborArrayIndex < Neighbors.Num(); ++NeighborArrayIndex)
+    const int32 NeighborEndOffset = NeighborRange.StartOffset + NeighborRange.Count;
+    for (int32 NeighborOffset = NeighborRange.StartOffset; NeighborOffset < NeighborEndOffset; ++NeighborOffset)
     {
-        const int32 NeighborIndex = Neighbors[NeighborArrayIndex];
+        const int32 NeighborIndex = Receiver.RuntimeData->FlatNeighborIndices[NeighborOffset];
         if (!Receiver.SimulationState->AbsorbedWetnessPerVertex.IsValidIndex(NeighborIndex) ||
             !Receiver.RuntimeData->IsVertexWettable(NeighborIndex))
         {
@@ -565,22 +593,6 @@ float FWetSimulationStage::CalculateNeighborGravityBias(const FWetSimulationStag
         2.0f);
 }
 
-void FWetSimulationStage::RequeueUnprocessedPendingWetness(FWetSimulationStageArgs& Receiver, const int32 QueueReadIndex)
-{
-    DWC_PROFILE_SCOPE(DWC_Simulation_RequeueUnprocessedPendingWetness);
-
-    for (int32 RemainingQueueIndex = QueueReadIndex;
-         RemainingQueueIndex < Receiver.SimulationState->CurrentPendingWetnessVertexIndexQueue.Num();
-         ++RemainingQueueIndex)
-    {
-        const int32 VertexIndex = Receiver.SimulationState->CurrentPendingWetnessVertexIndexQueue[RemainingQueueIndex];
-        if (Receiver.SimulationState->CurrentPendingWetnessAmounts.IsValidIndex(RemainingQueueIndex))
-        {
-            QueuePendingWetness(Receiver, VertexIndex, Receiver.SimulationState->CurrentPendingWetnessAmounts[RemainingQueueIndex]);
-        }
-    }
-}
-
 void FWetSimulationStage::ProcessPendingWetness(FWetSimulationStageArgs& Receiver, bool& bDirty, const float EffectiveSpreadRatePerSecond)
 {
     DWC_PROFILE_SCOPE(DWC_Simulation_ProcessPendingWetness);
@@ -609,10 +621,14 @@ void FWetSimulationStage::ProcessPendingWetness(FWetSimulationStageArgs& Receive
                                                               bUseGravityBias,
                                                               bCanSpread);
 
-    RequeueUnprocessedPendingWetness(Receiver, QueueReadIndex);
-
-    Receiver.SimulationState->CurrentPendingWetnessVertexIndexQueue.Reset();
-    Receiver.SimulationState->CurrentPendingWetnessAmounts.Reset();
+    Receiver.SimulationState->CurrentPendingWetnessReadIndex = QueueReadIndex;
+    if (Receiver.SimulationState->CurrentPendingWetnessReadIndex >=
+        Receiver.SimulationState->CurrentPendingWetnessVertexIndexQueue.Num())
+    {
+        Receiver.SimulationState->CurrentPendingWetnessVertexIndexQueue.Reset();
+        Receiver.SimulationState->CurrentPendingWetnessAmounts.Reset();
+        Receiver.SimulationState->CurrentPendingWetnessReadIndex = 0;
+    }
 }
 
 bool FWetSimulationStage::UpdateWetness(FWetSimulationStageArgs& Receiver)
@@ -623,7 +639,12 @@ bool FWetSimulationStage::UpdateWetness(FWetSimulationStageArgs& Receiver)
     const float EffectiveDryRatePerSecond = Receiver.GetDryRatePerSecond();
     const float EffectiveSpreadRatePerSecond = Receiver.GetSpreadRatePerSecond();
 
-    if (Receiver.SimulationState->UpdatingPendingWetnessVertexIndexQueue.Num() > 0)
+    const bool bHasCurrentPendingWetness =
+        Receiver.SimulationState->CurrentPendingWetnessReadIndex <
+        Receiver.SimulationState->CurrentPendingWetnessVertexIndexQueue.Num();
+
+    if (Receiver.SimulationState->UpdatingPendingWetnessVertexIndexQueue.Num() > 0 ||
+        bHasCurrentPendingWetness)
     {
         ProcessPendingWetness(Receiver, bDirty, EffectiveSpreadRatePerSecond);
     }

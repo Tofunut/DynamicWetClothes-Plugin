@@ -82,7 +82,6 @@ class DWC_API FWetSimulationStage
         float                          GravityFlowStrength,
         const FTransform&              ComponentTransform,
         const FVector&                 GravityDirection);
-    void RequeueUnprocessedPendingWetness(FWetSimulationStageArgs& Args, int32 QueueReadIndex);
     void ProcessPendingWetness(
         FWetSimulationStageArgs& Args,
         bool&                    bDirty,

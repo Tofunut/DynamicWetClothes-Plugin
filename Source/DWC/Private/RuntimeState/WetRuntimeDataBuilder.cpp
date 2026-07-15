@@ -56,6 +56,7 @@ void FWetRuntimeDataBuilder::InitializeAbsorbedWetnessData(FWetRuntimeDataBuildA
     Receiver.SimulationState->UpdatingPendingWetnessVertexIndexQueue.Reset();
     Receiver.SimulationState->CurrentPendingWetnessVertexIndexQueue.Reset();
     Receiver.SimulationState->CurrentPendingWetnessAmounts.Reset();
+    Receiver.SimulationState->CurrentPendingWetnessReadIndex = 0;
     Receiver.SimulationState->bPendingWetnessQueued.Init(false, VertexCount);
     Receiver.CachedWetVertexColors->Init(FLinearColor::Black, VertexCount);
     Receiver.SimulationState->DirtyWetVertexIndices.Reset();
@@ -254,7 +255,8 @@ bool FWetRuntimeDataBuilder::InitializeNeighborGraphFromPrecomputedData(FWetRunt
             SkeletalMesh,
             Receiver.LODIndex,
             VertexCount,
-            Receiver.RuntimeData->NeighborGraph,
+            Receiver.RuntimeData->NeighborRanges,
+            Receiver.RuntimeData->FlatNeighborIndices,
             &ErrorMessage))
     {
         UE_LOG(
@@ -284,6 +286,7 @@ void FWetRuntimeDataBuilder::EnsureWetnessBufferSize(FWetRuntimeDataBuildArgs& R
         Receiver.SimulationState->UpdatingPendingWetnessVertexIndexQueue.Reset();
         Receiver.SimulationState->CurrentPendingWetnessVertexIndexQueue.Reset();
         Receiver.SimulationState->CurrentPendingWetnessAmounts.Reset();
+        Receiver.SimulationState->CurrentPendingWetnessReadIndex = 0;
         Receiver.SimulationState->bPendingWetnessQueued.Reset();
         return;
     }
@@ -312,6 +315,9 @@ void FWetRuntimeDataBuilder::EnsureWetnessBufferSize(FWetRuntimeDataBuildArgs& R
     {
         Receiver.SimulationState->UpdatingPendingWetnessAmounts.SetNumZeroed(VertexCount);
         Receiver.SimulationState->UpdatingPendingWetnessVertexIndexQueue.Reset();
+        Receiver.SimulationState->CurrentPendingWetnessVertexIndexQueue.Reset();
+        Receiver.SimulationState->CurrentPendingWetnessAmounts.Reset();
+        Receiver.SimulationState->CurrentPendingWetnessReadIndex = 0;
     }
 
     if (Receiver.SimulationState->WetnessDryHoldTimePerVertex.Num() != VertexCount)
@@ -323,6 +329,9 @@ void FWetRuntimeDataBuilder::EnsureWetnessBufferSize(FWetRuntimeDataBuildArgs& R
     {
         Receiver.SimulationState->bPendingWetnessQueued.Init(false, VertexCount);
         Receiver.SimulationState->UpdatingPendingWetnessVertexIndexQueue.Reset();
+        Receiver.SimulationState->CurrentPendingWetnessVertexIndexQueue.Reset();
+        Receiver.SimulationState->CurrentPendingWetnessAmounts.Reset();
+        Receiver.SimulationState->CurrentPendingWetnessReadIndex = 0;
     }
 }
 
@@ -338,6 +347,7 @@ void FWetRuntimeDataBuilder::EnsureWetnessBufferSize(FWetInputStageArgs& Receive
             Receiver.SimulationState->UpdatingPendingWetnessVertexIndexQueue.Reset();
             Receiver.SimulationState->CurrentPendingWetnessVertexIndexQueue.Reset();
             Receiver.SimulationState->CurrentPendingWetnessAmounts.Reset();
+            Receiver.SimulationState->CurrentPendingWetnessReadIndex = 0;
             Receiver.SimulationState->bPendingWetnessQueued.Reset();
         }
         if (Receiver.RuntimeData)
@@ -360,6 +370,9 @@ void FWetRuntimeDataBuilder::EnsureWetnessBufferSize(FWetInputStageArgs& Receive
         {
             Receiver.SimulationState->UpdatingPendingWetnessAmounts.SetNumZeroed(VertexCount);
             Receiver.SimulationState->UpdatingPendingWetnessVertexIndexQueue.Reset();
+            Receiver.SimulationState->CurrentPendingWetnessVertexIndexQueue.Reset();
+            Receiver.SimulationState->CurrentPendingWetnessAmounts.Reset();
+            Receiver.SimulationState->CurrentPendingWetnessReadIndex = 0;
         }
         if (Receiver.SimulationState->WetnessDryHoldTimePerVertex.Num() != VertexCount)
         {
@@ -369,6 +382,9 @@ void FWetRuntimeDataBuilder::EnsureWetnessBufferSize(FWetInputStageArgs& Receive
         {
             Receiver.SimulationState->bPendingWetnessQueued.Init(false, VertexCount);
             Receiver.SimulationState->UpdatingPendingWetnessVertexIndexQueue.Reset();
+            Receiver.SimulationState->CurrentPendingWetnessVertexIndexQueue.Reset();
+            Receiver.SimulationState->CurrentPendingWetnessAmounts.Reset();
+            Receiver.SimulationState->CurrentPendingWetnessReadIndex = 0;
         }
     }
 

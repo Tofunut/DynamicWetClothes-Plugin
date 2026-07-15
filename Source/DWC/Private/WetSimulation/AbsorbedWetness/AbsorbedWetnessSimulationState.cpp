@@ -8,6 +8,7 @@ void FAbsorbedWetnessSimulationState::ResetAll()
     UpdatingPendingWetnessVertexIndexQueue.Reset();
     CurrentPendingWetnessVertexIndexQueue.Reset();
     CurrentPendingWetnessAmounts.Reset();
+    CurrentPendingWetnessReadIndex = 0;
     bPendingWetnessQueued.Reset();
     DirtyWetVertexIndices.Reset();
 }
@@ -20,6 +21,7 @@ void FAbsorbedWetnessSimulationState::ResetForVertexCount(const int32 VertexCoun
     UpdatingPendingWetnessVertexIndexQueue.Reset();
     CurrentPendingWetnessVertexIndexQueue.Reset();
     CurrentPendingWetnessAmounts.Reset();
+    CurrentPendingWetnessReadIndex = 0;
     bPendingWetnessQueued.Init(false, VertexCount);
     DirtyWetVertexIndices.Reset();
 }

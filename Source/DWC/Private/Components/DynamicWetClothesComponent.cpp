@@ -317,7 +317,6 @@ FWetRenderStageArgs UDynamicWetClothesComponent::MakeWetRenderStageArgs(FDWCWetM
     Args.RuntimeData = Receiver.RuntimeData.Get();
     Args.SimulationState = Receiver.SimulationState.Get();
     Args.WetMaterialInstances = &Receiver.WetMaterialInstances;
-    Args.CachedWetVertexColors = &Receiver.RenderStage->CachedWetVertexColors;
     Args.UnassignedWetPartDebugColor = UnassignedWetPartDebugColor;
     Args.bEnableWetPartDebugVertexColors = bEnableWetPartDebugVertexColors;
     Args.bWetPartDebugUseWetnessMask = bWetPartDebugUseWetnessMask;

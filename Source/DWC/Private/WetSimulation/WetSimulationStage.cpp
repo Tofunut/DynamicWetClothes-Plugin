@@ -299,7 +299,7 @@ void FWetSimulationStage::DryOutWetness(FWetSimulationStageArgs& Receiver, bool&
     }
 }
 
-bool FWetSimulationStage::PreparePendingWetnessProcessing(FWetSimulationStageArgs& Receiver, const float EffectiveSpreadRatePerSecond, float& OutSpreadAlpha, float& OutGravityFlowStrength, bool& bOutUseGravityBias, bool& bOutCanSpread)
+bool FWetSimulationStage::PreparePendingWetnessProcessing(FWetSimulationStageArgs& Receiver, const float EffectiveSpreadRatePerSecond, float& OutSpreadAlpha, float& OutGravityFlowStrength, FVector& OutLocalGravityDirection, bool& bOutUseGravityBias, bool& bOutCanSpread)
 {
     DWC_PROFILE_SCOPE(DWC_Simulation_PreparePendingWetnessProcessing);
 
@@ -325,6 +325,7 @@ bool FWetSimulationStage::PreparePendingWetnessProcessing(FWetSimulationStageArg
     }
 
     OutGravityFlowStrength = Receiver.GetGravityFlowStrength();
+    OutLocalGravityDirection = FVector::DownVector;
     bOutUseGravityBias = OutGravityFlowStrength > 0.0f;
     if (!bOutUseGravityBias)
     {
@@ -358,6 +359,13 @@ bool FWetSimulationStage::PreparePendingWetnessProcessing(FWetSimulationStageArg
     if (bOutUseGravityBias)
     {
         bOutUseGravityBias = EnsureCachedSkinnedPositions(Receiver);
+        if (bOutUseGravityBias && Receiver.TargetSkeletalMesh)
+        {
+            OutLocalGravityDirection = Receiver.TargetSkeletalMesh
+                                           ->GetComponentTransform()
+                                           .InverseTransformVectorNoScale(FVector::DownVector)
+                                           .GetSafeNormal();
+        }
     }
 
     OutSpreadAlpha = FMath::Clamp(
@@ -400,7 +408,7 @@ void FWetSimulationStage::SnapshotPendingWetnessForCurrentUpdate(FWetSimulationS
     }
 }
 
-int32 FWetSimulationStage::ProcessCurrentPendingWetness(FWetSimulationStageArgs& Receiver, bool& bDirty, const float SpreadAlpha, const float GravityFlowStrength, const bool bUseGravityBias, const bool bCanSpread)
+int32 FWetSimulationStage::ProcessCurrentPendingWetness(FWetSimulationStageArgs& Receiver, bool& bDirty, const float SpreadAlpha, const float GravityFlowStrength, const FVector& LocalGravityDirection, const bool bUseGravityBias, const bool bCanSpread)
 {
     DWC_PROFILE_SCOPE(DWC_Simulation_ProcessCurrentPendingWetness);
 
@@ -460,13 +468,14 @@ int32 FWetSimulationStage::ProcessCurrentPendingWetness(FWetSimulationStageArgs&
                                         SpreadableWetness,
                                         VertexSpreadAlpha,
                                         VertexGravityFlowStrength,
+                                        LocalGravityDirection,
                                         bUseGravityBias && VertexGravityFlowStrength > 0.0f);
     }
 
     return QueueReadIndex;
 }
 
-void FWetSimulationStage::SpreadPendingWetnessToNeighbors(FWetSimulationStageArgs& Receiver, const int32 VertexIndex, const float SpreadableWetness, const float SpreadAlpha, const float GravityFlowStrength, const bool bUseGravityBias)
+void FWetSimulationStage::SpreadPendingWetnessToNeighbors(FWetSimulationStageArgs& Receiver, const int32 VertexIndex, const float SpreadableWetness, const float SpreadAlpha, const float GravityFlowStrength, const FVector& LocalGravityDirection, const bool bUseGravityBias)
 {
     if (!Receiver.RuntimeData ||
         !Receiver.RuntimeData->IsVertexWettable(VertexIndex) ||
@@ -488,17 +497,13 @@ void FWetSimulationStage::SpreadPendingWetnessToNeighbors(FWetSimulationStageArg
         return;
     }
 
-    const bool       bCanUseGravityBias = bUseGravityBias &&
-                                    Receiver.TargetSkeletalMesh &&
+    const bool bCanUseGravityBias = bUseGravityBias &&
                                     Receiver.MeshSampler &&
-                                    Receiver.MeshSampler->CachedSkinnedPositions.IsValidIndex(VertexIndex);
-    const FTransform ComponentTransform = bCanUseGravityBias
-                                              ? Receiver.TargetSkeletalMesh->GetComponentTransform()
-                                              : FTransform::Identity;
-    const FVector    GravityDirection = FVector::DownVector;
-    const FVector    SourceWorldPosition = bCanUseGravityBias
-                                               ? ComponentTransform.TransformPosition(FVector(Receiver.MeshSampler->CachedSkinnedPositions[VertexIndex]))
-                                               : FVector::ZeroVector;
+                                    Receiver.MeshSampler->CachedSkinnedPositions.IsValidIndex(VertexIndex) &&
+                                    !LocalGravityDirection.IsNearlyZero();
+    const FVector SourceLocalPosition = bCanUseGravityBias
+                                            ? FVector(Receiver.MeshSampler->CachedSkinnedPositions[VertexIndex])
+                                            : FVector::ZeroVector;
 
     struct FNeighborFlow
     {
@@ -528,11 +533,10 @@ void FWetSimulationStage::SpreadPendingWetnessToNeighbors(FWetSimulationStageArg
 
         const float GravityBias = bCanUseGravityBias
                                       ? CalculateNeighborGravityBias(Receiver,
-                                                                     SourceWorldPosition,
+                                                                     SourceLocalPosition,
                                                                      NeighborIndex,
                                                                      GravityFlowStrength,
-                                                                     ComponentTransform,
-                                                                     GravityDirection)
+                                                                     LocalGravityDirection)
                                       : 1.0f;
 
         float PartBoundaryScale = 1.0f;
@@ -569,7 +573,7 @@ void FWetSimulationStage::SpreadPendingWetnessToNeighbors(FWetSimulationStageArg
     }
 }
 
-float FWetSimulationStage::CalculateNeighborGravityBias(const FWetSimulationStageArgs& Receiver, const FVector& SourceWorldPosition, const int32 NeighborIndex, const float GravityFlowStrength, const FTransform& ComponentTransform, const FVector& GravityDirection)
+float FWetSimulationStage::CalculateNeighborGravityBias(const FWetSimulationStageArgs& Receiver, const FVector& SourceLocalPosition, const int32 NeighborIndex, const float GravityFlowStrength, const FVector& LocalGravityDirection)
 {
     if (!Receiver.MeshSampler ||
         !Receiver.MeshSampler->CachedSkinnedPositions.IsValidIndex(NeighborIndex))
@@ -577,14 +581,16 @@ float FWetSimulationStage::CalculateNeighborGravityBias(const FWetSimulationStag
         return 1.0f;
     }
 
-    const FVector TargetWorldPosition = ComponentTransform.TransformPosition(
-        FVector(Receiver.MeshSampler->CachedSkinnedPositions[NeighborIndex]));
-
-    const FVector FlowDirection =
-        (TargetWorldPosition - SourceWorldPosition).GetSafeNormal();
+    const FVector TargetLocalPosition(Receiver.MeshSampler->CachedSkinnedPositions[NeighborIndex]);
+    const FVector FlowDelta = TargetLocalPosition - SourceLocalPosition;
+    const float   FlowLengthSquared = FlowDelta.SizeSquared();
+    if (FlowLengthSquared <= SMALL_NUMBER)
+    {
+        return 1.0f;
+    }
 
     const float GravityAlignment =
-        FVector::DotProduct(FlowDirection, GravityDirection);
+        FVector::DotProduct(FlowDelta, LocalGravityDirection) * FMath::InvSqrt(FlowLengthSquared);
 
     return FMath::Clamp(
         1.0f + GravityAlignment * GravityFlowStrength,
@@ -598,6 +604,7 @@ void FWetSimulationStage::ProcessPendingWetness(FWetSimulationStageArgs& Receive
 
     float SpreadAlpha = 0.0f;
     float GravityFlowStrength = 0.0f;
+    FVector LocalGravityDirection = FVector::DownVector;
     bool  bUseGravityBias = false;
     bool  bCanSpread = false;
 
@@ -605,6 +612,7 @@ void FWetSimulationStage::ProcessPendingWetness(FWetSimulationStageArgs& Receive
                                          EffectiveSpreadRatePerSecond,
                                          SpreadAlpha,
                                          GravityFlowStrength,
+                                         LocalGravityDirection,
                                          bUseGravityBias,
                                          bCanSpread))
     {
@@ -617,6 +625,7 @@ void FWetSimulationStage::ProcessPendingWetness(FWetSimulationStageArgs& Receive
                                                               bDirty,
                                                               SpreadAlpha,
                                                               GravityFlowStrength,
+                                                              LocalGravityDirection,
                                                               bUseGravityBias,
                                                               bCanSpread);
 

@@ -58,7 +58,7 @@ void FWetRuntimeDataBuilder::InitializeAbsorbedWetnessData(FWetRuntimeDataBuildA
     Receiver.SimulationState->CurrentPendingWetnessAmounts.Reset();
     Receiver.SimulationState->CurrentPendingWetnessReadIndex = 0;
     Receiver.SimulationState->bPendingWetnessQueued.Init(false, VertexCount);
-    Receiver.CachedWetVertexColors->Init(FLinearColor::Black, VertexCount);
+    Receiver.CachedWetVertexColors->Init(FColor::Black, VertexCount);
     Receiver.SimulationState->DirtyWetVertexIndices.Reset();
     Receiver.SimulationState->bDirtyWetVertexQueued.Init(false, VertexCount);
 

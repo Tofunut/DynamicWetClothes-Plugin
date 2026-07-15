@@ -27,7 +27,7 @@ struct DWC_API FWetRuntimeDataBuildArgs
 
     FWetClothingRuntimeData*         RuntimeData = nullptr;
     FAbsorbedWetnessSimulationState* SimulationState = nullptr;
-    TArray<FLinearColor>*            CachedWetVertexColors = nullptr;
+    TArray<FColor>*                  CachedWetVertexColors = nullptr;
 
     FLinearColor UnassignedWetPartDebugColor = FLinearColor(0.25f, 0.25f, 0.25f, 1.0f);
 

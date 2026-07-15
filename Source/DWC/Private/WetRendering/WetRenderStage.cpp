@@ -91,7 +91,7 @@ void FWetRenderStage::ResetCachedVertexColors()
 
 void FWetRenderStage::InitializeCachedVertexColors(const int32 VertexCount)
 {
-    CachedWetVertexColors.Init(FLinearColor::Black, VertexCount);
+    CachedWetVertexColors.Init(FColor::Black, VertexCount);
 }
 
 void FWetRenderStage::InitializeWetMaterialInstance(FWetRenderStageArgs& Receiver)
@@ -467,13 +467,13 @@ void FWetRenderStage::ApplyWetnessToMaterial(FWetRenderStageArgs& Receiver)
     {
         // Vertex SafeCode: 렌더링 단계에서는 RuntimeData를 재빌드하지 않고 SimulationState 크기만 방어적으로 맞춘다.
         Receiver.SimulationState->AbsorbedWetnessPerVertex.SetNumZeroed(VertexCount);
-        CachedWetVertexColors.Init(FLinearColor::Black, VertexCount);
+        CachedWetVertexColors.Init(FColor::Black, VertexCount);
         Receiver.SimulationState->MarkAllWetVertexColorsDirty();
     }
 
     if (CachedWetVertexColors.Num() != VertexCount)
     {
-        CachedWetVertexColors.Init(FLinearColor::Black, VertexCount);
+        CachedWetVertexColors.Init(FColor::Black, VertexCount);
         Receiver.SimulationState->MarkAllWetVertexColorsDirty();
     }
 
@@ -495,7 +495,7 @@ void FWetRenderStage::ApplyWetnessToMaterial(FWetRenderStageArgs& Receiver)
 
             if (Receiver.RuntimeData == nullptr || !Receiver.RuntimeData->IsVertexWettable(VertexIndex))
             {
-                CachedWetVertexColors[VertexIndex] = FLinearColor::Black;
+                CachedWetVertexColors[VertexIndex] = FColor::Black;
                 continue;
             }
 
@@ -505,7 +505,7 @@ void FWetRenderStage::ApplyWetnessToMaterial(FWetRenderStageArgs& Receiver)
                 0.0f,
                 1.0f);
 
-            CachedWetVertexColors[VertexIndex] = MakeWetVertexColor(Receiver, VertexIndex, Wetness);
+            CachedWetVertexColors[VertexIndex] = MakeWetVertexColor(Receiver, VertexIndex, Wetness).ToFColor(false);
         }
     }
 

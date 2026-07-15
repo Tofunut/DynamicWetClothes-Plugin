@@ -58,6 +58,7 @@ class DWC_API FWetSimulationStage
          float                    EffectiveSpreadRatePerSecond,
          float&                   OutSpreadAlpha,
          float&                   OutGravityFlowStrength,
+         FVector&                 OutLocalGravityDirection,
          bool&                    bOutUseGravityBias,
          bool&                    bOutCanSpread);
     void  SnapshotPendingWetnessForCurrentUpdate(FWetSimulationStageArgs& Args);
@@ -66,6 +67,7 @@ class DWC_API FWetSimulationStage
         bool&                    bDirty,
         float                    SpreadAlpha,
         float                    GravityFlowStrength,
+        const FVector&           LocalGravityDirection,
         bool                     bUseGravityBias,
         bool                     bCanSpread);
     void SpreadPendingWetnessToNeighbors(
@@ -74,14 +76,14 @@ class DWC_API FWetSimulationStage
         float                    SpreadableWetness,
         float                    SpreadAlpha,
         float                    GravityFlowStrength,
+        const FVector&           LocalGravityDirection,
         bool                     bUseGravityBias);
     float CalculateNeighborGravityBias(
         const FWetSimulationStageArgs& Args,
-        const FVector&                 SourceWorldPosition,
+        const FVector&                 SourceLocalPosition,
         int32                          NeighborIndex,
         float                          GravityFlowStrength,
-        const FTransform&              ComponentTransform,
-        const FVector&                 GravityDirection);
+        const FVector&                 LocalGravityDirection);
     void ProcessPendingWetness(
         FWetSimulationStageArgs& Args,
         bool&                    bDirty,

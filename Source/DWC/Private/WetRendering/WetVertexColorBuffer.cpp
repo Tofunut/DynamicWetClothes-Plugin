@@ -10,9 +10,9 @@
 #include "Utility/DWCProfiling.h"
 
 void FWetVertexColorBuffer::ApplyVertexColorOverride(
-    USkeletalMeshComponent&     TargetSkeletalMesh,
-    const int32                 LODIndex,
-    const TArray<FLinearColor>& VertexColors)
+    USkeletalMeshComponent& TargetSkeletalMesh,
+    const int32             LODIndex,
+    const TArray<FColor>&   VertexColors)
 {
     DWC_PROFILE_SCOPE(DWC_Render_SetVertexColorOverride);
 
@@ -20,15 +20,22 @@ void FWetVertexColorBuffer::ApplyVertexColorOverride(
     {
         DWC_PROFILE_SCOPE(DWC_Render_SetVertexColorOverride_Fallback);
 
-        TargetSkeletalMesh.SetVertexColorOverride_LinearColor(LODIndex, VertexColors);
+        TArray<FLinearColor> LinearColors;
+        LinearColors.SetNumUninitialized(VertexColors.Num());
+        for (int32 VertexIndex = 0; VertexIndex < VertexColors.Num(); ++VertexIndex)
+        {
+            LinearColors[VertexIndex] = FLinearColor(VertexColors[VertexIndex]);
+        }
+
+        TargetSkeletalMesh.SetVertexColorOverride_LinearColor(LODIndex, LinearColors);
         TargetSkeletalMesh.MarkRenderStateDirty();
     }
 }
 
 bool FWetVertexColorBuffer::ApplyVertexColorOverrideByDirectBufferSwap(
-    USkeletalMeshComponent&     TargetSkeletalMesh,
-    const int32                 LODIndex,
-    const TArray<FLinearColor>& VertexColors)
+    USkeletalMeshComponent& TargetSkeletalMesh,
+    const int32             LODIndex,
+    const TArray<FColor>&   VertexColors)
 {
     DWC_PROFILE_SCOPE(DWC_Render_SwapVertexColorOverrideBuffer);
 
@@ -44,23 +51,13 @@ bool FWetVertexColorBuffer::ApplyVertexColorOverrideByDirectBufferSwap(
 
     const FSkeletalMeshLODRenderData& LODData = SkelMeshRenderData->LODRenderData[LODIndex];
     const int32 ExpectedNumVerts = LODData.StaticVertexBuffers.PositionVertexBuffer.GetNumVertices();
-    if (ExpectedNumVerts <= 0)
+    if (ExpectedNumVerts <= 0 || VertexColors.Num() != ExpectedNumVerts)
     {
         return false;
     }
 
-    TArray<FColor> PackedColors;
-    PackedColors.SetNumUninitialized(ExpectedNumVerts);
-    for (int32 VertexIndex = 0; VertexIndex < ExpectedNumVerts; ++VertexIndex)
-    {
-        PackedColors[VertexIndex] =
-            VertexColors.IsValidIndex(VertexIndex)
-                ? VertexColors[VertexIndex].ToFColor(false)
-                : FColor::White;
-    }
-
     FColorVertexBuffer* NewOverrideVertexColors = new FColorVertexBuffer;
-    NewOverrideVertexColors->InitFromColorArray(PackedColors);
+    NewOverrideVertexColors->InitFromColorArray(VertexColors);
 
     FSkelMeshComponentLODInfo& LODInfo = TargetSkeletalMesh.LODInfo[LODIndex];
     FColorVertexBuffer* OldOverrideVertexColors = LODInfo.OverrideVertexColors;

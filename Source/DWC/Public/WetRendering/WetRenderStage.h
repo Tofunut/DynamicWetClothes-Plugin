@@ -30,7 +30,6 @@ struct DWC_API FWetRenderStageArgs
     FAbsorbedWetnessSimulationState* SimulationState = nullptr;
 
     TArray<TObjectPtr<UMaterialInstanceDynamic>>* WetMaterialInstances = nullptr;
-    TArray<FLinearColor>*                         CachedWetVertexColors = nullptr;
 
     FLinearColor UnassignedWetPartDebugColor = FLinearColor(0.25f, 0.25f, 0.25f, 1.0f);
     bool         bEnableWetPartDebugVertexColors = false;
@@ -73,5 +72,5 @@ class DWC_API FWetRenderStage
     void         ApplyWetnessToMaterial(FWetRenderStageArgs& Args);
     FLinearColor MakeWetVertexColor(const FWetRenderStageArgs& Args, int32 VertexIndex, float Wetness) const;
 
-    TArray<FLinearColor> CachedWetVertexColors;
+    TArray<FColor> CachedWetVertexColors;
 };

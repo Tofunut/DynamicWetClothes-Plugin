@@ -7,7 +7,9 @@ class FAbsorbedWetnessSimulationState
   public:
     void ResetAll();
     void ResetForVertexCount(int32 VertexCount);
+    void MarkWetVertexDirty(int32 VertexIndex);
     void MarkAllWetVertexColorsDirty();
+    void ClearDirtyWetVertexIndices();
 
     TArray<float> AbsorbedWetnessPerVertex;
     TArray<float> UpdatingPendingWetnessAmounts;
@@ -20,4 +22,5 @@ class FAbsorbedWetnessSimulationState
     TArray<bool>  bPendingWetnessQueued;
 
     TArray<int32> DirtyWetVertexIndices;
+    TArray<bool>  bDirtyWetVertexQueued;
 };

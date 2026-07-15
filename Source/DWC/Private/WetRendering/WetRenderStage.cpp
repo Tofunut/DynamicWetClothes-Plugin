@@ -467,22 +467,14 @@ void FWetRenderStage::ApplyWetnessToMaterial(FWetRenderStageArgs& Receiver)
     {
         // Vertex SafeCode: 렌더링 단계에서는 RuntimeData를 재빌드하지 않고 SimulationState 크기만 방어적으로 맞춘다.
         Receiver.SimulationState->AbsorbedWetnessPerVertex.SetNumZeroed(VertexCount);
-        Receiver.SimulationState->DirtyWetVertexIndices.Reset();
         CachedWetVertexColors.Init(FLinearColor::Black, VertexCount);
-        for (int32 VertexIndex = 0; VertexIndex < VertexCount; ++VertexIndex)
-        {
-            Receiver.SimulationState->DirtyWetVertexIndices.Add(VertexIndex);
-        }
+        Receiver.SimulationState->MarkAllWetVertexColorsDirty();
     }
 
     if (CachedWetVertexColors.Num() != VertexCount)
     {
         CachedWetVertexColors.Init(FLinearColor::Black, VertexCount);
-        Receiver.SimulationState->DirtyWetVertexIndices.Reset();
-        for (int32 VertexIndex = 0; VertexIndex < VertexCount; ++VertexIndex)
-        {
-            Receiver.SimulationState->DirtyWetVertexIndices.Add(VertexIndex);
-        }
+        Receiver.SimulationState->MarkAllWetVertexColorsDirty();
     }
 
     if (Receiver.SimulationState->DirtyWetVertexIndices.Num() == 0)
@@ -517,7 +509,7 @@ void FWetRenderStage::ApplyWetnessToMaterial(FWetRenderStageArgs& Receiver)
         }
     }
 
-    Receiver.SimulationState->DirtyWetVertexIndices.Reset();
+    Receiver.SimulationState->ClearDirtyWetVertexIndices();
 
     FWetVertexColorBuffer::ApplyVertexColorOverride(
         *Receiver.TargetSkeletalMesh,

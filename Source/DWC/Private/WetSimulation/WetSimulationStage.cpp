@@ -132,7 +132,7 @@ float FWetSimulationStage::AbsorbWetnessAtVertex(FWetInputStageArgs& Receiver, c
     if (!FMath::IsNearlyEqual(OldWetness, NewWetness))
     {
         Wetness = NewWetness;
-        Receiver.SimulationState->DirtyWetVertexIndices.Add(VertexIndex);
+        Receiver.SimulationState->MarkWetVertexDirty(VertexIndex);
         bDirty = true;
     }
 
@@ -195,7 +195,7 @@ float FWetSimulationStage::AbsorbWetnessAtVertex(FWetSimulationStageArgs& Receiv
     if (!FMath::IsNearlyEqual(OldWetness, NewWetness))
     {
         Wetness = NewWetness;
-        Receiver.SimulationState->DirtyWetVertexIndices.Add(VertexIndex);
+        Receiver.SimulationState->MarkWetVertexDirty(VertexIndex);
         bDirty = true;
     }
 
@@ -292,7 +292,7 @@ void FWetSimulationStage::DryOutWetness(FWetSimulationStageArgs& Receiver, bool&
 
             if (!FMath::IsNearlyEqual(OldWetness, Wetness))
             {
-                Receiver.SimulationState->DirtyWetVertexIndices.Add(VertexIndex);
+                Receiver.SimulationState->MarkWetVertexDirty(VertexIndex);
                 bDirty = true;
             }
         }

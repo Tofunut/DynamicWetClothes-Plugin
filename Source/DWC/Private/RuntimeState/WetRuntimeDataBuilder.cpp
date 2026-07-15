@@ -60,6 +60,7 @@ void FWetRuntimeDataBuilder::InitializeAbsorbedWetnessData(FWetRuntimeDataBuildA
     Receiver.SimulationState->bPendingWetnessQueued.Init(false, VertexCount);
     Receiver.CachedWetVertexColors->Init(FLinearColor::Black, VertexCount);
     Receiver.SimulationState->DirtyWetVertexIndices.Reset();
+    Receiver.SimulationState->bDirtyWetVertexQueued.Init(false, VertexCount);
 
     FWetVertexColorBuffer::ApplyVertexColorOverride(
         *Receiver.TargetSkeletalMesh,
@@ -288,6 +289,8 @@ void FWetRuntimeDataBuilder::EnsureWetnessBufferSize(FWetRuntimeDataBuildArgs& R
         Receiver.SimulationState->CurrentPendingWetnessAmounts.Reset();
         Receiver.SimulationState->CurrentPendingWetnessReadIndex = 0;
         Receiver.SimulationState->bPendingWetnessQueued.Reset();
+        Receiver.SimulationState->DirtyWetVertexIndices.Reset();
+        Receiver.SimulationState->bDirtyWetVertexQueued.Reset();
         return;
     }
 
@@ -333,6 +336,12 @@ void FWetRuntimeDataBuilder::EnsureWetnessBufferSize(FWetRuntimeDataBuildArgs& R
         Receiver.SimulationState->CurrentPendingWetnessAmounts.Reset();
         Receiver.SimulationState->CurrentPendingWetnessReadIndex = 0;
     }
+
+    if (Receiver.SimulationState->bDirtyWetVertexQueued.Num() != VertexCount)
+    {
+        Receiver.SimulationState->DirtyWetVertexIndices.Reset();
+        Receiver.SimulationState->bDirtyWetVertexQueued.Init(false, VertexCount);
+    }
 }
 
 void FWetRuntimeDataBuilder::EnsureWetnessBufferSize(FWetInputStageArgs& Receiver, const int32 VertexCount)
@@ -349,6 +358,8 @@ void FWetRuntimeDataBuilder::EnsureWetnessBufferSize(FWetInputStageArgs& Receive
             Receiver.SimulationState->CurrentPendingWetnessAmounts.Reset();
             Receiver.SimulationState->CurrentPendingWetnessReadIndex = 0;
             Receiver.SimulationState->bPendingWetnessQueued.Reset();
+            Receiver.SimulationState->DirtyWetVertexIndices.Reset();
+            Receiver.SimulationState->bDirtyWetVertexQueued.Reset();
         }
         if (Receiver.RuntimeData)
         {
@@ -385,6 +396,11 @@ void FWetRuntimeDataBuilder::EnsureWetnessBufferSize(FWetInputStageArgs& Receive
             Receiver.SimulationState->CurrentPendingWetnessVertexIndexQueue.Reset();
             Receiver.SimulationState->CurrentPendingWetnessAmounts.Reset();
             Receiver.SimulationState->CurrentPendingWetnessReadIndex = 0;
+        }
+        if (Receiver.SimulationState->bDirtyWetVertexQueued.Num() != VertexCount)
+        {
+            Receiver.SimulationState->DirtyWetVertexIndices.Reset();
+            Receiver.SimulationState->bDirtyWetVertexQueued.Init(false, VertexCount);
         }
     }
 

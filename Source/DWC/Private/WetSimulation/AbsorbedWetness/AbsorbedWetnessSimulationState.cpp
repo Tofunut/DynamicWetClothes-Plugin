@@ -11,6 +11,7 @@ void FAbsorbedWetnessSimulationState::ResetAll()
     CurrentPendingWetnessReadIndex = 0;
     bPendingWetnessQueued.Reset();
     DirtyWetVertexIndices.Reset();
+    bDirtyWetVertexQueued.Reset();
 }
 
 void FAbsorbedWetnessSimulationState::ResetForVertexCount(const int32 VertexCount)
@@ -24,13 +25,48 @@ void FAbsorbedWetnessSimulationState::ResetForVertexCount(const int32 VertexCoun
     CurrentPendingWetnessReadIndex = 0;
     bPendingWetnessQueued.Init(false, VertexCount);
     DirtyWetVertexIndices.Reset();
+    bDirtyWetVertexQueued.Init(false, VertexCount);
+}
+
+void FAbsorbedWetnessSimulationState::MarkWetVertexDirty(const int32 VertexIndex)
+{
+    if (!AbsorbedWetnessPerVertex.IsValidIndex(VertexIndex))
+    {
+        return;
+    }
+
+    if (bDirtyWetVertexQueued.Num() != AbsorbedWetnessPerVertex.Num())
+    {
+        bDirtyWetVertexQueued.Init(false, AbsorbedWetnessPerVertex.Num());
+    }
+
+    if (!bDirtyWetVertexQueued[VertexIndex])
+    {
+        bDirtyWetVertexQueued[VertexIndex] = true;
+        DirtyWetVertexIndices.Add(VertexIndex);
+    }
 }
 
 void FAbsorbedWetnessSimulationState::MarkAllWetVertexColorsDirty()
 {
     DirtyWetVertexIndices.Reset();
+    bDirtyWetVertexQueued.Init(false, AbsorbedWetnessPerVertex.Num());
     for (int32 VertexIndex = 0; VertexIndex < AbsorbedWetnessPerVertex.Num(); ++VertexIndex)
     {
         DirtyWetVertexIndices.Add(VertexIndex);
+        bDirtyWetVertexQueued[VertexIndex] = true;
     }
+}
+
+void FAbsorbedWetnessSimulationState::ClearDirtyWetVertexIndices()
+{
+    for (const int32 VertexIndex : DirtyWetVertexIndices)
+    {
+        if (bDirtyWetVertexQueued.IsValidIndex(VertexIndex))
+        {
+            bDirtyWetVertexQueued[VertexIndex] = false;
+        }
+    }
+
+    DirtyWetVertexIndices.Reset();
 }

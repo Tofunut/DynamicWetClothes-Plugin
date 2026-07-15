@@ -39,12 +39,12 @@ class FWetClothingAssetEditor : public FAssetEditorToolkit
     TSharedRef<SDockTab> SpawnMainTab(const FSpawnTabArgs& Args);
     void                 FillAssetToolbar(FToolBarBuilder& ToolbarBuilder);
     TSharedRef<SWidget>  BuildBakeMapsMenu();
-    FReply               HandleBakeAllMapsClicked();
     void                 HandleGenerateSurfaceWaterUVClicked();
-    FReply               HandleBakeWetnessProfileMapsClicked();
+    FReply               HandleBakeAllWetnessProfileMapsClicked();
+    FReply               HandleBakeSelectedWetnessProfileMapClicked();
     FReply               HandleBakeTransparencyRevealMapsClicked();
-    FReply               HandleBakeWrinkleNormalMapClicked();
-    FReply               HandleBakeWrinkleMaskClicked();
+    FReply               HandleBakeAllWrinkleNormalMapsClicked();
+    FReply               HandleBakeSelectedWrinkleNormalMapClicked();
     TSharedRef<SWidget>  BuildModeToolbarWidget();
     TSharedRef<SWidget>  BuildModeToggleButton(EWetClothingEditorMode Mode, FName IconName, const FText& ToolTipText);
     void                 SetEditorMode(EWetClothingEditorMode NewMode);

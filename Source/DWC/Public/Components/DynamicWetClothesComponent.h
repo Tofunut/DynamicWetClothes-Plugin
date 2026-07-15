@@ -221,8 +221,38 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Wrinkle")
     FName WrinkleWetnessMaxParameterName = TEXT("DWC_WrinkleWetnessMax");
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Transparency", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float TransparencyWetnessMin = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Transparency", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float TransparencyWetnessMax = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Transparency")
+    FName TransparencyMapParameterName = TEXT("DWC_TransparencyMap");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Transparency")
+    FName UseTransparencyMapParameterName = TEXT("DWC_UseTransparencyMap");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Transparency")
+    FName TransparencyStrengthParameterName = TEXT("DWC_TransparencyStrength");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Transparency")
+    FName TransparencyWetnessMinParameterName = TEXT("DWC_TransparencyWetnessMin");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Transparency")
+    FName TransparencyWetnessMaxParameterName = TEXT("DWC_TransparencyWetnessMax");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Transparency")
+    FName TransparencyUVChannelParameterName = TEXT("DWC_TransparencyUVChannel");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Transparency")
+    FName WrinkleSuppressionStrengthParameterName = TEXT("DWC_WrinkleSuppressionStrength");
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Debug")
     bool bLogWrinkleRuntimeBindings = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Debug")
+    bool bLogTransparencyRuntimeBindings = false;
 
   private:
     TUniquePtr<FDWCTaskQueue> AsyncTaskQueue;

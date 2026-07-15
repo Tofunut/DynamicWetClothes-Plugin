@@ -3010,32 +3010,6 @@ FReply SWetClothingPartEditorPanel::HandleSaveAssetClicked()
     return FReply::Handled();
 }
 
-FReply SWetClothingPartEditorPanel::HandleBakeAllMapsClicked()
-{
-    HandleBakeAllWetnessProfileMapsClicked();
-    if (UWetClothingAsset* Asset = WetClothingAsset.Get())
-    {
-        FString Error;
-        if (!FWetClothingSurfaceWaterFlowMapBaker::Bake(Asset, Error))
-        {
-            FMessageDialog::Open(EAppMsgType::Ok, FText::FromString(FString::Printf(TEXT("Surface Water Flow Map bake failed: %s"), *Error)));
-        }
-    }
-    return FReply::Handled();
-}
-
-FReply SWetClothingPartEditorPanel::HandleBakeWrinkleNormalMapClicked()
-{
-    FMessageDialog::Open(EAppMsgType::Ok, LOCTEXT("BakeWrinkleNormalMapPending", "Wrinkle Normal Map baking is not implemented yet."));
-    return FReply::Handled();
-}
-
-FReply SWetClothingPartEditorPanel::HandleBakeWrinkleMaskClicked()
-{
-    FMessageDialog::Open(EAppMsgType::Ok, LOCTEXT("BakeWrinkleMaskPending", "Wrinkle Mask baking is not implemented yet."));
-    return FReply::Handled();
-}
-
 bool SWetClothingPartEditorPanel::IsWetnessProfileMapBakeSourceValid() const
 {
     return WetClothingAsset.IsValid() && WetClothingAsset->TargetMesh != nullptr && ResolveSelectedMaterialTexture() != nullptr && SelectedUVChannelItem.IsValid();
@@ -3048,27 +3022,44 @@ bool SWetClothingPartEditorPanel::CanBakeAnyWetnessProfileMap() const
     return WetClothingAsset.IsValid() && WetClothingAsset->TargetMesh != nullptr && SelectedUVChannelItem.IsValid() && SourceTextures.Num() > 0;
 }
 
-FReply SWetClothingPartEditorPanel::HandleBakeSelectedWetnessProfileMapClicked()
+bool SWetClothingPartEditorPanel::BakeSelectedWetnessProfileMap(FString& OutSummary, bool* OutHadWarnings)
 {
-    UWetClothingAsset* WetClothingAssetPtr = WetClothingAsset.Get();
-    UTexture*          SourceTexture = ResolveSelectedMaterialTexture();
-    if (WetClothingAssetPtr == nullptr || SourceTexture == nullptr)
+    if (OutHadWarnings != nullptr)
     {
-        return FReply::Handled();
+        *OutHadWarnings = false;
+    }
+
+    UWetClothingAsset* WetClothingAssetPtr = WetClothingAsset.Get();
+    if (WetClothingAssetPtr == nullptr || WetClothingAssetPtr->TargetMesh == nullptr)
+    {
+        OutSummary = TEXT("Assign a TargetMesh before baking a wetness profile map.");
+        return false;
+    }
+
+    if (SelectedMaterialSlotIndex == INDEX_NONE)
+    {
+        OutSummary = TEXT("Select a material slot before baking its WetPart map.");
+        return false;
+    }
+
+    UTexture* SourceTexture = ResolveSelectedMaterialTexture();
+    if (SourceTexture == nullptr || !SelectedUVChannelItem.IsValid())
+    {
+        OutSummary = TEXT("Select a source texture and UV channel before baking the selected material slot.");
+        return false;
     }
 
     const int32 UVChannelIndex = GetSelectedUVChannelIndex();
-
     TArray<int32> MaterialSlotIndices;
     CollectMaterialSlotsForWetnessProfileMap(SourceTexture, UVChannelIndex, MaterialSlotIndices);
-    if (MaterialSlotIndices.Num() == 0)
+    if (!MaterialSlotIndices.Contains(SelectedMaterialSlotIndex))
     {
-        FMessageDialog::Open(EAppMsgType::Ok, LOCTEXT("NoWetnessProfileMapBakeSlots", "No material slots were found for the selected texture."));
-        return FReply::Handled();
+        OutSummary = TEXT("The selected material slot is not assigned to the selected source texture and UV channel.");
+        return false;
     }
 
     const FWetClothingBakedWetnessProfileMap* ExistingWetnessProfileMap = FindBakedWetnessProfileMap(SourceTexture, UVChannelIndex);
-    FWetClothingWetnessProfileMapBakeSettings      Settings;
+    FWetClothingWetnessProfileMapBakeSettings Settings;
     if (ExistingWetnessProfileMap != nullptr)
     {
         Settings.Resolution = ExistingWetnessProfileMap->Resolution;
@@ -3076,7 +3067,7 @@ FReply SWetClothingPartEditorPanel::HandleBakeSelectedWetnessProfileMapClicked()
     }
 
     FWetClothingWetnessProfileMapBakeResult Result;
-    FString                                 ErrorMessage;
+    FString ErrorMessage;
     if (!FWetClothingWetnessProfileMapBaker::BakeWetnessProfileMap0(
             WetClothingAssetPtr,
             SourceTexture,
@@ -3086,21 +3077,30 @@ FReply SWetClothingPartEditorPanel::HandleBakeSelectedWetnessProfileMapClicked()
             Result,
             ErrorMessage))
     {
-        FMessageDialog::Open(EAppMsgType::Ok, FText::FromString(ErrorMessage));
-        return FReply::Handled();
+        OutSummary = ErrorMessage;
+        return false;
     }
-
-    UE_LOG(
-        LogTemp,
-        Display,
-        TEXT("DWC: Baked Wetness Profile Map 0 '%s' for texture '%s' (%d painted pixels)."),
-        *GetNameSafe(Result.WetnessProfileMap0.Get()),
-        *GetNameSafe(SourceTexture),
-        Result.PaintedPixelCount);
 
     if (DetailsView.IsValid())
     {
         DetailsView->ForceRefresh();
+    }
+
+    OutSummary = FString::Printf(
+        TEXT("WetPart map baked for slot %d.\n\nSource Texture: %s\nUV Channel: %d\nWetness Profile Map: %s"),
+        SelectedMaterialSlotIndex,
+        *GetNameSafe(SourceTexture),
+        UVChannelIndex,
+        *GetNameSafe(Result.WetnessProfileMap0.Get()));
+    return true;
+}
+
+FReply SWetClothingPartEditorPanel::HandleBakeSelectedWetnessProfileMapClicked()
+{
+    FString Summary;
+    if (!BakeSelectedWetnessProfileMap(Summary))
+    {
+        FMessageDialog::Open(EAppMsgType::Ok, FText::FromString(Summary));
     }
 
     return FReply::Handled();
@@ -3380,11 +3380,20 @@ bool SWetClothingPartEditorPanel::BakeWetnessProfileMapsAndUpdateMaterials(FStri
         return false;
     }
 
+    FString SharedFunctionError;
+    if (!FWetClothingMaterialSetup::ValidateSharedApplyWetnessFunction(SharedFunctionError))
+    {
+        OutSummary = TEXT("The fixed MF_DWC_ApplyWetness asset is not compatible with this DWCEditor build.\n\n") + SharedFunctionError;
+        OutSummary += TEXT("\n\nRun 'DWC.RepairApplyWetnessFunction' explicitly, then retry Material Setup.");
+        return false;
+    }
+
     TArray<FString> CreatedOrUpdatedMaterials;
     TArray<FString> BakedWetnessProfileMaps;
     TArray<FString> RemovedStaleWetnessProfileMaps;
     TArray<FString> Skipped;
     TArray<FString> Warnings;
+    TMap<FString, FWetClothingMaterialSetupResult> MaterialSetupResultsBySource;
 
     WetClothingAssetPtr->Modify();
     const int32 RemovedOverrideCount = WetClothingAssetPtr->PartData.GeneratedWetMaterialOverrides.RemoveAll(
@@ -3420,6 +3429,35 @@ bool SWetClothingPartEditorPanel::BakeWetnessProfileMapsAndUpdateMaterials(FStri
                 return MaterialOverride.MaterialSlotIndex == MaterialSlotIndex;
             });
 
+        const FString MaterialSetupKey = SourceMaterial->GetPathName();
+        if (const FWetClothingMaterialSetupResult* CachedResult = MaterialSetupResultsBySource.Find(MaterialSetupKey))
+        {
+            if (!CachedResult->bSucceeded || CachedResult->ConfiguredMaterial == nullptr)
+            {
+                Warnings.Add(FString::Printf(
+                    TEXT("Slot %d shares source material '%s', whose DWC material setup failed: %s"),
+                    MaterialSlotIndex,
+                    *GetNameSafe(SourceMaterial),
+                    *CachedResult->Message));
+                continue;
+            }
+
+            WetClothingAssetPtr->Modify();
+            if (ExistingOverride == nullptr)
+            {
+                ExistingOverride = &WetClothingAssetPtr->PartData.GeneratedWetMaterialOverrides.AddDefaulted_GetRef();
+                ExistingOverride->MaterialSlotIndex = MaterialSlotIndex;
+            }
+            ExistingOverride->SourceMaterial = SourceMaterial;
+            ExistingOverride->WetMaterial = CachedResult->ConfiguredMaterial;
+            WetClothingAssetPtr->MarkPackageDirty();
+            Skipped.Add(FString::Printf(
+                TEXT("Slot %d shares '%s'; reused the material setup result from an earlier slot."),
+                MaterialSlotIndex,
+                *GetNameSafe(CachedResult->ConfiguredMaterial)));
+            continue;
+        }
+
         const bool bRepairExistingOverride = ExistingOverride != nullptr &&
             ExistingOverride->SourceMaterial == SourceMaterial &&
             ExistingOverride->WetMaterial != nullptr &&
@@ -3431,10 +3469,12 @@ bool SWetClothingPartEditorPanel::BakeWetnessProfileMapsAndUpdateMaterials(FStri
         {
             SurfaceWaterUVChannelIndex = SlotData->UVChannelIndex;
         }
+
         FWetClothingMaterialSetupResult Result = FWetClothingMaterialSetup::DuplicateAndApplyToMaterialInterface(
             bRepairExistingOverride ? ExistingOverride->WetMaterial.Get() : SourceMaterial,
             0,
             SurfaceWaterUVChannelIndex);
+        MaterialSetupResultsBySource.Add(MaterialSetupKey, Result);
         if (!Result.bSucceeded || Result.ConfiguredMaterial == nullptr)
         {
             Warnings.Add(FString::Printf(TEXT("Slot %d material setup failed: %s"), MaterialSlotIndex, *Result.Message));

@@ -5,6 +5,7 @@
 #include "WetWrinkleHitData.h"
 
 class FAdvancedPreviewScene;
+class FPrimitiveDrawInterface;
 class FSceneView;
 class HHitProxy;
 class SWetWrinkleViewport;
@@ -22,6 +23,7 @@ class FWetWrinkleViewportClient : public FEditorViewportClient
     virtual void MouseMove(FViewport* InViewport, int32 X, int32 Y) override;
     virtual void CapturedMouseMove(FViewport* InViewport, int32 X, int32 Y) override;
     virtual void ProcessClick(FSceneView& View, HHitProxy* HitProxy, FKey Key, EInputEvent Event, uint32 HitX, uint32 HitY) override;
+    virtual void Draw(const FSceneView* View, FPrimitiveDrawInterface* PDI) override;
     void FocusOnPreviewMesh(const USkeletalMeshComponent* InPreviewMeshComponent, bool bInstant = false);
     void RequestFocusOnPreviewMeshNextTick(const USkeletalMeshComponent* InPreviewMeshComponent);
     void SetPreviewMeshComponent(const USkeletalMeshComponent* InPreviewMeshComponent);

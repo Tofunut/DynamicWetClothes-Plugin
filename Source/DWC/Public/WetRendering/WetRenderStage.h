@@ -50,10 +50,19 @@ struct DWC_API FWetRenderStageArgs
     FName WrinkleStrengthParameterName = DWCWetMaterialParameters::WrinkleStrength();
     FName WrinkleWetnessMinParameterName = DWCWetMaterialParameters::WrinkleWetnessMin();
     FName WrinkleWetnessMaxParameterName = DWCWetMaterialParameters::WrinkleWetnessMax();
+    FName TransparencyMapParameterName = DWCWetMaterialParameters::TransparencyMap();
+    FName UseTransparencyMapParameterName = DWCWetMaterialParameters::UseTransparencyMap();
+    FName TransparencyStrengthParameterName = DWCWetMaterialParameters::TransparencyStrength();
+    FName TransparencyWetnessMinParameterName = DWCWetMaterialParameters::TransparencyWetnessMin();
+    FName TransparencyWetnessMaxParameterName = DWCWetMaterialParameters::TransparencyWetnessMax();
+    FName TransparencyUVChannelParameterName = DWCWetMaterialParameters::TransparencyUVChannel();
+    FName WrinkleSuppressionStrengthParameterName = DWCWetMaterialParameters::WrinkleSuppressionStrength();
 
     float WrinkleStrength = DWCWetMaterialParameters::DefaultWrinkleStrength();
     float WrinkleWetnessMin = DWCWetMaterialParameters::DefaultWrinkleWetnessMin();
     float WrinkleWetnessMax = DWCWetMaterialParameters::DefaultWrinkleWetnessMax();
+    float TransparencyWetnessMin = DWCWetMaterialParameters::DefaultTransparencyWetnessMin();
+    float TransparencyWetnessMax = DWCWetMaterialParameters::DefaultTransparencyWetnessMax();
 
     FName UnderColorParameterName = TEXT("DWC_UnderColor");
     FName UnderColorBlendStrengthParameterName = TEXT("DWC_UnderColorBlendStrength");
@@ -87,6 +96,7 @@ struct DWC_API FWetRenderStageArgs
     FLinearColor UnderColor = FLinearColor(0.8f, 0.55f, 0.42f, 1.0f);
     float        UnderColorBlendStrength = 0.3f;
     bool         bLogWrinkleRuntimeBindings = false;
+    bool         bLogTransparencyRuntimeBindings = false;
 
     int32 LODIndex = 0;
 };
@@ -101,6 +111,7 @@ class DWC_API FWetRenderStage
     void         ApplyWetMaterialParameters(FWetRenderStageArgs& Args);
     void         ApplyWetnessProfileMapParameters(FWetRenderStageArgs& Args);
     void         ApplyWetWrinkleNormalMapParameters(FWetRenderStageArgs& Args);
+    void         ApplyWetTransparencyMapParameters(FWetRenderStageArgs& Args);
     void         ApplyWetnessToMaterial(FWetRenderStageArgs& Args);
     FLinearColor MakeWetVertexColor(const FWetRenderStageArgs& Args, int32 VertexIndex, float Wetness) const;
 

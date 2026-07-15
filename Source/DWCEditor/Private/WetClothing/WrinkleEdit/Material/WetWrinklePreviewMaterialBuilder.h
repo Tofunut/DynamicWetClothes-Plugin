@@ -13,6 +13,8 @@ namespace WetWrinklePreviewMaterialParameters
     extern const FName AccumulatedNormal;
     extern const FName AccumulatedEnabled;
     extern const FName AccumulatedStrength;
+    extern const FName TransientRidgeNormal;
+    extern const FName TransientRidgeEnabled;
     extern const FName HoverNormal;
     extern const FName HoverEnabled;
     extern const FName HoverCenterUV;

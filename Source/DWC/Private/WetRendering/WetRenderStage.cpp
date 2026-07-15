@@ -40,7 +40,9 @@ namespace
     }
 } // namespace
 #include "Runtime/Engine/Public/Materials/MaterialInstanceDynamic.h"
+#include "Materials/MaterialInterface.h"
 #include "DataAssets/WetClothingAsset.h"
+#include "DataAssets/WetClothingTransparencyData.h"
 #include "DataAssets/WetClothingWrinkleData.h"
 #include "WetSimulation/SurfaceWater/SurfaceWaterSimulationState.h"
 #include "Utility/DWCLog.h"
@@ -63,6 +65,40 @@ namespace
         return State != nullptr && State->bIsWettableSlot;
     }
 
+    bool HasTextureParameter(const UMaterialInterface* Material, const FName ParameterName)
+    {
+        if (Material == nullptr || ParameterName.IsNone())
+        {
+            return false;
+        }
+
+        TArray<FMaterialParameterInfo> ParameterInfos;
+        TArray<FGuid> ParameterIds;
+        Material->GetAllTextureParameterInfo(ParameterInfos, ParameterIds);
+        return ParameterInfos.ContainsByPredicate(
+            [ParameterName](const FMaterialParameterInfo& ParameterInfo)
+            {
+                return ParameterInfo.Name == ParameterName;
+            });
+    }
+
+    bool HasScalarParameter(const UMaterialInterface* Material, const FName ParameterName)
+    {
+        if (Material == nullptr || ParameterName.IsNone())
+        {
+            return false;
+        }
+
+        TArray<FMaterialParameterInfo> ParameterInfos;
+        TArray<FGuid> ParameterIds;
+        Material->GetAllScalarParameterInfo(ParameterInfos, ParameterIds);
+        return ParameterInfos.ContainsByPredicate(
+            [ParameterName](const FMaterialParameterInfo& ParameterInfo)
+            {
+                return ParameterInfo.Name == ParameterName;
+            });
+    }
+
     const TCHAR* DescribeWrinkleMapMatchType(
         const FWetWrinkleBakedMapSet& BakedMap,
         const int32                   PreferredUVChannelIndex,
@@ -83,6 +119,21 @@ namespace
         }
 
         return TEXT("SlotFallback");
+    }
+
+    const TCHAR* DescribeTransparencyMapMatchType(const EDWCTransparencyBakedMapMatch Match)
+    {
+        switch (Match)
+        {
+        case EDWCTransparencyBakedMapMatch::ExactSlotUVLOD:
+            return TEXT("ExactSlotUvLod");
+        case EDWCTransparencyBakedMapMatch::SlotUVFallback:
+            return TEXT("SlotUvFallbackLod");
+        case EDWCTransparencyBakedMapMatch::SlotFallback:
+            return TEXT("SlotFallback");
+        default:
+            return TEXT("None");
+        }
     }
 }
 
@@ -260,6 +311,7 @@ void FWetRenderStage::ApplyWetMaterialParameters(FWetRenderStageArgs& Receiver)
 
     ApplyWetnessProfileMapParameters(Receiver);
     ApplyWetWrinkleNormalMapParameters(Receiver);
+    ApplyWetTransparencyMapParameters(Receiver);
 }
 
 void FWetRenderStage::ApplyWetnessProfileMapParameters(FWetRenderStageArgs& Receiver)
@@ -371,7 +423,10 @@ void FWetRenderStage::ApplyWetWrinkleNormalMapParameters(FWetRenderStageArgs& Re
 
     if (Receiver.WetClothingAsset != nullptr)
     {
-        const int32 PreferredUVChannelIndex = 0;
+        const int32 PreferredUVChannelIndex =
+            Receiver.WetClothingAsset->WrinkleData.WrinkleUVChannelIndex != INDEX_NONE
+                ? Receiver.WetClothingAsset->WrinkleData.WrinkleUVChannelIndex
+                : 0;
         for (int32 MaterialSlotIndex = 0; MaterialSlotIndex < Receiver.WetMaterialInstances->Num(); ++MaterialSlotIndex)
         {
             if (!Receiver.WetMaterialInstances->IsValidIndex(MaterialSlotIndex) ||
@@ -421,10 +476,18 @@ void FWetRenderStage::ApplyWetWrinkleNormalMapParameters(FWetRenderStageArgs& Re
 
             if (Receiver.bLogWrinkleRuntimeBindings)
             {
+                const UMaterialInterface* CurrentMaterial =
+                    Receiver.TargetSkeletalMesh != nullptr ? Receiver.TargetSkeletalMesh->GetMaterial(MaterialSlotIndex) : nullptr;
+                const bool bHasWrinkleTextureParameter = HasTextureParameter(CurrentMaterial, Receiver.WrinkleNormalMapParameterName);
+                const bool bHasUseWrinkleParameter = HasScalarParameter(CurrentMaterial, Receiver.UseWrinkleNormalMapParameterName);
+                const bool bHasWrinkleStrengthParameter = HasScalarParameter(CurrentMaterial, Receiver.WrinkleStrengthParameterName);
+                const bool bHasWrinkleWetnessMinParameter = HasScalarParameter(CurrentMaterial, Receiver.WrinkleWetnessMinParameterName);
+                const bool bHasWrinkleWetnessMaxParameter = HasScalarParameter(CurrentMaterial, Receiver.WrinkleWetnessMaxParameterName);
+
                 UE_LOG(
                     LogDWC,
                     Log,
-                    TEXT("DWC wrinkle runtime: mesh '%s' slot %d assigned baked wrinkle map '%s' (match=%s, bakedUV=%d, bakedLOD=%d, strength=%.3f, wetnessRange=[%.3f, %.3f], material='%s')."),
+                    TEXT("DWC wrinkle runtime: mesh '%s' slot %d assigned baked wrinkle map '%s' (match=%s, bakedUV=%d, bakedLOD=%d, strength=%.3f, wetnessRange=[%.3f, %.3f], material='%s', params={texture:%s,use:%s,strength:%s,min:%s,max:%s})."),
                     *GetNameSafe(Receiver.TargetSkeletalMesh),
                     MaterialSlotIndex,
                     *GetNameSafe(BakedWrinkleMap->BakedWrinkleNormalMap),
@@ -434,7 +497,12 @@ void FWetRenderStage::ApplyWetWrinkleNormalMapParameters(FWetRenderStageArgs& Re
                     SafeWrinkleStrength,
                     SafeWrinkleWetnessMin,
                     SafeWrinkleWetnessMax,
-                    *GetNameSafe(Receiver.TargetSkeletalMesh != nullptr ? Receiver.TargetSkeletalMesh->GetMaterial(MaterialSlotIndex) : nullptr));
+                    *GetNameSafe(CurrentMaterial),
+                    bHasWrinkleTextureParameter ? TEXT("true") : TEXT("false"),
+                    bHasUseWrinkleParameter ? TEXT("true") : TEXT("false"),
+                    bHasWrinkleStrengthParameter ? TEXT("true") : TEXT("false"),
+                    bHasWrinkleWetnessMinParameter ? TEXT("true") : TEXT("false"),
+                    bHasWrinkleWetnessMaxParameter ? TEXT("true") : TEXT("false"));
             }
 
             bWrinkleNormalMapAssigned[MaterialSlotIndex] = true;
@@ -500,7 +568,9 @@ void FWetRenderStage::ApplyWetWrinkleNormalMapParameters(FWetRenderStageArgs& Re
                     MaterialSlotIndex,
                     bHasAnyBakedEntryForSlot ? TEXT("true") : TEXT("false"),
                     bHasAnyUsableNormalForSlot ? TEXT("true") : TEXT("false"),
-                    Receiver.WetClothingAsset != nullptr ? 0 : INDEX_NONE,
+                    Receiver.WetClothingAsset != nullptr && Receiver.WetClothingAsset->WrinkleData.WrinkleUVChannelIndex != INDEX_NONE
+                        ? Receiver.WetClothingAsset->WrinkleData.WrinkleUVChannelIndex
+                        : (Receiver.WetClothingAsset != nullptr ? 0 : INDEX_NONE),
                     *GetNameSafe(Receiver.TargetSkeletalMesh != nullptr ? Receiver.TargetSkeletalMesh->GetMaterial(MaterialSlotIndex) : nullptr));
             }
 
@@ -520,6 +590,191 @@ void FWetRenderStage::ApplyWetWrinkleNormalMapParameters(FWetRenderStageArgs& Re
         if (!Receiver.WrinkleWetnessMaxParameterName.IsNone())
         {
             MID->SetScalarParameterValue(Receiver.WrinkleWetnessMaxParameterName, SafeWrinkleWetnessMax);
+        }
+    }
+}
+
+void FWetRenderStage::ApplyWetTransparencyMapParameters(FWetRenderStageArgs& Receiver)
+{
+    if (Receiver.WetMaterialInstances == nullptr)
+    {
+        return;
+    }
+
+    if (Receiver.TransparencyMapParameterName.IsNone() &&
+        Receiver.UseTransparencyMapParameterName.IsNone() &&
+        Receiver.TransparencyStrengthParameterName.IsNone() &&
+        Receiver.TransparencyWetnessMinParameterName.IsNone() &&
+        Receiver.TransparencyWetnessMaxParameterName.IsNone() &&
+        Receiver.TransparencyUVChannelParameterName.IsNone() &&
+        Receiver.WrinkleSuppressionStrengthParameterName.IsNone())
+    {
+        return;
+    }
+
+    const float SafeWetnessMin = FMath::Clamp(Receiver.TransparencyWetnessMin, 0.0f, 1.0f);
+    const float SafeWetnessMax = FMath::Max(SafeWetnessMin, FMath::Clamp(Receiver.TransparencyWetnessMax, 0.0f, 1.0f));
+    const float TransparencyStrength = Receiver.WetClothingAsset != nullptr
+                                           ? FMath::Max(0.0f, Receiver.WetClothingAsset->TransparencyData.TransparencyPreviewStrength)
+                                           : 0.0f;
+    const float WrinkleSuppressionStrength = Receiver.WetClothingAsset != nullptr
+                                                 ? FMath::Max(0.0f, Receiver.WetClothingAsset->TransparencyData.WrinkleSuppressionStrength)
+                                                 : 0.0f;
+
+    TArray<bool> bTransparencyMapAssigned;
+    bTransparencyMapAssigned.Init(false, Receiver.WetMaterialInstances->Num());
+
+    if (Receiver.WetClothingAsset != nullptr)
+    {
+        for (int32 MaterialSlotIndex = 0; MaterialSlotIndex < Receiver.WetMaterialInstances->Num(); ++MaterialSlotIndex)
+        {
+            if (!IsMaterialSlotWettableForRender(Receiver.WetClothingAsset, MaterialSlotIndex))
+            {
+                continue;
+            }
+
+            const FWetClothingTransparencyLayerData* Layer =
+                Receiver.WetClothingAsset->TransparencyData.TransparencyLayers.FindByPredicate(
+                    [MaterialSlotIndex](const FWetClothingTransparencyLayerData& Candidate)
+                    {
+                        return Candidate.TargetSurface.OuterMaterialSlotIndex == MaterialSlotIndex;
+                    });
+            if (Layer == nullptr)
+            {
+                continue;
+            }
+
+            EDWCTransparencyBakedMapMatch Match = EDWCTransparencyBakedMapMatch::None;
+            const FWetClothingBakedTransparencyMap* BakedMap =
+                Receiver.WetClothingAsset->TransparencyData.FindBakedTransparencyMap(
+                    MaterialSlotIndex,
+                    Layer->TargetSurface.OuterUVChannel,
+                    Receiver.LODIndex,
+                    &Match);
+            if (BakedMap == nullptr || BakedMap->TransparencyMap == nullptr)
+            {
+                continue;
+            }
+
+            if (BakedMap->UVChannelIndex < 0 || BakedMap->UVChannelIndex > 3)
+            {
+                if (Receiver.bLogTransparencyRuntimeBindings)
+                {
+                    UE_LOG(
+                        LogDWC,
+                        Warning,
+                        TEXT("DWC transparency runtime: mesh '%s' slot %d skipped map '%s' because baked UV channel %d is outside the supported runtime range 0-3."),
+                        *GetNameSafe(Receiver.TargetSkeletalMesh),
+                        MaterialSlotIndex,
+                        *GetNameSafe(BakedMap->TransparencyMap),
+                        BakedMap->UVChannelIndex);
+                }
+                continue;
+            }
+
+            UMaterialInstanceDynamic* MID = (*Receiver.WetMaterialInstances)[MaterialSlotIndex];
+            if (MID == nullptr)
+            {
+                continue;
+            }
+
+            if (!Receiver.TransparencyMapParameterName.IsNone())
+            {
+                MID->SetTextureParameterValue(Receiver.TransparencyMapParameterName, BakedMap->TransparencyMap);
+            }
+            if (!Receiver.UseTransparencyMapParameterName.IsNone())
+            {
+                MID->SetScalarParameterValue(Receiver.UseTransparencyMapParameterName, 1.0f);
+            }
+            if (!Receiver.TransparencyStrengthParameterName.IsNone())
+            {
+                MID->SetScalarParameterValue(Receiver.TransparencyStrengthParameterName, TransparencyStrength);
+            }
+            if (!Receiver.TransparencyWetnessMinParameterName.IsNone())
+            {
+                MID->SetScalarParameterValue(Receiver.TransparencyWetnessMinParameterName, SafeWetnessMin);
+            }
+            if (!Receiver.TransparencyWetnessMaxParameterName.IsNone())
+            {
+                MID->SetScalarParameterValue(Receiver.TransparencyWetnessMaxParameterName, SafeWetnessMax);
+            }
+            if (!Receiver.TransparencyUVChannelParameterName.IsNone())
+            {
+                MID->SetScalarParameterValue(Receiver.TransparencyUVChannelParameterName, static_cast<float>(BakedMap->UVChannelIndex));
+            }
+            if (!Receiver.WrinkleSuppressionStrengthParameterName.IsNone())
+            {
+                MID->SetScalarParameterValue(Receiver.WrinkleSuppressionStrengthParameterName, WrinkleSuppressionStrength);
+            }
+
+            if (Receiver.bLogTransparencyRuntimeBindings)
+            {
+                const UMaterialInterface* Material = Receiver.TargetSkeletalMesh != nullptr
+                                                         ? Receiver.TargetSkeletalMesh->GetMaterial(MaterialSlotIndex)
+                                                         : nullptr;
+                UE_LOG(
+                    LogDWC,
+                    Log,
+                    TEXT("DWC transparency runtime: mesh '%s' slot %d assigned packed map '%s' (match=%s, bakedUV=%d, bakedLOD=%d, strength=%.3f, wetnessRange=[%.3f, %.3f], wrinkleSuppression=%.3f, material='%s', params={texture:%s,use:%s,strength:%s,min:%s,max:%s,uv:%s,suppression:%s})."),
+                    *GetNameSafe(Receiver.TargetSkeletalMesh),
+                    MaterialSlotIndex,
+                    *GetNameSafe(BakedMap->TransparencyMap),
+                    DescribeTransparencyMapMatchType(Match),
+                    BakedMap->UVChannelIndex,
+                    BakedMap->LODIndex,
+                    TransparencyStrength,
+                    SafeWetnessMin,
+                    SafeWetnessMax,
+                    WrinkleSuppressionStrength,
+                    *GetNameSafe(Material),
+                    HasTextureParameter(Material, Receiver.TransparencyMapParameterName) ? TEXT("true") : TEXT("false"),
+                    HasScalarParameter(Material, Receiver.UseTransparencyMapParameterName) ? TEXT("true") : TEXT("false"),
+                    HasScalarParameter(Material, Receiver.TransparencyStrengthParameterName) ? TEXT("true") : TEXT("false"),
+                    HasScalarParameter(Material, Receiver.TransparencyWetnessMinParameterName) ? TEXT("true") : TEXT("false"),
+                    HasScalarParameter(Material, Receiver.TransparencyWetnessMaxParameterName) ? TEXT("true") : TEXT("false"),
+                    HasScalarParameter(Material, Receiver.TransparencyUVChannelParameterName) ? TEXT("true") : TEXT("false"),
+                    HasScalarParameter(Material, Receiver.WrinkleSuppressionStrengthParameterName) ? TEXT("true") : TEXT("false"));
+            }
+
+            bTransparencyMapAssigned[MaterialSlotIndex] = true;
+        }
+    }
+
+    for (int32 MaterialSlotIndex = 0; MaterialSlotIndex < Receiver.WetMaterialInstances->Num(); ++MaterialSlotIndex)
+    {
+        UMaterialInstanceDynamic* MID = (*Receiver.WetMaterialInstances)[MaterialSlotIndex];
+        if (MID == nullptr || bTransparencyMapAssigned[MaterialSlotIndex])
+        {
+            continue;
+        }
+
+        if (!Receiver.TransparencyMapParameterName.IsNone())
+        {
+            MID->SetTextureParameterValue(Receiver.TransparencyMapParameterName, nullptr);
+        }
+        if (!Receiver.UseTransparencyMapParameterName.IsNone())
+        {
+            MID->SetScalarParameterValue(Receiver.UseTransparencyMapParameterName, 0.0f);
+        }
+        if (!Receiver.TransparencyStrengthParameterName.IsNone())
+        {
+            MID->SetScalarParameterValue(Receiver.TransparencyStrengthParameterName, 0.0f);
+        }
+        if (!Receiver.TransparencyWetnessMinParameterName.IsNone())
+        {
+            MID->SetScalarParameterValue(Receiver.TransparencyWetnessMinParameterName, SafeWetnessMin);
+        }
+        if (!Receiver.TransparencyWetnessMaxParameterName.IsNone())
+        {
+            MID->SetScalarParameterValue(Receiver.TransparencyWetnessMaxParameterName, SafeWetnessMax);
+        }
+        if (!Receiver.TransparencyUVChannelParameterName.IsNone())
+        {
+            MID->SetScalarParameterValue(Receiver.TransparencyUVChannelParameterName, 0.0f);
+        }
+        if (!Receiver.WrinkleSuppressionStrengthParameterName.IsNone())
+        {
+            MID->SetScalarParameterValue(Receiver.WrinkleSuppressionStrengthParameterName, 0.0f);
         }
     }
 }

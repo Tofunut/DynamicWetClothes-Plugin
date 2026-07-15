@@ -5,6 +5,7 @@
 #include "WetClothing/PartEdit/Editor/SWetClothingPartEditorPanel.h"
 #include "WetClothing/TransparencyBake/Editor/SWetClothingTransparencyBakePanel.h"
 #include "WetClothing/WrinkleEdit/Editor/SWetWrinkleEditorPanel.h"
+#include "Misc/MessageDialog.h"
 #include "Widgets/Layout/SWidgetSwitcher.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/SBoxPanel.h"
@@ -135,6 +136,21 @@ bool SWetClothingAssetEditorPanel::BakeWetVisualAssets(FString& OutSummary, bool
     return true;
 }
 
+bool SWetClothingAssetEditorPanel::BakeSelectedWetnessProfileMap(FString& OutSummary, bool* OutHadWarnings)
+{
+    if (!PartEditorPanel.IsValid())
+    {
+        OutSummary = TEXT("WetPart editor is not available.");
+        if (OutHadWarnings != nullptr)
+        {
+            *OutHadWarnings = false;
+        }
+        return false;
+    }
+
+    return PartEditorPanel->BakeSelectedWetnessProfileMap(OutSummary, OutHadWarnings);
+}
+
 bool SWetClothingAssetEditorPanel::BakePendingVisualAssets(FString& OutSummary, bool* OutHadWarnings)
 {
     bool bHadWarnings = false;
@@ -200,6 +216,28 @@ bool SWetClothingAssetEditorPanel::BakeTransparencyRevealAssets(FString& OutSumm
 bool SWetClothingAssetEditorPanel::SaveTransparencySetupAssets() const
 {
     return TransparencyBakePanel.IsValid() ? TransparencyBakePanel->SaveTransparencySetupAssets() : true;
+}
+
+FReply SWetClothingAssetEditorPanel::ExecuteBakeWrinkleNormalMap()
+{
+    if (!WrinkleEditorPanel.IsValid())
+    {
+        FMessageDialog::Open(EAppMsgType::Ok, LOCTEXT("BakeWrinkleEditorUnavailable", "Wrinkle editor is not available."));
+        return FReply::Handled();
+    }
+
+    return WrinkleEditorPanel->ExecuteBakeWrinkleNormalMap();
+}
+
+FReply SWetClothingAssetEditorPanel::ExecuteBakeAllWrinkleNormalMaps()
+{
+    if (!WrinkleEditorPanel.IsValid())
+    {
+        FMessageDialog::Open(EAppMsgType::Ok, LOCTEXT("BakeWrinkleEditorUnavailable", "Wrinkle editor is not available."));
+        return FReply::Handled();
+    }
+
+    return WrinkleEditorPanel->ExecuteBakeAllWrinkleNormalMaps();
 }
 
 bool SWetClothingAssetEditorPanel::SaveBakedVisualAssets() const

@@ -514,6 +514,13 @@ bool FDWCTransparencyAssetBakeService::SaveTransparencySetupAssets(UWetClothingA
         AddPackageForObject(BakedLayer.ConfidenceMap.Get(), PackagesToSave);
         AddPackageForObject(BakedLayer.RevealMaterial.Get(), PackagesToSave);
     }
+    for (const FWetClothingTransparencyLayerData& Layer : WetClothingAsset->TransparencyData.TransparencyLayers)
+    {
+        for (const FWetClothingBakedTransparencyMap& BakedMap : Layer.BakedMaps)
+        {
+            AddPackageForObject(BakedMap.TransparencyMap.Get(), PackagesToSave);
+        }
+    }
 
     if (PackagesToSave.Num() == 0)
     {

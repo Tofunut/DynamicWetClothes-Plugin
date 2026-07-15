@@ -8,17 +8,19 @@ class UWetClothingAsset;
 
 struct FWetWrinkleNormalMapBakeSettings
 {
-    int32 Resolution = 1024;
-    int32 PaddingPixels = 4;
+    int32 Resolution = 2048;
+    int32 PaddingPixels = 8;
     bool bIncludeDisabledPatchStrokes = false;
     bool bBakeNormalMap = true;
-    bool bBakeMask = true;
+    bool bBakeMask = false;
 };
 
 struct FWetWrinkleNormalMapBakeResult
 {
     int32 BakedMapCount = 0;
     int32 BakedStampCount = 0;
+    int32 BakedProceduralStrokeCount = 0;
+    bool bBakedCoverageAlpha = false;
     TArray<UTexture2D*> BakedNormalMaps;
     TArray<UTexture2D*> BakedMasks;
 };
@@ -47,7 +49,8 @@ class FWetWrinkleNormalMapBaker
         const UWetClothingAsset& WetClothingAsset,
         const FBakeGroup&        Group,
         int32                    Width,
-        int32                    Height);
+        int32                    Height,
+        const FWetWrinkleNormalMapBakeSettings& Settings);
 
     static UTexture2D* CreateOrUpdateTextureAsset(
         UWetClothingAsset&    WetClothingAsset,

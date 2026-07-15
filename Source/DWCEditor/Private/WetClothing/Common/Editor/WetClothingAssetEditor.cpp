@@ -313,59 +313,16 @@ void FWetClothingAssetEditor::FillAssetToolbar(FToolBarBuilder& ToolbarBuilder)
 TSharedRef<SWidget> FWetClothingAssetEditor::BuildBakeMapsMenu()
 {
     FWetClothingBakeMapsMenuArgs Args;
-    Args.OnBakeAllMaps = FSimpleDelegate::CreateLambda([this]() { HandleBakeAllMapsClicked(); });
-    Args.OnBakeWetnessProfileMaps = FSimpleDelegate::CreateLambda([this]() { HandleBakeWetnessProfileMapsClicked(); });
+    Args.CurrentMode = CurrentMode;
+    Args.OnBakeAllWetnessProfileMaps = FSimpleDelegate::CreateLambda([this]() { HandleBakeAllWetnessProfileMapsClicked(); });
+    Args.OnBakeSelectedWetnessProfileMap = FSimpleDelegate::CreateLambda([this]() { HandleBakeSelectedWetnessProfileMapClicked(); });
     Args.OnBakeTransparencyRevealMaps = FSimpleDelegate::CreateLambda([this]() { HandleBakeTransparencyRevealMapsClicked(); });
-    Args.OnBakeWrinkleNormalMap = FSimpleDelegate::CreateLambda([this]() { HandleBakeWrinkleNormalMapClicked(); });
-    Args.OnBakeWrinkleMask = FSimpleDelegate::CreateLambda([this]() { HandleBakeWrinkleMaskClicked(); });
+    Args.OnBakeAllWrinkleNormalMaps = FSimpleDelegate::CreateLambda([this]() { HandleBakeAllWrinkleNormalMapsClicked(); });
+    Args.OnBakeSelectedWrinkleNormalMap = FSimpleDelegate::CreateLambda([this]() { HandleBakeSelectedWrinkleNormalMapClicked(); });
     return FWetClothingEditorCommonWidgets::BuildBakeMapsMenu(Args);
 }
 
-FReply FWetClothingAssetEditor::HandleBakeAllMapsClicked()
-{
-    HandleBakeWetnessProfileMapsClicked();
-
-    UWetClothingAsset* Asset = WetClothingAsset.Get();
-    if (Asset == nullptr)
-    {
-        return FReply::Handled();
-    }
-
-    FString ErrorMessage;
-    if (!FWetClothingSurfaceWaterFlowMapBaker::Bake(Asset, ErrorMessage))
-    {
-        FMessageDialog::Open(
-            EAppMsgType::Ok,
-            FText::FromString(FString::Printf(TEXT("Surface Water Flow Map bake failed: %s"), *ErrorMessage)));
-    }
-
-    return FReply::Handled();
-}
-
-void FWetClothingAssetEditor::HandleGenerateSurfaceWaterUVClicked()
-{
-    UWetClothingAsset* Asset = WetClothingAsset.Get();
-    if (!Asset) return;
-
-    const FSurfaceWaterSimulationSettings& Settings = Asset->SurfaceWaterSettings;
-    const FWetClothingSurfaceWaterUVGenerationResult Result = FWetClothingSurfaceWaterUVGenerator::Generate(
-        Asset, //Editing WCA
-        0, //Use LOD0 Mesh
-        0, //Use UV0 Island Structure
-        Settings.UVChannelIndexToConstruct, //Channel to Struct
-        Settings.RenderTargetResolution, //Surface Water RT Resoluition
-        Settings.BakedFlowMap.PaddingPixels, //Padding Between UV Island
-        Settings.bAllowOverwriteExistingSurfaceWaterUVChannel,
-        Settings.TargetSurfaceWaterTexelsPerCentimeter);
-
-    FMessageDialog::Open(
-        Result.bSucceeded ? EAppMsgCategory::Success : EAppMsgCategory::Error,
-        EAppMsgType::Ok,
-        FText::FromString(Result.Message));
-    if (Result.bSucceeded && EditorPanel.IsValid()) EditorPanel->RefreshFromAsset();
-}
-
-FReply FWetClothingAssetEditor::HandleBakeWetnessProfileMapsClicked()
+FReply FWetClothingAssetEditor::HandleBakeAllWetnessProfileMapsClicked()
 {
     if (!EditorPanel.IsValid())
     {
@@ -382,6 +339,50 @@ FReply FWetClothingAssetEditor::HandleBakeWetnessProfileMapsClicked()
 
     EditorPanel->SaveBakedVisualAssets();
 
+    const EAppMsgCategory MessageCategory = bHadWarnings ? EAppMsgCategory::Warning : EAppMsgCategory::Success;
+    FMessageDialog::Open(MessageCategory, EAppMsgType::Ok, FText::FromString(Summary));
+    return FReply::Handled();
+}
+
+void FWetClothingAssetEditor::HandleGenerateSurfaceWaterUVClicked()
+{
+    UWetClothingAsset* Asset = WetClothingAsset.Get();
+    if (!Asset) return;
+
+    const FSurfaceWaterSimulationSettings& Settings = Asset->SurfaceWaterSettings;
+    const FWetClothingSurfaceWaterUVGenerationResult Result = FWetClothingSurfaceWaterUVGenerator::Generate(
+        Asset, // Editing WCA
+        0, // Use LOD0 Mesh
+        0, // Use UV0 Island Structure
+        Settings.UVChannelIndexToConstruct, // Channel to Struct
+        Settings.RenderTargetResolution, // Surface Water RT Resolution
+        Settings.BakedFlowMap.PaddingPixels, // Padding Between UV Island
+        Settings.bAllowOverwriteExistingSurfaceWaterUVChannel,
+        Settings.TargetSurfaceWaterTexelsPerCentimeter);
+
+    FMessageDialog::Open(
+        Result.bSucceeded ? EAppMsgCategory::Success : EAppMsgCategory::Error,
+        EAppMsgType::Ok,
+        FText::FromString(Result.Message));
+    if (Result.bSucceeded && EditorPanel.IsValid()) EditorPanel->RefreshFromAsset();
+}
+
+FReply FWetClothingAssetEditor::HandleBakeSelectedWetnessProfileMapClicked()
+{
+    if (!EditorPanel.IsValid())
+    {
+        return FReply::Handled();
+    }
+
+    FString Summary;
+    bool bHadWarnings = false;
+    if (!EditorPanel->BakeSelectedWetnessProfileMap(Summary, &bHadWarnings))
+    {
+        FMessageDialog::Open(EAppMsgType::Ok, FText::FromString(Summary));
+        return FReply::Handled();
+    }
+
+    EditorPanel->SaveBakedVisualAssets();
     const EAppMsgCategory MessageCategory = bHadWarnings ? EAppMsgCategory::Warning : EAppMsgCategory::Success;
     FMessageDialog::Open(MessageCategory, EAppMsgType::Ok, FText::FromString(Summary));
     return FReply::Handled();
@@ -409,16 +410,14 @@ FReply FWetClothingAssetEditor::HandleBakeTransparencyRevealMapsClicked()
     return FReply::Handled();
 }
 
-FReply FWetClothingAssetEditor::HandleBakeWrinkleNormalMapClicked()
+FReply FWetClothingAssetEditor::HandleBakeAllWrinkleNormalMapsClicked()
 {
-    FMessageDialog::Open(EAppMsgType::Ok, LOCTEXT("BakeWrinkleNormalMapPending", "Wrinkle Normal Map baking is not implemented yet."));
-    return FReply::Handled();
+    return EditorPanel.IsValid() ? EditorPanel->ExecuteBakeAllWrinkleNormalMaps() : FReply::Handled();
 }
 
-FReply FWetClothingAssetEditor::HandleBakeWrinkleMaskClicked()
+FReply FWetClothingAssetEditor::HandleBakeSelectedWrinkleNormalMapClicked()
 {
-    FMessageDialog::Open(EAppMsgType::Ok, LOCTEXT("BakeWrinkleMaskPending", "Wrinkle Mask baking is not implemented yet."));
-    return FReply::Handled();
+    return EditorPanel.IsValid() ? EditorPanel->ExecuteBakeWrinkleNormalMap() : FReply::Handled();
 }
 
 TSharedRef<SWidget> FWetClothingAssetEditor::BuildModeToolbarWidget()

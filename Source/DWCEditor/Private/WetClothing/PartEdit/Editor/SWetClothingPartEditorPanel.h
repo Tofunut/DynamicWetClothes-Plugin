@@ -33,6 +33,7 @@ class SWetClothingPartEditorPanel : public SCompoundWidget
     void RefreshFromAsset();
     bool HasPendingVisualBakeTasks(FString* OutSummary = nullptr) const;
     bool BakeWetnessProfileMapsAndUpdateMaterials(FString& OutSummary, bool* OutHadWarnings = nullptr);
+    bool BakeSelectedWetnessProfileMap(FString& OutSummary, bool* OutHadWarnings = nullptr);
     bool SaveBakedWetnessAssets() const;
 
   private:
@@ -160,9 +161,6 @@ class SWetClothingPartEditorPanel : public SCompoundWidget
     void                                           HandleSelectionLineThicknessChanged(float InValue);
     FReply                                         HandleFocusPreviewClicked();
     FReply                                         HandleSaveAssetClicked();
-    FReply                                         HandleBakeAllMapsClicked();
-    FReply                                         HandleBakeWrinkleNormalMapClicked();
-    FReply                                         HandleBakeWrinkleMaskClicked();
     bool                                           IsWetnessProfileMapBakeSourceValid() const;
     bool                                           CanBakeAnyWetnessProfileMap() const;
     FReply                                         HandleBakeSelectedWetnessProfileMapClicked();

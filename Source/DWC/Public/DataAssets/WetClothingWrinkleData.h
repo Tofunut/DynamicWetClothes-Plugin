@@ -5,6 +5,7 @@
 
 class UTexture;
 class UTexture2D;
+class UWetWrinklePreset;
 
 USTRUCT(BlueprintType)
 struct DWC_API FWetWrinklePatchPlacement
@@ -43,13 +44,13 @@ struct DWC_API FWetWrinklePatchPlacement
     FVector2D Scale = FVector2D(1.0f, 1.0f);
 
     UPROPERTY(EditAnywhere, Category = "Wet Wrinkle Patch", meta = (ClampMin = "0.0", ClampMax = "4.0"))
-    float Strength = 2.0f;
+    float Strength = 1.0f;
 
     UPROPERTY(EditAnywhere, Category = "Wet Wrinkle Patch", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float Falloff = 0.5f;
 
-    UPROPERTY(EditAnywhere, Category = "Wet Wrinkle Patch", meta = (DisplayName = "Patch Normal Texture"))
-    TObjectPtr<UTexture2D> NormalPatchTexture = nullptr;
+    UPROPERTY(EditAnywhere, Category = "Wet Wrinkle Patch")
+    TObjectPtr<UWetWrinklePreset> WrinklePreset = nullptr;
 
     UPROPERTY(EditAnywhere, Category = "Wet Wrinkle Patch")
     int32 AffectedWetPartID = INDEX_NONE;
@@ -100,6 +101,165 @@ struct DWC_API FWetWrinklePatchStroke
 };
 
 USTRUCT(BlueprintType)
+struct DWC_API FWetProceduralRidgeStrokePoint
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, Category = "Wet Procedural Ridge Stroke")
+    FVector2D PositionUV = FVector2D::ZeroVector;
+
+    UPROPERTY(EditAnywhere, Category = "Wet Procedural Ridge Stroke")
+    int32 AnchorTriangleID = INDEX_NONE;
+
+    UPROPERTY(EditAnywhere, Category = "Wet Procedural Ridge Stroke")
+    FVector3f AnchorBarycentric = FVector3f(1.0f, 0.0f, 0.0f);
+};
+
+UENUM(BlueprintType)
+enum class EWetProceduralRidgeShape : uint8
+{
+    Convex,
+    Concave,
+    Fold
+};
+
+UENUM(BlueprintType)
+enum class EWetProceduralRidgeEndpointMode : uint8
+{
+    Pointed,
+    Rounded,
+    Junction,
+    Flared
+};
+
+USTRUCT(BlueprintType)
+struct DWC_API FWetProceduralRidgeEndpoint
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, Category = "Wet Procedural Ridge Stroke")
+    EWetProceduralRidgeEndpointMode Mode = EWetProceduralRidgeEndpointMode::Pointed;
+
+    UPROPERTY(VisibleAnywhere, Category = "Wet Procedural Ridge Stroke")
+    FGuid ConnectedStrokeGuid;
+
+    UPROPERTY(VisibleAnywhere, Category = "Wet Procedural Ridge Stroke")
+    int32 ConnectedSegmentIndex = INDEX_NONE;
+
+    UPROPERTY(VisibleAnywhere, Category = "Wet Procedural Ridge Stroke", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float ConnectedSegmentT = 0.0f;
+
+    void ResetConnection()
+    {
+        ConnectedStrokeGuid.Invalidate();
+        ConnectedSegmentIndex = INDEX_NONE;
+        ConnectedSegmentT = 0.0f;
+    }
+};
+
+USTRUCT(BlueprintType)
+struct DWC_API FWetProceduralRidgeFlareSettings
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, Category = "Flared Endpoint", meta = (ClampMin = "0.01", ClampMax = "0.5"))
+    float Length = 0.25f;
+
+    UPROPERTY(EditAnywhere, Category = "Flared Endpoint", meta = (ClampMin = "1.0", ClampMax = "5.0"))
+    float WidthScale = 2.5f;
+
+    UPROPERTY(EditAnywhere, Category = "Flared Endpoint", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float EndStrength = 0.10f;
+
+    UPROPERTY(EditAnywhere, Category = "Flared Endpoint", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float Softness = 0.70f;
+};
+
+USTRUCT(BlueprintType)
+struct DWC_API FWetProceduralRidgeVariationSettings
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, Category = "Natural Variation")
+    bool bEnabled = false;
+
+    UPROPERTY(EditAnywhere, Category = "Natural Variation", meta = (ClampMin = "0.0", ClampMax = "0.5"))
+    float CenterlineAmount = 0.15f;
+
+    UPROPERTY(EditAnywhere, Category = "Natural Variation", meta = (ClampMin = "0.25", ClampMax = "12.0"))
+    float CenterlineFrequency = 3.0f;
+
+    UPROPERTY(EditAnywhere, Category = "Natural Variation", meta = (ClampMin = "0.0", ClampMax = "0.5"))
+    float WidthVariation = 0.10f;
+
+    UPROPERTY(EditAnywhere, Category = "Natural Variation", meta = (ClampMin = "0.25", ClampMax = "12.0"))
+    float WidthFrequency = 2.0f;
+
+    UPROPERTY(EditAnywhere, Category = "Natural Variation")
+    int32 NoiseSeed = 1337;
+};
+
+USTRUCT(BlueprintType)
+struct DWC_API FWetProceduralRidgeStroke
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, Category = "Wet Procedural Ridge Stroke")
+    FGuid StrokeGuid;
+
+    UPROPERTY(EditAnywhere, Category = "Wet Procedural Ridge Stroke")
+    FString DisplayName;
+
+    UPROPERTY(EditAnywhere, Category = "Wet Procedural Ridge Stroke")
+    bool bEnabled = true;
+
+    UPROPERTY(VisibleAnywhere, Category = "Wet Procedural Ridge Stroke")
+    int32 MaterialSlotIndex = INDEX_NONE;
+
+    UPROPERTY(VisibleAnywhere, Category = "Wet Procedural Ridge Stroke")
+    int32 UVChannelIndex = 0;
+
+    UPROPERTY(VisibleAnywhere, Category = "Wet Procedural Ridge Stroke")
+    int32 LODIndex = 0;
+
+    UPROPERTY(EditAnywhere, Category = "Wet Procedural Ridge Stroke")
+    TArray<FWetProceduralRidgeStrokePoint> Points;
+
+    UPROPERTY(EditAnywhere, Category = "Wet Procedural Ridge Stroke")
+    EWetProceduralRidgeShape Shape = EWetProceduralRidgeShape::Convex;
+
+    UPROPERTY(EditAnywhere, Category = "Wet Procedural Ridge Stroke")
+    bool bFlipFoldSide = false;
+
+    UPROPERTY(EditAnywhere, Category = "Wet Procedural Ridge Stroke", meta = (ClampMin = "0.0001"))
+    float WidthUV = 0.025f;
+
+    UPROPERTY(EditAnywhere, Category = "Wet Procedural Ridge Stroke", meta = (ClampMin = "0.0", ClampMax = "4.0"))
+    float Strength = 1.0f;
+
+    UPROPERTY(EditAnywhere, Category = "Wet Procedural Ridge Stroke", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float Falloff = 0.5f;
+
+    UPROPERTY(EditAnywhere, Category = "Wet Procedural Ridge Stroke", meta = (ClampMin = "0.0", ClampMax = "0.5"))
+    float StartTaper = 0.15f;
+
+    UPROPERTY(EditAnywhere, Category = "Wet Procedural Ridge Stroke", meta = (ClampMin = "0.0", ClampMax = "0.5"))
+    float EndTaper = 0.15f;
+
+    UPROPERTY(EditAnywhere, Category = "Wet Procedural Ridge Stroke")
+    FWetProceduralRidgeEndpoint StartEndpoint;
+
+    UPROPERTY(EditAnywhere, Category = "Wet Procedural Ridge Stroke")
+    FWetProceduralRidgeEndpoint EndEndpoint;
+
+    UPROPERTY(EditAnywhere, Category = "Wet Procedural Ridge Stroke")
+    FWetProceduralRidgeFlareSettings FlareSettings;
+
+    UPROPERTY(EditAnywhere, Category = "Wet Procedural Ridge Stroke")
+    FWetProceduralRidgeVariationSettings NaturalVariation;
+};
+
+USTRUCT(BlueprintType)
 struct DWC_API FWetWrinkleBakeSettings
 {
     GENERATED_BODY()
@@ -123,6 +283,14 @@ struct DWC_API FWetWrinkleBakeSettings
     bool bIncludeDisabledPatchStrokes = false;
 };
 
+UENUM(BlueprintType)
+enum class EDWCWrinkleAlphaSemantic : uint8
+{
+    None,
+    NormalDeviationCoverage_DEPRECATED UMETA(Hidden),
+    ConvexSeparation
+};
+
 USTRUCT(BlueprintType)
 struct DWC_API FWetWrinkleBakedMapSet
 {
@@ -142,6 +310,15 @@ struct DWC_API FWetWrinkleBakedMapSet
 
     UPROPERTY(VisibleAnywhere, Category = "Wet Wrinkle Baked")
     TObjectPtr<UTexture2D> BakedWrinkleMask = nullptr;
+
+    UPROPERTY(VisibleAnywhere, Category = "Wet Wrinkle Baked")
+    bool bHasCoverageAlpha = false;
+
+    UPROPERTY(VisibleAnywhere, Category = "Wet Wrinkle Baked")
+    EDWCWrinkleAlphaSemantic AlphaSemantic = EDWCWrinkleAlphaSemantic::None;
+
+    UPROPERTY(VisibleAnywhere, Category = "Wet Wrinkle Baked")
+    int32 AlphaBuildVersion = 0;
 
     UPROPERTY(VisibleAnywhere, Category = "Wet Wrinkle Baked")
     int32 Resolution = 2048;
@@ -206,6 +383,9 @@ struct DWC_API FWetClothingWrinkleData
 
     UPROPERTY(EditAnywhere, Category = "Editable")
     TArray<FWetWrinklePatchStroke> EditablePatchStrokes;
+
+    UPROPERTY(EditAnywhere, Category = "Editable")
+    TArray<FWetProceduralRidgeStroke> EditableProceduralRidgeStrokes;
 
     UPROPERTY(EditAnywhere, Category = "Bake")
     FWetWrinkleBakeSettings BakeSettings;

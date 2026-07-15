@@ -8,6 +8,7 @@
 
 class UTexture;
 class UTexture2D;
+class UMaterialInterface;
 struct FDWCRevealBakeTextureWriteSettings;
 
 class FDWCRevealBakeSourceResolver
@@ -20,6 +21,7 @@ class FDWCRevealBakeSourceResolver
         FName                   LayerId);
 
     static UTexture2D* ResolveRevealSourceBaseColorTexture(const FDWCBakeResolvedLayer& SourceLayer);
+    static UTexture2D* ResolveRevealSourceBaseColorTexture(UMaterialInterface* SourceMaterial);
     static UTexture* ResolvePreviewSourceTexture(const FDWCBakeResolvedLayer& SourceLayer);
 
     static void PopulateSourceLayerTextures(

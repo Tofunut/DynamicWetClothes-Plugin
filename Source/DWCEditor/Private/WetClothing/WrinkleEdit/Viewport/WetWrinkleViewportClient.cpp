@@ -60,13 +60,13 @@ void FWetWrinkleViewportClient::Tick(float DeltaSeconds)
 
 bool FWetWrinkleViewportClient::InputKey(const FInputKeyEventArgs& EventArgs)
 {
-    if (EventArgs.Event == IE_Pressed && (EventArgs.Key == EKeys::MouseScrollUp || EventArgs.Key == EKeys::MouseScrollDown))
+    if (EventArgs.Key == EKeys::Escape && EventArgs.Event == IE_Pressed && bIsPainting)
     {
-        const FVector LookAtLocation = GetLookAtLocation();
-        const float CurrentDistance = FMath::Max(static_cast<float>(FVector::Dist(GetViewLocation(), LookAtLocation)), 8.0f);
-        const float ZoomScale = EventArgs.Key == EKeys::MouseScrollUp ? 0.85f : 1.15f;
-        SetViewLocationForOrbiting(LookAtLocation, FMath::Clamp(CurrentDistance * ZoomScale, 8.0f, 100000.0f));
-        Invalidate();
+        if (const TSharedPtr<SWetWrinkleViewport> PinnedViewport = ViewportWidget.Pin())
+        {
+            PinnedViewport->CancelPaintStrokeFromClient();
+        }
+        bIsPainting = false;
         return true;
     }
 
@@ -175,6 +175,16 @@ void FWetWrinkleViewportClient::ProcessClick(FSceneView& View, HHitProxy* HitPro
     }
 
     ClearSurfaceHit();
+}
+
+void FWetWrinkleViewportClient::Draw(const FSceneView* View, FPrimitiveDrawInterface* PDI)
+{
+    FEditorViewportClient::Draw(View, PDI);
+
+    if (const TSharedPtr<SWetWrinkleViewport> PinnedViewport = ViewportWidget.Pin())
+    {
+        PinnedViewport->DrawProceduralStrokeGuides(PDI);
+    }
 }
 
 void FWetWrinkleViewportClient::FocusOnPreviewMesh(const USkeletalMeshComponent* InPreviewMeshComponent, bool bInstant)

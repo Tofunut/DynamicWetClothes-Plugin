@@ -38,8 +38,12 @@ struct FDWCRevealBakeRayProjectionSettings
 {
     float RayStartOffset = 0.01f;
     float RayLengthScale = 1.0f;
+    float MinHitDistance = 0.0f;
     bool bRespectSourceLayerOrder = true;
     bool bRespectBlockers = true;
+    bool bPreferLowerSourceLayerOrder = false;
+    bool bRespectPerSourceMaxDistance = false;
+    bool bUseNormalAlignmentConfidence = false;
 };
 
 class FDWCRevealBakeTexelSampler
@@ -49,7 +53,8 @@ class FDWCRevealBakeTexelSampler
         const FDWCRevealBakeSurface&               OuterSurface,
         const FDWCRevealBakeTexelSamplingSettings& Settings,
         TArray<FDWCRevealBakeTexelSample>&         OutSamples,
-        FString*                             OutErrorMessage = nullptr);
+        FString*                                   OutErrorMessage = nullptr,
+        int32*                                     OutOverlappedPixelCount = nullptr);
 
   private:
     static constexpr double BarycentricTolerance = -1.0e-6;

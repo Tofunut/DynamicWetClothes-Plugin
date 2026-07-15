@@ -465,65 +465,73 @@ TSharedRef<SWidget> FWetClothingEditorCommonWidgets::BuildBakeMapsMenu(const FWe
 {
     FMenuBuilder MenuBuilder(true, nullptr);
 
-    MenuBuilder.BeginSection(TEXT("BakeAll"), NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeAllMapsMenuSection", "BAKE"));
-    MenuBuilder.AddMenuEntry(
-        NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeAllMapsMenuItem", "Bake All Maps"),
-        NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeAllMapsMenuItemTooltip", "Bake every map supported by the current editor mode."),
-        FSlateIcon(),
-        FUIAction(FExecuteAction::CreateLambda([OnBakeAllMaps = Args.OnBakeAllMaps]()
-        {
-            if (OnBakeAllMaps.IsBound())
+    MenuBuilder.BeginSection(TEXT("BakeMapTypes"), NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeMapTypesMenuSection", "BAKE"));
+    switch (Args.CurrentMode)
+    {
+    case EWetClothingEditorMode::PartEdit:
+        MenuBuilder.AddMenuEntry(
+            NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeAllWetPartMapsMenuItem", "Bake All WetPart Maps"),
+            NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeAllWetPartMapsMenuItemTooltip", "Bake wetness profile maps for all wettable material slots."),
+            FSlateIcon(),
+            FUIAction(FExecuteAction::CreateLambda([OnBakeAllWetnessProfileMaps = Args.OnBakeAllWetnessProfileMaps]()
             {
-                OnBakeAllMaps.Execute();
-            }
-        })));
-    MenuBuilder.EndSection();
+                if (OnBakeAllWetnessProfileMaps.IsBound())
+                {
+                    OnBakeAllWetnessProfileMaps.Execute();
+                }
+            })));
+        MenuBuilder.AddMenuEntry(
+            NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeSelectedWetPartSlotMenuItem", "Bake Selected Material Slot"),
+            NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeSelectedWetPartSlotMenuItemTooltip", "Bake the wetness profile map for the selected material slot's texture and UV channel."),
+            FSlateIcon(),
+            FUIAction(FExecuteAction::CreateLambda([OnBakeSelectedWetnessProfileMap = Args.OnBakeSelectedWetnessProfileMap]()
+            {
+                if (OnBakeSelectedWetnessProfileMap.IsBound())
+                {
+                    OnBakeSelectedWetnessProfileMap.Execute();
+                }
+            })));
+        break;
 
-    MenuBuilder.BeginSection(TEXT("BakeMapTypes"), NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeMapTypesMenuSection", "MAP TYPES"));
-    MenuBuilder.AddMenuEntry(
-        NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeWetnessProfileMapsMenuItem", "Bake Wetness Profile Maps"),
-        NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeWetnessProfileMapsMenuItemTooltip", "Bake wetness profile maps."),
-        FSlateIcon(),
-        FUIAction(FExecuteAction::CreateLambda([OnBakeWetnessProfileMaps = Args.OnBakeWetnessProfileMaps]()
-        {
-            if (OnBakeWetnessProfileMaps.IsBound())
+    case EWetClothingEditorMode::WrinkleEdit:
+        MenuBuilder.AddMenuEntry(
+            NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeAllWrinkleNormalMapsMenuItem", "Bake All Wrinkle Normal Maps"),
+            NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeAllWrinkleNormalMapsMenuItemTooltip", "Bake wrinkle normal maps for every material slot that contains wrinkle patches."),
+            FSlateIcon(),
+            FUIAction(FExecuteAction::CreateLambda([OnBakeAllWrinkleNormalMaps = Args.OnBakeAllWrinkleNormalMaps]()
             {
-                OnBakeWetnessProfileMaps.Execute();
-            }
-        })));
-    MenuBuilder.AddMenuEntry(
-        NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeTransparencyRevealMapsMenuItem", "Bake & Save Transparency Reveal Maps"),
-        NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeTransparencyRevealMapsMenuItemTooltip", "Bake reveal textures/materials for Transparency mode and save the generated assets."),
-        FSlateIcon(),
-        FUIAction(FExecuteAction::CreateLambda([OnBakeTransparencyRevealMaps = Args.OnBakeTransparencyRevealMaps]()
-        {
-            if (OnBakeTransparencyRevealMaps.IsBound())
+                if (OnBakeAllWrinkleNormalMaps.IsBound())
+                {
+                    OnBakeAllWrinkleNormalMaps.Execute();
+                }
+            })));
+        MenuBuilder.AddMenuEntry(
+            NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeSelectedWrinkleSlotMenuItem", "Bake Selected Material Slot"),
+            NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeSelectedWrinkleSlotMenuItemTooltip", "Bake the wrinkle normal map for the selected material slot."),
+            FSlateIcon(),
+            FUIAction(FExecuteAction::CreateLambda([OnBakeSelectedWrinkleNormalMap = Args.OnBakeSelectedWrinkleNormalMap]()
             {
-                OnBakeTransparencyRevealMaps.Execute();
-            }
-        })));
-    MenuBuilder.AddMenuEntry(
-        NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeWrinkleNormalMapMenuItem", "Bake Wrinkle Normal Map"),
-        NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeWrinkleNormalMapMenuItemTooltip", "Bake a wrinkle normal map."),
-        FSlateIcon(),
-        FUIAction(FExecuteAction::CreateLambda([OnBakeWrinkleNormalMap = Args.OnBakeWrinkleNormalMap]()
-        {
-            if (OnBakeWrinkleNormalMap.IsBound())
+                if (OnBakeSelectedWrinkleNormalMap.IsBound())
+                {
+                    OnBakeSelectedWrinkleNormalMap.Execute();
+                }
+            })));
+        break;
+
+    case EWetClothingEditorMode::TransparencyBake:
+        MenuBuilder.AddMenuEntry(
+            NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeTransparencyRevealMapsMenuItem", "Bake & Save Transparency Reveal Maps"),
+            NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeTransparencyRevealMapsMenuItemTooltip", "Bake reveal textures/materials for Transparency mode and save the generated assets."),
+            FSlateIcon(),
+            FUIAction(FExecuteAction::CreateLambda([OnBakeTransparencyRevealMaps = Args.OnBakeTransparencyRevealMaps]()
             {
-                OnBakeWrinkleNormalMap.Execute();
-            }
-        })));
-    MenuBuilder.AddMenuEntry(
-        NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeWrinkleMaskMenuItem", "Bake Wrinkle Mask"),
-        NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeWrinkleMaskMenuItemTooltip", "Bake a wrinkle mask."),
-        FSlateIcon(),
-        FUIAction(FExecuteAction::CreateLambda([OnBakeWrinkleMask = Args.OnBakeWrinkleMask]()
-        {
-            if (OnBakeWrinkleMask.IsBound())
-            {
-                OnBakeWrinkleMask.Execute();
-            }
-        })));
+                if (OnBakeTransparencyRevealMaps.IsBound())
+                {
+                    OnBakeTransparencyRevealMaps.Execute();
+                }
+            })));
+        break;
+    }
     MenuBuilder.EndSection();
 
     return MenuBuilder.MakeWidget();

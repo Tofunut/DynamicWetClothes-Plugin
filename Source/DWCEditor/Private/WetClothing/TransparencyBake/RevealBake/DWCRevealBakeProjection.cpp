@@ -282,9 +282,14 @@ bool FDWCRevealBakeTexelSampler::BuildOuterTexelSamples(
     const FDWCRevealBakeSurface&               OuterSurface,
     const FDWCRevealBakeTexelSamplingSettings& Settings,
     TArray<FDWCRevealBakeTexelSample>&         OutSamples,
-    FString*                             OutErrorMessage)
+    FString*                                   OutErrorMessage,
+    int32*                                     OutOverlappedPixelCount)
 {
     OutSamples.Reset();
+    if (OutOverlappedPixelCount != nullptr)
+    {
+        *OutOverlappedPixelCount = 0;
+    }
 
     if (Settings.Resolution.X <= 0 || Settings.Resolution.Y <= 0)
     {
@@ -298,12 +303,18 @@ bool FDWCRevealBakeTexelSampler::BuildOuterTexelSamples(
         return false;
     }
 
-    TSet<int32> OccupiedPixels;
-    OccupiedPixels.Reserve(Settings.Resolution.X * Settings.Resolution.Y / 2);
+    TArray<int32> OccupiedPixelTriangles;
+    OccupiedPixelTriangles.Init(INDEX_NONE, Settings.Resolution.X * Settings.Resolution.Y);
+    TArray<uint8> OverlappedPixels;
+    if (OutOverlappedPixelCount != nullptr)
+    {
+        OverlappedPixels.Init(0, Settings.Resolution.X * Settings.Resolution.Y);
+    }
     OutSamples.Reserve(Settings.Resolution.X * Settings.Resolution.Y / 2);
 
-    for (const FDWCRevealBakeSurfaceTriangle& Triangle : OuterSurface.Triangles)
+    for (int32 SurfaceTriangleIndex = 0; SurfaceTriangleIndex < OuterSurface.Triangles.Num(); ++SurfaceTriangleIndex)
     {
+        const FDWCRevealBakeSurfaceTriangle& Triangle = OuterSurface.Triangles[SurfaceTriangleIndex];
         if (Settings.MaterialSlotIndex != INDEX_NONE && Triangle.MaterialSlotIndex != Settings.MaterialSlotIndex)
         {
             continue;
@@ -320,8 +331,23 @@ bool FDWCRevealBakeTexelSampler::BuildOuterTexelSamples(
             for (int32 X = PixelBounds.Min.X; X < PixelBounds.Max.X; ++X)
             {
                 const int32 PixelKey = MakePixelKey(X, Y, Settings.Resolution.X);
-                if (OccupiedPixels.Contains(PixelKey))
+                const int32 ExistingTriangleIndex = OccupiedPixelTriangles[PixelKey];
+                if (ExistingTriangleIndex != INDEX_NONE)
                 {
+                    const FDWCRevealBakeSurfaceTriangle& ExistingTriangle = OuterSurface.Triangles[ExistingTriangleIndex];
+                    bool bSharesVertex = false;
+                    for (int32 ExistingCorner = 0; ExistingCorner < 3 && !bSharesVertex; ++ExistingCorner)
+                    {
+                        for (int32 NewCorner = 0; NewCorner < 3; ++NewCorner)
+                        {
+                            bSharesVertex |= ExistingTriangle.VertexIndices[ExistingCorner] == Triangle.VertexIndices[NewCorner];
+                        }
+                    }
+                    if (!bSharesVertex && OutOverlappedPixelCount != nullptr && OverlappedPixels[PixelKey] == 0)
+                    {
+                        OverlappedPixels[PixelKey] = 1;
+                        ++(*OutOverlappedPixelCount);
+                    }
                     continue;
                 }
 
@@ -344,7 +370,7 @@ bool FDWCRevealBakeTexelSampler::BuildOuterTexelSamples(
                 Sample.MaterialSlotIndex = Triangle.MaterialSlotIndex;
                 Sample.Barycentric = Barycentric;
 
-                OccupiedPixels.Add(PixelKey);
+                OccupiedPixelTriangles[PixelKey] = SurfaceTriangleIndex;
                 OutSamples.Add(Sample);
             }
         }
@@ -467,6 +493,17 @@ bool FDWCRevealBakeRayProjector::ProjectSamplesToSources(
                 continue;
             }
 
+            if (Distance < FMath::Max(0.0f, Settings.MinHitDistance))
+            {
+                continue;
+            }
+
+            if (Settings.bRespectPerSourceMaxDistance &&
+                Distance > FMath::Max(0.0f, TriangleRef->SourceSurface->MaxRevealDistance))
+            {
+                continue;
+            }
+
             FCandidateHit Candidate;
             Candidate.SourceSurface = TriangleRef->SourceSurface;
             Candidate.Triangle = TriangleRef->Triangle;
@@ -478,8 +515,13 @@ bool FDWCRevealBakeRayProjector::ProjectSamplesToSources(
         }
 
         CandidateHits.Sort(
-            [](const FCandidateHit& Left, const FCandidateHit& Right)
+            [&Settings](const FCandidateHit& Left, const FCandidateHit& Right)
             {
+                if (Settings.bPreferLowerSourceLayerOrder && Left.SourceSurface != nullptr && Right.SourceSurface != nullptr &&
+                    Left.SourceSurface->LayerOrder != Right.SourceSurface->LayerOrder)
+                {
+                    return Left.SourceSurface->LayerOrder < Right.SourceSurface->LayerOrder;
+                }
                 return Left.Distance < Right.Distance;
             });
 
@@ -496,6 +538,13 @@ bool FDWCRevealBakeRayProjector::ProjectSamplesToSources(
             if (Candidate.SourceSurface->bCanBeRevealSource)
             {
                 SelectedHit = MakeRayHit(Sample, Candidate, MaxRevealDistance);
+                if (Settings.bUseNormalAlignmentConfidence)
+                {
+                    SelectedHit.Confidence = FMath::Clamp(
+                        static_cast<float>(FVector::DotProduct(Sample.Normal.GetSafeNormal(), Candidate.Normal.GetSafeNormal())),
+                        0.0f,
+                        1.0f);
+                }
                 break;
             }
 

@@ -20,4 +20,10 @@ class FWetClothingMaterialSetup
         int32 WrinkleUVChannelIndex = INDEX_NONE,
         int32 SurfaceWaterUVChannelIndex = 1);
     static bool                            IsMaterialConfiguredForDwc(UMaterialInterface* MaterialInterface);
+
+    // Routine material setup treats MF_DWC_ApplyWetness as a fixed, read-only asset.
+    static bool ValidateSharedApplyWetnessFunction(FString& OutErrorMessage);
+
+    // Explicit maintenance path for plugin upgrades. This mutates and dirties the shared function asset.
+    static bool RepairOrUpgradeSharedApplyWetnessFunction(FString& OutErrorMessage);
 };

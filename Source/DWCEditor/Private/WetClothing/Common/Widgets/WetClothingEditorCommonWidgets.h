@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "WetClothing/Common/Editor/WetClothingAssetEditorTypes.h"
+#include "WetClothing/Common/Editor/WetClothingEditorMode.h"
 #include "Widgets/Input/SComboBox.h"
 
 class FAssetThumbnail;
@@ -32,11 +33,12 @@ struct FWetClothingMaterialSlotRowArgs
 
 struct FWetClothingBakeMapsMenuArgs
 {
-    FSimpleDelegate OnBakeAllMaps;
-    FSimpleDelegate OnBakeWetnessProfileMaps;
+    EWetClothingEditorMode CurrentMode = EWetClothingEditorMode::PartEdit;
+    FSimpleDelegate OnBakeAllWetnessProfileMaps;
+    FSimpleDelegate OnBakeSelectedWetnessProfileMap;
     FSimpleDelegate OnBakeTransparencyRevealMaps;
-    FSimpleDelegate OnBakeWrinkleNormalMap;
-    FSimpleDelegate OnBakeWrinkleMask;
+    FSimpleDelegate OnBakeAllWrinkleNormalMaps;
+    FSimpleDelegate OnBakeSelectedWrinkleNormalMap;
 };
 
 class FWetClothingEditorCommonWidgets

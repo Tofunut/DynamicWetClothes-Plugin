@@ -608,6 +608,19 @@ int32 SWetClothingAssetUVView::OnPaint(
 
 
 
+    const UTexture2D* MarkerAddressTexture = Cast<UTexture2D>(BackgroundTexture.Get());
+    const auto ApplyMarkerTextureAddress = [MarkerAddressTexture](const FVector2D& UV, const FVector2D& MarkerCenter)
+    {
+        if (MarkerAddressTexture == nullptr)
+        {
+            return UV;
+        }
+
+        return FVector2D(
+            ApplyUVViewTextureAddress(UV.X, MarkerCenter.X, MarkerAddressTexture->AddressX),
+            ApplyUVViewTextureAddress(UV.Y, MarkerCenter.Y, MarkerAddressTexture->AddressY));
+    };
+
     for (const FWetClothingAssetUVViewCircleMarker& Marker : CircleMarkers)
     {
         if (Marker.RadiusUV <= UE_SMALL_NUMBER)
@@ -615,9 +628,12 @@ int32 SWetClothingAssetUVView::OnPaint(
             continue;
         }
 
-        const FVector2D CenterLocal = UVToLocal(Marker.CenterUV, AllottedGeometry, UVBounds, ZoomAmount, ClampedViewOffset);
-        const FVector2D RadiusULocal = UVToLocal(Marker.CenterUV + FVector2D(Marker.RadiusUV, 0.0f), AllottedGeometry, UVBounds, ZoomAmount, ClampedViewOffset);
-        const FVector2D RadiusVLocal = UVToLocal(Marker.CenterUV + FVector2D(0.0f, Marker.RadiusUV), AllottedGeometry, UVBounds, ZoomAmount, ClampedViewOffset);
+        const FVector2D DisplayCenterUV = ApplyMarkerTextureAddress(Marker.CenterUV, Marker.CenterUV);
+        const FVector2D DisplayRadiusUUV = ApplyMarkerTextureAddress(Marker.CenterUV + FVector2D(Marker.RadiusUV, 0.0f), Marker.CenterUV);
+        const FVector2D DisplayRadiusVUV = ApplyMarkerTextureAddress(Marker.CenterUV + FVector2D(0.0f, Marker.RadiusUV), Marker.CenterUV);
+        const FVector2D CenterLocal = UVToLocal(DisplayCenterUV, AllottedGeometry, UVBounds, ZoomAmount, ClampedViewOffset);
+        const FVector2D RadiusULocal = UVToLocal(DisplayRadiusUUV, AllottedGeometry, UVBounds, ZoomAmount, ClampedViewOffset);
+        const FVector2D RadiusVLocal = UVToLocal(DisplayRadiusVUV, AllottedGeometry, UVBounds, ZoomAmount, ClampedViewOffset);
         const FVector2D Radii(
             FMath::Max(FMath::Abs(RadiusULocal.X - CenterLocal.X), 1.0),
             FMath::Max(FMath::Abs(RadiusVLocal.Y - CenterLocal.Y), 1.0));

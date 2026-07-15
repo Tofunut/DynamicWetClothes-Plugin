@@ -4,9 +4,12 @@
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Core/DWCEditorUtils.h"
 #include "DataAssets/WetClothingAsset.h"
+#include "DataAssets/WetWrinklePreset.h"
+#include "Editor.h"
 #include "Engine/SkeletalMesh.h"
 #include "Engine/Texture2D.h"
 #include "AssetThumbnail.h"
+#include "Brushes/SlateRoundedBoxBrush.h"
 #include "Core/DWCEditorStyle.h"
 #include "Brushes/SlateImageBrush.h"
 #include "Materials/MaterialInterface.h"
@@ -17,6 +20,7 @@
 #include "Styling/AppStyle.h"
 #include "Styling/CoreStyle.h"
 #include "Styling/StyleColors.h"
+#include "Subsystems/AssetEditorSubsystem.h"
 #include "Types/WidgetActiveTimerDelegate.h"
 #include "WetClothing/Common/Analysis/WetClothingAssetMeshAnalyzer.h"
 #include "WetClothing/Common/Texture/WetClothingMaterialTextureResolver.h"
@@ -34,9 +38,11 @@
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SScaleBox.h"
+#include "Widgets/Layout/SScrollBox.h"
 #include "Widgets/Layout/SSeparator.h"
 #include "Widgets/Layout/SSplitter.h"
 #include "Widgets/Layout/SUniformGridPanel.h"
+#include "Widgets/Layout/SWrapBox.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/Text/SInlineEditableTextBlock.h"
 #include "Widgets/Text/STextBlock.h"
@@ -50,8 +56,18 @@
 
 namespace
 {
-    constexpr const TCHAR* WetWrinklePreset0Path = TEXT("/DynamicWetClothes/Presets/WrinkleTextures/Wet_Wrinkle_Normal0.Wet_Wrinkle_Normal0");
-    constexpr const TCHAR* WetWrinklePresetFolderPath = TEXT("/DynamicWetClothes/Presets/WrinkleTextures");
+    float WrapWetRidgeDelta(const float Delta)
+    {
+        return Delta - FMath::RoundToFloat(Delta);
+    }
+
+    float WrapWetRidgeUnit(float Value)
+    {
+        Value = FMath::Fmod(Value, 1.0f);
+        return Value < 0.0f ? Value + 1.0f : Value;
+    }
+
+    constexpr const TCHAR* WetWrinkleBaseNormalTextureFolderPath = TEXT("/DynamicWetClothes/Presets/WrinkleTextures");
     constexpr float WetWrinkleDefaultSizeCm = 8.0f;
     constexpr float WetWrinkleDefaultSizeUV = 0.0677f;
     constexpr float WetWrinkleUVPerCm = WetWrinkleDefaultSizeUV / WetWrinkleDefaultSizeCm;
@@ -344,10 +360,7 @@ namespace
         {
             Collector.AddReferencedObject(GeneratedNormalTexture);
             Collector.AddReferencedObject(DisplayPreviewTexture);
-            if (UWetClothingAsset* Asset = WetClothingAsset.Get())
-            {
-                Collector.AddReferencedObject(Asset);
-            }
+            Collector.AddReferencedObject(WetClothingAsset);
         }
 
         virtual FString GetReferencerName() const override
@@ -646,7 +659,7 @@ namespace
 
       private:
         TWeakPtr<SWindow> ParentWindow;
-        TWeakObjectPtr<UWetClothingAsset> WetClothingAsset;
+        TObjectPtr<UWetClothingAsset> WetClothingAsset = nullptr;
         TSharedPtr<SWetWrinkleViewport> PreviewViewport;
         TSharedPtr<SWetWrinkleZoomableImage> GeneratedNormalImage;
         TSharedPtr<SComboBox<TSharedPtr<FWetWrinkleBrushPresetOption>>> BaseNormalComboBox;
@@ -679,7 +692,10 @@ void SWetWrinkleEditorPanel::Construct(const FArguments& InArgs)
     WetClothingAsset = InArgs._WetClothingAsset;
     DetailsView = InArgs._DetailsView;
     MaterialThumbnailPool = MakeShared<FAssetThumbnailPool>(32);
-    PatchTextureThumbnailPool = MakeShared<FAssetThumbnailPool>(32);
+    if (GEditor != nullptr)
+    {
+        GEditor->RegisterForUndo(this);
+    }
 
     UVDisplayModeItems.Reset();
     UVDisplayModeItems.Add(MakeShared<EWetClothingAssetUVDisplayMode>(EWetClothingAssetUVDisplayMode::Normal));
@@ -696,10 +712,24 @@ void SWetWrinkleEditorPanel::Construct(const FArguments& InArgs)
     RefreshUVChannelOptions();
     RefreshMaterialTextures();
     RefreshBrushPresetOptions();
-    BrushSettings.BrushHeightTexture = ResolveDefaultBrushHeightTexture();
+    RefreshWrinklePresetPalette();
     SizeCm = WetWrinkleDefaultSizeCm;
     SizeUV = WetWrinkleDefaultSizeUV;
     BrushSettings.BrushRadiusUV = SizeUV;
+    SelectedWrinklePresetThumbnailBrush.SetImageSize(FVector2D(128.0f, 128.0f));
+    WrinklePresetPaletteButtonStyle = FButtonStyle()
+        .SetNormal(FSlateRoundedBoxBrush(FLinearColor::White, 6.0f))
+        .SetHovered(FSlateRoundedBoxBrush(FLinearColor(1.15f, 1.15f, 1.15f, 1.0f), 6.0f))
+        .SetPressed(FSlateRoundedBoxBrush(FLinearColor(0.85f, 0.85f, 0.85f, 1.0f), 6.0f))
+        .SetDisabled(FSlateRoundedBoxBrush(FLinearColor::White, 6.0f))
+        .SetNormalPadding(FMargin(0.0f))
+        .SetPressedPadding(FMargin(0.0f));
+    RegisterActiveTimer(
+        1.0f,
+        FWidgetActiveTimerDelegate::CreateSP(this, &SWetWrinkleEditorPanel::HandleWrinklePresetPaletteRefreshTimer));
+    FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
+    AssetRegistryModule.Get().OnAssetRemoved().AddSP(this, &SWetWrinkleEditorPanel::HandleWrinklePresetPaletteAssetRemoved);
+    AssetRegistryModule.Get().OnAssetUpdated().AddSP(this, &SWetWrinkleEditorPanel::HandleWrinklePresetPaletteAssetUpdated);
 
     const FSlateFontInfo PanelHeadingFont = FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), 16);
 
@@ -851,7 +881,7 @@ void SWetWrinkleEditorPanel::Construct(const FArguments& InArgs)
                                                                              .SelectionMode(ESelectionMode::None)]]]]]
 
                     + SSplitter::Slot()
-                          .Value(0.47f)
+                          .Value(0.44f)
                               [FWetClothingEditorCommonWidgets::BuildPreviewSection(
                                   SNew(SSplitter)
                                       .Orientation(Orient_Vertical)
@@ -863,7 +893,8 @@ void SWetWrinkleEditorPanel::Construct(const FArguments& InArgs)
                                                      .OnSurfaceHitChanged(FOnWetWrinkleSurfaceHitChanged::CreateSP(this, &SWetWrinkleEditorPanel::HandleSurfaceHitChanged))
                                                      .OnPaintStrokeStarted(FOnWetWrinklePaintStrokeStarted::CreateSP(this, &SWetWrinkleEditorPanel::HandlePaintStrokeStarted))
                                                      .OnPaintStampRequested(FOnWetWrinklePaintStampRequested::CreateSP(this, &SWetWrinkleEditorPanel::HandlePaintStampRequested))
-                                                     .OnPaintStrokeEnded(FOnWetWrinklePaintStrokeEnded::CreateSP(this, &SWetWrinkleEditorPanel::HandlePaintStrokeEnded))]
+                                                     .OnPaintStrokeEnded(FOnWetWrinklePaintStrokeEnded::CreateSP(this, &SWetWrinkleEditorPanel::HandlePaintStrokeEnded))
+                                                     .OnPaintStrokeCanceled(FOnWetWrinklePaintStrokeCanceled::CreateSP(this, &SWetWrinkleEditorPanel::HandlePaintStrokeCanceled))]
 
                                       + SSplitter::Slot()
                                             .Value(0.32f)
@@ -871,7 +902,7 @@ void SWetWrinkleEditorPanel::Construct(const FArguments& InArgs)
                                   FOnWetClothingPreviewFocusClicked::CreateSP(this, &SWetWrinkleEditorPanel::HandleFocusClicked))]
 
                     + SSplitter::Slot()
-                          .Value(0.25f)
+                          .Value(0.28f)
                               [SNew(SSplitter)
                                    .Orientation(Orient_Vertical)
 
@@ -892,34 +923,229 @@ TSharedRef<SWidget> SWetWrinkleEditorPanel::BuildPatchBrushSection()
 
     return SNew(SBorder)
         .Padding(10.0f)
-            [SNew(SVerticalBox)
+            [SNew(SScrollBox)
+             + SScrollBox::Slot()
+                   [SNew(SVerticalBox)
 
              + SVerticalBox::Slot()
                    .AutoHeight()
                    .Padding(0.0f, 0.0f, 0.0f, 8.0f)
                        [SNew(STextBlock)
-                            .Text(LOCTEXT("PatchBrushHeading", "Patch Brush"))
+                            .Text(this, &SWetWrinkleEditorPanel::GetBrushSectionHeadingText)
                             .Font(SectionHeadingFont)]
 
              + SVerticalBox::Slot()
                    .AutoHeight()
-                   .Padding(0.0f, 0.0f, 0.0f, 6.0f)
-                       [SNew(STextBlock)
-                            .Text(LOCTEXT("PatchNormalTextureLabel", "Normal Texture"))]
+                   .Padding(0.0f, 0.0f, 0.0f, 10.0f)
+                       [SNew(SHorizontalBox)
+
+                        + SHorizontalBox::Slot()
+                              .FillWidth(1.0f)
+                                  [SNew(SCheckBox)
+                                       .Style(FAppStyle::Get(), "ToggleButtonCheckbox")
+                                       .HAlign(HAlign_Center)
+                                       .IsChecked(this, &SWetWrinkleEditorPanel::GetToolModeCheckState, EWetWrinkleToolMode::Patch)
+                                       .OnCheckStateChanged(this, &SWetWrinkleEditorPanel::HandleToolModeChanged, EWetWrinkleToolMode::Patch)
+                                           [SNew(STextBlock)
+                                                .Text(LOCTEXT("PatchToolMode", "Patch"))]]
+
+                        + SHorizontalBox::Slot()
+                              .FillWidth(1.0f)
+                              .Padding(4.0f, 0.0f, 0.0f, 0.0f)
+                                  [SNew(SCheckBox)
+                                       .Style(FAppStyle::Get(), "ToggleButtonCheckbox")
+                                       .HAlign(HAlign_Center)
+                                       .IsChecked(this, &SWetWrinkleEditorPanel::GetToolModeCheckState, EWetWrinkleToolMode::ProceduralRidgeStroke)
+                                       .OnCheckStateChanged(this, &SWetWrinkleEditorPanel::HandleToolModeChanged, EWetWrinkleToolMode::ProceduralRidgeStroke)
+                                           [SNew(STextBlock)
+                                                .Text(LOCTEXT("RidgeStrokeToolMode", "Ridge Stroke"))]]]
 
              + SVerticalBox::Slot()
-                   .FillHeight(1.0f)
-                   .Padding(0.0f, 0.0f, 0.0f, 12.0f)
-                       [SAssignNew(PatchTextureListView, SListView<FPatchTextureItemPtr>)
-                            .ListItemsSource(&BrushPresetOptions)
-                            .OnGenerateRow(this, &SWetWrinkleEditorPanel::GeneratePatchTextureRow)
-                            .OnSelectionChanged(this, &SWetWrinkleEditorPanel::HandlePatchTextureSelectionChanged)]
+                   .AutoHeight()
+                   .Padding(0.0f, 0.0f, 0.0f, 10.0f)
+                       [SNew(SBox)
+                            .Visibility(this, &SWetWrinkleEditorPanel::GetProceduralRidgeToolVisibility)
+                                [SNew(SHorizontalBox)
+
+                        + SHorizontalBox::Slot()
+                              .FillWidth(1.0f)
+                                  [SNew(SCheckBox)
+                                       .Style(FAppStyle::Get(), "ToggleButtonCheckbox")
+                                       .HAlign(HAlign_Center)
+                                       .IsChecked(this, &SWetWrinkleEditorPanel::GetRidgeEditModeCheckState, EWetProceduralRidgeEditMode::Draw)
+                                       .OnCheckStateChanged(this, &SWetWrinkleEditorPanel::HandleRidgeEditModeChanged, EWetProceduralRidgeEditMode::Draw)
+                                           [SNew(STextBlock).Text(LOCTEXT("RidgeDrawMode", "Draw"))]]
+
+                        + SHorizontalBox::Slot()
+                              .FillWidth(1.0f)
+                              .Padding(4.0f, 0.0f, 0.0f, 0.0f)
+                                  [SNew(SCheckBox)
+                                       .Style(FAppStyle::Get(), "ToggleButtonCheckbox")
+                                       .HAlign(HAlign_Center)
+                                       .IsChecked(this, &SWetWrinkleEditorPanel::GetRidgeEditModeCheckState, EWetProceduralRidgeEditMode::Edit)
+                                       .OnCheckStateChanged(this, &SWetWrinkleEditorPanel::HandleRidgeEditModeChanged, EWetProceduralRidgeEditMode::Edit)
+                                           [SNew(STextBlock).Text(LOCTEXT("RidgeEditMode", "Edit"))]]]]
+
+             + SVerticalBox::Slot()
+                   .AutoHeight()
+                   .Padding(0.0f, 0.0f, 0.0f, 10.0f)
+                       [SNew(SCheckBox)
+                            .Visibility(this, &SWetWrinkleEditorPanel::GetProceduralRidgeToolVisibility)
+                            .IsChecked(this, &SWetWrinkleEditorPanel::GetRidgeJunctionModeCheckState)
+                            .OnCheckStateChanged(this, &SWetWrinkleEditorPanel::HandleRidgeJunctionModeChanged)
+                            .ToolTipText(LOCTEXT("RidgeJunctionModeTooltip", "Automatically snap ridge endpoints to nearby ridge strokes and store a junction connection."))
+                                [SNew(STextBlock).Text(LOCTEXT("RidgeJunctionMode", "Junction Mode"))]]
+
+             + SVerticalBox::Slot()
+                   .AutoHeight()
+                   .Padding(0.0f, 0.0f, 0.0f, 4.0f)
+                       [SNew(STextBlock)
+                            .Visibility(this, &SWetWrinkleEditorPanel::GetProceduralRidgeToolVisibility)
+                            .Text(LOCTEXT("RidgeShapeLabel", "Shape"))]
+
+             + SVerticalBox::Slot()
+                   .AutoHeight()
+                   .Padding(0.0f, 0.0f, 0.0f, 10.0f)
+                       [SNew(SBox)
+                            .Visibility(this, &SWetWrinkleEditorPanel::GetProceduralRidgeToolVisibility)
+                                [SNew(SHorizontalBox)
+
+                                 + SHorizontalBox::Slot()
+                                       .FillWidth(1.0f)
+                                           [SNew(SCheckBox)
+                                                .Style(FAppStyle::Get(), "ToggleButtonCheckbox")
+                                                .HAlign(HAlign_Center)
+                                                .IsChecked(this, &SWetWrinkleEditorPanel::GetRidgeShapeCheckState, EWetProceduralRidgeShape::Convex)
+                                                .OnCheckStateChanged(this, &SWetWrinkleEditorPanel::HandleRidgeShapeChanged, EWetProceduralRidgeShape::Convex)
+                                                    [SNew(STextBlock).Text(LOCTEXT("RidgeShapeConvex", "Convex"))]]
+
+                                 + SHorizontalBox::Slot()
+                                       .FillWidth(1.0f)
+                                       .Padding(4.0f, 0.0f, 0.0f, 0.0f)
+                                           [SNew(SCheckBox)
+                                                .Style(FAppStyle::Get(), "ToggleButtonCheckbox")
+                                                .HAlign(HAlign_Center)
+                                                .IsChecked(this, &SWetWrinkleEditorPanel::GetRidgeShapeCheckState, EWetProceduralRidgeShape::Concave)
+                                                .OnCheckStateChanged(this, &SWetWrinkleEditorPanel::HandleRidgeShapeChanged, EWetProceduralRidgeShape::Concave)
+                                                    [SNew(STextBlock).Text(LOCTEXT("RidgeShapeConcave", "Concave"))]]
+
+                                 + SHorizontalBox::Slot()
+                                       .FillWidth(1.0f)
+                                       .Padding(4.0f, 0.0f, 0.0f, 0.0f)
+                                           [SNew(SCheckBox)
+                                                .Style(FAppStyle::Get(), "ToggleButtonCheckbox")
+                                                .HAlign(HAlign_Center)
+                                                .IsChecked(this, &SWetWrinkleEditorPanel::GetRidgeShapeCheckState, EWetProceduralRidgeShape::Fold)
+                                                .OnCheckStateChanged(this, &SWetWrinkleEditorPanel::HandleRidgeShapeChanged, EWetProceduralRidgeShape::Fold)
+                                                    [SNew(STextBlock).Text(LOCTEXT("RidgeShapeFold", "Fold"))]]]]
+
+             + SVerticalBox::Slot()
+                   .AutoHeight()
+                   .Padding(0.0f, 0.0f, 0.0f, 10.0f)
+                       [SNew(SCheckBox)
+                            .Visibility(this, &SWetWrinkleEditorPanel::GetFoldOptionsVisibility)
+                            .IsChecked(this, &SWetWrinkleEditorPanel::GetFlipFoldSideCheckState)
+                            .OnCheckStateChanged(this, &SWetWrinkleEditorPanel::HandleFlipFoldSideChanged)
+                                [SNew(STextBlock)
+                                     .Text(LOCTEXT("FlipRidgeFoldSide", "Flip Fold Side"))]]
 
              + SVerticalBox::Slot()
                    .AutoHeight()
                    .Padding(0.0f, 0.0f, 0.0f, 6.0f)
                        [SNew(STextBlock)
-                            .Text(LOCTEXT("SizeLabel", "Size (cm)"))]
+                            .Text(LOCTEXT("WetWrinklePresetLabel", "Wet Wrinkle Preset"))]
+
+             + SVerticalBox::Slot()
+                   .AutoHeight()
+                   .Padding(0.0f, 0.0f, 0.0f, 6.0f)
+                       [SNew(SHorizontalBox)
+
+                        + SHorizontalBox::Slot()
+                              .FillWidth(1.0f)
+                                  [SNew(SObjectPropertyEntryBox)
+                                       .IsEnabled_Lambda([this]() { return BrushSettings.ToolMode == EWetWrinkleToolMode::Patch; })
+                                       .AllowedClass(UWetWrinklePreset::StaticClass())
+                                       .ObjectPath(this, &SWetWrinkleEditorPanel::GetWrinklePresetObjectPath)
+                                       .OnObjectChanged(this, &SWetWrinkleEditorPanel::HandleWrinklePresetChanged)]
+
+                        + SHorizontalBox::Slot()
+                              .AutoWidth()
+                              .Padding(0.0f)
+                              .VAlign(VAlign_Center)
+                                  [SNew(SBox)
+                                       .WidthOverride(18.0f)
+                                       .HeightOverride(18.0f)
+                                           [SNew(SButton)
+                                                .ButtonStyle(FAppStyle::Get(), "SimpleButton")
+                                                .ContentPadding(0.0f)
+                                                .ToolTipText(LOCTEXT("RefreshWrinklePresetPaletteTooltip", "Refresh the Wet Wrinkle Preset palette."))
+                                                .OnClicked(this, &SWetWrinkleEditorPanel::HandleRefreshWrinklePresetPaletteClicked)
+                                                    [SNew(SImage)
+                                                         .Image(FAppStyle::GetBrush("Icons.Refresh"))
+                                                         .ColorAndOpacity(FSlateColor::UseForeground())]]]]
+
+             + SVerticalBox::Slot()
+                   .AutoHeight()
+                   .Padding(0.0f, 0.0f, 0.0f, 8.0f)
+                       [SNew(SBox)
+                            .IsEnabled_Lambda([this]() { return BrushSettings.ToolMode == EWetWrinkleToolMode::Patch; })
+                                [BuildWrinklePresetPalette()]]
+
+             + SVerticalBox::Slot()
+                   .AutoHeight()
+                   .Padding(0.0f, 0.0f, 0.0f, 8.0f)
+                       [SNew(SHorizontalBox)
+
+                        + SHorizontalBox::Slot()
+                              .FillWidth(1.0f)
+                              .VAlign(VAlign_Center)
+                                  [SNew(STextBlock)
+                                       .AutoWrapText(true)
+                                       .ColorAndOpacity(this, &SWetWrinkleEditorPanel::GetWrinklePresetStatusColor)
+                                       .Text(this, &SWetWrinkleEditorPanel::GetWrinklePresetStatusText)]
+
+                        + SHorizontalBox::Slot()
+                              .AutoWidth()
+                              .VAlign(VAlign_Center)
+                              .Padding(6.0f, 0.0f, 0.0f, 0.0f)
+                                      [SNew(SButton)
+                                       .IsEnabled_Lambda([this]() { return BrushSettings.ToolMode == EWetWrinkleToolMode::Patch && CanOpenWrinklePreset(); })
+                                       .Text(LOCTEXT("OpenWrinklePresetButton", "Open"))
+                                       .OnClicked(this, &SWetWrinkleEditorPanel::HandleOpenWrinklePresetClicked)]]
+
+             + SVerticalBox::Slot()
+                   .AutoHeight()
+                   .Padding(0.0f, 0.0f, 0.0f, 8.0f)
+                       [SNew(SVerticalBox)
+
+                        + SVerticalBox::Slot()
+                              .AutoHeight()
+                              .Padding(0.0f, 0.0f, 0.0f, 4.0f)
+                                  [SNew(STextBlock)
+                                       .Text(LOCTEXT("SelectedWrinklePresetThumbnailLabel", "Wrinkle Normal"))]
+
+                        + SVerticalBox::Slot()
+                              .AutoHeight()
+                                  [SNew(SBox)
+                                           [SNew(SBorder)
+                                                .Padding(1.0f)
+                                                .BorderImage(FCoreStyle::Get().GetBrush("WhiteBrush"))
+                                                .BorderBackgroundColor(FLinearColor(0.45f, 0.45f, 0.45f))
+                                                    [SNew(SBorder)
+                                                         .BorderImage(FCoreStyle::Get().GetBrush("WhiteBrush"))
+                                                         .BorderBackgroundColor(FLinearColor::Black)
+                                                             [SNew(SScaleBox)
+                                                                  .Stretch(EStretch::ScaleToFitX)
+                                                                  .StretchDirection(EStretchDirection::DownOnly)
+                                                                      [SNew(SImage)
+                                                                           .Image(this, &SWetWrinkleEditorPanel::GetWrinklePresetThumbnailBrush)
+                                                                           .Visibility(this, &SWetWrinkleEditorPanel::GetWrinklePresetThumbnailVisibility)]]]]]]
+
+             + SVerticalBox::Slot()
+                   .AutoHeight()
+                   .Padding(0.0f, 0.0f, 0.0f, 6.0f)
+                       [SNew(STextBlock)
+                            .Text(this, &SWetWrinkleEditorPanel::GetBrushSizeLabelText)]
 
              + SVerticalBox::Slot()
                    .AutoHeight()
@@ -934,6 +1160,9 @@ TSharedRef<SWidget> SWetWrinkleEditorPanel::BuildPatchBrushSection()
                                                 .MinValue(0.1f)
                                                 .MaxValue(100.0f)
                                                 .Value(this, &SWetWrinkleEditorPanel::GetBrushSizeCm)
+                                                .OnBeginSliderMovement(this, &SWetWrinkleEditorPanel::HandleRidgePropertySliderBegin)
+                                                .OnEndSliderMovement(this, &SWetWrinkleEditorPanel::HandleRidgePropertySliderEnd)
+                                                .OnValueCommitted(this, &SWetWrinkleEditorPanel::HandleRidgePropertyCommitted)
                                                 .OnValueChanged(this, &SWetWrinkleEditorPanel::HandleBrushRadiusChanged)]]
 
                         + SHorizontalBox::Slot()
@@ -962,7 +1191,10 @@ TSharedRef<SWidget> SWetWrinkleEditorPanel::BuildPatchBrushSection()
                             .MaxValue(4.0f)
                             .MinSliderValue(0.0f)
                             .MaxSliderValue(4.0f)
-                            .Value(BrushSettings.Strength)
+                            .Value(this, &SWetWrinkleEditorPanel::GetRidgeStrengthValue)
+                            .OnBeginSliderMovement(this, &SWetWrinkleEditorPanel::HandleRidgePropertySliderBegin)
+                            .OnEndSliderMovement(this, &SWetWrinkleEditorPanel::HandleRidgePropertySliderEnd)
+                            .OnValueCommitted(this, &SWetWrinkleEditorPanel::HandleRidgePropertyCommitted)
                             .OnValueChanged(this, &SWetWrinkleEditorPanel::HandleStrengthChanged)]
 
              + SVerticalBox::Slot()
@@ -977,23 +1209,360 @@ TSharedRef<SWidget> SWetWrinkleEditorPanel::BuildPatchBrushSection()
                        [SNew(SSpinBox<float>)
                             .MinValue(0.0f)
                             .MaxValue(100.0f)
-                            .Value(BrushSettings.Falloff * 100.0f)
+                            .Value(this, &SWetWrinkleEditorPanel::GetRidgeFalloffPercentValue)
+                            .OnBeginSliderMovement(this, &SWetWrinkleEditorPanel::HandleRidgePropertySliderBegin)
+                            .OnEndSliderMovement(this, &SWetWrinkleEditorPanel::HandleRidgePropertySliderEnd)
+                            .OnValueCommitted(this, &SWetWrinkleEditorPanel::HandleRidgePropertyCommitted)
                             .OnValueChanged(this, &SWetWrinkleEditorPanel::HandleFalloffChanged)]
 
              + SVerticalBox::Slot()
                    .AutoHeight()
                    .Padding(0.0f, 0.0f, 0.0f, 6.0f)
-                       [SNew(STextBlock)
+                        [SNew(STextBlock)
+                            .Visibility(this, &SWetWrinkleEditorPanel::GetPatchToolVisibility)
                             .Text(LOCTEXT("RotationLabel", "Rotation (°)"))]
 
              + SVerticalBox::Slot()
                    .AutoHeight()
                    .Padding(0.0f, 0.0f, 0.0f, 10.0f)
-                       [SNew(SSpinBox<float>)
+                        [SNew(SSpinBox<float>)
+                            .Visibility(this, &SWetWrinkleEditorPanel::GetPatchToolVisibility)
                             .MinValue(-180.0f)
                             .MaxValue(180.0f)
                             .Value(FMath::RadiansToDegrees(BrushSettings.RotationRadians))
                             .OnValueChanged(this, &SWetWrinkleEditorPanel::HandleRotationChanged)]
+
+             + SVerticalBox::Slot()
+                   .AutoHeight()
+                   .Padding(0.0f, 0.0f, 0.0f, 4.0f)
+                       [SNew(STextBlock)
+                            .Visibility(this, &SWetWrinkleEditorPanel::GetProceduralRidgeToolVisibility)
+                            .Text(LOCTEXT("RidgeStartTaperLabel", "Start Taper"))]
+
+             + SVerticalBox::Slot()
+                   .AutoHeight()
+                   .Padding(0.0f, 0.0f, 0.0f, 8.0f)
+                       [SNew(SSpinBox<float>)
+                            .Visibility(this, &SWetWrinkleEditorPanel::GetProceduralRidgeToolVisibility)
+                            .MinValue(0.0f)
+                            .MaxValue(0.5f)
+                            .Delta(0.01f)
+                            .Value(this, &SWetWrinkleEditorPanel::GetRidgeStartTaperValue)
+                            .OnBeginSliderMovement(this, &SWetWrinkleEditorPanel::HandleRidgePropertySliderBegin)
+                            .OnEndSliderMovement(this, &SWetWrinkleEditorPanel::HandleRidgePropertySliderEnd)
+                            .OnValueCommitted(this, &SWetWrinkleEditorPanel::HandleRidgePropertyCommitted)
+                            .OnValueChanged(this, &SWetWrinkleEditorPanel::HandleRidgeStartTaperChanged)]
+
+             + SVerticalBox::Slot()
+                   .AutoHeight()
+                   .Padding(0.0f, 0.0f, 0.0f, 4.0f)
+                       [SNew(STextBlock)
+                            .Visibility(this, &SWetWrinkleEditorPanel::GetProceduralRidgeToolVisibility)
+                            .Text(LOCTEXT("RidgeEndTaperLabel", "End Taper"))]
+
+             + SVerticalBox::Slot()
+                   .AutoHeight()
+                   .Padding(0.0f, 0.0f, 0.0f, 8.0f)
+                       [SNew(SSpinBox<float>)
+                            .Visibility(this, &SWetWrinkleEditorPanel::GetProceduralRidgeToolVisibility)
+                            .MinValue(0.0f)
+                            .MaxValue(0.5f)
+                            .Delta(0.01f)
+                            .Value(this, &SWetWrinkleEditorPanel::GetRidgeEndTaperValue)
+                            .OnBeginSliderMovement(this, &SWetWrinkleEditorPanel::HandleRidgePropertySliderBegin)
+                            .OnEndSliderMovement(this, &SWetWrinkleEditorPanel::HandleRidgePropertySliderEnd)
+                            .OnValueCommitted(this, &SWetWrinkleEditorPanel::HandleRidgePropertyCommitted)
+                            .OnValueChanged(this, &SWetWrinkleEditorPanel::HandleRidgeEndTaperChanged)]
+
+             + SVerticalBox::Slot()
+                   .AutoHeight()
+                   .Padding(0.0f, 0.0f, 0.0f, 4.0f)
+                       [SNew(SBox)
+                            .Visibility(this, &SWetWrinkleEditorPanel::GetProceduralRidgeToolVisibility)
+                                [SNew(SVerticalBox)
+
+                                 + SVerticalBox::Slot()
+                                       .AutoHeight()
+                                       .Padding(0.0f, 0.0f, 0.0f, 6.0f)
+                                           [SNew(SCheckBox)
+                                                .IsChecked(this, &SWetWrinkleEditorPanel::GetRidgeNaturalVariationEnabledState)
+                                                .OnCheckStateChanged(this, &SWetWrinkleEditorPanel::HandleRidgeNaturalVariationEnabledChanged)
+                                                    [SNew(STextBlock).Text(LOCTEXT("RidgeNaturalVariation", "Natural Variation"))]]
+
+                                 + SVerticalBox::Slot()
+                                       .AutoHeight()
+                                       .Padding(0.0f, 0.0f, 0.0f, 4.0f)
+                                           [SNew(STextBlock).Text(LOCTEXT("RidgeCenterlineVariationLabel", "Centerline Variation"))]
+
+                                 + SVerticalBox::Slot()
+                                       .AutoHeight()
+                                       .Padding(0.0f, 0.0f, 0.0f, 8.0f)
+                                           [SNew(SSpinBox<float>)
+                                                .IsEnabled_Lambda([this]() { return BrushSettings.RidgeNaturalVariation.bEnabled; })
+                                                .MinValue(0.0f)
+                                                .MaxValue(0.5f)
+                                                .Delta(0.01f)
+                                                .Value(this, &SWetWrinkleEditorPanel::GetRidgeCenterlineVariationValue)
+                                                .OnBeginSliderMovement(this, &SWetWrinkleEditorPanel::HandleRidgePropertySliderBegin)
+                                                .OnEndSliderMovement(this, &SWetWrinkleEditorPanel::HandleRidgePropertySliderEnd)
+                                                .OnValueCommitted(this, &SWetWrinkleEditorPanel::HandleRidgePropertyCommitted)
+                                                .OnValueChanged(this, &SWetWrinkleEditorPanel::HandleRidgeCenterlineVariationChanged)]
+
+                                 + SVerticalBox::Slot()
+                                       .AutoHeight()
+                                       .Padding(0.0f, 0.0f, 0.0f, 4.0f)
+                                           [SNew(STextBlock).Text(LOCTEXT("RidgeCenterlineFrequencyLabel", "Centerline Frequency"))]
+
+                                 + SVerticalBox::Slot()
+                                       .AutoHeight()
+                                       .Padding(0.0f, 0.0f, 0.0f, 8.0f)
+                                           [SNew(SSpinBox<float>)
+                                                .IsEnabled_Lambda([this]() { return BrushSettings.RidgeNaturalVariation.bEnabled; })
+                                                .MinValue(0.25f)
+                                                .MaxValue(12.0f)
+                                                .Delta(0.25f)
+                                                .Value(this, &SWetWrinkleEditorPanel::GetRidgeCenterlineFrequencyValue)
+                                                .OnBeginSliderMovement(this, &SWetWrinkleEditorPanel::HandleRidgePropertySliderBegin)
+                                                .OnEndSliderMovement(this, &SWetWrinkleEditorPanel::HandleRidgePropertySliderEnd)
+                                                .OnValueCommitted(this, &SWetWrinkleEditorPanel::HandleRidgePropertyCommitted)
+                                                .OnValueChanged(this, &SWetWrinkleEditorPanel::HandleRidgeCenterlineFrequencyChanged)]
+
+                                 + SVerticalBox::Slot()
+                                       .AutoHeight()
+                                       .Padding(0.0f, 0.0f, 0.0f, 4.0f)
+                                           [SNew(STextBlock).Text(LOCTEXT("RidgeWidthVariationLabel", "Width Variation"))]
+
+                                 + SVerticalBox::Slot()
+                                       .AutoHeight()
+                                       .Padding(0.0f, 0.0f, 0.0f, 8.0f)
+                                           [SNew(SSpinBox<float>)
+                                                .IsEnabled_Lambda([this]() { return BrushSettings.RidgeNaturalVariation.bEnabled; })
+                                                .MinValue(0.0f)
+                                                .MaxValue(0.5f)
+                                                .Delta(0.01f)
+                                                .Value(this, &SWetWrinkleEditorPanel::GetRidgeWidthVariationValue)
+                                                .OnBeginSliderMovement(this, &SWetWrinkleEditorPanel::HandleRidgePropertySliderBegin)
+                                                .OnEndSliderMovement(this, &SWetWrinkleEditorPanel::HandleRidgePropertySliderEnd)
+                                                .OnValueCommitted(this, &SWetWrinkleEditorPanel::HandleRidgePropertyCommitted)
+                                                .OnValueChanged(this, &SWetWrinkleEditorPanel::HandleRidgeWidthVariationChanged)]
+
+                                 + SVerticalBox::Slot()
+                                       .AutoHeight()
+                                       .Padding(0.0f, 0.0f, 0.0f, 4.0f)
+                                           [SNew(STextBlock).Text(LOCTEXT("RidgeWidthFrequencyLabel", "Width Frequency"))]
+
+                                 + SVerticalBox::Slot()
+                                       .AutoHeight()
+                                       .Padding(0.0f, 0.0f, 0.0f, 8.0f)
+                                           [SNew(SSpinBox<float>)
+                                                .IsEnabled_Lambda([this]() { return BrushSettings.RidgeNaturalVariation.bEnabled; })
+                                                .MinValue(0.25f)
+                                                .MaxValue(12.0f)
+                                                .Delta(0.25f)
+                                                .Value(this, &SWetWrinkleEditorPanel::GetRidgeWidthFrequencyValue)
+                                                .OnBeginSliderMovement(this, &SWetWrinkleEditorPanel::HandleRidgePropertySliderBegin)
+                                                .OnEndSliderMovement(this, &SWetWrinkleEditorPanel::HandleRidgePropertySliderEnd)
+                                                .OnValueCommitted(this, &SWetWrinkleEditorPanel::HandleRidgePropertyCommitted)
+                                                .OnValueChanged(this, &SWetWrinkleEditorPanel::HandleRidgeWidthFrequencyChanged)]
+
+                                 + SVerticalBox::Slot()
+                                       .AutoHeight()
+                                       .Padding(0.0f, 0.0f, 0.0f, 4.0f)
+                                           [SNew(STextBlock).Text(LOCTEXT("RidgeNoiseSeedLabel", "Noise Seed"))]
+
+                                 + SVerticalBox::Slot()
+                                       .AutoHeight()
+                                       .Padding(0.0f, 0.0f, 0.0f, 10.0f)
+                                           [SNew(SHorizontalBox)
+
+                                            + SHorizontalBox::Slot()
+                                                  .FillWidth(1.0f)
+                                                      [SNew(SSpinBox<int32>)
+                                                           .IsEnabled_Lambda([this]() { return BrushSettings.RidgeNaturalVariation.bEnabled; })
+                                                           .Value(this, &SWetWrinkleEditorPanel::GetRidgeNoiseSeedValue)
+                                                           .OnValueChanged(this, &SWetWrinkleEditorPanel::HandleRidgeNoiseSeedChanged)]
+
+                                            + SHorizontalBox::Slot()
+                                                  .AutoWidth()
+                                                  .Padding(4.0f, 0.0f, 0.0f, 0.0f)
+                                                      [SNew(SButton)
+                                                           .ButtonStyle(FAppStyle::Get(), "SimpleButton")
+                                                           .IsEnabled_Lambda([this]() { return BrushSettings.RidgeNaturalVariation.bEnabled; })
+                                                           .ToolTipText(LOCTEXT("RandomizeRidgeNoiseSeedTooltip", "Generate a different deterministic variation for this ridge."))
+                                                           .OnClicked(this, &SWetWrinkleEditorPanel::HandleRandomizeRidgeNoiseSeedClicked)
+                                                               [SNew(SImage).Image(FAppStyle::GetBrush("Icons.Refresh"))]]]]]
+
+             + SVerticalBox::Slot()
+                   .AutoHeight()
+                   .Padding(0.0f, 0.0f, 0.0f, 4.0f)
+                       [SNew(SBox)
+                            .Visibility(this, &SWetWrinkleEditorPanel::GetProceduralRidgeEditVisibility)
+                                [SNew(SHorizontalBox)
+
+                                 + SHorizontalBox::Slot()
+                                       .FillWidth(1.0f)
+                                           [SNew(STextBlock)
+                                                .Text(this, &SWetWrinkleEditorPanel::GetSelectedRidgeEndpointStatusText, true)
+                                                .ColorAndOpacity(this, &SWetWrinkleEditorPanel::GetSelectedRidgeEndpointStatusColor, true)]
+
+                                 + SHorizontalBox::Slot()
+                                       .FillWidth(1.0f)
+                                       .Padding(6.0f, 0.0f, 0.0f, 0.0f)
+                                           [SNew(STextBlock)
+                                                .Text(this, &SWetWrinkleEditorPanel::GetSelectedRidgeEndpointStatusText, false)
+                                                .ColorAndOpacity(this, &SWetWrinkleEditorPanel::GetSelectedRidgeEndpointStatusColor, false)]]]
+
+             + SVerticalBox::Slot()
+                   .AutoHeight()
+                   .Padding(0.0f, 0.0f, 0.0f, 8.0f)
+                       [SNew(SBox)
+                            .Visibility(this, &SWetWrinkleEditorPanel::GetProceduralRidgeEditVisibility)
+                                [SNew(SHorizontalBox)
+
+                                 + SHorizontalBox::Slot()
+                                       .FillWidth(1.0f)
+                                           [SNew(SCheckBox)
+                                                .IsChecked(this, &SWetWrinkleEditorPanel::GetSelectedRidgeEndpointPointedState, true)
+                                                .OnCheckStateChanged(this, &SWetWrinkleEditorPanel::HandleSelectedRidgeEndpointPointedChanged, true)
+                                                    [SNew(STextBlock).Text(LOCTEXT("RidgePointedStart", "Pointed Start"))]]
+
+                                 + SHorizontalBox::Slot()
+                                       .FillWidth(1.0f)
+                                       .Padding(6.0f, 0.0f, 0.0f, 0.0f)
+                                           [SNew(SCheckBox)
+                                                .IsChecked(this, &SWetWrinkleEditorPanel::GetSelectedRidgeEndpointPointedState, false)
+                                                .OnCheckStateChanged(this, &SWetWrinkleEditorPanel::HandleSelectedRidgeEndpointPointedChanged, false)
+                                                    [SNew(STextBlock).Text(LOCTEXT("RidgePointedEnd", "Pointed End"))]]]]
+
+             + SVerticalBox::Slot()
+                   .AutoHeight()
+                   .Padding(0.0f, 0.0f, 0.0f, 8.0f)
+                       [SNew(SBox)
+                            .Visibility(this, &SWetWrinkleEditorPanel::GetProceduralRidgeEditVisibility)
+                                [SNew(SHorizontalBox)
+
+                                 + SHorizontalBox::Slot()
+                                       .FillWidth(1.0f)
+                                           [SNew(SCheckBox)
+                                                .IsChecked(this, &SWetWrinkleEditorPanel::GetSelectedRidgeEndpointFlaredState, true)
+                                                .OnCheckStateChanged(this, &SWetWrinkleEditorPanel::HandleSelectedRidgeEndpointFlaredChanged, true)
+                                                    [SNew(STextBlock).Text(LOCTEXT("RidgeFlaredStart", "Flared Start"))]]
+
+                                 + SHorizontalBox::Slot()
+                                       .FillWidth(1.0f)
+                                       .Padding(6.0f, 0.0f, 0.0f, 0.0f)
+                                           [SNew(SCheckBox)
+                                                .IsChecked(this, &SWetWrinkleEditorPanel::GetSelectedRidgeEndpointFlaredState, false)
+                                                .OnCheckStateChanged(this, &SWetWrinkleEditorPanel::HandleSelectedRidgeEndpointFlaredChanged, false)
+                                                    [SNew(STextBlock).Text(LOCTEXT("RidgeFlaredEnd", "Flared End"))]]]]
+
+             + SVerticalBox::Slot()
+                   .AutoHeight()
+                   .Padding(0.0f, 0.0f, 0.0f, 4.0f)
+                       [SNew(SBox)
+                            .Visibility(this, &SWetWrinkleEditorPanel::GetFlareOptionsVisibility)
+                                [SNew(SVerticalBox)
+
+                                 + SVerticalBox::Slot()
+                                       .AutoHeight()
+                                       .Padding(0.0f, 0.0f, 0.0f, 4.0f)
+                                           [SNew(STextBlock).Text(LOCTEXT("RidgeFlareLengthLabel", "Flare Length"))]
+
+                                 + SVerticalBox::Slot()
+                                       .AutoHeight()
+                                       .Padding(0.0f, 0.0f, 0.0f, 8.0f)
+                                           [SNew(SSpinBox<float>)
+                                                .MinValue(0.01f)
+                                                .MaxValue(0.5f)
+                                                .Delta(0.01f)
+                                                .Value(this, &SWetWrinkleEditorPanel::GetRidgeFlareLengthValue)
+                                                .OnBeginSliderMovement(this, &SWetWrinkleEditorPanel::HandleRidgePropertySliderBegin)
+                                                .OnEndSliderMovement(this, &SWetWrinkleEditorPanel::HandleRidgePropertySliderEnd)
+                                                .OnValueCommitted(this, &SWetWrinkleEditorPanel::HandleRidgePropertyCommitted)
+                                                .OnValueChanged(this, &SWetWrinkleEditorPanel::HandleRidgeFlareLengthChanged)]
+
+                                 + SVerticalBox::Slot()
+                                       .AutoHeight()
+                                       .Padding(0.0f, 0.0f, 0.0f, 4.0f)
+                                           [SNew(STextBlock).Text(LOCTEXT("RidgeFlareWidthLabel", "Flare Width"))]
+
+                                 + SVerticalBox::Slot()
+                                       .AutoHeight()
+                                       .Padding(0.0f, 0.0f, 0.0f, 8.0f)
+                                           [SNew(SSpinBox<float>)
+                                                .MinValue(1.0f)
+                                                .MaxValue(5.0f)
+                                                .Delta(0.1f)
+                                                .Value(this, &SWetWrinkleEditorPanel::GetRidgeFlareWidthValue)
+                                                .OnBeginSliderMovement(this, &SWetWrinkleEditorPanel::HandleRidgePropertySliderBegin)
+                                                .OnEndSliderMovement(this, &SWetWrinkleEditorPanel::HandleRidgePropertySliderEnd)
+                                                .OnValueCommitted(this, &SWetWrinkleEditorPanel::HandleRidgePropertyCommitted)
+                                                .OnValueChanged(this, &SWetWrinkleEditorPanel::HandleRidgeFlareWidthChanged)]
+
+                                 + SVerticalBox::Slot()
+                                       .AutoHeight()
+                                       .Padding(0.0f, 0.0f, 0.0f, 4.0f)
+                                           [SNew(STextBlock).Text(LOCTEXT("RidgeFlareEndStrengthLabel", "Flare End Strength"))]
+
+                                 + SVerticalBox::Slot()
+                                       .AutoHeight()
+                                       .Padding(0.0f, 0.0f, 0.0f, 8.0f)
+                                           [SNew(SSpinBox<float>)
+                                                .MinValue(0.0f)
+                                                .MaxValue(1.0f)
+                                                .Delta(0.05f)
+                                                .Value(this, &SWetWrinkleEditorPanel::GetRidgeFlareEndStrengthValue)
+                                                .OnBeginSliderMovement(this, &SWetWrinkleEditorPanel::HandleRidgePropertySliderBegin)
+                                                .OnEndSliderMovement(this, &SWetWrinkleEditorPanel::HandleRidgePropertySliderEnd)
+                                                .OnValueCommitted(this, &SWetWrinkleEditorPanel::HandleRidgePropertyCommitted)
+                                                .OnValueChanged(this, &SWetWrinkleEditorPanel::HandleRidgeFlareEndStrengthChanged)]
+
+                                 + SVerticalBox::Slot()
+                                       .AutoHeight()
+                                       .Padding(0.0f, 0.0f, 0.0f, 4.0f)
+                                           [SNew(STextBlock).Text(LOCTEXT("RidgeFlareSoftnessLabel", "Flare Softness"))]
+
+                                 + SVerticalBox::Slot()
+                                       .AutoHeight()
+                                       .Padding(0.0f, 0.0f, 0.0f, 10.0f)
+                                           [SNew(SSpinBox<float>)
+                                                .MinValue(0.0f)
+                                                .MaxValue(1.0f)
+                                                .Delta(0.05f)
+                                                .Value(this, &SWetWrinkleEditorPanel::GetRidgeFlareSoftnessValue)
+                                                .OnBeginSliderMovement(this, &SWetWrinkleEditorPanel::HandleRidgePropertySliderBegin)
+                                                 .OnEndSliderMovement(this, &SWetWrinkleEditorPanel::HandleRidgePropertySliderEnd)
+                                                 .OnValueCommitted(this, &SWetWrinkleEditorPanel::HandleRidgePropertyCommitted)
+                                                 .OnValueChanged(this, &SWetWrinkleEditorPanel::HandleRidgeFlareSoftnessChanged)]]]
+
+             + SVerticalBox::Slot()
+                   .AutoHeight()
+                   .Padding(0.0f, 0.0f, 0.0f, 4.0f)
+                       [SNew(STextBlock)
+                            .Visibility(this, &SWetWrinkleEditorPanel::GetProceduralRidgeToolVisibility)
+                            .Text(LOCTEXT("RidgePointSpacingLabel", "Point Spacing"))]
+
+             + SVerticalBox::Slot()
+                   .AutoHeight()
+                   .Padding(0.0f, 0.0f, 0.0f, 10.0f)
+                       [SNew(SSpinBox<float>)
+                            .Visibility(this, &SWetWrinkleEditorPanel::GetProceduralRidgeToolVisibility)
+                            .MinValue(0.05f)
+                            .MaxValue(1.0f)
+                            .Delta(0.05f)
+                            .Value(BrushSettings.RidgePointSpacingScale)
+                            .OnValueChanged(this, &SWetWrinkleEditorPanel::HandleRidgePointSpacingChanged)]
+
+             + SVerticalBox::Slot()
+                   .AutoHeight()
+                   .Padding(0.0f, 0.0f, 0.0f, 10.0f)
+                       [SNew(SBox)
+                            .Visibility(this, &SWetWrinkleEditorPanel::GetProceduralRidgeEditVisibility)
+                                [SNew(SButton)
+                                     .IsEnabled(this, &SWetWrinkleEditorPanel::CanDeleteSelectedRidgePoint)
+                                     .Text(LOCTEXT("DeleteSelectedRidgePoint", "Delete Selected Point"))
+                                     .ToolTipText(LOCTEXT("DeleteSelectedRidgePointTooltip", "Delete the selected control point. A ridge must keep at least two points."))
+                                     .OnClicked(this, &SWetWrinkleEditorPanel::HandleDeleteSelectedRidgePointClicked)]]
 
              + SVerticalBox::Slot()
                    .AutoHeight()
@@ -1009,7 +1578,7 @@ TSharedRef<SWidget> SWetWrinkleEditorPanel::BuildPatchBrushSection()
                             .MaxValue(1.0f)
                             .MinSliderValue(0.0f)
                             .MaxSliderValue(1.0f)
-                            .Delta(0.05f)
+                            .Delta(0.1f)
                             .Value(BrushSettings.PreviewWetness)
                             .OnValueChanged(this, &SWetWrinkleEditorPanel::HandlePreviewWetnessChanged)]
 
@@ -1020,7 +1589,7 @@ TSharedRef<SWidget> SWetWrinkleEditorPanel::BuildPatchBrushSection()
                             .IsChecked(this, &SWetWrinkleEditorPanel::GetPreviewToggleState)
                             .OnCheckStateChanged(this, &SWetWrinkleEditorPanel::HandlePreviewToggleChanged)
                                 [SNew(STextBlock)
-                                     .Text(LOCTEXT("PreviewToggle", "Show Preview Cursor"))]]];
+                                     .Text(LOCTEXT("PreviewToggle", "Show Preview Cursor"))]]]];
 }
 
 TSharedRef<SWidget> SWetWrinkleEditorPanel::BuildPatchListSection()
@@ -1040,7 +1609,7 @@ TSharedRef<SWidget> SWetWrinkleEditorPanel::BuildPatchListSection()
                               .FillWidth(1.0f)
                               .VAlign(VAlign_Center)
                                   [SNew(STextBlock)
-                                       .Text(LOCTEXT("PatchListHeading", "Patch List"))
+                                       .Text(LOCTEXT("PatchListHeading", "Wrinkle Elements"))
                                        .Font(SectionHeadingFont)]
 
                         + SHorizontalBox::Slot()
@@ -1076,8 +1645,10 @@ void SWetWrinkleEditorPanel::RefreshFromAsset()
     RefreshUVChannelOptions();
     RefreshMaterialTextures();
     RefreshBrushPresetOptions();
+    RefreshWrinklePresetPalette();
     RefreshPartMapItems();
     RefreshStrokeList();
+    RefreshWrinklePresetThumbnail();
     InvalidateWrinkleUVViewCache();
 
     if (PreviewViewport.IsValid())
@@ -1096,29 +1667,53 @@ FReply SWetWrinkleEditorPanel::HandleSaveClicked()
     return FReply::Handled();
 }
 
-FReply SWetWrinkleEditorPanel::HandleBakeAllMapsClicked()
+FReply SWetWrinkleEditorPanel::ExecuteBakeWrinkleNormalMap()
 {
-    return BakeWrinkleMapsForSelectedSlot(true, true);
+    if (BrushSettings.MaterialSlotIndex == INDEX_NONE)
+    {
+        FMessageDialog::Open(EAppMsgType::Ok, LOCTEXT("BakeWrinkleNoSlot", "Select a material slot before baking a wrinkle normal map."));
+        return FReply::Handled();
+    }
+
+    return BakeWrinkleNormalMapsForSlots({BrushSettings.MaterialSlotIndex});
 }
 
-FReply SWetWrinkleEditorPanel::HandleBakeWetnessProfileMapsClicked()
+SWetWrinkleEditorPanel::~SWetWrinkleEditorPanel()
 {
-    FMessageDialog::Open(EAppMsgType::Ok, LOCTEXT("BakeWetnessProfileMapsFromWrinkle", "Wetness Profile Map baking is available from Part mode."));
-    return FReply::Handled();
+    ActiveRidgeEditTransaction.Reset();
+    ActiveRidgePropertyTransaction.Reset();
+    if (GEditor != nullptr)
+    {
+        GEditor->UnregisterForUndo(this);
+    }
 }
 
-FReply SWetWrinkleEditorPanel::HandleBakeWrinkleNormalMapClicked()
+void SWetWrinkleEditorPanel::PostUndo(bool bSuccess)
 {
-    return BakeWrinkleMapsForSelectedSlot(true, false);
+    if (bSuccess)
+    {
+        ActiveRidgeEditTransaction.Reset();
+        ActiveRidgePropertyTransaction.Reset();
+        bEditingProceduralRidgePoint = false;
+        bInsertedEditedProceduralRidgePoint = false;
+        EditingProceduralRidgePointIndex = INDEX_NONE;
+        SelectedProceduralRidgePointIndex = INDEX_NONE;
+        if (PreviewViewport.IsValid())
+        {
+            PreviewViewport->ClearTransientProceduralStroke();
+            PreviewViewport->SetEditingProceduralStrokeGuid(FGuid());
+        }
+        CancelProceduralRidgeStroke();
+        RefreshFromAsset();
+    }
 }
 
-FReply SWetWrinkleEditorPanel::HandleBakeWrinkleMaskClicked()
+void SWetWrinkleEditorPanel::PostRedo(bool bSuccess)
 {
-    // The mask is generated from the same patch rasterization pass as the normal map.
-    return BakeWrinkleMapsForSelectedSlot(true, true);
+    PostUndo(bSuccess);
 }
 
-FReply SWetWrinkleEditorPanel::BakeWrinkleMapsForSelectedSlot(bool bBakeNormalMap, bool bBakeMask)
+FReply SWetWrinkleEditorPanel::ExecuteBakeAllWrinkleNormalMaps()
 {
     UWetClothingAsset* Asset = WetClothingAsset.Get();
     if (Asset == nullptr)
@@ -1127,9 +1722,57 @@ FReply SWetWrinkleEditorPanel::BakeWrinkleMapsForSelectedSlot(bool bBakeNormalMa
         return FReply::Handled();
     }
 
-    if (BrushSettings.MaterialSlotIndex == INDEX_NONE)
+    TSet<int32> UniqueMaterialSlots;
+    for (const FWetWrinklePatchStroke& Stroke : Asset->WrinkleData.EditablePatchStrokes)
     {
-        FMessageDialog::Open(EAppMsgType::Ok, LOCTEXT("BakeWrinkleNoSlot", "Select a material slot before baking wrinkle maps."));
+        if (!Stroke.bEnabled && !Asset->WrinkleData.BakeSettings.bIncludeDisabledPatchStrokes)
+        {
+            continue;
+        }
+
+        for (const FWetWrinklePatchPlacement& Patch : Stroke.PatchPlacements)
+        {
+            if (Patch.MaterialSlotIndex != INDEX_NONE)
+            {
+                UniqueMaterialSlots.Add(Patch.MaterialSlotIndex);
+            }
+        }
+    }
+
+    for (const FWetProceduralRidgeStroke& Stroke : Asset->WrinkleData.EditableProceduralRidgeStrokes)
+    {
+        if ((!Stroke.bEnabled && !Asset->WrinkleData.BakeSettings.bIncludeDisabledPatchStrokes) ||
+            Stroke.MaterialSlotIndex == INDEX_NONE || Stroke.Points.Num() < 2)
+        {
+            continue;
+        }
+
+        UniqueMaterialSlots.Add(Stroke.MaterialSlotIndex);
+    }
+
+    TArray<int32> MaterialSlotIndices = UniqueMaterialSlots.Array();
+    MaterialSlotIndices.Sort();
+    if (MaterialSlotIndices.Num() == 0)
+    {
+        FMessageDialog::Open(EAppMsgType::Ok, LOCTEXT("BakeAllWrinkleNoInputs", "No enabled wrinkle patches or procedural ridge strokes were found to bake."));
+        return FReply::Handled();
+    }
+
+    return BakeWrinkleNormalMapsForSlots(MaterialSlotIndices);
+}
+
+FReply SWetWrinkleEditorPanel::BakeWrinkleNormalMapsForSlots(const TArray<int32>& MaterialSlotIndices)
+{
+    UWetClothingAsset* Asset = WetClothingAsset.Get();
+    if (Asset == nullptr)
+    {
+        FMessageDialog::Open(EAppMsgType::Ok, LOCTEXT("BakeWrinkleNoAsset", "Wet Clothing Asset is unavailable."));
+        return FReply::Handled();
+    }
+
+    if (MaterialSlotIndices.Num() == 0)
+    {
+        FMessageDialog::Open(EAppMsgType::Ok, LOCTEXT("BakeWrinkleNoSlots", "No material slots were provided for wrinkle normal baking."));
         return FReply::Handled();
     }
 
@@ -1137,14 +1780,33 @@ FReply SWetWrinkleEditorPanel::BakeWrinkleMapsForSelectedSlot(bool bBakeNormalMa
     Settings.Resolution = Asset->WrinkleData.BakeSettings.DefaultResolution;
     Settings.PaddingPixels = Asset->WrinkleData.BakeSettings.PaddingPixels;
     Settings.bIncludeDisabledPatchStrokes = Asset->WrinkleData.BakeSettings.bIncludeDisabledPatchStrokes;
-    Settings.bBakeNormalMap = bBakeNormalMap && Asset->WrinkleData.BakeSettings.bBakeNormalMap;
-    Settings.bBakeMask = bBakeMask && Asset->WrinkleData.BakeSettings.bBakeMask;
+    Settings.bBakeNormalMap = true;
+    Settings.bBakeMask = false;
 
-    FWetWrinkleNormalMapBakeResult Result;
-    FString ErrorMessage;
-    if (!FWetWrinkleNormalMapBaker::BakeMaterialSlot(Asset, BrushSettings.MaterialSlotIndex, Settings, Result, ErrorMessage))
+    int32 BakedMapCount = 0;
+    int32 BakedPatchCount = 0;
+    int32 BakedProceduralStrokeCount = 0;
+    TArray<FString> FailedSlots;
+    for (const int32 MaterialSlotIndex : MaterialSlotIndices)
     {
-        FMessageDialog::Open(EAppMsgType::Ok, FText::FromString(ErrorMessage));
+        FWetWrinkleNormalMapBakeResult Result;
+        FString ErrorMessage;
+        if (!FWetWrinkleNormalMapBaker::BakeMaterialSlot(Asset, MaterialSlotIndex, Settings, Result, ErrorMessage))
+        {
+            FailedSlots.Add(FString::Printf(TEXT("Slot %d: %s"), MaterialSlotIndex, *ErrorMessage));
+            continue;
+        }
+
+        BakedMapCount += Result.BakedMapCount;
+        BakedPatchCount += Result.BakedStampCount;
+        BakedProceduralStrokeCount += Result.BakedProceduralStrokeCount;
+    }
+
+    if (BakedMapCount == 0)
+    {
+        FMessageDialog::Open(
+            EAppMsgType::Ok,
+            FText::FromString(FailedSlots.Num() > 0 ? FString::Join(FailedSlots, TEXT("\n")) : TEXT("No wrinkle normal maps were generated.")));
         return FReply::Handled();
     }
 
@@ -1154,12 +1816,21 @@ FReply SWetWrinkleEditorPanel::BakeWrinkleMapsForSelectedSlot(bool bBakeNormalMa
         DetailsView->ForceRefresh();
     }
 
+    const EAppMsgCategory MessageCategory = FailedSlots.Num() > 0 ? EAppMsgCategory::Warning : EAppMsgCategory::Success;
+    FString Summary = FString::Printf(
+        TEXT("Baked %d wrinkle normal map set(s) from %d patch(es) and %d procedural ridge stroke(s).\nConvex wrinkle coverage alpha was packed into the baked normal map."),
+        BakedMapCount,
+        BakedPatchCount,
+        BakedProceduralStrokeCount);
+    if (FailedSlots.Num() > 0)
+    {
+        Summary += FString::Printf(TEXT("\n\nSkipped:\n- %s"), *FString::Join(FailedSlots, TEXT("\n- ")));
+    }
+
     FMessageDialog::Open(
+        MessageCategory,
         EAppMsgType::Ok,
-        FText::Format(
-            LOCTEXT("BakeWrinkleSlotSuccess", "Baked {0} wrinkle map set(s) from {1} patch(es)."),
-            FText::AsNumber(Result.BakedMapCount),
-            FText::AsNumber(Result.BakedStampCount)));
+        FText::FromString(Summary));
     return FReply::Handled();
 }
 
@@ -1174,15 +1845,39 @@ FReply SWetWrinkleEditorPanel::HandleFocusClicked()
 
 void SWetWrinkleEditorPanel::HandleSurfaceHitChanged(const FWetWrinkleSurfaceHit& SurfaceHit)
 {
+    if (bCapturingProceduralRidgeStroke && !SurfaceHit.bHit)
+    {
+        bProceduralRidgeCaptureBlocked = true;
+    }
     CurrentHit = SurfaceHit;
     RefreshWrinkleUVViewMarkersOnly();
 }
 
 void SWetWrinkleEditorPanel::HandlePaintStrokeStarted(const FWetWrinkleSurfaceHit& SurfaceHit)
 {
+    if (BrushSettings.ToolMode == EWetWrinkleToolMode::ProceduralRidgeStroke)
+    {
+        if (BrushSettings.RidgeEditMode == EWetProceduralRidgeEditMode::Edit)
+        {
+            BeginProceduralRidgePointEdit(SurfaceHit);
+        }
+        else
+        {
+            BeginProceduralRidgeStroke(SurfaceHit);
+        }
+        return;
+    }
+
     UWetClothingAsset* Asset = WetClothingAsset.Get();
     if (Asset == nullptr || !SurfaceHit.bHit || BrushSettings.MaterialSlotIndex == INDEX_NONE || BrushSettings.UVChannelIndex == INDEX_NONE)
     {
+        return;
+    }
+
+    FString PresetReason;
+    if (!IsCurrentWrinklePresetUsable(&PresetReason))
+    {
+        FMessageDialog::Open(EAppMsgType::Ok, FText::FromString(PresetReason));
         return;
     }
 
@@ -1198,6 +1893,7 @@ void SWetWrinkleEditorPanel::HandlePaintStrokeStarted(const FWetWrinkleSurfaceHi
 
     ActiveStrokeGuid = NewStroke.StrokeGuid;
     SelectedStrokeGuid = NewStroke.StrokeGuid;
+    SelectedElementType = EWetWrinkleElementType::PatchStroke;
     LastStampUV = SurfaceHit.UV;
     LastStampMaterialSlotIndex = SurfaceHit.MaterialSlotIndex;
     LastStampUVChannelIndex = SurfaceHit.UVChannelIndex;
@@ -1209,6 +1905,7 @@ void SWetWrinkleEditorPanel::HandlePaintStrokeStarted(const FWetWrinkleSurfaceHi
     if (PreviewViewport.IsValid())
     {
         PreviewViewport->SetSelectedStrokeGuid(SelectedStrokeGuid);
+        PreviewViewport->SetSelectedProceduralStrokeGuid(FGuid());
         PreviewViewport->AppendAccumulatedPreviewStamp(NewStroke.PatchPlacements.Last());
     }
     RefreshWrinkleUVView();
@@ -1216,9 +1913,28 @@ void SWetWrinkleEditorPanel::HandlePaintStrokeStarted(const FWetWrinkleSurfaceHi
 
 void SWetWrinkleEditorPanel::HandlePaintStampRequested(const FWetWrinkleSurfaceHit& SurfaceHit)
 {
+    if (BrushSettings.ToolMode == EWetWrinkleToolMode::ProceduralRidgeStroke)
+    {
+        if (bEditingProceduralRidgePoint)
+        {
+            UpdateProceduralRidgePointEdit(SurfaceHit);
+        }
+        else
+        {
+            AppendProceduralRidgeStrokePoint(SurfaceHit);
+        }
+        return;
+    }
+
     UWetClothingAsset* Asset = WetClothingAsset.Get();
     FWetWrinklePatchStroke* ActiveStroke = FindMutableStroke(ActiveStrokeGuid);
     if (Asset == nullptr || ActiveStroke == nullptr || !SurfaceHit.bHit || BrushSettings.MaterialSlotIndex == INDEX_NONE || BrushSettings.UVChannelIndex == INDEX_NONE)
+    {
+        return;
+    }
+
+    FString PresetReason;
+    if (!IsCurrentWrinklePresetUsable(&PresetReason))
     {
         return;
     }
@@ -1252,10 +1968,39 @@ void SWetWrinkleEditorPanel::HandlePaintStampRequested(const FWetWrinkleSurfaceH
 
 void SWetWrinkleEditorPanel::HandlePaintStrokeEnded()
 {
+    if (bEditingProceduralRidgePoint)
+    {
+        EndProceduralRidgePointEdit(false);
+        return;
+    }
+
+    if (bCapturingProceduralRidgeStroke)
+    {
+        CommitProceduralRidgeStroke();
+        return;
+    }
+
     ActiveStrokeGuid.Invalidate();
     bHasLastStamp = false;
     bAllowImmediateNextStrokeStamp = false;
     ActivePaintTransaction.Reset();
+}
+
+void SWetWrinkleEditorPanel::HandlePaintStrokeCanceled()
+{
+    if (bEditingProceduralRidgePoint)
+    {
+        EndProceduralRidgePointEdit(true);
+        return;
+    }
+
+    if (bCapturingProceduralRidgeStroke)
+    {
+        CancelProceduralRidgeStroke();
+        return;
+    }
+
+    HandlePaintStrokeEnded();
 }
 
 void SWetWrinkleEditorPanel::PushBrushSettingsToViewport()
@@ -1277,6 +2022,15 @@ void SWetWrinkleEditorPanel::RefreshStrokeList()
         {
             FStrokeListItemPtr Item = MakeShared<FWetWrinklePatchStrokeListItem>();
             Item->StrokeGuid = Stroke.StrokeGuid;
+            Item->ElementType = EWetWrinkleElementType::PatchStroke;
+            StrokeListItems.Add(Item);
+        }
+
+        for (const FWetProceduralRidgeStroke& Stroke : Asset->WrinkleData.EditableProceduralRidgeStrokes)
+        {
+            FStrokeListItemPtr Item = MakeShared<FWetWrinklePatchStrokeListItem>();
+            Item->StrokeGuid = Stroke.StrokeGuid;
+            Item->ElementType = EWetWrinkleElementType::ProceduralRidgeStroke;
             StrokeListItems.Add(Item);
         }
     }
@@ -1286,7 +2040,7 @@ void SWetWrinkleEditorPanel::RefreshStrokeList()
         StrokeListView->RequestListRefresh();
         for (const FStrokeListItemPtr& Item : StrokeListItems)
         {
-            if (Item.IsValid() && Item->StrokeGuid == SelectedStrokeGuid)
+            if (Item.IsValid() && Item->StrokeGuid == SelectedStrokeGuid && Item->ElementType == SelectedElementType)
             {
                 StrokeListView->SetSelection(Item);
                 break;
@@ -1299,7 +2053,14 @@ void SWetWrinkleEditorPanel::RefreshStrokeOverlay(bool bRebuildAccumulatedPrevie
 {
     if (PreviewViewport.IsValid())
     {
-        PreviewViewport->SetSelectedStrokeGuid(SelectedStrokeGuid);
+        PreviewViewport->SetSelectedStrokeGuid(
+            SelectedElementType == EWetWrinkleElementType::PatchStroke ? SelectedStrokeGuid : FGuid());
+        PreviewViewport->SetSelectedProceduralStrokeGuid(
+            SelectedElementType == EWetWrinkleElementType::ProceduralRidgeStroke ? SelectedStrokeGuid : FGuid());
+        PreviewViewport->SetSelectedProceduralStrokePointIndex(
+            SelectedElementType == EWetWrinkleElementType::ProceduralRidgeStroke
+                ? SelectedProceduralRidgePointIndex
+                : INDEX_NONE);
         PreviewViewport->RefreshStoredStampOverlay(bRebuildAccumulatedPreview);
     }
     RefreshWrinkleUVView();
@@ -1919,7 +2680,6 @@ void SWetWrinkleEditorPanel::RefreshWrinkleUVViewMarkersOnly()
 void SWetWrinkleEditorPanel::RefreshBrushPresetOptions()
 {
     BrushPresetOptions.Reset();
-    PatchTextureThumbnails.Reset();
 
     auto AddPreset = [this](const FText& DisplayName, const FSoftObjectPath& TexturePath)
     {
@@ -1934,10 +2694,9 @@ void SWetWrinkleEditorPanel::RefreshBrushPresetOptions()
         BrushPresetOptions.Add(Option);
     };
 
-    bool bFoundFromRegistry = false;
     FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
     TArray<FAssetData> TextureAssets;
-    AssetRegistryModule.Get().GetAssetsByPath(FName(WetWrinklePresetFolderPath), TextureAssets, false);
+    AssetRegistryModule.Get().GetAssetsByPath(FName(WetWrinkleBaseNormalTextureFolderPath), TextureAssets, false);
     TextureAssets.Sort([](const FAssetData& A, const FAssetData& B)
     {
         return A.AssetName.ToString() < B.AssetName.ToString();
@@ -1945,27 +2704,320 @@ void SWetWrinkleEditorPanel::RefreshBrushPresetOptions()
 
     for (const FAssetData& TextureAsset : TextureAssets)
     {
-        const int32 PreviousCount = BrushPresetOptions.Num();
         AddPreset(FText::FromName(TextureAsset.AssetName), TextureAsset.ToSoftObjectPath());
-        bFoundFromRegistry |= BrushPresetOptions.Num() > PreviousCount;
     }
 
-    if (!bFoundFromRegistry)
+}
+
+void SWetWrinkleEditorPanel::RefreshWrinklePresetPalette(bool bForceAssetScan)
+{
+    WrinklePresetPaletteItems.Reset();
+
+    FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
+    if (bForceAssetScan)
     {
-        AddPreset(LOCTEXT("WetWrinklePreset0", "Wet_Wrinkle_Normal0"), FSoftObjectPath(WetWrinklePreset0Path));
+        AssetRegistryModule.Get().SearchAllAssets(true);
     }
 
-    if (BrushPresetComboBox.IsValid())
+    TArray<FAssetData> PresetAssets;
+    AssetRegistryModule.Get().GetAssetsByClass(UWetWrinklePreset::StaticClass()->GetClassPathName(), PresetAssets, true);
+    PresetAssets.Sort([](const FAssetData& A, const FAssetData& B)
     {
-        BrushPresetComboBox->RefreshOptions();
-        BrushPresetComboBox->SetSelectedItem(FindBrushPresetOption(BrushSettings.BrushHeightTexture.Get()));
+        return A.AssetName.ToString() < B.AssetName.ToString();
+    });
+
+    for (const FAssetData& PresetAsset : PresetAssets)
+    {
+        UWetWrinklePreset* Preset = Cast<UWetWrinklePreset>(PresetAsset.GetAsset());
+        if (Preset == nullptr)
+        {
+            continue;
+        }
+
+        TSharedPtr<FWetWrinklePresetPaletteItem> Item = MakeShared<FWetWrinklePresetPaletteItem>();
+        Item->DisplayName = FText::FromName(PresetAsset.AssetName);
+        Item->PresetPath = PresetAsset.ToSoftObjectPath();
+        Item->Preset = Preset;
+        Item->bRemoved = false;
+        RefreshWrinklePresetPaletteItemState(Item);
+        WrinklePresetPaletteItems.Add(Item);
     }
 
-    if (PatchTextureListView.IsValid())
+    RebuildWrinklePresetPaletteWidget();
+}
+
+void SWetWrinkleEditorPanel::RebuildWrinklePresetPaletteWidget()
+{
+    if (!WrinklePresetPaletteWrapBox.IsValid())
     {
-        PatchTextureListView->RequestListRefresh();
-        PatchTextureListView->SetSelection(FindBrushPresetOption(BrushSettings.BrushHeightTexture.Get()), ESelectInfo::Direct);
+        return;
     }
+
+    WrinklePresetPaletteWrapBox->ClearChildren();
+
+    if (WrinklePresetPaletteItems.Num() == 0)
+    {
+        WrinklePresetPaletteWrapBox->AddSlot()
+            [SNew(STextBlock)
+                 .AutoWrapText(true)
+                 .ColorAndOpacity(FSlateColor(FLinearColor(0.65f, 0.65f, 0.65f)))
+                 .Text(LOCTEXT("NoWetWrinklePresetPaletteItems", "No Wet Wrinkle Presets found."))];
+        return;
+    }
+
+    for (TSharedPtr<FWetWrinklePresetPaletteItem> Item : WrinklePresetPaletteItems)
+    {
+        WrinklePresetPaletteWrapBox->AddSlot()
+            [GenerateWrinklePresetPaletteTile(Item)];
+    }
+}
+
+void SWetWrinkleEditorPanel::RefreshWrinklePresetPaletteState()
+{
+    for (const TSharedPtr<FWetWrinklePresetPaletteItem>& Item : WrinklePresetPaletteItems)
+    {
+        RefreshWrinklePresetPaletteItemState(Item);
+    }
+
+    RefreshWrinklePresetThumbnail();
+}
+
+void SWetWrinkleEditorPanel::RefreshWrinklePresetPaletteItemState(const TSharedPtr<FWetWrinklePresetPaletteItem>& Item)
+{
+    if (!Item.IsValid())
+    {
+        return;
+    }
+
+    if (Item->bRemoved)
+    {
+        Item->Preset.Reset();
+        Item->ThumbnailTexturePath.Reset();
+        Item->ThumbnailBrush.SetResourceObject(nullptr);
+        return;
+    }
+
+    UWetWrinklePreset* Preset = Item->Preset.Get();
+    if (Preset == nullptr && Item->PresetPath.IsValid())
+    {
+        Preset = Cast<UWetWrinklePreset>(Item->PresetPath.TryLoad());
+        Item->Preset = Preset;
+    }
+
+    UTexture2D* ThumbnailTexture = Preset != nullptr ? Preset->GetNormalTextureForBrush() : nullptr;
+
+    Item->ThumbnailTexturePath = ThumbnailTexture != nullptr ? FSoftObjectPath(ThumbnailTexture) : FSoftObjectPath();
+    Item->ThumbnailBrush.SetResourceObject(ThumbnailTexture);
+    Item->ThumbnailBrush.SetImageSize(
+        ThumbnailTexture != nullptr
+            ? FVector2D(FMath::Max(ThumbnailTexture->GetSizeX(), 1), FMath::Max(ThumbnailTexture->GetSizeY(), 1))
+            : FVector2D(144.0f, 144.0f));
+}
+
+EActiveTimerReturnType SWetWrinkleEditorPanel::HandleWrinklePresetPaletteRefreshTimer(double, float)
+{
+    RefreshWrinklePresetPaletteState();
+    return EActiveTimerReturnType::Continue;
+}
+
+void SWetWrinkleEditorPanel::HandleWrinklePresetPaletteAssetRemoved(const FAssetData& AssetData)
+{
+    const FSoftObjectPath RemovedAssetPath = AssetData.ToSoftObjectPath();
+    bool bClearedSelectedThumbnail = false;
+
+    for (const TSharedPtr<FWetWrinklePresetPaletteItem>& Item : WrinklePresetPaletteItems)
+    {
+        if (!Item.IsValid())
+        {
+            continue;
+        }
+
+        if (Item->PresetPath == RemovedAssetPath)
+        {
+            Item->Preset.Reset();
+            Item->bRemoved = true;
+            Item->ThumbnailTexturePath.Reset();
+            Item->ThumbnailBrush.SetResourceObject(nullptr);
+        }
+        else if (Item->ThumbnailTexturePath == RemovedAssetPath)
+        {
+            Item->ThumbnailTexturePath.Reset();
+            Item->ThumbnailBrush.SetResourceObject(nullptr);
+        }
+    }
+
+    if (SelectedWrinklePresetThumbnailBrush.GetResourceObject() != nullptr &&
+        FSoftObjectPath(SelectedWrinklePresetThumbnailBrush.GetResourceObject()) == RemovedAssetPath)
+    {
+        SelectedWrinklePresetThumbnailBrush.SetResourceObject(nullptr);
+        bClearedSelectedThumbnail = true;
+    }
+
+    if (BrushSettings.WrinklePreset != nullptr && FSoftObjectPath(BrushSettings.WrinklePreset.Get()) == RemovedAssetPath)
+    {
+        BrushSettings.WrinklePreset = nullptr;
+        RefreshWrinklePresetThumbnail();
+        PushBrushSettingsToViewport();
+        RefreshStrokeOverlay();
+    }
+
+    if (!bClearedSelectedThumbnail)
+    {
+        RefreshWrinklePresetThumbnail();
+    }
+}
+
+void SWetWrinkleEditorPanel::HandleWrinklePresetPaletteAssetUpdated(const FAssetData& AssetData)
+{
+    const FSoftObjectPath UpdatedAssetPath = AssetData.ToSoftObjectPath();
+    for (const TSharedPtr<FWetWrinklePresetPaletteItem>& Item : WrinklePresetPaletteItems)
+    {
+        if (Item.IsValid() && (Item->PresetPath == UpdatedAssetPath || Item->ThumbnailTexturePath == UpdatedAssetPath))
+        {
+            RefreshWrinklePresetPaletteItemState(Item);
+        }
+    }
+
+    RefreshWrinklePresetThumbnail();
+}
+
+TSharedRef<SWidget> SWetWrinkleEditorPanel::BuildWrinklePresetPalette()
+{
+    TSharedRef<SWrapBox> WrapBox = SAssignNew(WrinklePresetPaletteWrapBox, SWrapBox)
+        .UseAllottedSize(true)
+        .InnerSlotPadding(FVector2D(4.0f, 4.0f));
+
+    RebuildWrinklePresetPaletteWidget();
+
+    return SNew(SBox)
+        .HeightOverride(332.0f)
+            [SNew(SScrollBox)
+             + SScrollBox::Slot()
+                   [WrapBox]];
+}
+
+TSharedRef<SWidget> SWetWrinkleEditorPanel::GenerateWrinklePresetPaletteTile(TSharedPtr<FWetWrinklePresetPaletteItem> Item)
+{
+    return SNew(SButton)
+        .ButtonStyle(&WrinklePresetPaletteButtonStyle)
+        .ContentPadding(6.0f)
+        .ButtonColorAndOpacity(this, &SWetWrinkleEditorPanel::GetWrinklePresetPaletteTileColor, Item)
+        .Visibility(this, &SWetWrinkleEditorPanel::GetWrinklePresetPaletteTileVisibility, Item)
+        .ToolTipText(this, &SWetWrinkleEditorPanel::GetWrinklePresetPaletteTooltipText, Item)
+        .OnClicked(this, &SWetWrinkleEditorPanel::HandleWrinklePresetPaletteClicked, Item)
+            [SNew(SBox)
+                 .WidthOverride(144.0f)
+                 .HeightOverride(144.0f)
+                     [SNew(SScaleBox)
+                          .Stretch(EStretch::ScaleToFit)
+                          .StretchDirection(EStretchDirection::Both)
+                              [SNew(SImage)
+                                   .Image(Item.IsValid() ? &Item->ThumbnailBrush : nullptr)
+                                   .Visibility(this, &SWetWrinkleEditorPanel::GetWrinklePresetPaletteThumbnailVisibility, Item)]]];
+}
+
+FReply SWetWrinkleEditorPanel::HandleWrinklePresetPaletteClicked(TSharedPtr<FWetWrinklePresetPaletteItem> Item)
+{
+    if (!Item.IsValid())
+    {
+        return FReply::Handled();
+    }
+
+    UWetWrinklePreset* Preset = Item->Preset.Get();
+    if (Preset == nullptr && Item->PresetPath.IsValid())
+    {
+        Preset = Cast<UWetWrinklePreset>(Item->PresetPath.TryLoad());
+        Item->Preset = Preset;
+    }
+
+    BrushSettings.WrinklePreset = Preset;
+    if (Preset != nullptr)
+    {
+        const FWetWrinklePresetBrushDefaults& Defaults = Preset->BrushDefaults;
+        SizeCm = FMath::Max(Defaults.DefaultSizeCm, 0.1f);
+        SizeUV = SizeCm * WetWrinkleUVPerCm;
+        BrushSettings.BrushRadiusUV = SizeUV;
+        BrushSettings.Strength = FMath::Clamp(Defaults.DefaultStrength, 0.0f, 4.0f);
+        BrushSettings.Falloff = FMath::Clamp(Defaults.DefaultFalloff, 0.0f, 1.0f);
+    }
+
+    RefreshWrinklePresetThumbnail();
+    PushBrushSettingsToViewport();
+    RefreshStrokeOverlay();
+    RefreshStrokeList();
+    RefreshWrinkleUVViewMarkersOnly();
+    return FReply::Handled();
+}
+
+FReply SWetWrinkleEditorPanel::HandleRefreshWrinklePresetPaletteClicked()
+{
+    RefreshWrinklePresetPalette(true);
+    RefreshWrinklePresetThumbnail();
+    PushBrushSettingsToViewport();
+    RefreshStrokeOverlay();
+    RefreshStrokeList();
+    RefreshWrinkleUVViewMarkersOnly();
+    return FReply::Handled();
+}
+
+EVisibility SWetWrinkleEditorPanel::GetWrinklePresetPaletteThumbnailVisibility(TSharedPtr<FWetWrinklePresetPaletteItem> Item) const
+{
+    return Item.IsValid() && IsValid(Item->ThumbnailBrush.GetResourceObject()) ? EVisibility::Visible : EVisibility::Hidden;
+}
+
+EVisibility SWetWrinkleEditorPanel::GetWrinklePresetPaletteTileVisibility(TSharedPtr<FWetWrinklePresetPaletteItem> Item) const
+{
+    return Item.IsValid() && !Item->bRemoved ? EVisibility::Visible : EVisibility::Collapsed;
+}
+
+FText SWetWrinkleEditorPanel::GetWrinklePresetPaletteTooltipText(TSharedPtr<FWetWrinklePresetPaletteItem> Item) const
+{
+    if (!Item.IsValid())
+    {
+        return FText::GetEmpty();
+    }
+
+    const UWetWrinklePreset* Preset = Item->Preset.Get();
+    FText StateText = LOCTEXT("WrinklePresetPaletteMissingTooltip", "Missing");
+    if (Preset != nullptr)
+    {
+        if (Preset->IsUsableForBrush())
+        {
+            StateText = Preset->IsBuildStale()
+                            ? LOCTEXT("WrinklePresetPaletteStaleTooltip", "Stale")
+                            : LOCTEXT("WrinklePresetPaletteReadyTooltip", "Ready");
+        }
+    }
+
+    return FText::Format(
+        LOCTEXT("WrinklePresetPaletteTooltip", "{0}\nTexture Status : {1}"),
+        Item->DisplayName,
+        StateText);
+}
+
+FSlateColor SWetWrinkleEditorPanel::GetWrinklePresetPaletteTileColor(TSharedPtr<FWetWrinklePresetPaletteItem> Item) const
+{
+    const UWetWrinklePreset* ItemPreset = Item.IsValid() ? Item->Preset.Get() : nullptr;
+    const bool bIsSelected = ItemPreset != nullptr &&
+        (BrushSettings.WrinklePreset == ItemPreset ||
+         (BrushSettings.WrinklePreset != nullptr && Item.IsValid() && Item->PresetPath == FSoftObjectPath(BrushSettings.WrinklePreset.Get())));
+    if (bIsSelected)
+    {
+        return FSlateColor(FLinearColor(0.18f, 0.42f, 0.80f, 1.0f));
+    }
+
+    const bool bUsable = ItemPreset != nullptr && ItemPreset->IsUsableForBrush();
+    if (!bUsable)
+    {
+        return FSlateColor(FLinearColor(0.15f, 0.08f, 0.08f, 1.0f));
+    }
+
+    if (ItemPreset->IsBuildStale())
+    {
+        return FSlateColor(FLinearColor(0.22f, 0.17f, 0.05f, 1.0f));
+    }
+
+    return FSlateColor(FLinearColor(0.10f, 0.10f, 0.10f, 1.0f));
 }
 
 FText SWetWrinkleEditorPanel::GetSelectedMeshUVChannelText() const
@@ -2244,15 +3296,23 @@ FReply SWetWrinkleEditorPanel::HandleAutoGenerateClicked()
 
 FText SWetWrinkleEditorPanel::GetHitInfoText() const
 {
+    if (bCapturingProceduralRidgeStroke && bProceduralRidgeCaptureBlocked)
+    {
+        return LOCTEXT(
+            "RidgeStrokeCaptureStopped",
+            "Ridge stroke stopped at a material, UV island, or mesh-surface boundary. Release the mouse to keep the valid segment.");
+    }
+
     if (!CurrentHit.bHit)
     {
         return LOCTEXT("NoSurfaceHit", "No mesh surface under cursor.");
     }
 
     return FText::FromString(FString::Printf(
-        TEXT("Slot: %d\nTriangle: %d\nUV%d: %.4f, %.4f\nPosition: %.1f, %.1f, %.1f"),
+        TEXT("Slot: %d\nTriangle: %d / UV Island: %d\nUV%d: %.4f, %.4f\nPosition: %.1f, %.1f, %.1f"),
         CurrentHit.MaterialSlotIndex,
         CurrentHit.TriangleID,
+        CurrentHit.UVIslandID,
         CurrentHit.UVChannelIndex,
         CurrentHit.UV.X,
         CurrentHit.UV.Y,
@@ -2265,6 +3325,7 @@ FText SWetWrinkleEditorPanel::GetPatchListSummaryText() const
 {
     const UWetClothingAsset* Asset = WetClothingAsset.Get();
     const int32 StrokeCount = Asset != nullptr ? Asset->WrinkleData.EditablePatchStrokes.Num() : 0;
+    const int32 RidgeStrokeCount = Asset != nullptr ? Asset->WrinkleData.EditableProceduralRidgeStrokes.Num() : 0;
     int32 StampCount = 0;
     if (Asset != nullptr)
     {
@@ -2274,7 +3335,183 @@ FText SWetWrinkleEditorPanel::GetPatchListSummaryText() const
         }
     }
 
-    return FText::Format(LOCTEXT("PatchListSummary", "{0} patch list(s), {1} patch(es)."), FText::AsNumber(StrokeCount), FText::AsNumber(StampCount));
+    return FText::Format(
+        LOCTEXT("PatchListSummary", "{0} patch list(s), {1} patch(es), {2} ridge stroke(s)."),
+        FText::AsNumber(StrokeCount),
+        FText::AsNumber(StampCount),
+        FText::AsNumber(RidgeStrokeCount));
+}
+
+FText SWetWrinkleEditorPanel::GetBrushSectionHeadingText() const
+{
+    return BrushSettings.ToolMode == EWetWrinkleToolMode::ProceduralRidgeStroke
+               ? LOCTEXT("RidgeStrokeBrushHeading", "Procedural Ridge Stroke")
+               : LOCTEXT("PatchBrushHeading", "Patch Brush");
+}
+
+FText SWetWrinkleEditorPanel::GetBrushSizeLabelText() const
+{
+    return BrushSettings.ToolMode == EWetWrinkleToolMode::ProceduralRidgeStroke
+               ? LOCTEXT("RidgeWidthLabel", "Width (cm)")
+               : LOCTEXT("SizeLabel", "Size (cm)");
+}
+
+ECheckBoxState SWetWrinkleEditorPanel::GetToolModeCheckState(EWetWrinkleToolMode ToolMode) const
+{
+    return BrushSettings.ToolMode == ToolMode ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+}
+
+void SWetWrinkleEditorPanel::HandleToolModeChanged(ECheckBoxState NewState, EWetWrinkleToolMode ToolMode)
+{
+    if (NewState != ECheckBoxState::Checked || BrushSettings.ToolMode == ToolMode)
+    {
+        return;
+    }
+
+    EndProceduralRidgePointEdit(true);
+    ActiveRidgePropertyTransaction.Reset();
+    if (PreviewViewport.IsValid())
+    {
+        PreviewViewport->ClearTransientProceduralStroke();
+        PreviewViewport->SetEditingProceduralStrokeGuid(FGuid());
+    }
+    CancelProceduralRidgeStroke();
+    BrushSettings.ToolMode = ToolMode;
+    SelectedProceduralRidgePointIndex = INDEX_NONE;
+    CurrentHit = FWetWrinkleSurfaceHit();
+    PushBrushSettingsToViewport();
+    RefreshWrinkleUVViewMarkersOnly();
+}
+
+ECheckBoxState SWetWrinkleEditorPanel::GetRidgeEditModeCheckState(EWetProceduralRidgeEditMode EditMode) const
+{
+    return BrushSettings.RidgeEditMode == EditMode ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+}
+
+void SWetWrinkleEditorPanel::HandleRidgeEditModeChanged(ECheckBoxState NewState, EWetProceduralRidgeEditMode EditMode)
+{
+    if (NewState != ECheckBoxState::Checked || BrushSettings.RidgeEditMode == EditMode)
+    {
+        return;
+    }
+
+    EndProceduralRidgePointEdit(true);
+    ActiveRidgePropertyTransaction.Reset();
+    if (PreviewViewport.IsValid())
+    {
+        PreviewViewport->ClearTransientProceduralStroke();
+        PreviewViewport->SetEditingProceduralStrokeGuid(FGuid());
+    }
+    CancelProceduralRidgeStroke();
+    BrushSettings.RidgeEditMode = EditMode;
+    SelectedProceduralRidgePointIndex = INDEX_NONE;
+    PushBrushSettingsToViewport();
+    RefreshStrokeOverlay(false);
+}
+
+ECheckBoxState SWetWrinkleEditorPanel::GetRidgeJunctionModeCheckState() const
+{
+    return BrushSettings.bRidgeJunctionModeEnabled ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+}
+
+void SWetWrinkleEditorPanel::HandleRidgeJunctionModeChanged(const ECheckBoxState NewState)
+{
+    const bool bEnabled = NewState == ECheckBoxState::Checked;
+    if (BrushSettings.bRidgeJunctionModeEnabled == bEnabled)
+    {
+        return;
+    }
+
+    EndProceduralRidgePointEdit(true);
+    CancelProceduralRidgeStroke();
+    BrushSettings.bRidgeJunctionModeEnabled = bEnabled;
+    PushBrushSettingsToViewport();
+    RefreshStrokeOverlay(false);
+}
+
+ECheckBoxState SWetWrinkleEditorPanel::GetRidgeShapeCheckState(const EWetProceduralRidgeShape Shape) const
+{
+    return BrushSettings.RidgeShape == Shape ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+}
+
+void SWetWrinkleEditorPanel::HandleRidgeShapeChanged(
+    const ECheckBoxState NewState,
+    const EWetProceduralRidgeShape Shape)
+{
+    if (NewState != ECheckBoxState::Checked || BrushSettings.RidgeShape == Shape)
+    {
+        return;
+    }
+
+    BrushSettings.RidgeShape = Shape;
+    ApplyBrushSettingsToSelectedProceduralStroke();
+    PushBrushSettingsToViewport();
+
+    if (ActiveRidgePropertyTransaction.IsValid())
+    {
+        ActiveRidgePropertyTransaction.Reset();
+        if (PreviewViewport.IsValid())
+        {
+            PreviewViewport->ClearTransientProceduralStroke();
+            PreviewViewport->SetEditingProceduralStrokeGuid(FGuid());
+        }
+        RefreshStrokeOverlay(true);
+    }
+}
+
+EVisibility SWetWrinkleEditorPanel::GetFoldOptionsVisibility() const
+{
+    return BrushSettings.ToolMode == EWetWrinkleToolMode::ProceduralRidgeStroke &&
+                   BrushSettings.RidgeShape == EWetProceduralRidgeShape::Fold
+               ? EVisibility::Visible
+               : EVisibility::Collapsed;
+}
+
+ECheckBoxState SWetWrinkleEditorPanel::GetFlipFoldSideCheckState() const
+{
+    return BrushSettings.bFlipRidgeFoldSide ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+}
+
+void SWetWrinkleEditorPanel::HandleFlipFoldSideChanged(const ECheckBoxState NewState)
+{
+    const bool bNewFlipFoldSide = NewState == ECheckBoxState::Checked;
+    if (BrushSettings.bFlipRidgeFoldSide == bNewFlipFoldSide)
+    {
+        return;
+    }
+
+    BrushSettings.bFlipRidgeFoldSide = bNewFlipFoldSide;
+    ApplyBrushSettingsToSelectedProceduralStroke();
+    PushBrushSettingsToViewport();
+
+    if (ActiveRidgePropertyTransaction.IsValid())
+    {
+        ActiveRidgePropertyTransaction.Reset();
+        if (PreviewViewport.IsValid())
+        {
+            PreviewViewport->ClearTransientProceduralStroke();
+            PreviewViewport->SetEditingProceduralStrokeGuid(FGuid());
+        }
+        RefreshStrokeOverlay(true);
+    }
+}
+
+EVisibility SWetWrinkleEditorPanel::GetPatchToolVisibility() const
+{
+    return BrushSettings.ToolMode == EWetWrinkleToolMode::Patch ? EVisibility::Visible : EVisibility::Collapsed;
+}
+
+EVisibility SWetWrinkleEditorPanel::GetProceduralRidgeToolVisibility() const
+{
+    return BrushSettings.ToolMode == EWetWrinkleToolMode::ProceduralRidgeStroke ? EVisibility::Visible : EVisibility::Collapsed;
+}
+
+EVisibility SWetWrinkleEditorPanel::GetProceduralRidgeEditVisibility() const
+{
+    return BrushSettings.ToolMode == EWetWrinkleToolMode::ProceduralRidgeStroke &&
+                   BrushSettings.RidgeEditMode == EWetProceduralRidgeEditMode::Edit
+               ? EVisibility::Visible
+               : EVisibility::Collapsed;
 }
 
 FText SWetWrinkleEditorPanel::GetMaterialSlotCountText() const
@@ -2419,110 +3656,110 @@ TSharedRef<ITableRow> SWetWrinkleEditorPanel::GeneratePartMapRow(FWetPartEntryPt
     return FWetClothingEditorCommonWidgets::GeneratePartMapRow(Item, OwnerTable);
 }
 
-TSharedRef<SWidget> SWetWrinkleEditorPanel::GenerateBrushPresetComboRow(TSharedPtr<FWetWrinkleBrushPresetOption> Item) const
+FString SWetWrinkleEditorPanel::GetWrinklePresetObjectPath() const
 {
-    return SNew(STextBlock)
-        .Text(Item.IsValid() ? Item->DisplayName : LOCTEXT("MissingWrinklePreset", "<missing>"));
+    return BrushSettings.WrinklePreset != nullptr ? BrushSettings.WrinklePreset->GetPathName() : FString();
 }
 
-
-TSharedRef<ITableRow> SWetWrinkleEditorPanel::GeneratePatchTextureRow(FPatchTextureItemPtr Item, const TSharedRef<STableViewBase>& OwnerTable)
+void SWetWrinkleEditorPanel::HandleWrinklePresetChanged(const FAssetData& AssetData)
 {
-    UTexture2D* Texture = Item.IsValid() ? Cast<UTexture2D>(Item->TexturePath.TryLoad()) : nullptr;
-    TSharedRef<SWidget> ThumbnailWidget =
-        SNew(SBorder)
-        .BorderImage(FAppStyle::Get().GetBrush(TEXT("WhiteBrush")))
-        .BorderBackgroundColor(FLinearColor(0.06f, 0.06f, 0.06f, 1.0f));
+    BrushSettings.WrinklePreset = Cast<UWetWrinklePreset>(AssetData.GetAsset());
+    FString UnusableReason;
+    IsCurrentWrinklePresetUsable(&UnusableReason);
 
-    if (Texture != nullptr && PatchTextureThumbnailPool.IsValid())
+    if (BrushSettings.WrinklePreset != nullptr)
     {
-        TSharedPtr<FAssetThumbnail> Thumbnail = MakeShared<FAssetThumbnail>(Texture, 52, 52, PatchTextureThumbnailPool);
-        PatchTextureThumbnails.Add(Thumbnail);
-
-        FAssetThumbnailConfig ThumbnailConfig;
-        ThumbnailConfig.bAllowFadeIn = false;
-        ThumbnailWidget = Thumbnail->MakeThumbnailWidget(ThumbnailConfig);
+        const FWetWrinklePresetBrushDefaults& Defaults = BrushSettings.WrinklePreset->BrushDefaults;
+        SizeCm = FMath::Max(Defaults.DefaultSizeCm, 0.1f);
+        SizeUV = SizeCm * WetWrinkleUVPerCm;
+        BrushSettings.BrushRadiusUV = SizeUV;
+        BrushSettings.Strength = FMath::Clamp(Defaults.DefaultStrength, 0.0f, 4.0f);
+        BrushSettings.Falloff = FMath::Clamp(Defaults.DefaultFalloff, 0.0f, 1.0f);
     }
 
-    return SNew(STableRow<FPatchTextureItemPtr>, OwnerTable)
-        .Padding(4.0f)
-        [SNew(SHorizontalBox)
-
-         + SHorizontalBox::Slot()
-               .AutoWidth()
-               .VAlign(VAlign_Center)
-               .Padding(0.0f, 0.0f, 8.0f, 0.0f)
-                   [SNew(SBox)
-                        .WidthOverride(56.0f)
-                        .HeightOverride(56.0f)
-                            [ThumbnailWidget]]
-
-         + SHorizontalBox::Slot()
-               .FillWidth(1.0f)
-               .VAlign(VAlign_Center)
-                   [SNew(STextBlock)
-                        .Text(Item.IsValid() ? Item->DisplayName : LOCTEXT("MissingPatchTexture", "<missing>"))]];
-}
-
-FText SWetWrinkleEditorPanel::GetSelectedBrushPresetText() const
-{
-    if (TSharedPtr<FWetWrinkleBrushPresetOption> Option = FindBrushPresetOption(BrushSettings.BrushHeightTexture.Get()))
-    {
-        return Option->DisplayName;
-    }
-
-    UTexture2D* BrushHeightTexture = BrushSettings.BrushHeightTexture.Get();
-    return BrushHeightTexture != nullptr
-               ? FText::FromString(FString::Printf(TEXT("Custom - %s"), *BrushHeightTexture->GetName()))
-               : LOCTEXT("NoWrinklePresetSelected", "None");
-}
-
-void SWetWrinkleEditorPanel::HandleBrushPresetChanged(TSharedPtr<FWetWrinkleBrushPresetOption> Item, ESelectInfo::Type SelectInfo)
-{
-    if (!Item.IsValid())
-    {
-        return;
-    }
-
-    BrushSettings.BrushHeightTexture = Cast<UTexture2D>(Item->TexturePath.TryLoad());
+    RefreshWrinklePresetThumbnail();
     PushBrushSettingsToViewport();
     RefreshStrokeOverlay();
+    RefreshStrokeList();
+    RefreshWrinkleUVViewMarkersOnly();
 }
 
-
-void SWetWrinkleEditorPanel::HandlePatchTextureSelectionChanged(FPatchTextureItemPtr Item, ESelectInfo::Type SelectInfo)
+void SWetWrinkleEditorPanel::RefreshWrinklePresetThumbnail()
 {
-    if (!Item.IsValid())
-    {
-        return;
-    }
-
-    BrushSettings.BrushHeightTexture = Cast<UTexture2D>(Item->TexturePath.TryLoad());
-    if (BrushPresetComboBox.IsValid())
-    {
-        BrushPresetComboBox->SetSelectedItem(Item);
-    }
-
-    PushBrushSettingsToViewport();
-    RefreshStrokeOverlay();
+    UTexture2D* CorrectedNormalTexture = BrushSettings.WrinklePreset != nullptr
+                                             ? BrushSettings.WrinklePreset->GetNormalTextureForBrush()
+                                             : nullptr;
+    SelectedWrinklePresetThumbnailBrush.SetResourceObject(CorrectedNormalTexture);
+    SelectedWrinklePresetThumbnailBrush.SetImageSize(
+        CorrectedNormalTexture != nullptr
+            ? FVector2D(FMath::Max(CorrectedNormalTexture->GetSizeX(), 1), FMath::Max(CorrectedNormalTexture->GetSizeY(), 1))
+            : FVector2D(128.0f, 128.0f));
 }
 
-FString SWetWrinkleEditorPanel::GetBrushHeightTextureObjectPath() const
+const FSlateBrush* SWetWrinkleEditorPanel::GetWrinklePresetThumbnailBrush() const
 {
-    UTexture2D* BrushHeightTexture = BrushSettings.BrushHeightTexture.Get();
-    return BrushHeightTexture != nullptr ? BrushHeightTexture->GetPathName() : FString();
+    return &SelectedWrinklePresetThumbnailBrush;
 }
 
-void SWetWrinkleEditorPanel::HandleBrushHeightTextureChanged(const FAssetData& AssetData)
+EVisibility SWetWrinkleEditorPanel::GetWrinklePresetThumbnailVisibility() const
 {
-    BrushSettings.BrushHeightTexture = Cast<UTexture2D>(AssetData.GetAsset());
-    if (BrushPresetComboBox.IsValid())
+    return IsValid(SelectedWrinklePresetThumbnailBrush.GetResourceObject()) ? EVisibility::Visible : EVisibility::Hidden;
+}
+
+FText SWetWrinkleEditorPanel::GetWrinklePresetStatusText() const
+{
+    const UWetWrinklePreset* Preset = BrushSettings.WrinklePreset.Get();
+    if (Preset == nullptr)
     {
-        BrushPresetComboBox->SetSelectedItem(FindBrushPresetOption(BrushSettings.BrushHeightTexture.Get()));
+        return LOCTEXT("WrinklePresetNoSelection", "No preset selected.");
     }
 
-    PushBrushSettingsToViewport();
-    RefreshStrokeOverlay();
+    FString Reason;
+    if (!Preset->IsUsableForBrush(&Reason))
+    {
+        return FText::FromString(Reason);
+    }
+
+    if (Preset->IsBuildStale())
+    {
+        return LOCTEXT("WrinklePresetStale", "Preset is stale. Existing generated textures will be used; rebuild is recommended.");
+    }
+
+    return LOCTEXT("WrinklePresetReady", "Ready.");
+}
+
+FSlateColor SWetWrinkleEditorPanel::GetWrinklePresetStatusColor() const
+{
+    const UWetWrinklePreset* Preset = BrushSettings.WrinklePreset.Get();
+    if (Preset == nullptr || !Preset->IsUsableForBrush())
+    {
+        return FSlateColor(FLinearColor(1.0f, 0.35f, 0.25f));
+    }
+
+    if (Preset->IsBuildStale())
+    {
+        return FSlateColor(FLinearColor(1.0f, 0.75f, 0.25f));
+    }
+
+    return FSlateColor(FLinearColor(0.35f, 0.9f, 0.45f));
+}
+
+FReply SWetWrinkleEditorPanel::HandleOpenWrinklePresetClicked()
+{
+    if (UAssetEditorSubsystem* AssetEditorSubsystem = GEditor != nullptr ? GEditor->GetEditorSubsystem<UAssetEditorSubsystem>() : nullptr)
+    {
+        if (BrushSettings.WrinklePreset != nullptr)
+        {
+            AssetEditorSubsystem->OpenEditorForAsset(BrushSettings.WrinklePreset.Get());
+        }
+    }
+
+    return FReply::Handled();
+}
+
+bool SWetWrinkleEditorPanel::CanOpenWrinklePreset() const
+{
+    return BrushSettings.WrinklePreset != nullptr;
 }
 
 TSharedRef<ITableRow> SWetWrinkleEditorPanel::GenerateStrokeRow(FStrokeListItemPtr Item, const TSharedRef<STableViewBase>& OwnerTable)
@@ -2538,7 +3775,16 @@ TSharedRef<ITableRow> SWetWrinkleEditorPanel::GenerateStrokeRow(FStrokeListItemP
                        [SNew(SCheckBox)
                             .IsChecked_Lambda([this, Item]()
                                               {
-                                                  const FWetWrinklePatchStroke* Stroke = Item.IsValid() ? FindStroke(Item->StrokeGuid) : nullptr;
+                                                  if (!Item.IsValid())
+                                                  {
+                                                      return ECheckBoxState::Unchecked;
+                                                  }
+                                                  if (Item->ElementType == EWetWrinkleElementType::ProceduralRidgeStroke)
+                                                  {
+                                                      const FWetProceduralRidgeStroke* Stroke = FindProceduralRidgeStroke(Item->StrokeGuid);
+                                                      return Stroke != nullptr && Stroke->bEnabled ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+                                                  }
+                                                  const FWetWrinklePatchStroke* Stroke = FindStroke(Item->StrokeGuid);
                                                   return Stroke != nullptr && Stroke->bEnabled ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
                                               })
                             .OnCheckStateChanged(this, &SWetWrinkleEditorPanel::HandleStrokeEnabledChanged, Item)]
@@ -2549,6 +3795,11 @@ TSharedRef<ITableRow> SWetWrinkleEditorPanel::GenerateStrokeRow(FStrokeListItemP
                        [SNew(SInlineEditableTextBlock)
                             .Text_Lambda([this, Item]()
                                          {
+                                             if (Item.IsValid() && Item->ElementType == EWetWrinkleElementType::ProceduralRidgeStroke)
+                                             {
+                                                 const FWetProceduralRidgeStroke* Stroke = FindProceduralRidgeStroke(Item->StrokeGuid);
+                                                 return Stroke != nullptr ? FText::FromString(Stroke->DisplayName) : LOCTEXT("MissingRidgeStrokeName", "<missing ridge>");
+                                             }
                                              const FWetWrinklePatchStroke* Stroke = Item.IsValid() ? FindStroke(Item->StrokeGuid) : nullptr;
                                              return Stroke != nullptr ? FText::FromString(Stroke->DisplayName) : LOCTEXT("MissingPatchListName", "<missing>");
                                          })
@@ -2561,6 +3812,13 @@ TSharedRef<ITableRow> SWetWrinkleEditorPanel::GenerateStrokeRow(FStrokeListItemP
                        [SNew(STextBlock)
                             .Text_Lambda([this, Item]()
                                          {
+                                             if (Item.IsValid() && Item->ElementType == EWetWrinkleElementType::ProceduralRidgeStroke)
+                                             {
+                                                 const FWetProceduralRidgeStroke* Stroke = FindProceduralRidgeStroke(Item->StrokeGuid);
+                                                 return FText::Format(
+                                                     LOCTEXT("RidgeStrokePointCount", "Ridge / {0}"),
+                                                     FText::AsNumber(Stroke != nullptr ? Stroke->Points.Num() : 0));
+                                             }
                                              const FWetWrinklePatchStroke* Stroke = Item.IsValid() ? FindStroke(Item->StrokeGuid) : nullptr;
                                              return FText::AsNumber(Stroke != nullptr ? Stroke->PatchPlacements.Num() : 0);
                                          })]
@@ -2575,14 +3833,42 @@ TSharedRef<ITableRow> SWetWrinkleEditorPanel::GenerateStrokeRow(FStrokeListItemP
 
 void SWetWrinkleEditorPanel::HandleStrokeSelectionChanged(FStrokeListItemPtr Item, ESelectInfo::Type SelectInfo)
 {
+    EndProceduralRidgePointEdit(true);
+    ActiveRidgePropertyTransaction.Reset();
+    if (PreviewViewport.IsValid())
+    {
+        PreviewViewport->ClearTransientProceduralStroke();
+        PreviewViewport->SetEditingProceduralStrokeGuid(FGuid());
+    }
     SelectedStrokeGuid = Item.IsValid() ? Item->StrokeGuid : FGuid();
-    RefreshStrokeOverlay();
+    SelectedElementType = Item.IsValid() ? Item->ElementType : EWetWrinkleElementType::PatchStroke;
+    SelectedProceduralRidgePointIndex = INDEX_NONE;
+    if (const FWetProceduralRidgeStroke* Stroke =
+            SelectedElementType == EWetWrinkleElementType::ProceduralRidgeStroke
+                ? FindProceduralRidgeStroke(SelectedStrokeGuid)
+                : nullptr)
+    {
+        BrushSettings.RidgeShape = Stroke->Shape;
+        BrushSettings.bFlipRidgeFoldSide = Stroke->bFlipFoldSide;
+        SizeUV = Stroke->WidthUV;
+        SizeCm = FMath::Clamp(SizeUV / WetWrinkleUVPerCm, 0.1f, 100.0f);
+        BrushSettings.BrushRadiusUV = Stroke->WidthUV;
+        BrushSettings.Strength = Stroke->Strength;
+        BrushSettings.Falloff = Stroke->Falloff;
+        BrushSettings.RidgeStartTaper = Stroke->StartTaper;
+        BrushSettings.RidgeEndTaper = Stroke->EndTaper;
+        BrushSettings.RidgeFlareSettings = Stroke->FlareSettings;
+        BrushSettings.RidgeNaturalVariation = Stroke->NaturalVariation;
+        PushBrushSettingsToViewport();
+    }
+    RefreshStrokeOverlay(false);
 }
 
 FReply SWetWrinkleEditorPanel::HandleClearStrokesClicked()
 {
     UWetClothingAsset* Asset = WetClothingAsset.Get();
-    if (Asset == nullptr || Asset->WrinkleData.EditablePatchStrokes.Num() == 0)
+    if (Asset == nullptr ||
+        (Asset->WrinkleData.EditablePatchStrokes.Num() == 0 && Asset->WrinkleData.EditableProceduralRidgeStrokes.Num() == 0))
     {
         return FReply::Handled();
     }
@@ -2590,9 +3876,12 @@ FReply SWetWrinkleEditorPanel::HandleClearStrokesClicked()
     const FScopedTransaction Transaction(LOCTEXT("ClearWetWrinkleStrokesTransaction", "Clear Wet Wrinkle Patch Lists"));
     Asset->Modify();
     Asset->WrinkleData.EditablePatchStrokes.Reset();
+    Asset->WrinkleData.EditableProceduralRidgeStrokes.Reset();
     ActiveStrokeGuid.Invalidate();
     SelectedStrokeGuid.Invalidate();
+    SelectedElementType = EWetWrinkleElementType::PatchStroke;
     bHasLastStamp = false;
+    CancelProceduralRidgeStroke();
     MarkAssetEdited();
     RefreshStrokeList();
     RefreshStrokeOverlay();
@@ -2602,19 +3891,40 @@ FReply SWetWrinkleEditorPanel::HandleClearStrokesClicked()
 bool SWetWrinkleEditorPanel::IsClearStrokesEnabled() const
 {
     const UWetClothingAsset* Asset = WetClothingAsset.Get();
-    return Asset != nullptr && Asset->WrinkleData.EditablePatchStrokes.Num() > 0;
+    return Asset != nullptr &&
+           (Asset->WrinkleData.EditablePatchStrokes.Num() > 0 || Asset->WrinkleData.EditableProceduralRidgeStrokes.Num() > 0);
 }
 
 void SWetWrinkleEditorPanel::HandleStrokeEnabledChanged(ECheckBoxState NewState, FStrokeListItemPtr Item)
 {
     UWetClothingAsset* Asset = WetClothingAsset.Get();
-    FWetWrinklePatchStroke* Stroke = Item.IsValid() ? FindMutableStroke(Item->StrokeGuid) : nullptr;
-    if (Asset == nullptr || Stroke == nullptr)
+    if (Asset == nullptr || !Item.IsValid())
     {
         return;
     }
 
     const bool bNewEnabled = NewState == ECheckBoxState::Checked;
+    if (Item->ElementType == EWetWrinkleElementType::ProceduralRidgeStroke)
+    {
+        FWetProceduralRidgeStroke* Stroke = FindMutableProceduralRidgeStroke(Item->StrokeGuid);
+        if (Stroke == nullptr || Stroke->bEnabled == bNewEnabled)
+        {
+            return;
+        }
+
+        const FScopedTransaction Transaction(LOCTEXT("ToggleProceduralRidgeStrokeTransaction", "Toggle Procedural Ridge Stroke"));
+        Asset->Modify();
+        Stroke->bEnabled = bNewEnabled;
+        MarkAssetEdited();
+        RefreshStrokeOverlay();
+        return;
+    }
+
+    FWetWrinklePatchStroke* Stroke = FindMutableStroke(Item->StrokeGuid);
+    if (Stroke == nullptr)
+    {
+        return;
+    }
     if (Stroke->bEnabled == bNewEnabled)
     {
         return;
@@ -2630,14 +3940,34 @@ void SWetWrinkleEditorPanel::HandleStrokeEnabledChanged(ECheckBoxState NewState,
 void SWetWrinkleEditorPanel::HandleStrokeNameCommitted(const FText& InText, ETextCommit::Type CommitType, FStrokeListItemPtr Item)
 {
     UWetClothingAsset* Asset = WetClothingAsset.Get();
-    FWetWrinklePatchStroke* Stroke = Item.IsValid() ? FindMutableStroke(Item->StrokeGuid) : nullptr;
-    if (Asset == nullptr || Stroke == nullptr)
+    if (Asset == nullptr || !Item.IsValid())
     {
         return;
     }
 
     const FString NewName = InText.ToString().TrimStartAndEnd();
-    if (NewName.IsEmpty() || Stroke->DisplayName == NewName)
+    if (NewName.IsEmpty())
+    {
+        return;
+    }
+
+    if (Item->ElementType == EWetWrinkleElementType::ProceduralRidgeStroke)
+    {
+        FWetProceduralRidgeStroke* Stroke = FindMutableProceduralRidgeStroke(Item->StrokeGuid);
+        if (Stroke == nullptr || Stroke->DisplayName == NewName)
+        {
+            return;
+        }
+        const FScopedTransaction Transaction(LOCTEXT("RenameProceduralRidgeStrokeTransaction", "Rename Procedural Ridge Stroke"));
+        Asset->Modify();
+        Stroke->DisplayName = NewName;
+        MarkAssetEdited();
+        RefreshStrokeList();
+        return;
+    }
+
+    FWetWrinklePatchStroke* Stroke = FindMutableStroke(Item->StrokeGuid);
+    if (Stroke == nullptr || Stroke->DisplayName == NewName)
     {
         return;
     }
@@ -2654,6 +3984,34 @@ FReply SWetWrinkleEditorPanel::HandleDeleteStrokeClicked(FStrokeListItemPtr Item
     UWetClothingAsset* Asset = WetClothingAsset.Get();
     if (Asset == nullptr || !Item.IsValid())
     {
+        return FReply::Handled();
+    }
+
+    if (Item->ElementType == EWetWrinkleElementType::ProceduralRidgeStroke)
+    {
+        const int32 RidgeIndex = Asset->WrinkleData.EditableProceduralRidgeStrokes.IndexOfByPredicate(
+            [Item](const FWetProceduralRidgeStroke& Stroke)
+            {
+                return Stroke.StrokeGuid == Item->StrokeGuid;
+            });
+        if (RidgeIndex == INDEX_NONE)
+        {
+            return FReply::Handled();
+        }
+
+        const FScopedTransaction Transaction(LOCTEXT("DeleteProceduralRidgeStrokeTransaction", "Delete Procedural Ridge Stroke"));
+        Asset->Modify();
+        const FGuid DeletedGuid = Asset->WrinkleData.EditableProceduralRidgeStrokes[RidgeIndex].StrokeGuid;
+        ClearConnectionsToStroke(DeletedGuid);
+        Asset->WrinkleData.EditableProceduralRidgeStrokes.RemoveAt(RidgeIndex);
+        if (SelectedStrokeGuid == DeletedGuid && SelectedElementType == EWetWrinkleElementType::ProceduralRidgeStroke)
+        {
+            SelectedStrokeGuid.Invalidate();
+            SelectedProceduralRidgePointIndex = INDEX_NONE;
+        }
+        MarkAssetEdited();
+        RefreshStrokeList();
+        RefreshStrokeOverlay();
         return FReply::Handled();
     }
 
@@ -2724,6 +4082,15 @@ void SWetWrinkleEditorPanel::HandleMaterialSlotChanged(int32 NewValue)
 
 float SWetWrinkleEditorPanel::GetBrushSizeCm() const
 {
+    if (BrushSettings.ToolMode == EWetWrinkleToolMode::ProceduralRidgeStroke &&
+        BrushSettings.RidgeEditMode == EWetProceduralRidgeEditMode::Edit &&
+        SelectedElementType == EWetWrinkleElementType::ProceduralRidgeStroke)
+    {
+        if (const FWetProceduralRidgeStroke* Stroke = FindProceduralRidgeStroke(SelectedStrokeGuid))
+        {
+            return FMath::Clamp(Stroke->WidthUV / WetWrinkleUVPerCm, 0.1f, 100.0f);
+        }
+    }
     return SizeCm;
 }
 
@@ -2786,6 +4153,7 @@ void SWetWrinkleEditorPanel::HandleBrushRadiusChanged(float NewValue)
     SizeCm = FMath::Clamp(NewValue, 0.1f, 100.0f);
     SizeUV = FMath::Clamp(SizeCm * WetWrinkleUVPerCm, 0.001f, 0.5f);
     BrushSettings.BrushRadiusUV = SizeUV;
+    ApplyBrushSettingsToSelectedProceduralStroke();
     PushBrushSettingsToViewport();
     RefreshWrinkleUVView();
 }
@@ -2793,6 +4161,7 @@ void SWetWrinkleEditorPanel::HandleBrushRadiusChanged(float NewValue)
 FReply SWetWrinkleEditorPanel::HandleBrushSizePresetClicked(float NewValue)
 {
     HandleBrushRadiusChanged(NewValue);
+    HandleRidgePropertyCommitted(NewValue, ETextCommit::Default);
     if (BrushSizeComboButton.IsValid())
     {
         BrushSizeComboButton->SetIsOpen(false);
@@ -2804,12 +4173,14 @@ FReply SWetWrinkleEditorPanel::HandleBrushSizePresetClicked(float NewValue)
 void SWetWrinkleEditorPanel::HandleStrengthChanged(float NewValue)
 {
     BrushSettings.Strength = FMath::Clamp(NewValue, 0.0f, 4.0f);
+    ApplyBrushSettingsToSelectedProceduralStroke();
     PushBrushSettingsToViewport();
 }
 
 void SWetWrinkleEditorPanel::HandleFalloffChanged(float NewValue)
 {
     BrushSettings.Falloff = FMath::Clamp(NewValue / 100.0f, 0.0f, 1.0f);
+    ApplyBrushSettingsToSelectedProceduralStroke();
     PushBrushSettingsToViewport();
 }
 
@@ -2823,6 +4194,561 @@ void SWetWrinkleEditorPanel::HandlePreviewWetnessChanged(float NewValue)
 {
     BrushSettings.PreviewWetness = FMath::Clamp(NewValue, 0.0f, 1.0f);
     PushBrushSettingsToViewport();
+}
+
+void SWetWrinkleEditorPanel::HandleRidgeStartTaperChanged(float NewValue)
+{
+    BrushSettings.RidgeStartTaper = FMath::Clamp(NewValue, 0.0f, 0.5f);
+    ApplyBrushSettingsToSelectedProceduralStroke();
+    PushBrushSettingsToViewport();
+}
+
+void SWetWrinkleEditorPanel::HandleRidgeEndTaperChanged(float NewValue)
+{
+    BrushSettings.RidgeEndTaper = FMath::Clamp(NewValue, 0.0f, 0.5f);
+    ApplyBrushSettingsToSelectedProceduralStroke();
+    PushBrushSettingsToViewport();
+}
+
+float SWetWrinkleEditorPanel::GetRidgeFlareLengthValue() const
+{
+    return BrushSettings.RidgeFlareSettings.Length;
+}
+
+void SWetWrinkleEditorPanel::HandleRidgeFlareLengthChanged(const float NewValue)
+{
+    BrushSettings.RidgeFlareSettings.Length = FMath::Clamp(NewValue, 0.01f, 0.5f);
+    ApplyBrushSettingsToSelectedProceduralStroke();
+    PushBrushSettingsToViewport();
+}
+
+float SWetWrinkleEditorPanel::GetRidgeFlareWidthValue() const
+{
+    return BrushSettings.RidgeFlareSettings.WidthScale;
+}
+
+void SWetWrinkleEditorPanel::HandleRidgeFlareWidthChanged(const float NewValue)
+{
+    BrushSettings.RidgeFlareSettings.WidthScale = FMath::Clamp(NewValue, 1.0f, 5.0f);
+    ApplyBrushSettingsToSelectedProceduralStroke();
+    PushBrushSettingsToViewport();
+}
+
+float SWetWrinkleEditorPanel::GetRidgeFlareEndStrengthValue() const
+{
+    return BrushSettings.RidgeFlareSettings.EndStrength;
+}
+
+void SWetWrinkleEditorPanel::HandleRidgeFlareEndStrengthChanged(const float NewValue)
+{
+    BrushSettings.RidgeFlareSettings.EndStrength = FMath::Clamp(NewValue, 0.0f, 1.0f);
+    ApplyBrushSettingsToSelectedProceduralStroke();
+    PushBrushSettingsToViewport();
+}
+
+float SWetWrinkleEditorPanel::GetRidgeFlareSoftnessValue() const
+{
+    return BrushSettings.RidgeFlareSettings.Softness;
+}
+
+void SWetWrinkleEditorPanel::HandleRidgeFlareSoftnessChanged(const float NewValue)
+{
+    BrushSettings.RidgeFlareSettings.Softness = FMath::Clamp(NewValue, 0.0f, 1.0f);
+    ApplyBrushSettingsToSelectedProceduralStroke();
+    PushBrushSettingsToViewport();
+}
+
+void SWetWrinkleEditorPanel::HandleRidgePointSpacingChanged(float NewValue)
+{
+    BrushSettings.RidgePointSpacingScale = FMath::Clamp(NewValue, 0.05f, 1.0f);
+}
+
+ECheckBoxState SWetWrinkleEditorPanel::GetRidgeNaturalVariationEnabledState() const
+{
+    return BrushSettings.RidgeNaturalVariation.bEnabled ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+}
+
+void SWetWrinkleEditorPanel::HandleRidgeNaturalVariationEnabledChanged(const ECheckBoxState NewState)
+{
+    const bool bEnabled = NewState == ECheckBoxState::Checked;
+    if (BrushSettings.RidgeNaturalVariation.bEnabled == bEnabled)
+    {
+        return;
+    }
+
+    BrushSettings.RidgeNaturalVariation.bEnabled = bEnabled;
+    ApplyBrushSettingsToSelectedProceduralStroke();
+    PushBrushSettingsToViewport();
+    if (ActiveRidgePropertyTransaction.IsValid())
+    {
+        ActiveRidgePropertyTransaction.Reset();
+        if (PreviewViewport.IsValid())
+        {
+            PreviewViewport->ClearTransientProceduralStroke();
+            PreviewViewport->SetEditingProceduralStrokeGuid(FGuid());
+        }
+        RefreshStrokeOverlay(true);
+    }
+}
+
+float SWetWrinkleEditorPanel::GetRidgeCenterlineVariationValue() const
+{
+    return BrushSettings.RidgeNaturalVariation.CenterlineAmount;
+}
+
+void SWetWrinkleEditorPanel::HandleRidgeCenterlineVariationChanged(const float NewValue)
+{
+    BrushSettings.RidgeNaturalVariation.CenterlineAmount = FMath::Clamp(NewValue, 0.0f, 0.5f);
+    ApplyBrushSettingsToSelectedProceduralStroke();
+    PushBrushSettingsToViewport();
+}
+
+float SWetWrinkleEditorPanel::GetRidgeCenterlineFrequencyValue() const
+{
+    return BrushSettings.RidgeNaturalVariation.CenterlineFrequency;
+}
+
+void SWetWrinkleEditorPanel::HandleRidgeCenterlineFrequencyChanged(const float NewValue)
+{
+    BrushSettings.RidgeNaturalVariation.CenterlineFrequency = FMath::Clamp(NewValue, 0.25f, 12.0f);
+    ApplyBrushSettingsToSelectedProceduralStroke();
+    PushBrushSettingsToViewport();
+}
+
+float SWetWrinkleEditorPanel::GetRidgeWidthVariationValue() const
+{
+    return BrushSettings.RidgeNaturalVariation.WidthVariation;
+}
+
+void SWetWrinkleEditorPanel::HandleRidgeWidthVariationChanged(const float NewValue)
+{
+    BrushSettings.RidgeNaturalVariation.WidthVariation = FMath::Clamp(NewValue, 0.0f, 0.5f);
+    ApplyBrushSettingsToSelectedProceduralStroke();
+    PushBrushSettingsToViewport();
+}
+
+float SWetWrinkleEditorPanel::GetRidgeWidthFrequencyValue() const
+{
+    return BrushSettings.RidgeNaturalVariation.WidthFrequency;
+}
+
+void SWetWrinkleEditorPanel::HandleRidgeWidthFrequencyChanged(const float NewValue)
+{
+    BrushSettings.RidgeNaturalVariation.WidthFrequency = FMath::Clamp(NewValue, 0.25f, 12.0f);
+    ApplyBrushSettingsToSelectedProceduralStroke();
+    PushBrushSettingsToViewport();
+}
+
+int32 SWetWrinkleEditorPanel::GetRidgeNoiseSeedValue() const
+{
+    return BrushSettings.RidgeNaturalVariation.NoiseSeed;
+}
+
+void SWetWrinkleEditorPanel::HandleRidgeNoiseSeedChanged(const int32 NewValue)
+{
+    if (BrushSettings.RidgeNaturalVariation.NoiseSeed == NewValue)
+    {
+        return;
+    }
+
+    BrushSettings.RidgeNaturalVariation.NoiseSeed = NewValue;
+    ApplyBrushSettingsToSelectedProceduralStroke();
+    PushBrushSettingsToViewport();
+    if (ActiveRidgePropertyTransaction.IsValid())
+    {
+        ActiveRidgePropertyTransaction.Reset();
+        if (PreviewViewport.IsValid())
+        {
+            PreviewViewport->ClearTransientProceduralStroke();
+            PreviewViewport->SetEditingProceduralStrokeGuid(FGuid());
+        }
+        RefreshStrokeOverlay(true);
+    }
+}
+
+FReply SWetWrinkleEditorPanel::HandleRandomizeRidgeNoiseSeedClicked()
+{
+    int32 NewSeed = static_cast<int32>(FPlatformTime::Cycles64() & 0x7FFFFFFF);
+    if (NewSeed == BrushSettings.RidgeNaturalVariation.NoiseSeed)
+    {
+        ++NewSeed;
+    }
+    HandleRidgeNoiseSeedChanged(NewSeed);
+    return FReply::Handled();
+}
+
+float SWetWrinkleEditorPanel::GetRidgeStrengthValue() const
+{
+    if (BrushSettings.ToolMode == EWetWrinkleToolMode::ProceduralRidgeStroke &&
+        BrushSettings.RidgeEditMode == EWetProceduralRidgeEditMode::Edit &&
+        SelectedElementType == EWetWrinkleElementType::ProceduralRidgeStroke)
+    {
+        if (const FWetProceduralRidgeStroke* Stroke = FindProceduralRidgeStroke(SelectedStrokeGuid))
+        {
+            return Stroke->Strength;
+        }
+    }
+    return BrushSettings.Strength;
+}
+
+float SWetWrinkleEditorPanel::GetRidgeFalloffPercentValue() const
+{
+    if (BrushSettings.ToolMode == EWetWrinkleToolMode::ProceduralRidgeStroke &&
+        BrushSettings.RidgeEditMode == EWetProceduralRidgeEditMode::Edit &&
+        SelectedElementType == EWetWrinkleElementType::ProceduralRidgeStroke)
+    {
+        if (const FWetProceduralRidgeStroke* Stroke = FindProceduralRidgeStroke(SelectedStrokeGuid))
+        {
+            return Stroke->Falloff * 100.0f;
+        }
+    }
+    return BrushSettings.Falloff * 100.0f;
+}
+
+float SWetWrinkleEditorPanel::GetRidgeStartTaperValue() const
+{
+    if (BrushSettings.ToolMode == EWetWrinkleToolMode::ProceduralRidgeStroke &&
+        BrushSettings.RidgeEditMode == EWetProceduralRidgeEditMode::Edit &&
+        SelectedElementType == EWetWrinkleElementType::ProceduralRidgeStroke)
+    {
+        if (const FWetProceduralRidgeStroke* Stroke = FindProceduralRidgeStroke(SelectedStrokeGuid))
+        {
+            return Stroke->StartTaper;
+        }
+    }
+    return BrushSettings.RidgeStartTaper;
+}
+
+float SWetWrinkleEditorPanel::GetRidgeEndTaperValue() const
+{
+    if (BrushSettings.ToolMode == EWetWrinkleToolMode::ProceduralRidgeStroke &&
+        BrushSettings.RidgeEditMode == EWetProceduralRidgeEditMode::Edit &&
+        SelectedElementType == EWetWrinkleElementType::ProceduralRidgeStroke)
+    {
+        if (const FWetProceduralRidgeStroke* Stroke = FindProceduralRidgeStroke(SelectedStrokeGuid))
+        {
+            return Stroke->EndTaper;
+        }
+    }
+    return BrushSettings.RidgeEndTaper;
+}
+
+void SWetWrinkleEditorPanel::ApplyBrushSettingsToSelectedProceduralStroke()
+{
+    if (BrushSettings.ToolMode != EWetWrinkleToolMode::ProceduralRidgeStroke ||
+        BrushSettings.RidgeEditMode != EWetProceduralRidgeEditMode::Edit ||
+        SelectedElementType != EWetWrinkleElementType::ProceduralRidgeStroke)
+    {
+        return;
+    }
+
+    UWetClothingAsset* Asset = WetClothingAsset.Get();
+    FWetProceduralRidgeStroke* Stroke = FindMutableProceduralRidgeStroke(SelectedStrokeGuid);
+    if (Asset == nullptr || Stroke == nullptr)
+    {
+        return;
+    }
+
+    if (Stroke->Shape == BrushSettings.RidgeShape &&
+        Stroke->bFlipFoldSide == BrushSettings.bFlipRidgeFoldSide &&
+        FMath::IsNearlyEqual(Stroke->WidthUV, BrushSettings.BrushRadiusUV) &&
+        FMath::IsNearlyEqual(Stroke->Strength, BrushSettings.Strength) &&
+        FMath::IsNearlyEqual(Stroke->Falloff, BrushSettings.Falloff) &&
+        FMath::IsNearlyEqual(Stroke->StartTaper, BrushSettings.RidgeStartTaper) &&
+        FMath::IsNearlyEqual(Stroke->EndTaper, BrushSettings.RidgeEndTaper) &&
+        FMath::IsNearlyEqual(Stroke->FlareSettings.Length, BrushSettings.RidgeFlareSettings.Length) &&
+        FMath::IsNearlyEqual(Stroke->FlareSettings.WidthScale, BrushSettings.RidgeFlareSettings.WidthScale) &&
+        FMath::IsNearlyEqual(Stroke->FlareSettings.EndStrength, BrushSettings.RidgeFlareSettings.EndStrength) &&
+        FMath::IsNearlyEqual(Stroke->FlareSettings.Softness, BrushSettings.RidgeFlareSettings.Softness) &&
+        Stroke->NaturalVariation.bEnabled == BrushSettings.RidgeNaturalVariation.bEnabled &&
+        FMath::IsNearlyEqual(Stroke->NaturalVariation.CenterlineAmount, BrushSettings.RidgeNaturalVariation.CenterlineAmount) &&
+        FMath::IsNearlyEqual(Stroke->NaturalVariation.CenterlineFrequency, BrushSettings.RidgeNaturalVariation.CenterlineFrequency) &&
+        FMath::IsNearlyEqual(Stroke->NaturalVariation.WidthVariation, BrushSettings.RidgeNaturalVariation.WidthVariation) &&
+        FMath::IsNearlyEqual(Stroke->NaturalVariation.WidthFrequency, BrushSettings.RidgeNaturalVariation.WidthFrequency) &&
+        Stroke->NaturalVariation.NoiseSeed == BrushSettings.RidgeNaturalVariation.NoiseSeed)
+    {
+        return;
+    }
+
+    if (!ActiveRidgePropertyTransaction.IsValid())
+    {
+        ActiveRidgePropertyTransaction = MakeUnique<FScopedTransaction>(
+            LOCTEXT("EditProceduralRidgeSettingsTransaction", "Edit Procedural Ridge Settings"));
+    }
+    Asset->Modify();
+    Stroke->Shape = BrushSettings.RidgeShape;
+    Stroke->bFlipFoldSide = BrushSettings.bFlipRidgeFoldSide;
+    Stroke->WidthUV = BrushSettings.BrushRadiusUV;
+    Stroke->Strength = BrushSettings.Strength;
+    Stroke->Falloff = BrushSettings.Falloff;
+    Stroke->StartTaper = BrushSettings.RidgeStartTaper;
+    Stroke->EndTaper = BrushSettings.RidgeEndTaper;
+    Stroke->FlareSettings = BrushSettings.RidgeFlareSettings;
+    Stroke->NaturalVariation = BrushSettings.RidgeNaturalVariation;
+    MarkAssetEdited();
+    if (PreviewViewport.IsValid())
+    {
+        PreviewViewport->SetEditingProceduralStrokeGuid(Stroke->StrokeGuid);
+        PreviewViewport->PreviewEditedProceduralStroke(*Stroke);
+    }
+    RefreshStrokeOverlay(false);
+}
+
+void SWetWrinkleEditorPanel::HandleRidgePropertySliderBegin()
+{
+    if (!ActiveRidgePropertyTransaction.IsValid() &&
+        BrushSettings.ToolMode == EWetWrinkleToolMode::ProceduralRidgeStroke &&
+        BrushSettings.RidgeEditMode == EWetProceduralRidgeEditMode::Edit)
+    {
+        ActiveRidgePropertyTransaction = MakeUnique<FScopedTransaction>(
+            LOCTEXT("EditProceduralRidgeSettingsTransaction", "Edit Procedural Ridge Settings"));
+    }
+}
+
+void SWetWrinkleEditorPanel::HandleRidgePropertySliderEnd(float NewValue)
+{
+    if (!ActiveRidgePropertyTransaction.IsValid())
+    {
+        return;
+    }
+    ActiveRidgePropertyTransaction.Reset();
+    if (PreviewViewport.IsValid())
+    {
+        PreviewViewport->ClearTransientProceduralStroke();
+        PreviewViewport->SetEditingProceduralStrokeGuid(FGuid());
+    }
+    RefreshStrokeOverlay(true);
+}
+
+void SWetWrinkleEditorPanel::HandleRidgePropertyCommitted(float NewValue, ETextCommit::Type CommitType)
+{
+    if (!ActiveRidgePropertyTransaction.IsValid())
+    {
+        return;
+    }
+    ActiveRidgePropertyTransaction.Reset();
+    if (PreviewViewport.IsValid())
+    {
+        PreviewViewport->ClearTransientProceduralStroke();
+        PreviewViewport->SetEditingProceduralStrokeGuid(FGuid());
+    }
+    RefreshStrokeOverlay(true);
+}
+
+ECheckBoxState SWetWrinkleEditorPanel::GetSelectedRidgeEndpointPointedState(const bool bStartEndpoint) const
+{
+    const FWetProceduralRidgeStroke* Stroke = FindProceduralRidgeStroke(SelectedStrokeGuid);
+    if (Stroke == nullptr || SelectedElementType != EWetWrinkleElementType::ProceduralRidgeStroke)
+    {
+        return ECheckBoxState::Undetermined;
+    }
+    const FWetProceduralRidgeEndpoint& Endpoint = bStartEndpoint ? Stroke->StartEndpoint : Stroke->EndEndpoint;
+    return Endpoint.Mode == EWetProceduralRidgeEndpointMode::Pointed
+        ? ECheckBoxState::Checked
+        : ECheckBoxState::Unchecked;
+}
+
+ECheckBoxState SWetWrinkleEditorPanel::GetSelectedRidgeEndpointFlaredState(const bool bStartEndpoint) const
+{
+    const FWetProceduralRidgeStroke* Stroke = FindProceduralRidgeStroke(SelectedStrokeGuid);
+    if (Stroke == nullptr || SelectedElementType != EWetWrinkleElementType::ProceduralRidgeStroke)
+    {
+        return ECheckBoxState::Undetermined;
+    }
+    const FWetProceduralRidgeEndpoint& Endpoint = bStartEndpoint ? Stroke->StartEndpoint : Stroke->EndEndpoint;
+    return Endpoint.Mode == EWetProceduralRidgeEndpointMode::Flared
+        ? ECheckBoxState::Checked
+        : ECheckBoxState::Unchecked;
+}
+
+EVisibility SWetWrinkleEditorPanel::GetFlareOptionsVisibility() const
+{
+    const FWetProceduralRidgeStroke* Stroke = FindProceduralRidgeStroke(SelectedStrokeGuid);
+    return BrushSettings.ToolMode == EWetWrinkleToolMode::ProceduralRidgeStroke &&
+            BrushSettings.RidgeEditMode == EWetProceduralRidgeEditMode::Edit &&
+            SelectedElementType == EWetWrinkleElementType::ProceduralRidgeStroke &&
+            Stroke != nullptr &&
+            (Stroke->StartEndpoint.Mode == EWetProceduralRidgeEndpointMode::Flared ||
+             Stroke->EndEndpoint.Mode == EWetProceduralRidgeEndpointMode::Flared)
+        ? EVisibility::Visible
+        : EVisibility::Collapsed;
+}
+
+FText SWetWrinkleEditorPanel::GetSelectedRidgeEndpointStatusText(const bool bStartEndpoint) const
+{
+    const FWetProceduralRidgeStroke* Stroke = FindProceduralRidgeStroke(SelectedStrokeGuid);
+    if (Stroke == nullptr || SelectedElementType != EWetWrinkleElementType::ProceduralRidgeStroke)
+    {
+        return bStartEndpoint
+            ? LOCTEXT("RidgeStartEndpointNoSelection", "Start: No stroke")
+            : LOCTEXT("RidgeEndEndpointNoSelection", "End: No stroke");
+    }
+
+    const EWetProceduralRidgeEndpointMode Mode =
+        (bStartEndpoint ? Stroke->StartEndpoint : Stroke->EndEndpoint).Mode;
+    FText ModeText;
+    switch (Mode)
+    {
+    case EWetProceduralRidgeEndpointMode::Rounded:
+        ModeText = LOCTEXT("RidgeEndpointRounded", "Rounded");
+        break;
+    case EWetProceduralRidgeEndpointMode::Junction:
+        ModeText = LOCTEXT("RidgeEndpointJunction", "Junction");
+        break;
+    case EWetProceduralRidgeEndpointMode::Flared:
+        ModeText = LOCTEXT("RidgeEndpointFlared", "Flared");
+        break;
+    case EWetProceduralRidgeEndpointMode::Pointed:
+    default:
+        ModeText = LOCTEXT("RidgeEndpointPointed", "Pointed");
+        break;
+    }
+
+    return FText::Format(
+        bStartEndpoint
+            ? LOCTEXT("RidgeStartEndpointStatus", "Start: {0}")
+            : LOCTEXT("RidgeEndEndpointStatus", "End: {0}"),
+        ModeText);
+}
+
+FSlateColor SWetWrinkleEditorPanel::GetSelectedRidgeEndpointStatusColor(const bool bStartEndpoint) const
+{
+    const FWetProceduralRidgeStroke* Stroke = FindProceduralRidgeStroke(SelectedStrokeGuid);
+    if (Stroke != nullptr && SelectedElementType == EWetWrinkleElementType::ProceduralRidgeStroke)
+    {
+        const EWetProceduralRidgeEndpointMode Mode =
+            (bStartEndpoint ? Stroke->StartEndpoint : Stroke->EndEndpoint).Mode;
+        if (Mode == EWetProceduralRidgeEndpointMode::Junction)
+        {
+            return FSlateColor(FLinearColor(1.0f, 0.72f, 0.05f, 1.0f));
+        }
+        if (Mode == EWetProceduralRidgeEndpointMode::Flared)
+        {
+            return FSlateColor(FLinearColor(0.85f, 0.45f, 1.0f, 1.0f));
+        }
+    }
+    return FSlateColor::UseForeground();
+}
+
+void SWetWrinkleEditorPanel::HandleSelectedRidgeEndpointPointedChanged(
+    const ECheckBoxState NewState,
+    const bool bStartEndpoint)
+{
+    UWetClothingAsset* Asset = WetClothingAsset.Get();
+    FWetProceduralRidgeStroke* Stroke = FindMutableProceduralRidgeStroke(SelectedStrokeGuid);
+    if (Asset == nullptr || Stroke == nullptr || SelectedElementType != EWetWrinkleElementType::ProceduralRidgeStroke)
+    {
+        return;
+    }
+
+    FWetProceduralRidgeEndpoint& Endpoint = bStartEndpoint ? Stroke->StartEndpoint : Stroke->EndEndpoint;
+    const EWetProceduralRidgeEndpointMode NewMode = NewState == ECheckBoxState::Checked
+        ? EWetProceduralRidgeEndpointMode::Pointed
+        : EWetProceduralRidgeEndpointMode::Rounded;
+    if (Endpoint.Mode == NewMode)
+    {
+        return;
+    }
+
+    const FScopedTransaction Transaction(LOCTEXT("EditProceduralRidgeEndpointTransaction", "Edit Procedural Ridge Endpoint"));
+    Asset->Modify();
+    Endpoint.Mode = NewMode;
+    Endpoint.ResetConnection();
+    MarkAssetEdited();
+    RefreshStrokeOverlay(true);
+}
+
+void SWetWrinkleEditorPanel::HandleSelectedRidgeEndpointFlaredChanged(
+    const ECheckBoxState NewState,
+    const bool bStartEndpoint)
+{
+    UWetClothingAsset* Asset = WetClothingAsset.Get();
+    FWetProceduralRidgeStroke* Stroke = FindMutableProceduralRidgeStroke(SelectedStrokeGuid);
+    if (Asset == nullptr || Stroke == nullptr || SelectedElementType != EWetWrinkleElementType::ProceduralRidgeStroke)
+    {
+        return;
+    }
+
+    FWetProceduralRidgeEndpoint& Endpoint = bStartEndpoint ? Stroke->StartEndpoint : Stroke->EndEndpoint;
+    const EWetProceduralRidgeEndpointMode NewMode = NewState == ECheckBoxState::Checked
+        ? EWetProceduralRidgeEndpointMode::Flared
+        : EWetProceduralRidgeEndpointMode::Rounded;
+    if (Endpoint.Mode == NewMode)
+    {
+        return;
+    }
+
+    const FScopedTransaction Transaction(LOCTEXT("EditProceduralRidgeFlaredEndpointTransaction", "Edit Flared Ridge Endpoint"));
+    Asset->Modify();
+    Endpoint.Mode = NewMode;
+    Endpoint.ResetConnection();
+    MarkAssetEdited();
+    RefreshStrokeOverlay(true);
+}
+
+bool SWetWrinkleEditorPanel::CanDeleteSelectedRidgePoint() const
+{
+    const FWetProceduralRidgeStroke* Stroke =
+        SelectedElementType == EWetWrinkleElementType::ProceduralRidgeStroke
+            ? FindProceduralRidgeStroke(SelectedStrokeGuid)
+            : nullptr;
+    return Stroke != nullptr && Stroke->Points.Num() > 2 && Stroke->Points.IsValidIndex(SelectedProceduralRidgePointIndex);
+}
+
+FReply SWetWrinkleEditorPanel::HandleDeleteSelectedRidgePointClicked()
+{
+    UWetClothingAsset* Asset = WetClothingAsset.Get();
+    FWetProceduralRidgeStroke* Stroke = FindMutableProceduralRidgeStroke(SelectedStrokeGuid);
+    if (Asset == nullptr || Stroke == nullptr || !CanDeleteSelectedRidgePoint())
+    {
+        return FReply::Handled();
+    }
+
+    const FScopedTransaction Transaction(LOCTEXT("DeleteProceduralRidgePointTransaction", "Delete Procedural Ridge Point"));
+    Asset->Modify();
+    const bool bRemovedStart = SelectedProceduralRidgePointIndex == 0;
+    const bool bRemovedEnd = SelectedProceduralRidgePointIndex == Stroke->Points.Num() - 1;
+    Stroke->Points.RemoveAt(SelectedProceduralRidgePointIndex);
+    if (bRemovedStart)
+    {
+        Stroke->StartEndpoint.Mode = EWetProceduralRidgeEndpointMode::Pointed;
+        Stroke->StartEndpoint.ResetConnection();
+    }
+    if (bRemovedEnd)
+    {
+        Stroke->EndEndpoint.Mode = EWetProceduralRidgeEndpointMode::Pointed;
+        Stroke->EndEndpoint.ResetConnection();
+    }
+    SelectedProceduralRidgePointIndex = INDEX_NONE;
+    MarkAssetEdited();
+    RefreshStrokeList();
+    RefreshStrokeOverlay(true);
+    return FReply::Handled();
+}
+
+void SWetWrinkleEditorPanel::ClearConnectionsToStroke(const FGuid& DeletedStrokeGuid)
+{
+    if (!DeletedStrokeGuid.IsValid())
+    {
+        return;
+    }
+
+    if (UWetClothingAsset* Asset = WetClothingAsset.Get())
+    {
+        for (FWetProceduralRidgeStroke& Stroke : Asset->WrinkleData.EditableProceduralRidgeStrokes)
+        {
+            if (Stroke.StartEndpoint.ConnectedStrokeGuid == DeletedStrokeGuid)
+            {
+                Stroke.StartEndpoint.Mode = EWetProceduralRidgeEndpointMode::Pointed;
+                Stroke.StartEndpoint.ResetConnection();
+            }
+            if (Stroke.EndEndpoint.ConnectedStrokeGuid == DeletedStrokeGuid)
+            {
+                Stroke.EndEndpoint.Mode = EWetProceduralRidgeEndpointMode::Pointed;
+                Stroke.EndEndpoint.ResetConnection();
+            }
+        }
+    }
 }
 
 void SWetWrinkleEditorPanel::HandlePreviewToggleChanged(ECheckBoxState NewState)
@@ -2867,6 +4793,606 @@ const FWetWrinklePatchStroke* SWetWrinkleEditorPanel::FindStroke(const FGuid& St
         });
 }
 
+FWetProceduralRidgeStroke* SWetWrinkleEditorPanel::FindMutableProceduralRidgeStroke(const FGuid& StrokeGuid) const
+{
+    UWetClothingAsset* Asset = WetClothingAsset.Get();
+    if (Asset == nullptr || !StrokeGuid.IsValid())
+    {
+        return nullptr;
+    }
+
+    return Asset->WrinkleData.EditableProceduralRidgeStrokes.FindByPredicate(
+        [StrokeGuid](const FWetProceduralRidgeStroke& Stroke)
+        {
+            return Stroke.StrokeGuid == StrokeGuid;
+        });
+}
+
+const FWetProceduralRidgeStroke* SWetWrinkleEditorPanel::FindProceduralRidgeStroke(const FGuid& StrokeGuid) const
+{
+    const UWetClothingAsset* Asset = WetClothingAsset.Get();
+    if (Asset == nullptr || !StrokeGuid.IsValid())
+    {
+        return nullptr;
+    }
+
+    return Asset->WrinkleData.EditableProceduralRidgeStrokes.FindByPredicate(
+        [StrokeGuid](const FWetProceduralRidgeStroke& Stroke)
+        {
+            return Stroke.StrokeGuid == StrokeGuid;
+        });
+}
+
+FWetProceduralRidgeStrokePoint SWetWrinkleEditorPanel::MakeProceduralRidgePointFromHit(const FWetWrinkleSurfaceHit& SurfaceHit) const
+{
+    FWetProceduralRidgeStrokePoint Point;
+    Point.PositionUV = SurfaceHit.UV;
+    Point.AnchorTriangleID = SurfaceHit.TriangleID;
+    Point.AnchorBarycentric = FVector3f(SurfaceHit.Barycentric);
+    return Point;
+}
+
+int32 SWetWrinkleEditorPanel::FindNearestProceduralRidgeSegment(
+    const FWetProceduralRidgeStroke& Stroke,
+    const FVector2D& UV,
+    float& OutSegmentT) const
+{
+    int32 NearestSegmentIndex = INDEX_NONE;
+    double NearestDistanceSq = TNumericLimits<double>::Max();
+    OutSegmentT = 0.0f;
+    for (int32 SegmentIndex = 0; SegmentIndex + 1 < Stroke.Points.Num(); ++SegmentIndex)
+    {
+        const FVector2D Start = Stroke.Points[SegmentIndex].PositionUV;
+        const FVector2D Delta(
+            WrapWetRidgeDelta(Stroke.Points[SegmentIndex + 1].PositionUV.X - Start.X),
+            WrapWetRidgeDelta(Stroke.Points[SegmentIndex + 1].PositionUV.Y - Start.Y));
+        const FVector2D WrappedUV(
+            Start.X + WrapWetRidgeDelta(UV.X - Start.X),
+            Start.Y + WrapWetRidgeDelta(UV.Y - Start.Y));
+        const double LengthSq = Delta.SizeSquared();
+        const float SegmentT = LengthSq > UE_SMALL_NUMBER
+            ? FMath::Clamp(static_cast<float>(FVector2D::DotProduct(WrappedUV - Start, Delta) / LengthSq), 0.0f, 1.0f)
+            : 0.0f;
+        const double DistanceSq = FVector2D::DistSquared(WrappedUV, Start + Delta * SegmentT);
+        if (DistanceSq < NearestDistanceSq)
+        {
+            NearestDistanceSq = DistanceSq;
+            NearestSegmentIndex = SegmentIndex;
+            OutSegmentT = SegmentT;
+        }
+    }
+    return NearestSegmentIndex;
+}
+
+bool SWetWrinkleEditorPanel::FindProceduralRidgeJunctionSnap(
+    const FWetWrinkleSurfaceHit& SurfaceHit,
+    const FGuid& ExcludedStrokeGuid,
+    FWetWrinkleSurfaceHit& OutSnappedHit,
+    FGuid& OutConnectedStrokeGuid,
+    int32& OutConnectedSegmentIndex,
+    float& OutConnectedSegmentT) const
+{
+    OutConnectedStrokeGuid.Invalidate();
+    OutConnectedSegmentIndex = INDEX_NONE;
+    OutConnectedSegmentT = 0.0f;
+    if (!BrushSettings.bRidgeJunctionModeEnabled)
+    {
+        return false;
+    }
+
+    const UWetClothingAsset* Asset = WetClothingAsset.Get();
+    if (Asset == nullptr || !PreviewViewport.IsValid() || !SurfaceHit.bHit)
+    {
+        return false;
+    }
+
+    const double MaxWorldDistance = FMath::Max(static_cast<double>(SizeCm * 0.75f), 1.0);
+    double BestWorldDistanceSq = FMath::Square(MaxWorldDistance);
+    for (const FWetProceduralRidgeStroke& Candidate : Asset->WrinkleData.EditableProceduralRidgeStrokes)
+    {
+        if (!Candidate.bEnabled || Candidate.StrokeGuid == ExcludedStrokeGuid || Candidate.Points.Num() < 2 ||
+            Candidate.MaterialSlotIndex != SurfaceHit.MaterialSlotIndex || Candidate.UVChannelIndex != SurfaceHit.UVChannelIndex)
+        {
+            continue;
+        }
+
+        // Control points already have an exact triangle/barycentric anchor. Prefer
+        // that data so clicking a visible guide point never depends on UV projection.
+        for (int32 PointIndex = 0; PointIndex < Candidate.Points.Num(); ++PointIndex)
+        {
+            FVector PointWorld = FVector::ZeroVector;
+            FVector PointNormal = FVector::UpVector;
+            if (!PreviewViewport->ResolveProceduralStrokePointWorld(
+                    Candidate.Points[PointIndex],
+                    Candidate.MaterialSlotIndex,
+                    PointWorld,
+                    PointNormal))
+            {
+                continue;
+            }
+
+            const double PointDistanceSq = FVector::DistSquared(PointWorld, SurfaceHit.WorldPosition);
+            if (PointDistanceSq > BestWorldDistanceSq)
+            {
+                continue;
+            }
+
+            FWetWrinkleSurfaceHit PointHit;
+            if (!PreviewViewport->TryBuildSurfaceHitFromProceduralStrokePoint(
+                    Candidate.Points[PointIndex],
+                    Candidate.MaterialSlotIndex,
+                    Candidate.UVChannelIndex,
+                    PointHit))
+            {
+                continue;
+            }
+
+            BestWorldDistanceSq = PointDistanceSq;
+            OutSnappedHit = PointHit;
+            OutConnectedStrokeGuid = Candidate.StrokeGuid;
+            if (PointIndex + 1 < Candidate.Points.Num())
+            {
+                OutConnectedSegmentIndex = PointIndex;
+                OutConnectedSegmentT = 0.0f;
+            }
+            else
+            {
+                OutConnectedSegmentIndex = PointIndex - 1;
+                OutConnectedSegmentT = 1.0f;
+            }
+        }
+
+        for (int32 SegmentIndex = 0; SegmentIndex + 1 < Candidate.Points.Num(); ++SegmentIndex)
+        {
+            FVector StartWorld = FVector::ZeroVector;
+            FVector EndWorld = FVector::ZeroVector;
+            FVector StartNormal = FVector::UpVector;
+            FVector EndNormal = FVector::UpVector;
+            if (!PreviewViewport->ResolveProceduralStrokePointWorld(
+                    Candidate.Points[SegmentIndex],
+                    Candidate.MaterialSlotIndex,
+                    StartWorld,
+                    StartNormal) ||
+                !PreviewViewport->ResolveProceduralStrokePointWorld(
+                    Candidate.Points[SegmentIndex + 1],
+                    Candidate.MaterialSlotIndex,
+                    EndWorld,
+                    EndNormal))
+            {
+                continue;
+            }
+
+            const FVector SegmentDelta = EndWorld - StartWorld;
+            const double SegmentLengthSq = SegmentDelta.SizeSquared();
+            const float SegmentT = SegmentLengthSq > UE_SMALL_NUMBER
+                ? FMath::Clamp(
+                      static_cast<float>(FVector::DotProduct(SurfaceHit.WorldPosition - StartWorld, SegmentDelta) / SegmentLengthSq),
+                      0.0f,
+                      1.0f)
+                : 0.0f;
+            const FVector ClosestWorld = StartWorld + SegmentDelta * SegmentT;
+            const double WorldDistanceSq = FVector::DistSquared(ClosestWorld, SurfaceHit.WorldPosition);
+            if (WorldDistanceSq > BestWorldDistanceSq)
+            {
+                continue;
+            }
+
+            const FVector2D StartUV = Candidate.Points[SegmentIndex].PositionUV;
+            const FVector2D UVDelta(
+                WrapWetRidgeDelta(Candidate.Points[SegmentIndex + 1].PositionUV.X - StartUV.X),
+                WrapWetRidgeDelta(Candidate.Points[SegmentIndex + 1].PositionUV.Y - StartUV.Y));
+            const FVector2D ClosestUV = StartUV + UVDelta * SegmentT;
+            FWetWrinkleSurfaceHit CandidateHit;
+            if (!PreviewViewport->TryBuildSurfaceHitAtUVNearWorldPosition(
+                    SurfaceHit.MaterialSlotIndex,
+                    SurfaceHit.UVChannelIndex,
+                    FVector2D(WrapWetRidgeUnit(ClosestUV.X), WrapWetRidgeUnit(ClosestUV.Y)),
+                    ClosestWorld,
+                    CandidateHit))
+            {
+                continue;
+            }
+
+            BestWorldDistanceSq = WorldDistanceSq;
+            OutSnappedHit = CandidateHit;
+            OutConnectedStrokeGuid = Candidate.StrokeGuid;
+            OutConnectedSegmentIndex = SegmentIndex;
+            OutConnectedSegmentT = SegmentT;
+        }
+    }
+    return OutConnectedStrokeGuid.IsValid();
+}
+
+void SWetWrinkleEditorPanel::BeginProceduralRidgePointEdit(const FWetWrinkleSurfaceHit& SurfaceHit)
+{
+    UWetClothingAsset* Asset = WetClothingAsset.Get();
+    FWetProceduralRidgeStroke* Stroke =
+        SelectedElementType == EWetWrinkleElementType::ProceduralRidgeStroke
+            ? FindMutableProceduralRidgeStroke(SelectedStrokeGuid)
+            : nullptr;
+    if (Asset == nullptr || Stroke == nullptr || !PreviewViewport.IsValid() || !SurfaceHit.bHit ||
+        SurfaceHit.MaterialSlotIndex != Stroke->MaterialSlotIndex || SurfaceHit.UVChannelIndex != Stroke->UVChannelIndex)
+    {
+        return;
+    }
+
+    const bool bInsertPoint = FSlateApplication::Get().GetModifierKeys().IsShiftDown();
+    int32 PointIndex = INDEX_NONE;
+    if (bInsertPoint)
+    {
+        float SegmentT = 0.0f;
+        const int32 SegmentIndex = FindNearestProceduralRidgeSegment(*Stroke, SurfaceHit.UV, SegmentT);
+        if (SegmentIndex != INDEX_NONE)
+        {
+            PointIndex = SegmentIndex + 1;
+        }
+    }
+    else
+    {
+        PointIndex = PreviewViewport->FindNearestProceduralStrokePoint(
+            *Stroke,
+            SurfaceHit.WorldPosition,
+            FMath::Max(SizeCm * 0.75f, 1.0f));
+    }
+
+    if (PointIndex == INDEX_NONE)
+    {
+        return;
+    }
+
+    ActiveRidgeEditTransaction = MakeUnique<FScopedTransaction>(
+        bInsertPoint
+            ? LOCTEXT("InsertProceduralRidgePointTransaction", "Insert Procedural Ridge Point")
+            : LOCTEXT("MoveProceduralRidgePointTransaction", "Move Procedural Ridge Point"));
+    Asset->Modify();
+    bInsertedEditedProceduralRidgePoint = bInsertPoint;
+    if (bInsertPoint)
+    {
+        Stroke->Points.Insert(MakeProceduralRidgePointFromHit(SurfaceHit), PointIndex);
+    }
+
+    EditingProceduralRidgePointIndex = PointIndex;
+    SelectedProceduralRidgePointIndex = PointIndex;
+    OriginalEditedProceduralRidgePoint = Stroke->Points[PointIndex];
+    OriginalEditedStartEndpoint = Stroke->StartEndpoint;
+    OriginalEditedEndEndpoint = Stroke->EndEndpoint;
+    EditingProceduralRidgeUVIslandID = SurfaceHit.UVIslandID;
+    bEditingProceduralRidgePoint = true;
+    PreviewViewport->SetEditingProceduralStrokeGuid(Stroke->StrokeGuid);
+    PreviewViewport->PreviewEditedProceduralStroke(*Stroke);
+    RefreshStrokeOverlay(false);
+}
+
+void SWetWrinkleEditorPanel::UpdateProceduralRidgePointEdit(const FWetWrinkleSurfaceHit& SurfaceHit)
+{
+    FWetProceduralRidgeStroke* Stroke = FindMutableProceduralRidgeStroke(SelectedStrokeGuid);
+    if (!bEditingProceduralRidgePoint || Stroke == nullptr || !PreviewViewport.IsValid() || !SurfaceHit.bHit ||
+        !Stroke->Points.IsValidIndex(EditingProceduralRidgePointIndex) ||
+        SurfaceHit.MaterialSlotIndex != Stroke->MaterialSlotIndex || SurfaceHit.UVChannelIndex != Stroke->UVChannelIndex ||
+        SurfaceHit.UVIslandID != EditingProceduralRidgeUVIslandID)
+    {
+        return;
+    }
+
+    FWetWrinkleSurfaceHit FinalHit = SurfaceHit;
+    const bool bEndpoint = EditingProceduralRidgePointIndex == 0 || EditingProceduralRidgePointIndex == Stroke->Points.Num() - 1;
+    FGuid ConnectedStrokeGuid;
+    int32 ConnectedSegmentIndex = INDEX_NONE;
+    float ConnectedSegmentT = 0.0f;
+    if (bEndpoint)
+    {
+        FindProceduralRidgeJunctionSnap(
+            SurfaceHit,
+            Stroke->StrokeGuid,
+            FinalHit,
+            ConnectedStrokeGuid,
+            ConnectedSegmentIndex,
+            ConnectedSegmentT);
+    }
+
+    Stroke->Points[EditingProceduralRidgePointIndex] = MakeProceduralRidgePointFromHit(FinalHit);
+    if (EditingProceduralRidgePointIndex == 0)
+    {
+        Stroke->StartEndpoint.Mode = ConnectedStrokeGuid.IsValid()
+            ? EWetProceduralRidgeEndpointMode::Junction
+            : EWetProceduralRidgeEndpointMode::Pointed;
+        Stroke->StartEndpoint.ConnectedStrokeGuid = ConnectedStrokeGuid;
+        Stroke->StartEndpoint.ConnectedSegmentIndex = ConnectedSegmentIndex;
+        Stroke->StartEndpoint.ConnectedSegmentT = ConnectedSegmentT;
+    }
+    else if (EditingProceduralRidgePointIndex == Stroke->Points.Num() - 1)
+    {
+        Stroke->EndEndpoint.Mode = ConnectedStrokeGuid.IsValid()
+            ? EWetProceduralRidgeEndpointMode::Junction
+            : EWetProceduralRidgeEndpointMode::Pointed;
+        Stroke->EndEndpoint.ConnectedStrokeGuid = ConnectedStrokeGuid;
+        Stroke->EndEndpoint.ConnectedSegmentIndex = ConnectedSegmentIndex;
+        Stroke->EndEndpoint.ConnectedSegmentT = ConnectedSegmentT;
+    }
+    PreviewViewport->PreviewEditedProceduralStroke(*Stroke);
+    RefreshStrokeOverlay(false);
+}
+
+void SWetWrinkleEditorPanel::EndProceduralRidgePointEdit(const bool bCancel)
+{
+    if (!bEditingProceduralRidgePoint)
+    {
+        return;
+    }
+
+    if (FWetProceduralRidgeStroke* Stroke = FindMutableProceduralRidgeStroke(SelectedStrokeGuid))
+    {
+        if (bCancel)
+        {
+            if (bInsertedEditedProceduralRidgePoint && Stroke->Points.IsValidIndex(EditingProceduralRidgePointIndex))
+            {
+                Stroke->Points.RemoveAt(EditingProceduralRidgePointIndex);
+            }
+            else if (Stroke->Points.IsValidIndex(EditingProceduralRidgePointIndex))
+            {
+                Stroke->Points[EditingProceduralRidgePointIndex] = OriginalEditedProceduralRidgePoint;
+            }
+            Stroke->StartEndpoint = OriginalEditedStartEndpoint;
+            Stroke->EndEndpoint = OriginalEditedEndEndpoint;
+        }
+        else
+        {
+            MarkAssetEdited();
+        }
+    }
+
+    if (PreviewViewport.IsValid())
+    {
+        PreviewViewport->ClearTransientProceduralStroke();
+        PreviewViewport->SetEditingProceduralStrokeGuid(FGuid());
+    }
+    ActiveRidgeEditTransaction.Reset();
+    EditingProceduralRidgePointIndex = INDEX_NONE;
+    EditingProceduralRidgeUVIslandID = INDEX_NONE;
+    bEditingProceduralRidgePoint = false;
+    bInsertedEditedProceduralRidgePoint = false;
+    RefreshStrokeList();
+    RefreshStrokeOverlay(true);
+}
+
+void SWetWrinkleEditorPanel::BeginProceduralRidgeStroke(const FWetWrinkleSurfaceHit& SurfaceHit)
+{
+    if (WetClothingAsset.Get() == nullptr ||
+        !SurfaceHit.bHit ||
+        SurfaceHit.MaterialSlotIndex != BrushSettings.MaterialSlotIndex ||
+        SurfaceHit.UVChannelIndex != BrushSettings.UVChannelIndex ||
+        SurfaceHit.UVIslandID == INDEX_NONE)
+    {
+        return;
+    }
+
+    if (BrushSettings.RidgeNaturalVariation.bEnabled)
+    {
+        BrushSettings.RidgeNaturalVariation.NoiseSeed = static_cast<int32>(FPlatformTime::Cycles64() & 0x7FFFFFFF);
+        PushBrushSettingsToViewport();
+    }
+
+    FWetWrinkleSurfaceHit StartHit = SurfaceHit;
+    PendingStartConnectionStrokeGuid.Invalidate();
+    PendingStartConnectionSegmentIndex = INDEX_NONE;
+    PendingStartConnectionSegmentT = 0.0f;
+    FindProceduralRidgeJunctionSnap(
+        SurfaceHit,
+        FGuid(),
+        StartHit,
+        PendingStartConnectionStrokeGuid,
+        PendingStartConnectionSegmentIndex,
+        PendingStartConnectionSegmentT);
+
+    CapturedProceduralRidgeHits.Reset();
+    CapturedProceduralRidgeHits.Add(StartHit);
+    ActiveProceduralRidgeMaterialSlotIndex = StartHit.MaterialSlotIndex;
+    ActiveProceduralRidgeUVChannelIndex = StartHit.UVChannelIndex;
+    ActiveProceduralRidgeUVIslandID = StartHit.UVIslandID;
+    bCapturingProceduralRidgeStroke = true;
+    bProceduralRidgeCaptureBlocked = false;
+
+    if (PreviewViewport.IsValid())
+    {
+        PreviewViewport->SetTransientProceduralStroke(
+            BuildSmoothedProceduralRidgeHits(),
+            PendingStartConnectionStrokeGuid.IsValid());
+    }
+}
+
+void SWetWrinkleEditorPanel::AppendProceduralRidgeStrokePoint(const FWetWrinkleSurfaceHit& SurfaceHit)
+{
+    if (!bCapturingProceduralRidgeStroke || bProceduralRidgeCaptureBlocked || !SurfaceHit.bHit)
+    {
+        return;
+    }
+
+    if (SurfaceHit.MaterialSlotIndex != ActiveProceduralRidgeMaterialSlotIndex ||
+        SurfaceHit.UVChannelIndex != ActiveProceduralRidgeUVChannelIndex ||
+        SurfaceHit.UVIslandID != ActiveProceduralRidgeUVIslandID)
+    {
+        bProceduralRidgeCaptureBlocked = true;
+        return;
+    }
+
+    if (!ShouldAddProceduralRidgePoint(SurfaceHit))
+    {
+        return;
+    }
+
+    CapturedProceduralRidgeHits.Add(SurfaceHit);
+    if (PreviewViewport.IsValid())
+    {
+        TArray<FWetWrinkleSurfaceHit> PreviewHits = BuildSmoothedProceduralRidgeHits();
+        bool bEndJunction = false;
+        if (PreviewHits.Num() >= 2)
+        {
+            FWetWrinkleSurfaceHit SnappedEndHit;
+            FGuid ConnectedStrokeGuid;
+            int32 ConnectedSegmentIndex = INDEX_NONE;
+            float ConnectedSegmentT = 0.0f;
+            bEndJunction = FindProceduralRidgeJunctionSnap(
+                PreviewHits.Last(),
+                FGuid(),
+                SnappedEndHit,
+                ConnectedStrokeGuid,
+                ConnectedSegmentIndex,
+                ConnectedSegmentT);
+            if (bEndJunction)
+            {
+                PreviewHits.Last() = SnappedEndHit;
+            }
+        }
+        PreviewViewport->SetTransientProceduralStroke(
+            PreviewHits,
+            PendingStartConnectionStrokeGuid.IsValid(),
+            bEndJunction);
+    }
+}
+
+void SWetWrinkleEditorPanel::CommitProceduralRidgeStroke()
+{
+    UWetClothingAsset* Asset = WetClothingAsset.Get();
+    TArray<FWetWrinkleSurfaceHit> FinalHits = BuildSmoothedProceduralRidgeHits();
+    if (Asset != nullptr && FinalHits.Num() >= 2)
+    {
+        FGuid EndConnectionStrokeGuid;
+        int32 EndConnectionSegmentIndex = INDEX_NONE;
+        float EndConnectionSegmentT = 0.0f;
+        FWetWrinkleSurfaceHit SnappedEndHit;
+        if (FindProceduralRidgeJunctionSnap(
+                FinalHits.Last(),
+                FGuid(),
+                SnappedEndHit,
+                EndConnectionStrokeGuid,
+                EndConnectionSegmentIndex,
+                EndConnectionSegmentT))
+        {
+            FinalHits.Last() = SnappedEndHit;
+        }
+
+        const FScopedTransaction Transaction(LOCTEXT("CreateProceduralRidgeStrokeTransaction", "Create Procedural Ridge Stroke"));
+        Asset->Modify();
+
+        FWetProceduralRidgeStroke NewStroke;
+        NewStroke.StrokeGuid = FGuid::NewGuid();
+        NewStroke.DisplayName = FString::Printf(
+            TEXT("Ridge %03d"),
+            Asset->WrinkleData.EditableProceduralRidgeStrokes.Num() + 1);
+        NewStroke.MaterialSlotIndex = ActiveProceduralRidgeMaterialSlotIndex;
+        NewStroke.UVChannelIndex = ActiveProceduralRidgeUVChannelIndex;
+        NewStroke.LODIndex = 0;
+        NewStroke.Shape = BrushSettings.RidgeShape;
+        NewStroke.bFlipFoldSide = BrushSettings.bFlipRidgeFoldSide;
+        NewStroke.WidthUV = BrushSettings.BrushRadiusUV;
+        NewStroke.Strength = BrushSettings.Strength;
+        NewStroke.Falloff = BrushSettings.Falloff;
+        NewStroke.StartTaper = BrushSettings.RidgeStartTaper;
+        NewStroke.EndTaper = BrushSettings.RidgeEndTaper;
+        NewStroke.FlareSettings = BrushSettings.RidgeFlareSettings;
+        NewStroke.NaturalVariation = BrushSettings.RidgeNaturalVariation;
+        if (PendingStartConnectionStrokeGuid.IsValid())
+        {
+            NewStroke.StartEndpoint.Mode = EWetProceduralRidgeEndpointMode::Junction;
+            NewStroke.StartEndpoint.ConnectedStrokeGuid = PendingStartConnectionStrokeGuid;
+            NewStroke.StartEndpoint.ConnectedSegmentIndex = PendingStartConnectionSegmentIndex;
+            NewStroke.StartEndpoint.ConnectedSegmentT = PendingStartConnectionSegmentT;
+        }
+        if (EndConnectionStrokeGuid.IsValid())
+        {
+            NewStroke.EndEndpoint.Mode = EWetProceduralRidgeEndpointMode::Junction;
+            NewStroke.EndEndpoint.ConnectedStrokeGuid = EndConnectionStrokeGuid;
+            NewStroke.EndEndpoint.ConnectedSegmentIndex = EndConnectionSegmentIndex;
+            NewStroke.EndEndpoint.ConnectedSegmentT = EndConnectionSegmentT;
+        }
+        NewStroke.Points.Reserve(FinalHits.Num());
+        for (const FWetWrinkleSurfaceHit& Hit : FinalHits)
+        {
+            NewStroke.Points.Add(MakeProceduralRidgePointFromHit(Hit));
+        }
+
+        Asset->WrinkleData.EditableProceduralRidgeStrokes.Add(NewStroke);
+        if (PreviewViewport.IsValid())
+        {
+            PreviewViewport->AppendAccumulatedPreviewProceduralStroke(NewStroke);
+        }
+        SelectedStrokeGuid = NewStroke.StrokeGuid;
+        SelectedElementType = EWetWrinkleElementType::ProceduralRidgeStroke;
+        MarkAssetEdited();
+        RefreshStrokeList();
+    }
+
+    CancelProceduralRidgeStroke();
+    RefreshStrokeOverlay(false);
+}
+
+void SWetWrinkleEditorPanel::CancelProceduralRidgeStroke()
+{
+    bCapturingProceduralRidgeStroke = false;
+    bProceduralRidgeCaptureBlocked = false;
+    ActiveProceduralRidgeMaterialSlotIndex = INDEX_NONE;
+    ActiveProceduralRidgeUVChannelIndex = INDEX_NONE;
+    ActiveProceduralRidgeUVIslandID = INDEX_NONE;
+    PendingStartConnectionStrokeGuid.Invalidate();
+    PendingStartConnectionSegmentIndex = INDEX_NONE;
+    PendingStartConnectionSegmentT = 0.0f;
+    CapturedProceduralRidgeHits.Reset();
+    if (PreviewViewport.IsValid())
+    {
+        PreviewViewport->ClearTransientProceduralStroke();
+    }
+}
+
+bool SWetWrinkleEditorPanel::ShouldAddProceduralRidgePoint(const FWetWrinkleSurfaceHit& SurfaceHit) const
+{
+    if (CapturedProceduralRidgeHits.IsEmpty())
+    {
+        return true;
+    }
+
+    const FWetWrinkleSurfaceHit& LastHit = CapturedProceduralRidgeHits.Last();
+    const float SpacingScale = FMath::Clamp(BrushSettings.RidgePointSpacingScale, 0.05f, 1.0f);
+    const double MinSurfaceSpacing = FMath::Max(static_cast<double>(SizeCm * SpacingScale), 0.1);
+    const double MinUVSpacing = FMath::Max(static_cast<double>(BrushSettings.BrushRadiusUV * SpacingScale), 0.00025);
+    return FVector::Distance(LastHit.WorldPosition, SurfaceHit.WorldPosition) >= MinSurfaceSpacing ||
+           FVector2D::Distance(LastHit.UV, SurfaceHit.UV) >= MinUVSpacing;
+}
+
+TArray<FWetWrinkleSurfaceHit> SWetWrinkleEditorPanel::BuildSmoothedProceduralRidgeHits() const
+{
+    TArray<FWetWrinkleSurfaceHit> Result = CapturedProceduralRidgeHits;
+    if (Result.Num() < 3 || !PreviewViewport.IsValid())
+    {
+        return Result;
+    }
+
+    constexpr double SmoothingAlpha = 0.25;
+    const double MaxProjectionDistance = FMath::Max(static_cast<double>(SizeCm * 0.5f), 0.5);
+    for (int32 PointIndex = 1; PointIndex + 1 < CapturedProceduralRidgeHits.Num(); ++PointIndex)
+    {
+        const FWetWrinkleSurfaceHit& Previous = CapturedProceduralRidgeHits[PointIndex - 1];
+        const FWetWrinkleSurfaceHit& Current = CapturedProceduralRidgeHits[PointIndex];
+        const FWetWrinkleSurfaceHit& Next = CapturedProceduralRidgeHits[PointIndex + 1];
+        const FVector2D NeighborMidpoint = (Previous.UV + Next.UV) * 0.5;
+        const FVector2D SmoothedUV = FMath::Lerp(Current.UV, NeighborMidpoint, SmoothingAlpha);
+
+        FWetWrinkleSurfaceHit SmoothedHit;
+        if (PreviewViewport->TryBuildSurfaceHitAtUVNearWorldPosition(
+                ActiveProceduralRidgeMaterialSlotIndex,
+                ActiveProceduralRidgeUVChannelIndex,
+                SmoothedUV,
+                Current.WorldPosition,
+                SmoothedHit) &&
+            SmoothedHit.UVIslandID == ActiveProceduralRidgeUVIslandID &&
+            FVector::Distance(SmoothedHit.WorldPosition, Current.WorldPosition) <= MaxProjectionDistance)
+        {
+            Result[PointIndex] = SmoothedHit;
+        }
+    }
+
+    return Result;
+}
+
 FWetWrinklePatchPlacement SWetWrinkleEditorPanel::MakeStampFromHit(const FWetWrinkleSurfaceHit& SurfaceHit) const
 {
     FWetWrinklePatchPlacement Stamp;
@@ -2879,7 +5405,7 @@ FWetWrinklePatchPlacement SWetWrinkleEditorPanel::MakeStampFromHit(const FWetWri
     Stamp.Scale = FVector2D(1.0f, 1.0f);
     Stamp.Strength = BrushSettings.Strength;
     Stamp.Falloff = BrushSettings.Falloff;
-    Stamp.NormalPatchTexture = BrushSettings.BrushHeightTexture.Get();
+    Stamp.WrinklePreset = BrushSettings.WrinklePreset.Get();
     Stamp.AffectedWetPartID = INDEX_NONE;
 #if WITH_EDITORONLY_DATA
     Stamp.bHasEditorSurface = true;
@@ -2899,9 +5425,19 @@ UTexture* SWetWrinkleEditorPanel::ResolveSourceTextureForStamp(int32 MaterialSlo
         UVChannelIndex);
 }
 
-UTexture2D* SWetWrinkleEditorPanel::ResolveDefaultBrushHeightTexture() const
+bool SWetWrinkleEditorPanel::IsCurrentWrinklePresetUsable(FString* OutReason) const
 {
-    return LoadObject<UTexture2D>(nullptr, WetWrinklePreset0Path);
+    const UWetWrinklePreset* Preset = BrushSettings.WrinklePreset.Get();
+    if (Preset == nullptr)
+    {
+        if (OutReason != nullptr)
+        {
+            *OutReason = TEXT("Select a Wet Wrinkle Preset before painting wrinkle patches.");
+        }
+        return false;
+    }
+
+    return Preset->IsUsableForBrush(OutReason);
 }
 
 FText SWetWrinkleEditorPanel::GetMaterialSlotDisplayText(int32 MaterialSlotIndex) const
@@ -2952,25 +5488,6 @@ SWetWrinkleEditorPanel::FMaterialSlotItemPtr SWetWrinkleEditorPanel::FindMateria
     }
 
     return MaterialSlotItems.Num() > 0 ? MaterialSlotItems[0] : nullptr;
-}
-
-TSharedPtr<FWetWrinkleBrushPresetOption> SWetWrinkleEditorPanel::FindBrushPresetOption(UTexture2D* Texture) const
-{
-    if (Texture == nullptr)
-    {
-        return nullptr;
-    }
-
-    const FSoftObjectPath TexturePath(Texture);
-    for (const TSharedPtr<FWetWrinkleBrushPresetOption>& Option : BrushPresetOptions)
-    {
-        if (Option.IsValid() && Option->TexturePath == TexturePath)
-        {
-            return Option;
-        }
-    }
-
-    return nullptr;
 }
 
 void SWetWrinkleEditorPanel::HandleTextureUVHovered(const FVector2D& UV)

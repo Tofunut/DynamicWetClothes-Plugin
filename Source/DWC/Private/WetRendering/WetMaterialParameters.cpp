@@ -44,6 +44,48 @@ namespace DWCWetMaterialParameters
         return Name;
     }
 
+    const FName& TransparencyMap()
+    {
+        static const FName Name(TEXT("DWC_TransparencyMap"));
+        return Name;
+    }
+
+    const FName& UseTransparencyMap()
+    {
+        static const FName Name(TEXT("DWC_UseTransparencyMap"));
+        return Name;
+    }
+
+    const FName& TransparencyStrength()
+    {
+        static const FName Name(TEXT("DWC_TransparencyStrength"));
+        return Name;
+    }
+
+    const FName& TransparencyWetnessMin()
+    {
+        static const FName Name(TEXT("DWC_TransparencyWetnessMin"));
+        return Name;
+    }
+
+    const FName& TransparencyWetnessMax()
+    {
+        static const FName Name(TEXT("DWC_TransparencyWetnessMax"));
+        return Name;
+    }
+
+    const FName& TransparencyUVChannel()
+    {
+        static const FName Name(TEXT("DWC_TransparencyUVChannel"));
+        return Name;
+    }
+
+    const FName& WrinkleSuppressionStrength()
+    {
+        static const FName Name(TEXT("DWC_WrinkleSuppressionStrength"));
+        return Name;
+    }
+
     float DefaultWrinkleStrength()
     {
         return 1.0f;
@@ -55,6 +97,16 @@ namespace DWCWetMaterialParameters
     }
 
     float DefaultWrinkleWetnessMax()
+    {
+        return 1.0f;
+    }
+
+    float DefaultTransparencyWetnessMin()
+    {
+        return 0.0f;
+    }
+
+    float DefaultTransparencyWetnessMax()
     {
         return 1.0f;
     }

@@ -110,6 +110,18 @@ UTexture2D* FDWCRevealBakeSourceResolver::ResolveRevealSourceBaseColorTexture(co
     return BestScore > -500 ? BestTexture : nullptr;
 }
 
+UTexture2D* FDWCRevealBakeSourceResolver::ResolveRevealSourceBaseColorTexture(UMaterialInterface* SourceMaterial)
+{
+    if (SourceMaterial == nullptr)
+    {
+        return nullptr;
+    }
+
+    FDWCBakeResolvedLayer TemporaryLayer;
+    TemporaryLayer.Materials.Add(SourceMaterial);
+    return ResolveRevealSourceBaseColorTexture(TemporaryLayer);
+}
+
 UTexture* FDWCRevealBakeSourceResolver::ResolvePreviewSourceTexture(const FDWCBakeResolvedLayer& SourceLayer)
 {
     for (UMaterialInterface* Material : SourceLayer.Materials)

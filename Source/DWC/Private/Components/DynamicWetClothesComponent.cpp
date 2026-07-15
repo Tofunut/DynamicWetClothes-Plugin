@@ -93,6 +93,15 @@ UDynamicWetClothesComponent::UDynamicWetClothesComponent()
     WrinkleWetnessMax = DWCWetMaterialParameters::DefaultWrinkleWetnessMax();
 
     AsyncTaskQueue = MakeUnique<FDWCTaskQueue>();
+    TransparencyMapParameterName = DWCWetMaterialParameters::TransparencyMap();
+    UseTransparencyMapParameterName = DWCWetMaterialParameters::UseTransparencyMap();
+    TransparencyStrengthParameterName = DWCWetMaterialParameters::TransparencyStrength();
+    TransparencyWetnessMinParameterName = DWCWetMaterialParameters::TransparencyWetnessMin();
+    TransparencyWetnessMaxParameterName = DWCWetMaterialParameters::TransparencyWetnessMax();
+    TransparencyUVChannelParameterName = DWCWetMaterialParameters::TransparencyUVChannel();
+    WrinkleSuppressionStrengthParameterName = DWCWetMaterialParameters::WrinkleSuppressionStrength();
+    TransparencyWetnessMin = DWCWetMaterialParameters::DefaultTransparencyWetnessMin();
+    TransparencyWetnessMax = DWCWetMaterialParameters::DefaultTransparencyWetnessMax();
 }
 
 UDynamicWetClothesComponent::~UDynamicWetClothesComponent() = default;
@@ -479,6 +488,16 @@ FWetRenderStageArgs UDynamicWetClothesComponent::MakeWetRenderStageArgs(FDWCWetM
     Args.WrinkleWetnessMin = WrinkleWetnessMin;
     Args.WrinkleWetnessMax = WrinkleWetnessMax;
     Args.bLogWrinkleRuntimeBindings = bLogWrinkleRuntimeBindings;
+    Args.TransparencyMapParameterName = TransparencyMapParameterName;
+    Args.UseTransparencyMapParameterName = UseTransparencyMapParameterName;
+    Args.TransparencyStrengthParameterName = TransparencyStrengthParameterName;
+    Args.TransparencyWetnessMinParameterName = TransparencyWetnessMinParameterName;
+    Args.TransparencyWetnessMaxParameterName = TransparencyWetnessMaxParameterName;
+    Args.TransparencyUVChannelParameterName = TransparencyUVChannelParameterName;
+    Args.WrinkleSuppressionStrengthParameterName = WrinkleSuppressionStrengthParameterName;
+    Args.TransparencyWetnessMin = TransparencyWetnessMin;
+    Args.TransparencyWetnessMax = TransparencyWetnessMax;
+    Args.bLogTransparencyRuntimeBindings = bLogTransparencyRuntimeBindings;
     Args.LODIndex = 0;
 
     Args.WetPartDebugUseWetnessMaskParameterName = WetPartDebugUseWetnessMaskParameterName;
@@ -520,13 +539,51 @@ USkeletalMeshComponent* UDynamicWetClothesComponent::ResolveTargetSkeletalMesh()
 UWetClothingAsset* UDynamicWetClothesComponent::ResolveWetClothingAssetForMesh(const USkeletalMeshComponent& MeshComponent) const
 {
     USkeletalMesh* SkeletalMesh = MeshComponent.GetSkeletalMeshAsset();
-    if (SkeletalMesh == nullptr || WetClothingAsset == nullptr)
+    if (SkeletalMesh == nullptr)
     {
+        UE_LOG(
+            LogTemp,
+            Warning,
+            TEXT("DynamicWetClothesComponent: Target skeletal mesh component '%s' has no skeletal mesh asset on %s."),
+            *GetNameSafe(&MeshComponent),
+            *GetNameSafe(GetOwner()));
         return nullptr;
     }
 
-    if (WetClothingAsset->TargetMesh != nullptr && WetClothingAsset->TargetMesh != SkeletalMesh)
+    if (WetClothingAsset == nullptr)
     {
+        UE_LOG(
+            LogTemp,
+            Warning,
+            TEXT("DynamicWetClothesComponent: Wet Clothing Asset is not assigned on %s for mesh '%s' (%s)."),
+            *GetNameSafe(GetOwner()),
+            *GetNameSafe(&MeshComponent),
+            *GetNameSafe(SkeletalMesh));
+        return nullptr;
+    }
+
+    if (WetClothingAsset->TargetMesh == nullptr)
+    {
+        UE_LOG(
+            LogTemp,
+            Warning,
+            TEXT("DynamicWetClothesComponent: Wet Clothing Asset '%s' has no TargetMesh assigned on %s."),
+            *GetNameSafe(WetClothingAsset),
+            *GetNameSafe(GetOwner()));
+        return nullptr;
+    }
+
+    if (WetClothingAsset->TargetMesh != SkeletalMesh)
+    {
+        UE_LOG(
+            LogTemp,
+            Warning,
+            TEXT("DynamicWetClothesComponent: Wet Clothing Asset '%s' targets '%s' but receiver mesh '%s' uses '%s' on %s."),
+            *GetNameSafe(WetClothingAsset),
+            *GetNameSafe(WetClothingAsset->TargetMesh),
+            *GetNameSafe(&MeshComponent),
+            *GetNameSafe(SkeletalMesh),
+            *GetNameSafe(GetOwner()));
         return nullptr;
     }
 
@@ -606,7 +663,10 @@ void UDynamicWetClothesComponent::ApplyGeneratedWetMaterialOverrides()
 
         if (bLogWrinkleRuntimeBindings)
         {
-            const int32 PreferredUVChannelIndex = 0;
+            const int32 PreferredUVChannelIndex =
+                ReceiverWetClothingAsset->WrinkleData.WrinkleUVChannelIndex != INDEX_NONE
+                    ? ReceiverWetClothingAsset->WrinkleData.WrinkleUVChannelIndex
+                    : 0;
             for (int32 MaterialSlotIndex = 0; MaterialSlotIndex < OverrideTargetMesh->GetNumMaterials(); ++MaterialSlotIndex)
             {
                 const FWetWrinkleBakedMapSet* BakedWrinkleMap =
@@ -1301,6 +1361,16 @@ void UDynamicWetClothesComponent::PostEditChangeProperty(FPropertyChangedEvent& 
         PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, WrinkleWetnessMinParameterName) ||
         PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, WrinkleWetnessMaxParameterName) ||
         PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, bLogWrinkleRuntimeBindings) ||
+        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, TransparencyWetnessMin) ||
+        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, TransparencyWetnessMax) ||
+        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, TransparencyMapParameterName) ||
+        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, UseTransparencyMapParameterName) ||
+        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, TransparencyStrengthParameterName) ||
+        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, TransparencyWetnessMinParameterName) ||
+        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, TransparencyWetnessMaxParameterName) ||
+        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, TransparencyUVChannelParameterName) ||
+        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, WrinkleSuppressionStrengthParameterName) ||
+        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, bLogTransparencyRuntimeBindings) ||
         PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, FallbackUnderColor) ||
         PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, WetUnderColorBlendStrength) ||
         PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, UnderColorParameterName) ||

@@ -26,6 +26,8 @@ namespace WetWrinklePreviewMaterialParameters
     const FName AccumulatedNormal(TEXT("DWC_WrinklePreview_AccumulatedNormal"));
     const FName AccumulatedEnabled(TEXT("DWC_WrinklePreview_AccumulatedEnabled"));
     const FName AccumulatedStrength(TEXT("DWC_WrinklePreview_AccumulatedStrength"));
+    const FName TransientRidgeNormal(TEXT("DWC_WrinklePreview_TransientRidgeNormal"));
+    const FName TransientRidgeEnabled(TEXT("DWC_WrinklePreview_TransientRidgeEnabled"));
     const FName HoverNormal(TEXT("DWC_WrinklePreview_HoverNormal"));
     const FName HoverEnabled(TEXT("DWC_WrinklePreview_HoverEnabled"));
     const FName HoverCenterUV(TEXT("DWC_WrinklePreview_HoverCenterUV"));
@@ -218,9 +220,12 @@ namespace
             TEXT("UV0"), TEXT("UV1"), TEXT("UV2"), TEXT("UV3"),
             TEXT("UV4"), TEXT("UV5"), TEXT("UV6"), TEXT("UV7"),
             TEXT("UVChannel"),
+            TEXT("PreviewWetness"),
             TEXT("AccumulatedEnabled"),
             TEXT("AccumulatedStrength"),
             TEXT("AccumulatedNormalTex"),
+            TEXT("TransientRidgeEnabled"),
+            TEXT("TransientRidgeNormalTex"),
             TEXT("HoverEnabled"),
             TEXT("HoverCenterUV"),
             TEXT("HoverRadiusUV"),
@@ -240,6 +245,7 @@ namespace
 
         Custom->Code = TEXT(R"(
 float3 BaseTS = normalize(BaseNormal);
+float PreviewWetnessScale = saturate(PreviewWetness);
 int UVIndex = (int)round(clamp(UVChannel, 0.0, 7.0));
 float2 SelectedUV = UV0;
 if (UVIndex == 1) { SelectedUV = UV1; }
@@ -254,9 +260,16 @@ float3 CombinedTS = BaseTS;
 if (AccumulatedEnabled > 0.5)
 {
     float2 AccumulatedXY = Texture2DSampleLevel(AccumulatedNormalTex, AccumulatedNormalTexSampler, frac(SelectedUV), 0).rg * 2.0 - 1.0;
-    float AccumulatedWeight = max(AccumulatedStrength, 0.0);
+    float AccumulatedWeight = max(AccumulatedStrength, 0.0) * PreviewWetnessScale;
     float3 AccumulatedTS = normalize(float3(AccumulatedXY * AccumulatedWeight, 1.0));
     CombinedTS = normalize(float3(CombinedTS.xy + AccumulatedTS.xy, CombinedTS.z * AccumulatedTS.z));
+}
+
+if (TransientRidgeEnabled > 0.5)
+{
+    float2 TransientRidgeXY = Texture2DSampleLevel(TransientRidgeNormalTex, TransientRidgeNormalTexSampler, frac(SelectedUV), 0).rg * 2.0 - 1.0;
+    float3 TransientRidgeTS = normalize(float3(TransientRidgeXY * PreviewWetnessScale, 1.0));
+    CombinedTS = normalize(float3(CombinedTS.xy + TransientRidgeTS.xy, CombinedTS.z * TransientRidgeTS.z));
 }
 
 if (HoverEnabled > 0.5 && HoverRadiusUV > 0.000001)
@@ -280,7 +293,7 @@ if (HoverEnabled > 0.5 && HoverRadiusUV > 0.000001)
         HoverXY = float2(
             HoverXY.x * CosRotation - HoverXY.y * SinRotation,
             HoverXY.x * SinRotation + HoverXY.y * CosRotation);
-        float HoverWeight = max(HoverStrength, 0.0) * EdgeFade;
+        float HoverWeight = max(HoverStrength, 0.0) * EdgeFade * PreviewWetnessScale;
         float3 HoverTS = normalize(float3(HoverXY * HoverWeight, 1.0));
         CombinedTS = normalize(float3(CombinedTS.xy + HoverTS.xy, CombinedTS.z * HoverTS.z));
     }
@@ -408,31 +421,38 @@ return PreviewVertexColor;
         UMaterialExpressionCustom* Blend = CreatePreviewBlendExpression(Material, -100, 1300);
         UMaterialExpressionScalarParameter* UVChannel = CreateWetWrinkleScalarParameter(
             Material, WetWrinklePreviewMaterialParameters::UVChannel, 0.0f, -650, 1250);
+        UMaterialExpressionScalarParameter* PreviewWetness = CreateWetWrinkleScalarParameter(
+            Material, WetWrinklePreviewMaterialParameters::PreviewWetness, 1.0f, -650, 1300);
         UMaterialExpressionTextureObjectParameter* AccumulatedNormal = CreateNormalTextureParameter(
             Material, WetWrinklePreviewMaterialParameters::AccumulatedNormal, -650, 1350);
         UMaterialExpressionScalarParameter* AccumulatedEnabled = CreateWetWrinkleScalarParameter(
             Material, WetWrinklePreviewMaterialParameters::AccumulatedEnabled, 0.0f, -650, 1450);
         UMaterialExpressionScalarParameter* AccumulatedStrength = CreateWetWrinkleScalarParameter(
             Material, WetWrinklePreviewMaterialParameters::AccumulatedStrength, 1.0f, -650, 1550);
+        UMaterialExpressionTextureObjectParameter* TransientRidgeNormal = CreateNormalTextureParameter(
+            Material, WetWrinklePreviewMaterialParameters::TransientRidgeNormal, -650, 1650);
+        UMaterialExpressionScalarParameter* TransientRidgeEnabled = CreateWetWrinkleScalarParameter(
+            Material, WetWrinklePreviewMaterialParameters::TransientRidgeEnabled, 0.0f, -650, 1750);
         UMaterialExpressionTextureObjectParameter* HoverNormal = CreateNormalTextureParameter(
-            Material, WetWrinklePreviewMaterialParameters::HoverNormal, -650, 1650);
+            Material, WetWrinklePreviewMaterialParameters::HoverNormal, -650, 1850);
         UMaterialExpressionScalarParameter* HoverEnabled = CreateWetWrinkleScalarParameter(
-            Material, WetWrinklePreviewMaterialParameters::HoverEnabled, 0.0f, -650, 1750);
+            Material, WetWrinklePreviewMaterialParameters::HoverEnabled, 0.0f, -650, 1950);
         UMaterialExpressionVectorParameter* HoverCenterUV = CreateWetWrinkleVectorParameter(
-            Material, WetWrinklePreviewMaterialParameters::HoverCenterUV, FLinearColor::Black, -650, 1850);
+            Material, WetWrinklePreviewMaterialParameters::HoverCenterUV, FLinearColor::Black, -650, 2050);
         UMaterialExpressionScalarParameter* HoverRadiusUV = CreateWetWrinkleScalarParameter(
-            Material, WetWrinklePreviewMaterialParameters::HoverRadiusUV, 0.025f, -650, 1950);
+            Material, WetWrinklePreviewMaterialParameters::HoverRadiusUV, 0.025f, -650, 2150);
         UMaterialExpressionScalarParameter* HoverRotation = CreateWetWrinkleScalarParameter(
-            Material, WetWrinklePreviewMaterialParameters::HoverRotation, 0.0f, -650, 2050);
+            Material, WetWrinklePreviewMaterialParameters::HoverRotation, 0.0f, -650, 2250);
         UMaterialExpressionVectorParameter* HoverScale = CreateWetWrinkleVectorParameter(
-            Material, WetWrinklePreviewMaterialParameters::HoverScale, FLinearColor(1.0f, 1.0f, 0.0f, 0.0f), -650, 2150);
+            Material, WetWrinklePreviewMaterialParameters::HoverScale, FLinearColor(1.0f, 1.0f, 0.0f, 0.0f), -650, 2350);
         UMaterialExpressionScalarParameter* HoverStrength = CreateWetWrinkleScalarParameter(
-            Material, WetWrinklePreviewMaterialParameters::HoverStrength, 1.0f, -650, 2250);
+            Material, WetWrinklePreviewMaterialParameters::HoverStrength, 1.0f, -650, 2450);
         UMaterialExpressionScalarParameter* HoverFalloff = CreateWetWrinkleScalarParameter(
-            Material, WetWrinklePreviewMaterialParameters::HoverFalloff, 0.5f, -650, 2350);
+            Material, WetWrinklePreviewMaterialParameters::HoverFalloff, 0.5f, -650, 2550);
 
-        if (Blend == nullptr || UVChannel == nullptr || AccumulatedNormal == nullptr || AccumulatedEnabled == nullptr ||
-            AccumulatedStrength == nullptr || HoverNormal == nullptr || HoverEnabled == nullptr || HoverCenterUV == nullptr ||
+        if (Blend == nullptr || UVChannel == nullptr || PreviewWetness == nullptr || AccumulatedNormal == nullptr || AccumulatedEnabled == nullptr ||
+            AccumulatedStrength == nullptr || TransientRidgeNormal == nullptr || TransientRidgeEnabled == nullptr ||
+            HoverNormal == nullptr || HoverEnabled == nullptr || HoverCenterUV == nullptr ||
             HoverRadiusUV == nullptr || HoverRotation == nullptr || HoverScale == nullptr || HoverStrength == nullptr ||
             HoverFalloff == nullptr)
         {
@@ -516,9 +536,12 @@ return PreviewVertexColor;
             bConnected &= ConnectExpression(UVCoordinates[UVIndex], FString(), Blend, FString::Printf(TEXT("UV%d"), UVIndex), OutError);
         }
         bConnected &= ConnectExpression(UVChannel, FString(), Blend, TEXT("UVChannel"), OutError);
+        bConnected &= ConnectExpression(PreviewWetness, FString(), Blend, TEXT("PreviewWetness"), OutError);
         bConnected &= ConnectExpression(AccumulatedEnabled, FString(), Blend, TEXT("AccumulatedEnabled"), OutError);
         bConnected &= ConnectExpression(AccumulatedStrength, FString(), Blend, TEXT("AccumulatedStrength"), OutError);
         bConnected &= ConnectExpression(AccumulatedNormal, FString(), Blend, TEXT("AccumulatedNormalTex"), OutError);
+        bConnected &= ConnectExpression(TransientRidgeEnabled, FString(), Blend, TEXT("TransientRidgeEnabled"), OutError);
+        bConnected &= ConnectExpression(TransientRidgeNormal, FString(), Blend, TEXT("TransientRidgeNormalTex"), OutError);
         bConnected &= ConnectExpression(HoverEnabled, FString(), Blend, TEXT("HoverEnabled"), OutError);
         bConnected &= ConnectExpression(HoverCenterUV, FString(), Blend, TEXT("HoverCenterUV"), OutError);
         bConnected &= ConnectExpression(HoverRadiusUV, FString(), Blend, TEXT("HoverRadiusUV"), OutError);
@@ -588,8 +611,7 @@ return PreviewVertexColor;
             return { TEXT("Cannot compile a null wrinkle preview material.") };
         }
 
-        bool bNeedsSkeletalMeshUsageRecompile = false;
-        Material->SetMaterialUsage(bNeedsSkeletalMeshUsageRecompile, MATUSAGE_SkeletalMesh);
+        Material->SetMaterialUsage(MATUSAGE_SkeletalMesh);
         Material->UpdateCachedExpressionData();
 
         {

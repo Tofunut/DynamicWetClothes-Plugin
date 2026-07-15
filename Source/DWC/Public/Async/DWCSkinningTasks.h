@@ -27,11 +27,28 @@ struct DWC_API FDWCSkinningTaskSnapshot
     bool bComputePositions = true;
     bool bComputeNormals = false;
 
+    TSharedPtr<const struct FDWCSkinningStaticData, ESPMode::ThreadSafe> StaticData;
     TArray<FMatrix44f> RefToLocalMatrices;
+};
+
+struct DWC_API FDWCSkinningStaticData
+{
+    FDWCVertexTaskSnapshot VertexTarget;
     TArray<FVector3f> LocalPositions;
     TArray<FVector3f> LocalNormals;
     TArray<FDWCSkinningVertexSnapshot> Vertices;
     TArray<FDWCSkinningInfluenceSnapshot> Influences;
+
+    bool IsValidFor(const FDWCVertexTaskSnapshot& InVertexTarget) const
+    {
+        return VertexTarget.Target.TargetId == InVertexTarget.Target.TargetId &&
+               VertexTarget.Target.TargetGeneration == InVertexTarget.Target.TargetGeneration &&
+               VertexTarget.LODIndex == InVertexTarget.LODIndex &&
+               VertexTarget.VertexCount == InVertexTarget.VertexCount &&
+               Vertices.Num() == InVertexTarget.VertexCount &&
+               LocalPositions.Num() == InVertexTarget.VertexCount &&
+               LocalNormals.Num() == InVertexTarget.VertexCount;
+    }
 };
 
 struct DWC_API FDWCSkinningTaskResult
@@ -79,6 +96,12 @@ DWC_API bool BuildDWCSkinningTaskSnapshot(
     USkeletalMeshComponent*       TargetSkeletalMesh,
     int32                         LODIndex,
     const FDWCTaskTargetSnapshot& Target,
+    const TSharedPtr<const FDWCSkinningStaticData, ESPMode::ThreadSafe>& StaticData,
     bool                          bComputePositions,
     bool                          bComputeNormals,
     FDWCSkinningTaskSnapshot&     OutSnapshot);
+
+DWC_API TSharedPtr<const FDWCSkinningStaticData, ESPMode::ThreadSafe> BuildDWCSkinningStaticData(
+    USkeletalMeshComponent*       TargetSkeletalMesh,
+    int32                         LODIndex,
+    const FDWCTaskTargetSnapshot& Target);

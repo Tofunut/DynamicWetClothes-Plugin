@@ -25,6 +25,7 @@ class UMaterialInstanceDynamic;
 class UWetnessProfile;
 class FDWCTaskQueue;
 struct FDWCSkinningTaskResult;
+struct FDWCSkinningStaticData;
 
 struct FDWCWetMeshReceiverRuntime
 {
@@ -40,6 +41,7 @@ struct FDWCWetMeshReceiverRuntime
     TUniquePtr<FWetClothingMeshSampler> MeshSampler;
     TUniquePtr<FWetRenderStage> RenderStage;
     TArray<TObjectPtr<UMaterialInstanceDynamic>> WetMaterialInstances;
+    TSharedPtr<const FDWCSkinningStaticData, ESPMode::ThreadSafe> SkinningStaticData;
 
     bool bWetRenderDirty = false;
     bool bCpuSkinningTaskPending = false;
@@ -100,6 +102,8 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
     void                     RequestWetRenderingUpdate();
     void                     RequestWetRenderingUpdate(FDWCWetMeshReceiverRuntime& Receiver);
     bool                     RequestCpuSkinningTask(FDWCWetMeshReceiverRuntime& Receiver, bool bComputePositions, bool bComputeNormals);
+    void                     RequestContinuousCpuSkinningTasks();
+    bool                     HasPendingCpuSkinningTasks() const;
     void                     FlushAsyncTaskQueueGameThread();
     bool                     FlushPendingWetContacts();
 

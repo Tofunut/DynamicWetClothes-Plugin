@@ -61,12 +61,16 @@ namespace
 
     bool HasCachedSkinnedPositions(const FWetInputStageArgs& Receiver)
     {
-        return Receiver.MeshSampler != nullptr && Receiver.MeshSampler->CachedSkinnedPositions.Num() > 0;
+        return Receiver.MeshSampler != nullptr &&
+               Receiver.SimulationState != nullptr &&
+               Receiver.MeshSampler->CachedSkinnedPositions.Num() == Receiver.SimulationState->AbsorbedWetnessPerVertex.Num();
     }
 
     bool HasCachedSkinnedNormals(const FWetInputStageArgs& Receiver)
     {
-        return Receiver.MeshSampler != nullptr && Receiver.MeshSampler->CachedSkinnedNormals.Num() > 0;
+        return Receiver.MeshSampler != nullptr &&
+               Receiver.SimulationState != nullptr &&
+               Receiver.MeshSampler->CachedSkinnedNormals.Num() == Receiver.SimulationState->AbsorbedWetnessPerVertex.Num();
     }
 
     bool EnsureCachedSkinnedPositions(FWetInputStageArgs& Receiver)
@@ -76,7 +80,6 @@ namespace
             return true;
         }
 
-        RequestAsyncSkinning(Receiver, true, false);
         return false;
     }
 
@@ -87,7 +90,6 @@ namespace
             return true;
         }
 
-        RequestAsyncSkinning(Receiver, false, true);
         return false;
     }
 

@@ -66,9 +66,8 @@ void FDWCCpuSkinningTask::ExecuteWorker()
 
     const int32 VertexCount = Snapshot.VertexTarget.VertexCount;
     if (VertexCount <= 0 ||
-        Snapshot.Vertices.Num() != VertexCount ||
-        Snapshot.LocalPositions.Num() != VertexCount ||
-        (Snapshot.bComputeNormals && Snapshot.LocalNormals.Num() != VertexCount))
+        !Snapshot.StaticData.IsValid() ||
+        !Snapshot.StaticData->IsValidFor(Snapshot.VertexTarget))
     {
         SetStatus(EDWCTaskStatus::Failed);
         return;
@@ -86,7 +85,8 @@ void FDWCCpuSkinningTask::ExecuteWorker()
 
     ParallelFor(VertexCount, [this](const int32 VertexIndex)
     {
-        const FDWCSkinningVertexSnapshot& Vertex = Snapshot.Vertices[VertexIndex];
+        const FDWCSkinningStaticData& StaticData = *Snapshot.StaticData;
+        const FDWCSkinningVertexSnapshot& Vertex = StaticData.Vertices[VertexIndex];
         if (Vertex.InfluenceOffset < 0 || Vertex.InfluenceCount <= 0)
         {
             return;
@@ -99,12 +99,12 @@ void FDWCCpuSkinningTask::ExecuteWorker()
         for (int32 InfluenceIndex = 0; InfluenceIndex < Vertex.InfluenceCount; ++InfluenceIndex)
         {
             const int32 InfluenceArrayIndex = Vertex.InfluenceOffset + InfluenceIndex;
-            if (!Snapshot.Influences.IsValidIndex(InfluenceArrayIndex))
+            if (!StaticData.Influences.IsValidIndex(InfluenceArrayIndex))
             {
                 continue;
             }
 
-            const FDWCSkinningInfluenceSnapshot& Influence = Snapshot.Influences[InfluenceArrayIndex];
+            const FDWCSkinningInfluenceSnapshot& Influence = StaticData.Influences[InfluenceArrayIndex];
             if (!Snapshot.RefToLocalMatrices.IsValidIndex(Influence.BoneIndex) || Influence.Weight <= 0.0f)
             {
                 continue;
@@ -113,13 +113,13 @@ void FDWCCpuSkinningTask::ExecuteWorker()
             const FMatrix44f& BoneMatrix = Snapshot.RefToLocalMatrices[Influence.BoneIndex];
             if (Snapshot.bComputePositions)
             {
-                const FVector4f Position4f = BoneMatrix.TransformPosition(Snapshot.LocalPositions[VertexIndex]);
+                const FVector4f Position4f = BoneMatrix.TransformPosition(StaticData.LocalPositions[VertexIndex]);
                 SkinnedPosition += FVector3f(Position4f.X, Position4f.Y, Position4f.Z) * Influence.Weight;
             }
 
             if (Snapshot.bComputeNormals)
             {
-                const FVector4f Normal4f = BoneMatrix.TransformVector(Snapshot.LocalNormals[VertexIndex]);
+                const FVector4f Normal4f = BoneMatrix.TransformVector(StaticData.LocalNormals[VertexIndex]);
                 SkinnedNormal += FVector3f(Normal4f.X, Normal4f.Y, Normal4f.Z) * Influence.Weight;
             }
 
@@ -168,6 +168,7 @@ bool BuildDWCSkinningTaskSnapshot(
     USkeletalMeshComponent*       TargetSkeletalMesh,
     const int32                   LODIndex,
     const FDWCTaskTargetSnapshot& Target,
+    const TSharedPtr<const FDWCSkinningStaticData, ESPMode::ThreadSafe>& StaticData,
     const bool                    bComputePositions,
     const bool                    bComputeNormals,
     FDWCSkinningTaskSnapshot&     OutSnapshot)
@@ -176,19 +177,7 @@ bool BuildDWCSkinningTaskSnapshot(
 
     OutSnapshot = FDWCSkinningTaskSnapshot();
 
-    if (!TargetSkeletalMesh || (!bComputePositions && !bComputeNormals))
-    {
-        return false;
-    }
-
-    FSkeletalMeshLODRenderData* LODData = nullptr;
-    if (!GetLODRenderData(TargetSkeletalMesh, LODIndex, LODData))
-    {
-        return false;
-    }
-
-    const FSkinWeightVertexBuffer* SkinWeightBuffer = TargetSkeletalMesh->GetSkinWeightBuffer(0);
-    if (!SkinWeightBuffer)
+    if (!TargetSkeletalMesh || !StaticData.IsValid() || (!bComputePositions && !bComputeNormals))
     {
         return false;
     }
@@ -200,7 +189,7 @@ bool BuildDWCSkinningTaskSnapshot(
         return false;
     }
 
-    const int32 VertexCount = LODData->GetNumVertices();
+    const int32 VertexCount = StaticData->VertexTarget.VertexCount;
     if (VertexCount <= 0)
     {
         return false;
@@ -209,21 +198,62 @@ bool BuildDWCSkinningTaskSnapshot(
     OutSnapshot.VertexTarget.Target = Target;
     OutSnapshot.VertexTarget.LODIndex = LODIndex;
     OutSnapshot.VertexTarget.VertexCount = VertexCount;
+    if (!StaticData->IsValidFor(OutSnapshot.VertexTarget))
+    {
+        return false;
+    }
+
     OutSnapshot.FrameNumber = GFrameCounter;
     OutSnapshot.bComputePositions = bComputePositions;
     OutSnapshot.bComputeNormals = bComputeNormals;
+    OutSnapshot.StaticData = StaticData;
     OutSnapshot.RefToLocalMatrices = MoveTemp(RefToLocalMatrices);
-    OutSnapshot.LocalPositions.SetNumZeroed(VertexCount);
-    OutSnapshot.Vertices.SetNumZeroed(VertexCount);
 
-    if (bComputeNormals)
+    return true;
+}
+
+TSharedPtr<const FDWCSkinningStaticData, ESPMode::ThreadSafe> BuildDWCSkinningStaticData(
+    USkeletalMeshComponent*       TargetSkeletalMesh,
+    const int32                   LODIndex,
+    const FDWCTaskTargetSnapshot& Target)
+{
+    DWC_PROFILE_SCOPE(DWC_BuildCpuSkinningStaticData);
+
+    if (!TargetSkeletalMesh)
     {
-        OutSnapshot.LocalNormals.SetNumZeroed(VertexCount);
+        return nullptr;
     }
+
+    FSkeletalMeshLODRenderData* LODData = nullptr;
+    if (!GetLODRenderData(TargetSkeletalMesh, LODIndex, LODData))
+    {
+        return nullptr;
+    }
+
+    const FSkinWeightVertexBuffer* SkinWeightBuffer = TargetSkeletalMesh->GetSkinWeightBuffer(0);
+    if (!SkinWeightBuffer)
+    {
+        return nullptr;
+    }
+
+    const int32 VertexCount = LODData->GetNumVertices();
+    if (VertexCount <= 0)
+    {
+        return nullptr;
+    }
+
+    TSharedRef<FDWCSkinningStaticData, ESPMode::ThreadSafe> StaticData =
+        MakeShared<FDWCSkinningStaticData, ESPMode::ThreadSafe>();
+    StaticData->VertexTarget.Target = Target;
+    StaticData->VertexTarget.LODIndex = LODIndex;
+    StaticData->VertexTarget.VertexCount = VertexCount;
+    StaticData->LocalPositions.SetNumZeroed(VertexCount);
+    StaticData->LocalNormals.SetNumZeroed(VertexCount);
+    StaticData->Vertices.SetNumZeroed(VertexCount);
 
     const uint32 MaxInfluences = SkinWeightBuffer->GetMaxBoneInfluences();
     const float BoneWeightScale = SkinWeightBuffer->GetBoneWeightByteSize() == 1 ? 255.0f : 65535.0f;
-    OutSnapshot.Influences.Reserve(VertexCount * static_cast<int32>(MaxInfluences));
+    StaticData->Influences.Reserve(VertexCount * static_cast<int32>(MaxInfluences));
 
     for (int32 VertexIndex = 0; VertexIndex < VertexCount; ++VertexIndex)
     {
@@ -242,18 +272,15 @@ bool BuildDWCSkinningTaskSnapshot(
             continue;
         }
 
-        FDWCSkinningVertexSnapshot& Vertex = OutSnapshot.Vertices[VertexIndex];
+        FDWCSkinningVertexSnapshot& Vertex = StaticData->Vertices[VertexIndex];
         Vertex.BufferVertexIndex = BufferVertexIndex;
-        Vertex.InfluenceOffset = OutSnapshot.Influences.Num();
+        Vertex.InfluenceOffset = StaticData->Influences.Num();
 
-        OutSnapshot.LocalPositions[VertexIndex] =
+        StaticData->LocalPositions[VertexIndex] =
             LODData->StaticVertexBuffers.PositionVertexBuffer.VertexPosition(BufferVertexIndex);
 
-        if (bComputeNormals)
-        {
-            OutSnapshot.LocalNormals[VertexIndex] =
-                LODData->StaticVertexBuffers.StaticMeshVertexBuffer.VertexTangentZ(BufferVertexIndex).GetSafeNormal();
-        }
+        StaticData->LocalNormals[VertexIndex] =
+            LODData->StaticVertexBuffers.StaticMeshVertexBuffer.VertexTangentZ(BufferVertexIndex).GetSafeNormal();
 
         for (uint32 InfluenceIndex = 0; InfluenceIndex < MaxInfluences; ++InfluenceIndex)
         {
@@ -270,12 +297,7 @@ bool BuildDWCSkinningTaskSnapshot(
             }
 
             const int32 BoneIndex = Section.BoneMap[BoneMapIndex];
-            if (!OutSnapshot.RefToLocalMatrices.IsValidIndex(BoneIndex))
-            {
-                continue;
-            }
-
-            OutSnapshot.Influences.Add({BoneIndex, static_cast<float>(BoneWeight) / BoneWeightScale});
+            StaticData->Influences.Add({BoneIndex, static_cast<float>(BoneWeight) / BoneWeightScale});
             ++Vertex.InfluenceCount;
         }
 
@@ -285,5 +307,5 @@ bool BuildDWCSkinningTaskSnapshot(
         }
     }
 
-    return true;
+    return StaticData;
 }

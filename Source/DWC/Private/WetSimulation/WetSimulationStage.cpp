@@ -33,7 +33,6 @@ namespace
             return true;
         }
 
-        RequestAsyncSkinning(Receiver, true, false);
         return false;
     }
 

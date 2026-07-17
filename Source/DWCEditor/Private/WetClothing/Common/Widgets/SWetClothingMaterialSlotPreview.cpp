@@ -168,28 +168,55 @@ int32 SWetClothingMaterialSlotPreview::OnPaint(
 
     if (bDrawWireframe)
     {
-        const FLinearColor LineColor(0.92f, 0.92f, 0.92f, 1.0f);
-        for (const FProjectedTriangle& ProjectedTriangle : ProjectedTriangles)
+        TSet<uint64> DrawnEdgeKeys;
+        const FLinearColor LineColor(0.96f, 0.96f, 0.96f, 1.0f);
+
+        auto MakePointKey = [](const FVector2D& Point) -> uint32
         {
-            TArray<FVector2D> PaintedLinePoints;
-            PaintedLinePoints.Reserve(4);
+            constexpr float QuantizeScale = 16.0f;
+            const uint32 X = static_cast<uint32>(FMath::Clamp(FMath::RoundToInt(Point.X * QuantizeScale), 0, 65535));
+            const uint32 Y = static_cast<uint32>(FMath::Clamp(FMath::RoundToInt(Point.Y * QuantizeScale), 0, 65535));
+            return (X << 16) | Y;
+        };
 
-            for (int32 CornerIndex = 0; CornerIndex < 3; ++CornerIndex)
+        auto DrawUniqueEdge = [&](const FVector2D& A, const FVector2D& B)
+        {
+            const uint32 PointA = MakePointKey(A);
+            const uint32 PointB = MakePointKey(B);
+            const uint32 MinPointKey = FMath::Min(PointA, PointB);
+            const uint32 MaxPointKey = FMath::Max(PointA, PointB);
+            const uint64 EdgeKey = (static_cast<uint64>(MinPointKey) << 32) | static_cast<uint64>(MaxPointKey);
+            if (DrawnEdgeKeys.Contains(EdgeKey))
             {
-                PaintedLinePoints.Add((ProjectedTriangle.Positions[CornerIndex] - MinPoint) * UniformScale + Offset);
+                return;
             }
-            const FVector2D FirstPoint = PaintedLinePoints[0];
-            PaintedLinePoints.Add(FirstPoint);
+            DrawnEdgeKeys.Add(EdgeKey);
 
+            TArray<FVector2D> LinePoints;
+            LinePoints.Add(A);
+            LinePoints.Add(B);
             FSlateDrawElement::MakeLines(
                 OutDrawElements,
                 LayerId + 2,
                 AllottedGeometry.ToPaintGeometry(),
-                PaintedLinePoints,
+                LinePoints,
                 ESlateDrawEffect::None,
                 LineColor,
                 true,
-                0.1f);
+                0.55f);
+        };
+
+        for (const FProjectedTriangle& ProjectedTriangle : ProjectedTriangles)
+        {
+            FVector2D Painted[3];
+            for (int32 CornerIndex = 0; CornerIndex < 3; ++CornerIndex)
+            {
+                Painted[CornerIndex] = (ProjectedTriangle.Positions[CornerIndex] - MinPoint) * UniformScale + Offset;
+            }
+
+            DrawUniqueEdge(Painted[0], Painted[1]);
+            DrawUniqueEdge(Painted[1], Painted[2]);
+            DrawUniqueEdge(Painted[2], Painted[0]);
         }
     }
 

@@ -1667,7 +1667,7 @@ FReply SWetWrinkleEditorPanel::HandleSaveClicked()
     return FReply::Handled();
 }
 
-FReply SWetWrinkleEditorPanel::ExecuteBakeWrinkleNormalMap()
+FReply SWetWrinkleEditorPanel::BakeSelectedWrinkleNormalMap()
 {
     if (BrushSettings.MaterialSlotIndex == INDEX_NONE)
     {
@@ -1675,7 +1675,23 @@ FReply SWetWrinkleEditorPanel::ExecuteBakeWrinkleNormalMap()
         return FReply::Handled();
     }
 
-    return BakeWrinkleNormalMapsForSlots({BrushSettings.MaterialSlotIndex});
+    return BakeWrinkleNormalMapsForSlots({BrushSettings.MaterialSlotIndex}, true, false);
+}
+
+FReply SWetWrinkleEditorPanel::ExecuteBakeWrinkleNormalMap()
+{
+    return BakeSelectedWrinkleNormalMap();
+}
+
+FReply SWetWrinkleEditorPanel::BakeSelectedWrinkleMask()
+{
+    if (BrushSettings.MaterialSlotIndex == INDEX_NONE)
+    {
+        FMessageDialog::Open(EAppMsgType::Ok, LOCTEXT("BakeWrinkleMaskNoSlot", "Select a material slot before baking a wrinkle mask."));
+        return FReply::Handled();
+    }
+
+    return BakeWrinkleNormalMapsForSlots({BrushSettings.MaterialSlotIndex}, false, true);
 }
 
 SWetWrinkleEditorPanel::~SWetWrinkleEditorPanel()
@@ -1758,10 +1774,10 @@ FReply SWetWrinkleEditorPanel::ExecuteBakeAllWrinkleNormalMaps()
         return FReply::Handled();
     }
 
-    return BakeWrinkleNormalMapsForSlots(MaterialSlotIndices);
+    return BakeWrinkleNormalMapsForSlots(MaterialSlotIndices, true, false);
 }
 
-FReply SWetWrinkleEditorPanel::BakeWrinkleNormalMapsForSlots(const TArray<int32>& MaterialSlotIndices)
+FReply SWetWrinkleEditorPanel::BakeWrinkleNormalMapsForSlots(const TArray<int32>& MaterialSlotIndices, const bool bBakeNormalMap, const bool bBakeMask)
 {
     UWetClothingAsset* Asset = WetClothingAsset.Get();
     if (Asset == nullptr)
@@ -1772,16 +1788,20 @@ FReply SWetWrinkleEditorPanel::BakeWrinkleNormalMapsForSlots(const TArray<int32>
 
     if (MaterialSlotIndices.Num() == 0)
     {
-        FMessageDialog::Open(EAppMsgType::Ok, LOCTEXT("BakeWrinkleNoSlots", "No material slots were provided for wrinkle normal baking."));
+        FMessageDialog::Open(EAppMsgType::Ok, LOCTEXT("BakeWrinkleNoSlots", "No material slots were provided for wrinkle baking."));
         return FReply::Handled();
     }
+
+    const FString BakeLabel = bBakeNormalMap && bBakeMask
+                                  ? TEXT("wrinkle maps")
+                                  : (bBakeMask ? TEXT("wrinkle masks") : TEXT("wrinkle normal maps"));
 
     FWetWrinkleNormalMapBakeSettings Settings;
     Settings.Resolution = Asset->WrinkleData.BakeSettings.DefaultResolution;
     Settings.PaddingPixels = Asset->WrinkleData.BakeSettings.PaddingPixels;
     Settings.bIncludeDisabledPatchStrokes = Asset->WrinkleData.BakeSettings.bIncludeDisabledPatchStrokes;
-    Settings.bBakeNormalMap = true;
-    Settings.bBakeMask = false;
+    Settings.bBakeNormalMap = bBakeNormalMap;
+    Settings.bBakeMask = bBakeMask;
 
     int32 BakedMapCount = 0;
     int32 BakedPatchCount = 0;
@@ -1806,7 +1826,7 @@ FReply SWetWrinkleEditorPanel::BakeWrinkleNormalMapsForSlots(const TArray<int32>
     {
         FMessageDialog::Open(
             EAppMsgType::Ok,
-            FText::FromString(FailedSlots.Num() > 0 ? FString::Join(FailedSlots, TEXT("\n")) : TEXT("No wrinkle normal maps were generated.")));
+            FText::FromString(FailedSlots.Num() > 0 ? FString::Join(FailedSlots, TEXT("\n")) : FString::Printf(TEXT("No %s were generated."), *BakeLabel)));
         return FReply::Handled();
     }
 
@@ -1818,10 +1838,15 @@ FReply SWetWrinkleEditorPanel::BakeWrinkleNormalMapsForSlots(const TArray<int32>
 
     const EAppMsgCategory MessageCategory = FailedSlots.Num() > 0 ? EAppMsgCategory::Warning : EAppMsgCategory::Success;
     FString Summary = FString::Printf(
-        TEXT("Baked %d wrinkle normal map set(s) from %d patch(es) and %d procedural ridge stroke(s).\nConvex wrinkle coverage alpha was packed into the baked normal map."),
+        TEXT("Baked %d %s from %d patch(es) and %d procedural ridge stroke(s)."),
         BakedMapCount,
+        *BakeLabel,
         BakedPatchCount,
         BakedProceduralStrokeCount);
+    if (bBakeNormalMap)
+    {
+        Summary += TEXT("\nConvex wrinkle coverage alpha was packed into the baked normal map.");
+    }
     if (FailedSlots.Num() > 0)
     {
         Summary += FString::Printf(TEXT("\n\nSkipped:\n- %s"), *FString::Join(FailedSlots, TEXT("\n- ")));
@@ -3601,8 +3626,7 @@ TSharedRef<ITableRow> SWetWrinkleEditorPanel::GenerateMaterialSlotRow(FMaterialS
 {
     FWetClothingMaterialSlotRowArgs Args;
     Args.WetClothingAsset = WetClothingAsset.Get();
-    Args.TargetMesh = WetClothingAsset.IsValid() ? WetClothingAsset->TargetMesh.Get() : nullptr;
-    Args.SelectedMaterialSlotIndex = BrushSettings.MaterialSlotIndex;
+    Args.GeneratedDataUV = WetClothingAsset.IsValid() ? WetClothingAsset->GetRuntimeSkeletalMesh() : nullptr;
     Args.ThumbnailPool = MaterialThumbnailPool;
     Args.ThumbnailSink = &MaterialSlotThumbnails;
     Args.OnWettableSlotClicked = FOnWettableMaterialSlotClicked::CreateSP(this, &SWetWrinkleEditorPanel::HandleWettableMaterialSlotClicked);
@@ -3642,10 +3666,13 @@ FReply SWetWrinkleEditorPanel::HandleWettableMaterialSlotClicked(int32 MaterialS
     const bool bNewWettable = !FWetClothingEditorCommonWidgets::IsMaterialSlotWettable(Asset, MaterialSlotIndex);
     FWetClothingEditorCommonWidgets::SetMaterialSlotWettable(Asset, MaterialSlotIndex, bNewWettable);
 
-    RefreshMaterialSlotOptions();
-    if (DetailsView.IsValid())
+    if (FMaterialSlotItemPtr SlotItem = FindMaterialSlotItem(MaterialSlotIndex))
     {
-        DetailsView->ForceRefresh();
+        SlotItem->bIsWettableSlot = bNewWettable;
+    }
+    if (MaterialSlotListView.IsValid())
+    {
+        MaterialSlotListView->Invalidate(EInvalidateWidget::Paint);
     }
 
     return FReply::Handled();

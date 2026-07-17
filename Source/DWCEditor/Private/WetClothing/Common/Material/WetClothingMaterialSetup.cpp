@@ -2,26 +2,30 @@
 
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetToolsModule.h"
+#include "DataAssets/WetClothingAsset.h"
 #include "IAssetTools.h"
 #include "MaterialEditingLibrary.h"
 #include "Interfaces/IPluginManager.h"
 #include "Materials/Material.h"
+#include "Materials/MaterialExpressionAppendVector.h"
 #include "Materials/MaterialExpressionConstant.h"
 #include "Materials/MaterialExpressionConstant3Vector.h"
-#include "Materials/MaterialExpressionCustom.h"
-#include "Materials/MaterialExpressionFrac.h"
-#include "Materials/MaterialExpressionMaterialFunctionCall.h"
-#include "Materials/MaterialExpressionScalarParameter.h"
-#include "Materials/MaterialExpressionTextureSampleParameter2D.h"
-#include "Materials/MaterialExpressionTextureCoordinate.h"
-#include "Materials/MaterialExpressionVertexColor.h"
 #include "Materials/MaterialExpressionFunctionInput.h"
-#include "Materials/MaterialExpressionFunctionOutput.h"
+#include "Materials/MaterialExpressionLinearInterpolate.h"
+#include "Materials/MaterialExpressionMaterialFunctionCall.h"
+#include "Materials/MaterialExpressionMultiply.h"
+#include "Materials/MaterialExpressionScalarParameter.h"
+#include "Materials/MaterialExpressionTextureCoordinate.h"
+#include "Materials/MaterialExpressionTextureSample.h"
+#include "Materials/MaterialExpressionTextureSampleParameter2D.h"
+#include "Materials/MaterialExpressionVertexColor.h"
+#include "Materials/MaterialExpressionVectorParameter.h"
 #include "Materials/MaterialFunction.h"
 #include "Materials/MaterialFunctionInterface.h"
 #include "Materials/MaterialInstance.h"
 #include "Materials/MaterialInstanceConstant.h"
 #include "Materials/MaterialInterface.h"
+#include "Engine/SkeletalMesh.h"
 #include "Engine/Texture.h"
 #include "Misc/PackageName.h"
 #include "ScopedTransaction.h"
@@ -30,6 +34,26 @@
 namespace
 {
     constexpr const TCHAR* DynamicWetClothesPluginName = TEXT("DynamicWetClothes");
+    constexpr const TCHAR* GeneratedDwcMaterialSuffixCPU = TEXT("_DWC_CPU");
+    constexpr const TCHAR* GeneratedDwcMaterialSuffixGPU = TEXT("_DWC_GPU");
+    constexpr const TCHAR* DwcApplyWetnessFunctionCPU = TEXT("MF_DWC_ApplyWetness_CPU");
+    constexpr const TCHAR* DwcApplyWetnessFunctionGPU = TEXT("MF_DWC_ApplyWetness_GPU");
+    constexpr const TCHAR* DwcWetPartDebugFunction = TEXT("MF_DWC_WetPartDebug");
+    constexpr const TCHAR* DwcWetPartDebugUseWetnessMaskParameter = TEXT("DWC_WetPartDebugUseWetnessMask");
+
+    const TCHAR* GetGeneratedDwcMaterialSuffix(const EDWCSimulationMode SimulationMode)
+    {
+        return SimulationMode == EDWCSimulationMode::WetnessMapGPU
+                   ? GeneratedDwcMaterialSuffixGPU
+                   : GeneratedDwcMaterialSuffixCPU;
+    }
+
+    const TCHAR* GetDwcApplyWetnessFunctionName(const EDWCSimulationMode SimulationMode)
+    {
+        return SimulationMode == EDWCSimulationMode::WetnessMapGPU
+                   ? DwcApplyWetnessFunctionGPU
+                   : DwcApplyWetnessFunctionCPU;
+    }
 
     FString BuildDwcMaterialFunctionPath(const TCHAR* FunctionName)
     {
@@ -55,6 +79,13 @@ namespace
         return ObjectPath.IsEmpty() ? nullptr : LoadObject<UMaterialFunctionInterface>(nullptr, *ObjectPath);
     }
 
+    UMaterialFunctionInterface* LoadDwcApplyWetnessMaterialFunction(
+        const EDWCSimulationMode SimulationMode,
+        FString* OutObjectPath = nullptr)
+    {
+        return LoadDwcMaterialFunction(GetDwcApplyWetnessFunctionName(SimulationMode), OutObjectPath);
+    }
+
     bool HasFunctionCall(const UMaterial* Material, const UMaterialFunctionInterface* Function)
     {
         if (Material == nullptr || Function == nullptr)
@@ -72,6 +103,31 @@ namespace
         }
 
         return false;
+    }
+
+    TArray<int32> CollectWettableMaterialSlotIndices(const UWetClothingAsset& WetClothingAsset)
+    {
+        TArray<int32> WettableSlots;
+        for (const FWetClothingWettableMaterialSlotState& SlotState : WetClothingAsset.PartData.EditableWetPartData.WettableMaterialSlots)
+        {
+            if (SlotState.bIsWettableSlot && SlotState.MaterialSlotIndex != INDEX_NONE)
+            {
+                WettableSlots.AddUnique(SlotState.MaterialSlotIndex);
+            }
+        }
+        WettableSlots.Sort();
+        return WettableSlots;
+    }
+
+    const FWetClothingGeneratedWetMaterialOverride* FindGeneratedWetMaterialOverride(
+        const UWetClothingAsset& WetClothingAsset,
+        const int32 MaterialSlotIndex)
+    {
+        return WetClothingAsset.PartData.GeneratedWetMaterialOverrides.FindByPredicate(
+            [MaterialSlotIndex](const FWetClothingGeneratedWetMaterialOverride& MaterialOverride)
+            {
+                return MaterialOverride.MaterialSlotIndex == MaterialSlotIndex;
+            });
     }
 
     UMaterialExpressionMaterialFunctionCall* FindFunctionCall(UMaterial* Material, const UMaterialFunctionInterface* Function)
@@ -98,6 +154,27 @@ namespace
         return UMaterialEditingLibrary::GetMaterialExpressionInputNames(Expression).Contains(InputName);
     }
 
+    bool IsFunctionInputConnected(
+        const UMaterialExpressionMaterialFunctionCall* FunctionCall,
+        const FName InputName)
+    {
+        if (FunctionCall == nullptr)
+        {
+            return false;
+        }
+
+        for (const FFunctionExpressionInput& FunctionInput : FunctionCall->FunctionInputs)
+        {
+            if (FunctionInput.ExpressionInput != nullptr &&
+                FunctionInput.ExpressionInput->InputName == InputName)
+            {
+                return FunctionInput.Input.Expression != nullptr;
+            }
+        }
+
+        return false;
+    }
+
     FString JoinPinNames(const TArray<FString>& PinNames)
     {
         FString Result;
@@ -112,13 +189,24 @@ namespace
         return Result.IsEmpty() ? TEXT("<none>") : Result;
     }
 
-    bool ConnectChecked(UMaterialExpression* FromExpression, const FString& FromOutputName, UMaterialExpression* ToExpression, const FString& ToInputName, TArray<FString>& FailureReasons);
-    bool ConnectFunctionOutputChecked(UMaterialExpression* FromExpression, const FString& FromOutputName, UMaterialExpressionFunctionOutput* FunctionOutput, TArray<FString>& FailureReasons);
-    bool ConnectTextureCoordinateChecked(UMaterialExpression* UVExpression, UMaterialExpressionTextureSampleParameter2D* TextureSample, TArray<FString>& FailureReasons);
+    TArray<FString> GetMaterialExpressionOutputNames(UMaterialExpression* Expression)
+    {
+        TArray<FString> OutputNames;
+        if (Expression == nullptr)
+        {
+            return OutputNames;
+        }
+
+        for (const FExpressionOutput& Output : Expression->GetOutputs())
+        {
+            OutputNames.Add(Output.OutputName.ToString());
+        }
+        return OutputNames;
+    }
 
     bool ResolveRequiredOutputName(UMaterialExpression* Expression, const FString& OutputName, FString& OutResolvedOutputName)
     {
-        const TArray<FString> OutputNames = UMaterialEditingLibrary::GetMaterialExpressionOutputNames(Expression);
+        const TArray<FString> OutputNames = GetMaterialExpressionOutputNames(Expression);
         if (OutputNames.Contains(OutputName))
         {
             OutResolvedOutputName = OutputName;
@@ -127,141 +215,6 @@ namespace
 
         OutResolvedOutputName.Reset();
         return false;
-    }
-
-    bool ResolveConnectedFunctionInput(
-        UMaterialExpressionMaterialFunctionCall* FunctionCall,
-        const FString& InputName,
-        UMaterialExpression*& OutExpression,
-        FString& OutOutputName)
-    {
-        OutExpression = nullptr;
-        OutOutputName.Reset();
-        if (!FunctionCall) return false;
-
-        const TArray<FString> InputNames = UMaterialEditingLibrary::GetMaterialExpressionInputNames(FunctionCall);
-        const int32 InputIndex = InputNames.IndexOfByKey(InputName);
-        FExpressionInput* Input = InputIndex != INDEX_NONE ? FunctionCall->GetInput(InputIndex) : nullptr;
-        if (!Input || !Input->Expression) return false;
-
-        OutExpression = Input->Expression;
-        TArray<FExpressionOutput>& Outputs = OutExpression->GetOutputs();
-        if (Outputs.IsValidIndex(Input->OutputIndex))
-        {
-            OutOutputName = Outputs[Input->OutputIndex].OutputName.ToString();
-        }
-        return true;
-    }
-
-    UMaterialExpressionConstant* FindOrCreateTaggedScalarConstant(
-        UMaterial* Material,
-        const FString& Tag,
-        const float DefaultValue,
-        const int32 NodePosX,
-        const int32 NodePosY)
-    {
-        if (!Material) return nullptr;
-        for (UMaterialExpression* Expression : Material->GetExpressions())
-        {
-            UMaterialExpressionConstant* Constant = Cast<UMaterialExpressionConstant>(Expression);
-            if (Constant && Constant->Desc == Tag) return Constant;
-        }
-
-        UMaterialExpressionConstant* Constant = Cast<UMaterialExpressionConstant>(
-            UMaterialEditingLibrary::CreateMaterialExpression(
-                Material, UMaterialExpressionConstant::StaticClass(), NodePosX, NodePosY));
-        if (Constant)
-        {
-            Constant->R = DefaultValue;
-            Constant->Desc = Tag;
-        }
-        return Constant;
-    }
-
-    bool ConnectChecked(
-        UMaterialExpression* FromExpression,
-        const FString& FromOutputName,
-        UMaterialExpression* ToExpression,
-        const FString& ToInputName,
-        TArray<FString>& FailureReasons);
-
-    UMaterialExpressionScalarParameter* FindOrCreateScalarParameter(
-        UMaterial* Material,
-        FName ParameterName,
-        float DefaultValue,
-        int32 NodePosX,
-        int32 NodePosY);
-
-    void RemoveObsoleteDwcSurfaceExpressions(UMaterial* Material)
-    {
-        if (!Material) return;
-
-        TArray<UMaterialExpression*> ExpressionsToDelete;
-        for (UMaterialExpression* Expression : Material->GetExpressions())
-        {
-            const UMaterialExpressionScalarParameter* ScalarParameter =
-                Cast<UMaterialExpressionScalarParameter>(Expression);
-            const bool bLegacyInternalRefraction =
-                Expression->Desc == TEXT("DWC Clear Coat Internal Refraction Normal") ||
-                (ScalarParameter &&
-                 ScalarParameter->ParameterName == TEXT("DWC_SurfaceWaterInternalRefractionStrength"));
-            const bool bDwcClearCoatNode =
-                Expression->Desc.StartsWith(TEXT("DWC Clear Coat")) ||
-                Expression->Desc.StartsWith(TEXT("DWC Base Clear Coat"));
-            if (bLegacyInternalRefraction || bDwcClearCoatNode)
-            {
-                ExpressionsToDelete.Add(Expression);
-            }
-        }
-
-        for (UMaterialExpression* Expression : ExpressionsToDelete)
-        {
-            UMaterialEditingLibrary::DeleteMaterialExpression(Material, Expression);
-        }
-    }
-
-    bool RestorePreservedMaterialProperty(
-        UMaterial* Material,
-        UMaterialExpressionMaterialFunctionCall* ApplyCall,
-        const EMaterialProperty Property,
-        const FString& FunctionInput,
-        TArray<FString>& FailureReasons)
-    {
-        if (UMaterialEditingLibrary::GetMaterialPropertyInputNode(Material, Property) != ApplyCall)
-        {
-            return true;
-        }
-
-        FString SourceOutput;
-        UMaterialExpression* Source = nullptr;
-        ResolveConnectedFunctionInput(ApplyCall, FunctionInput, Source, SourceOutput);
-        if (!Source || Source->Desc.StartsWith(TEXT("DWC Base Clear Coat")))
-        {
-            return UMaterialEditingLibrary::DisconnectMaterialProperty(Material, Property);
-        }
-        if (UMaterialEditingLibrary::ConnectMaterialProperty(Source, SourceOutput, Property))
-        {
-            return true;
-        }
-
-        FailureReasons.Add(FString::Printf(
-            TEXT("Failed to restore preserved material property for MF input '%s'."), *FunctionInput));
-        return false;
-    }
-
-    bool RemoveLegacyDwcClearCoatRendering(
-        UMaterial* Material,
-        UMaterialExpressionMaterialFunctionCall* ApplyCall,
-        TArray<FString>& FailureReasons)
-    {
-        if (!Material || !ApplyCall) return false;
-        bool bRestored = true;
-        bRestored &= RestorePreservedMaterialProperty(
-            Material, ApplyCall, MP_CustomData0, TEXT("BaseClearCoat"), FailureReasons);
-        bRestored &= RestorePreservedMaterialProperty(
-            Material, ApplyCall, MP_CustomData1, TEXT("BaseClearCoatRoughness"), FailureReasons);
-        RemoveObsoleteDwcSurfaceExpressions(Material);
-        return bRestored;
     }
 
     UMaterialExpressionMaterialFunctionCall* CreateFunctionCall(UMaterial* Material, UMaterialFunctionInterface* Function, int32 NodePosX, int32 NodePosY)
@@ -275,6 +228,25 @@ namespace
 
         FunctionCall->UpdateFromFunctionResource();
         return FunctionCall;
+    }
+
+    UMaterialExpressionVertexColor* FindOrCreateVertexColor(UMaterial* Material, const int32 NodePosX, const int32 NodePosY)
+    {
+        if (Material == nullptr)
+        {
+            return nullptr;
+        }
+
+        for (UMaterialExpression* Expression : Material->GetExpressions())
+        {
+            if (UMaterialExpressionVertexColor* VertexColor = Cast<UMaterialExpressionVertexColor>(Expression))
+            {
+                return VertexColor;
+            }
+        }
+
+        return Cast<UMaterialExpressionVertexColor>(
+            UMaterialEditingLibrary::CreateMaterialExpression(Material, UMaterialExpressionVertexColor::StaticClass(), NodePosX, NodePosY));
     }
 
     UMaterialExpression* ResolveMaterialPropertyInputOrFallback(UMaterial* Material, EMaterialProperty Property, const FVector2D& NodePosition, FString& OutOutputName)
@@ -320,533 +292,10 @@ namespace
         return Fallback;
     }
 
-    UTexture* LoadDefaultPackedWrinkleTexture()
+    UMaterialExpressionScalarParameter* CreateScalarParameter(UMaterial* Material, const FName ParameterName, float DefaultValue, int32 NodePosX, int32 NodePosY)
     {
-        if (UTexture* DefaultDiffuse = LoadObject<UTexture>(nullptr, TEXT("/Engine/EngineMaterials/DefaultDiffuse.DefaultDiffuse")))
-        {
-            return DefaultDiffuse;
-        }
-
-        return LoadObject<UTexture>(nullptr, TEXT("/Engine/EngineMaterials/DefaultWhiteGrid.DefaultWhiteGrid"));
-    }
-
-    bool IsDefaultNormalPlaceholder(const UTexture* Texture)
-    {
-        if (Texture == nullptr)
-        {
-            return false;
-        }
-
-        const FString TexturePath = Texture->GetPathName();
-        return TexturePath == TEXT("/Engine/EngineMaterials/DefaultNormal.DefaultNormal") ||
-               TexturePath == TEXT("/Engine/EngineMaterials/T_Default_Normal.T_Default_Normal");
-    }
-
-    UMaterialExpressionFunctionInput* FindFunctionInput(UMaterialFunction* Function, const FName InputName)
-    {
-        if (Function == nullptr)
-        {
-            return nullptr;
-        }
-
-        for (UMaterialExpression* Expression : Function->GetExpressions())
-        {
-            UMaterialExpressionFunctionInput* Input = Cast<UMaterialExpressionFunctionInput>(Expression);
-            if (Input != nullptr && Input->InputName == InputName)
-            {
-                return Input;
-            }
-        }
-
-        return nullptr;
-    }
-
-    UMaterialExpressionFunctionInput* FindOrCreateFunctionInput(
-        UMaterialFunction* Function,
-        const FName        InputName,
-        EFunctionInputType InputType,
-        const FVector4f&   PreviewValue,
-        int32              SortPriority,
-        int32              NodePosX,
-        int32              NodePosY)
-    {
-        if (UMaterialExpressionFunctionInput* ExistingInput = FindFunctionInput(Function, InputName))
-        {
-            ExistingInput->InputType = InputType;
-            ExistingInput->PreviewValue = PreviewValue;
-            ExistingInput->bUsePreviewValueAsDefault = true;
-            ExistingInput->SortPriority = SortPriority;
-            ExistingInput->ConditionallyGenerateId(false);
-            ExistingInput->ValidateName();
-            return ExistingInput;
-        }
-
-        UMaterialExpressionFunctionInput* Input = Cast<UMaterialExpressionFunctionInput>(
-            UMaterialEditingLibrary::CreateMaterialExpressionInFunction(Function, UMaterialExpressionFunctionInput::StaticClass(), NodePosX, NodePosY));
-        if (Input == nullptr)
-        {
-            return nullptr;
-        }
-
-        Input->InputName = InputName;
-        Input->InputType = InputType;
-        Input->PreviewValue = PreviewValue;
-        Input->bUsePreviewValueAsDefault = true;
-        Input->SortPriority = SortPriority;
-        Input->ConditionallyGenerateId(true);
-        Input->ValidateName();
-        return Input;
-    }
-
-    UMaterialExpressionFunctionOutput* FindFunctionOutput(UMaterialFunction* Function, const FName OutputName)
-    {
-        if (Function == nullptr)
-        {
-            return nullptr;
-        }
-
-        for (UMaterialExpression* Expression : Function->GetExpressions())
-        {
-            UMaterialExpressionFunctionOutput* Output = Cast<UMaterialExpressionFunctionOutput>(Expression);
-            if (Output != nullptr && Output->OutputName == OutputName)
-            {
-                return Output;
-            }
-        }
-
-        return nullptr;
-    }
-
-    UMaterialExpressionFunctionOutput* FindOrCreateFunctionOutput(
-        UMaterialFunction* Function,
-        const FName        OutputName,
-        int32              SortPriority,
-        int32              NodePosX,
-        int32              NodePosY)
-    {
-        if (UMaterialExpressionFunctionOutput* ExistingOutput = FindFunctionOutput(Function, OutputName))
-        {
-            ExistingOutput->SortPriority = SortPriority;
-            ExistingOutput->ConditionallyGenerateId(false);
-            ExistingOutput->ValidateName();
-            return ExistingOutput;
-        }
-
-        UMaterialExpressionFunctionOutput* Output = Cast<UMaterialExpressionFunctionOutput>(
-            UMaterialEditingLibrary::CreateMaterialExpressionInFunction(Function, UMaterialExpressionFunctionOutput::StaticClass(), NodePosX, NodePosY));
-        if (Output == nullptr)
-        {
-            return nullptr;
-        }
-
-        Output->OutputName = OutputName;
-        Output->SortPriority = SortPriority;
-        Output->ConditionallyGenerateId(true);
-        Output->ValidateName();
-        return Output;
-    }
-
-    bool ValidateApplyWetnessFunctionContract(
-        UMaterialFunctionInterface* ApplyFunctionInterface,
-        TArray<FString>&            FailureReasons)
-    {
-        UMaterialFunction* ApplyFunction = Cast<UMaterialFunction>(ApplyFunctionInterface);
-        if (ApplyFunction == nullptr)
-        {
-            FailureReasons.Add(TEXT("MF_DWC_ApplyWetness is not a UMaterialFunction asset."));
-            return false;
-        }
-
-        static const FName RequiredInputs[] = {
-            TEXT("BaseColor"),
-            TEXT("BaseRoughness"),
-            TEXT("BaseNormal")
-        };
-        static const FName RequiredOutputs[] = {
-            TEXT("BaseColor"),
-            TEXT("Roughness"),
-            TEXT("Normal")
-        };
-        static const FName RequiredScalarParameters[] = {
-            TEXT("DWC_WetDarkeningStrength"),
-            TEXT("DWC_WetRoughness"),
-            TEXT("DWC_SurfaceWaterStrength"),
-            TEXT("DWC_UseWrinkleNormalMap"),
-            TEXT("DWC_WrinkleStrength"),
-            TEXT("DWC_WrinkleWetnessMin"),
-            TEXT("DWC_WrinkleWetnessMax"),
-            TEXT("DWC_UseTransparencyMap"),
-            TEXT("DWC_TransparencyStrength"),
-            TEXT("DWC_TransparencyWetnessMin"),
-            TEXT("DWC_TransparencyWetnessMax"),
-            TEXT("DWC_TransparencyUVChannel"),
-            TEXT("DWC_WrinkleSuppressionStrength")
-        };
-        static const FName RequiredTextureParameters[] = {
-            TEXT("DWC_WrinkleNormalMap"),
-            TEXT("DWC_TransparencyMap")
-        };
-        static const FString RequiredCustomDescriptions[] = {
-            TEXT("DWC ApplyWetness Wrinkle Normal Blend"),
-            TEXT("DWC ApplyWetness Runtime Transparency Blend"),
-            TEXT("DWC Transparency UV Selector")
-        };
-
-        for (const FName InputName : RequiredInputs)
-        {
-            if (FindFunctionInput(ApplyFunction, InputName) == nullptr)
-            {
-                FailureReasons.Add(FString::Printf(TEXT("Missing function input '%s'."), *InputName.ToString()));
-            }
-        }
-
-        for (const FName OutputName : RequiredOutputs)
-        {
-            const UMaterialExpressionFunctionOutput* Output = FindFunctionOutput(ApplyFunction, OutputName);
-            if (Output == nullptr)
-            {
-                FailureReasons.Add(FString::Printf(TEXT("Missing function output '%s'."), *OutputName.ToString()));
-            }
-            else if (Output->A.Expression == nullptr)
-            {
-                FailureReasons.Add(FString::Printf(TEXT("Function output '%s' is not connected."), *OutputName.ToString()));
-            }
-        }
-
-        TSet<FName> FoundScalarParameters;
-        TSet<FName> FoundTextureParameters;
-        TSet<FString> FoundCustomDescriptions;
-        for (UMaterialExpression* Expression : ApplyFunction->GetExpressions())
-        {
-            if (const UMaterialExpressionScalarParameter* ScalarParameter = Cast<UMaterialExpressionScalarParameter>(Expression))
-            {
-                FoundScalarParameters.Add(ScalarParameter->ParameterName);
-            }
-            if (const UMaterialExpressionTextureSampleParameter2D* TextureParameter = Cast<UMaterialExpressionTextureSampleParameter2D>(Expression))
-            {
-                FoundTextureParameters.Add(TextureParameter->ParameterName);
-            }
-            if (const UMaterialExpressionCustom* Custom = Cast<UMaterialExpressionCustom>(Expression))
-            {
-                FoundCustomDescriptions.Add(Custom->Description);
-            }
-        }
-
-        for (const FName ParameterName : RequiredScalarParameters)
-        {
-            if (!FoundScalarParameters.Contains(ParameterName))
-            {
-                FailureReasons.Add(FString::Printf(TEXT("Missing scalar parameter '%s'."), *ParameterName.ToString()));
-            }
-        }
-        for (const FName ParameterName : RequiredTextureParameters)
-        {
-            if (!FoundTextureParameters.Contains(ParameterName))
-            {
-                FailureReasons.Add(FString::Printf(TEXT("Missing texture parameter '%s'."), *ParameterName.ToString()));
-            }
-        }
-        for (const FString& Description : RequiredCustomDescriptions)
-        {
-            if (!FoundCustomDescriptions.Contains(Description))
-            {
-                FailureReasons.Add(FString::Printf(TEXT("Missing required graph node '%s'."), *Description));
-            }
-        }
-
-        return FailureReasons.Num() == 0;
-    }
-
-    UMaterialExpressionCustom* FindOrCreateApplyWetnessFunctionWrinkleNormalBlend(UMaterialFunction* Function, int32 NodePosX, int32 NodePosY)
-    {
-        static const FString BlendDescription = TEXT("DWC ApplyWetness Wrinkle Normal Blend");
-        static const TCHAR*  BlendCode = TEXT(
-            "float3 Base = normalize(BaseNormal);\n"
-            "// Match the editor accumulated-preview path: baked wrinkle Z is intentionally ignored.\n"
-            "// The preview reconstructs its tangent-space normal from XY with Z = 1 before blending.\n"
-            "float2 WrinkleXY = PackedWrinkle.rg * 2.0 - 1.0;\n"
-            "float WetnessRange = max(WrinkleWetnessMax - WrinkleWetnessMin, 0.0001);\n"
-            "float WetnessT = saturate((Wetness - WrinkleWetnessMin) / WetnessRange);\n"
-            "float Strength = max(WrinkleStrength, 0.0) * saturate(UseWrinkleNormalMap) * WetnessT;\n"
-            "float3 WeightedWrinkle = normalize(float3(WrinkleXY * Strength, 1.0));\n"
-            "return normalize(float3(Base.xy + WeightedWrinkle.xy, Base.z * WeightedWrinkle.z));");
-
-        auto ConfigureBlendNode = [](UMaterialExpressionCustom* Custom)
-        {
-            Custom->Inputs.Reset();
-
-            FCustomInput& BaseNormal = Custom->Inputs.AddDefaulted_GetRef();
-            BaseNormal.InputName = TEXT("BaseNormal");
-
-            FCustomInput& PackedWrinkle = Custom->Inputs.AddDefaulted_GetRef();
-            PackedWrinkle.InputName = TEXT("PackedWrinkle");
-
-            FCustomInput& Wetness = Custom->Inputs.AddDefaulted_GetRef();
-            Wetness.InputName = TEXT("Wetness");
-
-            FCustomInput& UseWrinkleNormalMap = Custom->Inputs.AddDefaulted_GetRef();
-            UseWrinkleNormalMap.InputName = TEXT("UseWrinkleNormalMap");
-
-            FCustomInput& WrinkleStrength = Custom->Inputs.AddDefaulted_GetRef();
-            WrinkleStrength.InputName = TEXT("WrinkleStrength");
-
-            FCustomInput& WrinkleWetnessMin = Custom->Inputs.AddDefaulted_GetRef();
-            WrinkleWetnessMin.InputName = TEXT("WrinkleWetnessMin");
-
-            FCustomInput& WrinkleWetnessMax = Custom->Inputs.AddDefaulted_GetRef();
-            WrinkleWetnessMax.InputName = TEXT("WrinkleWetnessMax");
-
-            Custom->OutputType = CMOT_Float3;
-            Custom->Code = BlendCode;
-        };
-
-        if (Function == nullptr)
-        {
-            return nullptr;
-        }
-
-        for (UMaterialExpression* Expression : Function->GetExpressions())
-        {
-            UMaterialExpressionCustom* Custom = Cast<UMaterialExpressionCustom>(Expression);
-            if (Custom != nullptr && Custom->Description == BlendDescription)
-            {
-                ConfigureBlendNode(Custom);
-                return Custom;
-            }
-        }
-
-        UMaterialExpressionCustom* Custom = Cast<UMaterialExpressionCustom>(
-            UMaterialEditingLibrary::CreateMaterialExpressionInFunction(Function, UMaterialExpressionCustom::StaticClass(), NodePosX, NodePosY));
-        if (Custom == nullptr)
-        {
-            return nullptr;
-        }
-
-        Custom->Description = BlendDescription;
-        ConfigureBlendNode(Custom);
-        return Custom;
-    }
-
-    UMaterialExpressionCustom* FindLegacyApplyWetnessFunctionTransparencyPreviewBlend(UMaterialFunction* Function)
-    {
-        static const FString BlendDescription = TEXT("DWC ApplyWetness Transparency Preview Blend");
-        if (Function == nullptr)
-        {
-            return nullptr;
-        }
-
-        for (UMaterialExpression* Expression : Function->GetExpressions())
-        {
-            UMaterialExpressionCustom* Custom = Cast<UMaterialExpressionCustom>(Expression);
-            if (Custom != nullptr && Custom->Description == BlendDescription)
-            {
-                return Custom;
-            }
-        }
-        return nullptr;
-    }
-
-    void RemoveLegacyApplyWetnessFunctionTransparencyPreviewGraph(UMaterialFunction* Function)
-    {
-        if (Function == nullptr)
-        {
-            return;
-        }
-
-        static const TSet<FName> LegacyScalarParameters = {
-            TEXT("DWC_UseTransparencyPreview"),
-            TEXT("DWC_TransparencyPreviewStrength"),
-            TEXT("DWC_TransparencyPreviewWetness"),
-            TEXT("DWC_TransparencyPreviewDebug")
-        };
-
-        TArray<UMaterialExpression*> ExpressionsToRemove;
-        for (UMaterialExpression* Expression : Function->GetExpressions())
-        {
-            const UMaterialExpressionCustom* Custom = Cast<UMaterialExpressionCustom>(Expression);
-            const UMaterialExpressionScalarParameter* Scalar = Cast<UMaterialExpressionScalarParameter>(Expression);
-            const UMaterialExpressionTextureSampleParameter2D* Texture = Cast<UMaterialExpressionTextureSampleParameter2D>(Expression);
-            if ((Custom != nullptr && Custom->Description == TEXT("DWC ApplyWetness Transparency Preview Blend")) ||
-                (Scalar != nullptr && LegacyScalarParameters.Contains(Scalar->ParameterName)) ||
-                (Texture != nullptr && Texture->ParameterName == TEXT("DWC_TransparencyPreviewMap")))
-            {
-                ExpressionsToRemove.Add(Expression);
-            }
-        }
-
-        for (UMaterialExpression* Expression : ExpressionsToRemove)
-        {
-            UMaterialEditingLibrary::DeleteMaterialExpressionInFunction(Function, Expression);
-        }
-    }
-
-    UMaterialExpressionCustom* FindApplyWetnessFunctionRuntimeTransparencyBlend(UMaterialFunction* Function)
-    {
-        static const FString BlendDescription = TEXT("DWC ApplyWetness Runtime Transparency Blend");
-        if (Function == nullptr)
-        {
-            return nullptr;
-        }
-
-        for (UMaterialExpression* Expression : Function->GetExpressions())
-        {
-            UMaterialExpressionCustom* Custom = Cast<UMaterialExpressionCustom>(Expression);
-            if (Custom != nullptr && Custom->Description == BlendDescription)
-            {
-                return Custom;
-            }
-        }
-        return nullptr;
-    }
-
-    UMaterialExpressionCustom* FindOrCreateApplyWetnessFunctionRuntimeTransparencyBlend(
-        UMaterialFunction* Function,
-        int32 NodePosX,
-        int32 NodePosY)
-    {
-        static const FString BlendDescription = TEXT("DWC ApplyWetness Runtime Transparency Blend");
-        static const TCHAR* BlendCode = TEXT(
-            "float WetnessRange = max(TransparencyWetnessMax - TransparencyWetnessMin, 0.0001);\n"
-            "float WetnessT = saturate((Wetness - TransparencyWetnessMin) / WetnessRange);\n"
-            "float WrinkleSuppression = saturate(WrinkleCoverage * max(WrinkleSuppressionStrength, 0.0) * saturate(UseWrinkleNormalMap));\n"
-            "float FinalTransparency = saturate(TransparencyAlpha * max(TransparencyStrength, 0.0) * WetnessT * "
-            "saturate(UseTransparencyMap) * (1.0 - WrinkleSuppression));\n"
-            "return lerp(BaseColor, TransparencyColor, FinalTransparency);");
-
-        auto ConfigureBlendNode = [](UMaterialExpressionCustom* Custom)
-        {
-            Custom->Inputs.Reset();
-            static const FName InputNames[] =
-            {
-                TEXT("BaseColor"),
-                TEXT("TransparencyColor"),
-                TEXT("TransparencyAlpha"),
-                TEXT("Wetness"),
-                TEXT("WrinkleCoverage"),
-                TEXT("UseWrinkleNormalMap"),
-                TEXT("UseTransparencyMap"),
-                TEXT("TransparencyStrength"),
-                TEXT("TransparencyWetnessMin"),
-                TEXT("TransparencyWetnessMax"),
-                TEXT("WrinkleSuppressionStrength")
-            };
-            for (const FName InputName : InputNames)
-            {
-                FCustomInput& Input = Custom->Inputs.AddDefaulted_GetRef();
-                Input.InputName = InputName;
-            }
-            Custom->OutputType = CMOT_Float3;
-            Custom->Code = BlendCode;
-        };
-
-        if (Function == nullptr)
-        {
-            return nullptr;
-        }
-
-        if (UMaterialExpressionCustom* Existing = FindApplyWetnessFunctionRuntimeTransparencyBlend(Function))
-        {
-            ConfigureBlendNode(Existing);
-            return Existing;
-        }
-
-        UMaterialExpressionCustom* Custom = Cast<UMaterialExpressionCustom>(
-            UMaterialEditingLibrary::CreateMaterialExpressionInFunction(
-                Function,
-                UMaterialExpressionCustom::StaticClass(),
-                NodePosX,
-                NodePosY));
-        if (Custom != nullptr)
-        {
-            Custom->Description = BlendDescription;
-            ConfigureBlendNode(Custom);
-        }
-        return Custom;
-    }
-
-    UMaterialExpressionCustom* FindOrCreateApplyWetnessFunctionTransparencyUVSelector(
-        UMaterialFunction* Function,
-        int32 NodePosX,
-        int32 NodePosY)
-    {
-        static const FString SelectorDescription = TEXT("DWC Transparency UV Selector");
-        static const TCHAR* SelectorCode = TEXT(
-            "float Channel = clamp(floor(UVChannel + 0.5), 0.0, 3.0);\n"
-            "if (Channel < 0.5) return UV0;\n"
-            "if (Channel < 1.5) return UV1;\n"
-            "if (Channel < 2.5) return UV2;\n"
-            "return UV3;");
-
-        auto ConfigureSelector = [](UMaterialExpressionCustom* Custom)
-        {
-            Custom->Inputs.Reset();
-            static const FName InputNames[] = { TEXT("UV0"), TEXT("UV1"), TEXT("UV2"), TEXT("UV3"), TEXT("UVChannel") };
-            for (const FName InputName : InputNames)
-            {
-                FCustomInput& Input = Custom->Inputs.AddDefaulted_GetRef();
-                Input.InputName = InputName;
-            }
-            Custom->OutputType = CMOT_Float2;
-            Custom->Code = SelectorCode;
-        };
-
-        if (Function == nullptr)
-        {
-            return nullptr;
-        }
-
-        for (UMaterialExpression* Expression : Function->GetExpressions())
-        {
-            UMaterialExpressionCustom* Custom = Cast<UMaterialExpressionCustom>(Expression);
-            if (Custom != nullptr && Custom->Description == SelectorDescription)
-            {
-                ConfigureSelector(Custom);
-                return Custom;
-            }
-        }
-
-        UMaterialExpressionCustom* Custom = Cast<UMaterialExpressionCustom>(
-            UMaterialEditingLibrary::CreateMaterialExpressionInFunction(
-                Function,
-                UMaterialExpressionCustom::StaticClass(),
-                NodePosX,
-                NodePosY));
-        if (Custom != nullptr)
-        {
-            Custom->Description = SelectorDescription;
-            ConfigureSelector(Custom);
-        }
-        return Custom;
-    }
-
-    UMaterialExpressionScalarParameter* FindOrCreateFunctionScalarParameter(
-        UMaterialFunction* Function,
-        const FName        ParameterName,
-        float              DefaultValue,
-        int32              NodePosX,
-        int32              NodePosY)
-    {
-        if (Function == nullptr)
-        {
-            return nullptr;
-        }
-
-        for (UMaterialExpression* Expression : Function->GetExpressions())
-        {
-            UMaterialExpressionScalarParameter* Parameter = Cast<UMaterialExpressionScalarParameter>(Expression);
-            if (Parameter != nullptr && Parameter->ParameterName == ParameterName)
-            {
-                Parameter->DefaultValue = DefaultValue;
-                return Parameter;
-            }
-        }
-
         UMaterialExpressionScalarParameter* Parameter = Cast<UMaterialExpressionScalarParameter>(
-            UMaterialEditingLibrary::CreateMaterialExpressionInFunction(
-                Function,
-                UMaterialExpressionScalarParameter::StaticClass(),
-                NodePosX,
-                NodePosY));
+            UMaterialEditingLibrary::CreateMaterialExpression(Material, UMaterialExpressionScalarParameter::StaticClass(), NodePosX, NodePosY));
         if (Parameter != nullptr)
         {
             Parameter->ParameterName = ParameterName;
@@ -855,546 +304,347 @@ namespace
         return Parameter;
     }
 
-    UMaterialExpressionTextureSampleParameter2D* FindOrCreateFunctionWrinkleTextureParameter(
-        UMaterialFunction* Function,
-        int32              NodePosX,
-        int32              NodePosY)
+    UMaterialExpressionScalarParameter* FindScalarParameter(UMaterial* Material, const FName ParameterName)
     {
-        static const FName ParameterName(TEXT("DWC_WrinkleNormalMap"));
-        if (Function == nullptr)
+        if (Material == nullptr)
         {
             return nullptr;
         }
 
-        for (UMaterialExpression* Expression : Function->GetExpressions())
+        for (UMaterialExpression* Expression : Material->GetExpressions())
         {
-            UMaterialExpressionTextureSampleParameter2D* Parameter = Cast<UMaterialExpressionTextureSampleParameter2D>(Expression);
+            UMaterialExpressionScalarParameter* Parameter = Cast<UMaterialExpressionScalarParameter>(Expression);
             if (Parameter != nullptr && Parameter->ParameterName == ParameterName)
             {
-                Parameter->SamplerType = SAMPLERTYPE_Color;
-                if (Parameter->Texture == nullptr || IsDefaultNormalPlaceholder(Parameter->Texture))
-                {
-                    Parameter->Texture = LoadDefaultPackedWrinkleTexture();
-                }
-                Parameter->Desc = TEXT("DWC baked wrinkle packed normal/coverage texture. RGB is decoded as tangent-space normal; alpha is reserved for coverage.");
                 return Parameter;
             }
         }
 
-        UMaterialExpressionTextureSampleParameter2D* Parameter = Cast<UMaterialExpressionTextureSampleParameter2D>(
-            UMaterialEditingLibrary::CreateMaterialExpressionInFunction(
-                Function,
-                UMaterialExpressionTextureSampleParameter2D::StaticClass(),
-                NodePosX,
-                NodePosY));
-        if (Parameter != nullptr)
-        {
-            Parameter->ParameterName = ParameterName;
-            Parameter->SamplerType = SAMPLERTYPE_Color;
-            Parameter->Texture = LoadDefaultPackedWrinkleTexture();
-            Parameter->Desc = TEXT("DWC baked wrinkle packed normal/coverage texture. RGB is decoded as tangent-space normal; alpha is reserved for coverage.");
-        }
-        return Parameter;
+        return nullptr;
     }
 
-    UMaterialExpressionTextureSampleParameter2D* FindOrCreateFunctionRuntimeTransparencyTextureParameter(
-        UMaterialFunction* Function,
-        int32 NodePosX,
-        int32 NodePosY)
+    UMaterialExpressionScalarParameter* FindOrCreateScalarParameter(UMaterial* Material, const FName ParameterName, float DefaultValue, int32 NodePosX, int32 NodePosY)
     {
-        static const FName ParameterName(TEXT("DWC_TransparencyMap"));
-        if (Function == nullptr)
+        if (UMaterialExpressionScalarParameter* ExistingParameter = FindScalarParameter(Material, ParameterName))
+        {
+            return ExistingParameter;
+        }
+
+        return CreateScalarParameter(Material, ParameterName, DefaultValue, NodePosX, NodePosY);
+    }
+
+    UMaterialExpressionVectorParameter* FindVectorParameter(UMaterial* Material, const FName ParameterName)
+    {
+        if (Material == nullptr)
         {
             return nullptr;
         }
 
-        for (UMaterialExpression* Expression : Function->GetExpressions())
+        for (UMaterialExpression* Expression : Material->GetExpressions())
         {
-            UMaterialExpressionTextureSampleParameter2D* Parameter = Cast<UMaterialExpressionTextureSampleParameter2D>(Expression);
+            UMaterialExpressionVectorParameter* Parameter = Cast<UMaterialExpressionVectorParameter>(Expression);
             if (Parameter != nullptr && Parameter->ParameterName == ParameterName)
             {
-                Parameter->SamplerType = SAMPLERTYPE_Color;
-                if (Parameter->Texture == nullptr)
-                {
-                    Parameter->Texture = LoadDefaultPackedWrinkleTexture();
-                }
-                Parameter->Desc = TEXT("DWC runtime packed transparency map. RGB is inner-surface color and A is edited transparency.");
                 return Parameter;
             }
         }
 
-        UMaterialExpressionTextureSampleParameter2D* Parameter = Cast<UMaterialExpressionTextureSampleParameter2D>(
-            UMaterialEditingLibrary::CreateMaterialExpressionInFunction(
-                Function,
-                UMaterialExpressionTextureSampleParameter2D::StaticClass(),
-                NodePosX,
-                NodePosY));
+        return nullptr;
+    }
+
+    UMaterialExpressionVectorParameter* CreateVectorParameter(UMaterial* Material, const FName ParameterName, const FLinearColor& DefaultValue, int32 NodePosX, int32 NodePosY)
+    {
+        UMaterialExpressionVectorParameter* Parameter = Cast<UMaterialExpressionVectorParameter>(
+            UMaterialEditingLibrary::CreateMaterialExpression(Material, UMaterialExpressionVectorParameter::StaticClass(), NodePosX, NodePosY));
         if (Parameter != nullptr)
         {
             Parameter->ParameterName = ParameterName;
-            Parameter->SamplerType = SAMPLERTYPE_Color;
-            Parameter->Texture = LoadDefaultPackedWrinkleTexture();
-            Parameter->Desc = TEXT("DWC runtime packed transparency map. RGB is inner-surface color and A is edited transparency.");
+            Parameter->DefaultValue = DefaultValue;
         }
         return Parameter;
     }
 
-    UMaterialExpressionTextureCoordinate* FindOrCreateFunctionTransparencyUV(
-        UMaterialFunction* Function,
-        const int32 CoordinateIndex,
-        int32 NodePosX,
-        int32 NodePosY)
+    UMaterialExpressionVectorParameter* FindOrCreateVectorParameter(
+        UMaterial*          Material,
+        const FName         ParameterName,
+        const FLinearColor& DefaultValue,
+        int32               NodePosX,
+        int32               NodePosY)
     {
-        const FString Description = FString::Printf(TEXT("DWC Transparency UV%d"), CoordinateIndex);
-        if (Function == nullptr)
+        if (UMaterialExpressionVectorParameter* ExistingParameter = FindVectorParameter(Material, ParameterName))
         {
-            return nullptr;
+            return ExistingParameter;
         }
 
-        for (UMaterialExpression* Expression : Function->GetExpressions())
-        {
-            UMaterialExpressionTextureCoordinate* TextureCoordinate = Cast<UMaterialExpressionTextureCoordinate>(Expression);
-            if (TextureCoordinate != nullptr && TextureCoordinate->Desc == Description)
-            {
-                TextureCoordinate->CoordinateIndex = CoordinateIndex;
-                return TextureCoordinate;
-            }
-        }
-
-        UMaterialExpressionTextureCoordinate* TextureCoordinate = Cast<UMaterialExpressionTextureCoordinate>(
-            UMaterialEditingLibrary::CreateMaterialExpressionInFunction(
-                Function,
-                UMaterialExpressionTextureCoordinate::StaticClass(),
-                NodePosX,
-                NodePosY));
-        if (TextureCoordinate != nullptr)
-        {
-            TextureCoordinate->CoordinateIndex = CoordinateIndex;
-            TextureCoordinate->Desc = Description;
-        }
-        return TextureCoordinate;
+        return CreateVectorParameter(Material, ParameterName, DefaultValue, NodePosX, NodePosY);
     }
 
-    UMaterialExpressionTextureCoordinate* FindOrCreateFunctionWrinkleUV0(
-        UMaterialFunction* Function,
-        int32              NodePosX,
-        int32              NodePosY)
+    UTexture* LoadDefaultNormalTexture()
     {
-        static const FString Description = TEXT("DWC Wrinkle UV0");
-        if (Function == nullptr)
+        if (UTexture* DefaultNormal = LoadObject<UTexture>(nullptr, TEXT("/Engine/EngineMaterials/DefaultNormal.DefaultNormal")))
         {
-            return nullptr;
+            return DefaultNormal;
         }
 
-        for (UMaterialExpression* Expression : Function->GetExpressions())
-        {
-            UMaterialExpressionTextureCoordinate* TextureCoordinate = Cast<UMaterialExpressionTextureCoordinate>(Expression);
-            if (TextureCoordinate != nullptr && TextureCoordinate->Desc == Description)
-            {
-                TextureCoordinate->CoordinateIndex = 0;
-                return TextureCoordinate;
-            }
-        }
-
-        UMaterialExpressionTextureCoordinate* TextureCoordinate = Cast<UMaterialExpressionTextureCoordinate>(
-            UMaterialEditingLibrary::CreateMaterialExpressionInFunction(
-                Function,
-                UMaterialExpressionTextureCoordinate::StaticClass(),
-                NodePosX,
-                NodePosY));
-        if (TextureCoordinate != nullptr)
-        {
-            TextureCoordinate->CoordinateIndex = 0;
-            TextureCoordinate->Desc = Description;
-        }
-        return TextureCoordinate;
+        return LoadObject<UTexture>(nullptr, TEXT("/Engine/EngineMaterials/T_Default_Normal.T_Default_Normal"));
     }
 
-    UMaterialExpressionFrac* FindOrCreateFunctionWrinkleUVWrap(
-        UMaterialFunction* Function,
-        int32              NodePosX,
-        int32              NodePosY)
+    UTexture* LoadDefaultBlackTexture()
     {
-        static const FString Description = TEXT("DWC Wrinkle UV Wrap");
-        if (Function == nullptr)
+        if (UTexture* BlackTexture = LoadObject<UTexture>(nullptr, TEXT("/Engine/EngineResources/Black.Black")))
         {
-            return nullptr;
+            return BlackTexture;
         }
 
-        for (UMaterialExpression* Expression : Function->GetExpressions())
-        {
-            UMaterialExpressionFrac* Frac = Cast<UMaterialExpressionFrac>(Expression);
-            if (Frac != nullptr && Frac->Desc == Description)
-            {
-                return Frac;
-            }
-        }
-
-        UMaterialExpressionFrac* Frac = Cast<UMaterialExpressionFrac>(
-            UMaterialEditingLibrary::CreateMaterialExpressionInFunction(
-                Function,
-                UMaterialExpressionFrac::StaticClass(),
-                NodePosX,
-                NodePosY));
-        if (Frac != nullptr)
-        {
-            Frac->Desc = Description;
-        }
-        return Frac;
+        return LoadObject<UTexture>(nullptr, TEXT("/Engine/EngineResources/DefaultTexture.DefaultTexture"));
     }
 
-    UMaterialExpressionVertexColor* FindOrCreateFunctionVertexColor(
-        UMaterialFunction* Function,
-        int32              NodePosX,
-        int32              NodePosY)
+    UTexture* LoadFallbackTextureForSamplerType(const EMaterialSamplerType SamplerType)
     {
-        if (Function == nullptr)
+        switch (SamplerType)
         {
-            return nullptr;
+        case SAMPLERTYPE_Normal:
+            return LoadDefaultNormalTexture();
+        case SAMPLERTYPE_Masks:
+        case SAMPLERTYPE_Grayscale:
+        case SAMPLERTYPE_LinearColor:
+            return LoadDefaultBlackTexture();
+        default:
+            return LoadObject<UTexture>(nullptr, TEXT("/Engine/EngineResources/DefaultTexture.DefaultTexture"));
         }
-
-        for (UMaterialExpression* Expression : Function->GetExpressions())
-        {
-            if (UMaterialExpressionVertexColor* VertexColor = Cast<UMaterialExpressionVertexColor>(Expression))
-            {
-                return VertexColor;
-            }
-        }
-
-        return Cast<UMaterialExpressionVertexColor>(
-            UMaterialEditingLibrary::CreateMaterialExpressionInFunction(
-                Function,
-                UMaterialExpressionVertexColor::StaticClass(),
-                NodePosX,
-                NodePosY));
     }
 
-    void ReplaceFunctionExpressionReferences(
-        UMaterialFunction*   Function,
-        UMaterialExpression* OldExpression,
-        UMaterialExpression* NewExpression)
+    bool ReplaceMissingTextureSamplesWithFallbacks(UMaterial* Material)
     {
-        if (Function == nullptr || OldExpression == nullptr || NewExpression == nullptr)
+        if (Material == nullptr)
         {
-            return;
+            return false;
         }
 
-        for (UMaterialExpression* Expression : Function->GetExpressions())
+        bool bChanged = false;
+        for (UMaterialExpression* Expression : Material->GetExpressions())
         {
-            if (Expression == OldExpression)
+            UMaterialExpressionTextureSample* TextureSample = Cast<UMaterialExpressionTextureSample>(Expression);
+            if (TextureSample == nullptr || TextureSample->Texture != nullptr)
             {
                 continue;
             }
 
-            for (FExpressionInputIterator It{Expression}; It; ++It)
+            if (UTexture* FallbackTexture = LoadFallbackTextureForSamplerType(TextureSample->SamplerType))
             {
-                FExpressionInput* Input = It.Input;
-                if (Input != nullptr && Input->Expression == OldExpression)
-                {
-                    Input->Connect(0, NewExpression);
-                }
-            }
-        }
-    }
-
-    void ReplaceFunctionScalarInputWithParameter(
-        UMaterialFunction* Function,
-        const FName        InputName,
-        const FName        ParameterName,
-        float              DefaultValue,
-        int32              NodePosX,
-        int32              NodePosY)
-    {
-        UMaterialExpressionFunctionInput* FunctionInput = FindFunctionInput(Function, InputName);
-        UMaterialExpressionScalarParameter* Parameter = FindOrCreateFunctionScalarParameter(
-            Function,
-            ParameterName,
-            DefaultValue,
-            NodePosX,
-            NodePosY);
-        if (FunctionInput == nullptr || Parameter == nullptr)
-        {
-            return;
-        }
-
-        ReplaceFunctionExpressionReferences(Function, FunctionInput, Parameter);
-        UMaterialEditingLibrary::DeleteMaterialExpressionInFunction(Function, FunctionInput);
-    }
-
-    void RemoveObsoleteFunctionInputs(UMaterialFunction* Function, const TSet<FName>& InputNames)
-    {
-        if (Function == nullptr)
-        {
-            return;
-        }
-
-        TArray<UMaterialExpression*> InputsToRemove;
-        for (UMaterialExpression* Expression : Function->GetExpressions())
-        {
-            UMaterialExpressionFunctionInput* FunctionInput = Cast<UMaterialExpressionFunctionInput>(Expression);
-            if (FunctionInput != nullptr && InputNames.Contains(FunctionInput->InputName))
-            {
-                InputsToRemove.Add(FunctionInput);
+                TextureSample->Texture = FallbackTexture;
+                bChanged = true;
             }
         }
 
-        for (UMaterialExpression* Expression : InputsToRemove)
-        {
-            UMaterialEditingLibrary::DeleteMaterialExpressionInFunction(Function, Expression);
-        }
+        return bChanged;
     }
 
-    bool EnsureApplyWetnessFunctionInternalGraph(
-        UMaterialFunctionInterface* ApplyFunctionInterface,
-        TArray<FString>&            FailureReasons)
+    FString BuildCompileErrorMessage(const FString& Prefix, const TArray<FString>& CompileErrors)
     {
-        UMaterialFunction* ApplyFunction = Cast<UMaterialFunction>(ApplyFunctionInterface);
-        if (ApplyFunction == nullptr)
+        if (CompileErrors.IsEmpty())
         {
-            FailureReasons.Add(TEXT("MF_DWC_ApplyWetness is not an editable UMaterialFunction asset."));
-            return false;
+            return Prefix;
         }
 
-        ApplyFunction->Modify();
+        return FString::Printf(
+            TEXT("%s\n%s"),
+            *Prefix,
+            *FString::Join(CompileErrors, TEXT("\n")));
+    }
 
-        ReplaceFunctionScalarInputWithParameter(
-            ApplyFunction,
-            TEXT("WetDarkeningStrength"),
-            TEXT("DWC_WetDarkeningStrength"),
-            0.35f,
-            -930,
-            80);
-        ReplaceFunctionScalarInputWithParameter(
-            ApplyFunction,
-            TEXT("WetRoughness"),
-            TEXT("DWC_WetRoughness"),
-            0.12f,
-            -930,
-            170);
-        ReplaceFunctionScalarInputWithParameter(
-            ApplyFunction,
-            TEXT("SurfaceWaterStrength"),
-            TEXT("DWC_SurfaceWaterStrength"),
-            1.0f,
-            -930,
-            260);
-        RemoveObsoleteFunctionInputs(
-            ApplyFunction,
-            {
-                TEXT("WrinkleNormal"),
-                TEXT("WrinkleWetness"),
-                TEXT("UseWrinkleNormalMap"),
-                TEXT("WrinkleStrength"),
-                TEXT("WrinkleWetnessMin"),
-                TEXT("WrinkleWetnessMax")
-            });
-
-        UMaterialExpressionFunctionInput* BaseNormal = FindOrCreateFunctionInput(
-            ApplyFunction,
-            TEXT("BaseNormal"),
-            FunctionInput_Vector3,
-            FVector4f(0.0f, 0.0f, 1.0f, 0.0f),
-            100,
-            -900,
-            500);
-        UMaterialExpressionTextureSampleParameter2D* WrinkleNormalMap = FindOrCreateFunctionWrinkleTextureParameter(
-            ApplyFunction,
-            -900,
-            620);
-        UMaterialExpressionTextureCoordinate* WrinkleUV0 = FindOrCreateFunctionWrinkleUV0(
-            ApplyFunction,
-            -1130,
-            620);
-        UMaterialExpressionFrac* WrinkleUVWrap = FindOrCreateFunctionWrinkleUVWrap(
-            ApplyFunction,
-            -1020,
-            620);
-        UMaterialExpressionVertexColor* VertexColor = FindOrCreateFunctionVertexColor(
-            ApplyFunction,
-            -900,
-            760);
-        UMaterialExpressionScalarParameter* UseWrinkleNormalMap = FindOrCreateFunctionScalarParameter(
-            ApplyFunction,
-            TEXT("DWC_UseWrinkleNormalMap"),
-            0.0f,
-            -900,
-            880);
-        UMaterialExpressionScalarParameter* WrinkleStrength = FindOrCreateFunctionScalarParameter(
-            ApplyFunction,
-            TEXT("DWC_WrinkleStrength"),
-            1.0f,
-            -900,
-            970);
-        UMaterialExpressionScalarParameter* WrinkleWetnessMin = FindOrCreateFunctionScalarParameter(
-            ApplyFunction,
-            TEXT("DWC_WrinkleWetnessMin"),
-            0.25f,
-            -900,
-            1060);
-        UMaterialExpressionScalarParameter* WrinkleWetnessMax = FindOrCreateFunctionScalarParameter(
-            ApplyFunction,
-            TEXT("DWC_WrinkleWetnessMax"),
-            1.0f,
-            -900,
-            1150);
-        UMaterialExpressionCustom* WrinkleBlend = FindOrCreateApplyWetnessFunctionWrinkleNormalBlend(
-            ApplyFunction,
-            -520,
-            710);
-        UMaterialExpressionFunctionOutput* NormalOutput = FindOrCreateFunctionOutput(
-            ApplyFunction,
-            TEXT("Normal"),
-            2,
-            -140,
-            710);
-        UMaterialExpressionFunctionOutput* BaseColorOutput = FindFunctionOutput(ApplyFunction, TEXT("BaseColor"));
-        FExpressionInput WetBaseColorInput;
-        if (BaseColorOutput != nullptr)
+    UMaterialExpressionTextureSampleParameter2D* FindTextureSampleParameter(UMaterial* Material, const FName ParameterName)
+    {
+        if (Material == nullptr)
         {
-            WetBaseColorInput = BaseColorOutput->A;
-            for (int32 UnwrapIndex = 0; UnwrapIndex < 2; ++UnwrapIndex)
-            {
-                UMaterialExpressionCustom* ExistingBlend = Cast<UMaterialExpressionCustom>(WetBaseColorInput.Expression);
-                if (ExistingBlend == nullptr ||
-                    (ExistingBlend != FindLegacyApplyWetnessFunctionTransparencyPreviewBlend(ApplyFunction) &&
-                     ExistingBlend != FindApplyWetnessFunctionRuntimeTransparencyBlend(ApplyFunction)))
-                {
-                    break;
-                }
+            return nullptr;
+        }
 
-                const FCustomInput* ExistingBaseColor = ExistingBlend->Inputs.FindByPredicate(
-                    [](const FCustomInput& Input) { return Input.InputName == TEXT("BaseColor"); });
-                if (ExistingBaseColor == nullptr || ExistingBaseColor->Input.Expression == nullptr)
-                {
-                    break;
-                }
-                WetBaseColorInput = ExistingBaseColor->Input;
+        for (UMaterialExpression* Expression : Material->GetExpressions())
+        {
+            UMaterialExpressionTextureSampleParameter2D* Parameter = Cast<UMaterialExpressionTextureSampleParameter2D>(Expression);
+            if (Parameter != nullptr && Parameter->ParameterName == ParameterName)
+            {
+                return Parameter;
             }
         }
-        RemoveLegacyApplyWetnessFunctionTransparencyPreviewGraph(ApplyFunction);
-        UMaterialExpressionTextureSampleParameter2D* RuntimeTransparencyMap =
-            FindOrCreateFunctionRuntimeTransparencyTextureParameter(ApplyFunction, -900, 1270);
-        UMaterialExpressionTextureCoordinate* TransparencyUV0 = FindOrCreateFunctionTransparencyUV(ApplyFunction, 0, -1250, 1220);
-        UMaterialExpressionTextureCoordinate* TransparencyUV1 = FindOrCreateFunctionTransparencyUV(ApplyFunction, 1, -1250, 1280);
-        UMaterialExpressionTextureCoordinate* TransparencyUV2 = FindOrCreateFunctionTransparencyUV(ApplyFunction, 2, -1250, 1340);
-        UMaterialExpressionTextureCoordinate* TransparencyUV3 = FindOrCreateFunctionTransparencyUV(ApplyFunction, 3, -1250, 1400);
-        UMaterialExpressionScalarParameter* TransparencyUVChannel = FindOrCreateFunctionScalarParameter(
-            ApplyFunction, TEXT("DWC_TransparencyUVChannel"), 0.0f, -1250, 1470);
-        UMaterialExpressionCustom* TransparencyUVSelector = FindOrCreateApplyWetnessFunctionTransparencyUVSelector(
-            ApplyFunction, -1050, 1320);
-        UMaterialExpressionScalarParameter* UseTransparencyMap = FindOrCreateFunctionScalarParameter(
-            ApplyFunction, TEXT("DWC_UseTransparencyMap"), 0.0f, -900, 1380);
-        UMaterialExpressionScalarParameter* TransparencyStrength = FindOrCreateFunctionScalarParameter(
-            ApplyFunction, TEXT("DWC_TransparencyStrength"), 0.4f, -900, 1470);
-        UMaterialExpressionScalarParameter* TransparencyWetnessMin = FindOrCreateFunctionScalarParameter(
-            ApplyFunction, TEXT("DWC_TransparencyWetnessMin"), 0.0f, -900, 1560);
-        UMaterialExpressionScalarParameter* TransparencyWetnessMax = FindOrCreateFunctionScalarParameter(
-            ApplyFunction, TEXT("DWC_TransparencyWetnessMax"), 1.0f, -900, 1650);
-        UMaterialExpressionScalarParameter* WrinkleSuppressionStrength = FindOrCreateFunctionScalarParameter(
-            ApplyFunction, TEXT("DWC_WrinkleSuppressionStrength"), 0.6f, -900, 1740);
-        UMaterialExpressionCustom* RuntimeTransparencyBlend = FindOrCreateApplyWetnessFunctionRuntimeTransparencyBlend(
-            ApplyFunction, -420, 1400);
 
-        if (BaseNormal == nullptr ||
-            WrinkleNormalMap == nullptr ||
-            WrinkleUV0 == nullptr ||
-            WrinkleUVWrap == nullptr ||
-            VertexColor == nullptr ||
-            UseWrinkleNormalMap == nullptr ||
-            WrinkleStrength == nullptr ||
-            WrinkleWetnessMin == nullptr ||
-            WrinkleWetnessMax == nullptr ||
-            WrinkleBlend == nullptr ||
-            NormalOutput == nullptr ||
-            BaseColorOutput == nullptr ||
-            WetBaseColorInput.Expression == nullptr ||
-            RuntimeTransparencyMap == nullptr ||
-            TransparencyUV0 == nullptr ||
-            TransparencyUV1 == nullptr ||
-            TransparencyUV2 == nullptr ||
-            TransparencyUV3 == nullptr ||
-            TransparencyUVChannel == nullptr ||
-            TransparencyUVSelector == nullptr ||
-            UseTransparencyMap == nullptr ||
-            TransparencyStrength == nullptr ||
-            TransparencyWetnessMin == nullptr ||
-            TransparencyWetnessMax == nullptr ||
-            WrinkleSuppressionStrength == nullptr ||
-            RuntimeTransparencyBlend == nullptr)
+        return nullptr;
+    }
+
+    UMaterialExpressionTextureSampleParameter2D* CreateTextureSampleParameter(UMaterial* Material, const FName ParameterName, int32 NodePosX, int32 NodePosY)
+    {
+        UMaterialExpressionTextureSampleParameter2D* Parameter = Cast<UMaterialExpressionTextureSampleParameter2D>(
+            UMaterialEditingLibrary::CreateMaterialExpression(Material, UMaterialExpressionTextureSampleParameter2D::StaticClass(), NodePosX, NodePosY));
+        if (Parameter != nullptr)
         {
-            FailureReasons.Add(TEXT("Could not create required wrinkle/transparency nodes inside MF_DWC_ApplyWetness."));
-            return false;
+            Parameter->ParameterName = ParameterName;
+            Parameter->SamplerType = SAMPLERTYPE_Normal;
+            Parameter->Texture = LoadDefaultNormalTexture();
+            Parameter->Desc = TEXT("DWC baked wrinkle tangent-space normal map.");
+        }
+        return Parameter;
+    }
+
+    UMaterialExpressionTextureSampleParameter2D* FindOrCreateTextureSampleParameter(UMaterial* Material, const FName ParameterName, int32 NodePosX, int32 NodePosY)
+    {
+        if (UMaterialExpressionTextureSampleParameter2D* ExistingParameter = FindTextureSampleParameter(Material, ParameterName))
+        {
+            ExistingParameter->SamplerType = SAMPLERTYPE_Normal;
+            if (ExistingParameter->Texture == nullptr)
+            {
+                ExistingParameter->Texture = LoadDefaultNormalTexture();
+            }
+            return ExistingParameter;
         }
 
-        bool bConnected = true;
-        bConnected &= ConnectChecked(BaseNormal, FString(), WrinkleBlend, TEXT("BaseNormal"), FailureReasons);
-        WrinkleUVWrap->Input.Connect(0, WrinkleUV0);
-        bConnected &= ConnectTextureCoordinateChecked(WrinkleUVWrap, WrinkleNormalMap, FailureReasons);
-        bConnected &= ConnectChecked(WrinkleNormalMap, TEXT("RGB"), WrinkleBlend, TEXT("PackedWrinkle"), FailureReasons);
-        bConnected &= ConnectChecked(VertexColor, TEXT("R"), WrinkleBlend, TEXT("Wetness"), FailureReasons);
-        bConnected &= ConnectChecked(UseWrinkleNormalMap, FString(), WrinkleBlend, TEXT("UseWrinkleNormalMap"), FailureReasons);
-        bConnected &= ConnectChecked(WrinkleStrength, FString(), WrinkleBlend, TEXT("WrinkleStrength"), FailureReasons);
-        bConnected &= ConnectChecked(WrinkleWetnessMin, FString(), WrinkleBlend, TEXT("WrinkleWetnessMin"), FailureReasons);
-        bConnected &= ConnectChecked(WrinkleWetnessMax, FString(), WrinkleBlend, TEXT("WrinkleWetnessMax"), FailureReasons);
-        bConnected &= ConnectFunctionOutputChecked(WrinkleBlend, FString(), NormalOutput, FailureReasons);
-        bConnected &= ConnectChecked(TransparencyUV0, FString(), TransparencyUVSelector, TEXT("UV0"), FailureReasons);
-        bConnected &= ConnectChecked(TransparencyUV1, FString(), TransparencyUVSelector, TEXT("UV1"), FailureReasons);
-        bConnected &= ConnectChecked(TransparencyUV2, FString(), TransparencyUVSelector, TEXT("UV2"), FailureReasons);
-        bConnected &= ConnectChecked(TransparencyUV3, FString(), TransparencyUVSelector, TEXT("UV3"), FailureReasons);
-        bConnected &= ConnectChecked(TransparencyUVChannel, FString(), TransparencyUVSelector, TEXT("UVChannel"), FailureReasons);
-        bConnected &= ConnectTextureCoordinateChecked(TransparencyUVSelector, RuntimeTransparencyMap, FailureReasons);
-        RuntimeTransparencyBlend->Inputs[0].Input = WetBaseColorInput;
-        bConnected &= ConnectChecked(RuntimeTransparencyMap, TEXT("RGB"), RuntimeTransparencyBlend, TEXT("TransparencyColor"), FailureReasons);
-        bConnected &= ConnectChecked(RuntimeTransparencyMap, TEXT("A"), RuntimeTransparencyBlend, TEXT("TransparencyAlpha"), FailureReasons);
-        bConnected &= ConnectChecked(VertexColor, TEXT("R"), RuntimeTransparencyBlend, TEXT("Wetness"), FailureReasons);
-        bConnected &= ConnectChecked(WrinkleNormalMap, TEXT("A"), RuntimeTransparencyBlend, TEXT("WrinkleCoverage"), FailureReasons);
-        bConnected &= ConnectChecked(UseWrinkleNormalMap, FString(), RuntimeTransparencyBlend, TEXT("UseWrinkleNormalMap"), FailureReasons);
-        bConnected &= ConnectChecked(UseTransparencyMap, FString(), RuntimeTransparencyBlend, TEXT("UseTransparencyMap"), FailureReasons);
-        bConnected &= ConnectChecked(TransparencyStrength, FString(), RuntimeTransparencyBlend, TEXT("TransparencyStrength"), FailureReasons);
-        bConnected &= ConnectChecked(TransparencyWetnessMin, FString(), RuntimeTransparencyBlend, TEXT("TransparencyWetnessMin"), FailureReasons);
-        bConnected &= ConnectChecked(TransparencyWetnessMax, FString(), RuntimeTransparencyBlend, TEXT("TransparencyWetnessMax"), FailureReasons);
-        bConnected &= ConnectChecked(WrinkleSuppressionStrength, FString(), RuntimeTransparencyBlend, TEXT("WrinkleSuppressionStrength"), FailureReasons);
-        bConnected &= ConnectFunctionOutputChecked(RuntimeTransparencyBlend, FString(), BaseColorOutput, FailureReasons);
+        return CreateTextureSampleParameter(Material, ParameterName, NodePosX, NodePosY);
+    }
 
-        if (!bConnected)
+    UMaterialExpressionTextureSampleParameter2D* FindOrCreateGPUWetnessMapParameter(
+        UMaterial* Material,
+        int32 NodePosX,
+        int32 NodePosY)
+    {
+        static const FName ParameterName(TEXT("DWC_WetnessMap"));
+        if (UMaterialExpressionTextureSampleParameter2D* ExistingParameter = FindTextureSampleParameter(Material, ParameterName))
+        {
+            ExistingParameter->SamplerType = SAMPLERTYPE_Color;
+            ExistingParameter->Desc = TEXT("DWC GPU absorbed-wetness map. Assigned by the GPU backend at runtime.");
+            if (ExistingParameter->Texture == nullptr)
+            {
+                ExistingParameter->Texture = LoadDefaultBlackTexture();
+            }
+            return ExistingParameter;
+        }
+
+        UMaterialExpressionTextureSampleParameter2D* Parameter = Cast<UMaterialExpressionTextureSampleParameter2D>(
+            UMaterialEditingLibrary::CreateMaterialExpression(
+                Material,
+                UMaterialExpressionTextureSampleParameter2D::StaticClass(),
+                NodePosX,
+                NodePosY));
+        if (Parameter != nullptr)
+        {
+            Parameter->ParameterName = ParameterName;
+            Parameter->SamplerType = SAMPLERTYPE_Color;
+            Parameter->Texture = LoadDefaultBlackTexture();
+            Parameter->Desc = TEXT("DWC GPU absorbed-wetness map. Assigned by the GPU backend at runtime.");
+        }
+        return Parameter;
+    }
+
+    UMaterialExpressionTextureCoordinate* FindOrCreateDWCDataTextureCoordinate(
+        UMaterial* Material,
+        const int32 DWCDataUVChannelIndex,
+        int32 NodePosX,
+        int32 NodePosY)
+    {
+        if (Material == nullptr || DWCDataUVChannelIndex < 0)
+        {
+            return nullptr;
+        }
+
+        for (UMaterialExpression* Expression : Material->GetExpressions())
+        {
+            if (UMaterialExpressionTextureCoordinate* TextureCoordinate = Cast<UMaterialExpressionTextureCoordinate>(Expression))
+            {
+                if (TextureCoordinate->Desc == TEXT("DWC Data UV"))
+                {
+                    TextureCoordinate->CoordinateIndex = DWCDataUVChannelIndex;
+                    return TextureCoordinate;
+                }
+            }
+        }
+
+        UMaterialExpressionTextureCoordinate* TextureCoordinate = Cast<UMaterialExpressionTextureCoordinate>(
+            UMaterialEditingLibrary::CreateMaterialExpression(Material, UMaterialExpressionTextureCoordinate::StaticClass(), NodePosX, NodePosY));
+        if (TextureCoordinate != nullptr)
+        {
+            TextureCoordinate->CoordinateIndex = DWCDataUVChannelIndex;
+            TextureCoordinate->Desc = TEXT("DWC Data UV");
+        }
+        return TextureCoordinate;
+    }
+
+    FString StripKnownDwcSuffix(const FString& PackageName)
+    {
+        static const TCHAR* KnownSuffixes[] = { GeneratedDwcMaterialSuffixCPU, GeneratedDwcMaterialSuffixGPU, TEXT("_DWC") };
+        for (const TCHAR* KnownSuffix : KnownSuffixes)
+        {
+            if (PackageName.EndsWith(KnownSuffix))
+            {
+                return PackageName.LeftChop(FCString::Strlen(KnownSuffix));
+            }
+        }
+        return PackageName;
+    }
+
+    bool PackageHasMissingPackageDependencies(const FString& PackageName)
+    {
+        if (PackageName.IsEmpty())
         {
             return false;
         }
 
-        UMaterialEditingLibrary::UpdateMaterialFunction(ApplyFunction);
-        ApplyFunction->MarkPackageDirty();
-        return true;
-    }
+        FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
+        TArray<FName> Dependencies;
+        AssetRegistryModule.Get().GetDependencies(
+            FName(*PackageName),
+            Dependencies,
+            UE::AssetRegistry::EDependencyCategory::Package);
 
-    UMaterial* LoadExistingDwcMaterialForSource(const UMaterial* SourceMaterial, bool* bOutExpectedDwcPackageExists = nullptr)
-    {
-        if (bOutExpectedDwcPackageExists != nullptr)
+        for (const FName Dependency : Dependencies)
         {
-            *bOutExpectedDwcPackageExists = false;
+            const FString DependencyPackageName = Dependency.ToString();
+            if (DependencyPackageName.StartsWith(TEXT("/Script/")) ||
+                DependencyPackageName.StartsWith(TEXT("/Memory/")) ||
+                DependencyPackageName.StartsWith(TEXT("/Temp/")) ||
+                DependencyPackageName == PackageName)
+            {
+                continue;
+            }
+
+            FString ExistingPackageFilename;
+            if (!FPackageName::DoesPackageExist(DependencyPackageName, &ExistingPackageFilename))
+            {
+                return true;
+            }
         }
 
+        return false;
+    }
+
+    UMaterial* LoadExistingDwcMaterialForSource(
+        const UMaterial* SourceMaterial,
+        const TCHAR*     GeneratedDwcMaterialSuffix)
+    {
         if (SourceMaterial == nullptr)
         {
             return nullptr;
         }
 
         const FString SourcePackageName = SourceMaterial->GetOutermost()->GetName();
-        if (SourcePackageName.EndsWith(TEXT("_DWC")))
+        if (SourcePackageName.EndsWith(GeneratedDwcMaterialSuffix))
         {
             return const_cast<UMaterial*>(SourceMaterial);
         }
 
-        const FString DwcPackageName = SourcePackageName + TEXT("_DWC");
-        if (bOutExpectedDwcPackageExists != nullptr)
+        const FString DwcPackageName = StripKnownDwcSuffix(SourcePackageName) + GeneratedDwcMaterialSuffix;
+        if (PackageHasMissingPackageDependencies(DwcPackageName))
         {
-            *bOutExpectedDwcPackageExists = FPackageName::DoesPackageExist(DwcPackageName);
+            return nullptr;
         }
+
         const FString DwcAssetName = FPackageName::GetLongPackageAssetName(DwcPackageName);
         const FString DwcObjectPath = DwcPackageName + TEXT(".") + DwcAssetName;
         return LoadObject<UMaterial>(nullptr, *DwcObjectPath);
     }
 
-    FString BuildDwcPackageNameForSourceInterface(const UMaterialInterface* SourceMaterialInterface, const UMaterial* FallbackParentMaterial)
+    FString BuildDwcPackageNameForSourceInterface(
+        const UMaterialInterface* SourceMaterialInterface,
+        const UMaterial*          FallbackParentMaterial,
+        const TCHAR*              GeneratedDwcMaterialSuffix)
     {
         FString SourcePackageName;
         if (SourceMaterialInterface != nullptr && SourceMaterialInterface->GetOutermost() != nullptr && SourceMaterialInterface->GetOutermost() != GetTransientPackage())
@@ -1407,17 +657,20 @@ namespace
             SourcePackageName = FallbackParentMaterial->GetOutermost()->GetName() + TEXT("_") + SourceMaterialInterface->GetName();
         }
 
-        if (SourcePackageName.EndsWith(TEXT("_DWC")))
+        if (SourcePackageName.EndsWith(GeneratedDwcMaterialSuffix))
         {
             return SourcePackageName;
         }
 
-        return SourcePackageName + TEXT("_DWC");
+        return StripKnownDwcSuffix(SourcePackageName) + GeneratedDwcMaterialSuffix;
     }
 
-    UMaterialInstanceConstant* LoadExistingDwcMaterialInstanceForSource(const UMaterialInstance* SourceInstance, const UMaterial* FallbackParentMaterial)
+    UMaterialInstanceConstant* LoadExistingDwcMaterialInstanceForSource(
+        const UMaterialInstance* SourceInstance,
+        const UMaterial*         FallbackParentMaterial,
+        const TCHAR*             GeneratedDwcMaterialSuffix)
     {
-        const FString DwcPackageName = BuildDwcPackageNameForSourceInterface(SourceInstance, FallbackParentMaterial);
+        const FString DwcPackageName = BuildDwcPackageNameForSourceInterface(SourceInstance, FallbackParentMaterial, GeneratedDwcMaterialSuffix);
         if (DwcPackageName.IsEmpty())
         {
             return nullptr;
@@ -1449,16 +702,31 @@ namespace
 
         FStaticParameterSet                    StaticParameters = SourceInstance->GetStaticParameters();
         FMaterialInstanceBasePropertyOverrides BasePropertyOverrides = SourceInstance->BasePropertyOverrides;
-        TargetInstance->SetPermutationParameters(StaticParameters, BasePropertyOverrides);
-        TargetInstance->UpdateStaticPermutation();
+        TargetInstance->UpdateStaticPermutation(StaticParameters, BasePropertyOverrides);
         TargetInstance->PostEditChange();
         TargetInstance->MarkPackageDirty();
+    }
+
+    TArray<FString> RecompileMaterialAndCollectErrors(UMaterial* Material)
+    {
+        if (Material == nullptr)
+        {
+            return { TEXT("Cannot compile a null material.") };
+        }
+
+        UMaterialEditingLibrary::RecompileMaterial(Material);
+        if (const FMaterialResource* Resource = Material->GetMaterialResource(GMaxRHIShaderPlatform))
+        {
+            return Resource->GetCompileErrors();
+        }
+        return {};
     }
 
     UMaterialInstanceConstant* CreateOrUpdateDwcMaterialInstanceForSource(
         const UMaterialInstance* SourceInstance,
         UMaterialInterface*      WetParent,
         const UMaterial*         FallbackParentMaterial,
+        const TCHAR*             GeneratedDwcMaterialSuffix,
         FString&                 OutErrorMessage,
         bool&                    bOutReusedExisting)
     {
@@ -1470,14 +738,14 @@ namespace
             return nullptr;
         }
 
-        if (UMaterialInstanceConstant* ExistingInstance = LoadExistingDwcMaterialInstanceForSource(SourceInstance, FallbackParentMaterial))
+        if (UMaterialInstanceConstant* ExistingInstance = LoadExistingDwcMaterialInstanceForSource(SourceInstance, FallbackParentMaterial, GeneratedDwcMaterialSuffix))
         {
             bOutReusedExisting = true;
             CopyMaterialInstanceOverrides(SourceInstance, ExistingInstance, WetParent);
             return ExistingInstance;
         }
 
-        FString DwcPackageName = BuildDwcPackageNameForSourceInterface(SourceInstance, FallbackParentMaterial);
+        FString DwcPackageName = BuildDwcPackageNameForSourceInterface(SourceInstance, FallbackParentMaterial, GeneratedDwcMaterialSuffix);
         if (DwcPackageName.IsEmpty())
         {
             OutErrorMessage = FString::Printf(TEXT("Could not determine a package path for '%s'."), *GetNameSafe(SourceInstance));
@@ -1535,34 +803,18 @@ namespace
                                                FromOutputName.IsEmpty() ? TEXT("<first>") : *FromOutputName,
                                                *GetNameSafe(ToExpression),
                                                *ToInputName,
-                                               *JoinPinNames(UMaterialEditingLibrary::GetMaterialExpressionOutputNames(FromExpression))));
+                                               *JoinPinNames(GetMaterialExpressionOutputNames(FromExpression))));
             return false;
         }
 
         return true;
     }
 
-    bool ConnectFunctionOutputChecked(
-        UMaterialExpression*               FromExpression,
-        const FString&                     FromOutputName,
-        UMaterialExpressionFunctionOutput* FunctionOutput,
-        TArray<FString>&                   FailureReasons)
+    bool ConnectTextureCoordinateChecked(UMaterialExpressionTextureCoordinate* TextureCoordinate, UMaterialExpressionTextureSampleParameter2D* TextureSample, TArray<FString>& FailureReasons)
     {
-        if (FromExpression == nullptr || FunctionOutput == nullptr)
+        if (TextureCoordinate == nullptr || TextureSample == nullptr)
         {
-            FailureReasons.Add(TEXT("Function output connection requires a source expression and function output node."));
-            return false;
-        }
-
-        FunctionOutput->A.Connect(0, FromExpression);
-        return true;
-    }
-
-    bool ConnectTextureCoordinateChecked(UMaterialExpression* UVExpression, UMaterialExpressionTextureSampleParameter2D* TextureSample, TArray<FString>& FailureReasons)
-    {
-        if (UVExpression == nullptr || TextureSample == nullptr)
-        {
-            FailureReasons.Add(TEXT("Wrinkle normal map UV connection requires a TextureCoordinate node and a texture sample node."));
+            FailureReasons.Add(TEXT("DWC Data UV connection requires a texture coordinate node and a texture sample node."));
             return false;
         }
 
@@ -1571,104 +823,539 @@ namespace
         for (const FString& CandidateInputName : CandidateInputNames)
         {
             if (InputNames.Contains(CandidateInputName) &&
-                UMaterialEditingLibrary::ConnectMaterialExpressions(UVExpression, FString(), TextureSample, CandidateInputName))
+                UMaterialEditingLibrary::ConnectMaterialExpressions(TextureCoordinate, FString(), TextureSample, CandidateInputName))
             {
                 return true;
             }
         }
 
         FailureReasons.Add(FString::Printf(
-            TEXT("Failed to connect the DWC wrinkle TextureCoordinate to DWC_WrinkleNormalMap. Available texture sample inputs: %s"),
+            TEXT("Failed to connect the DWC Data UV texture coordinate to the texture sample. Available texture sample inputs: %s"),
             *JoinPinNames(InputNames)));
         return false;
     }
 
-    bool ResolveConnectedFunctionInput(
-        UMaterialExpressionMaterialFunctionCall* FunctionCall,
-        const FName                              InputName,
-        UMaterialExpression*&                    OutExpression,
-        FString&                                 OutOutputName)
+    int32 ResolveExpressionOutputIndex(UMaterialExpression* Expression, const FString& OutputName, const int32 FallbackOutputIndex)
     {
-        OutExpression = nullptr;
-        OutOutputName.Reset();
-        if (FunctionCall == nullptr)
+        if (Expression == nullptr)
         {
-            return false;
+            return INDEX_NONE;
         }
 
-        FunctionCall->UpdateFromFunctionResource();
-        for (const FFunctionExpressionInput& FunctionInput : FunctionCall->FunctionInputs)
+        const TArray<FString> OutputNames = GetMaterialExpressionOutputNames(Expression);
+        for (int32 OutputIndex = 0; OutputIndex < OutputNames.Num(); ++OutputIndex)
         {
-            if (FunctionInput.ExpressionInput == nullptr || FunctionInput.ExpressionInput->InputName != InputName)
+            if (OutputNames[OutputIndex] == OutputName)
+            {
+                return OutputIndex;
+            }
+        }
+
+        return OutputNames.IsValidIndex(FallbackOutputIndex) ? FallbackOutputIndex : INDEX_NONE;
+    }
+
+    UMaterialExpressionFunctionInput* FindFunctionInputExpression(UMaterialFunction* MaterialFunction, const FName InputName)
+    {
+        if (MaterialFunction == nullptr)
+        {
+            return nullptr;
+        }
+
+        for (UMaterialExpression* Expression : MaterialFunction->GetExpressions())
+        {
+            UMaterialExpressionFunctionInput* FunctionInput = Cast<UMaterialExpressionFunctionInput>(Expression);
+            if (FunctionInput != nullptr && FunctionInput->InputName == InputName)
+            {
+                return FunctionInput;
+            }
+        }
+
+        return nullptr;
+    }
+
+    UMaterialExpressionFunctionInput* FindOrCreateScalarFunctionInput(
+        UMaterialFunction* MaterialFunction,
+        const FName        InputName,
+        const FString&     Description,
+        const float        PreviewValue,
+        const int32        SortPriority,
+        const int32        NodePosX,
+        const int32        NodePosY)
+    {
+        if (UMaterialExpressionFunctionInput* ExistingInput = FindFunctionInputExpression(MaterialFunction, InputName))
+        {
+            ExistingInput->InputType = FunctionInput_Scalar;
+            ExistingInput->Description = Description;
+            ExistingInput->PreviewValue = FVector4f(PreviewValue, PreviewValue, PreviewValue, PreviewValue);
+            ExistingInput->bUsePreviewValueAsDefault = true;
+            ExistingInput->SortPriority = SortPriority;
+            return ExistingInput;
+        }
+
+        UMaterialExpressionFunctionInput* FunctionInput = Cast<UMaterialExpressionFunctionInput>(
+            UMaterialEditingLibrary::CreateMaterialExpressionInFunction(
+                MaterialFunction,
+                UMaterialExpressionFunctionInput::StaticClass(),
+                NodePosX,
+                NodePosY));
+        if (FunctionInput != nullptr)
+        {
+            FunctionInput->InputName = InputName;
+            FunctionInput->Description = Description;
+            FunctionInput->InputType = FunctionInput_Scalar;
+            FunctionInput->PreviewValue = FVector4f(PreviewValue, PreviewValue, PreviewValue, PreviewValue);
+            FunctionInput->bUsePreviewValueAsDefault = true;
+            FunctionInput->SortPriority = SortPriority;
+            FunctionInput->ConditionallyGenerateId(true);
+            FunctionInput->ValidateName();
+        }
+
+        return FunctionInput;
+    }
+
+    UMaterialExpressionVertexColor* FindBestVertexColorWetnessSource(
+        UMaterialFunction* MaterialFunction,
+        int32&             OutRedOutputIndex,
+        TArray<FExpressionInput*>& OutWetnessInputs)
+    {
+        OutRedOutputIndex = INDEX_NONE;
+        OutWetnessInputs.Reset();
+
+        UMaterialExpressionVertexColor* BestVertexColor = nullptr;
+        int32                           BestRedOutputIndex = INDEX_NONE;
+        TArray<FExpressionInput*>       BestWetnessInputs;
+
+        if (MaterialFunction == nullptr)
+        {
+            return nullptr;
+        }
+
+        for (UMaterialExpression* Expression : MaterialFunction->GetExpressions())
+        {
+            UMaterialExpressionVertexColor* VertexColor = Cast<UMaterialExpressionVertexColor>(Expression);
+            if (VertexColor == nullptr)
             {
                 continue;
             }
 
-            OutExpression = FunctionInput.Input.Expression;
-            if (OutExpression == nullptr)
+            const int32 RedOutputIndex = ResolveExpressionOutputIndex(VertexColor, TEXT("R"), 1);
+            if (RedOutputIndex == INDEX_NONE)
             {
-                return false;
+                continue;
             }
 
-            const TArray<FString> OutputNames = UMaterialEditingLibrary::GetMaterialExpressionOutputNames(OutExpression);
-            if (OutputNames.IsValidIndex(FunctionInput.Input.OutputIndex))
+            TArray<FExpressionInput*> CandidateWetnessInputs;
+            for (UMaterialExpression* CandidateExpression : MaterialFunction->GetExpressions())
             {
-                OutOutputName = OutputNames[FunctionInput.Input.OutputIndex];
+                if (CandidateExpression == nullptr || CandidateExpression == VertexColor)
+                {
+                    continue;
+                }
+
+                for (FExpressionInputIterator InputIt{ CandidateExpression }; InputIt; ++InputIt)
+                {
+                    FExpressionInput* Input = InputIt.operator->();
+                    if (Input != nullptr &&
+                        Input->Expression == VertexColor &&
+                        Input->OutputIndex == RedOutputIndex)
+                    {
+                        CandidateWetnessInputs.Add(Input);
+                    }
+                }
             }
+
+            if (CandidateWetnessInputs.Num() > BestWetnessInputs.Num())
+            {
+                BestVertexColor = VertexColor;
+                BestRedOutputIndex = RedOutputIndex;
+                BestWetnessInputs = MoveTemp(CandidateWetnessInputs);
+            }
+        }
+
+        OutRedOutputIndex = BestRedOutputIndex;
+        OutWetnessInputs = MoveTemp(BestWetnessInputs);
+        return BestVertexColor;
+    }
+
+    bool EnsureCPUApplyWetnessFunctionUsesExplicitWetnessInput(
+        UMaterialFunctionInterface* ApplyFunction,
+        TArray<FString>&            FailureReasons)
+    {
+        UMaterialFunction* MaterialFunction = Cast<UMaterialFunction>(ApplyFunction);
+        if (MaterialFunction == nullptr)
+        {
+            FailureReasons.Add(TEXT("MF_DWC_ApplyWetness_CPU is not an editable material function."));
+            return false;
+        }
+
+        UMaterialExpressionFunctionInput* WetnessInput = FindOrCreateScalarFunctionInput(
+            MaterialFunction,
+            TEXT("Wetness"),
+            TEXT("CPU vertex wetness from VertexColor.R"),
+            0.0f,
+            0,
+            -1300,
+            -220);
+        if (WetnessInput == nullptr)
+        {
+            FailureReasons.Add(TEXT("Could not create Wetness input on MF_DWC_ApplyWetness_CPU."));
+            return false;
+        }
+
+        int32 RedOutputIndex = INDEX_NONE;
+        TArray<FExpressionInput*> WetnessInputs;
+        UMaterialExpressionVertexColor* VertexColor =
+            FindBestVertexColorWetnessSource(MaterialFunction, RedOutputIndex, WetnessInputs);
+
+        if (VertexColor != nullptr && RedOutputIndex != INDEX_NONE)
+        {
+            for (FExpressionInput* WetnessConsumerInput : WetnessInputs)
+            {
+                if (WetnessConsumerInput == nullptr)
+                {
+                    continue;
+                }
+
+                WetnessConsumerInput->Expression = WetnessInput;
+                WetnessConsumerInput->OutputIndex = 0;
+                WetnessConsumerInput->InputName = NAME_None;
+            }
+        }
+
+        MaterialFunction->MarkPackageDirty();
+        MaterialFunction->PostEditChange();
+        return true;
+    }
+
+    bool PrepareDwcApplyWetnessFunction(
+        UMaterialFunctionInterface* ApplyFunction,
+        const FWetClothingMaterialSetup::FOptions& Options,
+        TArray<FString>&            FailureReasons)
+    {
+        if (Options.SimulationMode != EDWCSimulationMode::VertexCPU)
+        {
             return true;
+        }
+
+        return EnsureCPUApplyWetnessFunctionUsesExplicitWetnessInput(ApplyFunction, FailureReasons);
+    }
+
+    bool DoesWetPartDebugFunctionUseWetnessMask(UMaterialFunctionInterface* DebugFunction)
+    {
+        UMaterialFunction* MaterialFunction = Cast<UMaterialFunction>(DebugFunction);
+        if (MaterialFunction == nullptr)
+        {
+            return false;
+        }
+
+        if (MaterialFunction->Description.Contains(DwcWetPartDebugUseWetnessMaskParameter))
+        {
+            return true;
+        }
+
+        for (UMaterialExpression* Expression : MaterialFunction->GetExpressions())
+        {
+            const UMaterialExpressionScalarParameter* ScalarParameter = Cast<UMaterialExpressionScalarParameter>(Expression);
+            if (ScalarParameter != nullptr &&
+                ScalarParameter->ParameterName == DwcWetPartDebugUseWetnessMaskParameter)
+            {
+                return true;
+            }
         }
 
         return false;
     }
 
-    void RemoveMaterialLevelDwcWetnessNodes(UMaterial* Material)
+    bool RemoveWetPartDebugWetnessMask(UMaterialFunctionInterface* DebugFunction, TArray<FString>& FailureReasons)
     {
-        if (Material == nullptr)
+        UMaterialFunction* MaterialFunction = Cast<UMaterialFunction>(DebugFunction);
+        if (MaterialFunction == nullptr)
         {
-            return;
+            FailureReasons.Add(TEXT("MF_DWC_WetPartDebug is not an editable material function."));
+            return false;
         }
 
-        static const TSet<FString> DwcCustomDescriptions = {
-            TEXT("DWC Decode Packed Wrinkle Normal"),
-            TEXT("DWC Blend Runtime Wrinkle Normal"),
-            TEXT("DWC Compute Wrinkle Wetness")
-        };
-        static const TSet<FName> DwcScalarParameters = {
-            TEXT("DWC_WetDarkeningStrength"),
-            TEXT("DWC_WetRoughness"),
-            TEXT("DWC_SurfaceWaterStrength"),
-            TEXT("DWC_UseWrinkleNormalMap"),
-            TEXT("DWC_WrinkleStrength"),
-            TEXT("DWC_WrinkleWetnessMin"),
-            TEXT("DWC_WrinkleWetnessMax")
-        };
-
-        TArray<UMaterialExpression*> ExpressionsToRemove;
-        for (UMaterialExpression* Expression : Material->GetExpressions())
+        bool bModified = false;
+        if (MaterialFunction->Description.Contains(DwcWetPartDebugUseWetnessMaskParameter))
         {
-            const UMaterialExpressionCustom* Custom = Cast<UMaterialExpressionCustom>(Expression);
-            const UMaterialExpressionScalarParameter* ScalarParameter = Cast<UMaterialExpressionScalarParameter>(Expression);
-            const UMaterialExpressionTextureSampleParameter2D* TextureParameter = Cast<UMaterialExpressionTextureSampleParameter2D>(Expression);
-            const UMaterialExpressionTextureCoordinate* TextureCoordinate = Cast<UMaterialExpressionTextureCoordinate>(Expression);
-            const bool bIsDwcCustom = Custom != nullptr && DwcCustomDescriptions.Contains(Custom->Description);
-            const bool bIsDwcScalar = ScalarParameter != nullptr && DwcScalarParameters.Contains(ScalarParameter->ParameterName);
-            const bool bIsDwcWrinkleTexture = TextureParameter != nullptr && TextureParameter->ParameterName == TEXT("DWC_WrinkleNormalMap");
-            const bool bIsDwcWrinkleUv = TextureCoordinate != nullptr && TextureCoordinate->Desc == TEXT("DWC Wrinkle UV");
-            if (bIsDwcCustom || bIsDwcScalar || bIsDwcWrinkleTexture || bIsDwcWrinkleUv)
+            MaterialFunction->Description = TEXT("Displays Dynamic Wet Clothes WetPart/Profile debug colors. The function reads VertexColor.R as wetness and VertexColor.GBA as the debug color.");
+            bModified = true;
+        }
+
+        TArray<UMaterialExpressionScalarParameter*> WetnessMaskParameters;
+        for (UMaterialExpression* Expression : MaterialFunction->GetExpressions())
+        {
+            UMaterialExpressionScalarParameter* ScalarParameter = Cast<UMaterialExpressionScalarParameter>(Expression);
+            if (ScalarParameter != nullptr &&
+                ScalarParameter->ParameterName == DwcWetPartDebugUseWetnessMaskParameter)
             {
-                ExpressionsToRemove.Add(Expression);
+                WetnessMaskParameters.Add(ScalarParameter);
             }
         }
 
-        for (UMaterialExpression* Expression : ExpressionsToRemove)
+        for (UMaterialExpressionScalarParameter* WetnessMaskParameter : WetnessMaskParameters)
         {
-            UMaterialEditingLibrary::DeleteMaterialExpression(Material, Expression);
+            UMaterialExpressionConstant* ConstantOne = Cast<UMaterialExpressionConstant>(
+                UMaterialEditingLibrary::CreateMaterialExpressionInFunction(
+                    MaterialFunction,
+                    UMaterialExpressionConstant::StaticClass(),
+                    WetnessMaskParameter->MaterialExpressionEditorX,
+                    WetnessMaskParameter->MaterialExpressionEditorY));
+            if (ConstantOne == nullptr)
+            {
+                FailureReasons.Add(TEXT("Could not create constant replacement for DWC_WetPartDebugUseWetnessMask."));
+                return false;
+            }
+            ConstantOne->R = 1.0f;
+
+            for (UMaterialExpression* Expression : MaterialFunction->GetExpressions())
+            {
+                if (Expression == nullptr || Expression == WetnessMaskParameter)
+                {
+                    continue;
+                }
+
+                for (FExpressionInputIterator InputIt{ Expression }; InputIt; ++InputIt)
+                {
+                    FExpressionInput* Input = InputIt.operator->();
+                    if (Input != nullptr && Input->Expression == WetnessMaskParameter)
+                    {
+                        Input->Expression = ConstantOne;
+                        Input->OutputIndex = 0;
+                        Input->InputName = NAME_None;
+                    }
+                }
+            }
+
+            UMaterialEditingLibrary::DeleteMaterialExpressionInFunction(MaterialFunction, WetnessMaskParameter);
+            bModified = true;
         }
+
+        if (bModified)
+        {
+            MaterialFunction->MarkPackageDirty();
+            MaterialFunction->PostEditChange();
+        }
+
+        return true;
+    }
+
+    bool ConnectDwcCPUVertexWetnessGraph(
+        UMaterial*                               Material,
+        UMaterialExpressionMaterialFunctionCall* ApplyCall,
+        const FWetClothingMaterialSetup::FOptions& Options,
+        TArray<FString>&                         FailureReasons)
+    {
+        if (Options.SimulationMode != EDWCSimulationMode::VertexCPU)
+        {
+            return true;
+        }
+
+        if (Material == nullptr || ApplyCall == nullptr)
+        {
+            FailureReasons.Add(TEXT("DWC CPU wetness setup requires a material and MF_DWC_ApplyWetness_CPU call."));
+            return false;
+        }
+
+        ApplyCall->UpdateFromFunctionResource();
+        if (!HasInput(ApplyCall, TEXT("Wetness")))
+        {
+            FailureReasons.Add(FString::Printf(
+                TEXT("MF_DWC_ApplyWetness_CPU must expose 'Wetness' input for CPU vertex wetness rendering. Available inputs: %s"),
+                *JoinPinNames(UMaterialEditingLibrary::GetMaterialExpressionInputNames(ApplyCall))));
+            return false;
+        }
+
+        UMaterialExpressionVertexColor* VertexColor = FindOrCreateVertexColor(Material, -900, -270);
+        if (VertexColor == nullptr)
+        {
+            FailureReasons.Add(TEXT("Could not create VertexColor node for CPU wetness rendering."));
+            return false;
+        }
+
+        return ConnectChecked(VertexColor, TEXT("R"), ApplyCall, TEXT("Wetness"), FailureReasons);
+    }
+
+    bool ConnectDwcWetnessMapGraph(
+        UMaterial*                               Material,
+        UMaterialExpressionMaterialFunctionCall* ApplyCall,
+        const FWetClothingMaterialSetup::FOptions& Options,
+        TArray<FString>&                         FailureReasons)
+    {
+        if (Material == nullptr || ApplyCall == nullptr)
+        {
+            FailureReasons.Add(TEXT("DWC wetness-map setup requires a material and MF_DWC_ApplyWetness call."));
+            return false;
+        }
+
+        if (!Options.bConnectWetnessMapPath)
+        {
+            return true;
+        }
+
+        if (!HasInput(ApplyCall, TEXT("WetnessMap")))
+        {
+            FailureReasons.Add(FString::Printf(
+                TEXT("MF_DWC_ApplyWetness_GPU must expose 'WetnessMap' input for DWC wetness-map rendering. Available inputs: %s"),
+                *JoinPinNames(UMaterialEditingLibrary::GetMaterialExpressionInputNames(ApplyCall))));
+            return false;
+        }
+
+        UMaterialExpressionTextureSampleParameter2D* WetnessMap = FindOrCreateGPUWetnessMapParameter(
+            Material,
+            -900,
+            1220);
+        UMaterialExpressionTextureCoordinate* DWCDataUV = FindOrCreateDWCDataTextureCoordinate(
+            Material,
+            Options.DWCDataUVChannelIndex,
+            -1150,
+            1220);
+        if (WetnessMap == nullptr || DWCDataUV == nullptr)
+        {
+            FailureReasons.Add(TEXT("DWC material setup could not create the wetness-map parameter nodes."));
+            return false;
+        }
+
+        bool bConnected = true;
+        bConnected &= ConnectTextureCoordinateChecked(DWCDataUV, WetnessMap, FailureReasons);
+        bConnected &= ConnectChecked(WetnessMap, TEXT("R"), ApplyCall, TEXT("WetnessMap"), FailureReasons);
+        return bConnected;
+    }
+
+    bool ConnectDwcDebugBaseColorGraph(
+        UMaterial*                               Material,
+        UMaterialExpressionMaterialFunctionCall* ApplyCall,
+        UMaterialExpressionMaterialFunctionCall* DebugCall,
+        const FWetClothingMaterialSetup::FOptions& Options,
+        const FString&                           ApplyBaseColorOutput,
+        TArray<FString>&                         FailureReasons)
+    {
+        if (Material == nullptr || ApplyCall == nullptr || DebugCall == nullptr)
+        {
+            FailureReasons.Add(TEXT("DWC debug base-color setup requires a material, apply function call, and debug function call."));
+            return false;
+        }
+
+        if (Options.SimulationMode != EDWCSimulationMode::WetnessMapGPU)
+        {
+            UMaterialExpressionScalarParameter* DebugStrength = FindOrCreateScalarParameter(
+                Material,
+                TEXT("DWC_WetPartDebugStrength"),
+                0.0f,
+                -900,
+                430);
+            UMaterialExpressionVertexColor* VertexColor = FindOrCreateVertexColor(Material, -900, -270);
+            UMaterialExpressionAppendVector* DebugColorGB = Cast<UMaterialExpressionAppendVector>(
+                UMaterialEditingLibrary::CreateMaterialExpression(Material, UMaterialExpressionAppendVector::StaticClass(), -620, -260));
+            UMaterialExpressionAppendVector* DebugColorGBA = Cast<UMaterialExpressionAppendVector>(
+                UMaterialEditingLibrary::CreateMaterialExpression(Material, UMaterialExpressionAppendVector::StaticClass(), -420, -230));
+            UMaterialExpressionMultiply* DebugMask = Cast<UMaterialExpressionMultiply>(
+                UMaterialEditingLibrary::CreateMaterialExpression(Material, UMaterialExpressionMultiply::StaticClass(), -620, 430));
+            UMaterialExpressionLinearInterpolate* DebugLerp = Cast<UMaterialExpressionLinearInterpolate>(
+                UMaterialEditingLibrary::CreateMaterialExpression(Material, UMaterialExpressionLinearInterpolate::StaticClass(), -110, -145));
+
+            if (DebugStrength == nullptr || VertexColor == nullptr || DebugColorGB == nullptr ||
+                DebugColorGBA == nullptr || DebugMask == nullptr || DebugLerp == nullptr)
+            {
+                FailureReasons.Add(TEXT("DWC CPU debug setup could not create one or more required nodes."));
+                return false;
+            }
+
+            bool bConnected = true;
+            bConnected &= ConnectChecked(VertexColor, TEXT("R"), DebugMask, TEXT("A"), FailureReasons);
+            bConnected &= ConnectChecked(DebugStrength, FString(), DebugMask, TEXT("B"), FailureReasons);
+            bConnected &= ConnectChecked(VertexColor, TEXT("G"), DebugColorGB, TEXT("A"), FailureReasons);
+            bConnected &= ConnectChecked(VertexColor, TEXT("B"), DebugColorGB, TEXT("B"), FailureReasons);
+            bConnected &= ConnectChecked(DebugColorGB, FString(), DebugColorGBA, TEXT("A"), FailureReasons);
+            bConnected &= ConnectChecked(VertexColor, TEXT("A"), DebugColorGBA, TEXT("B"), FailureReasons);
+            bConnected &= ConnectChecked(ApplyCall, ApplyBaseColorOutput, DebugLerp, TEXT("A"), FailureReasons);
+            bConnected &= ConnectChecked(DebugColorGBA, FString(), DebugLerp, TEXT("B"), FailureReasons);
+            bConnected &= ConnectChecked(DebugMask, FString(), DebugLerp, TEXT("Alpha"), FailureReasons);
+            if (!UMaterialEditingLibrary::ConnectMaterialProperty(DebugLerp, FString(), MP_BaseColor))
+            {
+                FailureReasons.Add(TEXT("Failed to connect CPU wet-part debug blend to Material BaseColor."));
+                bConnected = false;
+            }
+            return bConnected;
+        }
+
+        UMaterialExpressionTextureSampleParameter2D* WetnessMap = FindOrCreateGPUWetnessMapParameter(
+            Material,
+            -900,
+            1220);
+        UMaterialExpressionTextureCoordinate* DWCDataUV = FindOrCreateDWCDataTextureCoordinate(
+            Material,
+            Options.DWCDataUVChannelIndex,
+            -1150,
+            1220);
+        UMaterialExpressionScalarParameter* DebugStrength = FindOrCreateScalarParameter(
+            Material,
+            TEXT("DWC_WetPartDebugStrength"),
+            0.0f,
+            -900,
+            430);
+        UMaterialExpressionScalarParameter* WetDarkeningStrength = FindOrCreateScalarParameter(
+            Material,
+            TEXT("DWC_WetDarkeningStrength"),
+            0.35f,
+            -900,
+            140);
+        UMaterialExpressionVertexColor* VertexColor = FindOrCreateVertexColor(Material, -900, -270);
+        UMaterialExpressionAppendVector* DebugColorGB = Cast<UMaterialExpressionAppendVector>(
+            UMaterialEditingLibrary::CreateMaterialExpression(Material, UMaterialExpressionAppendVector::StaticClass(), -620, -260));
+        UMaterialExpressionAppendVector* DebugColorGBA = Cast<UMaterialExpressionAppendVector>(
+            UMaterialEditingLibrary::CreateMaterialExpression(Material, UMaterialExpressionAppendVector::StaticClass(), -420, -230));
+        UMaterialExpressionMultiply* WetDarkeningMask = Cast<UMaterialExpressionMultiply>(
+            UMaterialEditingLibrary::CreateMaterialExpression(Material, UMaterialExpressionMultiply::StaticClass(), -620, 140));
+        UMaterialExpressionConstant3Vector* WetDarkenTarget = Cast<UMaterialExpressionConstant3Vector>(
+            UMaterialEditingLibrary::CreateMaterialExpression(Material, UMaterialExpressionConstant3Vector::StaticClass(), -420, 35));
+        UMaterialExpressionLinearInterpolate* WetBaseColorLerp = Cast<UMaterialExpressionLinearInterpolate>(
+            UMaterialEditingLibrary::CreateMaterialExpression(Material, UMaterialExpressionLinearInterpolate::StaticClass(), -250, 40));
+        UMaterialExpressionMultiply* DebugMask = Cast<UMaterialExpressionMultiply>(
+            UMaterialEditingLibrary::CreateMaterialExpression(Material, UMaterialExpressionMultiply::StaticClass(), -620, 430));
+        UMaterialExpressionLinearInterpolate* DebugLerp = Cast<UMaterialExpressionLinearInterpolate>(
+            UMaterialEditingLibrary::CreateMaterialExpression(Material, UMaterialExpressionLinearInterpolate::StaticClass(), -110, -145));
+
+        if (WetnessMap == nullptr || DWCDataUV == nullptr || DebugStrength == nullptr || WetDarkeningStrength == nullptr ||
+            VertexColor == nullptr || DebugColorGB == nullptr || DebugColorGBA == nullptr ||
+            WetDarkeningMask == nullptr || WetDarkenTarget == nullptr || WetBaseColorLerp == nullptr ||
+            DebugMask == nullptr || DebugLerp == nullptr)
+        {
+            FailureReasons.Add(TEXT("DWC GPU debug setup could not create one or more required nodes."));
+            return false;
+        }
+
+        WetDarkenTarget->Constant = FLinearColor::Black;
+
+        bool bConnected = true;
+        bConnected &= ConnectTextureCoordinateChecked(DWCDataUV, WetnessMap, FailureReasons);
+        bConnected &= ConnectChecked(WetnessMap, TEXT("R"), WetDarkeningMask, TEXT("A"), FailureReasons);
+        bConnected &= ConnectChecked(WetDarkeningStrength, FString(), WetDarkeningMask, TEXT("B"), FailureReasons);
+        bConnected &= ConnectChecked(ApplyCall, ApplyBaseColorOutput, WetBaseColorLerp, TEXT("A"), FailureReasons);
+        bConnected &= ConnectChecked(WetDarkenTarget, FString(), WetBaseColorLerp, TEXT("B"), FailureReasons);
+        bConnected &= ConnectChecked(WetDarkeningMask, FString(), WetBaseColorLerp, TEXT("Alpha"), FailureReasons);
+        bConnected &= ConnectChecked(WetnessMap, TEXT("R"), DebugMask, TEXT("A"), FailureReasons);
+        bConnected &= ConnectChecked(DebugStrength, FString(), DebugMask, TEXT("B"), FailureReasons);
+        bConnected &= ConnectChecked(VertexColor, TEXT("G"), DebugColorGB, TEXT("A"), FailureReasons);
+        bConnected &= ConnectChecked(VertexColor, TEXT("B"), DebugColorGB, TEXT("B"), FailureReasons);
+        bConnected &= ConnectChecked(DebugColorGB, FString(), DebugColorGBA, TEXT("A"), FailureReasons);
+        bConnected &= ConnectChecked(VertexColor, TEXT("A"), DebugColorGBA, TEXT("B"), FailureReasons);
+        bConnected &= ConnectChecked(WetBaseColorLerp, FString(), DebugLerp, TEXT("A"), FailureReasons);
+        bConnected &= ConnectChecked(DebugColorGBA, FString(), DebugLerp, TEXT("B"), FailureReasons);
+        bConnected &= ConnectChecked(DebugMask, FString(), DebugLerp, TEXT("Alpha"), FailureReasons);
+        if (!UMaterialEditingLibrary::ConnectMaterialProperty(DebugLerp, FString(), MP_BaseColor))
+        {
+            FailureReasons.Add(TEXT("Failed to connect GPU wet-part debug blend to Material BaseColor."));
+            bConnected = false;
+        }
+
+        return bConnected;
     }
 
     bool ConnectDwcApplyWetnessNormalGraph(
         UMaterial*                               Material,
         UMaterialExpressionMaterialFunctionCall* ApplyCall,
+        const FWetClothingMaterialSetup::FOptions& Options,
         TArray<FString>&                         FailureReasons)
     {
         if (Material == nullptr || ApplyCall == nullptr)
@@ -1677,141 +1364,105 @@ namespace
             return false;
         }
 
-        ApplyCall->UpdateFromFunctionResource();
-        FString              BaseNormalOutputName;
-        UMaterialExpression* BaseNormalInput = nullptr;
-        if (!ResolveConnectedFunctionInput(ApplyCall, FName(TEXT("BaseNormal")), BaseNormalInput, BaseNormalOutputName))
+        if (!Options.bEnableDWCDataUVSampling)
         {
-            BaseNormalInput = ResolveMaterialPropertyInputOrFallback(Material, MP_Normal, FVector2D(-900.0f, 500.0f), BaseNormalOutputName);
+            return true;
         }
 
-        const UMaterialExpressionCustom* DwcWrinkleBlend = Cast<UMaterialExpressionCustom>(BaseNormalInput);
-        if (BaseNormalInput == ApplyCall ||
-            (DwcWrinkleBlend != nullptr && DwcWrinkleBlend->Description == TEXT("DWC Blend Runtime Wrinkle Normal")))
+        FString              BaseNormalOutputName;
+        UMaterialExpression* BaseNormalInput = ResolveMaterialPropertyInputOrFallback(Material, MP_Normal, FVector2D(-900.0f, 500.0f), BaseNormalOutputName);
+        if (BaseNormalInput == ApplyCall)
         {
-            BaseNormalInput = nullptr;
+            BaseNormalInput = Cast<UMaterialExpressionConstant3Vector>(
+                UMaterialEditingLibrary::CreateMaterialExpression(Material, UMaterialExpressionConstant3Vector::StaticClass(), -900, 500));
+            if (UMaterialExpressionConstant3Vector* FlatNormal = Cast<UMaterialExpressionConstant3Vector>(BaseNormalInput))
+            {
+                FlatNormal->Constant = FLinearColor(0.0f, 0.0f, 1.0f);
+            }
             BaseNormalOutputName.Reset();
         }
 
-        if (BaseNormalInput == nullptr)
+        UMaterialExpressionTextureSampleParameter2D* WrinkleNormalMap = FindOrCreateTextureSampleParameter(
+            Material,
+            TEXT("DWC_WrinkleNormalMap"),
+            -900,
+            670);
+        UMaterialExpressionTextureCoordinate* WrinkleUV = FindOrCreateDWCDataTextureCoordinate(
+            Material,
+            Options.DWCDataUVChannelIndex,
+            -1150,
+            670);
+        UMaterialExpressionScalarParameter* UseWrinkleNormalMap = FindOrCreateScalarParameter(
+            Material,
+            TEXT("DWC_UseWrinkleNormalMap"),
+            0.0f,
+            -900,
+            840);
+        UMaterialExpressionScalarParameter* WrinkleStrength = FindOrCreateScalarParameter(
+            Material,
+            TEXT("DWC_WrinkleStrength"),
+            1.0f,
+            -900,
+            930);
+        UMaterialExpressionScalarParameter* WrinkleWetnessMin = FindOrCreateScalarParameter(
+            Material,
+            TEXT("DWC_WrinkleWetnessMin"),
+            0.25f,
+            -900,
+            1020);
+        UMaterialExpressionScalarParameter* WrinkleWetnessMax = FindOrCreateScalarParameter(
+            Material,
+            TEXT("DWC_WrinkleWetnessMax"),
+            1.0f,
+            -900,
+            1110);
+
+        const bool bCreatedRequiredNodes = BaseNormalInput != nullptr &&
+                                           WrinkleNormalMap != nullptr &&
+                                           WrinkleUV != nullptr &&
+                                           UseWrinkleNormalMap != nullptr &&
+                                           WrinkleStrength != nullptr &&
+                                           WrinkleWetnessMin != nullptr &&
+                                           WrinkleWetnessMax != nullptr;
+        if (!bCreatedRequiredNodes)
         {
-            UMaterialExpressionConstant3Vector* FlatNormal = nullptr;
-            for (UMaterialExpression* Expression : Material->GetExpressions())
-            {
-                UMaterialExpressionConstant3Vector* Candidate = Cast<UMaterialExpressionConstant3Vector>(Expression);
-                if (Candidate != nullptr && Candidate->Desc == TEXT("DWC Base Normal Fallback"))
-                {
-                    FlatNormal = Candidate;
-                    break;
-                }
-            }
-
-            if (FlatNormal == nullptr)
-            {
-                FlatNormal = Cast<UMaterialExpressionConstant3Vector>(
-                    UMaterialEditingLibrary::CreateMaterialExpression(Material, UMaterialExpressionConstant3Vector::StaticClass(), -900, 500));
-            }
-
-            if (FlatNormal != nullptr)
-            {
-                FlatNormal->Constant = FLinearColor(0.0f, 0.0f, 1.0f);
-                FlatNormal->Desc = TEXT("DWC Base Normal Fallback");
-                BaseNormalInput = FlatNormal;
-                BaseNormalOutputName.Reset();
-            }
-        }
-
-        if (BaseNormalInput == nullptr)
-        {
-            FailureReasons.Add(TEXT("DWC material setup could not resolve the source material Normal input."));
+            FailureReasons.Add(TEXT("DWC material setup could not create one or more wrinkle normal nodes."));
             return false;
         }
 
         bool bConnected = true;
         bConnected &= ConnectChecked(BaseNormalInput, BaseNormalOutputName, ApplyCall, TEXT("BaseNormal"), FailureReasons);
+        bConnected &= ConnectTextureCoordinateChecked(WrinkleUV, WrinkleNormalMap, FailureReasons);
+        bConnected &= ConnectChecked(WrinkleNormalMap, TEXT("RGB"), ApplyCall, TEXT("WrinkleNormal"), FailureReasons);
+        bConnected &= ConnectChecked(UseWrinkleNormalMap, FString(), ApplyCall, TEXT("UseWrinkleNormalMap"), FailureReasons);
+        bConnected &= ConnectChecked(WrinkleStrength, FString(), ApplyCall, TEXT("WrinkleStrength"), FailureReasons);
+        bConnected &= ConnectChecked(WrinkleWetnessMin, FString(), ApplyCall, TEXT("WrinkleWetnessMin"), FailureReasons);
+        bConnected &= ConnectChecked(WrinkleWetnessMax, FString(), ApplyCall, TEXT("WrinkleWetnessMax"), FailureReasons);
 
         FString ApplyNormalOutput;
         if (!ResolveRequiredOutputName(ApplyCall, TEXT("Normal"), ApplyNormalOutput))
         {
             FailureReasons.Add(FString::Printf(TEXT("Missing output 'Normal' on MF_DWC_ApplyWetness. Available outputs: %s"),
-                                               *JoinPinNames(UMaterialEditingLibrary::GetMaterialExpressionOutputNames(ApplyCall))));
+                                               *JoinPinNames(GetMaterialExpressionOutputNames(ApplyCall))));
             return false;
         }
 
         if (!UMaterialEditingLibrary::ConnectMaterialProperty(ApplyCall, ApplyNormalOutput, MP_Normal))
         {
-            FailureReasons.Add(TEXT("Failed to connect MF_DWC_ApplyWetness output 'Normal' to Material Normal."));
+            FailureReasons.Add(TEXT("Failed to connect the DWC wetness normal output to Material Normal."));
             bConnected = false;
         }
 
-        RemoveMaterialLevelDwcWetnessNodes(Material);
-
         return bConnected;
-    }
-
-    bool ConnectDwcSurfaceWaterUV(
-        UMaterial* Material,
-        UMaterialExpressionMaterialFunctionCall* ApplyCall,
-        const int32 SurfaceWaterUVChannelIndex,
-        TArray<FString>& FailureReasons)
-    {
-        if (!Material || !ApplyCall || !HasInput(ApplyCall, TEXT("SurfaceWaterUV")))
-        {
-            FailureReasons.Add(TEXT("MF_DWC_ApplyWetness is missing the SurfaceWaterUV input."));
-            return false;
-        }
-
-        const int32 SafeUVChannelIndex = FMath::Clamp(SurfaceWaterUVChannelIndex, 0, 7);
-        UMaterialExpressionTextureCoordinate* SurfaceUV = nullptr;
-        for (UMaterialExpression* Expression : Material->GetExpressions())
-        {
-            UMaterialExpressionTextureCoordinate* Candidate = Cast<UMaterialExpressionTextureCoordinate>(Expression);
-            if (Candidate && Candidate->Desc == TEXT("DWC Surface Water UV"))
-            {
-                SurfaceUV = Candidate;
-                break;
-            }
-        }
-
-        if (!SurfaceUV)
-        {
-            SurfaceUV = Cast<UMaterialExpressionTextureCoordinate>(
-                UMaterialEditingLibrary::CreateMaterialExpression(
-                    Material, UMaterialExpressionTextureCoordinate::StaticClass(), -1150, 1240));
-        }
-        if (!SurfaceUV)
-        {
-            FailureReasons.Add(TEXT("Could not create the DWC Surface Water TextureCoordinate node."));
-            return false;
-        }
-
-        SurfaceUV->CoordinateIndex = SafeUVChannelIndex;
-        SurfaceUV->Desc = TEXT("DWC Surface Water UV");
-        return ConnectChecked(SurfaceUV, FString(), ApplyCall, TEXT("SurfaceWaterUV"), FailureReasons);
-    }
-
-    void ConfigureDwcMaterialNormalSettings(UMaterial* Material)
-    {
-        if (Material == nullptr)
-        {
-            return;
-        }
-
-        // DWC wrinkle maps are baked as tangent-space normals, so generated wet materials must
-        // evaluate the Normal input in tangent space even if the source material used another mode.
-        Material->bTangentSpaceNormal = true;
     }
 
     bool ConfigureExistingDwcMaterial(
         UMaterial*                  Material,
         UMaterialFunctionInterface* ApplyFunction,
         UMaterialFunctionInterface* DebugFunction,
-        int32                       WrinkleUVChannelIndex,
-        int32                       SurfaceWaterUVChannelIndex,
+        const FWetClothingMaterialSetup::FOptions& Options,
         TArray<FString>&            FailureReasons)
     {
-        (void)WrinkleUVChannelIndex;
-
         UMaterialExpressionMaterialFunctionCall* ApplyCall = FindFunctionCall(Material, ApplyFunction);
         UMaterialExpressionMaterialFunctionCall* DebugCall = FindFunctionCall(Material, DebugFunction);
         if (ApplyCall == nullptr || DebugCall == nullptr)
@@ -1820,44 +1471,81 @@ namespace
             return false;
         }
 
-        ConfigureDwcMaterialNormalSettings(Material);
+        bool                                bConnected = true;
+        UMaterialExpressionScalarParameter* WetDarkeningStrength = FindOrCreateScalarParameter(
+            Material,
+            TEXT("DWC_WetDarkeningStrength"),
+            0.35f,
+            -900,
+            140);
+        UMaterialExpressionScalarParameter* WetRoughness = FindOrCreateScalarParameter(
+            Material,
+            TEXT("DWC_WetRoughness"),
+            0.12f,
+            -900,
+            230);
+        UMaterialExpressionScalarParameter* SurfaceWaterStrength = FindOrCreateScalarParameter(
+            Material,
+            TEXT("DWC_SurfaceWaterStrength"),
+            1.0f,
+            -900,
+            330);
 
-        bool bConnected = true;
-        bConnected &= ConnectDwcApplyWetnessNormalGraph(Material, ApplyCall, FailureReasons);
-        bConnected &= ConnectDwcSurfaceWaterUV(Material, ApplyCall, SurfaceWaterUVChannelIndex, FailureReasons);
-        bConnected &= RemoveLegacyDwcClearCoatRendering(Material, ApplyCall, FailureReasons);
+        if (WetDarkeningStrength == nullptr)
+        {
+            FailureReasons.Add(TEXT("Could not create DWC_WetDarkeningStrength scalar parameter."));
+            bConnected = false;
+        }
+        else
+        {
+            bConnected &= ConnectChecked(WetDarkeningStrength, FString(), ApplyCall, TEXT("WetDarkeningStrength"), FailureReasons);
+        }
+        if (WetRoughness == nullptr)
+        {
+            FailureReasons.Add(TEXT("Could not create DWC_WetRoughness scalar parameter."));
+            bConnected = false;
+        }
+        else
+        {
+            bConnected &= ConnectChecked(WetRoughness, FString(), ApplyCall, TEXT("WetRoughness"), FailureReasons);
+        }
+        if (SurfaceWaterStrength == nullptr)
+        {
+            FailureReasons.Add(TEXT("Could not create DWC_SurfaceWaterStrength scalar parameter."));
+            bConnected = false;
+        }
+        else
+        {
+            bConnected &= ConnectChecked(SurfaceWaterStrength, FString(), ApplyCall, TEXT("SurfaceWaterStrength"), FailureReasons);
+        }
+        bConnected &= ConnectDwcCPUVertexWetnessGraph(Material, ApplyCall, Options, FailureReasons);
+        bConnected &= ConnectDwcApplyWetnessNormalGraph(Material, ApplyCall, Options, FailureReasons);
+        bConnected &= ConnectDwcWetnessMapGraph(Material, ApplyCall, Options, FailureReasons);
 
         FString ApplyBaseColorOutput;
         FString ApplyRoughnessOutput;
-        FString DebugColorOutput;
         if (!ResolveRequiredOutputName(ApplyCall, TEXT("BaseColor"), ApplyBaseColorOutput))
         {
             FailureReasons.Add(FString::Printf(TEXT("Missing output 'BaseColor' on MF_DWC_ApplyWetness. Available outputs: %s"),
-                                               *JoinPinNames(UMaterialEditingLibrary::GetMaterialExpressionOutputNames(ApplyCall))));
+                                               *JoinPinNames(GetMaterialExpressionOutputNames(ApplyCall))));
             bConnected = false;
         }
         if (!ResolveRequiredOutputName(ApplyCall, TEXT("Roughness"), ApplyRoughnessOutput))
         {
             FailureReasons.Add(FString::Printf(TEXT("Missing output 'Roughness' on MF_DWC_ApplyWetness. Available outputs: %s"),
-                                               *JoinPinNames(UMaterialEditingLibrary::GetMaterialExpressionOutputNames(ApplyCall))));
-            bConnected = false;
-        }
-        if (!ResolveRequiredOutputName(DebugCall, TEXT("Color"), DebugColorOutput))
-        {
-            FailureReasons.Add(FString::Printf(TEXT("Missing output 'Color' on MF_DWC_WetPartDebug. Available outputs: %s"),
-                                               *JoinPinNames(UMaterialEditingLibrary::GetMaterialExpressionOutputNames(DebugCall))));
+                                               *JoinPinNames(GetMaterialExpressionOutputNames(ApplyCall))));
             bConnected = false;
         }
 
         if (!ApplyBaseColorOutput.IsEmpty())
         {
-            bConnected &= ConnectChecked(ApplyCall, ApplyBaseColorOutput, DebugCall, TEXT("BaseColor"), FailureReasons);
-        }
-        if (!DebugColorOutput.IsEmpty() && !UMaterialEditingLibrary::ConnectMaterialProperty(DebugCall, DebugColorOutput, MP_BaseColor))
-        {
-            FailureReasons.Add(FString::Printf(TEXT("Failed to connect MF_DWC_WetPartDebug output '%s' to Material BaseColor."),
-                                               DebugColorOutput.IsEmpty() ? TEXT("<first>") : *DebugColorOutput));
-            bConnected = false;
+            bConnected &= ConnectDwcDebugBaseColorGraph(
+                Material,
+                ApplyCall,
+                DebugCall,
+                Options,
+                ApplyBaseColorOutput,
+                FailureReasons);
         }
         if (!ApplyRoughnessOutput.IsEmpty() && !UMaterialEditingLibrary::ConnectMaterialProperty(ApplyCall, ApplyRoughnessOutput, MP_Roughness))
         {
@@ -1873,12 +1561,9 @@ namespace
         UMaterial*                  Material,
         UMaterialFunctionInterface* ApplyFunction,
         UMaterialFunctionInterface* DebugFunction,
-        int32                       WrinkleUVChannelIndex,
-        int32                       SurfaceWaterUVChannelIndex,
+        const FWetClothingMaterialSetup::FOptions& Options,
         TArray<FString>&            FailureReasons)
     {
-        (void)WrinkleUVChannelIndex;
-
         FString              BaseColorOutputName;
         UMaterialExpression* BaseColorInput = ResolveMaterialPropertyInputOrFallback(Material, MP_BaseColor, FVector2D(-900.0f, -120.0f), BaseColorOutputName);
         FString              RoughnessOutputName;
@@ -1887,8 +1572,13 @@ namespace
         UMaterialExpressionMaterialFunctionCall* ApplyCall = CreateFunctionCall(Material, ApplyFunction, -360, -70);
         UMaterialExpressionMaterialFunctionCall* DebugCall = CreateFunctionCall(Material, DebugFunction, 60, -95);
 
+        UMaterialExpressionScalarParameter* WetDarkeningStrength = CreateScalarParameter(Material, TEXT("DWC_WetDarkeningStrength"), 0.35f, -900, 140);
+        UMaterialExpressionScalarParameter* WetRoughness = CreateScalarParameter(Material, TEXT("DWC_WetRoughness"), 0.12f, -900, 230);
+        UMaterialExpressionScalarParameter* SurfaceWaterStrength = CreateScalarParameter(Material, TEXT("DWC_SurfaceWaterStrength"), 1.0f, -900, 330);
+
         const bool bCreatedRequiredNodes = ApplyCall != nullptr && DebugCall != nullptr &&
-                                           BaseColorInput != nullptr && RoughnessInput != nullptr;
+                                           BaseColorInput != nullptr && RoughnessInput != nullptr &&
+                                           WetDarkeningStrength != nullptr && WetRoughness != nullptr && SurfaceWaterStrength != nullptr;
         if (!bCreatedRequiredNodes)
         {
             FailureReasons.Add(TEXT("DWC material setup could not create one or more required nodes."));
@@ -1897,49 +1587,44 @@ namespace
 
         bool bConnected = true;
         bConnected &= ConnectChecked(BaseColorInput, BaseColorOutputName, ApplyCall, TEXT("BaseColor"), FailureReasons);
+        bConnected &= ConnectChecked(WetDarkeningStrength, FString(), ApplyCall, TEXT("WetDarkeningStrength"), FailureReasons);
         bConnected &= ConnectChecked(RoughnessInput, RoughnessOutputName, ApplyCall, TEXT("BaseRoughness"), FailureReasons);
-        bConnected &= ConnectDwcApplyWetnessNormalGraph(Material, ApplyCall, FailureReasons);
-        bConnected &= ConnectDwcSurfaceWaterUV(Material, ApplyCall, SurfaceWaterUVChannelIndex, FailureReasons);
-        bConnected &= RemoveLegacyDwcClearCoatRendering(Material, ApplyCall, FailureReasons);
+        bConnected &= ConnectChecked(WetRoughness, FString(), ApplyCall, TEXT("WetRoughness"), FailureReasons);
+        bConnected &= ConnectChecked(SurfaceWaterStrength, FString(), ApplyCall, TEXT("SurfaceWaterStrength"), FailureReasons);
+        bConnected &= ConnectDwcCPUVertexWetnessGraph(Material, ApplyCall, Options, FailureReasons);
+        bConnected &= ConnectDwcApplyWetnessNormalGraph(Material, ApplyCall, Options, FailureReasons);
+        bConnected &= ConnectDwcWetnessMapGraph(Material, ApplyCall, Options, FailureReasons);
 
         FString ApplyBaseColorOutput;
         FString ApplyRoughnessOutput;
-        FString DebugColorOutput;
         if (!ResolveRequiredOutputName(ApplyCall, TEXT("BaseColor"), ApplyBaseColorOutput))
         {
             FailureReasons.Add(FString::Printf(TEXT("Missing output 'BaseColor' on MF_DWC_ApplyWetness. Available outputs: %s"),
-                                               *JoinPinNames(UMaterialEditingLibrary::GetMaterialExpressionOutputNames(ApplyCall))));
+                                               *JoinPinNames(GetMaterialExpressionOutputNames(ApplyCall))));
             bConnected = false;
         }
         if (!ResolveRequiredOutputName(ApplyCall, TEXT("Roughness"), ApplyRoughnessOutput))
         {
             FailureReasons.Add(FString::Printf(TEXT("Missing output 'Roughness' on MF_DWC_ApplyWetness. Available outputs: %s"),
-                                               *JoinPinNames(UMaterialEditingLibrary::GetMaterialExpressionOutputNames(ApplyCall))));
-            bConnected = false;
-        }
-        if (!ResolveRequiredOutputName(DebugCall, TEXT("Color"), DebugColorOutput))
-        {
-            FailureReasons.Add(FString::Printf(TEXT("Missing output 'Color' on MF_DWC_WetPartDebug. Available outputs: %s"),
-                                               *JoinPinNames(UMaterialEditingLibrary::GetMaterialExpressionOutputNames(DebugCall))));
+                                               *JoinPinNames(GetMaterialExpressionOutputNames(ApplyCall))));
             bConnected = false;
         }
 
         if (!ApplyBaseColorOutput.IsEmpty())
         {
-            bConnected &= ConnectChecked(ApplyCall, ApplyBaseColorOutput, DebugCall, TEXT("BaseColor"), FailureReasons);
-        }
-        if (!DebugColorOutput.IsEmpty() && !UMaterialEditingLibrary::ConnectMaterialProperty(DebugCall, DebugColorOutput, MP_BaseColor))
-        {
-            FailureReasons.Add(FString::Printf(TEXT("Failed to connect MF_DWC_WetPartDebug output '%s' to Material BaseColor. Available outputs: %s"),
-                                               DebugColorOutput.IsEmpty() ? TEXT("<first>") : *DebugColorOutput,
-                                               *JoinPinNames(UMaterialEditingLibrary::GetMaterialExpressionOutputNames(DebugCall))));
-            bConnected = false;
+            bConnected &= ConnectDwcDebugBaseColorGraph(
+                Material,
+                ApplyCall,
+                DebugCall,
+                Options,
+                ApplyBaseColorOutput,
+                FailureReasons);
         }
         if (!ApplyRoughnessOutput.IsEmpty() && !UMaterialEditingLibrary::ConnectMaterialProperty(ApplyCall, ApplyRoughnessOutput, MP_Roughness))
         {
             FailureReasons.Add(FString::Printf(TEXT("Failed to connect MF_DWC_ApplyWetness output '%s' to Material Roughness. Available outputs: %s"),
                                                ApplyRoughnessOutput.IsEmpty() ? TEXT("<first>") : *ApplyRoughnessOutput,
-                                               *JoinPinNames(UMaterialEditingLibrary::GetMaterialExpressionOutputNames(ApplyCall))));
+                                               *JoinPinNames(GetMaterialExpressionOutputNames(ApplyCall))));
             bConnected = false;
         }
 
@@ -1947,10 +1632,26 @@ namespace
     }
 } // namespace
 
+FWetClothingMaterialSetup::FOptions FWetClothingMaterialSetup::MakeOptionsForAsset(
+    const UWetClothingAsset* WetClothingAsset,
+    const EDWCSimulationMode SimulationMode)
+{
+    FOptions Options;
+    Options.SimulationMode = SimulationMode;
+    if (WetClothingAsset != nullptr)
+    {
+        Options.DWCDataUVChannelIndex = WetClothingAsset->GetDWCDataUVChannelIndex();
+        Options.bEnableDWCDataUVSampling = Options.DWCDataUVChannelIndex != INDEX_NONE;
+        Options.bConnectWetnessMapPath =
+            SimulationMode == EDWCSimulationMode::WetnessMapGPU &&
+            Options.bEnableDWCDataUVSampling;
+    }
+    return Options;
+}
+
 FWetClothingMaterialSetupResult FWetClothingMaterialSetup::DuplicateAndApplyToMaterialInterface(
     UMaterialInterface* MaterialInterface,
-    int32 WrinkleUVChannelIndex,
-    int32 SurfaceWaterUVChannelIndex)
+    const FOptions& Options)
 {
     FWetClothingMaterialSetupResult Result;
 
@@ -1960,7 +1661,15 @@ FWetClothingMaterialSetupResult FWetClothingMaterialSetup::DuplicateAndApplyToMa
         return Result;
     }
 
+    if ((Options.bConnectWetnessMapPath || Options.bEnableDWCDataUVSampling) &&
+        (Options.DWCDataUVChannelIndex < 0 || Options.DWCDataUVChannelIndex > 7))
+    {
+        Result.Message = TEXT("DWC material setup requires a generated DWC Data UV channel. Generate DWC Data UV first.");
+        return Result;
+    }
+
     UMaterial* Material = Cast<UMaterial>(MaterialInterface);
+    const TCHAR* GeneratedDwcMaterialSuffix = GetGeneratedDwcMaterialSuffix(Options.SimulationMode);
     if (Material == nullptr)
     {
         const UMaterialInstance* MaterialInstance = Cast<UMaterialInstance>(MaterialInterface);
@@ -1971,16 +1680,15 @@ FWetClothingMaterialSetupResult FWetClothingMaterialSetup::DuplicateAndApplyToMa
         }
 
         UMaterial* ParentMaterial = const_cast<UMaterial*>(MaterialInstance->GetMaterial());
-        if (IsMaterialConfiguredForDwc(MaterialInterface))
+        if (IsMaterialConfiguredForDwc(MaterialInterface, Options))
         {
             if (ParentMaterial != nullptr)
             {
-                FWetClothingMaterialSetupResult ParentRefreshResult = DuplicateAndApplyToMaterialInterface(
-                    ParentMaterial, WrinkleUVChannelIndex, SurfaceWaterUVChannelIndex);
+                FWetClothingMaterialSetupResult ParentRefreshResult = DuplicateAndApplyToMaterialInterface(ParentMaterial, Options);
                 if (!ParentRefreshResult.bSucceeded)
                 {
                     Result.Message = FString::Printf(
-                        TEXT("'%s' is already backed by a DWC material, but the parent material output connections could not be refreshed.\n%s"),
+                        TEXT("'%s' is already backed by a DWC material, but the parent material could not be refreshed.\n%s"),
                         *MaterialInterface->GetName(),
                         *ParentRefreshResult.Message);
                     return Result;
@@ -1991,7 +1699,7 @@ FWetClothingMaterialSetupResult FWetClothingMaterialSetup::DuplicateAndApplyToMa
             Result.bAlreadyConfigured = true;
             Result.ConfiguredMaterial = MaterialInterface;
             Result.Message = FString::Printf(
-                TEXT("'%s' is already backed by a DWC material. Refreshed its parent material output connections."),
+                TEXT("'%s' is already backed by a DWC material. Refreshed its parent material."),
                 *MaterialInterface->GetName());
             return Result;
         }
@@ -2002,8 +1710,7 @@ FWetClothingMaterialSetupResult FWetClothingMaterialSetup::DuplicateAndApplyToMa
             return Result;
         }
 
-        FWetClothingMaterialSetupResult ParentResult = DuplicateAndApplyToMaterialInterface(
-            ParentMaterial, WrinkleUVChannelIndex, SurfaceWaterUVChannelIndex);
+        FWetClothingMaterialSetupResult ParentResult = DuplicateAndApplyToMaterialInterface(ParentMaterial, Options);
         if (!ParentResult.bSucceeded || ParentResult.ConfiguredMaterial == nullptr)
         {
             Result.Message = FString::Printf(
@@ -2019,6 +1726,7 @@ FWetClothingMaterialSetupResult FWetClothingMaterialSetup::DuplicateAndApplyToMa
             MaterialInstance,
             ParentResult.ConfiguredMaterial,
             ParentMaterial,
+            GeneratedDwcMaterialSuffix,
             InstanceErrorMessage,
             bReusedExistingInstance);
         if (WetInstance == nullptr)
@@ -2041,7 +1749,9 @@ FWetClothingMaterialSetupResult FWetClothingMaterialSetup::DuplicateAndApplyToMa
 
     FString ApplyFunctionPath;
     FString DebugFunctionPath;
-    UMaterialFunctionInterface* ApplyFunction = LoadDwcMaterialFunction(TEXT("MF_DWC_ApplyWetness"), &ApplyFunctionPath);
+    UMaterialFunctionInterface* ApplyFunction = LoadDwcApplyWetnessMaterialFunction(
+        Options.SimulationMode,
+        &ApplyFunctionPath);
     UMaterialFunctionInterface* DebugFunction = LoadDwcMaterialFunction(TEXT("MF_DWC_WetPartDebug"), &DebugFunctionPath);
     if (ApplyFunction == nullptr || DebugFunction == nullptr)
     {
@@ -2052,13 +1762,14 @@ FWetClothingMaterialSetupResult FWetClothingMaterialSetup::DuplicateAndApplyToMa
         return Result;
     }
 
-    TArray<FString> ApplyFunctionFailureReasons;
-    if (!ValidateApplyWetnessFunctionContract(ApplyFunction, ApplyFunctionFailureReasons))
     {
-        Result.Message = TEXT("The fixed MF_DWC_ApplyWetness asset is incompatible with this DWCEditor build.\n");
-        Result.Message += FString::Join(ApplyFunctionFailureReasons, TEXT("\n"));
-        Result.Message += TEXT("\nRun 'DWC.RepairApplyWetnessFunction' explicitly, then retry Material Setup.");
-        return Result;
+        TArray<FString> FailureReasons;
+        if (!PrepareDwcApplyWetnessFunction(ApplyFunction, Options, FailureReasons))
+        {
+            Result.Message = TEXT("Could not prepare DWC apply wetness material function.\n");
+            Result.Message += FString::Join(FailureReasons, TEXT("\n"));
+            return Result;
+        }
     }
 
     if (HasFunctionCall(Material, ApplyFunction) || HasFunctionCall(Material, DebugFunction))
@@ -2066,10 +1777,10 @@ FWetClothingMaterialSetupResult FWetClothingMaterialSetup::DuplicateAndApplyToMa
         const FScopedTransaction Transaction(NSLOCTEXT("DWC", "RepairWetnessMaterialSetup", "Repair Dynamic Wet Clothes Material Setup"));
         Material->Modify();
 
-        TArray<FString> FailureReasons;
-        const bool bConfigured = ConfigureExistingDwcMaterial(
-            Material, ApplyFunction, DebugFunction, WrinkleUVChannelIndex, SurfaceWaterUVChannelIndex, FailureReasons);
-        const TArray<FString> CompileErrors = bConfigured ? UMaterialEditingLibrary::RecompileMaterial(Material) : TArray<FString>();
+        TArray<FString>       FailureReasons;
+        const bool            bConfigured = ConfigureExistingDwcMaterial(Material, ApplyFunction, DebugFunction, Options, FailureReasons);
+        ReplaceMissingTextureSamplesWithFallbacks(Material);
+        const TArray<FString> CompileErrors = bConfigured ? RecompileMaterialAndCollectErrors(Material) : TArray<FString>();
         Material->MarkPackageDirty();
 
         Result.bSucceeded = bConfigured && CompileErrors.Num() == 0;
@@ -2077,22 +1788,24 @@ FWetClothingMaterialSetupResult FWetClothingMaterialSetup::DuplicateAndApplyToMa
         Result.ConfiguredMaterial = Result.bSucceeded ? Material : nullptr;
         Result.Message = Result.bSucceeded
                              ? FString::Printf(TEXT("'%s' already contains DWC material functions. Refreshed DWC output connections."), *Material->GetName())
-                             : FString::Printf(TEXT("'%s' contains DWC material functions but setup refresh failed.\n%s"), *Material->GetName(), *FString::Join(FailureReasons, TEXT("\n")));
+                             : BuildCompileErrorMessage(
+                                   FString::Printf(TEXT("'%s' contains DWC material functions but setup refresh failed.\n%s"), *Material->GetName(), *FString::Join(FailureReasons, TEXT("\n"))),
+                                   CompileErrors);
         return Result;
     }
 
-    bool bExpectedDwcPackageExists = false;
-    if (UMaterial* ExistingDwcMaterial = LoadExistingDwcMaterialForSource(Material, &bExpectedDwcPackageExists))
+    if (UMaterial* ExistingDwcMaterial = LoadExistingDwcMaterialForSource(Material, GeneratedDwcMaterialSuffix))
     {
         const FScopedTransaction Transaction(NSLOCTEXT("DWC", "ReuseWetnessMaterialSetup", "Reuse Dynamic Wet Clothes Material Setup"));
         ExistingDwcMaterial->Modify();
 
-        TArray<FString> FailureReasons;
+        TArray<FString>       FailureReasons;
         const bool            bHasDwcFunctionCall = HasFunctionCall(ExistingDwcMaterial, ApplyFunction) || HasFunctionCall(ExistingDwcMaterial, DebugFunction);
         const bool            bConfigured = bHasDwcFunctionCall
-                                                ? ConfigureExistingDwcMaterial(ExistingDwcMaterial, ApplyFunction, DebugFunction, WrinkleUVChannelIndex, SurfaceWaterUVChannelIndex, FailureReasons)
-                                                : CreateDwcMaterialGraph(ExistingDwcMaterial, ApplyFunction, DebugFunction, WrinkleUVChannelIndex, SurfaceWaterUVChannelIndex, FailureReasons);
-        const TArray<FString> CompileErrors = bConfigured ? UMaterialEditingLibrary::RecompileMaterial(ExistingDwcMaterial) : TArray<FString>();
+                                                ? ConfigureExistingDwcMaterial(ExistingDwcMaterial, ApplyFunction, DebugFunction, Options, FailureReasons)
+                                                : CreateDwcMaterialGraph(ExistingDwcMaterial, ApplyFunction, DebugFunction, Options, FailureReasons);
+        ReplaceMissingTextureSamplesWithFallbacks(ExistingDwcMaterial);
+        const TArray<FString> CompileErrors = bConfigured ? RecompileMaterialAndCollectErrors(ExistingDwcMaterial) : TArray<FString>();
         ExistingDwcMaterial->MarkPackageDirty();
 
         Result.bSucceeded = bConfigured && CompileErrors.Num() == 0;
@@ -2100,17 +1813,9 @@ FWetClothingMaterialSetupResult FWetClothingMaterialSetup::DuplicateAndApplyToMa
         Result.ConfiguredMaterial = Result.bSucceeded ? ExistingDwcMaterial : nullptr;
         Result.Message = Result.bSucceeded
                              ? FString::Printf(TEXT("Reused existing DWC material '%s' and refreshed DWC material setup."), *ExistingDwcMaterial->GetName())
-                             : FString::Printf(TEXT("Existing DWC material '%s' could not be refreshed.\n%s"), *ExistingDwcMaterial->GetName(), *FString::Join(FailureReasons, TEXT("\n")));
-        return Result;
-    }
-
-    if (bExpectedDwcPackageExists)
-    {
-        const FString SourcePackageName = Material->GetOutermost()->GetName();
-        const FString DwcPackageName = SourcePackageName.EndsWith(TEXT("_DWC")) ? SourcePackageName : SourcePackageName + TEXT("_DWC");
-        Result.Message = FString::Printf(
-            TEXT("Expected existing DWC material package '%s' exists but could not be loaded. Fix or remove that material before generating a new DWC override."),
-            *DwcPackageName);
+                             : BuildCompileErrorMessage(
+                                   FString::Printf(TEXT("Existing DWC material '%s' could not be refreshed.\n%s"), *ExistingDwcMaterial->GetName(), *FString::Join(FailureReasons, TEXT("\n"))),
+                                   CompileErrors);
         return Result;
     }
 
@@ -2118,7 +1823,11 @@ FWetClothingMaterialSetupResult FWetClothingMaterialSetup::DuplicateAndApplyToMa
     FString            NewPackageName;
     FString            NewAssetName;
     FAssetToolsModule& AssetToolsModule = FModuleManager::LoadModuleChecked<FAssetToolsModule>(TEXT("AssetTools"));
-    AssetToolsModule.Get().CreateUniqueAssetName(OriginalPackageName, TEXT("_DWC"), NewPackageName, NewAssetName);
+    AssetToolsModule.Get().CreateUniqueAssetName(
+        StripKnownDwcSuffix(OriginalPackageName),
+        GeneratedDwcMaterialSuffix,
+        NewPackageName,
+        NewAssetName);
 
     const FString NewPackagePath = FPackageName::GetLongPackagePath(NewPackageName);
     UMaterial*    DuplicatedMaterial = Cast<UMaterial>(AssetToolsModule.Get().DuplicateAsset(NewAssetName, NewPackagePath, Material));
@@ -2132,7 +1841,7 @@ FWetClothingMaterialSetupResult FWetClothingMaterialSetup::DuplicateAndApplyToMa
 
     const FScopedTransaction Transaction(NSLOCTEXT("DWC", "ApplyWetnessMaterialSetup", "Apply Dynamic Wet Clothes Material Setup"));
     Material->Modify();
-    ConfigureDwcMaterialNormalSettings(Material);
+    ReplaceMissingTextureSamplesWithFallbacks(Material);
 
     FString              BaseColorOutputName;
     UMaterialExpression* BaseColorInput = ResolveMaterialPropertyInputOrFallback(Material, MP_BaseColor, FVector2D(-900.0f, -120.0f), BaseColorOutputName);
@@ -2142,8 +1851,13 @@ FWetClothingMaterialSetupResult FWetClothingMaterialSetup::DuplicateAndApplyToMa
     UMaterialExpressionMaterialFunctionCall* ApplyCall = CreateFunctionCall(Material, ApplyFunction, -360, -70);
     UMaterialExpressionMaterialFunctionCall* DebugCall = CreateFunctionCall(Material, DebugFunction, 60, -95);
 
+    UMaterialExpressionScalarParameter* WetDarkeningStrength = CreateScalarParameter(Material, TEXT("DWC_WetDarkeningStrength"), 0.35f, -900, 140);
+    UMaterialExpressionScalarParameter* WetRoughness = CreateScalarParameter(Material, TEXT("DWC_WetRoughness"), 0.12f, -900, 230);
+    UMaterialExpressionScalarParameter* SurfaceWaterStrength = CreateScalarParameter(Material, TEXT("DWC_SurfaceWaterStrength"), 1.0f, -900, 330);
+
     const bool bCreatedRequiredNodes = ApplyCall != nullptr && DebugCall != nullptr &&
-                                       BaseColorInput != nullptr && RoughnessInput != nullptr;
+                                       BaseColorInput != nullptr && RoughnessInput != nullptr &&
+                                       WetDarkeningStrength != nullptr && WetRoughness != nullptr && SurfaceWaterStrength != nullptr;
     if (!bCreatedRequiredNodes)
     {
         Result.Message = TEXT("DWC material setup could not create one or more required nodes.");
@@ -2153,48 +1867,43 @@ FWetClothingMaterialSetupResult FWetClothingMaterialSetup::DuplicateAndApplyToMa
     TArray<FString> FailureReasons;
     bool            bConnected = true;
     bConnected &= ConnectChecked(BaseColorInput, BaseColorOutputName, ApplyCall, TEXT("BaseColor"), FailureReasons);
+    bConnected &= ConnectChecked(WetDarkeningStrength, FString(), ApplyCall, TEXT("WetDarkeningStrength"), FailureReasons);
     bConnected &= ConnectChecked(RoughnessInput, RoughnessOutputName, ApplyCall, TEXT("BaseRoughness"), FailureReasons);
-    bConnected &= ConnectDwcApplyWetnessNormalGraph(Material, ApplyCall, FailureReasons);
-    bConnected &= ConnectDwcSurfaceWaterUV(Material, ApplyCall, SurfaceWaterUVChannelIndex, FailureReasons);
-    bConnected &= RemoveLegacyDwcClearCoatRendering(Material, ApplyCall, FailureReasons);
+    bConnected &= ConnectChecked(WetRoughness, FString(), ApplyCall, TEXT("WetRoughness"), FailureReasons);
+    bConnected &= ConnectChecked(SurfaceWaterStrength, FString(), ApplyCall, TEXT("SurfaceWaterStrength"), FailureReasons);
+    bConnected &= ConnectDwcCPUVertexWetnessGraph(Material, ApplyCall, Options, FailureReasons);
+    bConnected &= ConnectDwcApplyWetnessNormalGraph(Material, ApplyCall, Options, FailureReasons);
+    bConnected &= ConnectDwcWetnessMapGraph(Material, ApplyCall, Options, FailureReasons);
 
     FString ApplyBaseColorOutput;
     FString ApplyRoughnessOutput;
-    FString DebugColorOutput;
     if (!ResolveRequiredOutputName(ApplyCall, TEXT("BaseColor"), ApplyBaseColorOutput))
     {
         FailureReasons.Add(FString::Printf(TEXT("Missing output 'BaseColor' on MF_DWC_ApplyWetness. Available outputs: %s"),
-                                           *JoinPinNames(UMaterialEditingLibrary::GetMaterialExpressionOutputNames(ApplyCall))));
+                                           *JoinPinNames(GetMaterialExpressionOutputNames(ApplyCall))));
         bConnected = false;
     }
     if (!ResolveRequiredOutputName(ApplyCall, TEXT("Roughness"), ApplyRoughnessOutput))
     {
         FailureReasons.Add(FString::Printf(TEXT("Missing output 'Roughness' on MF_DWC_ApplyWetness. Available outputs: %s"),
-                                           *JoinPinNames(UMaterialEditingLibrary::GetMaterialExpressionOutputNames(ApplyCall))));
-        bConnected = false;
-    }
-    if (!ResolveRequiredOutputName(DebugCall, TEXT("Color"), DebugColorOutput))
-    {
-        FailureReasons.Add(FString::Printf(TEXT("Missing output 'Color' on MF_DWC_WetPartDebug. Available outputs: %s"),
-                                           *JoinPinNames(UMaterialEditingLibrary::GetMaterialExpressionOutputNames(DebugCall))));
+                                           *JoinPinNames(GetMaterialExpressionOutputNames(ApplyCall))));
         bConnected = false;
     }
     if (!ApplyBaseColorOutput.IsEmpty())
     {
-        bConnected &= ConnectChecked(ApplyCall, ApplyBaseColorOutput, DebugCall, TEXT("BaseColor"), FailureReasons);
-    }
-    if (!DebugColorOutput.IsEmpty() && !UMaterialEditingLibrary::ConnectMaterialProperty(DebugCall, DebugColorOutput, MP_BaseColor))
-    {
-        FailureReasons.Add(FString::Printf(TEXT("Failed to connect MF_DWC_WetPartDebug output '%s' to Material BaseColor. Available outputs: %s"),
-                                           DebugColorOutput.IsEmpty() ? TEXT("<first>") : *DebugColorOutput,
-                                           *JoinPinNames(UMaterialEditingLibrary::GetMaterialExpressionOutputNames(DebugCall))));
-        bConnected = false;
+        bConnected &= ConnectDwcDebugBaseColorGraph(
+            Material,
+            ApplyCall,
+            DebugCall,
+            Options,
+            ApplyBaseColorOutput,
+            FailureReasons);
     }
     if (!ApplyRoughnessOutput.IsEmpty() && !UMaterialEditingLibrary::ConnectMaterialProperty(ApplyCall, ApplyRoughnessOutput, MP_Roughness))
     {
         FailureReasons.Add(FString::Printf(TEXT("Failed to connect MF_DWC_ApplyWetness output '%s' to Material Roughness. Available outputs: %s"),
                                            ApplyRoughnessOutput.IsEmpty() ? TEXT("<first>") : *ApplyRoughnessOutput,
-                                           *JoinPinNames(UMaterialEditingLibrary::GetMaterialExpressionOutputNames(ApplyCall))));
+                                           *JoinPinNames(GetMaterialExpressionOutputNames(ApplyCall))));
         bConnected = false;
     }
 
@@ -2205,15 +1914,30 @@ FWetClothingMaterialSetupResult FWetClothingMaterialSetup::DuplicateAndApplyToMa
         return Result;
     }
 
-    const TArray<FString> CompileErrors = UMaterialEditingLibrary::RecompileMaterial(Material);
+    const TArray<FString> CompileErrors = RecompileMaterialAndCollectErrors(Material);
     Material->MarkPackageDirty();
 
     Result.bSucceeded = CompileErrors.Num() == 0;
     Result.ConfiguredMaterial = Result.bSucceeded ? Material : nullptr;
     Result.Message = Result.bSucceeded
                          ? FString::Printf(TEXT("Duplicated the source material and applied DWC material setup to '%s'."), *Material->GetName())
-                         : FString::Printf(TEXT("Duplicated the source material as '%s', but material compilation reported %d error(s)."), *Material->GetName(), CompileErrors.Num());
+                         : BuildCompileErrorMessage(
+                               FString::Printf(TEXT("Duplicated the source material as '%s', but material compilation reported %d error(s)."), *Material->GetName(), CompileErrors.Num()),
+                               CompileErrors);
     return Result;
+}
+
+FWetClothingMaterialSetupResult FWetClothingMaterialSetup::DuplicateAndApplyToMaterialInterface(
+    UMaterialInterface* MaterialInterface,
+    const int32 WrinkleUVChannelIndex,
+    const int32 FallbackDWCDataUVChannelIndex)
+{
+    FOptions Options;
+    Options.SimulationMode = EDWCSimulationMode::VertexCPU;
+    Options.DWCDataUVChannelIndex = WrinkleUVChannelIndex != INDEX_NONE ? WrinkleUVChannelIndex : FallbackDWCDataUVChannelIndex;
+    Options.bEnableDWCDataUVSampling = Options.DWCDataUVChannelIndex != INDEX_NONE;
+    Options.bConnectWetnessMapPath = false;
+    return DuplicateAndApplyToMaterialInterface(MaterialInterface, Options);
 }
 
 bool FWetClothingMaterialSetup::IsMaterialConfiguredForDwc(UMaterialInterface* MaterialInterface)
@@ -2229,60 +1953,203 @@ bool FWetClothingMaterialSetup::IsMaterialConfiguredForDwc(UMaterialInterface* M
         return false;
     }
 
-    UMaterialFunctionInterface* ApplyFunction = LoadDwcMaterialFunction(TEXT("MF_DWC_ApplyWetness"));
     UMaterialFunctionInterface* DebugFunction = LoadDwcMaterialFunction(TEXT("MF_DWC_WetPartDebug"));
-    return HasFunctionCall(Material, ApplyFunction) && HasFunctionCall(Material, DebugFunction);
+    UMaterialFunctionInterface* CPUApplyFunction = LoadDwcMaterialFunction(DwcApplyWetnessFunctionCPU);
+    UMaterialFunctionInterface* GPUApplyFunction = LoadDwcMaterialFunction(DwcApplyWetnessFunctionGPU);
+
+    return HasFunctionCall(Material, DebugFunction) &&
+           (HasFunctionCall(Material, CPUApplyFunction) ||
+            HasFunctionCall(Material, GPUApplyFunction));
+}
+
+bool FWetClothingMaterialSetup::IsMaterialConfiguredForDwc(
+    UMaterialInterface* MaterialInterface,
+    const FOptions& Options)
+{
+    if (!IsMaterialConfiguredForDwc(MaterialInterface))
+    {
+        return false;
+    }
+
+    UMaterial* Material = MaterialInterface != nullptr ? MaterialInterface->GetMaterial() : nullptr;
+    UMaterialFunctionInterface* ApplyFunction = LoadDwcApplyWetnessMaterialFunction(Options.SimulationMode);
+    UMaterialExpressionMaterialFunctionCall* ApplyCall = FindFunctionCall(Material, ApplyFunction);
+    if (ApplyCall == nullptr)
+    {
+        return false;
+    }
+
+    if (Options.SimulationMode == EDWCSimulationMode::VertexCPU)
+    {
+        return FindScalarParameter(Material, TEXT("DWC_WetRoughness")) != nullptr &&
+               FindScalarParameter(Material, TEXT("DWC_SurfaceWaterStrength")) != nullptr &&
+               IsFunctionInputConnected(ApplyCall, TEXT("Wetness")) &&
+               IsFunctionInputConnected(ApplyCall, TEXT("WetRoughness")) &&
+               IsFunctionInputConnected(ApplyCall, TEXT("SurfaceWaterStrength"));
+    }
+
+    if (!Options.bConnectWetnessMapPath)
+    {
+        return true;
+    }
+
+    return FindTextureSampleParameter(Material, TEXT("DWC_WetnessMap")) != nullptr &&
+           FindScalarParameter(Material, TEXT("DWC_WetRoughness")) != nullptr &&
+           FindScalarParameter(Material, TEXT("DWC_SurfaceWaterStrength")) != nullptr &&
+           IsFunctionInputConnected(ApplyCall, TEXT("WetnessMap")) &&
+           IsFunctionInputConnected(ApplyCall, TEXT("WetRoughness")) &&
+           IsFunctionInputConnected(ApplyCall, TEXT("SurfaceWaterStrength"));
+}
+
+void FWetClothingMaterialSetup::ValidateGeneratedMaterialOverrides(
+    const UWetClothingAsset* WetClothingAsset,
+    TArray<FString>& OutMessages)
+{
+    OutMessages.Reset();
+    if (WetClothingAsset == nullptr)
+    {
+        return;
+    }
+
+    const FDWCWetClothingAssetSetupSettings& Setup = WetClothingAsset->GetSetupSettings();
+    if (!Setup.bBuildCPUVertexSimulationData && !Setup.bBuildGPUWetnessMapSimulationData)
+    {
+        return;
+    }
+
+    const TArray<int32> WettableSlots = CollectWettableMaterialSlotIndices(*WetClothingAsset);
+    if (WettableSlots.IsEmpty())
+    {
+        return;
+    }
+
+    USkeletalMesh* RuntimeMesh = WetClothingAsset->GetRuntimeSkeletalMesh();
+    if (RuntimeMesh == nullptr)
+    {
+        OutMessages.Add(TEXT("Generated Materials: Assign a runtime skeletal mesh before generating wet materials."));
+        return;
+    }
+
+    const FWetClothingMaterialSetup::FOptions CPUOptions = MakeOptionsForAsset(WetClothingAsset, EDWCSimulationMode::VertexCPU);
+    const FWetClothingMaterialSetup::FOptions GPUOptions = MakeOptionsForAsset(WetClothingAsset, EDWCSimulationMode::WetnessMapGPU);
+    const TArray<FSkeletalMaterial>& Materials = RuntimeMesh->GetMaterials();
+
+    for (const int32 MaterialSlotIndex : WettableSlots)
+    {
+        if (!Materials.IsValidIndex(MaterialSlotIndex))
+        {
+            OutMessages.Add(FString::Printf(
+                TEXT("Slot %d: wettable material slot is out of range for the runtime mesh."),
+                MaterialSlotIndex));
+            continue;
+        }
+
+        UMaterialInterface* SourceMaterial = Materials[MaterialSlotIndex].MaterialInterface;
+        if (SourceMaterial == nullptr)
+        {
+            OutMessages.Add(FString::Printf(
+                TEXT("Slot %d: runtime mesh has no source material."),
+                MaterialSlotIndex));
+            continue;
+        }
+
+        const FWetClothingGeneratedWetMaterialOverride* MaterialOverride =
+            FindGeneratedWetMaterialOverride(*WetClothingAsset, MaterialSlotIndex);
+        UMaterialInterface* CPUWetMaterial = MaterialOverride != nullptr ? MaterialOverride->CPUWetMaterial.Get() : nullptr;
+        UMaterialInterface* GPUWetMaterial = MaterialOverride != nullptr ? MaterialOverride->GPUWetMaterial.Get() : nullptr;
+
+        if (MaterialOverride == nullptr ||
+            (Setup.bBuildCPUVertexSimulationData && CPUWetMaterial == nullptr) ||
+            (Setup.bBuildGPUWetnessMapSimulationData && GPUWetMaterial == nullptr))
+        {
+            OutMessages.Add(FString::Printf(
+                TEXT("Slot %d: missing generated DWC %s material. Use Generate Materials."),
+                MaterialSlotIndex,
+                Setup.bBuildCPUVertexSimulationData && CPUWetMaterial == nullptr ? TEXT("CPU") : TEXT("GPU")));
+            continue;
+        }
+
+        if (MaterialOverride->SourceMaterial != SourceMaterial)
+        {
+            OutMessages.Add(FString::Printf(
+                TEXT("Slot %d: generated materials are out of date because the runtime mesh source material changed. Use Generate Materials."),
+                MaterialSlotIndex));
+            continue;
+        }
+
+        if (Setup.bBuildCPUVertexSimulationData &&
+            !IsMaterialConfiguredForDwc(CPUWetMaterial, CPUOptions))
+        {
+            OutMessages.Add(FString::Printf(
+                TEXT("Slot %d: generated CPU material '%s' is missing DWC CPU material setup. Use Generate Materials."),
+                MaterialSlotIndex,
+                *GetNameSafe(CPUWetMaterial)));
+            continue;
+        }
+
+        if (Setup.bBuildGPUWetnessMapSimulationData &&
+            !IsMaterialConfiguredForDwc(GPUWetMaterial, GPUOptions))
+        {
+            OutMessages.Add(FString::Printf(
+                TEXT("Slot %d: generated GPU material '%s' is missing DWC GPU material setup or wetness-map parameters. Use Generate Materials."),
+                MaterialSlotIndex,
+                *GetNameSafe(GPUWetMaterial)));
+        }
+    }
 }
 
 bool FWetClothingMaterialSetup::ValidateSharedApplyWetnessFunction(FString& OutErrorMessage)
 {
     OutErrorMessage.Reset();
-    FString ApplyFunctionPath;
-    UMaterialFunctionInterface* ApplyFunction = LoadDwcMaterialFunction(TEXT("MF_DWC_ApplyWetness"), &ApplyFunctionPath);
-    if (ApplyFunction == nullptr)
+
+    FString CPUFunctionPath;
+    FString GPUFunctionPath;
+    FString DebugFunctionPath;
+    UMaterialFunctionInterface* CPUFunction =
+        LoadDwcApplyWetnessMaterialFunction(EDWCSimulationMode::VertexCPU, &CPUFunctionPath);
+    UMaterialFunctionInterface* GPUFunction =
+        LoadDwcApplyWetnessMaterialFunction(EDWCSimulationMode::WetnessMapGPU, &GPUFunctionPath);
+    UMaterialFunctionInterface* DebugFunction =
+        LoadDwcMaterialFunction(DwcWetPartDebugFunction, &DebugFunctionPath);
+
+    if (CPUFunction == nullptr || GPUFunction == nullptr || DebugFunction == nullptr)
     {
         OutErrorMessage = FString::Printf(
-            TEXT("Could not load MF_DWC_ApplyWetness at '%s'."),
-            ApplyFunctionPath.IsEmpty() ? TEXT("<plugin not mounted>") : *ApplyFunctionPath);
+            TEXT("Could not load DWC material functions. CPU='%s' GPU='%s' Debug='%s'."),
+            CPUFunctionPath.IsEmpty() ? TEXT("<plugin not mounted>") : *CPUFunctionPath,
+            GPUFunctionPath.IsEmpty() ? TEXT("<plugin not mounted>") : *GPUFunctionPath,
+            DebugFunctionPath.IsEmpty() ? TEXT("<plugin not mounted>") : *DebugFunctionPath);
         return false;
     }
 
-    TArray<FString> FailureReasons;
-    if (!ValidateApplyWetnessFunctionContract(ApplyFunction, FailureReasons))
+    if (DoesWetPartDebugFunctionUseWetnessMask(DebugFunction))
     {
-        OutErrorMessage = FString::Join(FailureReasons, TEXT("\n"));
+        OutErrorMessage = TEXT("MF_DWC_WetPartDebug still contains DWC_WetPartDebugUseWetnessMask. Run DWC.RepairApplyWetnessFunction to remove the legacy wetness-mask branch.");
         return false;
     }
+
     return true;
 }
 
 bool FWetClothingMaterialSetup::RepairOrUpgradeSharedApplyWetnessFunction(FString& OutErrorMessage)
 {
-    OutErrorMessage.Reset();
-    FString ApplyFunctionPath;
-    UMaterialFunctionInterface* ApplyFunction = LoadDwcMaterialFunction(TEXT("MF_DWC_ApplyWetness"), &ApplyFunctionPath);
-    if (ApplyFunction == nullptr)
+    FString DebugFunctionPath;
+    UMaterialFunctionInterface* DebugFunction =
+        LoadDwcMaterialFunction(DwcWetPartDebugFunction, &DebugFunctionPath);
+    if (DebugFunction == nullptr)
     {
         OutErrorMessage = FString::Printf(
-            TEXT("Could not load MF_DWC_ApplyWetness at '%s'."),
-            ApplyFunctionPath.IsEmpty() ? TEXT("<plugin not mounted>") : *ApplyFunctionPath);
+            TEXT("Could not load MF_DWC_WetPartDebug material function. Debug='%s'."),
+            DebugFunctionPath.IsEmpty() ? TEXT("<plugin not mounted>") : *DebugFunctionPath);
         return false;
     }
 
     TArray<FString> FailureReasons;
-    if (!EnsureApplyWetnessFunctionInternalGraph(ApplyFunction, FailureReasons))
+    if (!RemoveWetPartDebugWetnessMask(DebugFunction, FailureReasons))
     {
         OutErrorMessage = FString::Join(FailureReasons, TEXT("\n"));
         return false;
     }
 
-    FailureReasons.Reset();
-    if (!ValidateApplyWetnessFunctionContract(ApplyFunction, FailureReasons))
-    {
-        OutErrorMessage = TEXT("MF_DWC_ApplyWetness was rebuilt but still does not satisfy the fixed asset contract.\n");
-        OutErrorMessage += FString::Join(FailureReasons, TEXT("\n"));
-        return false;
-    }
-
-    return true;
+    return ValidateSharedApplyWetnessFunction(OutErrorMessage);
 }

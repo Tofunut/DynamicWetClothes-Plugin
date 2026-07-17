@@ -33,7 +33,6 @@ class SWetClothingPartEditorPanel : public SCompoundWidget
     void RefreshFromAsset();
     bool HasPendingVisualBakeTasks(FString* OutSummary = nullptr) const;
     bool BakeWetnessProfileMapsAndUpdateMaterials(FString& OutSummary, bool* OutHadWarnings = nullptr);
-    bool BakeSelectedWetnessProfileMap(FString& OutSummary, bool* OutHadWarnings = nullptr);
     bool SaveBakedWetnessAssets() const;
 
   private:
@@ -47,14 +46,16 @@ class SWetClothingPartEditorPanel : public SCompoundWidget
     using FWetPartEntryPtr = TSharedPtr<FWetClothingWetPartEntry>;
 
     void RefreshMaterialSlotItems();
-    void RefreshMaterialTextures();
+    void RefreshMaterialTextures(bool bRefreshUVView = true);
     void RefreshTextureToggleWidgets();
     void RefreshUVChannels();
     void RefreshUVIslandList();
     void RefreshUVView();
     void RefreshPreviewIslandHighlight();
-    void RefreshWetPartList();
+    void RefreshWetPartList(bool bRefreshUVView = true);
     void RefreshPreviewWetPartOverlay();
+    void RefreshIslandSelectionViews();
+    void RefreshWetPartAssignmentViews();
     void RefreshWetPartWidgets();
 
     void                                 EnsureDefaultWetPartForSelectedScope();
@@ -90,7 +91,7 @@ class SWetClothingPartEditorPanel : public SCompoundWidget
     TSharedRef<SWidget>       BuildTextureComboContent(FTextureItemPtr Item, float ThumbnailSize, bool bCompactLayout);
     FReply                    HandleApplyMaterialSetupClicked();
     bool                      IsApplyMaterialSetupEnabled() const;
-    TSharedRef<SWidget>       GenerateUVChannelComboItem(FUVChannelItemPtr Item);
+    TSharedRef<SWidget>       GenerateUVChannelComboItem(FUVChannelItemPtr Item) const;
     void                      HandleUVChannelSelectionChanged(FUVChannelItemPtr Item, ESelectInfo::Type SelectInfo);
     TSharedRef<SWidget>       GenerateUVDisplayModeComboItem(FUVDisplayModeItemPtr Item);
     void                      HandleUVDisplayModeSelectionChanged(FUVDisplayModeItemPtr Item, ESelectInfo::Type SelectInfo);
@@ -121,11 +122,9 @@ class SWetClothingPartEditorPanel : public SCompoundWidget
     TMap<int32, FLinearColor> BuildAutoPartitionPreviewColorMap(const TArray<FWetPartAutoPartitionCluster>& Clusters) const;
     void                      ApplyAutoPartitionClusters(const TArray<FWetPartAutoPartitionCluster>& Clusters);
     FReply                    HandleAssignSelectedUVIslandToWetPartClicked();
-    FReply                    HandleUVSelectionToolButtonClicked(FUVSelectionToolItemPtr Item);
     void                      SetCurrentUVSelectionTool(EWetClothingAssetUVSelectionTool InTool);
     const FSlateBrush*        GetUVSelectionToolBrush(FUVSelectionToolItemPtr Item) const;
     FSlateColor               GetUVSelectionToolIconColor(FUVSelectionToolItemPtr Item) const;
-    FSlateColor               GetUVSelectionToolButtonColor(FUVSelectionToolItemPtr Item) const;
 
     FText                                          GetMaterialSlotCountText() const;
     FText                                          GetSelectedMaterialSlotText() const;
@@ -161,6 +160,7 @@ class SWetClothingPartEditorPanel : public SCompoundWidget
     void                                           HandleSelectionLineThicknessChanged(float InValue);
     FReply                                         HandleFocusPreviewClicked();
     FReply                                         HandleSaveAssetClicked();
+    FReply                                         HandleBakeAllMapsClicked();
     bool                                           IsWetnessProfileMapBakeSourceValid() const;
     bool                                           CanBakeAnyWetnessProfileMap() const;
     FReply                                         HandleBakeSelectedWetnessProfileMapClicked();
@@ -194,7 +194,7 @@ class SWetClothingPartEditorPanel : public SCompoundWidget
     bool                                               bShowMaterialTextureInUVView = true;
     TArray<FUVChannelItemPtr>                          UVChannelItems;
     FUVChannelItemPtr                                  SelectedUVChannelItem;
-    TSharedPtr<class SComboBox<FUVChannelItemPtr>>     UVChannelComboBox;
+    TSharedPtr<class SComboBox<FUVChannelItemPtr>>      UVChannelComboBox;
     TArray<FUVDisplayModeItemPtr>                      UVDisplayModeItems;
     FUVDisplayModeItemPtr                              SelectedUVDisplayModeItem;
     TSharedPtr<class SComboBox<FUVDisplayModeItemPtr>> UVDisplayModeComboBox;
@@ -204,7 +204,7 @@ class SWetClothingPartEditorPanel : public SCompoundWidget
     TSet<int32>                                        SelectedUVIslandIDs;
     bool                                               bSyncingUVIslandListSelection = false;
     TSharedPtr<SWetClothingAssetUVView>                UVView;
-    EWetClothingAssetUVSelectionTool                   CurrentUVSelectionTool = EWetClothingAssetUVSelectionTool::Select;
+    EWetClothingAssetUVSelectionTool                   CurrentUVSelectionTool = EWetClothingAssetUVSelectionTool::BoxSelect;
     EWetClothingAssetUVDisplayMode                     CurrentUVDisplayMode = EWetClothingAssetUVDisplayMode::Normal;
     float                                              UVViewBackgroundTextureOpacity = 0.70f;
     float                                              UVViewIslandLineOpacity = 1.0f;

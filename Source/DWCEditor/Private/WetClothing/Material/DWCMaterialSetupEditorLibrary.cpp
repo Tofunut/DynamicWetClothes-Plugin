@@ -53,18 +53,10 @@ bool UDWCMaterialSetupEditorLibrary::RepairGeneratedWetMaterials(
             }
         }
 
-        int32 SurfaceWaterUVChannelIndex = WetClothingAsset->SurfaceWaterSettings.UVChannelIndexToConstruct;
-        if (const FSurfaceWaterMaterialSlotData* SlotData =
-                WetClothingAsset->SurfaceWaterSettings.FindMaterialSlot(MaterialOverride.MaterialSlotIndex))
-        {
-            SurfaceWaterUVChannelIndex = SlotData->UVChannelIndex;
-        }
-
         const FWetClothingMaterialSetupResult Result =
             FWetClothingMaterialSetup::DuplicateAndApplyToMaterialInterface(
                 RepairTarget,
-                0,
-                SurfaceWaterUVChannelIndex);
+                FWetClothingMaterialSetup::MakeOptionsForAsset(WetClothingAsset, EDWCSimulationMode::VertexCPU));
         if (!Result.bSucceeded || !Result.ConfiguredMaterial)
         {
             Messages.Add(FString::Printf(

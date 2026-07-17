@@ -7,6 +7,7 @@
 #include "Engine/Texture2D.h"
 #include "Misc/PackageName.h"
 #include "ObjectTools.h"
+#include "Rendering/SkeletalMeshRenderData.h"
 #include "UObject/Package.h"
 #include "WetClothing/Common/Analysis/WetClothingAssetMeshAnalyzer.h"
 
@@ -144,22 +145,26 @@ FString FWetClothingSurfaceWaterFlowMapBaker::MakeBuildSignature(
 	const UWetClothingAsset* Asset,
 	int32 MaterialSlotIndex)
 {
-	if (!Asset || !Asset->TargetMesh)
+	if (!Asset || Asset->GetRuntimeSkeletalMesh() == nullptr)
 	{
 		return FString();
 	}
 
-	const FSurfaceWaterSimulationSettings& S =
-		Asset->SurfaceWaterSettings;
+	const FSurfaceWaterSimulationSettings& S = Asset->SurfaceWaterSettings;
 	const FSurfaceWaterMaterialSlotData* SlotData = S.FindMaterialSlot(MaterialSlotIndex);
-	const int32 UVChannelIndex = SlotData ? SlotData->UVChannelIndex : S.UVChannelIndexToConstruct;
+	const FDWCDataUVPerLOD* DataUV = Asset->FindGeneratedDataUVForLOD(0);
+	if (DataUV == nullptr || !DataUV->bIsValid)
+	{
+		return FString();
+	}
 
 	return FString::Printf(
 		TEXT(
-			"DWC.SurfaceWaterFlow.v1|Mesh=%s|LOD=0|UV=%d|"
+			"DWC.SurfaceWaterFlow.DataUV.v2|Mesh=%s|LOD=0|DataUVChannel=%d|DataUV=%s|"
 			"Resolution=%d|Padding=%d|Gravity=0,0,-1|Slot=%d|WetSlots=%s"),
-		*Asset->TargetMesh->GetPathName(),
-		UVChannelIndex,
+		*Asset->GetRuntimeSkeletalMesh()->GetPathName(),
+		Asset->GetDWCDataUVChannelIndex(),
+		*DataUV->MeshSignature,
 		S.RenderTargetResolution,
 		SlotData ? SlotData->BakedFlowMap.PaddingPixels : 4,
 		MaterialSlotIndex,
@@ -264,14 +269,14 @@ bool FWetClothingSurfaceWaterFlowMapBaker::Bake(
 {
 	OutError.Reset();
 
-	if (!Asset || !Asset->TargetMesh)
+	if (!Asset || Asset->GetRuntimeSkeletalMesh() == nullptr)
 	{
 		OutError =
 			TEXT("Surface Water Flow Map requires a target mesh.");
 		return false;
 	}
 
-	FAssetCompilingManager::Get().FinishCompilationForObjects({Asset->TargetMesh.Get()});
+	FAssetCompilingManager::Get().FinishCompilationForObjects({Asset->GetRuntimeSkeletalMesh()});
 
 	FSurfaceWaterSimulationSettings& S =
 		Asset->SurfaceWaterSettings;
@@ -285,6 +290,22 @@ bool FWetClothingSurfaceWaterFlowMapBaker::Bake(
 
 	const int32 Resolution =
 		FMath::Clamp(S.RenderTargetResolution, 16, 4096);
+
+	const FDWCDataUVPerLOD* DataUV = Asset->FindGeneratedDataUVForLOD(0);
+	USkeletalMesh* RuntimeMesh = Asset->GetRuntimeSkeletalMesh();
+	const FSkeletalMeshRenderData* RenderData = RuntimeMesh != nullptr ? RuntimeMesh->GetResourceForRendering() : nullptr;
+	const int32 VertexCount = RenderData != nullptr && RenderData->LODRenderData.IsValidIndex(0)
+		? static_cast<int32>(RenderData->LODRenderData[0].GetNumVertices())
+		: 0;
+	if (Asset->GetDWCDataUVChannelIndex() == INDEX_NONE ||
+		DataUV == nullptr ||
+		!DataUV->bIsValid ||
+		DataUV->RenderVertexCount != VertexCount ||
+		DataUV->DataUVs.Num() != VertexCount)
+	{
+		OutError = TEXT("Surface Water Flow Map requires valid DWC Data UV. Rebuild DWC Data UV before baking Flow Maps.");
+		return false;
+	}
 
 	Asset->Modify();
 	int32 BakedSlotCount = 0;
@@ -307,16 +328,8 @@ bool FWetClothingSurfaceWaterFlowMapBaker::Bake(
 		{
 			SlotData = &S.SurfaceWaterMaterialSlots.AddDefaulted_GetRef();
 			SlotData->MaterialSlotIndex = Slot.MaterialSlotIndex;
-			SlotData->UVChannelIndex = S.UVChannelIndexToConstruct;
 		}
 		if (!SlotData->bEnabled || !SlotData->BakedFlowMap.bEnabled) continue;
-
-		const int32 UVChannelIndex = SlotData->UVChannelIndex;
-		if (FWetClothingAssetMeshAnalyzer::GetNumUVChannels(Asset->TargetMesh, 0) <= UVChannelIndex)
-		{
-			OutError = FString::Printf(TEXT("Surface Water UV channel %d is unavailable for material slot %d."), UVChannelIndex, Slot.MaterialSlotIndex);
-			return false;
-		}
 
 		TArray<FFloat16Color> Pixels;
 		Pixels.Init(FFloat16Color(FLinearColor(.5f, .5f, 0, 0)), Resolution * Resolution);
@@ -330,10 +343,9 @@ bool FWetClothingSurfaceWaterFlowMapBaker::Bake(
 		TArray<FWetClothingAssetUVIsland> Islands;
 		FString Error;
 
-		if (!FWetClothingAssetMeshAnalyzer::BuildMaterialSlotUVIslands(
-				Asset->TargetMesh,
+		if (!FWetClothingAssetMeshAnalyzer::BuildMaterialSlotDataUVIslands(
+				*Asset,
 				0,
-				UVChannelIndex,
 				Slot.MaterialSlotIndex,
 				Islands,
 				&Error))
@@ -454,7 +466,7 @@ bool FWetClothingSurfaceWaterFlowMapBaker::Bake(
 							&& Labels[I] != Label)
 						{
 							OutError = TEXT(
-								"Surface Water UV islands overlap in "
+								"DWC Data UV islands overlap in "
 								"texture space; Flow Map bake aborted.");
 
 							return false;
@@ -476,11 +488,11 @@ bool FWetClothingSurfaceWaterFlowMapBaker::Bake(
 	{
 		OutError = FString::Printf(
 			TEXT(
-				"No valid Surface Water UV triangles were rasterized. "
+				"No valid DWC Data UV triangles were rasterized. "
 				"WettableSlots=%d, CandidateTriangles=%d, "
 				"OutOfRangeOrNonFiniteUV=%d, Degenerate3DOrUV=%d. "
-				"Ensure the configured Surface Water UV channel is a "
-				"non-degenerate 0-1 unwrap on a wettable material slot."),
+				"Ensure DWC Data UV is a non-degenerate 0-1 unwrap "
+				"on a wettable material slot."),
 			1,
 			CandidateTriangleCount,
 			OutOfRangeUVTriangleCount,

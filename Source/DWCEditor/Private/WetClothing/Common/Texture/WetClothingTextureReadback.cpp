@@ -5,10 +5,31 @@
 #include "WetClothing/Common/Texture/WetClothingTextureReadback.h"
 
 #include "Engine/Texture2D.h"
+#include "UObject/ObjectKey.h"
+
+namespace
+{
+    struct FReadbackCacheEntry
+    {
+        int32 Width = 0;
+        int32 Height = 0;
+        ETextureSourceFormat Format = TSF_Invalid;
+        bool bSRGB = false;
+        TextureAddress AddressX = TA_Clamp;
+        TextureAddress AddressY = TA_Clamp;
+        FWetClothingTextureReadback Data;
+    };
+
+    TMap<FObjectKey, FReadbackCacheEntry> GTextureReadbackCache;
+}
 
 bool FWetClothingTextureReadback::IsValid() const
 {
-    return Width > 0 && Height > 0 && BytesPerPixel > 0 && RawData.Num() >= static_cast<int64>(Width) * Height * BytesPerPixel;
+    return Width > 0 &&
+           Height > 0 &&
+           BytesPerPixel > 0 &&
+           RawData.IsValid() &&
+           RawData->Num() >= static_cast<int64>(Width) * Height * BytesPerPixel;
 }
 
 FLinearColor FWetClothingTextureReadback::GetLinearColor(int32 X, int32 Y) const
@@ -21,7 +42,7 @@ FLinearColor FWetClothingTextureReadback::GetLinearColor(int32 X, int32 Y) const
     const int32  ClampedX = FMath::Clamp(X, 0, Width - 1);
     const int32  ClampedY = FMath::Clamp(Y, 0, Height - 1);
     const int64  PixelOffset = (static_cast<int64>(ClampedY) * Width + ClampedX) * BytesPerPixel;
-    const uint8* PixelPtr = RawData.GetData() + PixelOffset;
+    const uint8* PixelPtr = RawData->GetData() + PixelOffset;
     FColor       SRGBColor = FColor::Black;
 
     switch (Format)
@@ -52,6 +73,25 @@ bool FWetClothingTextureReadbackUtils::TryReadTextureSourceData(
 #if WITH_EDITORONLY_DATA
     OutTextureData = FWetClothingTextureReadback();
 
+    if (Texture != nullptr)
+    {
+        const FObjectKey Key(Texture);
+        if (const FReadbackCacheEntry* Cached = GTextureReadbackCache.Find(Key))
+        {
+            if (Cached->Width == Texture->Source.GetSizeX() &&
+                Cached->Height == Texture->Source.GetSizeY() &&
+                Cached->Format == Texture->Source.GetFormat() &&
+                Cached->bSRGB == Texture->SRGB &&
+                Cached->AddressX == Texture->AddressX &&
+                Cached->AddressY == Texture->AddressY)
+            {
+                OutTextureData = Cached->Data;
+                OutErrorMessage.Reset();
+                return true;
+            }
+        }
+    }
+
     if (Texture == nullptr)
     {
         OutErrorMessage = TEXT("Turn on a texture image for the selected material slot before running Auto-Partitioning.");
@@ -71,12 +111,14 @@ bool FWetClothingTextureReadbackUtils::TryReadTextureSourceData(
         return false;
     }
 
-    if (!Texture->Source.GetMipData(OutTextureData.RawData, 0))
+    TSharedPtr<TArray64<uint8>> SharedRawData = MakeShared<TArray64<uint8>>();
+    if (!Texture->Source.GetMipData(*SharedRawData, 0))
     {
         OutErrorMessage = FString::Printf(TEXT("Failed to read source pixels from texture '%s'."), *Texture->GetName());
         return false;
     }
 
+    OutTextureData.RawData = MoveTemp(SharedRawData);
     OutTextureData.Width = Texture->Source.GetSizeX();
     OutTextureData.Height = Texture->Source.GetSizeY();
     OutTextureData.BytesPerPixel = Texture->Source.GetBytesPerPixel();
@@ -91,10 +133,24 @@ bool FWetClothingTextureReadbackUtils::TryReadTextureSourceData(
         return false;
     }
 
+    FReadbackCacheEntry& CacheEntry = GTextureReadbackCache.FindOrAdd(FObjectKey(Texture));
+    CacheEntry.Width = OutTextureData.Width;
+    CacheEntry.Height = OutTextureData.Height;
+    CacheEntry.Format = OutTextureData.Format;
+    CacheEntry.bSRGB = OutTextureData.bSRGB;
+    CacheEntry.AddressX = OutTextureData.AddressX;
+    CacheEntry.AddressY = OutTextureData.AddressY;
+    CacheEntry.Data = OutTextureData;
+
     OutErrorMessage.Reset();
     return true;
 #else
     OutErrorMessage = TEXT("Auto-Partitioning requires editor-only texture source data.");
     return false;
 #endif
+}
+
+void FWetClothingTextureReadbackUtils::ClearCache()
+{
+    GTextureReadbackCache.Reset();
 }

@@ -2,7 +2,6 @@
 
 #include "CoreMinimal.h"
 #include "WetClothing/Common/Editor/WetClothingAssetEditorTypes.h"
-#include "WetClothing/Common/Editor/WetClothingEditorMode.h"
 #include "Widgets/Input/SComboBox.h"
 
 class FAssetThumbnail;
@@ -22,9 +21,7 @@ DECLARE_DELEGATE_RetVal(FReply, FOnWetClothingPreviewFocusClicked);
 struct FWetClothingMaterialSlotRowArgs
 {
     const UWetClothingAsset* WetClothingAsset = nullptr;
-    USkeletalMesh* TargetMesh = nullptr;
-    int32 SelectedMaterialSlotIndex = INDEX_NONE;
-    UTexture* OverridePreviewTexture = nullptr;
+    USkeletalMesh* GeneratedDataUV = nullptr;
     TSharedPtr<FAssetThumbnailPool> ThumbnailPool;
     TArray<TSharedPtr<FAssetThumbnail>>* ThumbnailSink = nullptr;
     FOnWettableMaterialSlotClicked OnWettableSlotClicked;
@@ -33,12 +30,20 @@ struct FWetClothingMaterialSlotRowArgs
 
 struct FWetClothingBakeMapsMenuArgs
 {
-    EWetClothingEditorMode CurrentMode = EWetClothingEditorMode::PartEdit;
-    FSimpleDelegate OnBakeAllWetnessProfileMaps;
-    FSimpleDelegate OnBakeSelectedWetnessProfileMap;
+    FSimpleDelegate OnBakeAllMaps;
+    FSimpleDelegate OnBakeWetnessProfileMaps;
+    FSimpleDelegate OnBakeGPUWetnessMapData;
     FSimpleDelegate OnBakeTransparencyRevealMaps;
-    FSimpleDelegate OnBakeAllWrinkleNormalMaps;
-    FSimpleDelegate OnBakeSelectedWrinkleNormalMap;
+    FSimpleDelegate OnBakeWrinkleNormalMap;
+    FSimpleDelegate OnBakeWrinkleMask;
+};
+
+struct FWetClothingGenerateMaterialsMenuArgs
+{
+    const UWetClothingAsset* WetClothingAsset = nullptr;
+    FSimpleDelegate OnGenerateCPUMaterials;
+    FSimpleDelegate OnGenerateGPUMaterials;
+    FSimpleDelegate OnGenerateAllMaterials;
 };
 
 class FWetClothingEditorCommonWidgets
@@ -53,6 +58,7 @@ class FWetClothingEditorCommonWidgets
         const FOnWetClothingPreviewFocusClicked& OnFocusClicked,
         TSharedPtr<SWidget> ExtraToolbarContent = TSharedPtr<SWidget>());
     static TSharedRef<SWidget> BuildBakeMapsMenu(const FWetClothingBakeMapsMenuArgs& Args);
+    static TSharedRef<SWidget> BuildGenerateMaterialsMenu(const FWetClothingGenerateMaterialsMenuArgs& Args);
 
     static FText GetUVDisplayModeLabel(EWetClothingAssetUVDisplayMode DisplayMode);
     static TSharedRef<SWidget> GenerateUVDisplayModeComboItem(TSharedPtr<EWetClothingAssetUVDisplayMode> Item);
@@ -93,7 +99,8 @@ class FWetClothingEditorCommonWidgets
         TAttribute<float> UVIslandLineOpacity,
         TFunction<void(float)> OnUVIslandLineOpacityChanged,
         TAttribute<float> UVIslandLineThicknessScale,
-        TFunction<void(float)> OnUVIslandLineThicknessScaleChanged);
+        TFunction<void(float)> OnUVIslandLineThicknessScaleChanged,
+        bool bShowBackgroundTextureControls = true);
 
     static TSharedRef<ITableRow> GenerateMaterialSlotRow(
         TSharedPtr<FWetClothingMaterialSlotItem> Item,
@@ -103,6 +110,8 @@ class FWetClothingEditorCommonWidgets
     static TSharedRef<ITableRow> GeneratePartMapRow(
         TSharedPtr<FWetClothingWetPartEntry> Item,
         const TSharedRef<STableViewBase>& OwnerTable);
+
+    static void ClearEditorSessionCaches();
 
     static bool IsMaterialSlotWettable(const UWetClothingAsset* WetClothingAsset, int32 MaterialSlotIndex);
     static void SetMaterialSlotWettable(UWetClothingAsset* WetClothingAsset, int32 MaterialSlotIndex, bool bIsWettableSlot);

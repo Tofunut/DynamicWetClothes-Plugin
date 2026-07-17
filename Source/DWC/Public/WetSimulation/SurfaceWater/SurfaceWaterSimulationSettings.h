@@ -50,9 +50,6 @@ struct DWC_API FSurfaceWaterMaterialSlotData
     UPROPERTY(EditAnywhere, Category="Surface Water|Material Slot")
     bool bEnabled = true;
 
-    UPROPERTY(EditAnywhere, Category="Surface Water|Material Slot", meta=(ClampMin="0"))
-    int32 UVChannelIndex = 1;
-
     UPROPERTY(VisibleAnywhere, Category="Surface Water|Material Slot", meta=(ShowOnlyInnerProperties))
     FSurfaceWaterBakedFlowMapData BakedFlowMap;
 };
@@ -64,14 +61,6 @@ struct DWC_API FSurfaceWaterSimulationSettings
 
     UPROPERTY(EditAnywhere, Category="Surface Water") 
     bool bEnabled = true;
-    UPROPERTY(EditAnywhere, Category="Surface Water", meta=(ClampMin="0", ClampMax="3")) 
-    int32 UVChannelIndexToConstruct = 1;
-    // Editor pipeline state. Kept serialized but intentionally hidden from the
-    // compact WCA Surface Water infrastructure panel.
-    UPROPERTY()
-    bool bAllowOverwriteExistingSurfaceWaterUVChannel = false;
-    UPROPERTY()
-    float TargetSurfaceWaterTexelsPerCentimeter = 0.0f;
     UPROPERTY(EditAnywhere, Category="Surface Water", meta=(ClampMin="16", ClampMax="4096")) 
     int32 RenderTargetResolution = 1024;
 
@@ -88,18 +77,6 @@ struct DWC_API FSurfaceWaterSimulationSettings
 
     UPROPERTY(VisibleAnywhere, Category="Surface Water|Material Slots", meta=(TitleProperty="Material Slot {MaterialSlotIndex}"))
     TArray<FSurfaceWaterMaterialSlotData> SurfaceWaterMaterialSlots;
-
-    UPROPERTY()
-    bool bHasGeneratedSurfaceWaterUV = false;
-
-    UPROPERTY()
-    int32 GeneratedSurfaceWaterUVChannelIndex = INDEX_NONE;
-
-    UPROPERTY()
-    int32 GeneratedSurfaceWaterSourceUVChannelIndex = 0;
-
-    UPROPERTY()
-    FGuid GeneratedSurfaceWaterUVBuildGuid;
 
     const FSurfaceWaterMaterialSlotData* FindMaterialSlot(int32 MaterialSlotIndex) const
     {

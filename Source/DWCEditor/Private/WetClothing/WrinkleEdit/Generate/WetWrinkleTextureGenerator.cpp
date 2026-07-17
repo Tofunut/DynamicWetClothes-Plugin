@@ -295,7 +295,7 @@ namespace
 
     UTexture* WetWrinkleResolveMaterialReferenceTexture(const UWetClothingAsset& WetClothingAsset, int32 MaterialSlotIndex)
     {
-        const USkeletalMesh* TargetMesh = WetClothingAsset.TargetMesh.Get();
+        const USkeletalMesh* TargetMesh = WetClothingAsset.GetRuntimeSkeletalMesh();
         if (TargetMesh == nullptr || !TargetMesh->GetMaterials().IsValidIndex(MaterialSlotIndex))
         {
             return nullptr;
@@ -351,9 +351,9 @@ bool FWetWrinkleTextureGenerator::GeneratePreviewMaterialSlotTexture(
         return false;
     }
 
-    if (WetClothingAsset->TargetMesh == nullptr)
+    if (WetClothingAsset->GetRuntimeSkeletalMesh() == nullptr)
     {
-        OutErrorMessage = TEXT("Assign a TargetMesh before generating wrinkle textures.");
+        OutErrorMessage = TEXT("Generate the DWC Data UV before generating wrinkle textures.");
         return false;
     }
 
@@ -363,9 +363,9 @@ bool FWetWrinkleTextureGenerator::GeneratePreviewMaterialSlotTexture(
         return false;
     }
 
-    if (!WetClothingAsset->TargetMesh->GetMaterials().IsValidIndex(MaterialSlotIndex))
+    if (!WetClothingAsset->GetRuntimeSkeletalMesh()->GetMaterials().IsValidIndex(MaterialSlotIndex))
     {
-        OutErrorMessage = TEXT("Selected material slot is not valid for the TargetMesh.");
+        OutErrorMessage = TEXT("Selected material slot is not valid for the DWC Data UV.");
         return false;
     }
 
@@ -384,20 +384,17 @@ bool FWetWrinkleTextureGenerator::GeneratePreviewMaterialSlotTexture(
         return false;
     }
 
-    const int32 UVChannelIndex = Settings.UVChannelIndex != INDEX_NONE
-                                    ? Settings.UVChannelIndex
-                                    : WetClothingAsset->WrinkleData.WrinkleUVChannelIndex;
-    if (UVChannelIndex == INDEX_NONE)
+    const int32 LODIndex = FMath::Max(0, Settings.LODIndex);
+    if (WetClothingAsset->FindGeneratedDataUVForLOD(LODIndex) == nullptr)
     {
-        OutErrorMessage = TEXT("Select or generate a wrinkle UV channel before generating wrinkle textures.");
+        OutErrorMessage = TEXT("Generate the DWC Data UV before generating wrinkle textures.");
         return false;
     }
 
     TArray<FWetClothingAssetUVIsland> Islands;
-    if (!FWetClothingAssetMeshAnalyzer::BuildMaterialSlotUVIslands(
-            WetClothingAsset->TargetMesh.Get(),
-            FMath::Max(0, Settings.LODIndex),
-            UVChannelIndex,
+    if (!FWetClothingAssetMeshAnalyzer::BuildMaterialSlotDataUVIslands(
+            *WetClothingAsset,
+            LODIndex,
             MaterialSlotIndex,
             Islands,
             &OutErrorMessage) || Islands.Num() == 0)

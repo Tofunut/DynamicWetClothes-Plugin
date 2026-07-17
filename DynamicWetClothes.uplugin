@@ -14,6 +14,11 @@
         "LoadingPhase": "PostConfigInit"
     },
     {
+        "Name": "DWCGPU",
+        "Type": "Runtime",
+        "LoadingPhase": "PostConfigInit"
+    },
+    {
         "Name": "DWCEditor",
         "Type": "Editor"
     },

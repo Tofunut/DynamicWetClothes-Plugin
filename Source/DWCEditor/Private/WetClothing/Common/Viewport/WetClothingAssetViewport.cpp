@@ -7,6 +7,8 @@
 #include "Engine/Engine.h"
 #include "Engine/SkeletalMesh.h"
 #include "Materials/MaterialInterface.h"
+#include "Rendering/SkeletalMeshLODRenderData.h"
+#include "Rendering/SkeletalMeshRenderData.h"
 #include "ProceduralMeshComponent.h"
 #include "Styling/AppStyle.h"
 #include "ToolMenus.h"
@@ -314,7 +316,25 @@ void SWetClothingAssetViewport::RefreshPreviewMesh()
     USkeletalMesh* TargetMesh = nullptr;
     if (UWetClothingAsset* WetClothingAssetPtr = WetClothingAsset.Get())
     {
-        TargetMesh = WetClothingAssetPtr->TargetMesh;
+        TargetMesh = WetClothingAssetPtr->GetRuntimeSkeletalMesh();
+    }
+
+    if (PreviewMeshComponent->GetSkeletalMeshAsset() == TargetMesh && TargetMesh != nullptr)
+    {
+        if (OverlayText.IsValid())
+        {
+            OverlayText->SetText(GetViewportHintText());
+        }
+
+        if (ViewportClient.IsValid())
+        {
+            ViewportClient->Invalidate();
+        }
+        else
+        {
+            Invalidate();
+        }
+        return;
     }
 
     PreviewMeshComponent->SetSkeletalMeshAsset(TargetMesh);
@@ -375,19 +395,37 @@ void SWetClothingAssetViewport::SetHighlightedMaterialSlot(int32 SlotIndex)
     const int32 MaterialCount = PreviewMeshComponent->GetNumMaterials();
     if (SlotIndex < 0 || SlotIndex >= MaterialCount || !OriginalPreviewMaterials.IsValidIndex(SlotIndex))
     {
+        PreviewMeshComponent->MarkRenderStateDirty();
         CurrentHighlightedMaterialSlot = INDEX_NONE;
         if (OverlayText.IsValid())
         {
             OverlayText->SetText(GetViewportHintText());
         }
+        RequestViewportRedraw();
         return;
     }
 
-    for (int32 MaterialIndex = 0; MaterialIndex < MaterialCount; ++MaterialIndex)
+    const USkeletalMesh* PreviewMesh = PreviewMeshComponent->GetSkeletalMeshAsset();
+    const FSkeletalMeshRenderData* RenderData = PreviewMesh != nullptr ? PreviewMesh->GetResourceForRendering() : nullptr;
+    if (RenderData == nullptr || !RenderData->LODRenderData.IsValidIndex(0))
     {
-        PreviewMeshComponent->ShowMaterialSection(MaterialIndex, MaterialIndex, MaterialIndex == SlotIndex, 0);
+        PreviewMeshComponent->MarkRenderStateDirty();
+        RequestViewportRedraw();
+        return;
     }
 
+    const FSkeletalMeshLODRenderData& LODData = RenderData->LODRenderData[0];
+    for (int32 SectionIndex = 0; SectionIndex < LODData.RenderSections.Num(); ++SectionIndex)
+    {
+        const FSkelMeshRenderSection& Section = LODData.RenderSections[SectionIndex];
+        PreviewMeshComponent->ShowMaterialSection(
+            Section.MaterialIndex,
+            SectionIndex,
+            Section.MaterialIndex == SlotIndex,
+            0);
+    }
+
+    PreviewMeshComponent->MarkRenderStateDirty();
     CurrentHighlightedMaterialSlot = SlotIndex;
 
     if (OverlayText.IsValid())
@@ -395,7 +433,7 @@ void SWetClothingAssetViewport::SetHighlightedMaterialSlot(int32 SlotIndex)
         OverlayText->SetText(GetViewportHintText());
     }
 
-    Invalidate();
+    RequestViewportRedraw();
 }
 
 void SWetClothingAssetViewport::ClearMaterialSlotHighlight()
@@ -403,6 +441,7 @@ void SWetClothingAssetViewport::ClearMaterialSlotHighlight()
     if (PreviewMeshComponent != nullptr)
     {
         PreviewMeshComponent->ShowAllMaterialSections(0);
+        PreviewMeshComponent->MarkRenderStateDirty();
     }
 
     CurrentHighlightedMaterialSlot = INDEX_NONE;
@@ -412,7 +451,7 @@ void SWetClothingAssetViewport::ClearMaterialSlotHighlight()
         OverlayText->SetText(GetViewportHintText());
     }
 
-    Invalidate();
+    RequestViewportRedraw();
 }
 
 void SWetClothingAssetViewport::SetSelectableIslands(const TArray<TSharedPtr<FWetClothingAssetUVIsland>>& InIslands)
@@ -459,6 +498,7 @@ void SWetClothingAssetViewport::ClearHighlightedIsland()
     {
         SelectionOverlayComponent->ClearAllMeshSections();
     }
+    RequestViewportRedraw();
 }
 
 void SWetClothingAssetViewport::SetWetPartIslandAssignments(const TMap<int32, int32>& InUVIslandToWetPartID, const TMap<int32, FLinearColor>& InIslandColors)
@@ -477,6 +517,7 @@ void SWetClothingAssetViewport::ClearWetPartIslandColors()
     {
         WetPartOverlayComponent->ClearAllMeshSections();
     }
+    RequestViewportRedraw();
 }
 
 void SWetClothingAssetViewport::RefreshWetPartOverlayMesh()
@@ -548,6 +589,9 @@ void SWetClothingAssetViewport::RefreshWetPartOverlayMesh()
             false,
             false);
     }
+
+    WetPartOverlayComponent->MarkRenderStateDirty();
+    RequestViewportRedraw();
 }
 
 void SWetClothingAssetViewport::RefreshSelectionOverlayMesh()
@@ -562,6 +606,8 @@ void SWetClothingAssetViewport::RefreshSelectionOverlayMesh()
 
     if (CurrentHighlightedUVIslandIDs.Num() == 0)
     {
+        SelectionOverlayComponent->MarkRenderStateDirty();
+        RequestViewportRedraw();
         return;
     }
 
@@ -648,6 +694,19 @@ void SWetClothingAssetViewport::RefreshSelectionOverlayMesh()
             false,
             false);
     }
+
+    SelectionOverlayComponent->MarkRenderStateDirty();
+    RequestViewportRedraw();
+}
+
+void SWetClothingAssetViewport::RequestViewportRedraw()
+{
+    if (ViewportClient.IsValid())
+    {
+        ViewportClient->Invalidate();
+    }
+
+    Invalidate();
 }
 
 void SWetClothingAssetViewport::FocusOnPreviewMesh(bool bInstant)

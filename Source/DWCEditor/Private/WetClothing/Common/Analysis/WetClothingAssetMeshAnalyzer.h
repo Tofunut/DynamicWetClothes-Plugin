@@ -4,6 +4,8 @@
 
 class USkeletalMesh;
 class UTexture;
+class UWetClothingAsset;
+struct FDWCOriginalUVIslandTopology;
 
 struct FWetClothingAssetUVTriangle
 {
@@ -37,6 +39,24 @@ class FWetClothingAssetMeshAnalyzer
         int32                              MaterialSlotIndex,
         TArray<FWetClothingAssetUVIsland>& OutIslands,
         FString*                           OutErrorMessage = nullptr);
+
+    /** Builds UV islands from the WCA-owned generated DWC Data UV payload. */
+    static bool BuildMaterialSlotDataUVIslands(
+        const UWetClothingAsset&           WetClothingAsset,
+        int32                              LODIndex,
+        int32                              MaterialSlotIndex,
+        TArray<FWetClothingAssetUVIsland>& OutIslands,
+        FString*                           OutErrorMessage = nullptr);
+
+    /** Rebuilds draw/hit-test triangles from persistent WCA island membership without rerunning island connectivity. */
+    static bool BuildMaterialSlotUVIslandsFromTopology(
+        const USkeletalMesh*                          SkeletalMesh,
+        int32                                         LODIndex,
+        int32                                         UVChannelIndex,
+        int32                                         MaterialSlotIndex,
+        const TArray<FDWCOriginalUVIslandTopology>&   Topology,
+        TArray<FWetClothingAssetUVIsland>&            OutIslands,
+        FString*                                      OutErrorMessage = nullptr);
 
     static void SetError(FString* OutErrorMessage, const TCHAR* InMessage);
 };

@@ -1,0 +1,93 @@
+#include "/Engine/Public/Platform.ush"
+
+Texture2D<float> SourceWetnessTexture;
+RWTexture2D<float> DestinationWetnessTexture;
+// x=destination texel index, y=incoming start, z=incoming count
+StructuredBuffer<uint4> SeamDestinations;
+// x=source texel index, y=normalized weight
+StructuredBuffer<float4> SeamIncoming;
+StructuredBuffer<uint4> TexelLookup;
+StructuredBuffer<float4> TriangleFlow;
+StructuredBuffer<float4> Profiles;
+StructuredBuffer<uint> TriangleProfileIndices;
+
+int2 TextureSize;
+uint SeamDestinationCount;
+float DeltaSeconds;
+float SeamTransferScale;
+float MaxWetness;
+
+static const float DWCSeamSpreadResponseScale = 1.75;
+static const float DWCMaxSeamTransferFraction = 0.35;
+
+float GetArea(uint TexelIndex)
+{
+    const uint4 Lookup = TexelLookup[TexelIndex];
+    if (Lookup.w == 0u || Lookup.x == 0xffffffffu)
+    {
+        return 0.0;
+    }
+    return max(asfloat(Lookup.z), 1.0e-10) * max(TriangleFlow[Lookup.x].z, 1.0e-4);
+}
+
+[numthreads(64, 1, 1)]
+void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+    const uint DestinationEntryIndex = DispatchThreadId.x;
+    if (DestinationEntryIndex >= SeamDestinationCount)
+    {
+        return;
+    }
+
+    const uint4 DestinationEntry = SeamDestinations[DestinationEntryIndex];
+    const uint DestinationTexelIndex = DestinationEntry.x;
+    const uint IncomingStart = DestinationEntry.y;
+    const uint IncomingCount = DestinationEntry.z;
+    const uint Width = (uint)TextureSize.x;
+    const int2 DestinationTexel = int2(
+        (int)(DestinationTexelIndex % Width),
+        (int)(DestinationTexelIndex / Width));
+
+    const uint4 DestinationLookup = TexelLookup[DestinationTexelIndex];
+    if (DestinationLookup.w == 0u || DestinationLookup.x == 0xffffffffu)
+    {
+        return;
+    }
+
+    const float DestinationArea = GetArea(DestinationTexelIndex);
+    const float DestinationWetness = max(SourceWetnessTexture.Load(int3(DestinationTexel, 0)), 0.0);
+    const float DestinationRate = max(Profiles[TriangleProfileIndices[DestinationLookup.x]].x, 0.0) *
+        SeamTransferScale * DWCSeamSpreadResponseScale;
+    float NewMass = DestinationWetness * DestinationArea;
+
+    [loop]
+    for (uint IncomingOffset = 0u; IncomingOffset < IncomingCount; ++IncomingOffset)
+    {
+        const float4 IncomingEntry = SeamIncoming[IncomingStart + IncomingOffset];
+        const uint SourceTexelIndex = (uint)IncomingEntry.x;
+        const float Weight = max(IncomingEntry.y, 0.0);
+        const uint4 SourceLookup = TexelLookup[SourceTexelIndex];
+        if (SourceLookup.w == 0u || SourceLookup.x == 0xffffffffu)
+        {
+            continue;
+        }
+
+        const int2 SourceTexel = int2(
+            (int)(SourceTexelIndex % Width),
+            (int)(SourceTexelIndex / Width));
+        const float SourceWetness = max(SourceWetnessTexture.Load(int3(SourceTexel, 0)), 0.0);
+        const float SourceArea = GetArea(SourceTexelIndex);
+        const float SourceRate = max(Profiles[TriangleProfileIndices[SourceLookup.x]].x, 0.0) *
+            SeamTransferScale * DWCSeamSpreadResponseScale;
+
+        const float OutFraction = min(saturate(DeltaSeconds * DestinationRate * Weight), DWCMaxSeamTransferFraction);
+        const float InFraction = min(saturate(DeltaSeconds * SourceRate * Weight), DWCMaxSeamTransferFraction);
+        NewMass -= DestinationWetness * DestinationArea * OutFraction;
+        NewMass += SourceWetness * SourceArea * InFraction;
+    }
+
+    DestinationWetnessTexture[DestinationTexel] = clamp(
+        max(NewMass, 0.0) / max(DestinationArea, 1.0e-10),
+        0.0,
+        MaxWetness);
+}

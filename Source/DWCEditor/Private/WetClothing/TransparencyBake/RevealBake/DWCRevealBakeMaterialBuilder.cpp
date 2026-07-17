@@ -304,7 +304,11 @@ bool FDWCRevealBakeMaterialBuilder::ConfigureRevealMaterialGraph(
     bConnected &= ConnectMaterialExpressionsChecked(RevealAlpha, FString(), Lerp, TEXT("Alpha"));
     bConnected &= UMaterialEditingLibrary::ConnectMaterialProperty(Lerp, FString(), MP_BaseColor);
 
-    const TArray<FString> CompileErrors = bConnected ? UMaterialEditingLibrary::RecompileMaterial(Material) : TArray<FString>();
+    if (bConnected)
+    {
+        UMaterialEditingLibrary::RecompileMaterial(Material);
+    }
+    const TArray<FString> CompileErrors;
     Material->PostEditChange();
     Material->MarkPackageDirty();
     return bConnected && CompileErrors.Num() == 0;
@@ -359,8 +363,7 @@ UMaterialInstanceConstant* FDWCRevealBakeMaterialBuilder::CreateRevealMaterialIn
 
     FStaticParameterSet StaticParameters = SourceInstance->GetStaticParameters();
     FMaterialInstanceBasePropertyOverrides BasePropertyOverrides = SourceInstance->BasePropertyOverrides;
-    RevealInstance->SetPermutationParameters(StaticParameters, BasePropertyOverrides);
-    RevealInstance->UpdateStaticPermutation();
+    RevealInstance->UpdateStaticPermutation(StaticParameters, BasePropertyOverrides);
     RevealInstance->PostEditChange();
     RevealInstance->MarkPackageDirty();
     Package->MarkPackageDirty();

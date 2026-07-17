@@ -25,6 +25,14 @@ struct DWC_API FDWCWetContact
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wet Contact")
     FName BoneName = NAME_None;
+
+    /** Optional exact simulation-LOD index-buffer triangle ID from a trace hit. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wet Contact")
+    int32 RenderTriangleID = INDEX_NONE;
+
+    /** Optional material-slot restriction for the contact. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wet Contact")
+    int32 MaterialSlotIndex = INDEX_NONE;
 };
 
 USTRUCT(BlueprintType)

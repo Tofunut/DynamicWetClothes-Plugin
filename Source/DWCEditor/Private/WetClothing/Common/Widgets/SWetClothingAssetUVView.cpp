@@ -269,6 +269,7 @@ void SWetClothingAssetUVView::SetIslands(const TArray<TSharedPtr<FWetClothingAss
         }
     }
 
+    RebuildGeometryCache();
     Invalidate(EInvalidateWidget::Paint);
 }
 
@@ -371,6 +372,8 @@ void SWetClothingAssetUVView::Clear()
     IslandColors.Reset();
     HiddenUVIslandIDs.Reset();
     CircleMarkers.Reset();
+    CachedOutlineEdgesByIsland.Reset();
+    CachedContentUVBounds = FBox2D(ForceInit);
     SetBackgroundTexture(nullptr);
     ResetView();
     Invalidate(EInvalidateWidget::Paint);
@@ -519,67 +522,22 @@ int32 SWetClothingAssetUVView::OnPaint(
 
         if (bOutlineOnly)
         {
-            TMap<FQuantizedUVEdge, FUVOutlineEdgeDrawData> OutlineEdges;
-            OutlineEdges.Reserve(Island.UVTriangles.Num() * 3);
-
-            for (const FWetClothingAssetUVTriangle& Triangle : Island.UVTriangles)
+            const TArray<FCachedOutlineEdge>* OutlineEdges = CachedOutlineEdgesByIsland.Find(Island.UVIslandID);
+            if (OutlineEdges != nullptr)
             {
-                for (int32 EdgeIndex = 0; EdgeIndex < 3; ++EdgeIndex)
+                for (const FCachedOutlineEdge& Edge : *OutlineEdges)
                 {
-                    const int32            NextIndex = (EdgeIndex + 1) % 3;
-                    const FVector2D        StartUV = Triangle.UVs[EdgeIndex];
-                    const FVector2D        EndUV = Triangle.UVs[NextIndex];
-                    const FQuantizedUVEdge EdgeKey(StartUV, EndUV);
-
-                    FUVOutlineEdgeDrawData& EdgeData = OutlineEdges.FindOrAdd(EdgeKey);
-                    if (EdgeData.ForwardCount == 0 && EdgeData.ReverseCount == 0)
-                    {
-                        EdgeData.Points = TPair<FVector2D, FVector2D>(StartUV, EndUV);
-                    }
-
-                    if (IsForwardCanonicalEdge(StartUV, EndUV, EdgeKey))
-                    {
-                        ++EdgeData.ForwardCount;
-                    }
-                    else
-                    {
-                        ++EdgeData.ReverseCount;
-                    }
+                    const TArray<FVector2D> EdgeLine = {
+                        UVToLocal(Edge.Start, AllottedGeometry, UVBounds, ZoomAmount, ClampedViewOffset),
+                        UVToLocal(Edge.End, AllottedGeometry, UVBounds, ZoomAmount, ClampedViewOffset)
+                    };
+                    FSlateDrawElement::MakeLines(
+                        OutDrawElements, DrawLayer, AllottedGeometry.ToPaintGeometry(), EdgeLine,
+                        ESlateDrawEffect::None, FLinearColor(0.02f, 0.02f, 0.02f, LineOpacity), true, Thickness + 1.2f);
+                    FSlateDrawElement::MakeLines(
+                        OutDrawElements, DrawLayer + 1, AllottedGeometry.ToPaintGeometry(), EdgeLine,
+                        ESlateDrawEffect::None, LineColor, true, Thickness);
                 }
-            }
-
-            for (const TPair<FQuantizedUVEdge, FUVOutlineEdgeDrawData>& EdgePair : OutlineEdges)
-            {
-                const FUVOutlineEdgeDrawData& EdgeData = EdgePair.Value;
-                if (EdgeData.ForwardCount == EdgeData.ReverseCount)
-                {
-                    continue;
-                }
-
-                const TArray<FVector2D> EdgeLine = {
-                    UVToLocal(EdgeData.Points.Key, AllottedGeometry, UVBounds, ZoomAmount, ClampedViewOffset),
-                    UVToLocal(EdgeData.Points.Value, AllottedGeometry, UVBounds, ZoomAmount, ClampedViewOffset)
-                };
-
-                FSlateDrawElement::MakeLines(
-                    OutDrawElements,
-                    DrawLayer,
-                    AllottedGeometry.ToPaintGeometry(),
-                    EdgeLine,
-                    ESlateDrawEffect::None,
-                    FLinearColor(0.02f, 0.02f, 0.02f, LineOpacity),
-                    true,
-                    Thickness + 1.2f);
-
-                FSlateDrawElement::MakeLines(
-                    OutDrawElements,
-                    DrawLayer + 1,
-                    AllottedGeometry.ToPaintGeometry(),
-                    EdgeLine,
-                    ESlateDrawEffect::None,
-                    LineColor,
-                    true,
-                    Thickness);
             }
         }
         else
@@ -608,19 +566,6 @@ int32 SWetClothingAssetUVView::OnPaint(
 
 
 
-    const UTexture2D* MarkerAddressTexture = Cast<UTexture2D>(BackgroundTexture.Get());
-    const auto ApplyMarkerTextureAddress = [MarkerAddressTexture](const FVector2D& UV, const FVector2D& MarkerCenter)
-    {
-        if (MarkerAddressTexture == nullptr)
-        {
-            return UV;
-        }
-
-        return FVector2D(
-            ApplyUVViewTextureAddress(UV.X, MarkerCenter.X, MarkerAddressTexture->AddressX),
-            ApplyUVViewTextureAddress(UV.Y, MarkerCenter.Y, MarkerAddressTexture->AddressY));
-    };
-
     for (const FWetClothingAssetUVViewCircleMarker& Marker : CircleMarkers)
     {
         if (Marker.RadiusUV <= UE_SMALL_NUMBER)
@@ -628,12 +573,9 @@ int32 SWetClothingAssetUVView::OnPaint(
             continue;
         }
 
-        const FVector2D DisplayCenterUV = ApplyMarkerTextureAddress(Marker.CenterUV, Marker.CenterUV);
-        const FVector2D DisplayRadiusUUV = ApplyMarkerTextureAddress(Marker.CenterUV + FVector2D(Marker.RadiusUV, 0.0f), Marker.CenterUV);
-        const FVector2D DisplayRadiusVUV = ApplyMarkerTextureAddress(Marker.CenterUV + FVector2D(0.0f, Marker.RadiusUV), Marker.CenterUV);
-        const FVector2D CenterLocal = UVToLocal(DisplayCenterUV, AllottedGeometry, UVBounds, ZoomAmount, ClampedViewOffset);
-        const FVector2D RadiusULocal = UVToLocal(DisplayRadiusUUV, AllottedGeometry, UVBounds, ZoomAmount, ClampedViewOffset);
-        const FVector2D RadiusVLocal = UVToLocal(DisplayRadiusVUV, AllottedGeometry, UVBounds, ZoomAmount, ClampedViewOffset);
+        const FVector2D CenterLocal = UVToLocal(Marker.CenterUV, AllottedGeometry, UVBounds, ZoomAmount, ClampedViewOffset);
+        const FVector2D RadiusULocal = UVToLocal(Marker.CenterUV + FVector2D(Marker.RadiusUV, 0.0f), AllottedGeometry, UVBounds, ZoomAmount, ClampedViewOffset);
+        const FVector2D RadiusVLocal = UVToLocal(Marker.CenterUV + FVector2D(0.0f, Marker.RadiusUV), AllottedGeometry, UVBounds, ZoomAmount, ClampedViewOffset);
         const FVector2D Radii(
             FMath::Max(FMath::Abs(RadiusULocal.X - CenterLocal.X), 1.0),
             FMath::Max(FMath::Abs(RadiusVLocal.Y - CenterLocal.Y), 1.0));
@@ -984,30 +926,58 @@ FReply SWetClothingAssetUVView::OnMouseWheel(const FGeometry& MyGeometry, const 
     ViewOffset += CursorLocal - CursorLocalAfterZoom;
     ViewOffset = ClampViewOffset(MyGeometry, UVBounds, ZoomAmount, ViewOffset);
 
-    if (FMath::IsNearlyEqual(ZoomAmount, OldZoom) && ViewOffset.Equals(OldOffset))
+    if (!FMath::IsNearlyEqual(ZoomAmount, OldZoom) || !ViewOffset.Equals(OldOffset))
     {
-        return FReply::Unhandled();
+        Invalidate(EInvalidateWidget::Paint);
     }
 
-    Invalidate(EInvalidateWidget::Paint);
     return FReply::Handled();
+}
+
+void SWetClothingAssetUVView::RebuildGeometryCache()
+{
+    CachedContentUVBounds = FBox2D(ForceInit);
+    CachedOutlineEdgesByIsland.Reset();
+
+    for (const FWetClothingAssetUVIsland& Island : Islands)
+    {
+        TMap<FQuantizedUVEdge, FUVOutlineEdgeDrawData> OutlineMap;
+        OutlineMap.Reserve(Island.UVTriangles.Num() * 3);
+        for (const FWetClothingAssetUVTriangle& Triangle : Island.UVTriangles)
+        {
+            for (int32 VertexIndex = 0; VertexIndex < 3; ++VertexIndex)
+            {
+                CachedContentUVBounds += Triangle.UVs[VertexIndex];
+                const int32 NextIndex = (VertexIndex + 1) % 3;
+                const FVector2D StartUV = Triangle.UVs[VertexIndex];
+                const FVector2D EndUV = Triangle.UVs[NextIndex];
+                const FQuantizedUVEdge EdgeKey(StartUV, EndUV);
+                FUVOutlineEdgeDrawData& EdgeData = OutlineMap.FindOrAdd(EdgeKey);
+                if (EdgeData.ForwardCount == 0 && EdgeData.ReverseCount == 0)
+                {
+                    EdgeData.Points = TPair<FVector2D, FVector2D>(StartUV, EndUV);
+                }
+                if (IsForwardCanonicalEdge(StartUV, EndUV, EdgeKey)) ++EdgeData.ForwardCount;
+                else ++EdgeData.ReverseCount;
+            }
+        }
+
+        TArray<FCachedOutlineEdge>& CachedEdges = CachedOutlineEdgesByIsland.FindOrAdd(Island.UVIslandID);
+        for (const TPair<FQuantizedUVEdge, FUVOutlineEdgeDrawData>& Pair : OutlineMap)
+        {
+            if (Pair.Value.ForwardCount != Pair.Value.ReverseCount)
+            {
+                FCachedOutlineEdge& Edge = CachedEdges.AddDefaulted_GetRef();
+                Edge.Start = Pair.Value.Points.Key;
+                Edge.End = Pair.Value.Points.Value;
+            }
+        }
+    }
 }
 
 FBox2D SWetClothingAssetUVView::ComputeContentUVBounds() const
 {
-    FBox2D Bounds(ForceInit);
-
-    for (const FWetClothingAssetUVIsland& Island : Islands)
-    {
-        for (const FWetClothingAssetUVTriangle& Triangle : Island.UVTriangles)
-        {
-            Bounds += Triangle.UVs[0];
-            Bounds += Triangle.UVs[1];
-            Bounds += Triangle.UVs[2];
-        }
-    }
-
-    return Bounds;
+    return CachedContentUVBounds;
 }
 
 FBox2D SWetClothingAssetUVView::ComputeUVBounds() const

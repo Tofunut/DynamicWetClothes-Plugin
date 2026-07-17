@@ -20,6 +20,11 @@ struct FWetVertexNeighborRange
     }
 };
 
+struct FWetVertexNeighborList
+{
+    TArray<int32> Neighbors;
+};
+
 class DWC_API FWetClothingRuntimeData
 {
   public:
@@ -35,6 +40,7 @@ class DWC_API FWetClothingRuntimeData
     TArray<FLinearColor>              VertexWetPartDebugColors;
     TArray<FWetVertexNeighborRange>   NeighborRanges;
     TArray<int32>                     FlatNeighborIndices;
+    TArray<FWetVertexNeighborList>    NeighborGraph;
     TArray<FVector2f>                 SurfaceWaterUVs;
     TArray<bool>                      SurfaceWaterUVValidFlags;
     TArray<int32>                     SurfaceWaterMaterialSlotIndices;

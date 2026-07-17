@@ -17,6 +17,7 @@ void FWetClothingRuntimeData::ResetNeighborGraph()
 {
     NeighborRanges.Reset();
     FlatNeighborIndices.Reset();
+    NeighborGraph.Reset();
     bHasNeighborGraph = false;
 }
 

@@ -195,7 +195,7 @@ namespace WetClothingSkeletalMeshCacheBuilderInternal
         const FSkinWeightVertexBuffer* SkinWeightBuffer = LODData.GetSkinWeightVertexBuffer();
         if (SkinWeightBuffer == nullptr)
         {
-            DWC::Error::SetMessage(OutErrorMessage, TEXT("TargetMesh skin weight buffer is unavailable."));
+            DWC::Error::SetMessage(OutErrorMessage, TEXT("DWC Data UV skin weight buffer is unavailable."));
             return false;
         }
 
@@ -203,19 +203,19 @@ namespace WetClothingSkeletalMeshCacheBuilderInternal
         const int32 VertexCount = static_cast<int32>(LODData.GetNumVertices());
         if (BoneCount <= 0)
         {
-            DWC::Error::SetMessage(OutErrorMessage, TEXT("TargetMesh has no reference skeleton bones."));
+            DWC::Error::SetMessage(OutErrorMessage, TEXT("DWC Data UV has no reference skeleton bones."));
             return false;
         }
 
         if (VertexCount <= 0)
         {
-            DWC::Error::SetMessage(OutErrorMessage, TEXT("TargetMesh LOD has no render vertices."));
+            DWC::Error::SetMessage(OutErrorMessage, TEXT("DWC Data UV LOD has no render vertices."));
             return false;
         }
 
         if (SkinWeightBuffer->GetMaxBoneInfluences() == 0)
         {
-            DWC::Error::SetMessage(OutErrorMessage, TEXT("TargetMesh skin weight buffer has no bone influences."));
+            DWC::Error::SetMessage(OutErrorMessage, TEXT("DWC Data UV skin weight buffer has no bone influences."));
             return false;
         }
 
@@ -303,20 +303,20 @@ bool FWetBoneOptimizationCacheBuilder::Build(
 
     if (SkeletalMesh == nullptr)
     {
-        DWC::Error::SetMessage(OutErrorMessage, TEXT("No TargetMesh is assigned."));
+        DWC::Error::SetMessage(OutErrorMessage, TEXT("No DWC Data UV is assigned."));
         return false;
     }
 
     const FSkeletalMeshRenderData* RenderData = SkeletalMesh->GetResourceForRendering();
     if (RenderData == nullptr)
     {
-        DWC::Error::SetMessage(OutErrorMessage, TEXT("TargetMesh render data is unavailable."));
+        DWC::Error::SetMessage(OutErrorMessage, TEXT("DWC Data UV render data is unavailable."));
         return false;
     }
 
     if (!RenderData->LODRenderData.IsValidIndex(LODIndex))
     {
-        DWC::Error::SetMessage(OutErrorMessage, TEXT("Requested TargetMesh LOD render data is unavailable."));
+        DWC::Error::SetMessage(OutErrorMessage, TEXT("Requested DWC Data UV LOD render data is unavailable."));
         return false;
     }
 

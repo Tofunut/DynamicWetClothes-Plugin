@@ -11,4 +11,12 @@ namespace DWC::Error
             *OutErrorMessage = Message;
         }
     }
+
+    void SetMessage(FString* OutErrorMessage, const FString& Message)
+    {
+        if (OutErrorMessage != nullptr)
+        {
+            *OutErrorMessage = Message;
+        }
+    }
 }

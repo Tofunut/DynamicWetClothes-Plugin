@@ -1,0 +1,93 @@
+#include "/Engine/Public/Platform.ush"
+
+Buffer<float> PositionBuffer;
+StructuredBuffer<uint4> TriangleIndices;
+StructuredBuffer<float4> TriangleUV01;
+StructuredBuffer<float4> TriangleUV2RestArea;
+RWStructuredBuffer<float4> TriangleFlow;
+RWStructuredBuffer<float4> TriangleMetric;
+
+uint TriangleCount;
+uint PositionIndexBase;
+float4x4 LocalToWorld;
+float4 WorldGravityDirection;
+
+float3 LoadPosition(uint GlobalVertexIndex)
+{
+    const uint VertexIndex = GlobalVertexIndex - PositionIndexBase;
+    const uint FloatIndex = VertexIndex * 3u;
+    return float3(
+        PositionBuffer[FloatIndex + 0u],
+        PositionBuffer[FloatIndex + 1u],
+        PositionBuffer[FloatIndex + 2u]);
+}
+
+[numthreads(64, 1, 1)]
+void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+    const uint LocalTriangleIndex = DispatchThreadId.x;
+    if (LocalTriangleIndex >= TriangleCount)
+    {
+        return;
+    }
+
+    const uint4 Indices = TriangleIndices[LocalTriangleIndex];
+    const uint TriangleID = Indices.w;
+    const float4 UV01 = TriangleUV01[LocalTriangleIndex];
+    const float4 UV2RestArea = TriangleUV2RestArea[LocalTriangleIndex];
+
+    const float3 P0 = mul(float4(LoadPosition(Indices.x), 1.0), LocalToWorld).xyz;
+    const float3 P1 = mul(float4(LoadPosition(Indices.y), 1.0), LocalToWorld).xyz;
+    const float3 P2 = mul(float4(LoadPosition(Indices.z), 1.0), LocalToWorld).xyz;
+
+    const float3 E1 = P1 - P0;
+    const float3 E2 = P2 - P0;
+    const float3 CrossE = cross(E1, E2);
+    const float DoubleArea = length(CrossE);
+    const float RestArea = max(UV2RestArea.z, 1.0e-8);
+    if (DoubleArea <= 1.0e-8)
+    {
+        TriangleFlow[TriangleID] = float4(0.0, 0.0, 1.0, 0.0);
+        TriangleMetric[TriangleID] = float4(1.0, 0.0, 1.0, 0.0);
+        return;
+    }
+
+    const float3 N = CrossE / DoubleArea;
+    const float2 UV0 = UV01.xy;
+    const float2 UV1 = UV01.zw;
+    const float2 UV2 = UV2RestArea.xy;
+    const float2 DUV1 = UV1 - UV0;
+    const float2 DUV2 = UV2 - UV0;
+    const float UVDet = DUV1.x * DUV2.y - DUV1.y * DUV2.x;
+    if (abs(UVDet) <= 1.0e-10)
+    {
+        TriangleFlow[TriangleID] = float4(0.0, 0.0, (0.5 * DoubleArea) / RestArea, 0.0);
+        TriangleMetric[TriangleID] = float4(1.0, 0.0, 1.0, 0.0);
+        return;
+    }
+
+    const float InvUVDet = 1.0 / UVDet;
+    const float3 DPDU = (E1 * DUV2.y - E2 * DUV1.y) * InvUVDet;
+    const float3 DPDV = (-E1 * DUV2.x + E2 * DUV1.x) * InvUVDet;
+
+    const float3 Gravity = normalize(WorldGravityDirection.xyz);
+    const float3 SurfaceGravity = Gravity - dot(Gravity, N) * N;
+
+    const float G00 = dot(DPDU, DPDU);
+    const float G01 = dot(DPDU, DPDV);
+    const float G11 = dot(DPDV, DPDV);
+    const float RHS0 = dot(DPDU, SurfaceGravity);
+    const float RHS1 = dot(DPDV, SurfaceGravity);
+    const float MetricDet = G00 * G11 - G01 * G01;
+
+    float2 FlowUV = 0.0;
+    if (abs(MetricDet) > 1.0e-12)
+    {
+        FlowUV.x = (RHS0 * G11 - RHS1 * G01) / MetricDet;
+        FlowUV.y = (RHS1 * G00 - RHS0 * G01) / MetricDet;
+    }
+
+    const float AreaScale = max((0.5 * DoubleArea) / RestArea, 1.0e-4);
+    TriangleFlow[TriangleID] = float4(FlowUV, AreaScale, 1.0);
+    TriangleMetric[TriangleID] = float4(G00, G01, G11, 1.0);
+}

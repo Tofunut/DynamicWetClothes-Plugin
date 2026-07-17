@@ -1,0 +1,93 @@
+#include "/Engine/Public/Platform.ush"
+
+RWTexture2D<float> WetnessTexture;
+
+int2 TextureSize;
+int2 DispatchMin;
+int2 DispatchSize;
+
+// UV01 = (UV0.x, UV0.y, UV1.x, UV1.y)
+float4 UV01;
+// UV2AndSettings = (UV2.x, UV2.y, DistanceToSurface, unused)
+float4 UV2AndSettings;
+// ContactAndRadius = (ContactWorldPosition.xyz, Radius)
+float4 ContactAndRadius;
+// P0AndAmount = (TriangleP0.xyz, Amount)
+float4 P0AndAmount;
+// P1AndMaxWetness = (TriangleP1.xyz, MaxWetness)
+float4 P1AndMaxWetness;
+// P2AndMode = (TriangleP2.xyz, Mode), Mode 0 = contact, Mode 1 = wet all
+float4 P2AndMode;
+
+bool ComputeBarycentricUV(float2 Point, float2 A, float2 B, float2 C, out float3 Barycentric)
+{
+    const float2 V0 = B - A;
+    const float2 V1 = C - A;
+    const float2 V2 = Point - A;
+    const float Denominator = V0.x * V1.y - V1.x * V0.y;
+    if (abs(Denominator) <= 1.0e-10)
+    {
+        Barycentric = 0.0;
+        return false;
+    }
+
+    const float WeightB = (V2.x * V1.y - V1.x * V2.y) / Denominator;
+    const float WeightC = (V0.x * V2.y - V2.x * V0.y) / Denominator;
+    const float WeightA = 1.0 - WeightB - WeightC;
+    Barycentric = float3(WeightA, WeightB, WeightC);
+
+    // A small tolerance keeps rasterization stable on shared triangle edges.
+    return all(Barycentric >= -1.0e-4) && all(Barycentric <= 1.0001);
+}
+
+[numthreads(8, 8, 1)]
+void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+    if (DispatchThreadId.x >= (uint)DispatchSize.x ||
+        DispatchThreadId.y >= (uint)DispatchSize.y)
+    {
+        return;
+    }
+
+    const int2 Texel = DispatchMin + int2(DispatchThreadId.xy);
+    if (Texel.x < 0 || Texel.y < 0 || Texel.x >= TextureSize.x || Texel.y >= TextureSize.y)
+    {
+        return;
+    }
+
+    const float2 UV = (float2(Texel) + 0.5) / float2(TextureSize);
+    const float2 UV0 = UV01.xy;
+    const float2 UV1 = UV01.zw;
+    const float2 UV2 = UV2AndSettings.xy;
+
+    float3 Barycentric;
+    if (!ComputeBarycentricUV(UV, UV0, UV1, UV2, Barycentric))
+    {
+        return;
+    }
+
+    float Influence = 1.0;
+    if (P2AndMode.w < 0.5)
+    {
+        const float3 TexelWorldPosition =
+            P0AndAmount.xyz * Barycentric.x +
+            P1AndMaxWetness.xyz * Barycentric.y +
+            P2AndMode.xyz * Barycentric.z;
+
+        const float Radius = max(ContactAndRadius.w, 1.0e-4);
+        const float SurfaceDistance = length(TexelWorldPosition - ContactAndRadius.xyz);
+        const float ContactDepth = max(UV2AndSettings.z, 0.0);
+        const float Distance = sqrt(SurfaceDistance * SurfaceDistance + ContactDepth * ContactDepth);
+        Influence = saturate(1.0 - Distance / Radius);
+        if (Influence <= 0.0)
+        {
+            return;
+        }
+    }
+
+    const float OldWetness = WetnessTexture[Texel];
+    WetnessTexture[Texel] = clamp(
+        OldWetness + P0AndAmount.w * Influence,
+        0.0,
+        P1AndMaxWetness.w);
+}

@@ -2,7 +2,7 @@
 
 #include "CoreMinimal.h"
 
-class FAbsorbedWetnessSimulationState
+class DWC_API FAbsorbedWetnessSimulationState
 {
   public:
     void ResetAll();

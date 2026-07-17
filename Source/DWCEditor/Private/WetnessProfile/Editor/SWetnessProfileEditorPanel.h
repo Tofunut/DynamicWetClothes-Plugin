@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Core/DWCSimulationMode.h"
 #include "Widgets/SCompoundWidget.h"
 
 class IDetailsView;
@@ -20,6 +21,15 @@ class SWetnessProfileEditorPanel : public SCompoundWidget
 
   private:
     FReply HandleSaveClicked();
+    TSharedRef<SWidget> BuildSimulationModeButton(EDWCSimulationMode Mode, const FText& Label);
+    ECheckBoxState IsSimulationModeChecked(EDWCSimulationMode Mode) const;
+    void HandleSimulationModeChanged(ECheckBoxState NewState, EDWCSimulationMode Mode);
+    float GetPreviewRainRadius() const;
+    void HandlePreviewRainRadiusChanged(float InRadius);
+    float GetPreviewRainAmountPercent() const;
+    void HandlePreviewRainAmountPercentChanged(float InAmountPercent);
+    ECheckBoxState IsPreviewWetnessDebugColorChecked() const;
+    void HandlePreviewWetnessDebugColorChanged(ECheckBoxState NewState);
 
   private:
     TWeakObjectPtr<UWetnessProfile>     WetnessProfile;

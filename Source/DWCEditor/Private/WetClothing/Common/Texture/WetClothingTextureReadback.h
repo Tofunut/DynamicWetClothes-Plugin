@@ -18,7 +18,8 @@ struct FWetClothingTextureReadback
     ETextureSourceFormat Format = TSF_Invalid;
     TextureAddress       AddressX = TA_Clamp;
     TextureAddress       AddressY = TA_Clamp;
-    TArray64<uint8>      RawData;
+    /** Shared by session-cache hits to avoid copying full source mips on every preview request. */
+    TSharedPtr<TArray64<uint8>> RawData;
 
     bool         IsValid() const;
     FLinearColor GetLinearColor(int32 X, int32 Y) const;
@@ -31,4 +32,5 @@ class FWetClothingTextureReadbackUtils
         UTexture2D*                  Texture,
         FWetClothingTextureReadback& OutTextureData,
         FString&                     OutErrorMessage);
+    static void ClearCache();
 };

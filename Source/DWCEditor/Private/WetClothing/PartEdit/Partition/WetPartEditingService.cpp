@@ -28,11 +28,6 @@ bool FWetPartEditingService::EnsureDefaultWetPartForScope(UWetClothingAsset* Wet
     {
         if (MatchesScope(Entry, Scope) && Entry.WetPartID == 0)
         {
-            WetClothingAsset->Modify();
-            Entry.DisplayName = GetDefaultWetPartName(0);
-            Entry.Color = GetDefaultWetPartColor(0);
-            Entry.bViewEnabled = true;
-            WetClothingAsset->MarkPackageDirty();
             return true;
         }
     }

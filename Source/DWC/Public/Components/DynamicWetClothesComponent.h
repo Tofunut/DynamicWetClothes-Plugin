@@ -10,8 +10,12 @@
 #include "RuntimeState/WetRuntimeDataBuilder.h"
 #include "RuntimeState/WetClothingRuntimeData.h"
 #include "Core/WetClothingSettings.h"
+#include "Core/DWCSimulationMode.h"
+#include "GPU/DWCGPUBackend.h"
+#include "Async/DWCTaskQueue.h"
 #include "DataAssets/WetClothingAsset.h"
 #include "DataAssets/WetnessProfile.h"
+#include "WetInputSystem/WetSurfaceContactResolver.h"
 #include "WetRendering/WetRenderStage.h"
 #include "WetSimulation/WetSimulationStage.h"
 #include "WetSimulation/AbsorbedWetness/AbsorbedWetnessSimulationState.h"
@@ -41,6 +45,8 @@ struct FDWCWetMeshReceiverRuntime
     TMap<int32, FSurfaceWaterProfileParameters> SurfaceWaterProfilesByMaterialSlot;
     TUniquePtr<FWetSimulationStage> SimulationStage;
     TUniquePtr<FWetInputStage> InputStage;
+    TUniquePtr<FWetSurfaceContactResolver> SurfaceContactResolver;
+    TUniquePtr<IDWCGPUBackend> GPUBackend;
     TUniquePtr<FWetClothingMeshSampler> MeshSampler;
     TUniquePtr<FWetRenderStage> RenderStage;
     TArray<TObjectPtr<UMaterialInstanceDynamic>> WetMaterialInstances;
@@ -89,6 +95,12 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
     int32 GetWetSurfaceSampleResolution() const;
     void CommitCpuSkinningTaskResult(FDWCSkinningTaskResult&& Result);
 
+    USkeletalMeshComponent* GetResolvedTargetSkeletalMeshComponent() const { return ResolveTargetSkeletalMesh(); }
+    USkeletalMesh* GetRequiredRuntimeSkeletalMesh() const
+    {
+        return WetClothingAsset != nullptr ? WetClothingAsset->GetRuntimeSkeletalMesh() : nullptr;
+    }
+
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 #if WITH_EDITOR
@@ -103,11 +115,13 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
   private:
     FWetRuntimeDataBuildArgs MakeRuntimeDataBuildArgs(FDWCWetMeshReceiverRuntime& Receiver);
     FWetInputStageArgs       MakeWetInputStageArgs(FDWCWetMeshReceiverRuntime& Receiver);
+    FWetSurfaceContactResolverArgs MakeWetSurfaceContactResolverArgs(FDWCWetMeshReceiverRuntime& Receiver);
     FWetSimulationStageArgs  MakeWetSimulationStageArgs(FDWCWetMeshReceiverRuntime& Receiver);
     FWetRenderStageArgs      MakeWetRenderStageArgs(FDWCWetMeshReceiverRuntime& Receiver);
     bool                     InitializeWetRuntime();
     bool                     RebuildWetMeshReceivers();
     bool                     InitializeWetMeshReceiverRuntime(FDWCWetMeshReceiverRuntime& Receiver);
+    bool                     InitializeGPUBackend(FDWCWetMeshReceiverRuntime& Receiver);
     void                     StartWetnessTimers();
     void                     UpdateWetness();
     void                     UpdateSurfaceWater();
@@ -138,6 +152,24 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
 
     UPROPERTY(EditAnywhere, Category = "Wetness")
     TObjectPtr<UWetClothingAsset> WetClothingAsset = nullptr;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Simulation")
+    EDWCSimulationMode SimulationMode = EDWCSimulationMode::VertexCPU;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Simulation|GPU", meta = (EditCondition = "SimulationMode == EDWCSimulationMode::WetnessMapGPU", ClampMin = "3", ClampMax = "64"))
+    int32 GPUContactNearestSeedVertexCount = 12;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Simulation|GPU", meta = (EditCondition = "SimulationMode == EDWCSimulationMode::WetnessMapGPU"))
+    FName GPUWetnessMapParameterName = TEXT("DWC_WetnessMap");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Simulation|GPU|Tuning", meta = (EditCondition = "SimulationMode == EDWCSimulationMode::WetnessMapGPU", ClampMin = "0.0"))
+    float GPUSpreadRateScale = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Simulation|GPU|Tuning", meta = (EditCondition = "SimulationMode == EDWCSimulationMode::WetnessMapGPU", ClampMin = "0.0"))
+    float GPUGravityFlowStrengthScale = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Simulation|GPU|Tuning", meta = (EditCondition = "SimulationMode == EDWCSimulationMode::WetnessMapGPU", ClampMin = "0.0"))
+    float GPUDryRateScale = 1.0f;
 
     UPROPERTY(EditAnywhere, Category = "Wetness", meta = (ShowOnlyInnerProperties))
     FWetClothingSettings WetnessSettings;
@@ -180,16 +212,10 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
     bool bEnableWetPartDebugVertexColors = false;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Debug")
-    bool bWetPartDebugUseWetnessMask = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Debug")
     FLinearColor UnassignedWetPartDebugColor = FLinearColor(0.25f, 0.25f, 0.25f, 1.0f);
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Debug")
     FName WetPartDebugStrengthParameterName = TEXT("DWC_WetPartDebugStrength");
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Debug")
-    FName WetPartDebugUseWetnessMaskParameterName = TEXT("DWC_WetPartDebugUseWetnessMask");
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Wetness Profile Map")
     FName WetnessProfileMap0ParameterName = TEXT("DWC_WetnessProfileMap0");
@@ -253,6 +279,9 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Debug")
     bool bLogTransparencyRuntimeBindings = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Debug")
+    bool bLogGPUWetnessRuntimeBindings = false;
 
   private:
     TUniquePtr<FDWCTaskQueue> AsyncTaskQueue;

@@ -39,10 +39,8 @@ struct DWC_API FWetRenderStageArgs
 
     FLinearColor UnassignedWetPartDebugColor = FLinearColor(0.25f, 0.25f, 0.25f, 1.0f);
     bool         bEnableWetPartDebugVertexColors = false;
-    bool         bWetPartDebugUseWetnessMask = true;
 
     FName WetPartDebugStrengthParameterName = TEXT("DWC_WetPartDebugStrength");
-    FName WetPartDebugUseWetnessMaskParameterName = TEXT("DWC_WetPartDebugUseWetnessMask");
     FName WetnessProfileMap0ParameterName = DWCWetMaterialParameters::WetnessProfileMap0();
     FName UseWetnessProfileMap0ParameterName = DWCWetMaterialParameters::UseWetnessProfileMap0();
     FName WrinkleNormalMapParameterName = DWCWetMaterialParameters::WrinkleNormalMap();

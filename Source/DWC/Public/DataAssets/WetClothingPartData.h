@@ -130,6 +130,13 @@ struct DWC_API FWetClothingGeneratedWetMaterialOverride
     TObjectPtr<UMaterialInterface> SourceMaterial = nullptr;
 
     UPROPERTY(VisibleAnywhere, Category = "Generated Wet Material")
+    TObjectPtr<UMaterialInterface> CPUWetMaterial = nullptr;
+
+    UPROPERTY(VisibleAnywhere, Category = "Generated Wet Material")
+    TObjectPtr<UMaterialInterface> GPUWetMaterial = nullptr;
+
+    // Compatibility alias used by the surface-water editor/runtime path.
+    UPROPERTY(VisibleAnywhere, Category = "Generated Wet Material")
     TObjectPtr<UMaterialInterface> WetMaterial = nullptr;
 };
 
@@ -232,13 +239,13 @@ struct DWC_API FWetClothingPrecomputedSimulationData
     UPROPERTY(VisibleAnywhere, Category = "Precomputed Simulation Data")
     int32 DataVersion = 1;
 
-    UPROPERTY(VisibleAnywhere, Category = "Precomputed Simulation Data")
+    UPROPERTY(Transient, VisibleAnywhere, Category = "Precomputed Simulation Data")
     TArray<FWetClothingPrecomputedVertexData> Vertices;
 
-    UPROPERTY(VisibleAnywhere, Category = "Precomputed Simulation Data")
+    UPROPERTY(Transient, VisibleAnywhere, Category = "Precomputed Simulation Data")
     TArray<FWetClothingPrecomputedVertexNeighbors> NeighborGraph;
 
-    UPROPERTY(VisibleAnywhere, Category = "Precomputed Simulation Data")
+    UPROPERTY(Transient, VisibleAnywhere, Category = "Precomputed Simulation Data")
     FWetClothingPrecomputedBoneOptimizationCache BoneOptimizationCache;
 };
 

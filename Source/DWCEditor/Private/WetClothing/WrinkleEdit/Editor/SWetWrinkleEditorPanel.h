@@ -72,8 +72,10 @@ class SWetWrinkleEditorPanel : public SCompoundWidget, public FEditorUndoClient
     virtual void PostUndo(bool bSuccess) override;
     virtual void PostRedo(bool bSuccess) override;
     void RefreshFromAsset();
+    FReply BakeSelectedWrinkleNormalMap();
     FReply ExecuteBakeWrinkleNormalMap();
     FReply ExecuteBakeAllWrinkleNormalMaps();
+    FReply BakeSelectedWrinkleMask();
 
   private:
     using FStrokeListItemPtr = TSharedPtr<FWetWrinklePatchStrokeListItem>;
@@ -83,7 +85,7 @@ class SWetWrinkleEditorPanel : public SCompoundWidget, public FEditorUndoClient
     using FUVDisplayModeItemPtr = TSharedPtr<EWetClothingAssetUVDisplayMode>;
 
     FReply HandleSaveClicked();
-    FReply BakeWrinkleNormalMapsForSlots(const TArray<int32>& MaterialSlotIndices);
+    FReply BakeWrinkleNormalMapsForSlots(const TArray<int32>& MaterialSlotIndices, bool bBakeNormalMap = true, bool bBakeMask = false);
     FReply HandleFocusClicked();
     void HandleSurfaceHitChanged(const FWetWrinkleSurfaceHit& SurfaceHit);
     void HandlePaintStrokeStarted(const FWetWrinkleSurfaceHit& SurfaceHit);

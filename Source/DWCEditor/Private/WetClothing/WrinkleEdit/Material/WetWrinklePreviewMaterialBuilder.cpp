@@ -83,7 +83,11 @@ namespace
             return FString();
         }
 
-        const TArray<FString> OutputNames = UMaterialEditingLibrary::GetMaterialExpressionOutputNames(Expression);
+        TArray<FString> OutputNames;
+        for (const FExpressionOutput& Output : Expression->GetOutputs())
+        {
+            OutputNames.Add(Output.OutputName.ToString());
+        }
         return OutputNames.IsValidIndex(Input.OutputIndex) ? OutputNames[Input.OutputIndex] : FString();
     }
 
@@ -611,7 +615,8 @@ return PreviewVertexColor;
             return { TEXT("Cannot compile a null wrinkle preview material.") };
         }
 
-        Material->SetMaterialUsage(MATUSAGE_SkeletalMesh);
+        bool bNeedsRecompile = false;
+        Material->SetMaterialUsage(bNeedsRecompile, MATUSAGE_SkeletalMesh);
         Material->UpdateCachedExpressionData();
 
         {

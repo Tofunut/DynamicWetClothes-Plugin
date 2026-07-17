@@ -28,9 +28,12 @@ class DWCWATERSYSTEMINTEGRATION_API UWaterBodyWetContactComponent : public UActo
     void CreateOverlapProxy();
     void DestroyOverlapProxy();
     void RefreshExistingOverlaps();
+    void RefreshReceiversInsideBounds();
     void ApplyWetnessTick(float DeltaTime);
     void AddReceiverFromActor(AActor* OtherActor);
     void RemoveReceiverFromActor(AActor* OtherActor);
+    bool IsOceanWaterBody() const;
+    bool ShouldTrackReceiver(const UDynamicWetClothesComponent& Receiver, const FBox* OptionalWaterBodyBounds = nullptr) const;
     bool BuildWaterSurfaceDataForReceiver(const UDynamicWetClothesComponent& Receiver, FDWCWaterSurfaceData& OutWaterSurfaceData) const;
     bool QueryWaterSurfaceZ(const FVector& WorldPosition, float& OutSurfaceZ) const;
     bool GetWaterBodyProxyBounds(FBox& OutBounds) const;
@@ -55,6 +58,12 @@ class DWCWATERSYSTEMINTEGRATION_API UWaterBodyWetContactComponent : public UActo
     UPROPERTY(EditAnywhere, Category = "Wetness")
     bool bApplyToExistingOverlapsOnBeginPlay = true;
 
+    UPROPERTY(EditAnywhere, Category = "Wetness")
+    bool bRefreshReceiversInsideBounds = true;
+
+    UPROPERTY(EditAnywhere, Category = "Wetness", meta = (ClampMin = "0.0"))
+    float ReceiverRefreshInterval = 0.25f;
+
     UPROPERTY(EditAnywhere, Category = "Wetness|Overlap Proxy")
     bool bCreateOverlapProxy = true;
 
@@ -74,6 +83,7 @@ class DWCWATERSYSTEMINTEGRATION_API UWaterBodyWetContactComponent : public UActo
 
     double AccumulatedBuildSurfaceDataSeconds = 0.0;
     double AccumulatedApplyWetSurfaceSeconds = 0.0;
+    float  AccumulatedReceiverRefreshSeconds = 0.0f;
     float  AccumulatedPerformanceLogSeconds = 0.0f;
     int32  AccumulatedPerformanceFrames = 0;
     int32  AccumulatedProcessedReceivers = 0;

@@ -18,7 +18,7 @@ FWetClothingAssetViewportClient::FWetClothingAssetViewportClient(
       PreviewScene(InPreviewScene), ViewportWidget(InViewportWidget)
 {
     SetViewMode(VMI_Lit);
-    SetRealtime(true);
+    SetRealtime(false);
     ViewFOV = 65.0f;
     FOVAngle = 65.0f;
 

@@ -56,6 +56,7 @@ class SWetClothingAssetViewport : public SEditorViewport, public FGCObject
     void                HandleIslandPickedFromClient(int32 UVIslandID, bool bAppendSelection);
     void                RefreshWetPartOverlayMesh();
     void                RefreshSelectionOverlayMesh();
+    void                RequestViewportRedraw();
     void                CacheOriginalMaterials();
     void                RestoreOriginalMaterials();
     UMaterialInterface* ResolveWetPartOverlayMaterial();

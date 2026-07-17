@@ -289,13 +289,6 @@ void FWetRenderStage::ApplyWetMaterialParameters(FWetRenderStageArgs& Receiver)
                 Receiver.bEnableWetPartDebugVertexColors ? 1.0f : 0.0f);
         }
 
-        if (!Receiver.WetPartDebugUseWetnessMaskParameterName.IsNone())
-        {
-            MID->SetScalarParameterValue(
-                Receiver.WetPartDebugUseWetnessMaskParameterName,
-                Receiver.bWetPartDebugUseWetnessMask ? 1.0f : 0.0f);
-        }
-
         if (!Receiver.UnderColorParameterName.IsNone())
         {
             MID->SetVectorParameterValue(Receiver.UnderColorParameterName, Receiver.UnderColor);
@@ -786,7 +779,7 @@ FLinearColor FWetRenderStage::MakeWetVertexColor(
 {
     if (Receiver.RuntimeData == nullptr || !Receiver.RuntimeData->IsVertexWettable(VertexIndex))
     {
-        return FLinearColor::Black;
+        return Receiver.bEnableWetPartDebugVertexColors ? FLinearColor(0.0f, 1.0f, 1.0f, 1.0f) : FLinearColor::Black;
     }
 
     if (!Receiver.bEnableWetPartDebugVertexColors)

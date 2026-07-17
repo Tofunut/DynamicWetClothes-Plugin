@@ -91,6 +91,7 @@ class SWetClothingAssetUVView : public SLeafWidget
         const FPointerEvent& MouseEvent) override;
 
   private:
+    void RebuildGeometryCache();
     FBox2D ComputeUVBounds() const;
     FBox2D ComputeContentUVBounds() const;
     double GetTextureAspectRatio() const;
@@ -146,7 +147,15 @@ class SWetClothingAssetUVView : public SLeafWidget
     bool DoLineSegmentsIntersect(const FVector2D& AStart, const FVector2D& AEnd, const FVector2D& BStart, const FVector2D& BEnd) const;
 
   private:
+    struct FCachedOutlineEdge
+    {
+        FVector2D Start = FVector2D::ZeroVector;
+        FVector2D End = FVector2D::ZeroVector;
+    };
+
     TArray<FWetClothingAssetUVIsland>      Islands;
+    TMap<int32, TArray<FCachedOutlineEdge>> CachedOutlineEdgesByIsland;
+    FBox2D                                 CachedContentUVBounds = FBox2D(ForceInit);
     TSet<int32>                            SelectedUVIslandIDs;
     TMap<int32, FLinearColor>              IslandColors;
     TSet<int32>                            HiddenUVIslandIDs;

@@ -102,16 +102,15 @@ void FWetClothingWetnessProfileMapBaker::AppendProfileParametersSignature(
     const FWetnessProfileParameters& Parameters)
 {
     Signature += FString::Printf(
-        TEXT("AF=%.9g;AR=%.9g;S=%.9g;D=%.9g;G=%.9g;WV=%.9g;T=%.9g;SW=%.9g;R=%.9g;"),
-        Parameters.GetAbsorptionFraction(),
-        Parameters.GetAbsorptionRate(),
-        Parameters.AbsorbedWetness.SpreadRate,
-        Parameters.AbsorbedWetness.DryRate,
-        Parameters.AbsorbedWetness.GravityFlowStrength,
-        Parameters.AbsorbedWetness.WetVisualStrength,
-        Parameters.AbsorbedWetness.TransparencyStrength,
+        TEXT("A=%.9g;S=%.9g;D=%.9g;G=%.9g;WV=%.9g;T=%.9g;SW=%.9g;R=%.9g;"),
+        Parameters.Absorption,
+        Parameters.SpreadRate,
+        Parameters.DryRate,
+        Parameters.GravityFlowStrength,
+        Parameters.WetVisualStrength,
+        Parameters.TransparencyStrength,
         Parameters.GetSurfaceWaterStrength(),
-        Parameters.SurfaceWater.FlowIntensityMultiplier);
+        Parameters.GetRunoffStrength());
 }
 
 const FWetClothingWetPartEntry* FWetClothingWetnessProfileMapBaker::FindWetPartEntryForUVIsland(
@@ -453,9 +452,9 @@ bool FWetClothingWetnessProfileMapBaker::BakeWetnessProfileMap0(
         return false;
     }
 
-    if (WetClothingAsset->TargetMesh == nullptr)
+    if (WetClothingAsset->GetRuntimeSkeletalMesh() == nullptr)
     {
-        OutErrorMessage = TEXT("Assign a TargetMesh before baking a Wetness Profile Map.");
+        OutErrorMessage = TEXT("Generate the DWC Data UV before baking a Wetness Profile Map.");
         return false;
     }
 
@@ -489,7 +488,7 @@ bool FWetClothingWetnessProfileMapBaker::BakeWetnessProfileMap0(
         TArray<FWetClothingAssetUVIsland> Islands;
         FString                           BuildUVIslandError;
         if (!FWetClothingAssetMeshAnalyzer::BuildMaterialSlotUVIslands(
-                WetClothingAsset->TargetMesh,
+                WetClothingAsset->GetRuntimeSkeletalMesh(),
                 0,
                 UVChannelIndex,
                 MaterialSlotIndex,

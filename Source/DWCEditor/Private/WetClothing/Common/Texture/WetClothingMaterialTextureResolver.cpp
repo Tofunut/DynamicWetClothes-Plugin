@@ -385,12 +385,12 @@ UTexture* FWetClothingMaterialTextureResolver::ResolveOrSaveTextureSelection(
         return SavedTexture;
     }
 
-    if (WetClothingAsset == nullptr || WetClothingAsset->TargetMesh == nullptr)
+    if (WetClothingAsset == nullptr || WetClothingAsset->GetRuntimeSkeletalMesh() == nullptr)
     {
         return nullptr;
     }
 
-    const TArray<FSkeletalMaterial>& Materials = WetClothingAsset->TargetMesh->GetMaterials();
+    const TArray<FSkeletalMaterial>& Materials = WetClothingAsset->GetRuntimeSkeletalMesh()->GetMaterials();
     if (!Materials.IsValidIndex(MaterialSlotIndex) || Materials[MaterialSlotIndex].MaterialInterface == nullptr)
     {
         return nullptr;
@@ -424,9 +424,9 @@ void FWetClothingMaterialTextureResolver::BuildTextureItemsForMaterialSlot(
     const bool bHasSavedSelection = HasSavedTextureSelection(WetClothingAsset, MaterialSlotIndex, UVChannelIndex);
     UTexture* SavedTexture = FindSavedTextureSelection(WetClothingAsset, MaterialSlotIndex, UVChannelIndex);
 
-    if (WetClothingAsset != nullptr && WetClothingAsset->TargetMesh != nullptr && MaterialSlotIndex != INDEX_NONE)
+    if (WetClothingAsset != nullptr && WetClothingAsset->GetRuntimeSkeletalMesh() != nullptr && MaterialSlotIndex != INDEX_NONE)
     {
-        const TArray<FSkeletalMaterial>& Materials = WetClothingAsset->TargetMesh->GetMaterials();
+        const TArray<FSkeletalMaterial>& Materials = WetClothingAsset->GetRuntimeSkeletalMesh()->GetMaterials();
         if (Materials.IsValidIndex(MaterialSlotIndex) && Materials[MaterialSlotIndex].MaterialInterface != nullptr)
         {
             BuildTextureItems(Materials[MaterialSlotIndex].MaterialInterface, OutItems);

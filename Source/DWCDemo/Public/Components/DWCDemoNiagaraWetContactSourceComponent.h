@@ -85,7 +85,7 @@ class DWCDEMO_API UDWCDemoNiagaraWetContactSourceComponent
     bool bTraceComplex = false;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Debug")
-    bool bEnableDebugLogging = true;
+    bool bEnableDebugLogging = false;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Debug", meta = (ClampMin = "0.1"))
     float DebugLogInterval = 1.0f;

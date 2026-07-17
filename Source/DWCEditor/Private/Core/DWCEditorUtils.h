@@ -4,7 +4,12 @@
 
 class UObject;
 
+DECLARE_MULTICAST_DELEGATE_OneParam(FOnDWCEditorAssetSaved, UObject*);
+DECLARE_MULTICAST_DELEGATE_TwoParams(FOnDWCEditorAssetSaveAttemptFinished, UObject*, bool);
+
 namespace DWCEditorUtils
 {
-    bool            SaveAsset(UObject* Asset);
+    bool SaveAsset(UObject* Asset);
+    FOnDWCEditorAssetSaved& OnAssetSaved();
+    FOnDWCEditorAssetSaveAttemptFinished& OnAssetSaveAttemptFinished();
 } // namespace DWCEditorUtils

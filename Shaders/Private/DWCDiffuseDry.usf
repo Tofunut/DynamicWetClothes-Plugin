@@ -1,0 +1,121 @@
+#include "/Engine/Public/Platform.ush"
+
+Texture2D<float> SourceWetnessTexture;
+RWTexture2D<float> DestinationWetnessTexture;
+StructuredBuffer<uint4> TexelLookup;
+StructuredBuffer<float4> TriangleFlow;
+// x=dot(dPdu,dPdu), y=dot(dPdu,dPdv), z=dot(dPdv,dPdv), w=valid
+StructuredBuffer<float4> TriangleMetric;
+// x=SpreadRate/s, y=DryRate/s, z=GravityStrength, w=valid profile
+StructuredBuffer<float4> Profiles;
+StructuredBuffer<uint> TriangleProfileIndices;
+
+int2 TextureSize;
+float DeltaSeconds;
+float MaxWetness;
+
+static const float DWCSpreadResponseScale = 1.75;
+static const float DWCGravityResponseScale = 1.50;
+static const float DWCMaxEdgeTransferFraction = 0.35;
+
+uint Flatten(int2 Texel)
+{
+    return (uint)(Texel.y * TextureSize.x + Texel.x);
+}
+
+bool IsInside(int2 Texel)
+{
+    return Texel.x >= 0 && Texel.y >= 0 && Texel.x < TextureSize.x && Texel.y < TextureSize.y;
+}
+
+float TexelArea(uint4 Lookup)
+{
+    if (Lookup.w == 0u || Lookup.x == 0xffffffffu)
+    {
+        return 0.0;
+    }
+    const float RestArea = max(asfloat(Lookup.z), 1.0e-10);
+    return RestArea * max(TriangleFlow[Lookup.x].z, 1.0e-4);
+}
+
+float EdgeFraction(uint4 Lookup, float2 DirectionUV)
+{
+    const uint TriangleID = Lookup.x;
+    const float4 Profile = Profiles[TriangleProfileIndices[TriangleID]];
+    const float4 Flow = TriangleFlow[TriangleID];
+    const float4 Metric = TriangleMetric[TriangleID];
+
+    const float2 DeltaUV = DirectionUV / max(float2(TextureSize), 1.0);
+    const float PhysicalDistanceSquared =
+        DeltaUV.x * DeltaUV.x * Metric.x +
+        2.0 * DeltaUV.x * DeltaUV.y * Metric.y +
+        DeltaUV.y * DeltaUV.y * Metric.z;
+    const float PhysicalDistance = sqrt(max(PhysicalDistanceSquared, 1.0e-12));
+    const float CharacteristicLength = sqrt(max(TexelArea(Lookup), 1.0e-12));
+    const float DistanceScale = clamp(CharacteristicLength / PhysicalDistance, 0.25, 4.0);
+
+    const float SpreadPerEdge = max(Profile.x, 0.0) * 0.25 * DWCSpreadResponseScale * DistanceScale;
+    const float FlowLength = length(Flow.xy);
+    const float2 FlowDirection = FlowLength > 1.0e-8 ? Flow.xy / FlowLength : 0.0;
+    const float GravityRate = max(Profile.z, 0.0) * DWCGravityResponseScale * saturate(FlowLength) *
+        max(dot(FlowDirection, DirectionUV), 0.0) * DistanceScale;
+    return min(saturate(DeltaSeconds * (SpreadPerEdge + GravityRate)), DWCMaxEdgeTransferFraction);
+}
+
+[numthreads(8, 8, 1)]
+void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+    const int2 Texel = int2(DispatchThreadId.xy);
+    if (!IsInside(Texel))
+    {
+        return;
+    }
+
+    const uint TexelIndex = Flatten(Texel);
+    const uint4 CenterLookup = TexelLookup[TexelIndex];
+    if (CenterLookup.w == 0u || CenterLookup.x == 0xffffffffu)
+    {
+        DestinationWetnessTexture[Texel] = 0.0;
+        return;
+    }
+
+    const float CenterArea = TexelArea(CenterLookup);
+    const float CenterWetness = max(SourceWetnessTexture.Load(int3(Texel, 0)), 0.0);
+    float NewMass = CenterWetness * CenterArea;
+
+    static const int2 Offsets[4] = {
+        int2(1, 0), int2(-1, 0), int2(0, 1), int2(0, -1)
+    };
+    static const float2 Directions[4] = {
+        float2(1, 0), float2(-1, 0), float2(0, 1), float2(0, -1)
+    };
+
+    [unroll]
+    for (uint DirectionIndex = 0u; DirectionIndex < 4u; ++DirectionIndex)
+    {
+        const int2 NeighborTexel = Texel + Offsets[DirectionIndex];
+        if (!IsInside(NeighborTexel))
+        {
+            continue;
+        }
+
+        const uint4 NeighborLookup = TexelLookup[Flatten(NeighborTexel)];
+        if (NeighborLookup.w == 0u || NeighborLookup.x == 0xffffffffu ||
+            NeighborLookup.w != CenterLookup.w)
+        {
+            continue; // Separate UV islands communicate only through the seam gather pass.
+        }
+
+        const float OutFraction = EdgeFraction(CenterLookup, Directions[DirectionIndex]);
+        NewMass -= CenterWetness * CenterArea * OutFraction;
+
+        const float NeighborArea = TexelArea(NeighborLookup);
+        const float NeighborWetness = max(SourceWetnessTexture.Load(int3(NeighborTexel, 0)), 0.0);
+        const float InFraction = EdgeFraction(NeighborLookup, -Directions[DirectionIndex]);
+        NewMass += NeighborWetness * NeighborArea * InFraction;
+    }
+
+    const float DryRate = max(Profiles[TriangleProfileIndices[CenterLookup.x]].y, 0.0);
+    NewMass = max(NewMass, 0.0) * exp(-DryRate * max(DeltaSeconds, 0.0));
+    DestinationWetnessTexture[Texel] = clamp(NewMass / max(CenterArea, 1.0e-10), 0.0, MaxWetness);
+}

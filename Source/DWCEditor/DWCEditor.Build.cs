@@ -20,6 +20,7 @@ public class DWCEditor : ModuleRules
 				"Engine",
 				"InputCore",
 				"MaterialEditor",
+				"MessageLog",
 				"MeshDescription",
 				"ProceduralMeshComponent",
 				"PropertyEditor",

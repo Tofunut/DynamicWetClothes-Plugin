@@ -130,11 +130,18 @@ bool FWetRuntimeDataBuilder::InitializeWetPartVertexData(FWetRuntimeDataBuildArg
 
     if (!InitializeWetPartVertexDataFromPrecomputedData(Receiver, VertexCount, DefaultParameters))
     {
+        const USkeletalMesh* RuntimeMesh = Receiver.TargetSkeletalMesh != nullptr
+                                               ? Receiver.TargetSkeletalMesh->GetSkeletalMeshAsset()
+                                               : nullptr;
+        const FString ValidationSummary = Receiver.WetClothingAsset != nullptr
+                                              ? Receiver.WetClothingAsset->GetPrecomputedSimulationDataValidationSummary(RuntimeMesh, Receiver.LODIndex)
+                                              : FString(TEXT("CPUPrecomputed{asset=null}"));
         UE_LOG(
             LogTemp,
             Error,
-            TEXT("DynamicWetClothesComponent: Failed to initialize wet part vertex data from precomputed simulation data on %s. Open the Wet Clothing Asset and save it to update runtime-ready data."),
-            *GetNameSafe(Receiver.OwnerForLogs));
+            TEXT("DynamicWetClothesComponent: Failed to initialize wet part vertex data from precomputed simulation data on %s. %s Open the Wet Clothing Asset and save it to update runtime-ready data."),
+            *GetNameSafe(Receiver.OwnerForLogs),
+            *ValidationSummary);
         return false;
     }
 
@@ -154,13 +161,25 @@ bool FWetRuntimeDataBuilder::InitializeWetPartVertexDataFromPrecomputedData(
     const USkeletalMesh* SkeletalMesh = Receiver.TargetSkeletalMesh->GetSkeletalMeshAsset();
     if (!Receiver.WetClothingAsset->IsPrecomputedSimulationDataValidForMesh(SkeletalMesh, Receiver.LODIndex))
     {
+        const FString ValidationSummary =
+            Receiver.WetClothingAsset->GetPrecomputedSimulationDataValidationSummary(SkeletalMesh, Receiver.LODIndex);
         if (Receiver.WetClothingAsset->GetPrecomputedSimulationData().bIsValid)
         {
             UE_LOG(
                 LogTemp,
                 Warning,
-                TEXT("DynamicWetClothesComponent: WetClothingAsset precomputed simulation data is stale for %s."),
-                *GetNameSafe(Receiver.OwnerForLogs));
+                TEXT("DynamicWetClothesComponent: WetClothingAsset precomputed simulation data is stale for %s. %s"),
+                *GetNameSafe(Receiver.OwnerForLogs),
+                *ValidationSummary);
+        }
+        else
+        {
+            UE_LOG(
+                LogTemp,
+                Warning,
+                TEXT("DynamicWetClothesComponent: WetClothingAsset precomputed simulation data is unavailable for %s. %s"),
+                *GetNameSafe(Receiver.OwnerForLogs),
+                *ValidationSummary);
         }
         return false;
     }
@@ -168,11 +187,17 @@ bool FWetRuntimeDataBuilder::InitializeWetPartVertexDataFromPrecomputedData(
     const FWetClothingPrecomputedSimulationData& PrecomputedData = Receiver.WetClothingAsset->GetPrecomputedSimulationData();
     if (PrecomputedData.VertexCount != VertexCount || PrecomputedData.Vertices.Num() != VertexCount)
     {
+        const FString ValidationSummary =
+            Receiver.WetClothingAsset->GetPrecomputedSimulationDataValidationSummary(SkeletalMesh, Receiver.LODIndex);
         UE_LOG(
             LogTemp,
             Warning,
-            TEXT("DynamicWetClothesComponent: WetClothingAsset precomputed simulation data vertex count mismatch on %s."),
-            *GetNameSafe(Receiver.OwnerForLogs));
+            TEXT("DynamicWetClothesComponent: WetClothingAsset precomputed simulation data vertex count mismatch on %s. RuntimeVertexCount=%d, PrecomputedVertexCount=%d, PrecomputedVertices=%d. %s"),
+            *GetNameSafe(Receiver.OwnerForLogs),
+            VertexCount,
+            PrecomputedData.VertexCount,
+            PrecomputedData.Vertices.Num(),
+            *ValidationSummary);
         return false;
     }
 

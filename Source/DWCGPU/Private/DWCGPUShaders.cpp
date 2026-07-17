@@ -1,0 +1,35 @@
+#include "DWCGPUShaders.h"
+
+namespace DWCGPUShadersPrivate
+{
+bool ShouldCompileDWC(const FGlobalShaderPermutationParameters& Parameters)
+{
+    return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM5);
+}
+} // namespace DWCGPUShadersPrivate
+
+using namespace DWCGPUShadersPrivate;
+
+IMPLEMENT_GLOBAL_SHADER(FDWCApplyTriangleAbsorptionCS, "/DWCGPU/DWCApplyAbsorption.usf", "MainCS", SF_Compute);
+bool FDWCApplyTriangleAbsorptionCS::ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
+{
+    return ShouldCompileDWC(Parameters);
+}
+
+IMPLEMENT_GLOBAL_SHADER(FDWCUpdateTriangleFlowCS, "/DWCGPU/DWCUpdateTriangleFlow.usf", "MainCS", SF_Compute);
+bool FDWCUpdateTriangleFlowCS::ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
+{
+    return ShouldCompileDWC(Parameters);
+}
+
+IMPLEMENT_GLOBAL_SHADER(FDWCDiffuseDryCS, "/DWCGPU/DWCDiffuseDry.usf", "MainCS", SF_Compute);
+bool FDWCDiffuseDryCS::ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
+{
+    return ShouldCompileDWC(Parameters);
+}
+
+IMPLEMENT_GLOBAL_SHADER(FDWCSeamGatherCS, "/DWCGPU/DWCSeamGather.usf", "MainCS", SF_Compute);
+bool FDWCSeamGatherCS::ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
+{
+    return ShouldCompileDWC(Parameters);
+}

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Core/DWCSimulationMode.h"
 #include "Toolkits/AssetEditorToolkit.h"
 #include "WetClothing/Common/Editor/WetClothingEditorMode.h"
 
@@ -12,8 +13,16 @@ class FToolBarBuilder;
 class IDetailsView;
 class SDockTab;
 class SWidget;
+class SWindow;
 class SWetClothingAssetEditorPanel;
 class UWetClothingAsset;
+
+enum class EWetClothingGenerateMaterialMode : uint8
+{
+    CPU,
+    GPU,
+    All
+};
 enum class ECheckBoxState : uint8;
 
 class FWetClothingAssetEditor : public FAssetEditorToolkit
@@ -31,20 +40,31 @@ class FWetClothingAssetEditor : public FAssetEditorToolkit
     virtual FString      GetWorldCentricTabPrefix() const override;
     virtual FLinearColor GetWorldCentricTabColorScale() const override;
     virtual bool         OnRequestClose(EAssetEditorCloseReason InCloseReason) override;
+    virtual void         SaveAsset_Execute() override;
 
   private:
     virtual void         PostRegenerateMenusAndToolbars() override;
     void                 HandleFinishedChangingProperties(const FPropertyChangedEvent& PropertyChangedEvent);
     void                 HandleObjectPropertyChanged(UObject* ObjectBeingModified, FPropertyChangedEvent& PropertyChangedEvent);
+    void                 HandleDWCEditorAssetSaveAttemptFinished(UObject* SavedAsset, bool bSaveSucceeded);
     TSharedRef<SDockTab> SpawnMainTab(const FSpawnTabArgs& Args);
     void                 FillAssetToolbar(FToolBarBuilder& ToolbarBuilder);
+    void                 HandleAssetSetupClicked();
+    void                 HandleGenerateGeneratedDataUVClicked();
+    void                 HandleValidationClicked();
+    FReply               HandleValidationResolveClicked(TWeakPtr<SWindow> DialogWindow);
     TSharedRef<SWidget>  BuildBakeMapsMenu();
-    void                 HandleGenerateSurfaceWaterUVClicked();
-    FReply               HandleBakeAllWetnessProfileMapsClicked();
-    FReply               HandleBakeSelectedWetnessProfileMapClicked();
+    TSharedRef<SWidget>  BuildGenerateMaterialsMenu();
+    FReply               HandleBakeAllMapsClicked();
+    FReply               HandleBakeWetnessProfileMapsClicked();
+    FReply               HandleBakeGPUWetnessMapDataClicked();
     FReply               HandleBakeTransparencyRevealMapsClicked();
-    FReply               HandleBakeAllWrinkleNormalMapsClicked();
-    FReply               HandleBakeSelectedWrinkleNormalMapClicked();
+    FReply               HandleBakeWrinkleNormalMapClicked();
+    FReply               HandleBakeWrinkleMaskClicked();
+    FReply               HandleGenerateMaterialsClicked(EWetClothingGenerateMaterialMode GenerateMode);
+    FReply               GenerateWetMaterials(EWetClothingGenerateMaterialMode GenerateMode);
+    bool                 ResolveIssuesAndSave(FString& OutFailure);
+    void                 RefreshAssetStateAndEditor(bool bIncludeMapValidation = true);
     TSharedRef<SWidget>  BuildModeToolbarWidget();
     TSharedRef<SWidget>  BuildModeToggleButton(EWetClothingEditorMode Mode, FName IconName, const FText& ToolTipText);
     void                 SetEditorMode(EWetClothingEditorMode NewMode);
@@ -61,6 +81,7 @@ class FWetClothingAssetEditor : public FAssetEditorToolkit
     TSharedPtr<SWetClothingAssetEditorPanel> EditorPanel;
     TSharedPtr<FWorkspaceItem>               WorkspaceMenuCategory;
     FDelegateHandle                          ObjectPropertyChangedHandle;
+    FDelegateHandle                          AssetSavedHandle;
     TSharedPtr<FExtender>                    ToolbarExtender;
     EWetClothingEditorMode                   CurrentMode = EWetClothingEditorMode::PartEdit;
 };

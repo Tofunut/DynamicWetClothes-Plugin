@@ -2,13 +2,18 @@
 
 #include "FileHelpers.h"
 #include "DataAssets/WetClothingAsset.h"
+#include "Engine/SkeletalMesh.h"
 #include "UObject/Object.h"
 #include "UObject/Package.h"
 #include "Framework/Notifications/NotificationManager.h"
+#include "Misc/ScopedSlowTask.h"
 #include "Widgets/Notifications/SNotificationList.h"
 
 namespace
 {
+    FOnDWCEditorAssetSaved GDWCEditorAssetSaved;
+    FOnDWCEditorAssetSaveAttemptFinished GDWCEditorAssetSaveAttemptFinished;
+
     void ShowDWCEditorNotification(const FText& Message, const SNotificationItem::ECompletionState CompletionState)
     {
         FNotificationInfo Info(Message);
@@ -22,6 +27,16 @@ namespace
     }
 }
 
+FOnDWCEditorAssetSaved& DWCEditorUtils::OnAssetSaved()
+{
+    return GDWCEditorAssetSaved;
+}
+
+FOnDWCEditorAssetSaveAttemptFinished& DWCEditorUtils::OnAssetSaveAttemptFinished()
+{
+    return GDWCEditorAssetSaveAttemptFinished;
+}
+
 bool DWCEditorUtils::SaveAsset(UObject* Asset)
 {
     if (Asset == nullptr)
@@ -29,43 +44,74 @@ bool DWCEditorUtils::SaveAsset(UObject* Asset)
         return false;
     }
 
-    if (UWetClothingAsset* WetClothingAsset = Cast<UWetClothingAsset>(Asset))
+    UWetClothingAsset* WetClothingAsset = Cast<UWetClothingAsset>(Asset);
+    if (WetClothingAsset != nullptr)
     {
-        if (WetClothingAsset->TargetMesh == nullptr)
-        {
-            UE_LOG(LogTemp, Warning, TEXT("DWCEditor: Saving %s without TargetMesh. Precomputed simulation data was not updated."), *GetNameSafe(WetClothingAsset));
-        }
-        else if (!WetClothingAsset->IsPrecomputedSimulationDataValidForMesh(WetClothingAsset->TargetMesh, 0))
-        {
-            FString ErrorMessage;
-            if (!WetClothingAsset->RebuildPrecomputedSimulationData(&ErrorMessage, 0))
-            {
-                UE_LOG(
-                    LogTemp,
-                    Error,
-                    TEXT("DWCEditor: Failed to update precomputed simulation data before saving %s. %s"),
-                    *GetNameSafe(WetClothingAsset),
-                    *ErrorMessage);
+        WetClothingAsset->BeginRuntimeDataEditorSaveAttempt();
+    }
 
-                ShowDWCEditorNotification(
-                    FText::FromString(TEXT("Failed to update runtime-ready data. Asset was not saved.")),
-                    SNotificationItem::CS_Fail);
-                return false;
-            }
-
-            ShowDWCEditorNotification(
-                FText::FromString(TEXT("Runtime-ready data updated.")),
-                SNotificationItem::CS_Success);
-        }
+    TUniquePtr<FScopedSlowTask> SaveSlowTask;
+    if (WetClothingAsset != nullptr)
+    {
+        SaveSlowTask = MakeUnique<FScopedSlowTask>(
+            2.0f,
+            FText::FromString(FString::Printf(TEXT("Saving %s..."), *GetNameSafe(WetClothingAsset))));
+        SaveSlowTask->MakeDialog(false);
+        SaveSlowTask->EnterProgressFrame(
+            1.0f,
+            FText::FromString(TEXT("Collecting asset packages to save...")));
     }
 
     UPackage* Package = Asset->GetOutermost();
     if (Package == nullptr)
     {
+        if (WetClothingAsset != nullptr)
+        {
+            WetClothingAsset->CompleteRuntimeDataEditorSaveAttempt(false);
+        }
+        GDWCEditorAssetSaveAttemptFinished.Broadcast(Asset, false);
         return false;
     }
 
     TArray<UPackage*> PackagesToSave;
     PackagesToSave.Add(Package);
-    return FEditorFileUtils::PromptForCheckoutAndSave(PackagesToSave, false, false) == FEditorFileUtils::PR_Success;
+    if (WetClothingAsset != nullptr)
+    {
+        if (USkeletalMesh* GeneratedDataUV = WetClothingAsset->GetRuntimeSkeletalMesh())
+        {
+            if (UPackage* RuntimeMeshPackage = GeneratedDataUV->GetOutermost();
+                RuntimeMeshPackage != nullptr &&
+                RuntimeMeshPackage != Package &&
+                RuntimeMeshPackage->IsDirty())
+            {
+                PackagesToSave.AddUnique(RuntimeMeshPackage);
+            }
+        }
+    }
+
+    if (SaveSlowTask.IsValid())
+    {
+        SaveSlowTask->EnterProgressFrame(
+            1.0f,
+            FText::FromString(TEXT("Saving Wet Clothing Asset packages...")));
+    }
+
+    const bool bSaved = FEditorFileUtils::PromptForCheckoutAndSave(PackagesToSave, false, false) == FEditorFileUtils::PR_Success;
+    if (WetClothingAsset != nullptr)
+    {
+        WetClothingAsset->CompleteRuntimeDataEditorSaveAttempt(bSaved);
+    }
+    if (bSaved)
+    {
+        if (WetClothingAsset != nullptr)
+        {
+            WetClothingAsset->RefreshBakeState(false);
+            ShowDWCEditorNotification(
+                FText::FromString(TEXT("Wet Clothing Asset saved.")),
+                SNotificationItem::CS_Success);
+        }
+        GDWCEditorAssetSaved.Broadcast(Asset);
+    }
+    GDWCEditorAssetSaveAttemptFinished.Broadcast(Asset, bSaved);
+    return bSaved;
 }

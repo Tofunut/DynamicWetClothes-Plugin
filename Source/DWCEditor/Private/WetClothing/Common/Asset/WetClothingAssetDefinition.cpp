@@ -2,6 +2,7 @@
 
 #include "Core/DWCEditorStyle.h"
 #include "DataAssets/WetClothingAsset.h"
+#include "Misc/ScopedSlowTask.h"
 #include "WetClothing/Common/Editor/WetClothingAssetEditor.h"
 
 #define LOCTEXT_NAMESPACE "WetClothingAssetDefinition"
@@ -39,6 +40,14 @@ const FSlateBrush* UWetClothingAssetDefinition::GetIconBrush(const FAssetData& I
 
 EAssetCommandResult UWetClothingAssetDefinition::OpenAssets(const FAssetOpenArgs& OpenArgs) const
 {
+    FScopedSlowTask OpenTask(
+        1.0f,
+        LOCTEXT("OpenWetClothingAssetsProgress", "Opening Wet Clothing Asset..."));
+    OpenTask.MakeDialog(false);
+    OpenTask.EnterProgressFrame(
+        0.2f,
+        LOCTEXT("LoadWetClothingAssetObjectsProgress", "Loading Wet Clothing Asset objects..."));
+
     const TArray<UWetClothingAsset*> WetClothingAssets = OpenArgs.LoadObjects<UWetClothingAsset>();
 
     if (WetClothingAssets.IsEmpty())
@@ -46,8 +55,14 @@ EAssetCommandResult UWetClothingAssetDefinition::OpenAssets(const FAssetOpenArgs
         return EAssetCommandResult::Unhandled;
     }
 
+    const float WorkPerAsset = 0.8f / static_cast<float>(WetClothingAssets.Num());
     for (UWetClothingAsset* WetClothingAsset : WetClothingAssets)
     {
+        OpenTask.EnterProgressFrame(
+            WorkPerAsset,
+            FText::FromString(FString::Printf(
+                TEXT("Creating editor for %s (metadata only, runtime payload stays lazy)..."),
+                *GetNameSafe(WetClothingAsset))));
         TSharedRef<FWetClothingAssetEditor> Editor = MakeShared<FWetClothingAssetEditor>();
         Editor->Initialize(OpenArgs.GetToolkitMode(), OpenArgs.ToolkitHost, WetClothingAsset);
     }

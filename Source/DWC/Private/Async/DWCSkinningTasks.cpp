@@ -3,6 +3,7 @@
 #include "Async/ParallelFor.h"
 #include "Components/DynamicWetClothesComponent.h"
 #include "CoreGlobals.h"
+#include "Engine/SkeletalMesh.h"
 #include "Runtime/Engine/Classes/Components/SkeletalMeshComponent.h"
 #include "Runtime/Engine/Public/Rendering/SkeletalMeshLODRenderData.h"
 #include "Runtime/Engine/Public/Rendering/SkeletalMeshRenderData.h"
@@ -182,6 +183,16 @@ bool BuildDWCSkinningTaskSnapshot(
         return false;
     }
 
+    const USkeletalMesh* CurrentMesh = TargetSkeletalMesh->GetSkeletalMeshAsset();
+    const FSkinWeightVertexBuffer* CurrentSkinWeightBuffer = TargetSkeletalMesh->GetSkinWeightBuffer(LODIndex);
+    if (CurrentMesh == nullptr ||
+        CurrentSkinWeightBuffer == nullptr ||
+        StaticData->SkeletalMeshIdentity != reinterpret_cast<UPTRINT>(CurrentMesh) ||
+        StaticData->SkinWeightBufferIdentity != reinterpret_cast<UPTRINT>(CurrentSkinWeightBuffer))
+    {
+        return false;
+    }
+
     TArray<FMatrix44f> RefToLocalMatrices;
     TargetSkeletalMesh->CacheRefToLocalMatrices(RefToLocalMatrices);
     if (RefToLocalMatrices.Num() == 0)
@@ -189,7 +200,7 @@ bool BuildDWCSkinningTaskSnapshot(
         return false;
     }
 
-    const int32 VertexCount = StaticData->VertexTarget.VertexCount;
+    const int32 VertexCount = StaticData->VertexCount;
     if (VertexCount <= 0)
     {
         return false;
@@ -213,9 +224,8 @@ bool BuildDWCSkinningTaskSnapshot(
 }
 
 TSharedPtr<const FDWCSkinningStaticData, ESPMode::ThreadSafe> BuildDWCSkinningStaticData(
-    USkeletalMeshComponent*       TargetSkeletalMesh,
-    const int32                   LODIndex,
-    const FDWCTaskTargetSnapshot& Target)
+    USkeletalMeshComponent* TargetSkeletalMesh,
+    const int32 LODIndex)
 {
     DWC_PROFILE_SCOPE(DWC_BuildCpuSkinningStaticData);
 
@@ -230,7 +240,7 @@ TSharedPtr<const FDWCSkinningStaticData, ESPMode::ThreadSafe> BuildDWCSkinningSt
         return nullptr;
     }
 
-    const FSkinWeightVertexBuffer* SkinWeightBuffer = TargetSkeletalMesh->GetSkinWeightBuffer(0);
+    const FSkinWeightVertexBuffer* SkinWeightBuffer = TargetSkeletalMesh->GetSkinWeightBuffer(LODIndex);
     if (!SkinWeightBuffer)
     {
         return nullptr;
@@ -244,9 +254,10 @@ TSharedPtr<const FDWCSkinningStaticData, ESPMode::ThreadSafe> BuildDWCSkinningSt
 
     TSharedRef<FDWCSkinningStaticData, ESPMode::ThreadSafe> StaticData =
         MakeShared<FDWCSkinningStaticData, ESPMode::ThreadSafe>();
-    StaticData->VertexTarget.Target = Target;
-    StaticData->VertexTarget.LODIndex = LODIndex;
-    StaticData->VertexTarget.VertexCount = VertexCount;
+    StaticData->SkeletalMeshIdentity = reinterpret_cast<UPTRINT>(TargetSkeletalMesh->GetSkeletalMeshAsset());
+    StaticData->SkinWeightBufferIdentity = reinterpret_cast<UPTRINT>(SkinWeightBuffer);
+    StaticData->LODIndex = LODIndex;
+    StaticData->VertexCount = VertexCount;
     StaticData->LocalPositions.SetNumZeroed(VertexCount);
     StaticData->LocalNormals.SetNumZeroed(VertexCount);
     StaticData->Vertices.SetNumZeroed(VertexCount);

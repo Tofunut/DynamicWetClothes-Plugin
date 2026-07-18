@@ -72,6 +72,51 @@ public:
     static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters);
 };
 
+/** Computes per-texel 8-way transfer normalization so one step cannot drain too much mass. */
+class FDWCTransferScale8CS final : public FGlobalShader
+{
+public:
+    DECLARE_GLOBAL_SHADER(FDWCTransferScale8CS);
+    SHADER_USE_PARAMETER_STRUCT(FDWCTransferScale8CS, FGlobalShader);
+
+    BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
+        SHADER_PARAMETER(FIntPoint, TextureSize)
+        SHADER_PARAMETER(float, DeltaSeconds)
+        SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float>, TransferScaleTexture)
+        SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint4>, TexelLookup)
+        SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float4>, TriangleFlow)
+        SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float4>, TriangleMetric)
+        SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float4>, Profiles)
+        SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, TriangleProfileIndices)
+    END_SHADER_PARAMETER_STRUCT()
+
+    static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters);
+};
+
+/** 8-neighbor absorbed-wetness spread, gravity bias, and drying using precomputed transfer scales. */
+class FDWCDiffuseDry8CS final : public FGlobalShader
+{
+public:
+    DECLARE_GLOBAL_SHADER(FDWCDiffuseDry8CS);
+    SHADER_USE_PARAMETER_STRUCT(FDWCDiffuseDry8CS, FGlobalShader);
+
+    BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
+        SHADER_PARAMETER(FIntPoint, TextureSize)
+        SHADER_PARAMETER(float, DeltaSeconds)
+        SHADER_PARAMETER(float, MaxWetness)
+        SHADER_PARAMETER_RDG_TEXTURE(Texture2D, SourceWetnessTexture)
+        SHADER_PARAMETER_RDG_TEXTURE(Texture2D, TransferScaleTexture)
+        SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float>, DestinationWetnessTexture)
+        SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint4>, TexelLookup)
+        SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float4>, TriangleFlow)
+        SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float4>, TriangleMetric)
+        SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float4>, Profiles)
+        SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, TriangleProfileIndices)
+    END_SHADER_PARAMETER_STRUCT()
+
+    static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters);
+};
+
 /** Destination-oriented seam gather; each thread owns exactly one destination texel. */
 class FDWCSeamGatherCS final : public FGlobalShader
 {

@@ -35,6 +35,7 @@ private:
     };
 
     bool BuildStaticSimulationData();
+    bool BuildDebugVertexLookup();
     bool CreateSlotResources();
     void DispatchSimulation(TArray<FDWCResolvedSurfaceContact>&& Contacts, float WetAllAmount, float DeltaSeconds);
 
@@ -42,12 +43,14 @@ private:
     TWeakObjectPtr<USkeletalMeshComponent> TargetSkeletalMesh;
     TWeakObjectPtr<UWetClothingAsset> WetClothingAsset;
     TArray<TObjectPtr<UMaterialInstanceDynamic>>* WetMaterialInstances = nullptr;
-    FName WetnessMapParameterName = TEXT("DWC_WetnessMap");
+    FName WetnessMapParameterName;
 
     TSharedPtr<const FStaticSimulationData, ESPMode::ThreadSafe> StaticSimulationData;
     TSharedPtr<FRenderState, ESPMode::ThreadSafe> RenderState;
     TArray<FMaterialSlotRuntime> MaterialSlots;
     TArray<FDWCResolvedSurfaceContact> PendingContacts;
+    TArray<FVector2f> DebugVertexDataUVs;
+    TArray<int32> DebugVertexMaterialSlots;
     float PendingWetAllAmount = 0.0f;
     float MaxWetness = 1.0f;
     float SpreadRateScale = 1.0f;
@@ -55,6 +58,6 @@ private:
     float GravityFlowStrengthScale = 1.0f;
     int32 LODIndex = 0;
     int32 DebugDispatchLogCount = 0;
-    bool bLogGPUWetnessRuntimeBindings = false;
+    bool bUseEightDirectionDiffusion = false;
     bool bInitialized = false;
 };

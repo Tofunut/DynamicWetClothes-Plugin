@@ -87,7 +87,6 @@ class FDWCEditorModule : public IModuleInterface
     {
         static const FString ApplyWetnessCPUAssetPath = TEXT("/DynamicWetClothes/Materials/Functions/MF_DWC_ApplyWetness_CPU");
         static const FString ApplyWetnessGPUAssetPath = TEXT("/DynamicWetClothes/Materials/Functions/MF_DWC_ApplyWetness_GPU");
-        static const FString WetPartDebugAssetPath = TEXT("/DynamicWetClothes/Materials/Functions/MF_DWC_WetPartDebug");
 
         UE_LOG(LogTemp, Display, TEXT("DWC material function repair started."));
 
@@ -110,14 +109,12 @@ class FDWCEditorModule : public IModuleInterface
                                                     : nullptr;
         if (AssetSubsystem == nullptr ||
             !AssetSubsystem->SaveAsset(ApplyWetnessCPUAssetPath, false) ||
-            !AssetSubsystem->SaveAsset(ApplyWetnessGPUAssetPath, false) ||
-            !AssetSubsystem->SaveAsset(WetPartDebugAssetPath, false))
+            !AssetSubsystem->SaveAsset(ApplyWetnessGPUAssetPath, false))
         {
             ErrorMessage = FString::Printf(
-                TEXT("DWC material functions validated but one or more assets could not be saved. Check source-control checkout and file permissions. CPU='%s' GPU='%s' Debug='%s'."),
+                TEXT("DWC material functions validated but one or more assets could not be saved. Check source-control checkout and file permissions. CPU='%s' GPU='%s'."),
                 *ApplyWetnessCPUAssetPath,
-                *ApplyWetnessGPUAssetPath,
-                *WetPartDebugAssetPath);
+                *ApplyWetnessGPUAssetPath);
             UE_LOG(LogTemp, Error, TEXT("%s"), *ErrorMessage);
             if (!FApp::IsUnattended())
             {
@@ -126,13 +123,13 @@ class FDWCEditorModule : public IModuleInterface
             return;
         }
 
-        UE_LOG(LogTemp, Display, TEXT("MF_DWC_ApplyWetness_CPU/GPU and MF_DWC_WetPartDebug were validated and saved as the fixed material functions."));
+        UE_LOG(LogTemp, Display, TEXT("MF_DWC_ApplyWetness_CPU/GPU were validated and saved as the fixed material functions."));
         if (!FApp::IsUnattended())
         {
             FMessageDialog::Open(
                 EAppMsgCategory::Success,
                 EAppMsgType::Ok,
-                FText::FromString(TEXT("MF_DWC_ApplyWetness_CPU/GPU and MF_DWC_WetPartDebug were validated and saved.")));
+                FText::FromString(TEXT("MF_DWC_ApplyWetness_CPU/GPU were validated and saved.")));
         }
     }
 

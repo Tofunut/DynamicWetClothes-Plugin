@@ -433,7 +433,6 @@ void SWetnessProfileViewport::RebuildPreviewWetnessRuntime()
     PreviewRuntimeData->VertexWetPartIDs.Init(0, VertexCount);
     PreviewRuntimeData->VertexWetnessProfileParameters.SetNum(VertexCount);
     RefreshPreviewWetnessProfileParameters();
-    PreviewRuntimeData->VertexWetPartDebugColors.Init(FLinearColor::White, VertexCount);
     PreviewRuntimeData->NeighborGraph.Reset();
     PreviewRuntimeData->NeighborGraph.SetNum(VertexCount);
     PreviewRuntimeData->bHasNeighborGraph = true;

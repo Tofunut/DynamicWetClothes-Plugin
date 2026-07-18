@@ -356,12 +356,17 @@ bool UDWCDemoNiagaraWetContactSourceComponent::BuildContactsFromParticle(
     const FVector TraceStart = ParticlePosition - ContactDirection * TraceDistance;
     const FVector TraceEnd = ParticlePosition + ContactDirection * TraceDistance;
 
+    TArray<USkeletalMeshComponent*> ReceiverSkeletalMeshes;
+    if (IsValid(InOutReceiver))
+    {
+        InOutReceiver->GetResolvedWetMeshComponents(ReceiverSkeletalMeshes);
+    }
     USkeletalMeshComponent* ReceiverSkeletalMesh =
-        IsValid(InOutReceiver) ? InOutReceiver->TargetSkeletalMesh.Get() : nullptr;
+        ReceiverSkeletalMeshes.IsEmpty() ? nullptr : ReceiverSkeletalMeshes[0];
 
     FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(DWCDemoNiagaraWetContactSource), bTraceComplex);
     const AActor* SourceOwner = GetOwner();
-    const AActor* ReceiverOwner = ReceiverSkeletalMesh ? ReceiverSkeletalMesh->GetOwner() : nullptr;
+    const AActor* ReceiverOwner = IsValid(InOutReceiver) ? InOutReceiver->GetOwner() : nullptr;
     if (SourceOwner && SourceOwner != ReceiverOwner)
     {
         QueryParams.AddIgnoredActor(SourceOwner);
@@ -371,14 +376,20 @@ bool UDWCDemoNiagaraWetContactSourceComponent::BuildContactsFromParticle(
     USkeletalMeshComponent* HitSkeletalMesh = nullptr;
     bool                    bHit = false;
 
-    if (ReceiverSkeletalMesh)
+    for (USkeletalMeshComponent* CandidateReceiverSkeletalMesh : ReceiverSkeletalMeshes)
     {
+        if (CandidateReceiverSkeletalMesh == nullptr)
+        {
+            continue;
+        }
+
         FHitResult ComponentHit;
-        if (ReceiverSkeletalMesh->LineTraceComponent(ComponentHit, TraceStart, TraceEnd, QueryParams))
+        if (CandidateReceiverSkeletalMesh->LineTraceComponent(ComponentHit, TraceStart, TraceEnd, QueryParams))
         {
             Hit = ComponentHit;
-            HitSkeletalMesh = ReceiverSkeletalMesh;
+            HitSkeletalMesh = CandidateReceiverSkeletalMesh;
             bHit = true;
+            break;
         }
     }
 
@@ -396,7 +407,7 @@ bool UDWCDemoNiagaraWetContactSourceComponent::BuildContactsFromParticle(
                     continue;
                 }
 
-                if (ReceiverSkeletalMesh && CandidateSkeletalMesh != ReceiverSkeletalMesh)
+                if (!ReceiverSkeletalMeshes.IsEmpty() && !ReceiverSkeletalMeshes.Contains(CandidateSkeletalMesh))
                 {
                     continue;
                 }

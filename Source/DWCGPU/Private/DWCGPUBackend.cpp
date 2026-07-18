@@ -1,5 +1,9 @@
 #include "DWCGPUBackend.h"
 
+#include "Utility/DWCDataUVBufferView.h"
+#include "TextureResource.h"
+#include "WetRendering/WetMaterialParameters.h"
+
 #include "DWCGPUShaders.h"
 #include "CachedGeometry.h"
 #include "Components/DynamicWetClothesComponent.h"
@@ -21,6 +25,10 @@ DEFINE_LOG_CATEGORY_STATIC(LogDWCGPU, Log, All);
 
 namespace DWCGPUBackendPrivate
 {
+// Set true only for the separate point-sampling diagnostic.
+// Restart PIE after changing this because render targets are created during Initialize().
+constexpr bool GDWCForceNearestWetnessSampling = false;
+
 constexpr int32 DWCFullSimulationMapVersion = FDWCGPULODBakeData::CurrentMapBakeVersion;
 constexpr float DWCSeamTransferScale = 1.0f;
 
@@ -299,15 +307,15 @@ bool FDWCGPUBackend::Initialize(const FDWCGPUBackendInitArgs& Args)
     TargetSkeletalMesh = Args.TargetSkeletalMesh;
     WetClothingAsset = Args.WetClothingAsset;
     WetMaterialInstances = Args.WetMaterialInstances;
-    WetnessMapParameterName = Args.WetnessMapParameterName;
+    WetnessMapParameterName = DWCWetMaterialParameters::WetnessMap();
     LODIndex = Args.LODIndex;
-    bLogGPUWetnessRuntimeBindings = Args.bLogGPUWetnessRuntimeBindings;
     MaxWetness = Args.WetnessSettings ? FMath::Max(0.0f, Args.WetnessSettings->MaxWetness) : 1.0f;
     SpreadRateScale = FMath::Max(0.0f, Args.SpreadRateScale);
     DryRateScale = FMath::Max(0.0f, Args.DryRateScale);
     GravityFlowStrengthScale = FMath::Max(0.0f, Args.GravityFlowStrengthScale);
+    bUseEightDirectionDiffusion = Args.bUseEightDirectionDiffusion;
 
-    if (bLogGPUWetnessRuntimeBindings)
+    if (UE_LOG_ACTIVE(LogDWCGPU, VeryVerbose))
     {
         UE_LOG(
             LogDWCGPU,
@@ -333,8 +341,11 @@ bool FDWCGPUBackend::Initialize(const FDWCGPUBackendInitArgs& Args)
         return false;
     }
 
+    // Debug lookup is optional. Normal GPU simulation must not fail when debug metadata is unavailable.
+    BuildDebugVertexLookup();
+
     bInitialized = true;
-    if (bLogGPUWetnessRuntimeBindings)
+    if (UE_LOG_ACTIVE(LogDWCGPU, VeryVerbose))
     {
         UE_LOG(
             LogDWCGPU,
@@ -572,7 +583,7 @@ bool FDWCGPUBackend::BuildStaticSimulationData()
     RenderState = MakeShared<FRenderState, ESPMode::ThreadSafe>();
     RenderState->Sections.SetNum(Data->Sections.Num());
     RenderState->Slots.SetNum(Data->Slots.Num());
-    if (bLogGPUWetnessRuntimeBindings)
+    if (UE_LOG_ACTIVE(LogDWCGPU, VeryVerbose))
     {
         UE_LOG(
             LogDWCGPU,
@@ -585,6 +596,58 @@ bool FDWCGPUBackend::BuildStaticSimulationData()
             Data->Profiles.Num(),
             ExpectedDWCDataUVChannel);
     }
+    return true;
+}
+
+
+bool FDWCGPUBackend::BuildDebugVertexLookup()
+{
+    DebugVertexDataUVs.Reset();
+    DebugVertexMaterialSlots.Reset();
+
+    const UWetClothingAsset* Asset = WetClothingAsset.Get();
+    if (Asset == nullptr)
+    {
+        return false;
+    }
+
+    FDWCDataUVBufferView DataUVView;
+    if (!DataUVView.Initialize(
+            Asset->GetRuntimeSkeletalMesh(),
+            LODIndex,
+            Asset->GetDWCDataUVChannelIndex()))
+    {
+        UE_LOG(LogDWCGPU, Warning, TEXT("DWCGPU: Could not build debug vertex lookup because the DWC Data UV buffer is unavailable."));
+        return false;
+    }
+
+    const FWetClothingPrecomputedSimulationData& Precomputed = Asset->GetPrecomputedSimulationData(LODIndex);
+    const int32 VertexCount = DataUVView.NumVertices();
+    if (VertexCount <= 0 || Precomputed.Vertices.Num() != VertexCount)
+    {
+        UE_LOG(
+            LogDWCGPU,
+            Warning,
+            TEXT("DWCGPU: Debug vertex lookup count mismatch. UV vertices=%d, precomputed vertices=%d."),
+            VertexCount,
+            Precomputed.Vertices.Num());
+        return false;
+    }
+
+    DebugVertexDataUVs.SetNumZeroed(VertexCount);
+    DebugVertexMaterialSlots.Init(INDEX_NONE, VertexCount);
+    for (int32 VertexIndex = 0; VertexIndex < VertexCount; ++VertexIndex)
+    {
+        const FWetClothingPrecomputedVertexData& VertexData = Precomputed.Vertices[VertexIndex];
+        if (!VertexData.bIsWettable)
+        {
+            continue;
+        }
+
+        DebugVertexDataUVs[VertexIndex] = DataUVView.GetUV(VertexIndex);
+        DebugVertexMaterialSlots[VertexIndex] = VertexData.MaterialSlotIndex;
+    }
+
     return true;
 }
 
@@ -620,6 +683,14 @@ bool FDWCGPUBackend::CreateSlotResources()
             WetnessMap->ClearColor = FLinearColor::Black;
             WetnessMap->bAutoGenerateMips = false;
             WetnessMap->bCanCreateUAV = true;
+
+            if constexpr (GDWCForceNearestWetnessSampling)
+            {
+                WetnessMap->Filter = TF_Nearest;
+                WetnessMap->AddressX = TA_Clamp;
+                WetnessMap->AddressY = TA_Clamp;
+            }
+
             WetnessMap->InitCustomFormat(Slot.Resolution, Slot.Resolution, PF_R16F, false);
             WetnessMap->UpdateResourceImmediate(true);
             Slot.WetnessMaps.Add(TStrongObjectPtr<UTextureRenderTarget2D>(WetnessMap));
@@ -642,7 +713,7 @@ bool FDWCGPUBackend::CreateSlotResources()
             if (MID)
             {
                 const bool bHasWetnessMapParameter = MaterialHasTextureParameter(MID, WetnessMapParameterName);
-                if (bLogGPUWetnessRuntimeBindings)
+                if (UE_LOG_ACTIVE(LogDWCGPU, VeryVerbose))
                 {
                     UE_LOG(
                         LogDWCGPU,
@@ -687,7 +758,7 @@ bool FDWCGPUBackend::CreateSlotResources()
                     *GetNameSafe(Slot.GetCurrentMap()),
                     Slot.Resolution,
                     *WetnessMapParameterName.ToString());
-                if (bLogGPUWetnessRuntimeBindings)
+                if (UE_LOG_ACTIVE(LogDWCGPU, VeryVerbose))
                 {
                     UE_LOG(
                         LogDWCGPU,
@@ -729,7 +800,7 @@ bool FDWCGPUBackend::EnqueueResolvedContacts(const TArray<FDWCResolvedSurfaceCon
 {
     if (!bInitialized || Contacts.IsEmpty())
     {
-        if (bLogGPUWetnessRuntimeBindings)
+        if (UE_LOG_ACTIVE(LogDWCGPU, VeryVerbose))
         {
             UE_LOG(
                 LogDWCGPU,
@@ -741,7 +812,7 @@ bool FDWCGPUBackend::EnqueueResolvedContacts(const TArray<FDWCResolvedSurfaceCon
         return false;
     }
     PendingContacts.Append(Contacts);
-    if (bLogGPUWetnessRuntimeBindings)
+    if (UE_LOG_ACTIVE(LogDWCGPU, VeryVerbose))
     {
         UE_LOG(
             LogDWCGPU,
@@ -757,7 +828,7 @@ bool FDWCGPUBackend::ApplyWetAll(const float Amount)
 {
     if (!bInitialized || FMath::IsNearlyZero(Amount))
     {
-        if (bLogGPUWetnessRuntimeBindings)
+        if (UE_LOG_ACTIVE(LogDWCGPU, VeryVerbose))
         {
             UE_LOG(
                 LogDWCGPU,
@@ -769,7 +840,7 @@ bool FDWCGPUBackend::ApplyWetAll(const float Amount)
         return false;
     }
     PendingWetAllAmount += Amount;
-    if (bLogGPUWetnessRuntimeBindings)
+    if (UE_LOG_ACTIVE(LogDWCGPU, VeryVerbose))
     {
         UE_LOG(
             LogDWCGPU,
@@ -792,7 +863,7 @@ void FDWCGPUBackend::Update(const float DeltaSeconds)
     Swap(Contacts, PendingContacts);
     const float WetAllAmount = PendingWetAllAmount;
     PendingWetAllAmount = 0.0f;
-    if (bLogGPUWetnessRuntimeBindings && (!Contacts.IsEmpty() || !FMath::IsNearlyZero(WetAllAmount) || DebugDispatchLogCount < 3))
+    if (UE_LOG_ACTIVE(LogDWCGPU, VeryVerbose) && (!Contacts.IsEmpty() || !FMath::IsNearlyZero(WetAllAmount) || DebugDispatchLogCount < 3))
     {
         UE_LOG(
             LogDWCGPU,
@@ -889,7 +960,7 @@ void FDWCGPUBackend::DispatchSimulation(
 
     if (SlotDispatches.IsEmpty())
     {
-        if (bLogGPUWetnessRuntimeBindings && bHadWetInput)
+        if (UE_LOG_ACTIVE(LogDWCGPU, VeryVerbose) && bHadWetInput)
         {
             UE_LOG(
                 LogDWCGPU,
@@ -917,7 +988,7 @@ void FDWCGPUBackend::DispatchSimulation(
             *GetNameSafe(MeshComponent));
     }
 
-    if (bLogGPUWetnessRuntimeBindings && (bHadWetInput || DebugDispatchLogCount <= 3))
+    if (UE_LOG_ACTIVE(LogDWCGPU, VeryVerbose) && (bHadWetInput || DebugDispatchLogCount <= 3))
     {
         TArray<FString> SlotSummaries;
         SlotSummaries.Reserve(SlotDispatches.Num());
@@ -978,7 +1049,7 @@ void FDWCGPUBackend::DispatchSimulation(
         if (UMaterialInstanceDynamic* MID = Slot.MaterialInstance.Get())
         {
             MID->SetTextureParameterValue(WetnessMapParameterName, Slot.GetCurrentMap());
-            if (bLogGPUWetnessRuntimeBindings && (bHadWetInput || DebugDispatchLogCount <= 3))
+            if (UE_LOG_ACTIVE(LogDWCGPU, VeryVerbose) && (bHadWetInput || DebugDispatchLogCount <= 3))
             {
                 UE_LOG(
                     LogDWCGPU,
@@ -989,7 +1060,7 @@ void FDWCGPUBackend::DispatchSimulation(
                     *GetNameSafe(MID));
             }
         }
-        else if (bLogGPUWetnessRuntimeBindings)
+        else if (UE_LOG_ACTIVE(LogDWCGPU, VeryVerbose))
         {
             UE_LOG(
                 LogDWCGPU,
@@ -1000,7 +1071,7 @@ void FDWCGPUBackend::DispatchSimulation(
     }
 
     ENQUEUE_RENDER_COMMAND(DWCFullWetMapSimulation)(
-        [MeshObject, StaticData, RTState, SlotDispatches = MoveTemp(SlotDispatches), DeltaSeconds, MaxWetnessValue, WorldGravityDirection, SimulationLODIndex](FRHICommandListImmediate& RHICmdList) mutable
+        [MeshObject, StaticData, RTState, SlotDispatches = MoveTemp(SlotDispatches), DeltaSeconds, MaxWetnessValue, WorldGravityDirection, SimulationLODIndex, bUseEightDirectionDiffusion = bUseEightDirectionDiffusion](FRHICommandListImmediate& RHICmdList) mutable
         {
             if (!StaticData.IsValid() || !RTState.IsValid())
             {
@@ -1117,7 +1188,9 @@ void FDWCGPUBackend::DispatchSimulation(
             FRDGBufferSRVRef FlowSRV = GraphBuilder.CreateSRV(TriangleFlowBuffer);
             FRDGBufferSRVRef MetricSRV = GraphBuilder.CreateSRV(TriangleMetricBuffer);
             TShaderMapRef<FDWCApplyTriangleAbsorptionCS> AbsorptionShader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
-            TShaderMapRef<FDWCDiffuseDryCS> DiffuseDryShader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
+            TShaderMapRef<FDWCDiffuseDryCS> DiffuseDry4Shader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
+            TShaderMapRef<FDWCTransferScale8CS> TransferScale8Shader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
+            TShaderMapRef<FDWCDiffuseDry8CS> DiffuseDry8Shader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
             TShaderMapRef<FDWCSeamGatherCS> SeamShader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
 
             for (FSlotRenderDispatch& SlotDispatch : SlotDispatches)
@@ -1178,26 +1251,80 @@ void FDWCGPUBackend::DispatchSimulation(
                             FMath::DivideAndRoundUp(Dispatch.DispatchSize.Y, 8), 1));
                 }
 
-                FDWCDiffuseDryCS::FParameters* DiffuseParameters =
-                    GraphBuilder.AllocParameters<FDWCDiffuseDryCS::FParameters>();
-                DiffuseParameters->TextureSize = FIntPoint(SlotDispatch.Resolution, SlotDispatch.Resolution);
-                DiffuseParameters->DeltaSeconds = DeltaSeconds;
-                DiffuseParameters->MaxWetness = MaxWetnessValue;
-                DiffuseParameters->SourceWetnessTexture = InputAppliedTexture;
-                DiffuseParameters->DestinationWetnessTexture = GraphBuilder.CreateUAV(NextTexture);
-                DiffuseParameters->TexelLookup = LookupSRV;
-                DiffuseParameters->TriangleFlow = FlowSRV;
-                DiffuseParameters->TriangleMetric = MetricSRV;
-                DiffuseParameters->Profiles = ProfileSRV;
-                DiffuseParameters->TriangleProfileIndices = TriangleProfileIndexSRV;
-                FComputeShaderUtils::AddPass(
-                    GraphBuilder,
-                    RDG_EVENT_NAME("DWC Diffuse Gravity Dry Slot %d", StaticSlot.MaterialSlotIndex),
-                    DiffuseDryShader,
-                    DiffuseParameters,
-                    FIntVector(
-                        FMath::DivideAndRoundUp(SlotDispatch.Resolution, 8),
-                        FMath::DivideAndRoundUp(SlotDispatch.Resolution, 8), 1));
+                if (bUseEightDirectionDiffusion)
+                {
+                    FRDGTextureDesc TransferScaleDesc = FRDGTextureDesc::Create2D(
+                        FIntPoint(SlotDispatch.Resolution, SlotDispatch.Resolution),
+                        PF_R16F,
+                        FClearValueBinding::White,
+                        TexCreate_ShaderResource | TexCreate_UAV);
+                    FRDGTextureRef TransferScaleTexture =
+                        GraphBuilder.CreateTexture(TransferScaleDesc, TEXT("DWC.AbsorbedWetness.TransferScale"));
+
+                    FDWCTransferScale8CS::FParameters* TransferScaleParameters =
+                        GraphBuilder.AllocParameters<FDWCTransferScale8CS::FParameters>();
+                    TransferScaleParameters->TextureSize = FIntPoint(SlotDispatch.Resolution, SlotDispatch.Resolution);
+                    TransferScaleParameters->DeltaSeconds = DeltaSeconds;
+                    TransferScaleParameters->TransferScaleTexture = GraphBuilder.CreateUAV(TransferScaleTexture);
+                    TransferScaleParameters->TexelLookup = LookupSRV;
+                    TransferScaleParameters->TriangleFlow = FlowSRV;
+                    TransferScaleParameters->TriangleMetric = MetricSRV;
+                    TransferScaleParameters->Profiles = ProfileSRV;
+                    TransferScaleParameters->TriangleProfileIndices = TriangleProfileIndexSRV;
+                    FComputeShaderUtils::AddPass(
+                        GraphBuilder,
+                        RDG_EVENT_NAME("DWC Transfer Scale 8 Slot %d", StaticSlot.MaterialSlotIndex),
+                        TransferScale8Shader,
+                        TransferScaleParameters,
+                        FIntVector(
+                            FMath::DivideAndRoundUp(SlotDispatch.Resolution, 8),
+                            FMath::DivideAndRoundUp(SlotDispatch.Resolution, 8), 1));
+
+                    FDWCDiffuseDry8CS::FParameters* DiffuseParameters =
+                        GraphBuilder.AllocParameters<FDWCDiffuseDry8CS::FParameters>();
+                    DiffuseParameters->TextureSize = FIntPoint(SlotDispatch.Resolution, SlotDispatch.Resolution);
+                    DiffuseParameters->DeltaSeconds = DeltaSeconds;
+                    DiffuseParameters->MaxWetness = MaxWetnessValue;
+                    DiffuseParameters->SourceWetnessTexture = InputAppliedTexture;
+                    DiffuseParameters->TransferScaleTexture = TransferScaleTexture;
+                    DiffuseParameters->DestinationWetnessTexture = GraphBuilder.CreateUAV(NextTexture);
+                    DiffuseParameters->TexelLookup = LookupSRV;
+                    DiffuseParameters->TriangleFlow = FlowSRV;
+                    DiffuseParameters->TriangleMetric = MetricSRV;
+                    DiffuseParameters->Profiles = ProfileSRV;
+                    DiffuseParameters->TriangleProfileIndices = TriangleProfileIndexSRV;
+                    FComputeShaderUtils::AddPass(
+                        GraphBuilder,
+                        RDG_EVENT_NAME("DWC Diffuse Gravity Dry 8 Slot %d", StaticSlot.MaterialSlotIndex),
+                        DiffuseDry8Shader,
+                        DiffuseParameters,
+                        FIntVector(
+                            FMath::DivideAndRoundUp(SlotDispatch.Resolution, 8),
+                            FMath::DivideAndRoundUp(SlotDispatch.Resolution, 8), 1));
+                }
+                else
+                {
+                    FDWCDiffuseDryCS::FParameters* DiffuseParameters =
+                        GraphBuilder.AllocParameters<FDWCDiffuseDryCS::FParameters>();
+                    DiffuseParameters->TextureSize = FIntPoint(SlotDispatch.Resolution, SlotDispatch.Resolution);
+                    DiffuseParameters->DeltaSeconds = DeltaSeconds;
+                    DiffuseParameters->MaxWetness = MaxWetnessValue;
+                    DiffuseParameters->SourceWetnessTexture = InputAppliedTexture;
+                    DiffuseParameters->DestinationWetnessTexture = GraphBuilder.CreateUAV(NextTexture);
+                    DiffuseParameters->TexelLookup = LookupSRV;
+                    DiffuseParameters->TriangleFlow = FlowSRV;
+                    DiffuseParameters->TriangleMetric = MetricSRV;
+                    DiffuseParameters->Profiles = ProfileSRV;
+                    DiffuseParameters->TriangleProfileIndices = TriangleProfileIndexSRV;
+                    FComputeShaderUtils::AddPass(
+                        GraphBuilder,
+                        RDG_EVENT_NAME("DWC Diffuse Gravity Dry 4 Slot %d", StaticSlot.MaterialSlotIndex),
+                        DiffuseDry4Shader,
+                        DiffuseParameters,
+                        FIntVector(
+                            FMath::DivideAndRoundUp(SlotDispatch.Resolution, 8),
+                            FMath::DivideAndRoundUp(SlotDispatch.Resolution, 8), 1));
+                }
 
                 if (!StaticSlot.SeamDestinations.IsEmpty() && !StaticSlot.SeamIncoming.IsEmpty())
                 {
@@ -1241,9 +1368,12 @@ void FDWCGPUBackend::DispatchSimulation(
 
 }
 
+
 void FDWCGPUBackend::Shutdown()
 {
     PendingContacts.Reset();
+    DebugVertexDataUVs.Reset();
+    DebugVertexMaterialSlots.Reset();
     PendingWetAllAmount = 0.0f;
 
     for (FMaterialSlotRuntime& Slot : MaterialSlots)
@@ -1266,13 +1396,12 @@ void FDWCGPUBackend::Shutdown()
     TargetSkeletalMesh.Reset();
     WetClothingAsset.Reset();
     WetMaterialInstances = nullptr;
-    WetnessMapParameterName = TEXT("DWC_WetnessMap");
+    WetnessMapParameterName = DWCWetMaterialParameters::WetnessMap();
     MaxWetness = 1.0f;
     SpreadRateScale = 1.0f;
     DryRateScale = 1.0f;
     GravityFlowStrengthScale = 1.0f;
     LODIndex = 0;
     DebugDispatchLogCount = 0;
-    bLogGPUWetnessRuntimeBindings = false;
     bInitialized = false;
 }

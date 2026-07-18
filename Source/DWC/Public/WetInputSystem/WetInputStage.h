@@ -31,7 +31,7 @@ struct DWC_API FWetInputStageArgs
     USkeletalMeshComponent*     TargetSkeletalMesh = nullptr;
     const FWetClothingSettings* WetnessSettings = nullptr;
 
-    FWetClothingRuntimeData*         RuntimeData = nullptr;
+    const FWetClothingRuntimeData*   RuntimeData = nullptr;
     FAbsorbedWetnessSimulationState* SimulationState = nullptr;
     TMap<int32, TUniquePtr<FSurfaceWaterSimulationState>>* SurfaceWaterStatesByMaterialSlot = nullptr;
     const FSurfaceWaterSimulationSettings* SurfaceWaterSettings = nullptr;

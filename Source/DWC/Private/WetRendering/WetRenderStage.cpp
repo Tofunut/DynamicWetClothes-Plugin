@@ -40,7 +40,6 @@ namespace
     }
 } // namespace
 #include "Runtime/Engine/Public/Materials/MaterialInstanceDynamic.h"
-#include "Materials/MaterialInterface.h"
 #include "DataAssets/WetClothingAsset.h"
 #include "DataAssets/WetClothingTransparencyData.h"
 #include "DataAssets/WetClothingWrinkleData.h"
@@ -65,76 +64,6 @@ namespace
         return State != nullptr && State->bIsWettableSlot;
     }
 
-    bool HasTextureParameter(const UMaterialInterface* Material, const FName ParameterName)
-    {
-        if (Material == nullptr || ParameterName.IsNone())
-        {
-            return false;
-        }
-
-        TArray<FMaterialParameterInfo> ParameterInfos;
-        TArray<FGuid> ParameterIds;
-        Material->GetAllTextureParameterInfo(ParameterInfos, ParameterIds);
-        return ParameterInfos.ContainsByPredicate(
-            [ParameterName](const FMaterialParameterInfo& ParameterInfo)
-            {
-                return ParameterInfo.Name == ParameterName;
-            });
-    }
-
-    bool HasScalarParameter(const UMaterialInterface* Material, const FName ParameterName)
-    {
-        if (Material == nullptr || ParameterName.IsNone())
-        {
-            return false;
-        }
-
-        TArray<FMaterialParameterInfo> ParameterInfos;
-        TArray<FGuid> ParameterIds;
-        Material->GetAllScalarParameterInfo(ParameterInfos, ParameterIds);
-        return ParameterInfos.ContainsByPredicate(
-            [ParameterName](const FMaterialParameterInfo& ParameterInfo)
-            {
-                return ParameterInfo.Name == ParameterName;
-            });
-    }
-
-    const TCHAR* DescribeWrinkleMapMatchType(
-        const FWetWrinkleBakedMapSet& BakedMap,
-        const int32                   PreferredUVChannelIndex,
-        const int32                   PreferredLODIndex)
-    {
-        if (PreferredUVChannelIndex != INDEX_NONE &&
-            PreferredLODIndex != INDEX_NONE &&
-            BakedMap.UVChannelIndex == PreferredUVChannelIndex &&
-            BakedMap.LODIndex == PreferredLODIndex)
-        {
-            return TEXT("ExactSlotUvLod");
-        }
-
-        if (PreferredUVChannelIndex != INDEX_NONE &&
-            BakedMap.UVChannelIndex == PreferredUVChannelIndex)
-        {
-            return TEXT("SlotUvFallbackLod");
-        }
-
-        return TEXT("SlotFallback");
-    }
-
-    const TCHAR* DescribeTransparencyMapMatchType(const EDWCTransparencyBakedMapMatch Match)
-    {
-        switch (Match)
-        {
-        case EDWCTransparencyBakedMapMatch::ExactSlotUVLOD:
-            return TEXT("ExactSlotUvLod");
-        case EDWCTransparencyBakedMapMatch::SlotUVFallback:
-            return TEXT("SlotUvFallbackLod");
-        case EDWCTransparencyBakedMapMatch::SlotFallback:
-            return TEXT("SlotFallback");
-        default:
-            return TEXT("None");
-        }
-    }
 }
 
 void FWetRenderStage::ResetCachedVertexColors()
@@ -181,6 +110,12 @@ void FWetRenderStage::ApplyWetMaterialParameters(FWetRenderStageArgs& Receiver)
         {
             continue;
         }
+        if (!DWCWetMaterialParameters::WetPartDebugStrength().IsNone())
+        {
+            MID->SetScalarParameterValue(
+                DWCWetMaterialParameters::WetPartDebugStrength(),
+                Receiver.bShowWetPartDebugColors ? 1.0f : 0.0f);
+        }
         const FSurfaceWaterProfileParameters DefaultSurfaceProfile;
         const FSurfaceWaterProfileParameters* SurfaceProfile =
             Receiver.SurfaceWaterProfilesByMaterialSlot
@@ -190,7 +125,7 @@ void FWetRenderStage::ApplyWetMaterialParameters(FWetRenderStageArgs& Receiver)
         {
             SurfaceProfile = &DefaultSurfaceProfile;
         }
-        if (!Receiver.SurfaceWaterRTParameterName.IsNone())
+        if (!DWCWetMaterialParameters::SurfaceWaterRT().IsNone())
         {
             FSurfaceWaterSimulationState* SlotState = nullptr;
             if (Receiver.SurfaceWaterStatesByMaterialSlot)
@@ -200,7 +135,7 @@ void FWetRenderStage::ApplyWetMaterialParameters(FWetRenderStageArgs& Receiver)
                     SlotState = Found->Get();
                 }
             }
-            MID->SetTextureParameterValue(Receiver.SurfaceWaterRTParameterName, SlotState ? SlotState->GetDropletRenderTarget() : nullptr);
+            MID->SetTextureParameterValue(DWCWetMaterialParameters::SurfaceWaterRT(), SlotState ? SlotState->GetDropletRenderTarget() : nullptr);
         }
         FSurfaceWaterSimulationState* SurfaceState = nullptr;
         if (Receiver.SurfaceWaterStatesByMaterialSlot)
@@ -210,33 +145,33 @@ void FWetRenderStage::ApplyWetMaterialParameters(FWetRenderStageArgs& Receiver)
                 SurfaceState = Found->Get();
             }
         }
-        if (!Receiver.SurfaceDropletRTParameterName.IsNone())
+        if (!DWCWetMaterialParameters::SurfaceDropletRT().IsNone())
         {
-            MID->SetTextureParameterValue(Receiver.SurfaceDropletRTParameterName, SurfaceState ? SurfaceState->GetDropletRenderTarget() : nullptr);
+            MID->SetTextureParameterValue(DWCWetMaterialParameters::SurfaceDropletRT(), SurfaceState ? SurfaceState->GetDropletRenderTarget() : nullptr);
         }
-        if (!Receiver.SurfaceFlowRTParameterName.IsNone())
+        if (!DWCWetMaterialParameters::SurfaceFlowRT().IsNone())
         {
-            MID->SetTextureParameterValue(Receiver.SurfaceFlowRTParameterName, SurfaceState ? SurfaceState->GetFlowRenderTarget() : nullptr);
+            MID->SetTextureParameterValue(DWCWetMaterialParameters::SurfaceFlowRT(), SurfaceState ? SurfaceState->GetFlowRenderTarget() : nullptr);
         }
-        if (!Receiver.SurfaceWaterTimeParameterName.IsNone())
+        if (!DWCWetMaterialParameters::SurfaceWaterTime().IsNone())
         {
-            MID->SetScalarParameterValue(Receiver.SurfaceWaterTimeParameterName, Receiver.SurfaceWaterTimeSeconds);
+            MID->SetScalarParameterValue(DWCWetMaterialParameters::SurfaceWaterTime(), Receiver.SurfaceWaterTimeSeconds);
         }
-        if (!Receiver.SurfaceWaterTexelSizeParameterName.IsNone())
+        if (!DWCWetMaterialParameters::SurfaceWaterTexelSize().IsNone())
         {
             MID->SetScalarParameterValue(
-                Receiver.SurfaceWaterTexelSizeParameterName,
+                DWCWetMaterialParameters::SurfaceWaterTexelSize(),
                 SurfaceState && SurfaceState->GetResolution() > 0
                     ? 1.0f / static_cast<float>(SurfaceState->GetResolution())
                     : 0.0f);
         }
-        if (!Receiver.SurfaceWaterNormalStrengthParameterName.IsNone())
+        if (!DWCWetMaterialParameters::SurfaceWaterNormalStrength().IsNone())
         {
-            MID->SetScalarParameterValue(Receiver.SurfaceWaterNormalStrengthParameterName, FMath::Max(0.0f, SurfaceProfile->NormalStrength));
+            MID->SetScalarParameterValue(DWCWetMaterialParameters::SurfaceWaterNormalStrength(), FMath::Max(0.0f, SurfaceProfile->NormalStrength));
         }
-        if (!Receiver.SurfaceWaterRoughnessParameterName.IsNone())
+        if (!DWCWetMaterialParameters::SurfaceWaterRoughness().IsNone())
         {
-            MID->SetScalarParameterValue(Receiver.SurfaceWaterRoughnessParameterName, FMath::Clamp(SurfaceProfile->SurfaceRoughness, 0.0f, 1.0f));
+            MID->SetScalarParameterValue(DWCWetMaterialParameters::SurfaceWaterRoughness(), FMath::Clamp(SurfaceProfile->SurfaceRoughness, 0.0f, 1.0f));
         }
         const float ThresholdMin = FMath::Clamp(
             FMath::Min(SurfaceProfile->SurfaceAmountThresholdMin, SurfaceProfile->SurfaceAmountThresholdMax), 0.0f, 1.0f);
@@ -250,54 +185,44 @@ void FWetRenderStage::ApplyWetMaterialParameters(FWetRenderStageArgs& Receiver)
             FMath::Min(SurfaceProfile->FlowMaskMin, SurfaceProfile->FlowMaskMax), 0.0f, 1.0f);
         const float FlowMaskMax = FMath::Clamp(
             FMath::Max(SurfaceProfile->FlowMaskMin, SurfaceProfile->FlowMaskMax), FlowMaskMin + KINDA_SMALL_NUMBER, 1.0f);
-        MID->SetScalarParameterValue(Receiver.SurfaceDropletTilingParameterName, FMath::Max(0.01f, SurfaceProfile->DropletTiling));
-        MID->SetScalarParameterValue(Receiver.SurfaceAmountThresholdMinParameterName, ThresholdMin);
-        MID->SetScalarParameterValue(Receiver.SurfaceAmountThresholdMaxParameterName, ThresholdMax);
-        MID->SetScalarParameterValue(Receiver.SurfaceDropletMaskMinParameterName, MaskMin);
-        MID->SetScalarParameterValue(Receiver.SurfaceDropletMaskMaxParameterName, MaskMax);
-        MID->SetScalarParameterValue(Receiver.SurfaceFlowTilingParameterName, FMath::Max(0.01f, SurfaceProfile->FlowTiling));
-        MID->SetScalarParameterValue(Receiver.SurfaceFlowPanningXParameterName, SurfaceProfile->FlowPanningX);
-        MID->SetScalarParameterValue(Receiver.SurfaceFlowPanningYParameterName, SurfaceProfile->FlowPanningY);
-        MID->SetScalarParameterValue(Receiver.SurfaceFlowNormalStrengthParameterName, FMath::Max(0.0f, SurfaceProfile->FlowNormalStrength));
-        MID->SetScalarParameterValue(Receiver.SurfaceFlowRoughnessParameterName, FMath::Clamp(SurfaceProfile->FlowRoughness, 0.0f, 1.0f));
-        MID->SetScalarParameterValue(Receiver.SurfaceFlowMaskMinParameterName, FlowMaskMin);
-        MID->SetScalarParameterValue(Receiver.SurfaceFlowMaskMaxParameterName, FlowMaskMax);
+        MID->SetScalarParameterValue(DWCWetMaterialParameters::SurfaceDropletTiling(), FMath::Max(0.01f, SurfaceProfile->DropletTiling));
+        MID->SetScalarParameterValue(DWCWetMaterialParameters::SurfaceAmountThresholdMin(), ThresholdMin);
+        MID->SetScalarParameterValue(DWCWetMaterialParameters::SurfaceAmountThresholdMax(), ThresholdMax);
+        MID->SetScalarParameterValue(DWCWetMaterialParameters::SurfaceDropletMaskMin(), MaskMin);
+        MID->SetScalarParameterValue(DWCWetMaterialParameters::SurfaceDropletMaskMax(), MaskMax);
+        MID->SetScalarParameterValue(DWCWetMaterialParameters::SurfaceFlowTiling(), FMath::Max(0.01f, SurfaceProfile->FlowTiling));
+        MID->SetScalarParameterValue(DWCWetMaterialParameters::SurfaceFlowPanningX(), SurfaceProfile->FlowPanningX);
+        MID->SetScalarParameterValue(DWCWetMaterialParameters::SurfaceFlowPanningY(), SurfaceProfile->FlowPanningY);
+        MID->SetScalarParameterValue(DWCWetMaterialParameters::SurfaceFlowNormalStrength(), FMath::Max(0.0f, SurfaceProfile->FlowNormalStrength));
+        MID->SetScalarParameterValue(DWCWetMaterialParameters::SurfaceFlowRoughness(), FMath::Clamp(SurfaceProfile->FlowRoughness, 0.0f, 1.0f));
+        MID->SetScalarParameterValue(DWCWetMaterialParameters::SurfaceFlowMaskMin(), FlowMaskMin);
+        MID->SetScalarParameterValue(DWCWetMaterialParameters::SurfaceFlowMaskMax(), FlowMaskMax);
         if (SurfaceProfile->DropletMaskTexture)
         {
-            MID->SetTextureParameterValue(Receiver.SurfaceDropletMaskTextureParameterName, SurfaceProfile->DropletMaskTexture);
+            MID->SetTextureParameterValue(DWCWetMaterialParameters::SurfaceDropletMaskTexture(), SurfaceProfile->DropletMaskTexture);
         }
         if (SurfaceProfile->DropletNormalTexture)
         {
-            MID->SetTextureParameterValue(Receiver.SurfaceDropletNormalTextureParameterName, SurfaceProfile->DropletNormalTexture);
+            MID->SetTextureParameterValue(DWCWetMaterialParameters::SurfaceDropletNormalTexture(), SurfaceProfile->DropletNormalTexture);
         }
         if (SurfaceProfile->FlowMaskTexture)
         {
-            MID->SetTextureParameterValue(Receiver.SurfaceFlowMaskTextureParameterName, SurfaceProfile->FlowMaskTexture);
+            MID->SetTextureParameterValue(DWCWetMaterialParameters::SurfaceFlowMaskTexture(), SurfaceProfile->FlowMaskTexture);
         }
         if (SurfaceProfile->FlowNormalTexture)
         {
-            MID->SetTextureParameterValue(Receiver.SurfaceFlowNormalTextureParameterName, SurfaceProfile->FlowNormalTexture);
-        }
-        if (!Receiver.SurfaceWaterDebugModeParameterName.IsNone())
-        {
-            MID->SetScalarParameterValue(Receiver.SurfaceWaterDebugModeParameterName, static_cast<float>(Receiver.SurfaceWaterDebugView));
-        }
-        if (!Receiver.WetPartDebugStrengthParameterName.IsNone())
-        {
-            MID->SetScalarParameterValue(
-                Receiver.WetPartDebugStrengthParameterName,
-                Receiver.bEnableWetPartDebugVertexColors ? 1.0f : 0.0f);
+            MID->SetTextureParameterValue(DWCWetMaterialParameters::SurfaceFlowNormalTexture(), SurfaceProfile->FlowNormalTexture);
         }
 
-        if (!Receiver.UnderColorParameterName.IsNone())
+        if (!DWCWetMaterialParameters::UnderColor().IsNone())
         {
-            MID->SetVectorParameterValue(Receiver.UnderColorParameterName, Receiver.UnderColor);
+            MID->SetVectorParameterValue(DWCWetMaterialParameters::UnderColor(), Receiver.UnderColor);
         }
 
-        if (!Receiver.UnderColorBlendStrengthParameterName.IsNone())
+        if (!DWCWetMaterialParameters::UnderColorBlendStrength().IsNone())
         {
             MID->SetScalarParameterValue(
-                Receiver.UnderColorBlendStrengthParameterName,
+                DWCWetMaterialParameters::UnderColorBlendStrength(),
                 FMath::Clamp(Receiver.UnderColorBlendStrength, 0.0f, 1.0f));
         }
     }
@@ -311,7 +236,7 @@ void FWetRenderStage::ApplyWetnessProfileMapParameters(FWetRenderStageArgs& Rece
 {
     DWC_PROFILE_SCOPE(DWC_Render_ApplyWetnessProfileMapParameters);
 
-    if (Receiver.WetnessProfileMap0ParameterName.IsNone() && Receiver.UseWetnessProfileMap0ParameterName.IsNone())
+    if (DWCWetMaterialParameters::WetnessProfileMap0().IsNone() && DWCWetMaterialParameters::UseWetnessProfileMap0().IsNone())
     {
         return;
     }
@@ -342,14 +267,14 @@ void FWetRenderStage::ApplyWetnessProfileMapParameters(FWetRenderStageArgs& Rece
                     continue;
                 }
 
-                if (!Receiver.WetnessProfileMap0ParameterName.IsNone())
+                if (!DWCWetMaterialParameters::WetnessProfileMap0().IsNone())
                 {
-                    MID->SetTextureParameterValue(Receiver.WetnessProfileMap0ParameterName, BakedWetnessProfileMap.WetnessProfileMap0);
+                    MID->SetTextureParameterValue(DWCWetMaterialParameters::WetnessProfileMap0(), BakedWetnessProfileMap.WetnessProfileMap0);
                 }
 
-                if (!Receiver.UseWetnessProfileMap0ParameterName.IsNone())
+                if (!DWCWetMaterialParameters::UseWetnessProfileMap0().IsNone())
                 {
-                    MID->SetScalarParameterValue(Receiver.UseWetnessProfileMap0ParameterName, 1.0f);
+                    MID->SetScalarParameterValue(DWCWetMaterialParameters::UseWetnessProfileMap0(), 1.0f);
                 }
 
                 bWetnessProfileMapAssigned[MaterialSlotIndex] = true;
@@ -357,7 +282,7 @@ void FWetRenderStage::ApplyWetnessProfileMapParameters(FWetRenderStageArgs& Rece
         }
     }
 
-    if (Receiver.UseWetnessProfileMap0ParameterName.IsNone())
+    if (DWCWetMaterialParameters::UseWetnessProfileMap0().IsNone())
     {
         return;
     }
@@ -372,7 +297,7 @@ void FWetRenderStage::ApplyWetnessProfileMapParameters(FWetRenderStageArgs& Rece
         UMaterialInstanceDynamic* MID = (*Receiver.WetMaterialInstances)[MaterialSlotIndex];
         if (MID != nullptr)
         {
-            MID->SetScalarParameterValue(Receiver.UseWetnessProfileMap0ParameterName, 0.0f);
+            MID->SetScalarParameterValue(DWCWetMaterialParameters::UseWetnessProfileMap0(), 0.0f);
         }
     }
 }
@@ -386,11 +311,11 @@ void FWetRenderStage::ApplyWetWrinkleNormalMapParameters(FWetRenderStageArgs& Re
         return;
     }
 
-    if (Receiver.WrinkleNormalMapParameterName.IsNone() &&
-        Receiver.UseWrinkleNormalMapParameterName.IsNone() &&
-        Receiver.WrinkleStrengthParameterName.IsNone() &&
-        Receiver.WrinkleWetnessMinParameterName.IsNone() &&
-        Receiver.WrinkleWetnessMaxParameterName.IsNone())
+    if (DWCWetMaterialParameters::WrinkleNormalMap().IsNone() &&
+        DWCWetMaterialParameters::UseWrinkleNormalMap().IsNone() &&
+        DWCWetMaterialParameters::WrinkleStrength().IsNone() &&
+        DWCWetMaterialParameters::WrinkleWetnessMin().IsNone() &&
+        DWCWetMaterialParameters::WrinkleWetnessMax().IsNone())
     {
         return;
     }
@@ -398,18 +323,6 @@ void FWetRenderStage::ApplyWetWrinkleNormalMapParameters(FWetRenderStageArgs& Re
     const float SafeWrinkleWetnessMin = FMath::Clamp(Receiver.WrinkleWetnessMin, 0.0f, 1.0f);
     const float SafeWrinkleWetnessMax = FMath::Max(SafeWrinkleWetnessMin, FMath::Clamp(Receiver.WrinkleWetnessMax, 0.0f, 1.0f));
     const float SafeWrinkleStrength = FMath::Max(0.0f, Receiver.WrinkleStrength);
-    if (Receiver.bLogWrinkleRuntimeBindings && Receiver.WrinkleWetnessMax < Receiver.WrinkleWetnessMin)
-    {
-        UE_LOG(
-            LogDWC,
-            Log,
-            TEXT("DWC wrinkle runtime: clamped wetness range on mesh '%s' from [%.3f, %.3f] to [%.3f, %.3f]."),
-            *GetNameSafe(Receiver.TargetSkeletalMesh),
-            Receiver.WrinkleWetnessMin,
-            Receiver.WrinkleWetnessMax,
-            SafeWrinkleWetnessMin,
-            SafeWrinkleWetnessMax);
-    }
 
     TArray<bool> bWrinkleNormalMapAssigned;
     bWrinkleNormalMapAssigned.Init(false, Receiver.WetMaterialInstances->Num());
@@ -442,61 +355,32 @@ void FWetRenderStage::ApplyWetWrinkleNormalMapParameters(FWetRenderStageArgs& Re
                 continue;
             }
 
-            if (!Receiver.WrinkleNormalMapParameterName.IsNone())
+            if (!DWCWetMaterialParameters::WrinkleNormalMap().IsNone())
             {
-                MID->SetTextureParameterValue(Receiver.WrinkleNormalMapParameterName, BakedWrinkleMap->BakedWrinkleNormalMap);
+                MID->SetTextureParameterValue(DWCWetMaterialParameters::WrinkleNormalMap(), BakedWrinkleMap->BakedWrinkleNormalMap);
             }
 
-            if (!Receiver.UseWrinkleNormalMapParameterName.IsNone())
+            if (!DWCWetMaterialParameters::UseWrinkleNormalMap().IsNone())
             {
-                MID->SetScalarParameterValue(Receiver.UseWrinkleNormalMapParameterName, 1.0f);
+                MID->SetScalarParameterValue(DWCWetMaterialParameters::UseWrinkleNormalMap(), 1.0f);
             }
 
-            if (!Receiver.WrinkleStrengthParameterName.IsNone())
+            if (!DWCWetMaterialParameters::WrinkleStrength().IsNone())
             {
-                MID->SetScalarParameterValue(Receiver.WrinkleStrengthParameterName, SafeWrinkleStrength);
+                MID->SetScalarParameterValue(DWCWetMaterialParameters::WrinkleStrength(), SafeWrinkleStrength);
             }
 
-            if (!Receiver.WrinkleWetnessMinParameterName.IsNone())
+            if (!DWCWetMaterialParameters::WrinkleWetnessMin().IsNone())
             {
-                MID->SetScalarParameterValue(Receiver.WrinkleWetnessMinParameterName, SafeWrinkleWetnessMin);
+                MID->SetScalarParameterValue(DWCWetMaterialParameters::WrinkleWetnessMin(), SafeWrinkleWetnessMin);
             }
 
-            if (!Receiver.WrinkleWetnessMaxParameterName.IsNone())
+            if (!DWCWetMaterialParameters::WrinkleWetnessMax().IsNone())
             {
-                MID->SetScalarParameterValue(Receiver.WrinkleWetnessMaxParameterName, SafeWrinkleWetnessMax);
+                MID->SetScalarParameterValue(DWCWetMaterialParameters::WrinkleWetnessMax(), SafeWrinkleWetnessMax);
             }
 
-            if (Receiver.bLogWrinkleRuntimeBindings)
-            {
-                const UMaterialInterface* CurrentMaterial =
-                    Receiver.TargetSkeletalMesh != nullptr ? Receiver.TargetSkeletalMesh->GetMaterial(MaterialSlotIndex) : nullptr;
-                const bool bHasWrinkleTextureParameter = HasTextureParameter(CurrentMaterial, Receiver.WrinkleNormalMapParameterName);
-                const bool bHasUseWrinkleParameter = HasScalarParameter(CurrentMaterial, Receiver.UseWrinkleNormalMapParameterName);
-                const bool bHasWrinkleStrengthParameter = HasScalarParameter(CurrentMaterial, Receiver.WrinkleStrengthParameterName);
-                const bool bHasWrinkleWetnessMinParameter = HasScalarParameter(CurrentMaterial, Receiver.WrinkleWetnessMinParameterName);
-                const bool bHasWrinkleWetnessMaxParameter = HasScalarParameter(CurrentMaterial, Receiver.WrinkleWetnessMaxParameterName);
 
-                UE_LOG(
-                    LogDWC,
-                    Log,
-                    TEXT("DWC wrinkle runtime: mesh '%s' slot %d assigned baked wrinkle map '%s' (match=%s, bakedUV=%d, bakedLOD=%d, strength=%.3f, wetnessRange=[%.3f, %.3f], material='%s', params={texture:%s,use:%s,strength:%s,min:%s,max:%s})."),
-                    *GetNameSafe(Receiver.TargetSkeletalMesh),
-                    MaterialSlotIndex,
-                    *GetNameSafe(BakedWrinkleMap->BakedWrinkleNormalMap),
-                    DescribeWrinkleMapMatchType(*BakedWrinkleMap, PreferredUVChannelIndex, Receiver.LODIndex),
-                    BakedWrinkleMap->UVChannelIndex,
-                    BakedWrinkleMap->LODIndex,
-                    SafeWrinkleStrength,
-                    SafeWrinkleWetnessMin,
-                    SafeWrinkleWetnessMax,
-                    *GetNameSafe(CurrentMaterial),
-                    bHasWrinkleTextureParameter ? TEXT("true") : TEXT("false"),
-                    bHasUseWrinkleParameter ? TEXT("true") : TEXT("false"),
-                    bHasWrinkleStrengthParameter ? TEXT("true") : TEXT("false"),
-                    bHasWrinkleWetnessMinParameter ? TEXT("true") : TEXT("false"),
-                    bHasWrinkleWetnessMaxParameter ? TEXT("true") : TEXT("false"));
-            }
 
             bWrinkleNormalMapAssigned[MaterialSlotIndex] = true;
         }
@@ -512,77 +396,49 @@ void FWetRenderStage::ApplyWetWrinkleNormalMapParameters(FWetRenderStageArgs& Re
 
         if (!bWrinkleNormalMapAssigned.IsValidIndex(MaterialSlotIndex) || !bWrinkleNormalMapAssigned[MaterialSlotIndex])
         {
-            if (!Receiver.WrinkleNormalMapParameterName.IsNone())
+            if (!DWCWetMaterialParameters::WrinkleNormalMap().IsNone())
             {
-                MID->SetTextureParameterValue(Receiver.WrinkleNormalMapParameterName, nullptr);
+                MID->SetTextureParameterValue(DWCWetMaterialParameters::WrinkleNormalMap(), nullptr);
             }
 
-            if (!Receiver.UseWrinkleNormalMapParameterName.IsNone())
+            if (!DWCWetMaterialParameters::UseWrinkleNormalMap().IsNone())
             {
-                MID->SetScalarParameterValue(Receiver.UseWrinkleNormalMapParameterName, 0.0f);
+                MID->SetScalarParameterValue(DWCWetMaterialParameters::UseWrinkleNormalMap(), 0.0f);
             }
 
-            if (!Receiver.WrinkleStrengthParameterName.IsNone())
+            if (!DWCWetMaterialParameters::WrinkleStrength().IsNone())
             {
-                MID->SetScalarParameterValue(Receiver.WrinkleStrengthParameterName, 0.0f);
+                MID->SetScalarParameterValue(DWCWetMaterialParameters::WrinkleStrength(), 0.0f);
             }
 
-            if (!Receiver.WrinkleWetnessMinParameterName.IsNone())
+            if (!DWCWetMaterialParameters::WrinkleWetnessMin().IsNone())
             {
-                MID->SetScalarParameterValue(Receiver.WrinkleWetnessMinParameterName, SafeWrinkleWetnessMin);
+                MID->SetScalarParameterValue(DWCWetMaterialParameters::WrinkleWetnessMin(), SafeWrinkleWetnessMin);
             }
 
-            if (!Receiver.WrinkleWetnessMaxParameterName.IsNone())
+            if (!DWCWetMaterialParameters::WrinkleWetnessMax().IsNone())
             {
-                MID->SetScalarParameterValue(Receiver.WrinkleWetnessMaxParameterName, SafeWrinkleWetnessMax);
+                MID->SetScalarParameterValue(DWCWetMaterialParameters::WrinkleWetnessMax(), SafeWrinkleWetnessMax);
             }
 
-            if (Receiver.bLogWrinkleRuntimeBindings)
-            {
-                const bool bHasAnyBakedEntryForSlot = Receiver.WetClothingAsset != nullptr &&
-                                                      Receiver.WetClothingAsset->WrinkleData.BakedWrinkleMaps.ContainsByPredicate(
-                                                          [MaterialSlotIndex](const FWetWrinkleBakedMapSet& Candidate)
-                                                          {
-                                                              return Candidate.MaterialSlotIndex == MaterialSlotIndex;
-                                                          });
-                const bool bHasAnyUsableNormalForSlot = Receiver.WetClothingAsset != nullptr &&
-                                                        Receiver.WetClothingAsset->WrinkleData.BakedWrinkleMaps.ContainsByPredicate(
-                                                            [MaterialSlotIndex](const FWetWrinkleBakedMapSet& Candidate)
-                                                            {
-                                                                return Candidate.MaterialSlotIndex == MaterialSlotIndex &&
-                                                                       Candidate.BakedWrinkleNormalMap != nullptr;
-                                                            });
 
-                UE_LOG(
-                    LogDWC,
-                    Log,
-                    TEXT("DWC wrinkle runtime: mesh '%s' slot %d disabled wrinkle normal apply (hasSlotMetadata=%s, hasUsableNormal=%s, preferredUV=%d, material='%s')."),
-                    *GetNameSafe(Receiver.TargetSkeletalMesh),
-                    MaterialSlotIndex,
-                    bHasAnyBakedEntryForSlot ? TEXT("true") : TEXT("false"),
-                    bHasAnyUsableNormalForSlot ? TEXT("true") : TEXT("false"),
-                    Receiver.WetClothingAsset != nullptr && Receiver.WetClothingAsset->WrinkleData.WrinkleUVChannelIndex != INDEX_NONE
-                        ? Receiver.WetClothingAsset->WrinkleData.WrinkleUVChannelIndex
-                        : (Receiver.WetClothingAsset != nullptr ? 0 : INDEX_NONE),
-                    *GetNameSafe(Receiver.TargetSkeletalMesh != nullptr ? Receiver.TargetSkeletalMesh->GetMaterial(MaterialSlotIndex) : nullptr));
-            }
 
             continue;
         }
 
-        if (!Receiver.WrinkleStrengthParameterName.IsNone())
+        if (!DWCWetMaterialParameters::WrinkleStrength().IsNone())
         {
-            MID->SetScalarParameterValue(Receiver.WrinkleStrengthParameterName, SafeWrinkleStrength);
+            MID->SetScalarParameterValue(DWCWetMaterialParameters::WrinkleStrength(), SafeWrinkleStrength);
         }
 
-        if (!Receiver.WrinkleWetnessMinParameterName.IsNone())
+        if (!DWCWetMaterialParameters::WrinkleWetnessMin().IsNone())
         {
-            MID->SetScalarParameterValue(Receiver.WrinkleWetnessMinParameterName, SafeWrinkleWetnessMin);
+            MID->SetScalarParameterValue(DWCWetMaterialParameters::WrinkleWetnessMin(), SafeWrinkleWetnessMin);
         }
 
-        if (!Receiver.WrinkleWetnessMaxParameterName.IsNone())
+        if (!DWCWetMaterialParameters::WrinkleWetnessMax().IsNone())
         {
-            MID->SetScalarParameterValue(Receiver.WrinkleWetnessMaxParameterName, SafeWrinkleWetnessMax);
+            MID->SetScalarParameterValue(DWCWetMaterialParameters::WrinkleWetnessMax(), SafeWrinkleWetnessMax);
         }
     }
 }
@@ -594,13 +450,13 @@ void FWetRenderStage::ApplyWetTransparencyMapParameters(FWetRenderStageArgs& Rec
         return;
     }
 
-    if (Receiver.TransparencyMapParameterName.IsNone() &&
-        Receiver.UseTransparencyMapParameterName.IsNone() &&
-        Receiver.TransparencyStrengthParameterName.IsNone() &&
-        Receiver.TransparencyWetnessMinParameterName.IsNone() &&
-        Receiver.TransparencyWetnessMaxParameterName.IsNone() &&
-        Receiver.TransparencyUVChannelParameterName.IsNone() &&
-        Receiver.WrinkleSuppressionStrengthParameterName.IsNone())
+    if (DWCWetMaterialParameters::TransparencyMap().IsNone() &&
+        DWCWetMaterialParameters::UseTransparencyMap().IsNone() &&
+        DWCWetMaterialParameters::TransparencyStrength().IsNone() &&
+        DWCWetMaterialParameters::TransparencyWetnessMin().IsNone() &&
+        DWCWetMaterialParameters::TransparencyWetnessMax().IsNone() &&
+        DWCWetMaterialParameters::TransparencyUVChannel().IsNone() &&
+        DWCWetMaterialParameters::WrinkleSuppressionStrength().IsNone())
     {
         return;
     }
@@ -651,17 +507,7 @@ void FWetRenderStage::ApplyWetTransparencyMapParameters(FWetRenderStageArgs& Rec
 
             if (BakedMap->UVChannelIndex < 0 || BakedMap->UVChannelIndex > 3)
             {
-                if (Receiver.bLogTransparencyRuntimeBindings)
-                {
-                    UE_LOG(
-                        LogDWC,
-                        Warning,
-                        TEXT("DWC transparency runtime: mesh '%s' slot %d skipped map '%s' because baked UV channel %d is outside the supported runtime range 0-3."),
-                        *GetNameSafe(Receiver.TargetSkeletalMesh),
-                        MaterialSlotIndex,
-                        *GetNameSafe(BakedMap->TransparencyMap),
-                        BakedMap->UVChannelIndex);
-                }
+
                 continue;
             }
 
@@ -671,63 +517,36 @@ void FWetRenderStage::ApplyWetTransparencyMapParameters(FWetRenderStageArgs& Rec
                 continue;
             }
 
-            if (!Receiver.TransparencyMapParameterName.IsNone())
+            if (!DWCWetMaterialParameters::TransparencyMap().IsNone())
             {
-                MID->SetTextureParameterValue(Receiver.TransparencyMapParameterName, BakedMap->TransparencyMap);
+                MID->SetTextureParameterValue(DWCWetMaterialParameters::TransparencyMap(), BakedMap->TransparencyMap);
             }
-            if (!Receiver.UseTransparencyMapParameterName.IsNone())
+            if (!DWCWetMaterialParameters::UseTransparencyMap().IsNone())
             {
-                MID->SetScalarParameterValue(Receiver.UseTransparencyMapParameterName, 1.0f);
+                MID->SetScalarParameterValue(DWCWetMaterialParameters::UseTransparencyMap(), 1.0f);
             }
-            if (!Receiver.TransparencyStrengthParameterName.IsNone())
+            if (!DWCWetMaterialParameters::TransparencyStrength().IsNone())
             {
-                MID->SetScalarParameterValue(Receiver.TransparencyStrengthParameterName, TransparencyStrength);
+                MID->SetScalarParameterValue(DWCWetMaterialParameters::TransparencyStrength(), TransparencyStrength);
             }
-            if (!Receiver.TransparencyWetnessMinParameterName.IsNone())
+            if (!DWCWetMaterialParameters::TransparencyWetnessMin().IsNone())
             {
-                MID->SetScalarParameterValue(Receiver.TransparencyWetnessMinParameterName, SafeWetnessMin);
+                MID->SetScalarParameterValue(DWCWetMaterialParameters::TransparencyWetnessMin(), SafeWetnessMin);
             }
-            if (!Receiver.TransparencyWetnessMaxParameterName.IsNone())
+            if (!DWCWetMaterialParameters::TransparencyWetnessMax().IsNone())
             {
-                MID->SetScalarParameterValue(Receiver.TransparencyWetnessMaxParameterName, SafeWetnessMax);
+                MID->SetScalarParameterValue(DWCWetMaterialParameters::TransparencyWetnessMax(), SafeWetnessMax);
             }
-            if (!Receiver.TransparencyUVChannelParameterName.IsNone())
+            if (!DWCWetMaterialParameters::TransparencyUVChannel().IsNone())
             {
-                MID->SetScalarParameterValue(Receiver.TransparencyUVChannelParameterName, static_cast<float>(BakedMap->UVChannelIndex));
+                MID->SetScalarParameterValue(DWCWetMaterialParameters::TransparencyUVChannel(), static_cast<float>(BakedMap->UVChannelIndex));
             }
-            if (!Receiver.WrinkleSuppressionStrengthParameterName.IsNone())
+            if (!DWCWetMaterialParameters::WrinkleSuppressionStrength().IsNone())
             {
-                MID->SetScalarParameterValue(Receiver.WrinkleSuppressionStrengthParameterName, WrinkleSuppressionStrength);
+                MID->SetScalarParameterValue(DWCWetMaterialParameters::WrinkleSuppressionStrength(), WrinkleSuppressionStrength);
             }
 
-            if (Receiver.bLogTransparencyRuntimeBindings)
-            {
-                const UMaterialInterface* Material = Receiver.TargetSkeletalMesh != nullptr
-                                                         ? Receiver.TargetSkeletalMesh->GetMaterial(MaterialSlotIndex)
-                                                         : nullptr;
-                UE_LOG(
-                    LogDWC,
-                    Log,
-                    TEXT("DWC transparency runtime: mesh '%s' slot %d assigned packed map '%s' (match=%s, bakedUV=%d, bakedLOD=%d, strength=%.3f, wetnessRange=[%.3f, %.3f], wrinkleSuppression=%.3f, material='%s', params={texture:%s,use:%s,strength:%s,min:%s,max:%s,uv:%s,suppression:%s})."),
-                    *GetNameSafe(Receiver.TargetSkeletalMesh),
-                    MaterialSlotIndex,
-                    *GetNameSafe(BakedMap->TransparencyMap),
-                    DescribeTransparencyMapMatchType(Match),
-                    BakedMap->UVChannelIndex,
-                    BakedMap->LODIndex,
-                    TransparencyStrength,
-                    SafeWetnessMin,
-                    SafeWetnessMax,
-                    WrinkleSuppressionStrength,
-                    *GetNameSafe(Material),
-                    HasTextureParameter(Material, Receiver.TransparencyMapParameterName) ? TEXT("true") : TEXT("false"),
-                    HasScalarParameter(Material, Receiver.UseTransparencyMapParameterName) ? TEXT("true") : TEXT("false"),
-                    HasScalarParameter(Material, Receiver.TransparencyStrengthParameterName) ? TEXT("true") : TEXT("false"),
-                    HasScalarParameter(Material, Receiver.TransparencyWetnessMinParameterName) ? TEXT("true") : TEXT("false"),
-                    HasScalarParameter(Material, Receiver.TransparencyWetnessMaxParameterName) ? TEXT("true") : TEXT("false"),
-                    HasScalarParameter(Material, Receiver.TransparencyUVChannelParameterName) ? TEXT("true") : TEXT("false"),
-                    HasScalarParameter(Material, Receiver.WrinkleSuppressionStrengthParameterName) ? TEXT("true") : TEXT("false"));
-            }
+
 
             bTransparencyMapAssigned[MaterialSlotIndex] = true;
         }
@@ -741,65 +560,63 @@ void FWetRenderStage::ApplyWetTransparencyMapParameters(FWetRenderStageArgs& Rec
             continue;
         }
 
-        if (!Receiver.TransparencyMapParameterName.IsNone())
+        if (!DWCWetMaterialParameters::TransparencyMap().IsNone())
         {
-            MID->SetTextureParameterValue(Receiver.TransparencyMapParameterName, nullptr);
+            MID->SetTextureParameterValue(DWCWetMaterialParameters::TransparencyMap(), nullptr);
         }
-        if (!Receiver.UseTransparencyMapParameterName.IsNone())
+        if (!DWCWetMaterialParameters::UseTransparencyMap().IsNone())
         {
-            MID->SetScalarParameterValue(Receiver.UseTransparencyMapParameterName, 0.0f);
+            MID->SetScalarParameterValue(DWCWetMaterialParameters::UseTransparencyMap(), 0.0f);
         }
-        if (!Receiver.TransparencyStrengthParameterName.IsNone())
+        if (!DWCWetMaterialParameters::TransparencyStrength().IsNone())
         {
-            MID->SetScalarParameterValue(Receiver.TransparencyStrengthParameterName, 0.0f);
+            MID->SetScalarParameterValue(DWCWetMaterialParameters::TransparencyStrength(), 0.0f);
         }
-        if (!Receiver.TransparencyWetnessMinParameterName.IsNone())
+        if (!DWCWetMaterialParameters::TransparencyWetnessMin().IsNone())
         {
-            MID->SetScalarParameterValue(Receiver.TransparencyWetnessMinParameterName, SafeWetnessMin);
+            MID->SetScalarParameterValue(DWCWetMaterialParameters::TransparencyWetnessMin(), SafeWetnessMin);
         }
-        if (!Receiver.TransparencyWetnessMaxParameterName.IsNone())
+        if (!DWCWetMaterialParameters::TransparencyWetnessMax().IsNone())
         {
-            MID->SetScalarParameterValue(Receiver.TransparencyWetnessMaxParameterName, SafeWetnessMax);
+            MID->SetScalarParameterValue(DWCWetMaterialParameters::TransparencyWetnessMax(), SafeWetnessMax);
         }
-        if (!Receiver.TransparencyUVChannelParameterName.IsNone())
+        if (!DWCWetMaterialParameters::TransparencyUVChannel().IsNone())
         {
-            MID->SetScalarParameterValue(Receiver.TransparencyUVChannelParameterName, 0.0f);
+            MID->SetScalarParameterValue(DWCWetMaterialParameters::TransparencyUVChannel(), 0.0f);
         }
-        if (!Receiver.WrinkleSuppressionStrengthParameterName.IsNone())
+        if (!DWCWetMaterialParameters::WrinkleSuppressionStrength().IsNone())
         {
-            MID->SetScalarParameterValue(Receiver.WrinkleSuppressionStrengthParameterName, 0.0f);
+            MID->SetScalarParameterValue(DWCWetMaterialParameters::WrinkleSuppressionStrength(), 0.0f);
         }
     }
 }
 
 FLinearColor FWetRenderStage::MakeWetVertexColor(
     const FWetRenderStageArgs& Receiver,
-    const int32                VertexIndex,
-    const float                Wetness) const
+    const int32 VertexIndex,
+    const float Wetness) const
 {
     if (Receiver.RuntimeData == nullptr || !Receiver.RuntimeData->IsVertexWettable(VertexIndex))
     {
-        return Receiver.bEnableWetPartDebugVertexColors ? FLinearColor(0.0f, 1.0f, 1.0f, 1.0f) : FLinearColor::Black;
+        return FLinearColor::Black;
     }
 
-    if (!Receiver.bEnableWetPartDebugVertexColors)
+    FLinearColor WetPartColor = FLinearColor::White;
+    const int32 WetPartID = Receiver.RuntimeData->VertexWetPartIDs.IsValidIndex(VertexIndex)
+        ? Receiver.RuntimeData->VertexWetPartIDs[VertexIndex]
+        : INDEX_NONE;
+    if (const FLinearColor* FoundColor = CachedWetPartDebugColorsByID.Find(WetPartID))
     {
-        const float TransparencyStrength = Receiver.RuntimeData->VertexWetnessProfileParameters.IsValidIndex(VertexIndex)
-                                               ? Receiver.RuntimeData->VertexWetnessProfileParameters[VertexIndex].GetTransparencyStrength()
-                                               : 0.0f;
-
-        return FLinearColor(Wetness, FMath::Clamp(TransparencyStrength, 0.0f, 1.0f), 0.0f, 1.0f);
+        WetPartColor = *FoundColor;
     }
 
-    const FLinearColor DebugColor = Receiver.RuntimeData->VertexWetPartDebugColors.IsValidIndex(VertexIndex)
-                                        ? Receiver.RuntimeData->VertexWetPartDebugColors[VertexIndex]
-                                        : Receiver.UnassignedWetPartDebugColor;
-
+    // VertexColor.R is reserved for CPU wetness. GBA stores the RGB Wet Part debug color.
+    // GPU rendering reads wetness from the existing wetness texture and uses the same GBA color.
     return FLinearColor(
         Wetness,
-        FMath::Clamp(DebugColor.R, 0.0f, 1.0f),
-        FMath::Clamp(DebugColor.G, 0.0f, 1.0f),
-        FMath::Clamp(DebugColor.B, 0.0f, 1.0f));
+        FMath::Clamp(WetPartColor.R, 0.0f, 1.0f),
+        FMath::Clamp(WetPartColor.G, 0.0f, 1.0f),
+        FMath::Clamp(WetPartColor.B, 0.0f, 1.0f));
 }
 
 void FWetRenderStage::ApplyWetnessToMaterial(FWetRenderStageArgs& Receiver)
@@ -813,10 +630,25 @@ void FWetRenderStage::ApplyWetnessToMaterial(FWetRenderStageArgs& Receiver)
     }
 
     const int32 VertexCount = LODData->GetNumVertices();
-    if (Receiver.SimulationState->AbsorbedWetnessPerVertex.Num() != VertexCount)
+
+    if (CachedWetPartDebugColorAsset.Get() != Receiver.WetClothingAsset)
     {
-        // Vertex SafeCode: 렌더링 단계에서는 RuntimeData를 재빌드하지 않고 SimulationState 크기만 방어적으로 맞춘다.
-        Receiver.SimulationState->AbsorbedWetnessPerVertex.SetNumZeroed(VertexCount);
+        CachedWetPartDebugColorAsset = const_cast<UWetClothingAsset*>(Receiver.WetClothingAsset);
+        CachedWetPartDebugColorsByID.Reset();
+        if (Receiver.WetClothingAsset != nullptr)
+        {
+            for (const FWetClothingWetPartEntry& Entry :
+                 Receiver.WetClothingAsset->PartData.EditableWetPartData.WetPartEntries)
+            {
+                CachedWetPartDebugColorsByID.FindOrAdd(Entry.WetPartID, Entry.Color);
+            }
+        }
+    }
+    TArray<float>* WetnessValues = &Receiver.SimulationState->AbsorbedWetnessPerVertex;
+    if (!Receiver.bGPUWetnessMode && WetnessValues->Num() != VertexCount)
+    {
+        // CPU vertex-wetness rendering owns this state and can repair its size defensively.
+        WetnessValues->SetNumZeroed(VertexCount);
         CachedWetVertexColors.Init(FColor::Black, VertexCount);
         Receiver.SimulationState->MarkAllWetVertexColorsDirty();
     }
@@ -837,7 +669,7 @@ void FWetRenderStage::ApplyWetnessToMaterial(FWetRenderStageArgs& Receiver)
 
         for (int32 VertexIndex : Receiver.SimulationState->DirtyWetVertexIndices)
         {
-            if (!Receiver.SimulationState->AbsorbedWetnessPerVertex.IsValidIndex(VertexIndex) ||
+            if ((!Receiver.bGPUWetnessMode && !WetnessValues->IsValidIndex(VertexIndex)) ||
                 !CachedWetVertexColors.IsValidIndex(VertexIndex))
             {
                 continue;
@@ -850,10 +682,9 @@ void FWetRenderStage::ApplyWetnessToMaterial(FWetRenderStageArgs& Receiver)
             }
 
             const float SafeVisualSaturationWetness = FMath::Max(Receiver.WetnessSettings->VisualSaturationWetness, KINDA_SMALL_NUMBER);
-            const float Wetness = FMath::Clamp(
-                Receiver.SimulationState->AbsorbedWetnessPerVertex[VertexIndex] / SafeVisualSaturationWetness,
-                0.0f,
-                1.0f);
+            const float Wetness = Receiver.bGPUWetnessMode
+                ? 0.0f
+                : FMath::Clamp((*WetnessValues)[VertexIndex] / SafeVisualSaturationWetness, 0.0f, 1.0f);
 
             CachedWetVertexColors[VertexIndex] = MakeWetVertexColor(Receiver, VertexIndex, Wetness).ToFColor(false);
         }

@@ -6,6 +6,9 @@
 #include "Engine/SkeletalMesh.h"
 #include "IAssetTools.h"
 #include "Misc/PackageName.h"
+#include "Misc/MessageDialog.h"
+#include "ObjectTools.h"
+#include "UObject/SoftObjectPath.h"
 #include "Modules/ModuleManager.h"
 #include "Rendering/SkeletalMeshLODRenderData.h"
 #include "Rendering/SkeletalMeshRenderData.h"
@@ -34,53 +37,83 @@ namespace DWCGeneratedDataUVPrivate
             return SourceMesh;
         }
 
-        if (!bForceNewAsset && Asset.GetPreparedSkeletalMesh() != nullptr)
+        if (!bForceNewAsset && Asset.GetDWCSkeletalMesh() != nullptr && Asset.GetDWCSkeletalMesh() != SourceMesh)
         {
-            return Asset.GetPreparedSkeletalMesh();
+            return Asset.GetDWCSkeletalMesh();
         }
 
-        const FString SourcePackageName = SourceMesh->GetOutermost() != nullptr
-            ? SourceMesh->GetOutermost()->GetName()
-            : FString();
-        if (!FPackageName::IsValidLongPackageName(SourcePackageName))
+        const FString AssetPackageName = Asset.GetOutermost() != nullptr ? Asset.GetOutermost()->GetName() : FString();
+        if (!FPackageName::IsValidLongPackageName(AssetPackageName))
         {
-            SetFailure(Result, TEXT("The Source Mesh must be a saved asset before DWC can create a prepared mesh copy."));
+            SetFailure(Result, TEXT("The Wet Clothing Asset must be saved before DWC can create a mesh copy."));
             return nullptr;
         }
 
-        FString UniquePackageName;
-        FString UniqueAssetName;
-        FAssetToolsModule& AssetToolsModule = FModuleManager::LoadModuleChecked<FAssetToolsModule>(TEXT("AssetTools"));
-        AssetToolsModule.Get().CreateUniqueAssetName(
-            SourcePackageName + TEXT("_DWCDataUV"),
-            FString(),
-            UniquePackageName,
-            UniqueAssetName);
+        const FString WCAFolder = FPackageName::GetLongPackagePath(AssetPackageName);
+        const FString GeneratedMeshFolder = WCAFolder / TEXT("Generated") / Asset.GetName() / TEXT("Mesh");
+        const FString SourceAssetName = SourceMesh->GetName();
+        const FString DWCAssetName = SourceAssetName.EndsWith(TEXT("_DWC"))
+            ? SourceAssetName
+            : SourceAssetName + TEXT("_DWC");
+        const FString TargetPackageName = GeneratedMeshFolder / DWCAssetName;
+        const FString TargetObjectPath = TargetPackageName + TEXT(".") + DWCAssetName;
 
+        if (USkeletalMesh* ExistingMesh = LoadObject<USkeletalMesh>(nullptr, *TargetObjectPath))
+        {
+            if (ExistingMesh == Asset.GetDWCSkeletalMesh())
+            {
+                return ExistingMesh;
+            }
+
+            const FText Warning = FText::FromString(FString::Printf(
+                TEXT("A Skeletal Mesh already exists at the deterministic DWC output path:\n\n%s\n\nReplacing it will permanently delete that asset before creating a new DWC mesh copy. Continue?"),
+                *TargetObjectPath));
+            if (FMessageDialog::Open(EAppMsgType::YesNo, Warning) != EAppReturnType::Yes)
+            {
+                SetFailure(Result, TEXT("DWC Skeletal Mesh creation was cancelled because the target path is occupied."));
+                return nullptr;
+            }
+
+            if (!ObjectTools::DeleteSingleObject(ExistingMesh, false))
+            {
+                SetFailure(Result, TEXT("Failed to remove the existing asset at the DWC Skeletal Mesh output path."));
+                return nullptr;
+            }
+        }
+        else if (UObject* ConflictingObject = LoadObject<UObject>(nullptr, *TargetObjectPath))
+        {
+            SetFailure(Result, FString::Printf(
+                TEXT("A non-Skeletal-Mesh asset already exists at the DWC output path: %s"),
+                *GetPathNameSafe(ConflictingObject)));
+            return nullptr;
+        }
+
+        FAssetToolsModule& AssetToolsModule = FModuleManager::LoadModuleChecked<FAssetToolsModule>(TEXT("AssetTools"));
         UObject* DuplicatedObject = AssetToolsModule.Get().DuplicateAsset(
-            UniqueAssetName,
-            FPackageName::GetLongPackagePath(UniquePackageName),
+            DWCAssetName,
+            GeneratedMeshFolder,
             SourceMesh);
-        USkeletalMesh* PreparedMesh = Cast<USkeletalMesh>(DuplicatedObject);
-        if (PreparedMesh == nullptr)
+        USkeletalMesh* DWCMesh = Cast<USkeletalMesh>(DuplicatedObject);
+        if (DWCMesh == nullptr)
         {
             SetFailure(Result, TEXT("Failed to duplicate the Source Mesh for DWC Data UV generation."));
             return nullptr;
         }
 
-        FAssetRegistryModule::AssetCreated(PreparedMesh);
-        PreparedMesh->MarkPackageDirty();
-        return PreparedMesh;
+        FAssetRegistryModule::AssetCreated(DWCMesh);
+        DWCMesh->MarkPackageDirty();
+        return DWCMesh;
     }
 
-    bool BuildDataUVPayloadFromMeshChannel(
+    bool BuildDataUVMetadataFromMeshChannel(
+        const UWetClothingAsset& Asset,
         const USkeletalMesh* Mesh,
         const int32 LODIndex,
         const int32 DWCDataUVChannelIndex,
-        FDWCDataUVPerLOD& OutDataUV,
+        FDWCDataUVLODMetadata& OutMetadata,
         FString* OutErrorMessage)
     {
-        OutDataUV = FDWCDataUVPerLOD();
+        OutMetadata = FDWCDataUVLODMetadata();
         if (Mesh == nullptr)
         {
             if (OutErrorMessage) *OutErrorMessage = TEXT("No runtime mesh is available.");
@@ -115,18 +148,22 @@ namespace DWCGeneratedDataUVPrivate
             return false;
         }
 
-        OutDataUV.bIsValid = true;
-        OutDataUV.LODIndex = LODIndex;
-        OutDataUV.RenderVertexCount = VertexCount;
-        OutDataUV.MeshSignature = UWetClothingAsset::BuildMeshContentSignature(Mesh, LODIndex, DWCDataUVChannelIndex);
-        OutDataUV.DataUVs.SetNum(VertexCount);
-        for (int32 VertexIndex = 0; VertexIndex < VertexCount; ++VertexIndex)
-        {
-            OutDataUV.DataUVs[VertexIndex] =
-                LODData.StaticVertexBuffers.StaticMeshVertexBuffer.GetVertexUV(VertexIndex, DWCDataUVChannelIndex);
-        }
+        OutMetadata.bIsValid = true;
+        OutMetadata.LODIndex = LODIndex;
+        OutMetadata.RenderVertexCount = VertexCount;
+        OutMetadata.MaterialSlotCount = Mesh->GetMaterials().Num();
+        OutMetadata.UVChannelIndex = DWCDataUVChannelIndex;
+        OutMetadata.MeshInputSignature = UWetClothingAsset::BuildMeshContentSignature(
+            Asset.GetSourceSkeletalMesh(),
+            LODIndex,
+            Asset.GetOriginalUVChannelIndex());
+        OutMetadata.DataUVOutputSignature = UWetClothingAsset::BuildMeshContentSignature(
+            Mesh,
+            LODIndex,
+            DWCDataUVChannelIndex);
+        OutMetadata.GeneratorVersion = 1;
 
-        if (OutDataUV.MeshSignature.IsEmpty())
+        if (OutMetadata.MeshInputSignature.IsEmpty() || OutMetadata.DataUVOutputSignature.IsEmpty())
         {
             if (OutErrorMessage) *OutErrorMessage = FString::Printf(TEXT("LOD%d DWC Data UV signature is empty."), LODIndex);
             return false;
@@ -206,8 +243,8 @@ namespace DWCGeneratedDataUVPrivate
 
 bool FDWCDataUVBuildService::BuildOriginalUVTopology(UWetClothingAsset& Asset, FString* OutErrorMessage)
 {
-    USkeletalMesh* RuntimeMesh = Asset.GetRuntimeSkeletalMesh();
-    const FSkeletalMeshRenderData* RenderData = RuntimeMesh != nullptr ? RuntimeMesh->GetResourceForRendering() : nullptr;
+    USkeletalMesh* SourceMesh = Asset.GetSourceSkeletalMesh();
+    const FSkeletalMeshRenderData* RenderData = SourceMesh != nullptr ? SourceMesh->GetResourceForRendering() : nullptr;
     if (RenderData == nullptr || RenderData->LODRenderData.IsEmpty())
     {
         if (OutErrorMessage) *OutErrorMessage = TEXT("The runtime mesh has no render LOD data.");
@@ -226,7 +263,7 @@ bool FDWCDataUVBuildService::BuildOriginalUVTopology(UWetClothingAsset& Asset, F
         FDWCEditorUVTopologyData Topology;
         if (!DWCGeneratedDataUVPrivate::BuildOriginalUVTopologyData(
                 Asset,
-                RuntimeMesh,
+                SourceMesh,
                 LODIndex,
                 Topology,
                 OutErrorMessage))
@@ -277,8 +314,8 @@ FDWCDataUVBuildResult FDWCDataUVBuildService::Generate(UWetClothingAsset& Asset,
         return Result;
     }
 
-    TArray<FDWCDataUVPerLOD> GeneratedDataUVs;
-    GeneratedDataUVs.Reserve(RenderData->LODRenderData.Num());
+    TArray<FDWCDataUVLODMetadata> DataUVMetadata;
+    DataUVMetadata.Reserve(RenderData->LODRenderData.Num());
     TArray<FDWCEditorUVTopologyData> Topologies;
     Topologies.Reserve(RenderData->LODRenderData.Num());
 
@@ -331,7 +368,7 @@ FDWCDataUVBuildResult FDWCDataUVBuildService::Generate(UWetClothingAsset& Asset,
 
         FDWCEditorUVTopologyData Topology;
         FString TopologyError;
-        if (!BuildOriginalUVTopologyData(Asset, TargetMesh, LODIndex, Topology, &TopologyError))
+        if (!BuildOriginalUVTopologyData(Asset, SourceMesh, LODIndex, Topology, &TopologyError))
         {
             SetFailure(Result, FString::Printf(
                 TEXT("LOD%d Original UV topology failed: %s"),
@@ -340,9 +377,9 @@ FDWCDataUVBuildResult FDWCDataUVBuildService::Generate(UWetClothingAsset& Asset,
             return Result;
         }
 
-        FDWCDataUVPerLOD& DataUV = GeneratedDataUVs.AddDefaulted_GetRef();
+        FDWCDataUVLODMetadata& Metadata = DataUVMetadata.AddDefaulted_GetRef();
         FString DataUVPayloadError;
-        if (!BuildDataUVPayloadFromMeshChannel(TargetMesh, LODIndex, DWCDataUVChannelIndex, DataUV, &DataUVPayloadError))
+        if (!BuildDataUVMetadataFromMeshChannel(Asset, TargetMesh, LODIndex, DWCDataUVChannelIndex, Metadata, &DataUVPayloadError))
         {
             SetFailure(Result, FString::Printf(TEXT("LOD%d generated an invalid DWC Data UV payload. %s"), LODIndex, *DataUVPayloadError));
             return Result;
@@ -356,7 +393,7 @@ FDWCDataUVBuildResult FDWCDataUVBuildService::Generate(UWetClothingAsset& Asset,
         Topologies.Add(MoveTemp(Topology));
     }
 
-    if (GeneratedDataUVs.IsEmpty())
+    if (DataUVMetadata.IsEmpty())
     {
         SetFailure(Result, TEXT("The Source Mesh produced no DWC Data UV payloads."));
         return Result;
@@ -368,7 +405,7 @@ FDWCDataUVBuildResult FDWCDataUVBuildService::Generate(UWetClothingAsset& Asset,
         OriginalIslandCount += Topology.Islands.Num();
     }
     Asset.SetGeneratedDataUVTarget(TargetMesh, DWCDataUVChannelIndex);
-    Asset.SetGeneratedDataUVs(MoveTemp(GeneratedDataUVs));
+    Asset.SetDataUVMetadata(MoveTemp(DataUVMetadata));
     Asset.SetOriginalUVTopologies(MoveTemp(Topologies));
 
     Result.bSucceeded = true;
@@ -384,8 +421,8 @@ FDWCDataUVBuildResult FDWCDataUVBuildService::Generate(UWetClothingAsset& Asset,
         DWCDataUVChannelIndex,
         Asset.GetSetupSettings().bModifySourceMeshForDWCDataUV
             ? TEXT("the Source Skeletal Mesh")
-            : TEXT("a prepared mesh copy"),
-        Asset.GeneratedDataUVsPerLOD.Num(),
+            : TEXT("the DWC Skeletal Mesh"),
+        Asset.GetDataUVMetadataLODCount(),
         Result.OriginalIslandCount);
 
     if (Result.bGeneratedWithWarnings)

@@ -35,7 +35,7 @@ bool FWetWrinkleBakeService::BakeAllWrinkleMaps(UWetClothingAsset* WetClothingAs
 
     if (AuthoredMaterialSlots.IsEmpty())
     {
-        WetClothingAsset->SetWrinkleBakeStatus(EDWCBakeStatus::Valid);
+        WetClothingAsset->SetWrinkleBakeStatus(EDWCBakeStatus::Disabled);
         OutSummary = TEXT("No authored wrinkle patches require baking.");
         return true;
     }

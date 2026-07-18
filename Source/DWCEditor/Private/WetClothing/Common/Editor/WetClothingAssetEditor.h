@@ -17,12 +17,6 @@ class SWindow;
 class SWetClothingAssetEditorPanel;
 class UWetClothingAsset;
 
-enum class EWetClothingGenerateMaterialMode : uint8
-{
-    CPU,
-    GPU,
-    All
-};
 enum class ECheckBoxState : uint8;
 
 class FWetClothingAssetEditor : public FAssetEditorToolkit
@@ -61,10 +55,15 @@ class FWetClothingAssetEditor : public FAssetEditorToolkit
     FReply               HandleBakeTransparencyRevealMapsClicked();
     FReply               HandleBakeWrinkleNormalMapClicked();
     FReply               HandleBakeWrinkleMaskClicked();
-    FReply               HandleGenerateMaterialsClicked(EWetClothingGenerateMaterialMode GenerateMode);
-    FReply               GenerateWetMaterials(EWetClothingGenerateMaterialMode GenerateMode);
+    FReply               HandleGenerateMaterialsClicked();
+    FReply               GenerateWetMaterials();
+    bool                 CanBakeAnyMaps() const;
+    bool                 CanBakeGPUMaps() const;
+    bool                 CanBakeWetnessProfileMaps() const;
+    bool                 CanBakeWrinkleMaps() const;
+    bool                 CanBakeTransparencyMaps() const;
     bool                 ResolveIssuesAndSave(FString& OutFailure);
-    void                 RefreshAssetStateAndEditor(bool bIncludeMapValidation = true);
+    void                 RefreshAssetStateAndEditor(bool bRunDeepValidation = false);
     TSharedRef<SWidget>  BuildModeToolbarWidget();
     TSharedRef<SWidget>  BuildModeToggleButton(EWetClothingEditorMode Mode, FName IconName, const FText& ToolTipText);
     void                 SetEditorMode(EWetClothingEditorMode NewMode);

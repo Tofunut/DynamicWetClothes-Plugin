@@ -1,6 +1,7 @@
 #if WITH_EDITOR
 
 #include "RuntimeState/WetGPUMapBakeBuilder.h"
+#include "Utility/DWCDataUVBufferView.h"
 
 #include "Async/ParallelFor.h"
 #include "DataAssets/WetClothingAsset.h"
@@ -340,7 +341,7 @@ bool BuildTrianglePartLookup(
 #if WITH_EDITORONLY_DATA
     const FDWCEditorUVTopologyData* Topology = Asset.FindOriginalUVTopologyForLOD(LODIndex);
     const FString CurrentTopologySignature = UWetClothingAsset::BuildMeshContentSignature(
-        Asset.GetRuntimeSkeletalMesh(),
+        Asset.GetSourceSkeletalMesh(),
         LODIndex,
         Asset.GetOriginalUVChannelIndex());
     if (Topology == nullptr ||
@@ -551,11 +552,8 @@ bool ResolveWettableMaterialSlots(
         }
         OutMaterialSlots.AddUnique(SlotState.MaterialSlotIndex);
     }
-    if (OutMaterialSlots.IsEmpty())
-    {
-        SetGPUMapBakeError(OutErrorMessage, TEXT("No material slot is marked Is Wettable."));
-        return false;
-    }
+    // An empty wettable set is a valid no-work configuration. Public save/bake
+    // entry points clear stale payloads and mark the output Disabled.
     OutMaterialSlots.Sort();
     return true;
 }
@@ -564,7 +562,7 @@ FString BuildRuntimeSignatureCacheKey(
     const UWetClothingAsset& Asset,
     const USkeletalMesh& RuntimeMesh,
     const FSkeletalMeshLODRenderData& LODData,
-    const FDWCDataUVPerLOD& DataUV,
+    const FDWCDataUVLODMetadata& DataUVMetadata,
     const TArray<uint32>& IndexBuffer,
     const TArray<int32>& WettableMaterialSlots,
     const int32 LODIndex)
@@ -577,9 +575,9 @@ FString BuildRuntimeSignatureCacheKey(
     Builder.AddValue(static_cast<int32>(LODData.GetNumVertices()));
     Builder.AddValue(static_cast<int32>(LODData.GetNumTexCoords()));
     Builder.AddValue(IndexBuffer.Num());
-    Builder.AddString(DataUV.MeshSignature);
-    Builder.AddValue(DataUV.RenderVertexCount);
-    Builder.AddValue(DataUV.DataUVs.Num());
+    Builder.AddString(DataUVMetadata.DataUVOutputSignature);
+    Builder.AddValue(DataUVMetadata.RenderVertexCount);
+    Builder.AddValue(DataUVMetadata.UVChannelIndex);
 
     Builder.AddValue(WettableMaterialSlots.Num());
     for (const int32 MaterialSlotIndex : WettableMaterialSlots)
@@ -710,10 +708,10 @@ bool FWetGPUMapBakeBuilder::BuildLODRuntimeSignature(
         return false;
     }
 
-    const FDWCDataUVPerLOD* DataUV = Asset.FindGeneratedDataUVForLOD(LODIndex);
-    if (DataUV == nullptr || !DataUV->bIsValid)
+    const FDWCDataUVLODMetadata* DataUVMetadata = Asset.FindDataUVMetadataForLOD(LODIndex);
+    if (DataUVMetadata == nullptr || !DataUVMetadata->bIsValid)
     {
-        SetGPUMapBakeError(OutErrorMessage, FString::Printf(TEXT("LOD%d has no generated DWC Data UV payload."), LODIndex));
+        SetGPUMapBakeError(OutErrorMessage, FString::Printf(TEXT("LOD%d has no generated DWC Data UV metadata."), LODIndex));
         return false;
     }
 
@@ -739,9 +737,13 @@ bool FWetGPUMapBakeBuilder::BuildLODRuntimeSignature(
 
     const int32 VertexCount = static_cast<int32>(LODData.GetNumVertices());
     const int32 TexCoordCount = static_cast<int32>(LODData.GetNumTexCoords());
-    if (DataUV->RenderVertexCount != VertexCount || DataUV->DataUVs.Num() != VertexCount)
+    FDWCDataUVBufferView DataUVView;
+    FString DataUVViewError;
+    if (!DataUVView.Initialize(RuntimeMesh, LODIndex, Asset.GetDWCDataUVChannelIndex(), &DataUVViewError) ||
+        DataUVMetadata->RenderVertexCount != VertexCount ||
+        DataUVView.NumVertices() != VertexCount)
     {
-        SetGPUMapBakeError(OutErrorMessage, FString::Printf(TEXT("LOD%d generated DWC Data UV payload does not match render vertex count."), LODIndex));
+        SetGPUMapBakeError(OutErrorMessage, FString::Printf(TEXT("LOD%d DWC Data UV does not match render vertices. %s"), LODIndex, *DataUVViewError));
         return false;
     }
 
@@ -749,9 +751,9 @@ bool FWetGPUMapBakeBuilder::BuildLODRuntimeSignature(
         RuntimeMesh,
         LODIndex,
         Asset.GetDWCDataUVChannelIndex());
-    if (CurrentDataUVSignature.IsEmpty() || DataUV->MeshSignature != CurrentDataUVSignature)
+    if (CurrentDataUVSignature.IsEmpty() || DataUVMetadata->DataUVOutputSignature != CurrentDataUVSignature)
     {
-        SetGPUMapBakeError(OutErrorMessage, FString::Printf(TEXT("LOD%d generated DWC Data UV payload is stale."), LODIndex));
+        SetGPUMapBakeError(OutErrorMessage, FString::Printf(TEXT("LOD%d generated DWC Data UV metadata is stale."), LODIndex));
         return false;
     }
 
@@ -759,7 +761,7 @@ bool FWetGPUMapBakeBuilder::BuildLODRuntimeSignature(
         Asset,
         *RuntimeMesh,
         LODData,
-        *DataUV,
+        *DataUVMetadata,
         IndexBuffer,
         WettableMaterialSlots,
         LODIndex);
@@ -785,10 +787,11 @@ bool FWetGPUMapBakeBuilder::BuildLODRuntimeSignature(
         Builder.AddValue(Position.Z);
     }
 
-    Builder.AddString(DataUV->MeshSignature);
-    Builder.AddValue(DataUV->DataUVs.Num());
-    for (const FVector2f& UV : DataUV->DataUVs)
+    Builder.AddString(DataUVMetadata->DataUVOutputSignature);
+    Builder.AddValue(DataUVView.NumVertices());
+    for (int32 VertexIndex = 0; VertexIndex < DataUVView.NumVertices(); ++VertexIndex)
     {
+        const FVector2f UV = DataUVView.GetUV(VertexIndex);
         Builder.AddValue(UV.X);
         Builder.AddValue(UV.Y);
     }
@@ -973,17 +976,21 @@ static bool BuildLODInternal(
         return false;
     }
 
-    const FDWCDataUVPerLOD* DataUV = Asset.FindGeneratedDataUVForLOD(LODIndex);
-    if (DataUV == nullptr || !DataUV->bIsValid)
+    const FDWCDataUVLODMetadata* DataUVMetadata = Asset.FindDataUVMetadataForLOD(LODIndex);
+    if (DataUVMetadata == nullptr || !DataUVMetadata->bIsValid)
     {
-        SetGPUMapBakeError(OutErrorMessage, FString::Printf(TEXT("LOD%d has no generated DWC Data UV payload."), LODIndex));
+        SetGPUMapBakeError(OutErrorMessage, FString::Printf(TEXT("LOD%d has no generated DWC Data UV metadata."), LODIndex));
         return false;
     }
 
     const int32 VertexCount = static_cast<int32>(LODData.GetNumVertices());
-    if (DataUV->RenderVertexCount != VertexCount || DataUV->DataUVs.Num() != VertexCount)
+    FDWCDataUVBufferView DataUVView;
+    FString DataUVViewError;
+    if (!DataUVView.Initialize(RuntimeMesh, LODIndex, Asset.GetDWCDataUVChannelIndex(), &DataUVViewError) ||
+        DataUVMetadata->RenderVertexCount != VertexCount ||
+        DataUVView.NumVertices() != VertexCount)
     {
-        SetGPUMapBakeError(OutErrorMessage, FString::Printf(TEXT("LOD%d generated DWC Data UV payload does not match render vertex count."), LODIndex));
+        SetGPUMapBakeError(OutErrorMessage, FString::Printf(TEXT("LOD%d DWC Data UV does not match render vertices. %s"), LODIndex, *DataUVViewError));
         return false;
     }
 
@@ -991,9 +998,9 @@ static bool BuildLODInternal(
         RuntimeMesh,
         LODIndex,
         Asset.GetDWCDataUVChannelIndex());
-    if (CurrentDataUVSignature.IsEmpty() || DataUV->MeshSignature != CurrentDataUVSignature)
+    if (CurrentDataUVSignature.IsEmpty() || DataUVMetadata->DataUVOutputSignature != CurrentDataUVSignature)
     {
-        SetGPUMapBakeError(OutErrorMessage, FString::Printf(TEXT("LOD%d generated DWC Data UV payload is stale."), LODIndex));
+        SetGPUMapBakeError(OutErrorMessage, FString::Printf(TEXT("LOD%d generated DWC Data UV metadata is stale."), LODIndex));
         return false;
     }
 
@@ -1035,7 +1042,7 @@ static bool BuildLODInternal(
     Output.BulkDataVersion = FDWCGPULODBakeData::CurrentBulkDataVersion;
     Output.MapBakeVersion = bBuildMaps ? FDWCGPULODBakeData::CurrentMapBakeVersion : 0;
     Output.LODIndex = LODIndex;
-    Output.MeshSignature = DataUV->MeshSignature;
+    Output.MeshSignature = DataUVMetadata->DataUVOutputSignature;
     Output.SourceDataSignature = UWetClothingAsset::BuildMeshContentSignature(Asset.GetSourceSkeletalMesh(), LODIndex, Asset.GetOriginalUVChannelIndex());
     Output.RuntimeSignature = MoveTemp(RuntimeSignature);
     Output.MapSignature = MoveTemp(MapSignature);
@@ -1136,9 +1143,9 @@ static bool BuildLODInternal(
             const FVector3f P0 = LODData.StaticVertexBuffers.PositionVertexBuffer.VertexPosition(V0);
             const FVector3f P1 = LODData.StaticVertexBuffers.PositionVertexBuffer.VertexPosition(V1);
             const FVector3f P2 = LODData.StaticVertexBuffers.PositionVertexBuffer.VertexPosition(V2);
-            const FVector2D UV0(DataUV->DataUVs[V0]);
-            const FVector2D UV1(DataUV->DataUVs[V1]);
-            const FVector2D UV2(DataUV->DataUVs[V2]);
+            const FVector2D UV0(DataUVView.GetUV(V0));
+            const FVector2D UV1(DataUVView.GetUV(V1));
+            const FVector2D UV2(DataUVView.GetUV(V2));
 
             auto IsDataUVInRange = [](const FVector2D& UV)
             {

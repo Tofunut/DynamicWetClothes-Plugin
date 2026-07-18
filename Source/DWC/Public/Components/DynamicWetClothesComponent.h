@@ -14,7 +14,6 @@
 #include "GPU/DWCGPUBackend.h"
 #include "Async/DWCTaskQueue.h"
 #include "DataAssets/WetClothingAsset.h"
-#include "DataAssets/WetnessProfile.h"
 #include "WetInputSystem/WetSurfaceContactResolver.h"
 #include "WetRendering/WetRenderStage.h"
 #include "WetSimulation/WetSimulationStage.h"
@@ -24,10 +23,16 @@
 
 #include "DynamicWetClothesComponent.generated.h"
 
+UENUM(BlueprintType)
+enum class EDWCGPUDiffusionNeighborMode : uint8
+{
+    FourDirections UMETA(DisplayName = "4 Directions"),
+    EightDirections UMETA(DisplayName = "8 Directions")
+};
+
 class USkeletalMeshComponent;
 class USkeletalMesh;
 class UMaterialInstanceDynamic;
-class UWetnessProfile;
 class FDWCTaskQueue;
 struct FDWCSkinningTaskResult;
 struct FDWCSkinningStaticData;
@@ -38,7 +43,7 @@ struct FDWCWetMeshReceiverRuntime
     TWeakObjectPtr<USkeletalMeshComponent> MeshComponent;
     TWeakObjectPtr<UWetClothingAsset> WetClothingAsset;
 
-    TUniquePtr<FWetClothingRuntimeData> RuntimeData;
+    TSharedPtr<const FWetClothingRuntimeData, ESPMode::ThreadSafe> SharedRuntimeData;
     TUniquePtr<FWetRuntimeDataBuilder> RuntimeDataBuilder;
     TUniquePtr<FAbsorbedWetnessSimulationState> SimulationState;
     TMap<int32, TUniquePtr<FSurfaceWaterSimulationState>> SurfaceWaterStatesByMaterialSlot;
@@ -78,28 +83,19 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
     bool ApplyWetArea(const FDWCWetAreaData& AreaData, bool bApplyMaterial = true);
     UFUNCTION(BlueprintCallable, Category = "Wetness")
     bool ApplyWetSurface(const FDWCWaterSurfaceData& WaterSurfaceData, float Amount, bool bApplyMaterial = true);
-    UFUNCTION(BlueprintCallable, Category = "Wetness|Debug")
-    void SetWetPartDebugVertexColorsEnabled(bool bEnabled);
-    UFUNCTION(BlueprintCallable, Category = "Wetness|Debug")
-    void RefreshWetVertexColors();
-    UFUNCTION(BlueprintCallable, Category = "Wetness|Debug")
-    bool DebugApplySurfaceWaterAtVertex(int32 VertexIndex, float Amount = 1.0f, float RadiusPixels = 12.0f, bool bFlowStamp = false);
-    UFUNCTION(BlueprintCallable, Category = "Wetness|Debug")
-    void SetSurfaceWaterDebugView(ESurfaceWaterDebugView DebugView);
-    UFUNCTION(BlueprintPure, Category = "Wetness|Debug")
-    int64 GetSurfaceWaterEstimatedGpuMemoryBytes() const;
-    UFUNCTION(BlueprintCallable, Category = "Wetness|Debug") void SetSurfaceWaterSimulationPaused(bool bPaused);
-    UFUNCTION(BlueprintCallable, Category = "Wetness|Debug") void StepSurfaceWaterSimulation();
-    UFUNCTION(BlueprintCallable, Category = "Wetness|Debug") void ClearSurfaceWater();
     bool GetWetnessWorldBounds(FBox& OutBounds) const;
+
+    UFUNCTION(BlueprintCallable, Category = "DWC|Debug")
+    void SetWetPartDebugColorsEnabled(bool bEnabled);
     int32 GetWetSurfaceSampleResolution() const;
     void CommitCpuSkinningTaskResult(FDWCSkinningTaskResult&& Result);
 
-    USkeletalMeshComponent* GetResolvedTargetSkeletalMeshComponent() const { return ResolveTargetSkeletalMesh(); }
-    USkeletalMesh* GetRequiredRuntimeSkeletalMesh() const
+    EDWCSimulationMode GetActiveSimulationMode() const
     {
-        return WetClothingAsset != nullptr ? WetClothingAsset->GetRuntimeSkeletalMesh() : nullptr;
+        return bSimulationModeLocked ? ActiveSimulationMode : SimulationMode;
     }
+
+    void GetResolvedWetMeshComponents(TArray<USkeletalMeshComponent*>& OutComponents) const;
 
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
@@ -134,41 +130,33 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
     void                     FlushAsyncTaskQueueGameThread();
     bool                     FlushPendingWetContacts();
 
-    USkeletalMeshComponent* ResolveTargetSkeletalMesh() const;
-    UWetClothingAsset*      ResolveWetClothingAssetForMesh(const USkeletalMeshComponent& MeshComponent) const;
     void                    ApplyGeneratedWetMaterialOverrides();
     bool                    ShouldReceiverConsiderContact(const FDWCWetMeshReceiverRuntime& Receiver, const FDWCWetContact& Contact) const;
     bool                    ShouldReceiverConsiderSurface(const FDWCWetMeshReceiverRuntime& Receiver, const FDWCWaterSurfaceData& WaterSurfaceData) const;
 
   public:
+    /** WCA assets handled by this component. Every matching SkeletalMeshComponent becomes a receiver. */
     UPROPERTY(EditAnywhere, Category = "Wetness")
-    FName TargetSkeletalMeshName = NAME_None;
+    TArray<TObjectPtr<UWetClothingAsset>> WetClothingAssets;
 
-    UPROPERTY(Transient)
-    TObjectPtr<USkeletalMeshComponent> TargetSkeletalMesh;
-
-    UPROPERTY(EditAnywhere)
-    TArray<UWetnessProfile*> WetnessProfiles;
-
-    UPROPERTY(EditAnywhere, Category = "Wetness")
-    TObjectPtr<UWetClothingAsset> WetClothingAsset = nullptr;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Simulation")
+    /** Selected per component instance and locked when BeginPlay starts. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Wetness|Simulation")
     EDWCSimulationMode SimulationMode = EDWCSimulationMode::VertexCPU;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Simulation|GPU", meta = (EditCondition = "SimulationMode == EDWCSimulationMode::WetnessMapGPU", ClampMin = "3", ClampMax = "64"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Simulation|GPU", meta = (EditCondition = "SimulationMode == EDWCSimulationMode::WetnessMapGPU", ClampMin = "3", ClampMax = "64", AdvancedDisplay))
     int32 GPUContactNearestSeedVertexCount = 12;
 
+    /** Number of neighboring texels used by GPU wetness diffusion. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Simulation|GPU", meta = (EditCondition = "SimulationMode == EDWCSimulationMode::WetnessMapGPU"))
-    FName GPUWetnessMapParameterName = TEXT("DWC_WetnessMap");
+    EDWCGPUDiffusionNeighborMode GPUDiffusionNeighborMode = EDWCGPUDiffusionNeighborMode::FourDirections;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Simulation|GPU|Tuning", meta = (EditCondition = "SimulationMode == EDWCSimulationMode::WetnessMapGPU", ClampMin = "0.0"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Simulation|GPU|Tuning", meta = (EditCondition = "SimulationMode == EDWCSimulationMode::WetnessMapGPU", ClampMin = "0.0", AdvancedDisplay))
     float GPUSpreadRateScale = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Simulation|GPU|Tuning", meta = (EditCondition = "SimulationMode == EDWCSimulationMode::WetnessMapGPU", ClampMin = "0.0"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Simulation|GPU|Tuning", meta = (EditCondition = "SimulationMode == EDWCSimulationMode::WetnessMapGPU", ClampMin = "0.0", AdvancedDisplay))
     float GPUGravityFlowStrengthScale = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Simulation|GPU|Tuning", meta = (EditCondition = "SimulationMode == EDWCSimulationMode::WetnessMapGPU", ClampMin = "0.0"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Simulation|GPU|Tuning", meta = (EditCondition = "SimulationMode == EDWCSimulationMode::WetnessMapGPU", ClampMin = "0.0", AdvancedDisplay))
     float GPUDryRateScale = 1.0f;
 
     UPROPERTY(EditAnywhere, Category = "Wetness", meta = (ShowOnlyInnerProperties))
@@ -177,10 +165,10 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Contact", meta = (AllowPrivateAccess = "true"))
     bool bBatchWetContactsPerFrame = true;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Contact", meta = (ClampMin = "1", AllowPrivateAccess = "true"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Contact", meta = (ClampMin = "1", AllowPrivateAccess = "true", AdvancedDisplay))
     int32 MaxBatchedWetContactsPerFrame = 64;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Surface", meta = (ClampMin = "2", ClampMax = "64", AllowPrivateAccess = "true"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Surface", meta = (ClampMin = "2", ClampMax = "64", AllowPrivateAccess = "true", AdvancedDisplay))
     int32 WetSurfaceSampleResolution = 8;
 
     UPROPERTY(EditAnywhere, Category = "Wetness|Visual")
@@ -188,40 +176,6 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
 
     UPROPERTY(EditAnywhere, Category = "Wetness|Visual", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float WetUnderColorBlendStrength = 0.3f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Visual")
-    FName UnderColorParameterName = TEXT("DWC_UnderColor");
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Visual")
-    FName UnderColorBlendStrengthParameterName = TEXT("DWC_UnderColorBlendStrength");
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Surface Water")
-    FName SurfaceWaterRTParameterName = TEXT("DWC_SurfaceWaterRT");
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Surface Water")
-    FName SurfaceDropletRTParameterName = TEXT("DWC_SurfaceDropletRT");
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Surface Water")
-    FName SurfaceFlowRTParameterName = TEXT("DWC_SurfaceFlowRT");
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Surface Water")
-    FName SurfaceWaterTimeParameterName = TEXT("DWC_SurfaceWaterTime");
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Surface Water")
-    FName SurfaceWaterTexelSizeParameterName = TEXT("DWC_SurfaceWaterTexelSize");
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Debug")
-    ESurfaceWaterDebugView SurfaceWaterDebugView = ESurfaceWaterDebugView::None;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Debug")
-    bool bEnableWetPartDebugVertexColors = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Debug")
-    FLinearColor UnassignedWetPartDebugColor = FLinearColor(0.25f, 0.25f, 0.25f, 1.0f);
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Debug")
-    FName WetPartDebugStrengthParameterName = TEXT("DWC_WetPartDebugStrength");
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Wetness Profile Map")
-    FName WetnessProfileMap0ParameterName = TEXT("DWC_WetnessProfileMap0");
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Wetness Profile Map")
-    FName UseWetnessProfileMap0ParameterName = TEXT("DWC_UseWetnessProfileMap0");
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Wrinkle", meta = (ClampMin = "0.0"))
     float WrinkleStrength = 1.0f;
@@ -232,58 +186,26 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Wrinkle", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float WrinkleWetnessMax = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Wrinkle")
-    FName WrinkleNormalMapParameterName = TEXT("DWC_WrinkleNormalMap");
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Wrinkle")
-    FName UseWrinkleNormalMapParameterName = TEXT("DWC_UseWrinkleNormalMap");
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Wrinkle")
-    FName WrinkleStrengthParameterName = TEXT("DWC_WrinkleStrength");
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Wrinkle")
-    FName WrinkleWetnessMinParameterName = TEXT("DWC_WrinkleWetnessMin");
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Wrinkle")
-    FName WrinkleWetnessMaxParameterName = TEXT("DWC_WrinkleWetnessMax");
-
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Transparency", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float TransparencyWetnessMin = 0.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Transparency", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float TransparencyWetnessMax = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Transparency")
-    FName TransparencyMapParameterName = TEXT("DWC_TransparencyMap");
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Transparency")
-    FName UseTransparencyMapParameterName = TEXT("DWC_UseTransparencyMap");
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Transparency")
-    FName TransparencyStrengthParameterName = TEXT("DWC_TransparencyStrength");
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Transparency")
-    FName TransparencyWetnessMinParameterName = TEXT("DWC_TransparencyWetnessMin");
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Transparency")
-    FName TransparencyWetnessMaxParameterName = TEXT("DWC_TransparencyWetnessMax");
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Transparency")
-    FName TransparencyUVChannelParameterName = TEXT("DWC_TransparencyUVChannel");
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Transparency")
-    FName WrinkleSuppressionStrengthParameterName = TEXT("DWC_WrinkleSuppressionStrength");
-
+    /**
+     * Keeps the normal material while dry and displays each Wet Part's configured color while wet.
+     * CPU wetness uses VertexColor.R; GPU wetness stays in the existing wetness texture path.
+     */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Debug")
-    bool bLogWrinkleRuntimeBindings = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Debug")
-    bool bLogTransparencyRuntimeBindings = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Debug")
-    bool bLogGPUWetnessRuntimeBindings = false;
+    bool bShowWetPartDebugColors = false;
 
   private:
+    UPROPERTY(Transient)
+    EDWCSimulationMode ActiveSimulationMode = EDWCSimulationMode::VertexCPU;
+
+    UPROPERTY(Transient)
+    bool bSimulationModeLocked = false;
+
     TUniquePtr<FDWCTaskQueue> AsyncTaskQueue;
     TArray<TUniquePtr<FDWCWetMeshReceiverRuntime>> Receivers;
 

@@ -1,17 +1,23 @@
 #include "Components/DynamicWetClothesComponentCustomization.h"
 
 #include "Components/DynamicWetClothesComponent.h"
+#include "Async/Async.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "DataAssets/WetClothingAsset.h"
 #include "DetailCategoryBuilder.h"
 #include "DetailLayoutBuilder.h"
 #include "DetailWidgetRow.h"
-#include "Engine/SkeletalMesh.h"
 #include "Engine/Blueprint.h"
 #include "Engine/SCS_Node.h"
 #include "Engine/SimpleConstructionScript.h"
+#include "Engine/SkeletalMesh.h"
 #include "GameFramework/Actor.h"
+#include "IPropertyUtilities.h"
 #include "Kismet2/BlueprintEditorUtils.h"
+#include "PropertyHandle.h"
 #include "ScopedTransaction.h"
+#include "UObject/UnrealType.h"
+#include "UObject/UObjectGlobals.h"
 #include "Styling/AppStyle.h"
 #include "Widgets/Images/SImage.h"
 #include "Widgets/Input/SButton.h"
@@ -21,7 +27,6 @@
 
 #define LOCTEXT_NAMESPACE "DynamicWetClothesComponentCustomization"
 
-
 namespace
 {
     UBlueprint* FindOwningBlueprint(const UDynamicWetClothesComponent* DWC)
@@ -30,255 +35,89 @@ namespace
         {
             return nullptr;
         }
-
         if (UBlueprint* Blueprint = DWC->GetTypedOuter<UBlueprint>())
         {
             return Blueprint;
         }
-
         if (const AActor* Owner = DWC->GetOwner())
         {
             return Cast<UBlueprint>(Owner->GetClass()->ClassGeneratedBy);
         }
-
         if (const UClass* OuterClass = DWC->GetTypedOuter<UClass>())
         {
             return Cast<UBlueprint>(OuterClass->ClassGeneratedBy);
         }
-
         return nullptr;
     }
 
-    void CollectOwnerTargetCandidates(
-        const UDynamicWetClothesComponent* DWC,
-        TArray<USkeletalMeshComponent*>& OutCandidates)
+    void CollectCandidateMeshes(const UDynamicWetClothesComponent* DWC, TArray<USkeletalMeshComponent*>& OutCandidates)
     {
+        OutCandidates.Reset();
         if (DWC == nullptr)
         {
             return;
         }
 
-        if (AActor* Owner = DWC->GetOwner())
+        auto AddOwnerMeshes = [&OutCandidates](AActor* Owner)
         {
+            if (Owner == nullptr)
+            {
+                return;
+            }
             TArray<USkeletalMeshComponent*> OwnerMeshes;
             Owner->GetComponents<USkeletalMeshComponent>(OwnerMeshes);
             for (USkeletalMeshComponent* Mesh : OwnerMeshes)
             {
                 OutCandidates.AddUnique(Mesh);
             }
-        }
-    }
+        };
 
-    void CollectBlueprintTemplateTargetCandidates(
-        const UDynamicWetClothesComponent* DWC,
-        TArray<USkeletalMeshComponent*>& OutCandidates)
-    {
-        if (DWC == nullptr || !DWC->IsTemplate())
+        if (!DWC->IsTemplate())
         {
+            AddOwnerMeshes(DWC->GetOwner());
             return;
         }
 
         UBlueprint* Blueprint = FindOwningBlueprint(DWC);
-        if (Blueprint == nullptr)
-        {
-            return;
-        }
-
-        if (Blueprint->SimpleConstructionScript != nullptr)
+        if (Blueprint != nullptr && Blueprint->SimpleConstructionScript != nullptr)
         {
             for (USCS_Node* Node : Blueprint->SimpleConstructionScript->GetAllNodes())
             {
-                if (Node == nullptr)
+                if (Node != nullptr)
                 {
-                    continue;
-                }
-
-                if (USkeletalMeshComponent* MeshTemplate = Cast<USkeletalMeshComponent>(Node->ComponentTemplate))
-                {
-                    OutCandidates.AddUnique(MeshTemplate);
-                }
-            }
-        }
-
-        if (UClass* GeneratedClass = Blueprint->GeneratedClass)
-        {
-            if (AActor* DefaultActor = Cast<AActor>(GeneratedClass->GetDefaultObject()))
-            {
-                TArray<USkeletalMeshComponent*> DefaultActorMeshes;
-                DefaultActor->GetComponents<USkeletalMeshComponent>(DefaultActorMeshes);
-                for (USkeletalMeshComponent* Mesh : DefaultActorMeshes)
-                {
-                    OutCandidates.AddUnique(Mesh);
-                }
-            }
-        }
-    }
-
-    void CollectCustomizationTargetCandidates(
-        const UDynamicWetClothesComponent* DWC,
-        TArray<USkeletalMeshComponent*>& OutCandidates)
-    {
-        if (DWC == nullptr)
-        {
-            return;
-        }
-
-        if (DWC->IsTemplate())
-        {
-            CollectBlueprintTemplateTargetCandidates(DWC, OutCandidates);
-            CollectOwnerTargetCandidates(DWC, OutCandidates);
-            return;
-        }
-
-        CollectOwnerTargetCandidates(DWC, OutCandidates);
-    }
-
-    FText MakeTargetComponentText(const USkeletalMeshComponent* Target)
-    {
-        return FText::Format(
-            LOCTEXT("TargetComponentFormat", "{0} -> {1}"),
-            FText::FromString(GetNameSafe(Target)),
-            FText::FromString(GetNameSafe(Target != nullptr ? Target->GetSkeletalMeshAsset() : nullptr)));
-    }
-
-    FText MakeCandidateListText(const UDynamicWetClothesComponent* DWC)
-    {
-        TArray<USkeletalMeshComponent*> Candidates;
-        CollectCustomizationTargetCandidates(DWC, Candidates);
-        if (Candidates.IsEmpty())
-        {
-            return LOCTEXT("NoCandidateComponents", "None");
-        }
-
-        TArray<FString> CandidateTexts;
-        CandidateTexts.Reserve(Candidates.Num());
-        for (const USkeletalMeshComponent* Candidate : Candidates)
-        {
-            CandidateTexts.Add(FText::Format(
-                LOCTEXT("CandidateComponentFormat", "{0} -> {1}"),
-                FText::FromString(GetNameSafe(Candidate)),
-                FText::FromString(GetNameSafe(Candidate != nullptr ? Candidate->GetSkeletalMeshAsset() : nullptr))).ToString());
-        }
-
-        return FText::FromString(FString::Join(CandidateTexts, TEXT(", ")));
-    }
-
-    USkeletalMeshComponent* SelectAutomaticTargetFromCandidates(
-        const UDynamicWetClothesComponent* DWC,
-        const TArray<USkeletalMeshComponent*>& Candidates)
-    {
-        USkeletalMeshComponent* FirstMesh = nullptr;
-        USkeletalMeshComponent* FirstValidMesh = nullptr;
-        USkeletalMesh* RequiredRuntimeMesh = DWC != nullptr ? DWC->GetRequiredRuntimeSkeletalMesh() : nullptr;
-
-        for (USkeletalMeshComponent* Mesh : Candidates)
-        {
-            if (Mesh == nullptr)
-            {
-                continue;
-            }
-
-            if (FirstMesh == nullptr)
-            {
-                FirstMesh = Mesh;
-            }
-            if (FirstValidMesh == nullptr && Mesh->GetSkeletalMeshAsset() != nullptr)
-            {
-                FirstValidMesh = Mesh;
-            }
-            if (RequiredRuntimeMesh != nullptr && Mesh->GetSkeletalMeshAsset() == RequiredRuntimeMesh)
-            {
-                return Mesh;
-            }
-        }
-
-        return FirstValidMesh != nullptr ? FirstValidMesh : FirstMesh;
-    }
-
-    USkeletalMeshComponent* ResolveBlueprintTemplateTarget(
-        const UDynamicWetClothesComponent* DWC,
-        UBlueprint** OutOwningBlueprint = nullptr)
-    {
-        if (OutOwningBlueprint != nullptr)
-        {
-            *OutOwningBlueprint = nullptr;
-        }
-        if (DWC == nullptr || !DWC->IsTemplate())
-        {
-            return nullptr;
-        }
-
-        UBlueprint* Blueprint = FindOwningBlueprint(DWC);
-        if (OutOwningBlueprint != nullptr)
-        {
-            *OutOwningBlueprint = Blueprint;
-        }
-
-        TArray<USkeletalMeshComponent*> Candidates;
-        CollectCustomizationTargetCandidates(DWC, Candidates);
-
-        if (!DWC->TargetSkeletalMeshName.IsNone())
-        {
-            if (Blueprint != nullptr && Blueprint->SimpleConstructionScript != nullptr)
-            {
-                for (USCS_Node* Node : Blueprint->SimpleConstructionScript->GetAllNodes())
-                {
-                    if (Node == nullptr)
+                    if (USkeletalMeshComponent* MeshTemplate = Cast<USkeletalMeshComponent>(Node->ComponentTemplate))
                     {
-                        continue;
-                    }
-
-                    USkeletalMeshComponent* MeshTemplate = Cast<USkeletalMeshComponent>(Node->ComponentTemplate);
-                    if (MeshTemplate == nullptr)
-                    {
-                        continue;
-                    }
-
-                    if (Node->GetVariableName() == DWC->TargetSkeletalMeshName ||
-                        MeshTemplate->GetFName() == DWC->TargetSkeletalMeshName)
-                    {
-                        return MeshTemplate;
+                        OutCandidates.AddUnique(MeshTemplate);
                     }
                 }
             }
-
-            for (USkeletalMeshComponent* Mesh : Candidates)
-            {
-                if (Mesh != nullptr && Mesh->GetFName() == DWC->TargetSkeletalMeshName)
-                {
-                    return Mesh;
-                }
-            }
-            return nullptr;
         }
 
-        return SelectAutomaticTargetFromCandidates(DWC, Candidates);
+        // Include inherited/default components even when the current Blueprint also has SCS nodes.
+        if (Blueprint != nullptr && Blueprint->GeneratedClass != nullptr)
+        {
+            AddOwnerMeshes(Cast<AActor>(Blueprint->GeneratedClass->GetDefaultObject()));
+        }
+        AddOwnerMeshes(DWC->GetOwner());
     }
 
-    USkeletalMeshComponent* ResolveCustomizationTarget(
-        const UDynamicWetClothesComponent* DWC,
-        UBlueprint** OutOwningBlueprint = nullptr)
+    FText MeshPathText(const UObject* Object)
     {
-        if (OutOwningBlueprint != nullptr)
-        {
-            *OutOwningBlueprint = nullptr;
-        }
-        if (DWC == nullptr)
-        {
-            return nullptr;
-        }
-
-        if (DWC->IsTemplate())
-        {
-            return ResolveBlueprintTemplateTarget(DWC, OutOwningBlueprint);
-        }
-        return DWC->GetResolvedTargetSkeletalMeshComponent();
+        return Object != nullptr ? FText::FromString(Object->GetPathName()) : LOCTEXT("None", "None");
     }
 }
 
 TSharedRef<IDetailCustomization> FDynamicWetClothesComponentCustomization::MakeInstance()
 {
     return MakeShared<FDynamicWetClothesComponentCustomization>();
+}
+
+FDynamicWetClothesComponentCustomization::~FDynamicWetClothesComponentCustomization()
+{
+    if (ObjectPropertyChangedHandle.IsValid())
+    {
+        FCoreUObjectDelegates::OnObjectPropertyChanged.Remove(ObjectPropertyChangedHandle);
+    }
 }
 
 void FDynamicWetClothesComponentCustomization::CustomizeDetails(IDetailLayoutBuilder& DetailBuilder)
@@ -291,203 +130,393 @@ void FDynamicWetClothesComponentCustomization::CustomizeDetails(IDetailLayoutBui
     }
 
     Component = Cast<UDynamicWetClothesComponent>(Objects[0].Get());
+    PropertyUtilities = DetailBuilder.GetPropertyUtilities();
+    if (!ObjectPropertyChangedHandle.IsValid())
+    {
+        ObjectPropertyChangedHandle = FCoreUObjectDelegates::OnObjectPropertyChanged.AddRaw(
+            this,
+            &FDynamicWetClothesComponentCustomization::HandleObjectPropertyChanged);
+    }
+    RebuildBindingStatuses();
+
+    const TSharedRef<IPropertyHandle> AssetsHandle = DetailBuilder.GetProperty(
+        GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, WetClothingAssets));
+    AssetsHandle->SetOnPropertyValueChanged(FSimpleDelegate::CreateRaw(this, &FDynamicWetClothesComponentCustomization::RequestRefresh));
+    AssetsHandle->SetOnChildPropertyValueChanged(FSimpleDelegate::CreateRaw(this, &FDynamicWetClothesComponentCustomization::RequestRefresh));
+    if (const TSharedPtr<IPropertyHandleArray> ArrayHandle = AssetsHandle->AsArray())
+    {
+        ArrayHandle->SetOnNumElementsChanged(FSimpleDelegate::CreateRaw(this, &FDynamicWetClothesComponentCustomization::RequestRefresh));
+    }
+
     IDetailCategoryBuilder& Category = DetailBuilder.EditCategory(TEXT("Wetness"));
-    Category.AddCustomRow(LOCTEXT("RuntimeMeshWarningFilter", "DWC Runtime Mesh Warning"))
-    .Visibility(TAttribute<EVisibility>::Create(TAttribute<EVisibility>::FGetter::CreateRaw(
-        this,
-        &FDynamicWetClothesComponentCustomization::GetRuntimeMeshWarningVisibility)))
+    Category.AddCustomRow(LOCTEXT("DWCBindingHeaderFilter", "DWC Mesh Bindings"))
     .WholeRowContent()
     [
-        SNew(SBorder)
-        .BorderImage(FAppStyle::GetBrush(TEXT("ToolPanel.GroupBorder")))
-        .BorderBackgroundColor(FLinearColor(1.0f, 0.66f, 0.08f, 0.16f))
-        .Padding(8.0f)
-        [
-            SNew(SHorizontalBox)
-            + SHorizontalBox::Slot()
-            .AutoWidth()
-            .VAlign(VAlign_Top)
-            .Padding(0.0f, 1.0f, 8.0f, 0.0f)
-            [
-                SNew(SImage)
-                .Image(FAppStyle::GetBrush(TEXT("Icons.WarningWithColor")))
-            ]
-            + SHorizontalBox::Slot()
-            .FillWidth(1.0f)
-            .VAlign(VAlign_Center)
-            [
-                SNew(STextBlock)
-                .AutoWrapText(true)
-                .Text(this, &FDynamicWetClothesComponentCustomization::GetRuntimeMeshWarningText)
-            ]
-        ]
+        SNew(STextBlock)
+        .Text(LOCTEXT("DWCBindingHeader", "Wet Clothing Asset Bindings"))
+        .Font(FAppStyle::GetFontStyle(TEXT("DetailsView.CategoryFontStyle")))
     ];
 
-    Category.AddCustomRow(LOCTEXT("RuntimeMeshFilter", "DWC Data UV"))
-    .WholeRowContent()
-    [
-        SNew(SVerticalBox)
-        + SVerticalBox::Slot()
-        .AutoHeight()
-        .Padding(2.0f)
+    if (CachedBindingStatuses.IsEmpty())
+    {
+        Category.AddCustomRow(LOCTEXT("NoWCAFilter", "No Wet Clothing Assets"))
+        .WholeRowContent()
         [
             SNew(STextBlock)
             .AutoWrapText(true)
-            .Text(this, &FDynamicWetClothesComponentCustomization::GetStatusText)
-        ]
-        + SVerticalBox::Slot()
-        .AutoHeight()
-        .Padding(2.0f, 6.0f, 2.0f, 2.0f)
+            .Text(LOCTEXT("NoWCA", "Add one or more Wet Clothing Assets. Each matching SkeletalMeshComponent will become a runtime receiver."))
+        ];
+        return;
+    }
+
+    for (int32 BindingIndex = 0; BindingIndex < CachedBindingStatuses.Num(); ++BindingIndex)
+    {
+        Category.AddCustomRow(FText::FromString(FString::Printf(TEXT("DWC Binding %d"), BindingIndex)))
+        .WholeRowContent()
         [
-            SNew(SButton)
-            .Text(this, &FDynamicWetClothesComponentCustomization::GetApplyButtonText)
-            .ToolTipText(LOCTEXT(
-                "ApplyTooltip",
-                "Changes only the target SkeletalMeshComponent's mesh reference. The Source and generated Data UV payloads are not overwritten."))
-            .IsEnabled(this, &FDynamicWetClothesComponentCustomization::CanApplyRuntimeMesh)
-            .OnClicked(this, &FDynamicWetClothesComponentCustomization::HandleApplyRuntimeMesh)
-        ]
+            SNew(SBorder)
+            .BorderImage(FAppStyle::GetBrush(TEXT("ToolPanel.GroupBorder")))
+            .Padding(8.0f)
+            [
+                SNew(SVerticalBox)
+                + SVerticalBox::Slot()
+                .AutoHeight()
+                [
+                    SNew(SHorizontalBox)
+                    + SHorizontalBox::Slot()
+                    .AutoWidth()
+                    .VAlign(VAlign_Top)
+                    .Padding(0.0f, 1.0f, 8.0f, 0.0f)
+                    [
+                        SNew(SImage)
+                        .Image(FAppStyle::GetBrush(TEXT("Icons.WarningWithColor")))
+                        .Visibility(this, &FDynamicWetClothesComponentCustomization::GetBindingWarningVisibility, BindingIndex)
+                    ]
+                    + SHorizontalBox::Slot()
+                    .FillWidth(1.0f)
+                    [
+                        SNew(STextBlock)
+                        .AutoWrapText(true)
+                        .Text(this, &FDynamicWetClothesComponentCustomization::GetBindingText, BindingIndex)
+                    ]
+                    + SHorizontalBox::Slot()
+                    .AutoWidth()
+                    .VAlign(VAlign_Center)
+                    .Padding(8.0f, 0.0f, 0.0f, 0.0f)
+                    [
+                        SNew(SButton)
+                        .Text(LOCTEXT("Apply", "Apply"))
+                        .Visibility(this, &FDynamicWetClothesComponentCustomization::GetBindingApplyVisibility, BindingIndex)
+                        .IsEnabled(this, &FDynamicWetClothesComponentCustomization::CanApplyBinding, BindingIndex)
+                        .OnClicked(this, &FDynamicWetClothesComponentCustomization::HandleApplyBinding, BindingIndex)
+                    ]
+                ]
+                + SVerticalBox::Slot()
+                .AutoHeight()
+                .Padding(24.0f, 4.0f, 0.0f, 0.0f)
+                [
+                    SNew(STextBlock)
+                    .Text(this, &FDynamicWetClothesComponentCustomization::GetBindingStateText, BindingIndex)
+                    .ColorAndOpacity(FSlateColor::UseSubduedForeground())
+                ]
+            ]
+        ];
+    }
+
+    Category.AddCustomRow(LOCTEXT("ApplyAllFilter", "Apply All DWC Meshes"))
+    .WholeRowContent()
+    [
+        SNew(SButton)
+        .Text(LOCTEXT("ApplyAll", "Apply All"))
+        .ToolTipText(LOCTEXT("ApplyAllTooltip", "Replace every unambiguous Source Skeletal Mesh reference with the DWC Skeletal Mesh required by its WCA."))
+        .IsEnabled(this, &FDynamicWetClothesComponentCustomization::CanApplyAll)
+        .OnClicked(this, &FDynamicWetClothesComponentCustomization::HandleApplyAll)
     ];
 }
 
-FText FDynamicWetClothesComponentCustomization::GetStatusText() const
+void FDynamicWetClothesComponentCustomization::RebuildBindingStatuses()
 {
-    const UDynamicWetClothesComponent* DWC = Component.Get();
-    if (DWC == nullptr || DWC->WetClothingAsset == nullptr)
-    {
-        return LOCTEXT("NoAsset", "Assign a Wet Clothing Asset.");
-    }
-    USkeletalMeshComponent* Target = ResolveCustomizationTarget(DWC);
-    USkeletalMesh* Required = DWC->GetRequiredRuntimeSkeletalMesh();
-    if (Required == nullptr)
-    {
-        return LOCTEXT("NoGeneratedDataUV", "Wet Clothing Asset has no Runtime Mesh.");
-    }
-    if (Target == nullptr)
-    {
-        return FText::Format(
-            LOCTEXT(
-                "NoTarget",
-                "Target SkeletalMeshComponent not found. Required: {0}."),
-            FText::FromString(GetNameSafe(Required)));
-    }
-    if (Target->GetSkeletalMeshAsset() == Required)
-    {
-        return FText::Format(
-            LOCTEXT("Ready", "Ready: {0}"),
-            MakeTargetComponentText(Target));
-    }
-    return FText::Format(
-        LOCTEXT("Mismatch", "Target: {0}\nRequired: {1}"),
-        MakeTargetComponentText(Target),
-        FText::FromString(GetNameSafe(Required)));
-}
-
-FText FDynamicWetClothesComponentCustomization::GetRuntimeMeshWarningText() const
-{
-    const UDynamicWetClothesComponent* DWC = Component.Get();
-    if (DWC == nullptr || DWC->WetClothingAsset == nullptr)
-    {
-        return FText::GetEmpty();
-    }
-
-    USkeletalMeshComponent* Target = ResolveCustomizationTarget(DWC);
-    if (Target == nullptr)
-    {
-        return FText::Format(
-            LOCTEXT(
-                "RuntimeMeshWarningNoTarget",
-                "DWC target not found. Required: {0}. Candidates: {1}"),
-            FText::FromString(GetNameSafe(DWC->GetRequiredRuntimeSkeletalMesh())),
-            MakeCandidateListText(DWC));
-    }
-
-    USkeletalMesh* Required = DWC->GetRequiredRuntimeSkeletalMesh();
-    if (Required == nullptr)
-    {
-        return FText::Format(
-            LOCTEXT(
-                "RuntimeMeshWarningNoRuntimeMesh",
-                "Wet Clothing Asset '{0}' has no Runtime Mesh."),
-            FText::FromString(GetNameSafe(DWC->WetClothingAsset)));
-    }
-
-    return FText::Format(
-        LOCTEXT(
-            "RuntimeMeshWarningMismatch",
-            "Target mesh mismatch. Target: {0}. Required: {1}."),
-        MakeTargetComponentText(Target),
-        FText::FromString(GetNameSafe(Required)));
-}
-
-EVisibility FDynamicWetClothesComponentCustomization::GetRuntimeMeshWarningVisibility() const
-{
-    return HasRuntimeMeshWarning() ? EVisibility::Visible : EVisibility::Collapsed;
-}
-
-FText FDynamicWetClothesComponentCustomization::GetApplyButtonText() const
-{
-    const UDynamicWetClothesComponent* DWC = Component.Get();
-    return DWC != nullptr && DWC->IsTemplate()
-        ? LOCTEXT("ApplyBlueprint", "Change Blueprint Default Mesh to Runtime Mesh")
-        : LOCTEXT("ApplyActor", "Change Current Actor Mesh to Runtime Mesh");
-}
-
-bool FDynamicWetClothesComponentCustomization::HasRuntimeMeshWarning() const
-{
-    const UDynamicWetClothesComponent* DWC = Component.Get();
-    if (DWC == nullptr || DWC->WetClothingAsset == nullptr)
-    {
-        return false;
-    }
-
-    USkeletalMeshComponent* Target = ResolveCustomizationTarget(DWC);
-    USkeletalMesh* Required = DWC->GetRequiredRuntimeSkeletalMesh();
-    return Target == nullptr || Required == nullptr || Target->GetSkeletalMeshAsset() != Required;
-}
-
-bool FDynamicWetClothesComponentCustomization::HasRuntimeMeshMismatch() const
-{
-    const UDynamicWetClothesComponent* DWC = Component.Get();
-    if (DWC == nullptr)
-    {
-        return false;
-    }
-    USkeletalMeshComponent* Target = ResolveCustomizationTarget(DWC);
-    USkeletalMesh* Required = DWC->GetRequiredRuntimeSkeletalMesh();
-    return Target != nullptr && Required != nullptr && Target->GetSkeletalMeshAsset() != Required;
-}
-
-bool FDynamicWetClothesComponentCustomization::CanApplyRuntimeMesh() const
-{
-    return HasRuntimeMeshMismatch();
-}
-
-FReply FDynamicWetClothesComponentCustomization::HandleApplyRuntimeMesh()
-{
+    CachedBindingStatuses.Reset();
     UDynamicWetClothesComponent* DWC = Component.Get();
     if (DWC == nullptr)
     {
-        return FReply::Handled();
-    }
-    USkeletalMeshComponent* Target = ResolveCustomizationTarget(DWC);
-    USkeletalMesh* Required = DWC->GetRequiredRuntimeSkeletalMesh();
-    if (Target == nullptr || Required == nullptr || Target->GetSkeletalMeshAsset() == Required)
-    {
-        return FReply::Handled();
+        return;
     }
 
-    UBlueprint* OwningBlueprint = nullptr;
-    if (DWC->IsTemplate())
+    TArray<USkeletalMeshComponent*> Candidates;
+    CollectCandidateMeshes(DWC, Candidates);
+    TSet<UWetClothingAsset*> SeenAssets;
+
+    for (UWetClothingAsset* Asset : DWC->WetClothingAssets)
     {
-        Target = ResolveCustomizationTarget(DWC, &OwningBlueprint);
-        if (Target == nullptr)
+        if (Asset == nullptr)
         {
-            return FReply::Handled();
+            FBindingStatus& Status = CachedBindingStatuses.AddDefaulted_GetRef();
+            Status.State = EBindingState::MissingAsset;
+            continue;
+        }
+
+        if (SeenAssets.Contains(Asset))
+        {
+            FBindingStatus& Status = CachedBindingStatuses.AddDefaulted_GetRef();
+            Status.Asset = Asset;
+            Status.State = EBindingState::DuplicateAsset;
+            continue;
+        }
+        SeenAssets.Add(Asset);
+
+        if (!Asset->IsCurrentAssetDataVersion())
+        {
+            FBindingStatus& Status = CachedBindingStatuses.AddDefaulted_GetRef();
+            Status.Asset = Asset;
+            Status.State = EBindingState::UnsupportedAssetVersion;
+            continue;
+        }
+
+        USkeletalMesh* SourceMesh = Asset->GetSourceSkeletalMesh();
+        USkeletalMesh* RequiredMesh = Asset->GetDWCSkeletalMesh();
+        if (SourceMesh == nullptr)
+        {
+            FBindingStatus& Status = CachedBindingStatuses.AddDefaulted_GetRef();
+            Status.Asset = Asset;
+            Status.RequiredMesh = RequiredMesh;
+            Status.State = EBindingState::MissingSourceMesh;
+            continue;
+        }
+        if (RequiredMesh == nullptr)
+        {
+            FBindingStatus& Status = CachedBindingStatuses.AddDefaulted_GetRef();
+            Status.Asset = Asset;
+            Status.SourceMesh = SourceMesh;
+            Status.State = EBindingState::MissingDWCMesh;
+            continue;
+        }
+
+        bool bAddedMatch = false;
+        for (USkeletalMeshComponent* Candidate : Candidates)
+        {
+            if (Candidate == nullptr)
+            {
+                continue;
+            }
+            USkeletalMesh* CurrentMesh = Candidate->GetSkeletalMeshAsset();
+            if (CurrentMesh != RequiredMesh && CurrentMesh != SourceMesh)
+            {
+                continue;
+            }
+
+            FBindingStatus& Status = CachedBindingStatuses.AddDefaulted_GetRef();
+            Status.Asset = Asset;
+            Status.MeshComponent = Candidate;
+            Status.CurrentMesh = CurrentMesh;
+            Status.SourceMesh = SourceMesh;
+            Status.RequiredMesh = RequiredMesh;
+            Status.State = CurrentMesh == RequiredMesh ? EBindingState::Ready : EBindingState::NeedsApply;
+            bAddedMatch = true;
+        }
+
+        if (!bAddedMatch)
+        {
+            FBindingStatus& Status = CachedBindingStatuses.AddDefaulted_GetRef();
+            Status.Asset = Asset;
+            Status.SourceMesh = SourceMesh;
+            Status.RequiredMesh = RequiredMesh;
+            Status.State = EBindingState::NoMatchingComponent;
         }
     }
 
-    const FScopedTransaction Transaction(LOCTEXT("ApplyRuntimeMeshTransaction", "Change DWC Target to Runtime Mesh"));
+    TMap<USkeletalMeshComponent*, UWetClothingAsset*> FirstClaim;
+    TSet<USkeletalMeshComponent*> ConflictingComponents;
+    for (const FBindingStatus& Status : CachedBindingStatuses)
+    {
+        USkeletalMeshComponent* MeshComponent = Status.MeshComponent.Get();
+        UWetClothingAsset* Asset = Status.Asset.Get();
+        if (MeshComponent == nullptr || Asset == nullptr ||
+            (Status.State != EBindingState::Ready && Status.State != EBindingState::NeedsApply))
+        {
+            continue;
+        }
+
+        if (UWetClothingAsset** Existing = FirstClaim.Find(MeshComponent))
+        {
+            if (*Existing != Asset)
+            {
+                ConflictingComponents.Add(MeshComponent);
+            }
+        }
+        else
+        {
+            FirstClaim.Add(MeshComponent, Asset);
+        }
+    }
+
+    for (FBindingStatus& Status : CachedBindingStatuses)
+    {
+        if (ConflictingComponents.Contains(Status.MeshComponent.Get()))
+        {
+            Status.State = EBindingState::ConflictingAsset;
+        }
+    }
+}
+
+void FDynamicWetClothesComponentCustomization::RequestRefresh()
+{
+    RebuildBindingStatuses();
+    if (const TSharedPtr<IPropertyUtilities> Utilities = PropertyUtilities.Pin())
+    {
+        Utilities->ForceRefresh();
+    }
+}
+
+void FDynamicWetClothesComponentCustomization::HandleObjectPropertyChanged(
+    UObject* ChangedObject,
+    FPropertyChangedEvent& PropertyChangedEvent)
+{
+    UDynamicWetClothesComponent* DWC = Component.Get();
+    if (DWC == nullptr || ChangedObject == nullptr || ChangedObject == DWC || bApplyingBinding)
+    {
+        return;
+    }
+
+    bool bAffectsBindings = DWC->WetClothingAssets.ContainsByPredicate(
+        [ChangedObject](const TObjectPtr<UWetClothingAsset>& Asset)
+        {
+            return Asset.Get() == ChangedObject;
+        });
+
+    if (!bAffectsBindings)
+    {
+        for (const FBindingStatus& Status : CachedBindingStatuses)
+        {
+            if (Status.MeshComponent.Get() == ChangedObject)
+            {
+                bAffectsBindings = true;
+                break;
+            }
+        }
+    }
+
+    if (!bAffectsBindings && ChangedObject == FindOwningBlueprint(DWC))
+    {
+        bAffectsBindings = true;
+    }
+
+    if (bAffectsBindings)
+    {
+        const TWeakPtr<IPropertyUtilities> WeakUtilities = PropertyUtilities;
+        AsyncTask(ENamedThreads::GameThread, [WeakUtilities]()
+        {
+            if (const TSharedPtr<IPropertyUtilities> Utilities = WeakUtilities.Pin())
+            {
+                Utilities->ForceRefresh();
+            }
+        });
+    }
+}
+
+FText FDynamicWetClothesComponentCustomization::GetBindingText(const int32 BindingIndex) const
+{
+    if (!CachedBindingStatuses.IsValidIndex(BindingIndex))
+    {
+        return FText::GetEmpty();
+    }
+    const FBindingStatus& Status = CachedBindingStatuses[BindingIndex];
+    return FText::Format(
+        LOCTEXT("BindingText", "WCA: {0}\nComponent: {1}"),
+        MeshPathText(Status.Asset.Get()),
+        Status.MeshComponent.IsValid() ? MeshPathText(Status.MeshComponent.Get()) : LOCTEXT("NoMatchingComponentName", "Not found"));
+}
+
+FText FDynamicWetClothesComponentCustomization::GetBindingStateText(const int32 BindingIndex) const
+{
+    if (!CachedBindingStatuses.IsValidIndex(BindingIndex))
+    {
+        return FText::GetEmpty();
+    }
+    const FBindingStatus& Status = CachedBindingStatuses[BindingIndex];
+    switch (Status.State)
+    {
+    case EBindingState::Ready:
+        return FText::Format(LOCTEXT("Ready", "Ready: {0}"), MeshPathText(Status.RequiredMesh.Get()));
+    case EBindingState::NeedsApply:
+        return FText::Format(LOCTEXT("NeedsApply", "Current: {0}\nRequired: {1}"), MeshPathText(Status.CurrentMesh.Get()), MeshPathText(Status.RequiredMesh.Get()));
+    case EBindingState::MissingAsset:
+        return LOCTEXT("MissingAsset", "This array entry has no Wet Clothing Asset assigned.");
+    case EBindingState::UnsupportedAssetVersion:
+        return FText::Format(
+            LOCTEXT("UnsupportedAssetVersion", "Unsupported WCA schema version. Current plugin version requires schema {0}. Recreate or regenerate this asset."),
+            FText::AsNumber(UWetClothingAsset::CurrentAssetDataVersion));
+    case EBindingState::NoMatchingComponent:
+        return FText::Format(LOCTEXT("NoMatch", "No component uses Source '{0}' or DWC mesh '{1}'."), MeshPathText(Status.SourceMesh.Get()), MeshPathText(Status.RequiredMesh.Get()));
+    case EBindingState::MissingSourceMesh:
+        return LOCTEXT("MissingSource", "The WCA has no Source Skeletal Mesh.");
+    case EBindingState::MissingDWCMesh:
+        return LOCTEXT("MissingDWC", "The WCA has no generated DWC Skeletal Mesh.");
+    case EBindingState::DuplicateAsset:
+        return LOCTEXT("Duplicate", "This WCA is registered more than once. Duplicate entries are ignored.");
+    case EBindingState::ConflictingAsset:
+        return LOCTEXT("Conflict", "Multiple WCA assets target this same SkeletalMeshComponent. Remove the conflicting entry before applying.");
+    default:
+        return FText::GetEmpty();
+    }
+}
+
+EVisibility FDynamicWetClothesComponentCustomization::GetBindingWarningVisibility(const int32 BindingIndex) const
+{
+    return CachedBindingStatuses.IsValidIndex(BindingIndex) && CachedBindingStatuses[BindingIndex].State != EBindingState::Ready
+        ? EVisibility::Visible
+        : EVisibility::Collapsed;
+}
+
+EVisibility FDynamicWetClothesComponentCustomization::GetBindingApplyVisibility(const int32 BindingIndex) const
+{
+    return CanApplyBinding(BindingIndex) ? EVisibility::Visible : EVisibility::Collapsed;
+}
+
+bool FDynamicWetClothesComponentCustomization::CanApplyBinding(const int32 BindingIndex) const
+{
+    return CachedBindingStatuses.IsValidIndex(BindingIndex) &&
+           CachedBindingStatuses[BindingIndex].State == EBindingState::NeedsApply &&
+           CachedBindingStatuses[BindingIndex].MeshComponent.IsValid() &&
+           CachedBindingStatuses[BindingIndex].RequiredMesh.IsValid();
+}
+
+bool FDynamicWetClothesComponentCustomization::CanApplyAll() const
+{
+    for (int32 Index = 0; Index < CachedBindingStatuses.Num(); ++Index)
+    {
+        if (CanApplyBinding(Index))
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool FDynamicWetClothesComponentCustomization::ApplyBinding(const int32 BindingIndex, const bool bUseTransaction)
+{
+    if (!CanApplyBinding(BindingIndex))
+    {
+        return false;
+    }
+
+    FBindingStatus& Status = CachedBindingStatuses[BindingIndex];
+    USkeletalMeshComponent* Target = Status.MeshComponent.Get();
+    USkeletalMesh* Required = Status.RequiredMesh.Get();
+    UDynamicWetClothesComponent* DWC = Component.Get();
+    if (Target == nullptr || Required == nullptr || DWC == nullptr)
+    {
+        return false;
+    }
+
+    TUniquePtr<FScopedTransaction> Transaction;
+    if (bUseTransaction)
+    {
+        Transaction = MakeUnique<FScopedTransaction>(LOCTEXT("ApplyRuntimeMeshTransaction", "Apply DWC Skeletal Mesh"));
+    }
+
+    TGuardValue<bool> ApplyingGuard(bApplyingBinding, true);
+    UBlueprint* OwningBlueprint = DWC->IsTemplate() ? FindOwningBlueprint(DWC) : nullptr;
     if (OwningBlueprint != nullptr)
     {
         OwningBlueprint->Modify();
@@ -496,11 +525,28 @@ FReply FDynamicWetClothesComponentCustomization::HandleApplyRuntimeMesh()
     Target->SetSkeletalMeshAsset(Required);
     Target->PostEditChange();
     Target->MarkPackageDirty();
-
     if (OwningBlueprint != nullptr)
     {
         FBlueprintEditorUtils::MarkBlueprintAsModified(OwningBlueprint);
     }
+    return true;
+}
+
+FReply FDynamicWetClothesComponentCustomization::HandleApplyBinding(const int32 BindingIndex)
+{
+    ApplyBinding(BindingIndex, true);
+    RequestRefresh();
+    return FReply::Handled();
+}
+
+FReply FDynamicWetClothesComponentCustomization::HandleApplyAll()
+{
+    const FScopedTransaction Transaction(LOCTEXT("ApplyAllRuntimeMeshesTransaction", "Apply All DWC Skeletal Meshes"));
+    for (int32 Index = 0; Index < CachedBindingStatuses.Num(); ++Index)
+    {
+        ApplyBinding(Index, false);
+    }
+    RequestRefresh();
     return FReply::Handled();
 }
 

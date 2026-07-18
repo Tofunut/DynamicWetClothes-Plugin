@@ -18,12 +18,11 @@ struct DWC_API FDWCGPUBackendInitArgs
     UWetClothingAsset* WetClothingAsset = nullptr;
     const FWetClothingSettings* WetnessSettings = nullptr;
     TArray<TObjectPtr<UMaterialInstanceDynamic>>* WetMaterialInstances = nullptr;
-    FName WetnessMapParameterName = TEXT("DWC_WetnessMap");
     int32 LODIndex = 0;
     float SpreadRateScale = 1.0f;
     float DryRateScale = 1.0f;
     float GravityFlowStrengthScale = 1.0f;
-    bool bLogGPUWetnessRuntimeBindings = false;
+    bool bUseEightDirectionDiffusion = false;
 };
 
 /** DWC-facing interface. It intentionally contains no RHI/RenderCore types. */
@@ -37,6 +36,7 @@ public:
     virtual bool EnqueueResolvedContacts(const TArray<FDWCResolvedSurfaceContact>& Contacts) = 0;
     virtual bool ApplyWetAll(float Amount) = 0;
     virtual void Update(float DeltaSeconds) = 0;
+
     virtual void Shutdown() = 0;
 };
 

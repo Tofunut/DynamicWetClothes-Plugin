@@ -329,7 +329,7 @@ EActiveTimerReturnType SWetClothingAssetEditorPanel::HandleDeferredRefresh(doubl
 
 FDWCEditorIssueStatus SWetClothingAssetEditorPanel::CollectIssueStatus(
     const bool bRefreshAssetState,
-    const bool bIncludeMapValidation) const
+    const bool bRunDeepValidation) const
 {
     FDWCEditorIssueStatus Result;
     UWetClothingAsset* Asset = WetClothingAsset.Get();
@@ -340,7 +340,7 @@ FDWCEditorIssueStatus SWetClothingAssetEditorPanel::CollectIssueStatus(
 
     if (bRefreshAssetState)
     {
-        Asset->RefreshBakeState(bIncludeMapValidation);
+        Asset->RefreshBakeState(bRunDeepValidation);
     }
 #if WITH_EDITORONLY_DATA
     const FDWCAssetBakeState& State = Asset->GetBakeState();
@@ -424,7 +424,17 @@ FDWCEditorIssueStatus SWetClothingAssetEditorPanel::CollectIssueStatus(
     }
 
     TArray<FString> GeneratedMaterialMessages;
-    FWetClothingMaterialSetup::ValidateGeneratedMaterialOverrides(Asset, GeneratedMaterialMessages);
+    if (Asset->HasAnyWettableMaterialSlot())
+    {
+        if (bRunDeepValidation)
+        {
+            FWetClothingMaterialSetup::ValidateGeneratedMaterialOverrides(Asset, GeneratedMaterialMessages);
+        }
+        else
+        {
+            FWetClothingMaterialSetup::ValidateGeneratedMaterialOverrideReferences(Asset, GeneratedMaterialMessages);
+        }
+    }
     if (!GeneratedMaterialMessages.IsEmpty())
     {
         Result.bMaterialIssue = true;
@@ -432,7 +442,7 @@ FDWCEditorIssueStatus SWetClothingAssetEditorPanel::CollectIssueStatus(
         Result.MaterialMessages = MoveTemp(GeneratedMaterialMessages);
     }
 
-    if (HasWrinkleContent(*Asset) && !DWCBuildStatus::IsUsable(State.WrinkleMaps))
+    if (Asset->HasWrinkleBakeContent() && !DWCBuildStatus::IsUsable(State.WrinkleMaps))
     {
         Result.bMapIssue = true;
         RaiseIssueSeverity(Result, GetSeverityForStatus(State.WrinkleMaps));
@@ -444,7 +454,7 @@ FDWCEditorIssueStatus SWetClothingAssetEditorPanel::CollectIssueStatus(
             bAssetHasUnsavedChanges,
             false));
     }
-    if (!Asset->TransparencyData.SourceBlueprintClass.IsNull() && !DWCBuildStatus::IsUsable(State.TransparencyMaps))
+    if (Asset->HasTransparencyBakeContent() && !DWCBuildStatus::IsUsable(State.TransparencyMaps))
     {
         Result.bMapIssue = true;
         RaiseIssueSeverity(Result, GetSeverityForStatus(State.TransparencyMaps));
@@ -458,7 +468,7 @@ FDWCEditorIssueStatus SWetClothingAssetEditorPanel::CollectIssueStatus(
     }
 
     FString VisualSummary;
-    if (HasPendingVisualBakeTasks(&VisualSummary) && !VisualSummary.IsEmpty())
+    if (Asset->HasAnyWettableMaterialSlot() && HasPendingVisualBakeTasks(&VisualSummary) && !VisualSummary.IsEmpty())
     {
         Result.bMapIssue = true;
         RaiseIssueSeverity(Result, EDWCEditorStatusSeverity::Warning);
@@ -475,9 +485,25 @@ FDWCEditorIssueStatus SWetClothingAssetEditorPanel::CollectIssueStatus(
         State.TransparencyMaps == EDWCBakeStatus::Failed;
     if (bHasFailedState && !State.LastFailure.IsEmpty())
     {
-        Result.bFailure = true;
-        RaiseIssueSeverity(Result, EDWCEditorStatusSeverity::Error);
-        Result.FailureMessages.Add(State.LastFailure);
+        const auto ContainsFailureDetail = [&State](const TArray<FString>& Messages)
+        {
+            return Messages.ContainsByPredicate(
+                [&State](const FString& Message)
+                {
+                    return Message.Contains(State.LastFailure) || State.LastFailure.Contains(Message);
+                });
+        };
+        const bool bFailureAlreadyShown =
+            ContainsFailureDetail(Result.RuntimeMessages) ||
+            ContainsFailureDetail(Result.MapMessages) ||
+            ContainsFailureDetail(Result.MaterialMessages) ||
+            ContainsFailureDetail(Result.GeneratedDataUVMessages);
+        if (!bFailureAlreadyShown)
+        {
+            Result.bFailure = true;
+            RaiseIssueSeverity(Result, EDWCEditorStatusSeverity::Error);
+            Result.FailureMessages.Add(State.LastFailure);
+        }
     }
 #endif
     return Result;

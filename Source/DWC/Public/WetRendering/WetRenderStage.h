@@ -32,29 +32,12 @@ struct DWC_API FWetRenderStageArgs
 
     const FWetClothingRuntimeData*   RuntimeData = nullptr;
     FAbsorbedWetnessSimulationState* SimulationState = nullptr;
+    bool bShowWetPartDebugColors = false;
+    bool bGPUWetnessMode = false;
     const TMap<int32, TUniquePtr<FSurfaceWaterSimulationState>>* SurfaceWaterStatesByMaterialSlot = nullptr;
     const TMap<int32, FSurfaceWaterProfileParameters>* SurfaceWaterProfilesByMaterialSlot = nullptr;
 
     TArray<TObjectPtr<UMaterialInstanceDynamic>>* WetMaterialInstances = nullptr;
-
-    FLinearColor UnassignedWetPartDebugColor = FLinearColor(0.25f, 0.25f, 0.25f, 1.0f);
-    bool         bEnableWetPartDebugVertexColors = false;
-
-    FName WetPartDebugStrengthParameterName = TEXT("DWC_WetPartDebugStrength");
-    FName WetnessProfileMap0ParameterName = DWCWetMaterialParameters::WetnessProfileMap0();
-    FName UseWetnessProfileMap0ParameterName = DWCWetMaterialParameters::UseWetnessProfileMap0();
-    FName WrinkleNormalMapParameterName = DWCWetMaterialParameters::WrinkleNormalMap();
-    FName UseWrinkleNormalMapParameterName = DWCWetMaterialParameters::UseWrinkleNormalMap();
-    FName WrinkleStrengthParameterName = DWCWetMaterialParameters::WrinkleStrength();
-    FName WrinkleWetnessMinParameterName = DWCWetMaterialParameters::WrinkleWetnessMin();
-    FName WrinkleWetnessMaxParameterName = DWCWetMaterialParameters::WrinkleWetnessMax();
-    FName TransparencyMapParameterName = DWCWetMaterialParameters::TransparencyMap();
-    FName UseTransparencyMapParameterName = DWCWetMaterialParameters::UseTransparencyMap();
-    FName TransparencyStrengthParameterName = DWCWetMaterialParameters::TransparencyStrength();
-    FName TransparencyWetnessMinParameterName = DWCWetMaterialParameters::TransparencyWetnessMin();
-    FName TransparencyWetnessMaxParameterName = DWCWetMaterialParameters::TransparencyWetnessMax();
-    FName TransparencyUVChannelParameterName = DWCWetMaterialParameters::TransparencyUVChannel();
-    FName WrinkleSuppressionStrengthParameterName = DWCWetMaterialParameters::WrinkleSuppressionStrength();
 
     float WrinkleStrength = DWCWetMaterialParameters::DefaultWrinkleStrength();
     float WrinkleWetnessMin = DWCWetMaterialParameters::DefaultWrinkleWetnessMin();
@@ -62,40 +45,10 @@ struct DWC_API FWetRenderStageArgs
     float TransparencyWetnessMin = DWCWetMaterialParameters::DefaultTransparencyWetnessMin();
     float TransparencyWetnessMax = DWCWetMaterialParameters::DefaultTransparencyWetnessMax();
 
-    FName UnderColorParameterName = TEXT("DWC_UnderColor");
-    FName UnderColorBlendStrengthParameterName = TEXT("DWC_UnderColorBlendStrength");
-    FName SurfaceWaterRTParameterName = TEXT("DWC_SurfaceWaterRT");
-    FName SurfaceDropletRTParameterName = TEXT("DWC_SurfaceDropletRT");
-    FName SurfaceFlowRTParameterName = TEXT("DWC_SurfaceFlowRT");
-    FName SurfaceWaterTimeParameterName = TEXT("DWC_SurfaceWaterTime");
-    FName SurfaceWaterTexelSizeParameterName = TEXT("DWC_SurfaceWaterTexelSize");
-    FName SurfaceWaterNormalStrengthParameterName = TEXT("DWC_SurfaceWaterNormalStrength");
-    FName SurfaceWaterRoughnessParameterName = TEXT("DWC_SurfaceWaterRoughness");
-    FName SurfaceDropletTilingParameterName = TEXT("DWC_SurfaceDropletTiling");
-    FName SurfaceAmountThresholdMinParameterName = TEXT("DWC_SurfaceAmountThresholdMin");
-    FName SurfaceAmountThresholdMaxParameterName = TEXT("DWC_SurfaceAmountThresholdMax");
-    FName SurfaceDropletMaskMinParameterName = TEXT("DWC_SurfaceDropletMaskMin");
-    FName SurfaceDropletMaskMaxParameterName = TEXT("DWC_SurfaceDropletMaskMax");
-    FName SurfaceDropletMaskTextureParameterName = TEXT("DWC_SurfaceDropletMaskTexture");
-    FName SurfaceDropletNormalTextureParameterName = TEXT("DWC_SurfaceDropletNormalTexture");
-    FName SurfaceFlowTilingParameterName = TEXT("DWC_SurfaceFlowTiling");
-    FName SurfaceFlowPanningXParameterName = TEXT("DWC_SurfaceFlowPanningX");
-    FName SurfaceFlowPanningYParameterName = TEXT("DWC_SurfaceFlowPanningY");
-    FName SurfaceFlowNormalStrengthParameterName = TEXT("DWC_SurfaceFlowNormalStrength");
-    FName SurfaceFlowRoughnessParameterName = TEXT("DWC_SurfaceFlowRoughness");
-    FName SurfaceFlowMaskMinParameterName = TEXT("DWC_SurfaceFlowMaskMin");
-    FName SurfaceFlowMaskMaxParameterName = TEXT("DWC_SurfaceFlowMaskMax");
-    FName SurfaceFlowMaskTextureParameterName = TEXT("DWC_SurfaceFlowMaskTexture");
-    FName SurfaceFlowNormalTextureParameterName = TEXT("DWC_SurfaceFlowNormalTexture");
-    FName SurfaceWaterDebugModeParameterName = TEXT("DWC_SurfaceWaterDebugMode");
     float SurfaceWaterTimeSeconds = 0.0f;
-    ESurfaceWaterDebugView SurfaceWaterDebugView = ESurfaceWaterDebugView::None;
 
     FLinearColor UnderColor = FLinearColor(0.8f, 0.55f, 0.42f, 1.0f);
     float        UnderColorBlendStrength = 0.3f;
-    bool         bLogWrinkleRuntimeBindings = false;
-    bool         bLogTransparencyRuntimeBindings = false;
-
     int32 LODIndex = 0;
 };
 
@@ -114,4 +67,6 @@ class DWC_API FWetRenderStage
     FLinearColor MakeWetVertexColor(const FWetRenderStageArgs& Args, int32 VertexIndex, float Wetness) const;
 
     TArray<FColor> CachedWetVertexColors;
+    TMap<int32, FLinearColor> CachedWetPartDebugColorsByID;
+    TWeakObjectPtr<UWetClothingAsset> CachedWetPartDebugColorAsset;
 };

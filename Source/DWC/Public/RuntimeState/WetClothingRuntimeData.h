@@ -28,6 +28,13 @@ struct FWetVertexNeighborList
 class DWC_API FWetClothingRuntimeData
 {
   public:
+    // Identity of this immutable shared payload.
+    int32 LODIndex = INDEX_NONE;
+    int32 VertexCount = 0;
+    int32 DataVersion = 0;
+    FString MeshSignature;
+    FString SourceDataSignature;
+
     void ResetWetPartData();
     void ResetNeighborGraph();
     void ResetBoneOptimizationCache();
@@ -37,7 +44,6 @@ class DWC_API FWetClothingRuntimeData
     TArray<bool>                      VertexAbsorbedWetnessFlags;
     TArray<bool>                      VertexSurfaceWaterFlags;
     TArray<FWetnessProfileParameters> VertexWetnessProfileParameters;
-    TArray<FLinearColor>              VertexWetPartDebugColors;
     TArray<FWetVertexNeighborRange>   NeighborRanges;
     TArray<int32>                     FlatNeighborIndices;
     TArray<FWetVertexNeighborList>    NeighborGraph;

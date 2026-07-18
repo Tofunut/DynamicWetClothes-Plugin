@@ -385,7 +385,7 @@ bool FWetWrinkleTextureGenerator::GeneratePreviewMaterialSlotTexture(
     }
 
     const int32 LODIndex = FMath::Max(0, Settings.LODIndex);
-    if (WetClothingAsset->FindGeneratedDataUVForLOD(LODIndex) == nullptr)
+    if (!WetClothingAsset->HasValidDataUVForLOD(LODIndex))
     {
         OutErrorMessage = TEXT("Generate the DWC Data UV before generating wrinkle textures.");
         return false;

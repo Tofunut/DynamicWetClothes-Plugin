@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Framework/Commands/UIAction.h"
 #include "WetClothing/Common/Editor/WetClothingAssetEditorTypes.h"
 #include "Widgets/Input/SComboBox.h"
 
@@ -36,14 +37,18 @@ struct FWetClothingBakeMapsMenuArgs
     FSimpleDelegate OnBakeTransparencyRevealMaps;
     FSimpleDelegate OnBakeWrinkleNormalMap;
     FSimpleDelegate OnBakeWrinkleMask;
+    FCanExecuteAction CanBakeAllMaps;
+    FCanExecuteAction CanBakeWetnessProfileMaps;
+    FCanExecuteAction CanBakeGPUWetnessMapData;
+    FCanExecuteAction CanBakeTransparencyRevealMaps;
+    FCanExecuteAction CanBakeWrinkleNormalMap;
+    FCanExecuteAction CanBakeWrinkleMask;
 };
 
 struct FWetClothingGenerateMaterialsMenuArgs
 {
     const UWetClothingAsset* WetClothingAsset = nullptr;
-    FSimpleDelegate OnGenerateCPUMaterials;
-    FSimpleDelegate OnGenerateGPUMaterials;
-    FSimpleDelegate OnGenerateAllMaterials;
+    FSimpleDelegate OnGenerateMaterials;
 };
 
 class FWetClothingEditorCommonWidgets

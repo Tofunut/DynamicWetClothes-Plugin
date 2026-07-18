@@ -10,6 +10,7 @@
 #include "Engine/Texture2D.h"
 #include "Materials/Material.h"
 #include "Materials/MaterialInterface.h"
+#include "Materials/MaterialInstanceConstant.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "ProceduralMeshComponent.h"
 #include "PrimitiveDrawInterface.h"
@@ -1217,12 +1218,12 @@ USkeletalMesh* SWetWrinkleViewport::ResolveTargetMesh() const
         return nullptr;
     }
 
-    if (Asset->TargetMesh != nullptr)
+    if (Asset->GetDWCSkeletalMesh() != nullptr)
     {
-        return Asset->TargetMesh;
+        return Asset->GetDWCSkeletalMesh();
     }
 
-    return Asset->TargetMesh;
+    return Asset->GetDWCSkeletalMesh();
 }
 
 const UWetClothingAsset* SWetWrinkleViewport::ResolveSourceWetClothingAsset() const
@@ -1268,7 +1269,7 @@ UMaterialInterface* SWetWrinkleViewport::ResolveDwcWetMaterialForSlot(int32 Mate
         {
             return Entry.MaterialSlotIndex == MaterialSlotIndex;
         });
-    return WetOverride != nullptr ? WetOverride->WetMaterial.Get() : nullptr;
+    return WetOverride != nullptr ? static_cast<UMaterialInterface*>(WetOverride->CPUMaterialInstance.Get()) : nullptr;
 }
 
 void SWetWrinkleViewport::ReleasePreviewMaterialSlots()

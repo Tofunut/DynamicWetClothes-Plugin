@@ -23,7 +23,7 @@ struct DWC_API FWetSimulationStageArgs
     USkeletalMeshComponent*     TargetSkeletalMesh = nullptr;
     const FWetClothingSettings* WetnessSettings = nullptr;
 
-    FWetClothingRuntimeData*         RuntimeData = nullptr;
+    const FWetClothingRuntimeData*   RuntimeData = nullptr;
     FAbsorbedWetnessSimulationState* SimulationState = nullptr;
 
     FWetRuntimeDataBuilder*  RuntimeDataBuilder = nullptr;

@@ -34,13 +34,13 @@ public:
     bool bBuildGPUWetnessMapSimulationData = true;
 
     UPROPERTY(EditAnywhere, Category = "Map Resolutions", meta = (DisplayName = "GPU Simulation"))
-    EDWCMapResolution GPUSimulationMapResolution = EDWCMapResolution::Resolution1024;
+    EDWCMapResolution GPUSimulationMapResolution = EDWCMapResolution::Resolution512;
 
     UPROPERTY(EditAnywhere, Category = "Map Resolutions", meta = (DisplayName = "Wrinkle"))
-    EDWCMapResolution WrinkleMapResolution = EDWCMapResolution::Resolution2048;
+    EDWCMapResolution WrinkleMapResolution = EDWCMapResolution::Resolution1024;
 
     UPROPERTY(EditAnywhere, Category = "Map Resolutions", meta = (DisplayName = "Transparency"))
-    EDWCMapResolution TransparencyMapResolution = EDWCMapResolution::Resolution2048;
+    EDWCMapResolution TransparencyMapResolution = EDWCMapResolution::Resolution1024;
 
     FDWCWetClothingAssetSetupSettings BuildSettings() const
     {
@@ -75,13 +75,13 @@ public:
     bool bBuildGPUWetnessMapSimulationData = true;
 
     UPROPERTY(EditAnywhere, Category = "Map Resolutions", meta = (DisplayName = "GPU Simulation"))
-    EDWCMapResolution GPUSimulationMapResolution = EDWCMapResolution::Resolution1024;
+    EDWCMapResolution GPUSimulationMapResolution = EDWCMapResolution::Resolution512;
 
     UPROPERTY(EditAnywhere, Category = "Map Resolutions", meta = (DisplayName = "Wrinkle"))
-    EDWCMapResolution WrinkleMapResolution = EDWCMapResolution::Resolution2048;
+    EDWCMapResolution WrinkleMapResolution = EDWCMapResolution::Resolution1024;
 
     UPROPERTY(EditAnywhere, Category = "Map Resolutions", meta = (DisplayName = "Transparency"))
-    EDWCMapResolution TransparencyMapResolution = EDWCMapResolution::Resolution2048;
+    EDWCMapResolution TransparencyMapResolution = EDWCMapResolution::Resolution1024;
 
     void InitializeFromSettings(const FDWCWetClothingAssetSetupSettings& InSettings)
     {

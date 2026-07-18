@@ -6,7 +6,6 @@
 class FSkeletalMeshLODRenderData;
 class USkeletalMeshComponent;
 class UWetClothingAsset;
-class UWetnessProfile;
 class FAbsorbedWetnessSimulationState;
 struct FWetnessProfileParameters;
 struct FWetInputStageArgs;
@@ -23,34 +22,16 @@ struct DWC_API FWetRuntimeDataBuildArgs
     UObject*                        OwnerForLogs = nullptr;
     USkeletalMeshComponent*         TargetSkeletalMesh = nullptr;
     const UWetClothingAsset*        WetClothingAsset = nullptr;
-    const TArray<UWetnessProfile*>* WetnessProfiles = nullptr;
-
-    FWetClothingRuntimeData*         RuntimeData = nullptr;
+    const FWetClothingRuntimeData*   RuntimeData = nullptr;
+    FWetClothingRuntimeData*         MutableRuntimeData = nullptr;
     FAbsorbedWetnessSimulationState* SimulationState = nullptr;
     TArray<FColor>*                  CachedWetVertexColors = nullptr;
-
-    FLinearColor UnassignedWetPartDebugColor = FLinearColor(0.25f, 0.25f, 0.25f, 1.0f);
 
     int32 LODIndex = 0;
     bool  bUsePrecomputedSimulationData = true;
     bool  bUsePrecomputedBoneOptimizationCache = true;
+    bool  bPrecomputedDataAlreadyValidated = false;
 
-    const UWetnessProfile* GetActiveWetnessProfile() const
-    {
-        if (WetnessProfiles == nullptr)
-        {
-            return nullptr;
-        }
-
-        for (const UWetnessProfile* WetnessProfile : *WetnessProfiles)
-        {
-            if (WetnessProfile)
-            {
-                return WetnessProfile;
-            }
-        }
-        return nullptr;
-    }
 };
 
 class DWC_API FWetRuntimeDataBuilder
@@ -59,9 +40,8 @@ class DWC_API FWetRuntimeDataBuilder
     void InitializeAbsorbedWetnessData(FWetRuntimeDataBuildArgs& Args);
     bool InitializeWetPartVertexData(FWetRuntimeDataBuildArgs& Args);
     bool InitializeWetPartVertexDataFromPrecomputedData(
-        FWetRuntimeDataBuildArgs&        Args,
-        int32                            VertexCount,
-        const FWetnessProfileParameters& DefaultParameters);
+        FWetRuntimeDataBuildArgs& Args,
+        int32 VertexCount);
     bool InitializeNeighborGraphFromPrecomputedData(FWetRuntimeDataBuildArgs& Args);
     void EnsureWetnessBufferSize(FWetRuntimeDataBuildArgs& Args, int32 VertexCount);
     void EnsureWetnessBufferSize(FWetInputStageArgs& Args, int32 VertexCount);

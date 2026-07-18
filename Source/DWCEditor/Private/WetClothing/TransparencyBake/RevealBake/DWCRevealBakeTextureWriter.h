@@ -17,7 +17,7 @@ struct FDWCRevealBakeTextureSet
 
 struct FDWCRevealBakeTextureWriteSettings
 {
-    FIntPoint Resolution = FIntPoint(512, 512);
+    FIntPoint Resolution = FIntPoint(1024, 1024);
     FString PackagePath;
     FString AssetNamePrefix = TEXT("T_DWC_Reveal");
     TArray<FName> SourceLayerIds;

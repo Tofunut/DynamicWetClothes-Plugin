@@ -22,7 +22,6 @@ struct FDWCDataUVGenerationResult
     int32 InvalidSourceUVTriangleCount = 0;
     int32 TriangleFallbackChartCount = 0;
     int32 RenderVertexCount = 0;
-    TArray<FVector2f> DataUVs;
 
     /** 3D degenerate triangles are excluded automatically and are informational only. */
     int32 GetWarningCount() const
@@ -39,19 +38,10 @@ struct FDWCDataUVGenerationResult
     FString Message;
 };
 
-/**
- * Generates read-only DWC Data UV payloads from Skeletal Mesh render data.
- * This utility never owns WCA state and is not exposed as an editor-mode command.
- */
+/** Generates and writes a DWC Data UV channel into an editable Skeletal Mesh LOD. */
 class FDWCDataUVGenerator
 {
 public:
-    static FDWCDataUVGenerationResult GenerateForSkeletalMeshRenderData(
-        const USkeletalMesh* SkeletalMesh,
-        int32 LODIndex,
-        int32 SourceUVChannelIndex,
-        int32 TargetMaterialSlotIndex = INDEX_NONE);
-
     static FDWCDataUVGenerationResult GenerateForSkeletalMesh(
         USkeletalMesh* SkeletalMesh,
         int32 LODIndex,

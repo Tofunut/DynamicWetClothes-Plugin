@@ -6,6 +6,8 @@
 #include "DataAssets/WetClothingPrecomputedBoneOptimizationCache.h"
 #include "WetClothingPartData.generated.h"
 
+class UMaterial;
+class UMaterialInstanceConstant;
 class UMaterialInterface;
 class UTexture;
 class UTexture2D;
@@ -129,15 +131,17 @@ struct DWC_API FWetClothingGeneratedWetMaterialOverride
     UPROPERTY(VisibleAnywhere, Category = "Generated Wet Material")
     TObjectPtr<UMaterialInterface> SourceMaterial = nullptr;
 
+    /** Shared generated material graph containing both CPU and GPU branches. */
     UPROPERTY(VisibleAnywhere, Category = "Generated Wet Material")
-    TObjectPtr<UMaterialInterface> CPUWetMaterial = nullptr;
+    TObjectPtr<UMaterial> GeneratedMaterial = nullptr;
 
+    /** CPU shader permutation: DWC_UseGPUBackend = false. */
     UPROPERTY(VisibleAnywhere, Category = "Generated Wet Material")
-    TObjectPtr<UMaterialInterface> GPUWetMaterial = nullptr;
+    TObjectPtr<UMaterialInstanceConstant> CPUMaterialInstance = nullptr;
 
-    // Compatibility alias used by the surface-water editor/runtime path.
+    /** GPU shader permutation: DWC_UseGPUBackend = true. */
     UPROPERTY(VisibleAnywhere, Category = "Generated Wet Material")
-    TObjectPtr<UMaterialInterface> WetMaterial = nullptr;
+    TObjectPtr<UMaterialInstanceConstant> GPUMaterialInstance = nullptr;
 };
 
 USTRUCT(BlueprintType)
@@ -192,10 +196,10 @@ struct DWC_API FWetClothingPrecomputedVertexData
 
     UPROPERTY(VisibleAnywhere, Category = "Precomputed Simulation Data")
     int32 UVIslandID = INDEX_NONE;
-    
+
     UPROPERTY(VisibleAnywhere, Category = "Precomputed Simulation Data")
     FVector2D SurfaceWaterUV = FVector2D::ZeroVector;
-    
+
     UPROPERTY(VisibleAnywhere, Category = "Precomputed Simulation Data")
     bool bHasSurfaceWaterUV = false;
 
@@ -229,10 +233,6 @@ struct DWC_API FWetClothingPrecomputedSimulationData
     UPROPERTY(VisibleAnywhere, Category = "Precomputed Simulation Data")
     FString MeshSignature;
 
-    // Kept for assets saved before MeshSignature / SourceDataSignature validation was introduced.
-    UPROPERTY()
-    FString MeshBuildSignature_DEPRECATED;
-
     UPROPERTY(VisibleAnywhere, Category = "Precomputed Simulation Data")
     FString SourceDataSignature;
 
@@ -257,7 +257,7 @@ struct DWC_API FWetClothingPartData
     UPROPERTY(EditAnywhere, Category = "Editable")
     FWetClothingEditableWetPartData EditableWetPartData;
 
-    UPROPERTY(VisibleAnywhere, Category = "Generated")
+    UPROPERTY(VisibleAnywhere, Category = "Generated Assets")
     TArray<FWetClothingGeneratedWetMaterialOverride> GeneratedWetMaterialOverrides;
 
     UPROPERTY(VisibleAnywhere, Category = "Baked")

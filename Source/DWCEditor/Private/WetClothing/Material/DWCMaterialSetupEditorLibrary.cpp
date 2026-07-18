@@ -1,8 +1,6 @@
 #include "WetClothing/Material/DWCMaterialSetupEditorLibrary.h"
 
 #include "DataAssets/WetClothingAsset.h"
-#include "Materials/Material.h"
-#include "Materials/MaterialInterface.h"
 #include "WetClothing/Common/Material/WetClothingMaterialSetup.h"
 
 bool UDWCMaterialSetupEditorLibrary::RepairGeneratedWetMaterials(
@@ -20,56 +18,43 @@ bool UDWCMaterialSetupEditorLibrary::RepairGeneratedWetMaterials(
     TArray<FString> Messages;
     WetClothingAsset->Modify();
 
+    const FWetClothingMaterialSetup::FOptions Options =
+        FWetClothingMaterialSetup::MakeOptionsForAsset(WetClothingAsset, EDWCSimulationMode::VertexCPU);
+
     for (FWetClothingGeneratedWetMaterialOverride& MaterialOverride :
          WetClothingAsset->PartData.GeneratedWetMaterialOverrides)
     {
-        UMaterialInterface* ExistingWetMaterial = MaterialOverride.WetMaterial.Get();
         UMaterialInterface* SourceMaterial = MaterialOverride.SourceMaterial.Get();
-        UMaterialInterface* RepairTarget = ExistingWetMaterial &&
-                FWetClothingMaterialSetup::IsMaterialConfiguredForDwc(ExistingWetMaterial)
-            ? ExistingWetMaterial
-            : SourceMaterial;
-        if (!RepairTarget)
+        if (!SourceMaterial)
         {
             Messages.Add(FString::Printf(
-                TEXT("Slot %d skipped: no repairable material."), MaterialOverride.MaterialSlotIndex));
+                TEXT("Slot %d skipped: no source material."),
+                MaterialOverride.MaterialSlotIndex));
             continue;
         }
 
-        // Restore materials that an older DWC Clear Coat path promoted. A source
-        // material authored as Clear Coat remains Clear Coat.
-        if (ExistingWetMaterial && SourceMaterial)
-        {
-            UMaterial* ConfiguredBase = ExistingWetMaterial->GetMaterial();
-            const UMaterial* SourceBase = SourceMaterial->GetMaterial();
-            if (ConfiguredBase && SourceBase &&
-                FWetClothingMaterialSetup::IsMaterialConfiguredForDwc(ConfiguredBase) &&
-                ConfiguredBase->GetShadingModels().HasOnlyShadingModel(MSM_ClearCoat) &&
-                !SourceBase->GetShadingModels().HasOnlyShadingModel(MSM_ClearCoat))
-            {
-                ConfiguredBase->Modify();
-                ConfiguredBase->SetShadingModel(SourceBase->GetShadingModels().GetFirstShadingModel());
-                ConfiguredBase->MarkPackageDirty();
-            }
-        }
-
-        const FWetClothingMaterialSetupResult Result =
-            FWetClothingMaterialSetup::DuplicateAndApplyToMaterialInterface(
-                RepairTarget,
-                FWetClothingMaterialSetup::MakeOptionsForAsset(WetClothingAsset, EDWCSimulationMode::VertexCPU));
-        if (!Result.bSucceeded || !Result.ConfiguredMaterial)
+        const FWetClothingUnifiedMaterialSetupResult Result =
+            FWetClothingMaterialSetup::CreateOrUpdateUnifiedMaterialSet(SourceMaterial, Options);
+        if (!Result.bSucceeded || !Result.GeneratedMaterial ||
+            !Result.CPUMaterialInstance || !Result.GPUMaterialInstance)
         {
             Messages.Add(FString::Printf(
-                TEXT("Slot %d failed: %s"), MaterialOverride.MaterialSlotIndex, *Result.Message));
+                TEXT("Slot %d failed: %s"),
+                MaterialOverride.MaterialSlotIndex,
+                *Result.Message));
             continue;
         }
 
-        MaterialOverride.WetMaterial = Result.ConfiguredMaterial;
+        MaterialOverride.GeneratedMaterial = Result.GeneratedMaterial;
+        MaterialOverride.CPUMaterialInstance = Result.CPUMaterialInstance;
+        MaterialOverride.GPUMaterialInstance = Result.GPUMaterialInstance;
         ++RepairedCount;
         Messages.Add(FString::Printf(
-            TEXT("Slot %d repaired: %s (%s)"),
+            TEXT("Slot %d repaired: shared=%s CPU=%s GPU=%s (%s)"),
             MaterialOverride.MaterialSlotIndex,
-            *GetNameSafe(Result.ConfiguredMaterial),
+            *GetNameSafe(Result.GeneratedMaterial),
+            *GetNameSafe(Result.CPUMaterialInstance),
+            *GetNameSafe(Result.GPUMaterialInstance),
             *Result.Message));
     }
 

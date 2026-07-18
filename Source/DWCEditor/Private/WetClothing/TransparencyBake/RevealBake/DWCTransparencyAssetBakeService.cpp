@@ -8,6 +8,7 @@
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
 #include "Materials/MaterialInterface.h"
+#include "Materials/MaterialInstanceConstant.h"
 #include "PreviewScene.h"
 #include "UObject/Package.h"
 #include "WetClothing/Common/Material/WetClothingMaterialSetup.h"
@@ -74,14 +75,21 @@ namespace
 
         if (FWetClothingGeneratedWetMaterialOverride* ExistingOverride = FindPartGeneratedWetMaterialOverride(WetClothingAsset, MaterialSlotIndex))
         {
-            if (ExistingOverride->WetMaterial != nullptr && FWetClothingMaterialSetup::IsMaterialConfiguredForDwc(ExistingOverride->WetMaterial))
+            if (ExistingOverride->CPUMaterialInstance != nullptr &&
+                FWetClothingMaterialSetup::IsMaterialConfiguredForDwc(
+                    ExistingOverride->CPUMaterialInstance,
+                    FWetClothingMaterialSetup::MakeOptionsForAsset(&WetClothingAsset, EDWCSimulationMode::VertexCPU)))
             {
-                return ExistingOverride->WetMaterial;
+                return ExistingOverride->CPUMaterialInstance;
             }
         }
 
-        FWetClothingMaterialSetupResult WetSetupResult = FWetClothingMaterialSetup::DuplicateAndApplyToMaterialInterface(SourceMaterial);
-        if (!WetSetupResult.bSucceeded || WetSetupResult.ConfiguredMaterial == nullptr)
+        const FWetClothingUnifiedMaterialSetupResult WetSetupResult =
+            FWetClothingMaterialSetup::CreateOrUpdateUnifiedMaterialSet(
+                SourceMaterial,
+                FWetClothingMaterialSetup::MakeOptionsForAsset(&WetClothingAsset, EDWCSimulationMode::VertexCPU));
+        if (!WetSetupResult.bSucceeded || WetSetupResult.GeneratedMaterial == nullptr ||
+            WetSetupResult.CPUMaterialInstance == nullptr || WetSetupResult.GPUMaterialInstance == nullptr)
         {
             OutErrorMessage = FString::Printf(
                 TEXT("Slot %d wet material setup failed before Transparency bake: %s"),
@@ -98,15 +106,17 @@ namespace
             Override->MaterialSlotIndex = MaterialSlotIndex;
         }
         Override->SourceMaterial = SourceMaterial;
-        Override->WetMaterial = WetSetupResult.ConfiguredMaterial;
+        Override->GeneratedMaterial = WetSetupResult.GeneratedMaterial;
+        Override->CPUMaterialInstance = WetSetupResult.CPUMaterialInstance;
+        Override->GPUMaterialInstance = WetSetupResult.GPUMaterialInstance;
         WetClothingAsset.MarkPackageDirty();
 
         OutSetupMessages.Add(FString::Printf(
             TEXT("Slot %d wet base -> %s"),
             MaterialSlotIndex,
-            *GetNameSafe(WetSetupResult.ConfiguredMaterial)));
+            *GetNameSafe(WetSetupResult.CPUMaterialInstance)));
 
-        return WetSetupResult.ConfiguredMaterial;
+        return WetSetupResult.CPUMaterialInstance;
     }
 
     FString MakeTransparencyBuildSignature(
@@ -119,7 +129,7 @@ namespace
         return FString::Printf(
             TEXT("DWCTransparencyReveal_v1|BP=%s|TargetMesh=%s|Layer=%s|Slot=%d|Resolution=%d|Feather=%g|Snapshot=%s|Material=%s"),
             *WetClothingAsset.TransparencyData.SourceBlueprintClass.ToSoftObjectPath().ToString(),
-            *GetPathNameSafe(WetClothingAsset.TargetMesh.Get()),
+            *GetPathNameSafe(WetClothingAsset.GetDWCSkeletalMesh()),
             *OuterLayer.LayerId.ToString(),
             MaterialSlotIndex,
             FMath::Clamp(WetClothingAsset.TransparencyData.RevealBakeResolution, MinRevealBakeResolution, MaxRevealBakeResolution),
@@ -200,7 +210,7 @@ namespace
         OutLayerIndex = INDEX_NONE;
         OutLayer = nullptr;
 
-        if (WetClothingAsset.TargetMesh == nullptr)
+        if (WetClothingAsset.GetDWCSkeletalMesh() == nullptr)
         {
             OutErrorMessage = TEXT("Assign a TargetMesh before baking Transparency.");
             return false;
@@ -209,13 +219,13 @@ namespace
         for (int32 LayerIndex = 0; LayerIndex < Snapshot.Layers.Num(); ++LayerIndex)
         {
             const FDWCBakeResolvedLayer& Layer = Snapshot.Layers[LayerIndex];
-            if (Layer.bCanBeWetOuterLayer && Layer.SkeletalMesh == WetClothingAsset.TargetMesh)
+            if (Layer.bCanBeWetOuterLayer && Layer.SkeletalMesh == WetClothingAsset.GetDWCSkeletalMesh())
             {
                 if (OutLayer != nullptr)
                 {
                     OutErrorMessage = FString::Printf(
                         TEXT("Source Blueprint has multiple wet outer layers using TargetMesh '%s'. Keep exactly one matching layer."),
-                        *GetNameSafe(WetClothingAsset.TargetMesh.Get()));
+                        *GetNameSafe(WetClothingAsset.GetDWCSkeletalMesh()));
                     return false;
                 }
 
@@ -228,7 +238,7 @@ namespace
         {
             OutErrorMessage = FString::Printf(
                 TEXT("Source Blueprint has no wet outer layer using TargetMesh '%s'."),
-                *GetNameSafe(WetClothingAsset.TargetMesh.Get()));
+                *GetNameSafe(WetClothingAsset.GetDWCSkeletalMesh()));
             return false;
         }
 
@@ -504,7 +514,9 @@ bool FDWCTransparencyAssetBakeService::SaveTransparencySetupAssets(UWetClothingA
     AddPackageForObject(WetClothingAsset, PackagesToSave);
     for (const FWetClothingGeneratedWetMaterialOverride& MaterialOverride : WetClothingAsset->PartData.GeneratedWetMaterialOverrides)
     {
-        AddPackageForObject(MaterialOverride.WetMaterial.Get(), PackagesToSave);
+        AddPackageForObject(MaterialOverride.GeneratedMaterial.Get(), PackagesToSave);
+        AddPackageForObject(MaterialOverride.CPUMaterialInstance.Get(), PackagesToSave);
+        AddPackageForObject(MaterialOverride.GPUMaterialInstance.Get(), PackagesToSave);
     }
     for (const FWetClothingBakedTransparencyRevealLayer& BakedLayer : WetClothingAsset->TransparencyData.BakedRevealLayers)
     {

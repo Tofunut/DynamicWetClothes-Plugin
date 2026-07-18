@@ -10,6 +10,7 @@
 #include "Rendering/SkeletalMeshRenderData.h"
 #include "UObject/Package.h"
 #include "WetClothing/Common/Analysis/WetClothingAssetMeshAnalyzer.h"
+#include "Utility/DWCDataUVBufferView.h"
 
 namespace
 {
@@ -152,8 +153,8 @@ FString FWetClothingSurfaceWaterFlowMapBaker::MakeBuildSignature(
 
 	const FSurfaceWaterSimulationSettings& S = Asset->SurfaceWaterSettings;
 	const FSurfaceWaterMaterialSlotData* SlotData = S.FindMaterialSlot(MaterialSlotIndex);
-	const FDWCDataUVPerLOD* DataUV = Asset->FindGeneratedDataUVForLOD(0);
-	if (DataUV == nullptr || !DataUV->bIsValid)
+	const FDWCDataUVLODMetadata* DataUVMetadata = Asset->FindDataUVMetadataForLOD(0);
+	if (DataUVMetadata == nullptr || !DataUVMetadata->bIsValid)
 	{
 		return FString();
 	}
@@ -164,7 +165,7 @@ FString FWetClothingSurfaceWaterFlowMapBaker::MakeBuildSignature(
 			"Resolution=%d|Padding=%d|Gravity=0,0,-1|Slot=%d|WetSlots=%s"),
 		*Asset->GetRuntimeSkeletalMesh()->GetPathName(),
 		Asset->GetDWCDataUVChannelIndex(),
-		*DataUV->MeshSignature,
+		*DataUVMetadata->DataUVOutputSignature,
 		S.RenderTargetResolution,
 		SlotData ? SlotData->BakedFlowMap.PaddingPixels : 4,
 		MaterialSlotIndex,
@@ -291,19 +292,18 @@ bool FWetClothingSurfaceWaterFlowMapBaker::Bake(
 	const int32 Resolution =
 		FMath::Clamp(S.RenderTargetResolution, 16, 4096);
 
-	const FDWCDataUVPerLOD* DataUV = Asset->FindGeneratedDataUVForLOD(0);
 	USkeletalMesh* RuntimeMesh = Asset->GetRuntimeSkeletalMesh();
-	const FSkeletalMeshRenderData* RenderData = RuntimeMesh != nullptr ? RuntimeMesh->GetResourceForRendering() : nullptr;
-	const int32 VertexCount = RenderData != nullptr && RenderData->LODRenderData.IsValidIndex(0)
-		? static_cast<int32>(RenderData->LODRenderData[0].GetNumVertices())
-		: 0;
-	if (Asset->GetDWCDataUVChannelIndex() == INDEX_NONE ||
-		DataUV == nullptr ||
-		!DataUV->bIsValid ||
-		DataUV->RenderVertexCount != VertexCount ||
-		DataUV->DataUVs.Num() != VertexCount)
+	const FDWCDataUVLODMetadata* DataUVMetadata = Asset->FindDataUVMetadataForLOD(0);
+	FDWCDataUVBufferView DataUVView;
+	FString DataUVError;
+	if (DataUVMetadata == nullptr ||
+		!DataUVMetadata->bIsValid ||
+		!DataUVView.Initialize(RuntimeMesh, 0, Asset->GetDWCDataUVChannelIndex(), &DataUVError) ||
+		DataUVMetadata->RenderVertexCount != DataUVView.NumVertices())
 	{
-		OutError = TEXT("Surface Water Flow Map requires valid DWC Data UV. Rebuild DWC Data UV before baking Flow Maps.");
+		OutError = FString::Printf(
+			TEXT("Surface Water Flow Map requires valid DWC Data UV. Rebuild DWC Data UV before baking Flow Maps. %s"),
+			*DataUVError);
 		return false;
 	}
 

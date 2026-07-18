@@ -116,7 +116,7 @@ bool SWetClothingTransparencyBakePanel::RefreshOptionItems()
     }
 
     const UWetClothingAsset* Asset = WetClothingAsset.Get();
-    const USkeletalMesh* Mesh = Asset != nullptr ? Asset->TargetMesh.Get() : nullptr;
+    const USkeletalMesh* Mesh = Asset != nullptr ? Asset->GetDWCSkeletalMesh() : nullptr;
     int32 NumUVChannels = 0;
     if (Mesh != nullptr)
     {
@@ -232,7 +232,7 @@ void SWetClothingTransparencyBakePanel::RefreshFromAsset()
         StatusMessage = TEXT("No Wet Clothing Asset.");
         PanelStatus = EDWCTransparencyPanelStatus::Error;
     }
-    else if (Asset->TargetMesh == nullptr)
+    else if (Asset->GetDWCSkeletalMesh() == nullptr)
     {
         StatusMessage = TEXT("Assign a Target Skeletal Mesh before configuring Transparency.");
         PanelStatus = EDWCTransparencyPanelStatus::Error;
@@ -245,7 +245,7 @@ void SWetClothingTransparencyBakePanel::RefreshFromAsset()
     else if (Layer->SourceType == EDWCTransparencySourceType::SameMeshMaterialSlots)
     {
         TArray<FString> Errors;
-        if (!FWetClothingTransparencyDataHelpers::ValidateTransparencyLayer(Asset->TargetMesh, *Layer, Errors))
+        if (!FWetClothingTransparencyDataHelpers::ValidateTransparencyLayer(Asset->GetDWCSkeletalMesh(), *Layer, Errors))
         {
             StatusMessage = FString::Join(Errors, TEXT("\n"));
             PanelStatus = EDWCTransparencyPanelStatus::Error;
@@ -398,7 +398,7 @@ FReply SWetClothingTransparencyBakePanel::HandleGenerateTransparencyMapClicked()
                 [Layer](const FWetClothingGeneratedWetMaterialOverride& Candidate)
                 {
                     return Candidate.MaterialSlotIndex == Layer->TargetSurface.OuterMaterialSlotIndex &&
-                           Candidate.WetMaterial != nullptr;
+                           Candidate.CPUMaterialInstance != nullptr;
                 });
         if (WetOverride == nullptr)
         {
@@ -838,11 +838,11 @@ bool SWetClothingTransparencyBakePanel::IsGenerateEnabled() const
 {
     const UWetClothingAsset* Asset = WetClothingAsset.Get();
     const FWetClothingTransparencyLayerData* Layer = GetSelectedLayer();
-    if (Asset == nullptr || Asset->TargetMesh == nullptr || Layer == nullptr) return false;
+    if (Asset == nullptr || Asset->GetDWCSkeletalMesh() == nullptr || Layer == nullptr) return false;
     if (Layer->SourceType == EDWCTransparencySourceType::SameMeshMaterialSlots)
     {
         TArray<FString> Errors;
-        return FWetClothingTransparencyDataHelpers::ValidateTransparencyLayer(Asset->TargetMesh, *Layer, Errors);
+        return FWetClothingTransparencyDataHelpers::ValidateTransparencyLayer(Asset->GetDWCSkeletalMesh(), *Layer, Errors);
     }
     return Layer->SourceType == EDWCTransparencySourceType::OtherSkeletalMeshComponents &&
         !Asset->TransparencyData.SourceBlueprintClass.IsNull();
@@ -1004,7 +1004,7 @@ void SWetClothingTransparencyBakePanel::HandleLayerSelectionChanged(FLayerItemPt
 FReply SWetClothingTransparencyBakePanel::HandleAddLayerClicked()
 {
     UWetClothingAsset* Asset = WetClothingAsset.Get();
-    if (Asset == nullptr || Asset->TargetMesh == nullptr) return FReply::Handled();
+    if (Asset == nullptr || Asset->GetDWCSkeletalMesh() == nullptr) return FReply::Handled();
     int32 NewSlot = INDEX_NONE;
     for (const FMaterialSlotItemPtr& Item : MaterialSlotItems)
     {
@@ -1017,7 +1017,7 @@ FReply SWetClothingTransparencyBakePanel::HandleAddLayerClicked()
     Asset->TransparencyData.DataVersion = FWetClothingTransparencyData::CurrentDataVersion;
     Layer.LayerGuid = FGuid::NewGuid();
     Layer.TargetSurface.OuterMaterialSlotIndex = NewSlot;
-    Layer.TargetSurface.OuterMaterialSlotName = Asset->TargetMesh->GetMaterials()[NewSlot].MaterialSlotName;
+    Layer.TargetSurface.OuterMaterialSlotName = Asset->GetDWCSkeletalMesh()->GetMaterials()[NewSlot].MaterialSlotName;
     SelectedLayerGuid = Layer.LayerGuid;
     Asset->MarkPackageDirty();
     RefreshFromAsset();
@@ -1165,11 +1165,11 @@ TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildControlPanel()
 TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildTargetMeshSection()
 {
     const UWetClothingAsset* Asset = WetClothingAsset.Get();
-    const int32 SlotCount = Asset != nullptr && Asset->TargetMesh != nullptr ? Asset->TargetMesh->GetMaterials().Num() : 0;
+    const int32 SlotCount = Asset != nullptr && Asset->GetDWCSkeletalMesh() != nullptr ? Asset->GetDWCSkeletalMesh()->GetMaterials().Num() : 0;
     return SNew(SVerticalBox)
         + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,6)[FWetClothingEditorCommonWidgets::BuildSectionHeader(LOCTEXT("TargetMeshSection", "Target Mesh"))]
-        + SVerticalBox::Slot().AutoHeight()[Asset != nullptr && Asset->TargetMesh != nullptr
-            ? BuildAssetSummaryRow(Asset->TargetMesh, FText::FromString(Asset->TargetMesh->GetName()), FText::Format(LOCTEXT("TargetMeshDetails", "{0} material slots / {1} UV channels"), FText::AsNumber(SlotCount), FText::AsNumber(UVChannelItems.Num())))
+        + SVerticalBox::Slot().AutoHeight()[Asset != nullptr && Asset->GetDWCSkeletalMesh() != nullptr
+            ? BuildAssetSummaryRow(Asset->GetDWCSkeletalMesh(), FText::FromString(Asset->GetDWCSkeletalMesh()->GetName()), FText::Format(LOCTEXT("TargetMeshDetails", "{0} material slots / {1} UV channels"), FText::AsNumber(SlotCount), FText::AsNumber(UVChannelItems.Num())))
             : BuildEmptyAssetRow(LOCTEXT("NoTargetMesh", "None"))];
 }
 

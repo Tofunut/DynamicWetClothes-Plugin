@@ -10,14 +10,16 @@
 #include "WetRendering/WetRenderStage.h"
 #include "WetRendering/WetMaterialParameters.h"
 #include "RuntimeState/WetClothingRuntimeData.h"
+#include "RuntimeState/DWCRuntimeDataSubsystem.h"
 #include "WetSimulation/WetSimulationStage.h"
 #include "WetSimulation/AbsorbedWetness/AbsorbedWetnessSimulationState.h"
 #include "WetSimulation/SurfaceWater/SurfaceWaterSimulationState.h"
 #include "Runtime/Engine/Public/Rendering/SkeletalMeshLODRenderData.h"
 #include "UObject/UnrealType.h"
-#include "DataAssets/WetnessProfile.h"
 #include "Engine/Texture2D.h"
+#include "Engine/World.h"
 #include "Materials/MaterialInterface.h"
+#include "Materials/MaterialInstanceConstant.h"
 #include "Modules/ModuleManager.h"
 #include "Utility/DWCLog.h"
 #include "Utility/DWCProfiling.h"
@@ -127,7 +129,6 @@ namespace
 
         const FString CPUDiagnostics = Asset->GetPrecomputedSimulationDataValidationSummary(SkeletalMesh, LODIndex);
         const bool bCPUDataValid = Asset->IsPrecomputedSimulationDataValidForMesh(SkeletalMesh, LODIndex);
-        const bool bDetailedLogsEnabled = Component != nullptr && Component->bLogGPUWetnessRuntimeBindings;
 
         if (Mode == EDWCSimulationMode::VertexCPU)
         {
@@ -136,14 +137,13 @@ namespace
                 UE_LOG(
                     LogDWC,
                     Log,
-                    TEXT("DWC runtime mode '%s' active on '%s'. Using CPU runtime data from asset '%s' for mesh '%s' LOD%d (hasCPUPayload=%s, detailLogs=%s). %s"),
+                    TEXT("DWC runtime mode '%s' active on '%s'. Using CPU runtime data from asset '%s' for mesh '%s' LOD%d (hasCPUPayload=%s). %s"),
                     SimulationModeToLogString(Mode),
                     *GetNameSafe(Component),
                     *GetNameSafe(Asset),
                     *GetNameSafe(SkeletalMesh),
                     LODIndex,
                     Asset->HasCPURuntimeDataPayload() ? TEXT("true") : TEXT("false"),
-                    bDetailedLogsEnabled ? TEXT("on") : TEXT("off"),
                     *CPUDiagnostics);
             }
             else
@@ -170,7 +170,7 @@ namespace
             UE_LOG(
                 LogDWC,
                 Log,
-                TEXT("DWC runtime mode '%s' active on '%s'. Using GPU runtime/map data from asset '%s' for mesh '%s' LOD%d (hasGPUPayload=%s, hasGPUMapPayload=%s, CPUDataValid=%s, detailLogs=%s). %s"),
+                TEXT("DWC runtime mode '%s' active on '%s'. Using GPU runtime/map data from asset '%s' for mesh '%s' LOD%d (hasGPUPayload=%s, hasGPUMapPayload=%s, CPUDataValid=%s). %s"),
                 SimulationModeToLogString(Mode),
                 *GetNameSafe(Component),
                 *GetNameSafe(Asset),
@@ -179,7 +179,6 @@ namespace
                 Asset->HasGPURuntimeDataPayload() ? TEXT("true") : TEXT("false"),
                 Asset->HasGPUMapDataPayload() ? TEXT("true") : TEXT("false"),
                 bCPUDataValid ? TEXT("true") : TEXT("false"),
-                bDetailedLogsEnabled ? TEXT("on") : TEXT("off"),
                 *CPUDiagnostics);
         }
         else
@@ -206,31 +205,10 @@ namespace
 
 UDynamicWetClothesComponent::UDynamicWetClothesComponent()
 {
-    // Wetness simulation is timer-driven; tick is enabled only to flush batched contacts.
+    // Wetness simulation is timer-driven; tick is enabled only while asynchronous work is pending.
     PrimaryComponentTick.bCanEverTick = true;
     PrimaryComponentTick.bStartWithTickEnabled = false;
-
-    WetnessProfileMap0ParameterName = DWCWetMaterialParameters::WetnessProfileMap0();
-    UseWetnessProfileMap0ParameterName = DWCWetMaterialParameters::UseWetnessProfileMap0();
-    WrinkleNormalMapParameterName = DWCWetMaterialParameters::WrinkleNormalMap();
-    UseWrinkleNormalMapParameterName = DWCWetMaterialParameters::UseWrinkleNormalMap();
-    WrinkleStrengthParameterName = DWCWetMaterialParameters::WrinkleStrength();
-    WrinkleWetnessMinParameterName = DWCWetMaterialParameters::WrinkleWetnessMin();
-    WrinkleWetnessMaxParameterName = DWCWetMaterialParameters::WrinkleWetnessMax();
-    WrinkleStrength = DWCWetMaterialParameters::DefaultWrinkleStrength();
-    WrinkleWetnessMin = DWCWetMaterialParameters::DefaultWrinkleWetnessMin();
-    WrinkleWetnessMax = DWCWetMaterialParameters::DefaultWrinkleWetnessMax();
-
     AsyncTaskQueue = MakeUnique<FDWCTaskQueue>();
-    TransparencyMapParameterName = DWCWetMaterialParameters::TransparencyMap();
-    UseTransparencyMapParameterName = DWCWetMaterialParameters::UseTransparencyMap();
-    TransparencyStrengthParameterName = DWCWetMaterialParameters::TransparencyStrength();
-    TransparencyWetnessMinParameterName = DWCWetMaterialParameters::TransparencyWetnessMin();
-    TransparencyWetnessMaxParameterName = DWCWetMaterialParameters::TransparencyWetnessMax();
-    TransparencyUVChannelParameterName = DWCWetMaterialParameters::TransparencyUVChannel();
-    WrinkleSuppressionStrengthParameterName = DWCWetMaterialParameters::WrinkleSuppressionStrength();
-    TransparencyWetnessMin = DWCWetMaterialParameters::DefaultTransparencyWetnessMin();
-    TransparencyWetnessMax = DWCWetMaterialParameters::DefaultTransparencyWetnessMax();
 }
 
 UDynamicWetClothesComponent::~UDynamicWetClothesComponent() = default;
@@ -240,6 +218,9 @@ UDynamicWetClothesComponent::~UDynamicWetClothesComponent() = default;
 void UDynamicWetClothesComponent::BeginPlay()
 {
     Super::BeginPlay();
+
+    ActiveSimulationMode = SimulationMode;
+    bSimulationModeLocked = true;
 
     if (!InitializeWetRuntime())
     {
@@ -274,7 +255,7 @@ void UDynamicWetClothesComponent::EndPlay(const EEndPlayReason::Type EndPlayReas
         }
     }
     Receivers.Reset();
-    TargetSkeletalMesh = nullptr;
+    bSimulationModeLocked = false;
 
     Super::EndPlay(EndPlayReason);
 }
@@ -307,7 +288,7 @@ bool UDynamicWetClothesComponent::InitializeWetRuntime()
 
     ApplyGeneratedWetMaterialOverrides();
 
-    if (IsGPUWetnessMode(SimulationMode))
+    if (IsGPUWetnessMode(GetActiveSimulationMode()))
     {
         for (TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver : Receivers)
         {
@@ -341,7 +322,7 @@ bool UDynamicWetClothesComponent::InitializeWetRuntime()
         }
 
         FWetRenderStageArgs RenderArgs = MakeWetRenderStageArgs(*Receiver);
-        if (!IsGPUWetnessMode(SimulationMode))
+        if (!IsGPUWetnessMode(GetActiveSimulationMode()))
         {
             Receiver->RenderStage->InitializeWetMaterialInstance(RenderArgs);
         }
@@ -374,38 +355,149 @@ bool UDynamicWetClothesComponent::RebuildWetMeshReceivers()
         }
     }
     Receivers.Reset();
-    TargetSkeletalMesh = nullptr;
 
-    USkeletalMeshComponent* Mesh = ResolveTargetSkeletalMesh();
-    if (Mesh == nullptr || Mesh->GetSkeletalMeshAsset() == nullptr)
+    AActor* Owner = GetOwner();
+    if (Owner == nullptr)
     {
-        UE_LOG(LogTemp, Warning, TEXT("DynamicWetClothesComponent: Target skeletal mesh could not be resolved on %s."), *GetNameSafe(GetOwner()));
         return false;
     }
 
-    UWetClothingAsset* ResolvedWetClothingAsset = ResolveWetClothingAssetForMesh(*Mesh);
-    if (ResolvedWetClothingAsset == nullptr)
+    TArray<USkeletalMeshComponent*> MeshComponents;
+    Owner->GetComponents<USkeletalMeshComponent>(MeshComponents);
+    if (MeshComponents.IsEmpty())
     {
-        UE_LOG(LogTemp, Warning, TEXT("DynamicWetClothesComponent: Wet Clothing Asset is missing or does not match the target mesh on %s."), *GetNameSafe(GetOwner()));
+        UE_LOG(LogDWC, Warning, TEXT("DynamicWetClothesComponent: No SkeletalMeshComponent exists on %s."), *GetNameSafe(Owner));
         return false;
     }
 
-    TUniquePtr<FDWCWetMeshReceiverRuntime> Receiver = MakeUnique<FDWCWetMeshReceiverRuntime>();
-    Receiver->ReceiverId = Mesh->GetFName();
-    Receiver->MeshComponent = Mesh;
-    Receiver->WetClothingAsset = ResolvedWetClothingAsset;
-    Receiver->RuntimeData = MakeUnique<FWetClothingRuntimeData>();
-    Receiver->RuntimeDataBuilder = MakeUnique<FWetRuntimeDataBuilder>();
-    Receiver->SimulationState = MakeUnique<FAbsorbedWetnessSimulationState>();
-    Receiver->SimulationStage = MakeUnique<FWetSimulationStage>();
-    Receiver->InputStage = MakeUnique<FWetInputStage>();
-    Receiver->SurfaceContactResolver = MakeUnique<FWetSurfaceContactResolver>();
-    Receiver->MeshSampler = MakeUnique<FWetClothingMeshSampler>();
-    Receiver->RenderStage = MakeUnique<FWetRenderStage>();
+    TSet<UWetClothingAsset*> SeenAssets;
+    TMap<USkeletalMeshComponent*, UWetClothingAsset*> FirstClaimByMesh;
+    TArray<TPair<USkeletalMeshComponent*, UWetClothingAsset*>> OrderedClaims;
+    TSet<USkeletalMeshComponent*> ConflictingMeshes;
 
-    TargetSkeletalMesh = Mesh;
-    Receivers.Add(MoveTemp(Receiver));
-    return true;
+    for (UWetClothingAsset* Asset : WetClothingAssets)
+    {
+        if (Asset == nullptr)
+        {
+            continue;
+        }
+
+        if (SeenAssets.Contains(Asset))
+        {
+            UE_LOG(LogDWC, Warning, TEXT("DynamicWetClothesComponent: Wet Clothing Asset '%s' is registered more than once on %s; duplicate entries are ignored."), *GetNameSafe(Asset), *GetNameSafe(Owner));
+            continue;
+        }
+        SeenAssets.Add(Asset);
+
+        if (!Asset->IsCurrentAssetDataVersion())
+        {
+            UE_LOG(
+                LogDWC,
+                Error,
+                TEXT("DynamicWetClothesComponent: Wet Clothing Asset '%s' uses unsupported schema version %d (current: %d). Recreate or regenerate the WCA before play."),
+                *GetNameSafe(Asset),
+                Asset->AssetDataVersion,
+                UWetClothingAsset::CurrentAssetDataVersion);
+            continue;
+        }
+
+        USkeletalMesh* RequiredMesh = Asset->GetDWCSkeletalMesh();
+        USkeletalMesh* SourceMesh = Asset->GetSourceSkeletalMesh();
+        if (RequiredMesh == nullptr)
+        {
+            UE_LOG(LogDWC, Warning, TEXT("DynamicWetClothesComponent: Wet Clothing Asset '%s' has no DWC Skeletal Mesh on %s."), *GetNameSafe(Asset), *GetNameSafe(Owner));
+            continue;
+        }
+
+        bool bMatchedRequiredMesh = false;
+        bool bFoundSourceMesh = false;
+        for (USkeletalMeshComponent* MeshComponent : MeshComponents)
+        {
+            if (MeshComponent == nullptr)
+            {
+                continue;
+            }
+
+            USkeletalMesh* CurrentMesh = MeshComponent->GetSkeletalMeshAsset();
+            bFoundSourceMesh |= SourceMesh != nullptr && CurrentMesh == SourceMesh;
+            if (CurrentMesh != RequiredMesh)
+            {
+                continue;
+            }
+
+            bMatchedRequiredMesh = true;
+            if (UWetClothingAsset** ExistingAsset = FirstClaimByMesh.Find(MeshComponent))
+            {
+                if (*ExistingAsset != Asset)
+                {
+                    ConflictingMeshes.Add(MeshComponent);
+                    UE_LOG(LogDWC, Error, TEXT("DynamicWetClothesComponent: Skeletal mesh component '%s' on %s is targeted by both '%s' and '%s'. Remove one conflicting WCA entry."), *GetNameSafe(MeshComponent), *GetNameSafe(Owner), *GetNameSafe(*ExistingAsset), *GetNameSafe(Asset));
+                }
+            }
+            else
+            {
+                FirstClaimByMesh.Add(MeshComponent, Asset);
+                OrderedClaims.Emplace(MeshComponent, Asset);
+            }
+        }
+
+        if (!bMatchedRequiredMesh)
+        {
+            if (bFoundSourceMesh && SourceMesh != RequiredMesh)
+            {
+                UE_LOG(LogDWC, Warning, TEXT("DynamicWetClothesComponent: WCA '%s' requires '%s', but %s still uses source mesh '%s'. Use the Details-panel Apply action before play."), *GetNameSafe(Asset), *GetNameSafe(RequiredMesh), *GetNameSafe(Owner), *GetNameSafe(SourceMesh));
+            }
+            else
+            {
+                UE_LOG(LogDWC, Warning, TEXT("DynamicWetClothesComponent: No SkeletalMeshComponent on %s uses DWC mesh '%s' required by WCA '%s'."), *GetNameSafe(Owner), *GetNameSafe(RequiredMesh), *GetNameSafe(Asset));
+            }
+        }
+    }
+
+    for (const TPair<USkeletalMeshComponent*, UWetClothingAsset*>& Claim : OrderedClaims)
+    {
+        if (ConflictingMeshes.Contains(Claim.Key))
+        {
+            continue;
+        }
+
+        USkeletalMeshComponent* Mesh = Claim.Key;
+        UWetClothingAsset* Asset = Claim.Value;
+        if (Mesh == nullptr || Asset == nullptr)
+        {
+            continue;
+        }
+
+        TUniquePtr<FDWCWetMeshReceiverRuntime> Receiver = MakeUnique<FDWCWetMeshReceiverRuntime>();
+        Receiver->ReceiverId = FName(*FString::Printf(TEXT("%s__%s"), *Mesh->GetFName().ToString(), *Asset->GetFName().ToString()));
+        Receiver->MeshComponent = Mesh;
+        Receiver->WetClothingAsset = Asset;
+        Receiver->RuntimeDataBuilder = MakeUnique<FWetRuntimeDataBuilder>();
+        Receiver->SimulationState = MakeUnique<FAbsorbedWetnessSimulationState>();
+        Receiver->SimulationStage = MakeUnique<FWetSimulationStage>();
+        Receiver->InputStage = MakeUnique<FWetInputStage>();
+        Receiver->SurfaceContactResolver = MakeUnique<FWetSurfaceContactResolver>();
+        Receiver->MeshSampler = MakeUnique<FWetClothingMeshSampler>();
+        Receiver->RenderStage = MakeUnique<FWetRenderStage>();
+        Receivers.Add(MoveTemp(Receiver));
+    }
+
+    return !Receivers.IsEmpty();
+}
+
+void UDynamicWetClothesComponent::GetResolvedWetMeshComponents(TArray<USkeletalMeshComponent*>& OutComponents) const
+{
+    OutComponents.Reset();
+    for (const TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver : Receivers)
+    {
+        if (Receiver.IsValid())
+        {
+            if (USkeletalMeshComponent* Mesh = Receiver->MeshComponent.Get())
+            {
+                OutComponents.AddUnique(Mesh);
+            }
+        }
+    }
 }
 
 bool UDynamicWetClothesComponent::InitializeWetMeshReceiverRuntime(FDWCWetMeshReceiverRuntime& Receiver)
@@ -416,54 +508,70 @@ bool UDynamicWetClothesComponent::InitializeWetMeshReceiverRuntime(FDWCWetMeshRe
     }
 
     FWetRuntimeDataBuildArgs RuntimeDataBuildArgs = MakeRuntimeDataBuildArgs(Receiver);
-    LogRuntimeModeData(this, Receiver, SimulationMode, RuntimeDataBuildArgs.LODIndex);
+    LogRuntimeModeData(this, Receiver, GetActiveSimulationMode(), RuntimeDataBuildArgs.LODIndex);
 
+    UWorld* World = GetWorld();
+    UDWCRuntimeDataSubsystem* RuntimeDataSubsystem =
+        World != nullptr ? World->GetSubsystem<UDWCRuntimeDataSubsystem>() : nullptr;
+    if (RuntimeDataSubsystem == nullptr || !Receiver.WetClothingAsset.IsValid())
+    {
+        UE_LOG(LogDWC, Error, TEXT("DynamicWetClothesComponent: Shared runtime data subsystem is unavailable on %s."), *GetNameSafe(GetOwner()));
+        return false;
+    }
+
+    Receiver.SharedRuntimeData = RuntimeDataSubsystem->AcquireSharedRuntimeData(
+        *Receiver.WetClothingAsset.Get(),
+        *Receiver.MeshComponent.Get(),
+        RuntimeDataBuildArgs.LODIndex,
+        GetOwner());
+    if (!Receiver.SharedRuntimeData.IsValid())
+    {
+        UE_LOG(
+            LogDWC,
+            Error,
+            TEXT("DynamicWetClothesComponent: Failed to acquire shared runtime data for WCA '%s' on %s."),
+            *GetNameSafe(Receiver.WetClothingAsset.Get()),
+            *GetNameSafe(GetOwner()));
+        return false;
+    }
+
+    RuntimeDataBuildArgs.RuntimeData = Receiver.SharedRuntimeData.Get();
     Receiver.RuntimeDataBuilder->InitializeAbsorbedWetnessData(RuntimeDataBuildArgs);
 
-    if (IsGPUWetnessMode(SimulationMode))
+    FSkeletalMeshLODRenderData* LODData = nullptr;
+    if (!Receiver.RuntimeDataBuilder->GetLODRenderData(
+            Receiver.MeshComponent.Get(),
+            RuntimeDataBuildArgs.LODIndex,
+            LODData) ||
+        LODData == nullptr)
     {
-        FSkeletalMeshLODRenderData* LODData = nullptr;
-        if (!Receiver.RuntimeDataBuilder->GetLODRenderData(
-                Receiver.MeshComponent.Get(),
-                RuntimeDataBuildArgs.LODIndex,
-                LODData) ||
-            LODData == nullptr)
-        {
-            return false;
-        }
+        return false;
+    }
 
-        Receiver.RuntimeDataBuilder->EnsureWetnessBufferSize(RuntimeDataBuildArgs, LODData->GetNumVertices());
-        Receiver.SimulationState->MarkAllWetVertexColorsDirty();
+    Receiver.RuntimeDataBuilder->EnsureWetnessBufferSize(RuntimeDataBuildArgs, LODData->GetNumVertices());
+    Receiver.SimulationState->MarkAllWetVertexColorsDirty();
 
-        // Bone-cache failure is non-fatal for GPU contacts; the resolver falls back to a full vertex pass.
-        Receiver.RuntimeDataBuilder->InitializeBoneOptimizationCacheFromPrecomputedData(
-            RuntimeDataBuildArgs,
-            UWetClothingAsset::RuntimeSimulationLODIndex);
-
+    if (IsGPUWetnessMode(GetActiveSimulationMode()))
+    {
         return true;
     }
 
-    if (!Receiver.RuntimeDataBuilder->InitializeWetPartVertexData(RuntimeDataBuildArgs))
+    if (!Receiver.SharedRuntimeData->bHasNeighborGraph)
     {
+        UE_LOG(
+            LogDWC,
+            Error,
+            TEXT("DynamicWetClothesComponent: CPU simulation requires a valid shared neighbor graph for WCA '%s'. Save the WCA to rebuild precomputed data."),
+            *GetNameSafe(Receiver.WetClothingAsset.Get()));
         return false;
     }
 
-    // Bone-cache failure is non-fatal. WetInputStage will perform a logged
-    // full-vertex traversal fallback for contacts that cannot use the cache.
-    Receiver.RuntimeDataBuilder->InitializeBoneOptimizationCacheFromPrecomputedData(
-        RuntimeDataBuildArgs,
-        UWetClothingAsset::RuntimeSimulationLODIndex);
-
-    if (!Receiver.RuntimeDataBuilder->InitializeNeighborGraphFromPrecomputedData(RuntimeDataBuildArgs))
-    {
-        return false;
-    }
-
-    const FDWCTaskTargetSnapshot TargetSnapshot{Receiver.ReceiverId, UWetClothingAsset::RuntimeSimulationLODIndex};
-    Receiver.SkinningStaticData = BuildDWCSkinningStaticData(
-        Receiver.MeshComponent.Get(),
-        RuntimeDataBuildArgs.LODIndex,
-        TargetSnapshot);
+    const FWetClothingPrecomputedSimulationData& PrecomputedData =
+        Receiver.WetClothingAsset->GetPrecomputedSimulationData(RuntimeDataBuildArgs.LODIndex);
+    Receiver.SkinningStaticData = RuntimeDataSubsystem->AcquireSkinningStaticData(
+        *Receiver.MeshComponent.Get(),
+        PrecomputedData.MeshSignature,
+        RuntimeDataBuildArgs.LODIndex);
     if (!Receiver.SkinningStaticData.IsValid())
     {
         UE_LOG(
@@ -478,17 +586,17 @@ bool UDynamicWetClothesComponent::InitializeWetMeshReceiverRuntime(FDWCWetMeshRe
     {
         TSet<int32> SurfaceEnabledMaterialSlots;
         TSet<int32> ConflictingProfileSlots;
-        for (int32 VertexIndex = 0; VertexIndex < Receiver.RuntimeData->SurfaceWaterMaterialSlotIndices.Num(); ++VertexIndex)
+        for (int32 VertexIndex = 0; VertexIndex < Receiver.SharedRuntimeData->SurfaceWaterMaterialSlotIndices.Num(); ++VertexIndex)
         {
-            if (!Receiver.RuntimeData->SupportsSurfaceWater(VertexIndex)) continue;
-            const int32 MaterialSlotIndex = Receiver.RuntimeData->SurfaceWaterMaterialSlotIndices[VertexIndex];
+            if (!Receiver.SharedRuntimeData->SupportsSurfaceWater(VertexIndex)) continue;
+            const int32 MaterialSlotIndex = Receiver.SharedRuntimeData->SurfaceWaterMaterialSlotIndices[VertexIndex];
             if (MaterialSlotIndex == INDEX_NONE) continue;
             SurfaceEnabledMaterialSlots.Add(MaterialSlotIndex);
 
-            if (Receiver.RuntimeData->VertexWetnessProfileParameters.IsValidIndex(VertexIndex))
+            if (Receiver.SharedRuntimeData->VertexWetnessProfileParameters.IsValidIndex(VertexIndex))
             {
                 const FSurfaceWaterProfileParameters& Candidate =
-                    Receiver.RuntimeData->VertexWetnessProfileParameters[VertexIndex].SurfaceWater;
+                    Receiver.SharedRuntimeData->VertexWetnessProfileParameters[VertexIndex].SurfaceWater;
                 FSurfaceWaterProfileParameters* Existing =
                     Receiver.SurfaceWaterProfilesByMaterialSlot.Find(MaterialSlotIndex);
                 if (!Existing)
@@ -587,7 +695,6 @@ void UDynamicWetClothesComponent::StartWetnessTimers()
 
 FWetRuntimeDataBuildArgs UDynamicWetClothesComponent::MakeRuntimeDataBuildArgs(FDWCWetMeshReceiverRuntime& Receiver)
 {
-    check(Receiver.RuntimeData.IsValid());
     check(Receiver.SimulationState.IsValid());
     check(Receiver.RenderStage.IsValid());
 
@@ -595,11 +702,10 @@ FWetRuntimeDataBuildArgs UDynamicWetClothesComponent::MakeRuntimeDataBuildArgs(F
     Args.OwnerForLogs = GetOwner();
     Args.TargetSkeletalMesh = Receiver.MeshComponent.Get();
     Args.WetClothingAsset = Receiver.WetClothingAsset.Get();
-    Args.WetnessProfiles = &WetnessProfiles;
-    Args.RuntimeData = Receiver.RuntimeData.Get();
+    // Static runtime data is acquired from UDWCRuntimeDataSubsystem and is not rebuilt per receiver.
+    Args.RuntimeData = nullptr;
     Args.SimulationState = Receiver.SimulationState.Get();
     Args.CachedWetVertexColors = &Receiver.RenderStage->CachedWetVertexColors;
-    Args.UnassignedWetPartDebugColor = UnassignedWetPartDebugColor;
     Args.LODIndex = UWetClothingAsset::RuntimeSimulationLODIndex;
 
     Args.bUsePrecomputedSimulationData = true;
@@ -609,7 +715,7 @@ FWetRuntimeDataBuildArgs UDynamicWetClothesComponent::MakeRuntimeDataBuildArgs(F
 
 FWetInputStageArgs UDynamicWetClothesComponent::MakeWetInputStageArgs(FDWCWetMeshReceiverRuntime& Receiver)
 {
-    check(Receiver.RuntimeData.IsValid());
+    check(Receiver.SharedRuntimeData.IsValid());
     check(Receiver.RuntimeDataBuilder.IsValid());
     check(Receiver.SimulationState.IsValid());
     check(Receiver.SimulationStage.IsValid());
@@ -619,7 +725,7 @@ FWetInputStageArgs UDynamicWetClothesComponent::MakeWetInputStageArgs(FDWCWetMes
     Args.OwnerForLogs = GetOwner();
     Args.TargetSkeletalMesh = Receiver.MeshComponent.Get();
     Args.WetnessSettings = &WetnessSettings;
-    Args.RuntimeData = Receiver.RuntimeData.Get();
+    Args.RuntimeData = Receiver.SharedRuntimeData.Get();
     Args.SimulationState = Receiver.SimulationState.Get();
     Args.SurfaceWaterStatesByMaterialSlot = &Receiver.SurfaceWaterStatesByMaterialSlot;
     Args.SurfaceWaterSettings = Receiver.WetClothingAsset.IsValid() ? &Receiver.WetClothingAsset->SurfaceWaterSettings : nullptr;
@@ -633,7 +739,7 @@ FWetInputStageArgs UDynamicWetClothesComponent::MakeWetInputStageArgs(FDWCWetMes
 
 FWetSurfaceContactResolverArgs UDynamicWetClothesComponent::MakeWetSurfaceContactResolverArgs(FDWCWetMeshReceiverRuntime& Receiver)
 {
-    check(Receiver.RuntimeData.IsValid());
+    check(Receiver.SharedRuntimeData.IsValid());
     check(Receiver.RuntimeDataBuilder.IsValid());
     check(Receiver.MeshSampler.IsValid());
 
@@ -642,7 +748,7 @@ FWetSurfaceContactResolverArgs UDynamicWetClothesComponent::MakeWetSurfaceContac
     Args.TargetSkeletalMesh = Receiver.MeshComponent.Get();
     Args.WetnessSettings = &WetnessSettings;
     Args.WetClothingAsset = Receiver.WetClothingAsset.Get();
-    Args.RuntimeData = Receiver.RuntimeData.Get();
+    Args.RuntimeData = Receiver.SharedRuntimeData.Get();
     Args.RuntimeDataBuilder = Receiver.RuntimeDataBuilder.Get();
     Args.MeshSampler = Receiver.MeshSampler.Get();
     Args.LODIndex = UWetClothingAsset::RuntimeSimulationLODIndex;
@@ -652,7 +758,7 @@ FWetSurfaceContactResolverArgs UDynamicWetClothesComponent::MakeWetSurfaceContac
 
 FWetSimulationStageArgs UDynamicWetClothesComponent::MakeWetSimulationStageArgs(FDWCWetMeshReceiverRuntime& Receiver)
 {
-    check(Receiver.RuntimeData.IsValid());
+    check(Receiver.SharedRuntimeData.IsValid());
     check(Receiver.RuntimeDataBuilder.IsValid());
     check(Receiver.SimulationState.IsValid());
     check(Receiver.MeshSampler.IsValid());
@@ -660,7 +766,7 @@ FWetSimulationStageArgs UDynamicWetClothesComponent::MakeWetSimulationStageArgs(
     FWetSimulationStageArgs Args;
     Args.TargetSkeletalMesh = Receiver.MeshComponent.Get();
     Args.WetnessSettings = &WetnessSettings;
-    Args.RuntimeData = Receiver.RuntimeData.Get();
+    Args.RuntimeData = Receiver.SharedRuntimeData.Get();
     Args.SimulationState = Receiver.SimulationState.Get();
     Args.RuntimeDataBuilder = Receiver.RuntimeDataBuilder.Get();
     Args.MeshSampler = Receiver.MeshSampler.Get();
@@ -670,7 +776,7 @@ FWetSimulationStageArgs UDynamicWetClothesComponent::MakeWetSimulationStageArgs(
 
 FWetRenderStageArgs UDynamicWetClothesComponent::MakeWetRenderStageArgs(FDWCWetMeshReceiverRuntime& Receiver)
 {
-    check(Receiver.RuntimeData.IsValid());
+    check(Receiver.SharedRuntimeData.IsValid());
     check(Receiver.SimulationState.IsValid());
     check(Receiver.RenderStage.IsValid());
 
@@ -678,51 +784,22 @@ FWetRenderStageArgs UDynamicWetClothesComponent::MakeWetRenderStageArgs(FDWCWetM
     Args.TargetSkeletalMesh = Receiver.MeshComponent.Get();
     Args.WetClothingAsset = Receiver.WetClothingAsset.Get();
     Args.WetnessSettings = &WetnessSettings;
-    Args.RuntimeData = Receiver.RuntimeData.Get();
+    Args.RuntimeData = Receiver.SharedRuntimeData.Get();
     Args.SimulationState = Receiver.SimulationState.Get();
     Args.SurfaceWaterStatesByMaterialSlot = &Receiver.SurfaceWaterStatesByMaterialSlot;
     Args.SurfaceWaterProfilesByMaterialSlot = &Receiver.SurfaceWaterProfilesByMaterialSlot;
     Args.WetMaterialInstances = &Receiver.WetMaterialInstances;
-    Args.SurfaceWaterRTParameterName = SurfaceWaterRTParameterName;
-    Args.SurfaceDropletRTParameterName = SurfaceDropletRTParameterName;
-    Args.SurfaceFlowRTParameterName = SurfaceFlowRTParameterName;
-    Args.SurfaceWaterTimeParameterName = SurfaceWaterTimeParameterName;
-    Args.SurfaceWaterTexelSizeParameterName = SurfaceWaterTexelSizeParameterName;
     Args.SurfaceWaterTimeSeconds = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
-    Args.SurfaceWaterDebugView = SurfaceWaterDebugView;
-    Args.UnassignedWetPartDebugColor = UnassignedWetPartDebugColor;
-    Args.bEnableWetPartDebugVertexColors = bEnableWetPartDebugVertexColors;
-    Args.WetPartDebugStrengthParameterName = WetPartDebugStrengthParameterName;
-    Args.WetnessProfileMap0ParameterName = WetnessProfileMap0ParameterName;
-    Args.UseWetnessProfileMap0ParameterName = UseWetnessProfileMap0ParameterName;
-    Args.WrinkleNormalMapParameterName = WrinkleNormalMapParameterName;
-    Args.UseWrinkleNormalMapParameterName = UseWrinkleNormalMapParameterName;
-    Args.WrinkleStrengthParameterName = WrinkleStrengthParameterName;
-    Args.WrinkleWetnessMinParameterName = WrinkleWetnessMinParameterName;
-    Args.WrinkleWetnessMaxParameterName = WrinkleWetnessMaxParameterName;
     Args.WrinkleStrength = WrinkleStrength;
     Args.WrinkleWetnessMin = WrinkleWetnessMin;
     Args.WrinkleWetnessMax = WrinkleWetnessMax;
-    Args.bLogWrinkleRuntimeBindings = bLogWrinkleRuntimeBindings;
-    Args.TransparencyMapParameterName = TransparencyMapParameterName;
-    Args.UseTransparencyMapParameterName = UseTransparencyMapParameterName;
-    Args.TransparencyStrengthParameterName = TransparencyStrengthParameterName;
-    Args.TransparencyWetnessMinParameterName = TransparencyWetnessMinParameterName;
-    Args.TransparencyWetnessMaxParameterName = TransparencyWetnessMaxParameterName;
-    Args.TransparencyUVChannelParameterName = TransparencyUVChannelParameterName;
-    Args.WrinkleSuppressionStrengthParameterName = WrinkleSuppressionStrengthParameterName;
     Args.TransparencyWetnessMin = TransparencyWetnessMin;
     Args.TransparencyWetnessMax = TransparencyWetnessMax;
-    Args.bLogTransparencyRuntimeBindings = bLogTransparencyRuntimeBindings;
-    Args.LODIndex = UWetClothingAsset::RuntimeSimulationLODIndex;
-
-    Args.WetnessProfileMap0ParameterName = WetnessProfileMap0ParameterName;
-    Args.UseWetnessProfileMap0ParameterName = UseWetnessProfileMap0ParameterName;
-    Args.UnderColorParameterName = UnderColorParameterName;
-    Args.UnderColorBlendStrengthParameterName = UnderColorBlendStrengthParameterName;
     Args.UnderColor = FallbackUnderColor;
     Args.UnderColorBlendStrength = WetUnderColorBlendStrength;
-    Args.SurfaceWaterRTParameterName = SurfaceWaterRTParameterName;
+    Args.bShowWetPartDebugColors = bShowWetPartDebugColors;
+    Args.bGPUWetnessMode = IsGPUWetnessMode(GetActiveSimulationMode());
+    Args.LODIndex = UWetClothingAsset::RuntimeSimulationLODIndex;
     return Args;
 }
 
@@ -757,12 +834,12 @@ bool UDynamicWetClothesComponent::InitializeGPUBackend(FDWCWetMeshReceiverRuntim
     InitArgs.WetClothingAsset = Asset;
     InitArgs.WetnessSettings = &WetnessSettings;
     InitArgs.WetMaterialInstances = &Receiver.WetMaterialInstances;
-    InitArgs.WetnessMapParameterName = GPUWetnessMapParameterName;
     InitArgs.LODIndex = UWetClothingAsset::RuntimeSimulationLODIndex;
     InitArgs.SpreadRateScale = GPUSpreadRateScale;
     InitArgs.DryRateScale = GPUDryRateScale;
     InitArgs.GravityFlowStrengthScale = GPUGravityFlowStrengthScale;
-    InitArgs.bLogGPUWetnessRuntimeBindings = bLogGPUWetnessRuntimeBindings;
+    InitArgs.bUseEightDirectionDiffusion =
+        GPUDiffusionNeighborMode == EDWCGPUDiffusionNeighborMode::EightDirections;
 
     if (!Backend->Initialize(InitArgs))
     {
@@ -777,86 +854,6 @@ bool UDynamicWetClothesComponent::InitializeGPUBackend(FDWCWetMeshReceiverRuntim
 
     Receiver.GPUBackend = MoveTemp(Backend);
     return true;
-}
-
-USkeletalMeshComponent* UDynamicWetClothesComponent::ResolveTargetSkeletalMesh() const
-{
-    AActor* Owner = GetOwner();
-    if (!Owner)
-        return nullptr;
-
-    TArray<USkeletalMeshComponent*> Meshes;
-    Owner->GetComponents<USkeletalMeshComponent>(Meshes);
-
-    if (!TargetSkeletalMeshName.IsNone())
-    {
-        for (USkeletalMeshComponent* Mesh : Meshes)
-        {
-            if (Mesh && Mesh->GetFName() == TargetSkeletalMeshName)
-            {
-                return Mesh;
-            }
-        }
-
-        return nullptr;
-    }
-
-    return Meshes.Num() > 0 ? Meshes[0] : nullptr;
-}
-
-UWetClothingAsset* UDynamicWetClothesComponent::ResolveWetClothingAssetForMesh(const USkeletalMeshComponent& MeshComponent) const
-{
-    USkeletalMesh* SkeletalMesh = MeshComponent.GetSkeletalMeshAsset();
-    if (SkeletalMesh == nullptr)
-    {
-        UE_LOG(
-            LogTemp,
-            Warning,
-            TEXT("DynamicWetClothesComponent: Target skeletal mesh component '%s' has no skeletal mesh asset on %s."),
-            *GetNameSafe(&MeshComponent),
-            *GetNameSafe(GetOwner()));
-        return nullptr;
-    }
-
-    if (WetClothingAsset == nullptr)
-    {
-        UE_LOG(
-            LogTemp,
-            Warning,
-            TEXT("DynamicWetClothesComponent: Wet Clothing Asset is not assigned on %s for mesh '%s' (%s)."),
-            *GetNameSafe(GetOwner()),
-            *GetNameSafe(&MeshComponent),
-            *GetNameSafe(SkeletalMesh));
-        return nullptr;
-    }
-
-    USkeletalMesh* RequiredRuntimeMesh = WetClothingAsset->GetRuntimeSkeletalMesh();
-    if (RequiredRuntimeMesh == nullptr)
-    {
-        UE_LOG(
-            LogTemp,
-            Warning,
-            TEXT("DynamicWetClothesComponent: Wet Clothing Asset '%s' has no runtime mesh assigned on %s."),
-            *GetNameSafe(WetClothingAsset),
-            *GetNameSafe(GetOwner()));
-        return nullptr;
-    }
-
-    if (RequiredRuntimeMesh != SkeletalMesh)
-    {
-        UE_LOG(
-            LogTemp,
-            Warning,
-            TEXT("DynamicWetClothesComponent: Wet Clothing Asset '%s' targets runtime mesh '%s' but receiver mesh '%s' uses '%s' on %s."),
-            *GetNameSafe(WetClothingAsset),
-            *GetNameSafe(RequiredRuntimeMesh),
-            *GetNameSafe(&MeshComponent),
-            *GetNameSafe(SkeletalMesh),
-            *GetNameSafe(GetOwner()));
-        return nullptr;
-    }
-
-    return WetClothingAsset;
 }
 
 void UDynamicWetClothesComponent::ApplyGeneratedWetMaterialOverrides()
@@ -877,13 +874,9 @@ void UDynamicWetClothesComponent::ApplyGeneratedWetMaterialOverrides()
 
         for (const FWetClothingGeneratedWetMaterialOverride& MaterialOverride : ReceiverWetClothingAsset->PartData.GeneratedWetMaterialOverrides)
         {
-            UMaterialInterface* WetMaterial = SimulationMode == EDWCSimulationMode::WetnessMapGPU
-                ? MaterialOverride.GPUWetMaterial.Get()
-                : MaterialOverride.CPUWetMaterial.Get();
-            if (WetMaterial == nullptr)
-            {
-                WetMaterial = MaterialOverride.WetMaterial.Get();
-            }
+            UMaterialInterface* WetMaterial = GetActiveSimulationMode() == EDWCSimulationMode::WetnessMapGPU
+                ? static_cast<UMaterialInterface*>(MaterialOverride.GPUMaterialInstance.Get())
+                : static_cast<UMaterialInterface*>(MaterialOverride.CPUMaterialInstance.Get());
 
             if (MaterialOverride.MaterialSlotIndex == INDEX_NONE ||
                 WetMaterial == nullptr ||
@@ -905,16 +898,7 @@ void UDynamicWetClothesComponent::ApplyGeneratedWetMaterialOverrides()
 
             OverrideTargetMesh->SetMaterial(MaterialOverride.MaterialSlotIndex, WetMaterial);
 
-            if (bLogWrinkleRuntimeBindings)
-            {
-                UE_LOG(
-                    LogDWC,
-                    Log,
-                    TEXT("DWC wrinkle runtime: applied generated wet material override '%s' to mesh '%s' slot %d."),
-                    *GetNameSafe(WetMaterial),
-                    *GetNameSafe(OverrideTargetMesh),
-                    MaterialOverride.MaterialSlotIndex);
-            }
+
         }
 
         for (const FWetClothingBakedTransparencyRevealLayer& RevealLayer : ReceiverWetClothingAsset->TransparencyData.BakedRevealLayers)
@@ -938,45 +922,7 @@ void UDynamicWetClothesComponent::ApplyGeneratedWetMaterialOverrides()
             OverrideTargetMesh->SetMaterial(RevealLayer.MaterialSlotIndex, RevealLayer.RevealMaterial);
         }
 
-        if (bLogWrinkleRuntimeBindings)
-        {
-            const int32 PreferredUVChannelIndex =
-                ReceiverWetClothingAsset->WrinkleData.WrinkleUVChannelIndex != INDEX_NONE
-                    ? ReceiverWetClothingAsset->WrinkleData.WrinkleUVChannelIndex
-                    : 0;
-            for (int32 MaterialSlotIndex = 0; MaterialSlotIndex < OverrideTargetMesh->GetNumMaterials(); ++MaterialSlotIndex)
-            {
-                const FWetWrinkleBakedMapSet* BakedWrinkleMap =
-                    ReceiverWetClothingAsset->WrinkleData.FindBakedWrinkleMap(MaterialSlotIndex, PreferredUVChannelIndex, 0);
-                if (BakedWrinkleMap == nullptr || BakedWrinkleMap->BakedWrinkleNormalMap == nullptr)
-                {
-                    continue;
-                }
 
-                const FWetClothingGeneratedWetMaterialOverride* MatchingOverride =
-                    ReceiverWetClothingAsset->PartData.GeneratedWetMaterialOverrides.FindByPredicate(
-                        [MaterialSlotIndex](const FWetClothingGeneratedWetMaterialOverride& Candidate)
-                        {
-                            return Candidate.MaterialSlotIndex == MaterialSlotIndex &&
-                                   (Candidate.WetMaterial != nullptr ||
-                                    Candidate.CPUWetMaterial != nullptr ||
-                                    Candidate.GPUWetMaterial != nullptr);
-                        });
-
-                if (MatchingOverride == nullptr)
-                {
-                    UE_LOG(
-                        LogDWC,
-                        Log,
-                        TEXT("DWC wrinkle runtime: mesh '%s' slot %d has baked wrinkle map '%s' (UV %d, LOD %d) but no generated wet material override entry. Runtime wrinkle apply expects the current slot material to already contain MF_DWC_ApplyWetness."),
-                        *GetNameSafe(OverrideTargetMesh),
-                        MaterialSlotIndex,
-                        *GetNameSafe(BakedWrinkleMap->BakedWrinkleNormalMap),
-                        BakedWrinkleMap->UVChannelIndex,
-                        BakedWrinkleMap->LODIndex);
-                }
-            }
-        }
     }
 }
 
@@ -1009,7 +955,7 @@ bool UDynamicWetClothesComponent::ShouldReceiverConsiderSurface(
 
 void UDynamicWetClothesComponent::ApplyWetAll(const float Amount)
 {
-    if (IsGPUWetnessMode(SimulationMode))
+    if (IsGPUWetnessMode(GetActiveSimulationMode()))
     {
         for (const TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver : Receivers)
         {
@@ -1050,7 +996,7 @@ bool UDynamicWetClothesComponent::ApplyWetContact(const FDWCWetContact& Contact,
         return true;
     }
 
-    if (IsGPUWetnessMode(SimulationMode))
+    if (IsGPUWetnessMode(GetActiveSimulationMode()))
     {
         bool bAnyQueued = false;
         for (const TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver : Receivers)
@@ -1100,7 +1046,7 @@ bool UDynamicWetClothesComponent::ApplyWetContacts(const TArray<FDWCWetContact>&
 {
     FlushPendingWetContacts();
 
-    if (IsGPUWetnessMode(SimulationMode))
+    if (IsGPUWetnessMode(GetActiveSimulationMode()))
     {
         bool bAnyQueued = false;
         for (const TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver : Receivers)
@@ -1175,7 +1121,7 @@ bool UDynamicWetClothesComponent::ApplyWetContacts(const TArray<FDWCWetContact>&
 
 bool UDynamicWetClothesComponent::ApplyWetArea(const FDWCWetAreaData& AreaData, const bool bApplyMaterial)
 {
-    if (IsGPUWetnessMode(SimulationMode))
+    if (IsGPUWetnessMode(GetActiveSimulationMode()))
     {
         bool bAnyQueued = false;
         for (const TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver : Receivers)
@@ -1223,7 +1169,7 @@ bool UDynamicWetClothesComponent::ApplyWetSurface(
     const float                 Amount,
     const bool                  bApplyMaterial)
 {
-    if (IsGPUWetnessMode(SimulationMode))
+    if (IsGPUWetnessMode(GetActiveSimulationMode()))
     {
         bool bAnyQueued = false;
         for (const TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver : Receivers)
@@ -1269,66 +1215,6 @@ bool UDynamicWetClothesComponent::ApplyWetSurface(
     return bAnyChanged;
 }
 
-void UDynamicWetClothesComponent::SetWetPartDebugVertexColorsEnabled(const bool bEnabled)
-{
-    if (bEnableWetPartDebugVertexColors == bEnabled)
-    {
-        return;
-    }
-
-    bEnableWetPartDebugVertexColors = bEnabled;
-
-    for (const TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver : Receivers)
-    {
-        if (!Receiver.IsValid() || !Receiver->RenderStage.IsValid())
-        {
-            continue;
-        }
-
-        FWetRenderStageArgs RenderArgs = MakeWetRenderStageArgs(*Receiver);
-        Receiver->RenderStage->ApplyWetMaterialParameters(RenderArgs);
-    }
-    RefreshWetVertexColors();
-}
-
-void UDynamicWetClothesComponent::RefreshWetVertexColors()
-{
-    if (Receivers.IsEmpty() && !InitializeWetRuntime())
-    {
-        return;
-    }
-
-    for (const TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver : Receivers)
-    {
-        if (!Receiver.IsValid() || !Receiver->RuntimeDataBuilder.IsValid() || !Receiver->SimulationState.IsValid())
-        {
-            continue;
-        }
-
-        USkeletalMeshComponent* Mesh = Receiver->MeshComponent.Get();
-        FWetRuntimeDataBuildArgs RuntimeDataBuildArgs = MakeRuntimeDataBuildArgs(*Receiver);
-
-        FSkeletalMeshLODRenderData* LODData = nullptr;
-        if (Mesh == nullptr ||
-            !Receiver->RuntimeDataBuilder->GetLODRenderData(Mesh, UWetClothingAsset::RuntimeSimulationLODIndex, LODData))
-        {
-            continue;
-        }
-
-        Receiver->RuntimeDataBuilder->EnsureWetnessBufferSize(RuntimeDataBuildArgs, LODData->GetNumVertices());
-        if (!Receiver->RuntimeDataBuilder->InitializeWetPartVertexData(RuntimeDataBuildArgs))
-        {
-            continue;
-        }
-        Receiver->SimulationState->MarkAllWetVertexColorsDirty();
-
-        FWetRenderStageArgs RenderArgs = MakeWetRenderStageArgs(*Receiver);
-        Receiver->RenderStage->ApplyWetnessToMaterial(RenderArgs);
-        Receiver->bWetRenderDirty = false;
-    }
-
-    bWetRenderDirty = false;
-}
 
 bool UDynamicWetClothesComponent::GetWetnessWorldBounds(FBox& OutBounds) const
 {
@@ -1447,7 +1333,7 @@ bool UDynamicWetClothesComponent::RequestCpuSkinningTask(
     const FDWCTaskTargetSnapshot TargetSnapshot{Receiver.ReceiverId, UWetClothingAsset::RuntimeSimulationLODIndex};
     if (!BuildDWCSkinningTaskSnapshot(
             Mesh,
-            0,
+            UWetClothingAsset::RuntimeSimulationLODIndex,
             TargetSnapshot,
             Receiver.SkinningStaticData,
             bComputePositions,
@@ -1468,7 +1354,7 @@ bool UDynamicWetClothesComponent::RequestCpuSkinningTask(
 
 void UDynamicWetClothesComponent::RequestContinuousCpuSkinningTasks()
 {
-    if (IsGPUWetnessMode(SimulationMode))
+    if (IsGPUWetnessMode(GetActiveSimulationMode()))
     {
         return;
     }
@@ -1525,7 +1411,7 @@ bool UDynamicWetClothesComponent::FlushPendingWetContacts()
         return false;
     }
 
-    if (IsGPUWetnessMode(SimulationMode))
+    if (IsGPUWetnessMode(GetActiveSimulationMode()))
     {
         bool bAnyQueued = false;
         for (const TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver : Receivers)
@@ -1621,7 +1507,7 @@ void UDynamicWetClothesComponent::UpdateWetness()
 {
     FlushAsyncTaskQueueGameThread();
 
-    if (IsGPUWetnessMode(SimulationMode))
+    if (IsGPUWetnessMode(GetActiveSimulationMode()))
     {
         FlushPendingWetContacts();
 
@@ -1700,91 +1586,49 @@ void UDynamicWetClothesComponent::UpdateWetRendering()
         }
 
         FWetRenderStageArgs RenderArgs = MakeWetRenderStageArgs(*Receiver);
-        Receiver->RenderStage->ApplyWetnessToMaterial(RenderArgs);
+        if (IsGPUWetnessMode(GetActiveSimulationMode()))
+        {
+            // GPU wetness remains in the existing texture path. Vertex colors only carry
+            // the static Wet Part debug color and are rebuilt when the debug view is toggled.
+            Receiver->RenderStage->ApplyWetMaterialParameters(RenderArgs);
+            if (bShowWetPartDebugColors && Receiver->SimulationState->DirtyWetVertexIndices.Num() > 0)
+            {
+                Receiver->RenderStage->ApplyWetnessToMaterial(RenderArgs);
+            }
+        }
+        else
+        {
+            Receiver->RenderStage->ApplyWetnessToMaterial(RenderArgs);
+        }
         Receiver->bWetRenderDirty = false;
     }
 
     bWetRenderDirty = false;
 }
 
-bool UDynamicWetClothesComponent::DebugApplySurfaceWaterAtVertex(
-    int32 VertexIndex,
-    float Amount,
-    float RadiusPixels,
-    bool bFlowStamp)
-{
-    bool bQueued = false;
-    for (const TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver : Receivers)
-    {
-        if (!Receiver.IsValid() || !Receiver->RuntimeData.IsValid() || !Receiver->WetClothingAsset.IsValid()) continue;
-        FVector2f UV;
-        int32 MaterialSlotIndex = INDEX_NONE;
-        if (!Receiver->RuntimeData->TryGetSurfaceWaterBinding(VertexIndex, MaterialSlotIndex, UV)) continue;
-        TUniquePtr<FSurfaceWaterSimulationState>* State = Receiver->SurfaceWaterStatesByMaterialSlot.Find(MaterialSlotIndex);
-        if (!State || !State->IsValid()) continue;
-        const FSurfaceWaterProfileParameters* SurfaceProfile =
-            Receiver->SurfaceWaterProfilesByMaterialSlot.Find(MaterialSlotIndex);
-        const FSurfaceWaterProfileParameters DefaultSurfaceProfile;
-        if (!SurfaceProfile) SurfaceProfile = &DefaultSurfaceProfile;
-        if (bFlowStamp)
-        {
-            (*State)->QueueFlowStamp(
-                UV,
-                FMath::Max(0.0f, Amount),
-                SurfaceProfile->FlowWidthPixels,
-                SurfaceProfile->FlowLengthPixels,
-                SurfaceProfile->FlowLifetimeSeconds);
-        }
-        else
-        {
-            (*State)->QueueDropletStamp(
-                UV,
-                FMath::Max(0.0f, Amount),
-                RadiusPixels,
-                SurfaceProfile->DropletLifetimeSeconds);
-        }
-        bQueued = true;
-    }
-    if (bQueued) UpdateSurfaceWater();
-    return bQueued;
-}
 
-void UDynamicWetClothesComponent::SetSurfaceWaterDebugView(const ESurfaceWaterDebugView DebugView)
+void UDynamicWetClothesComponent::SetWetPartDebugColorsEnabled(const bool bEnabled)
 {
-    SurfaceWaterDebugView = DebugView;
+    if (bShowWetPartDebugColors == bEnabled)
+    {
+        return;
+    }
+
+    bShowWetPartDebugColors = bEnabled;
     for (const TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver : Receivers)
     {
-        if (!Receiver.IsValid() || !Receiver->RenderStage.IsValid()) continue;
+        if (!Receiver.IsValid() || !Receiver->SimulationState.IsValid() || !Receiver->RenderStage.IsValid())
+        {
+            continue;
+        }
+
+        Receiver->SimulationState->MarkAllWetVertexColorsDirty();
+        Receiver->bWetRenderDirty = true;
+
         FWetRenderStageArgs RenderArgs = MakeWetRenderStageArgs(*Receiver);
         Receiver->RenderStage->ApplyWetMaterialParameters(RenderArgs);
     }
-}
-
-int64 UDynamicWetClothesComponent::GetSurfaceWaterEstimatedGpuMemoryBytes() const
-{
-    uint64 TotalBytes = 0;
-    for (const TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver : Receivers)
-    {
-        if (!Receiver.IsValid()) continue;
-        for (const TPair<int32, TUniquePtr<FSurfaceWaterSimulationState>>& Pair : Receiver->SurfaceWaterStatesByMaterialSlot)
-        {
-            if (Pair.Value.IsValid()) TotalBytes += Pair.Value->GetEstimatedGpuMemoryBytes();
-        }
-    }
-    return TotalBytes > static_cast<uint64>(MAX_int64) ? MAX_int64 : static_cast<int64>(TotalBytes);
-}
-
-void UDynamicWetClothesComponent::SetSurfaceWaterSimulationPaused(bool bPaused)
-{
-    for (const TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver : Receivers) if (Receiver.IsValid()) for (TPair<int32, TUniquePtr<FSurfaceWaterSimulationState>>& Pair : Receiver->SurfaceWaterStatesByMaterialSlot) if (Pair.Value.IsValid()) Pair.Value->SetSimulationPaused(bPaused);
-}
-void UDynamicWetClothesComponent::StepSurfaceWaterSimulation()
-{
-    SetSurfaceWaterSimulationPaused(false); UpdateSurfaceWater(); SetSurfaceWaterSimulationPaused(true);
-}
-void UDynamicWetClothesComponent::ClearSurfaceWater()
-{
-    for (const TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver : Receivers) if (Receiver.IsValid()) for (TPair<int32, TUniquePtr<FSurfaceWaterSimulationState>>& Pair : Receiver->SurfaceWaterStatesByMaterialSlot) if (Pair.Value.IsValid()) Pair.Value->Reset();
+    bWetRenderDirty = true;
 }
 
 void UDynamicWetClothesComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
@@ -1802,58 +1646,50 @@ void UDynamicWetClothesComponent::PostEditChangeProperty(FPropertyChangedEvent& 
     Super::PostEditChangeProperty(PropertyChangedEvent);
 
     const FName PropertyName = PropertyChangedEvent.GetPropertyName();
-    if (PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, bEnableWetPartDebugVertexColors) ||
-        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, SurfaceWaterDebugView) ||
-        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, WetPartDebugStrengthParameterName) ||
-        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, WetnessProfileMap0ParameterName) ||
-        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, UseWetnessProfileMap0ParameterName) ||
+    const bool bRequiresRuntimeRebuild =
+        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, WetClothingAssets) ||
+        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, SimulationMode);
+    const bool bRequiresMaterialRefresh =
+        bRequiresRuntimeRebuild ||
         PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, WrinkleStrength) ||
         PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, WrinkleWetnessMin) ||
         PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, WrinkleWetnessMax) ||
-        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, WrinkleNormalMapParameterName) ||
-        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, UseWrinkleNormalMapParameterName) ||
-        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, WrinkleStrengthParameterName) ||
-        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, WrinkleWetnessMinParameterName) ||
-        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, WrinkleWetnessMaxParameterName) ||
-        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, bLogWrinkleRuntimeBindings) ||
         PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, TransparencyWetnessMin) ||
         PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, TransparencyWetnessMax) ||
-        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, TransparencyMapParameterName) ||
-        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, UseTransparencyMapParameterName) ||
-        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, TransparencyStrengthParameterName) ||
-        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, TransparencyWetnessMinParameterName) ||
-        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, TransparencyWetnessMaxParameterName) ||
-        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, TransparencyUVChannelParameterName) ||
-        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, WrinkleSuppressionStrengthParameterName) ||
-        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, bLogTransparencyRuntimeBindings) ||
         PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, FallbackUnderColor) ||
         PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, WetUnderColorBlendStrength) ||
-        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, UnderColorParameterName) ||
-        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, UnderColorBlendStrengthParameterName) ||
-        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, UnassignedWetPartDebugColor) ||
-        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, TargetSkeletalMeshName) ||
-        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, WetClothingAsset))
+        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, bShowWetPartDebugColors);
+
+    if (!bRequiresMaterialRefresh)
     {
-        const bool bRequiresRuntimeRebuild =
-            PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, TargetSkeletalMeshName) ||
-            PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, WetClothingAsset);
+        return;
+    }
 
-        if (bRequiresRuntimeRebuild || Receivers.IsEmpty())
-        {
-            InitializeWetRuntime();
-        }
+    if (bRequiresRuntimeRebuild || Receivers.IsEmpty())
+    {
+        InitializeWetRuntime();
+    }
 
+    if (PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, bShowWetPartDebugColors))
+    {
         for (const TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver : Receivers)
         {
-            if (!Receiver.IsValid() || !Receiver->RenderStage.IsValid())
+            if (Receiver.IsValid() && Receiver->SimulationState.IsValid())
             {
-                continue;
+                Receiver->SimulationState->MarkAllWetVertexColorsDirty();
+                Receiver->bWetRenderDirty = true;
             }
+        }
+        bWetRenderDirty = true;
+    }
 
+    for (const TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver : Receivers)
+    {
+        if (Receiver.IsValid() && Receiver->RenderStage.IsValid())
+        {
             FWetRenderStageArgs RenderArgs = MakeWetRenderStageArgs(*Receiver);
             Receiver->RenderStage->ApplyWetMaterialParameters(RenderArgs);
         }
-        RefreshWetVertexColors();
     }
 }
 #endif

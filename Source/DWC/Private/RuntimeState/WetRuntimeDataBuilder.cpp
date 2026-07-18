@@ -70,6 +70,11 @@ void FWetRuntimeDataBuilder::InitializeAbsorbedWetnessData(FWetRuntimeDataBuildA
 
 bool FWetRuntimeDataBuilder::InitializeWetPartVertexData(FWetRuntimeDataBuildArgs& Receiver)
 {
+    if (Receiver.MutableRuntimeData == nullptr)
+    {
+        return false;
+    }
+
     FSkeletalMeshLODRenderData* LODData = nullptr;
     if (!GetLODRenderData(Receiver.TargetSkeletalMesh, Receiver.LODIndex, LODData))
     {
@@ -77,25 +82,18 @@ bool FWetRuntimeDataBuilder::InitializeWetPartVertexData(FWetRuntimeDataBuildArg
     }
 
     const int32 VertexCount = LODData->GetNumVertices();
-    Receiver.RuntimeData->VertexWetPartIDs.Init(INDEX_NONE, VertexCount);
-    Receiver.RuntimeData->VertexWettableFlags.Init(false, VertexCount);
-    Receiver.RuntimeData->VertexAbsorbedWetnessFlags.Init(false, VertexCount);
-    Receiver.RuntimeData->VertexSurfaceWaterFlags.Init(false, VertexCount);
-    Receiver.RuntimeData->VertexWetnessProfileParameters.SetNum(VertexCount);
-    Receiver.RuntimeData->VertexWetPartDebugColors.Init(Receiver.UnassignedWetPartDebugColor, VertexCount);
-    Receiver.RuntimeData->SurfaceWaterUVs.SetNum(VertexCount);
-    Receiver.RuntimeData->SurfaceWaterUVValidFlags.Init(false,VertexCount);
-    Receiver.RuntimeData->SurfaceWaterMaterialSlotIndices.Init(INDEX_NONE, VertexCount);
+    Receiver.MutableRuntimeData->VertexWetPartIDs.Init(INDEX_NONE, VertexCount);
+    Receiver.MutableRuntimeData->VertexWettableFlags.Init(false, VertexCount);
+    Receiver.MutableRuntimeData->VertexAbsorbedWetnessFlags.Init(false, VertexCount);
+    Receiver.MutableRuntimeData->VertexSurfaceWaterFlags.Init(false, VertexCount);
+    Receiver.MutableRuntimeData->VertexWetnessProfileParameters.SetNum(VertexCount);
+    Receiver.MutableRuntimeData->SurfaceWaterUVs.SetNum(VertexCount);
+    Receiver.MutableRuntimeData->SurfaceWaterUVValidFlags.Init(false,VertexCount);
+    Receiver.MutableRuntimeData->SurfaceWaterMaterialSlotIndices.Init(INDEX_NONE, VertexCount);
 
-    FWetnessProfileParameters DefaultParameters;
-    if (const UWetnessProfile* WetnessProfile = Receiver.GetActiveWetnessProfile())
+    for (FWetnessProfileParameters& VertexParameters : Receiver.MutableRuntimeData->VertexWetnessProfileParameters)
     {
-        DefaultParameters = WetnessProfile->GetParameters();
-    }
-
-    for (FWetnessProfileParameters& VertexParameters : Receiver.RuntimeData->VertexWetnessProfileParameters)
-    {
-        VertexParameters = DefaultParameters;
+        VertexParameters = FWetnessProfileParameters();
     }
 
     if (!Receiver.WetClothingAsset || !Receiver.TargetSkeletalMesh)
@@ -109,12 +107,12 @@ bool FWetRuntimeDataBuilder::InitializeWetPartVertexData(FWetRuntimeDataBuildArg
     }
 
     USkeletalMesh* SkeletalMesh = Receiver.TargetSkeletalMesh->GetSkeletalMeshAsset();
-    if (Receiver.WetClothingAsset->TargetMesh && Receiver.WetClothingAsset->TargetMesh != SkeletalMesh)
+    if (Receiver.WetClothingAsset->GetDWCSkeletalMesh() && Receiver.WetClothingAsset->GetDWCSkeletalMesh() != SkeletalMesh)
     {
         UE_LOG(
             LogTemp,
             Warning,
-            TEXT("DynamicWetClothesComponent: WetClothingAsset TargetMesh does not match the receiver mesh on %s."),
+            TEXT("DynamicWetClothesComponent: WetClothingAsset DWC Skeletal Mesh does not match the receiver mesh on %s."),
             *GetNameSafe(Receiver.OwnerForLogs));
     }
 
@@ -128,7 +126,7 @@ bool FWetRuntimeDataBuilder::InitializeWetPartVertexData(FWetRuntimeDataBuildArg
         return false;
     }
 
-    if (!InitializeWetPartVertexDataFromPrecomputedData(Receiver, VertexCount, DefaultParameters))
+    if (!InitializeWetPartVertexDataFromPrecomputedData(Receiver, VertexCount))
     {
         const USkeletalMesh* RuntimeMesh = Receiver.TargetSkeletalMesh != nullptr
                                                ? Receiver.TargetSkeletalMesh->GetSkeletalMeshAsset()
@@ -149,9 +147,8 @@ bool FWetRuntimeDataBuilder::InitializeWetPartVertexData(FWetRuntimeDataBuildArg
 }
 
 bool FWetRuntimeDataBuilder::InitializeWetPartVertexDataFromPrecomputedData(
-    FWetRuntimeDataBuildArgs&        Receiver,
-    const int32                      VertexCount,
-    const FWetnessProfileParameters& DefaultParameters)
+    FWetRuntimeDataBuildArgs& Receiver,
+    const int32 VertexCount)
 {
     if (!Receiver.WetClothingAsset || !Receiver.TargetSkeletalMesh)
     {
@@ -159,7 +156,8 @@ bool FWetRuntimeDataBuilder::InitializeWetPartVertexDataFromPrecomputedData(
     }
 
     const USkeletalMesh* SkeletalMesh = Receiver.TargetSkeletalMesh->GetSkeletalMeshAsset();
-    if (!Receiver.WetClothingAsset->IsPrecomputedSimulationDataValidForMesh(SkeletalMesh, Receiver.LODIndex))
+    if (!Receiver.bPrecomputedDataAlreadyValidated &&
+        !Receiver.WetClothingAsset->IsPrecomputedSimulationDataValidForMesh(SkeletalMesh, Receiver.LODIndex))
     {
         const FString ValidationSummary =
             Receiver.WetClothingAsset->GetPrecomputedSimulationDataValidationSummary(SkeletalMesh, Receiver.LODIndex);
@@ -219,12 +217,11 @@ bool FWetRuntimeDataBuilder::InitializeWetPartVertexDataFromPrecomputedData(
     for (int32 VertexIndex = 0; VertexIndex < PrecomputedData.Vertices.Num(); ++VertexIndex)
     {
         const FWetClothingPrecomputedVertexData& PrecomputedVertex = PrecomputedData.Vertices[VertexIndex];
-        if (!Receiver.RuntimeData->VertexWetPartIDs.IsValidIndex(VertexIndex) ||
-            !Receiver.RuntimeData->VertexWettableFlags.IsValidIndex(VertexIndex) ||
-            !Receiver.RuntimeData->VertexAbsorbedWetnessFlags.IsValidIndex(VertexIndex) ||
-            !Receiver.RuntimeData->VertexSurfaceWaterFlags.IsValidIndex(VertexIndex) ||
-            !Receiver.RuntimeData->VertexWetnessProfileParameters.IsValidIndex(VertexIndex) ||
-            !Receiver.RuntimeData->VertexWetPartDebugColors.IsValidIndex(VertexIndex))
+        if (!Receiver.MutableRuntimeData->VertexWetPartIDs.IsValidIndex(VertexIndex) ||
+            !Receiver.MutableRuntimeData->VertexWettableFlags.IsValidIndex(VertexIndex) ||
+            !Receiver.MutableRuntimeData->VertexAbsorbedWetnessFlags.IsValidIndex(VertexIndex) ||
+            !Receiver.MutableRuntimeData->VertexSurfaceWaterFlags.IsValidIndex(VertexIndex) ||
+            !Receiver.MutableRuntimeData->VertexWetnessProfileParameters.IsValidIndex(VertexIndex))
         {
             continue;
         }
@@ -238,25 +235,22 @@ bool FWetRuntimeDataBuilder::InitializeWetPartVertexDataFromPrecomputedData(
             Receiver.WetClothingAsset->PartData.EditableWetPartData.WetPartEntries.IsValidIndex(PrecomputedVertex.WetPartEntryIndex) &&
             ResolvedWetPartParametersByEntryIndex.Contains(PrecomputedVertex.WetPartEntryIndex))
         {
-            const FWetClothingWetPartEntry& WetPartEntry =
-                Receiver.WetClothingAsset->PartData.EditableWetPartData.WetPartEntries[PrecomputedVertex.WetPartEntryIndex];
-            Receiver.RuntimeData->VertexWettableFlags[VertexIndex] = true;
-            Receiver.RuntimeData->VertexWetPartIDs[VertexIndex] = PrecomputedVertex.WetPartID;
-            Receiver.RuntimeData->VertexWetnessProfileParameters[VertexIndex] =
+            Receiver.MutableRuntimeData->VertexWettableFlags[VertexIndex] = true;
+            Receiver.MutableRuntimeData->VertexWetPartIDs[VertexIndex] = PrecomputedVertex.WetPartID;
+            Receiver.MutableRuntimeData->VertexWetnessProfileParameters[VertexIndex] =
                 ResolvedWetPartParametersByEntryIndex[PrecomputedVertex.WetPartEntryIndex];
-            Receiver.RuntimeData->VertexAbsorbedWetnessFlags[VertexIndex] =
-                Receiver.RuntimeData->VertexWetnessProfileParameters[VertexIndex].SupportsAbsorbedWetness();
-            Receiver.RuntimeData->VertexWetPartDebugColors[VertexIndex] = WetPartEntry.Color;
+            Receiver.MutableRuntimeData->VertexAbsorbedWetnessFlags[VertexIndex] =
+                Receiver.MutableRuntimeData->VertexWetnessProfileParameters[VertexIndex].SupportsAbsorbedWetness();
             ++RuntimeWettableVertexCount;
         }
         if (PrecomputedVertex.bHasSurfaceWaterUV && PrecomputedVertex.SurfaceWaterUV.ContainsNaN() == false)
         {
-            Receiver.RuntimeData->SurfaceWaterUVs[VertexIndex] = FVector2f(PrecomputedVertex.SurfaceWaterUV);
-            Receiver.RuntimeData->SurfaceWaterUVValidFlags[VertexIndex] = true;
-            Receiver.RuntimeData->SurfaceWaterMaterialSlotIndices[VertexIndex] = PrecomputedVertex.MaterialSlotIndex;
-            Receiver.RuntimeData->VertexSurfaceWaterFlags[VertexIndex] =
-                Receiver.RuntimeData->VertexWetnessProfileParameters.IsValidIndex(VertexIndex) &&
-                Receiver.RuntimeData->VertexWetnessProfileParameters[VertexIndex].SupportsSurfaceWater();
+            Receiver.MutableRuntimeData->SurfaceWaterUVs[VertexIndex] = FVector2f(PrecomputedVertex.SurfaceWaterUV);
+            Receiver.MutableRuntimeData->SurfaceWaterUVValidFlags[VertexIndex] = true;
+            Receiver.MutableRuntimeData->SurfaceWaterMaterialSlotIndices[VertexIndex] = PrecomputedVertex.MaterialSlotIndex;
+            Receiver.MutableRuntimeData->VertexSurfaceWaterFlags[VertexIndex] =
+                Receiver.MutableRuntimeData->VertexWetnessProfileParameters.IsValidIndex(VertexIndex) &&
+                Receiver.MutableRuntimeData->VertexWetnessProfileParameters[VertexIndex].SupportsSurfaceWater();
         }
     }
 
@@ -293,6 +287,11 @@ bool FWetRuntimeDataBuilder::InitializeWetPartVertexDataFromPrecomputedData(
 
 bool FWetRuntimeDataBuilder::InitializeNeighborGraphFromPrecomputedData(FWetRuntimeDataBuildArgs& Receiver)
 {
+    if (Receiver.MutableRuntimeData == nullptr)
+    {
+        return false;
+    }
+
     FSkeletalMeshLODRenderData* LODData = nullptr;
     if (!GetLODRenderData(Receiver.TargetSkeletalMesh, Receiver.LODIndex, LODData))
     {
@@ -300,7 +299,7 @@ bool FWetRuntimeDataBuilder::InitializeNeighborGraphFromPrecomputedData(FWetRunt
     }
 
     const int32 VertexCount = LODData->GetNumVertices();
-    Receiver.RuntimeData->ResetNeighborGraph();
+    Receiver.MutableRuntimeData->ResetNeighborGraph();
 
     const USkeletalMesh* SkeletalMesh = Receiver.TargetSkeletalMesh ? Receiver.TargetSkeletalMesh->GetSkeletalMeshAsset() : nullptr;
     FString ErrorMessage;
@@ -309,8 +308,8 @@ bool FWetRuntimeDataBuilder::InitializeNeighborGraphFromPrecomputedData(FWetRunt
             SkeletalMesh,
             Receiver.LODIndex,
             VertexCount,
-            Receiver.RuntimeData->NeighborRanges,
-            Receiver.RuntimeData->FlatNeighborIndices,
+            Receiver.MutableRuntimeData->NeighborRanges,
+            Receiver.MutableRuntimeData->FlatNeighborIndices,
             &ErrorMessage))
     {
         UE_LOG(
@@ -322,7 +321,7 @@ bool FWetRuntimeDataBuilder::InitializeNeighborGraphFromPrecomputedData(FWetRunt
         return false;
     }
 
-    Receiver.RuntimeData->bHasNeighborGraph = true;
+    Receiver.MutableRuntimeData->bHasNeighborGraph = true;
     return true;
 }
 
@@ -331,12 +330,6 @@ void FWetRuntimeDataBuilder::EnsureWetnessBufferSize(FWetRuntimeDataBuildArgs& R
     if (VertexCount <= 0)
     {
         Receiver.SimulationState->AbsorbedWetnessPerVertex.Reset();
-        Receiver.RuntimeData->VertexWetPartIDs.Reset();
-        Receiver.RuntimeData->VertexWettableFlags.Reset();
-        Receiver.RuntimeData->VertexAbsorbedWetnessFlags.Reset();
-        Receiver.RuntimeData->VertexSurfaceWaterFlags.Reset();
-        Receiver.RuntimeData->VertexWetnessProfileParameters.Reset();
-        Receiver.RuntimeData->VertexWetPartDebugColors.Reset();
         Receiver.SimulationState->UpdatingPendingWetnessAmounts.Reset();
         Receiver.SimulationState->WetnessDryHoldTimePerVertex.Reset();
         Receiver.SimulationState->UpdatingPendingWetnessVertexIndexQueue.Reset();
@@ -354,21 +347,15 @@ void FWetRuntimeDataBuilder::EnsureWetnessBufferSize(FWetRuntimeDataBuildArgs& R
         Receiver.SimulationState->AbsorbedWetnessPerVertex.SetNumZeroed(VertexCount);
     }
 
-    if (Receiver.RuntimeData->VertexWetPartIDs.Num() != VertexCount ||
-        Receiver.RuntimeData->VertexWettableFlags.Num() != VertexCount ||
-        Receiver.RuntimeData->VertexAbsorbedWetnessFlags.Num() != VertexCount ||
-        Receiver.RuntimeData->VertexSurfaceWaterFlags.Num() != VertexCount ||
-        Receiver.RuntimeData->VertexWetnessProfileParameters.Num() != VertexCount ||
-        Receiver.RuntimeData->VertexWetPartDebugColors.Num() != VertexCount)
+    if (Receiver.RuntimeData != nullptr && Receiver.RuntimeData->VertexCount != VertexCount)
     {
-        if (!InitializeWetPartVertexData(Receiver))
-        {
-            UE_LOG(
-                LogTemp,
-                Error,
-                TEXT("DynamicWetClothesComponent: Failed to refresh precomputed wet part data on %s."),
-                *GetNameSafe(Receiver.OwnerForLogs));
-        }
+        UE_LOG(
+            LogTemp,
+            Error,
+            TEXT("DynamicWetClothesComponent: Shared runtime vertex count mismatch on %s. Shared=%d Runtime=%d."),
+            *GetNameSafe(Receiver.OwnerForLogs),
+            Receiver.RuntimeData->VertexCount,
+            VertexCount);
     }
 
     if (Receiver.SimulationState->UpdatingPendingWetnessAmounts.Num() != VertexCount)
@@ -403,92 +390,64 @@ void FWetRuntimeDataBuilder::EnsureWetnessBufferSize(FWetRuntimeDataBuildArgs& R
 
 void FWetRuntimeDataBuilder::EnsureWetnessBufferSize(FWetInputStageArgs& Receiver, const int32 VertexCount)
 {
-    if (VertexCount <= 0)
+    if (Receiver.SimulationState == nullptr)
     {
-        if (Receiver.SimulationState)
-        {
-            Receiver.SimulationState->AbsorbedWetnessPerVertex.Reset();
-            Receiver.SimulationState->UpdatingPendingWetnessAmounts.Reset();
-            Receiver.SimulationState->WetnessDryHoldTimePerVertex.Reset();
-            Receiver.SimulationState->UpdatingPendingWetnessVertexIndexQueue.Reset();
-            Receiver.SimulationState->CurrentPendingWetnessVertexIndexQueue.Reset();
-            Receiver.SimulationState->CurrentPendingWetnessAmounts.Reset();
-            Receiver.SimulationState->CurrentPendingWetnessReadIndex = 0;
-            Receiver.SimulationState->bPendingWetnessQueued.Reset();
-            Receiver.SimulationState->DirtyWetVertexIndices.Reset();
-            Receiver.SimulationState->bDirtyWetVertexQueued.Reset();
-        }
-        if (Receiver.RuntimeData)
-        {
-            Receiver.RuntimeData->VertexWetPartIDs.Reset();
-            Receiver.RuntimeData->VertexWettableFlags.Reset();
-            Receiver.RuntimeData->VertexAbsorbedWetnessFlags.Reset();
-            Receiver.RuntimeData->VertexSurfaceWaterFlags.Reset();
-            Receiver.RuntimeData->VertexWetnessProfileParameters.Reset();
-            Receiver.RuntimeData->VertexWetPartDebugColors.Reset();
-        }
         return;
     }
 
-    if (Receiver.SimulationState)
+    if (VertexCount <= 0)
     {
-        if (Receiver.SimulationState->AbsorbedWetnessPerVertex.Num() != VertexCount)
-        {
-            Receiver.SimulationState->AbsorbedWetnessPerVertex.SetNumZeroed(VertexCount);
-        }
-        if (Receiver.SimulationState->UpdatingPendingWetnessAmounts.Num() != VertexCount)
-        {
-            Receiver.SimulationState->UpdatingPendingWetnessAmounts.SetNumZeroed(VertexCount);
-            Receiver.SimulationState->UpdatingPendingWetnessVertexIndexQueue.Reset();
-            Receiver.SimulationState->CurrentPendingWetnessVertexIndexQueue.Reset();
-            Receiver.SimulationState->CurrentPendingWetnessAmounts.Reset();
-            Receiver.SimulationState->CurrentPendingWetnessReadIndex = 0;
-        }
-        if (Receiver.SimulationState->WetnessDryHoldTimePerVertex.Num() != VertexCount)
-        {
-            Receiver.SimulationState->WetnessDryHoldTimePerVertex.SetNumZeroed(VertexCount);
-        }
-        if (Receiver.SimulationState->bPendingWetnessQueued.Num() != VertexCount)
-        {
-            Receiver.SimulationState->bPendingWetnessQueued.Init(false, VertexCount);
-            Receiver.SimulationState->UpdatingPendingWetnessVertexIndexQueue.Reset();
-            Receiver.SimulationState->CurrentPendingWetnessVertexIndexQueue.Reset();
-            Receiver.SimulationState->CurrentPendingWetnessAmounts.Reset();
-            Receiver.SimulationState->CurrentPendingWetnessReadIndex = 0;
-        }
-        if (Receiver.SimulationState->bDirtyWetVertexQueued.Num() != VertexCount)
-        {
-            Receiver.SimulationState->DirtyWetVertexIndices.Reset();
-            Receiver.SimulationState->bDirtyWetVertexQueued.Init(false, VertexCount);
-        }
+        Receiver.SimulationState->AbsorbedWetnessPerVertex.Reset();
+        Receiver.SimulationState->UpdatingPendingWetnessAmounts.Reset();
+        Receiver.SimulationState->WetnessDryHoldTimePerVertex.Reset();
+        Receiver.SimulationState->UpdatingPendingWetnessVertexIndexQueue.Reset();
+        Receiver.SimulationState->CurrentPendingWetnessVertexIndexQueue.Reset();
+        Receiver.SimulationState->CurrentPendingWetnessAmounts.Reset();
+        Receiver.SimulationState->CurrentPendingWetnessReadIndex = 0;
+        Receiver.SimulationState->bPendingWetnessQueued.Reset();
+        Receiver.SimulationState->DirtyWetVertexIndices.Reset();
+        Receiver.SimulationState->bDirtyWetVertexQueued.Reset();
+        return;
     }
 
-    if (Receiver.RuntimeData)
+    if (Receiver.SimulationState->AbsorbedWetnessPerVertex.Num() != VertexCount)
     {
-        if (Receiver.RuntimeData->VertexWetPartIDs.Num() != VertexCount)
-        {
-            Receiver.RuntimeData->VertexWetPartIDs.Init(INDEX_NONE, VertexCount);
-        }
-        if (Receiver.RuntimeData->VertexWettableFlags.Num() != VertexCount)
-        {
-            Receiver.RuntimeData->VertexWettableFlags.Init(false, VertexCount);
-        }
-        if (Receiver.RuntimeData->VertexAbsorbedWetnessFlags.Num() != VertexCount)
-        {
-            Receiver.RuntimeData->VertexAbsorbedWetnessFlags.Init(false, VertexCount);
-        }
-        if (Receiver.RuntimeData->VertexSurfaceWaterFlags.Num() != VertexCount)
-        {
-            Receiver.RuntimeData->VertexSurfaceWaterFlags.Init(false, VertexCount);
-        }
-        if (Receiver.RuntimeData->VertexWetnessProfileParameters.Num() != VertexCount)
-        {
-            Receiver.RuntimeData->VertexWetnessProfileParameters.SetNum(VertexCount);
-        }
-        if (Receiver.RuntimeData->VertexWetPartDebugColors.Num() != VertexCount)
-        {
-            Receiver.RuntimeData->VertexWetPartDebugColors.Init(FLinearColor(0.25f, 0.25f, 0.25f, 1.0f), VertexCount);
-        }
+        Receiver.SimulationState->AbsorbedWetnessPerVertex.SetNumZeroed(VertexCount);
+    }
+    if (Receiver.SimulationState->UpdatingPendingWetnessAmounts.Num() != VertexCount)
+    {
+        Receiver.SimulationState->UpdatingPendingWetnessAmounts.SetNumZeroed(VertexCount);
+        Receiver.SimulationState->UpdatingPendingWetnessVertexIndexQueue.Reset();
+        Receiver.SimulationState->CurrentPendingWetnessVertexIndexQueue.Reset();
+        Receiver.SimulationState->CurrentPendingWetnessAmounts.Reset();
+        Receiver.SimulationState->CurrentPendingWetnessReadIndex = 0;
+    }
+    if (Receiver.SimulationState->WetnessDryHoldTimePerVertex.Num() != VertexCount)
+    {
+        Receiver.SimulationState->WetnessDryHoldTimePerVertex.SetNumZeroed(VertexCount);
+    }
+    if (Receiver.SimulationState->bPendingWetnessQueued.Num() != VertexCount)
+    {
+        Receiver.SimulationState->bPendingWetnessQueued.Init(false, VertexCount);
+        Receiver.SimulationState->UpdatingPendingWetnessVertexIndexQueue.Reset();
+        Receiver.SimulationState->CurrentPendingWetnessVertexIndexQueue.Reset();
+        Receiver.SimulationState->CurrentPendingWetnessAmounts.Reset();
+        Receiver.SimulationState->CurrentPendingWetnessReadIndex = 0;
+    }
+    if (Receiver.SimulationState->bDirtyWetVertexQueued.Num() != VertexCount)
+    {
+        Receiver.SimulationState->DirtyWetVertexIndices.Reset();
+        Receiver.SimulationState->bDirtyWetVertexQueued.Init(false, VertexCount);
+    }
+
+    if (Receiver.RuntimeData != nullptr && Receiver.RuntimeData->VertexCount != VertexCount)
+    {
+        UE_LOG(
+            LogTemp,
+            Error,
+            TEXT("DynamicWetClothesComponent: Shared runtime vertex count changed after initialization. Shared=%d Runtime=%d."),
+            Receiver.RuntimeData->VertexCount,
+            VertexCount);
     }
 }
 
@@ -526,18 +485,18 @@ bool FWetRuntimeDataBuilder::InitializeBoneOptimizationCacheFromPrecomputedData(
     FWetRuntimeDataBuildArgs& Receiver,
     const int32               LODIndex)
 {
-    if (!Receiver.RuntimeData)
+    if (!Receiver.MutableRuntimeData)
     {
         return false;
     }
 
-    Receiver.RuntimeData->ResetBoneOptimizationCache();
+    Receiver.MutableRuntimeData->ResetBoneOptimizationCache();
 
     auto SetFallbackReason = [&Receiver](const FString& Reason)
     {
-        if (Receiver.RuntimeData)
+        if (Receiver.MutableRuntimeData)
         {
-            Receiver.RuntimeData->BoneOptimizationCacheFallbackReason = Reason;
+            Receiver.MutableRuntimeData->BoneOptimizationCacheFallbackReason = Reason;
         }
     };
 
@@ -571,7 +530,7 @@ bool FWetRuntimeDataBuilder::InitializeBoneOptimizationCacheFromPrecomputedData(
             Receiver.WetClothingAsset,
             SkeletalMesh,
             LODIndex,
-            Receiver.RuntimeData->BoneOptimizationCache,
+            Receiver.MutableRuntimeData->BoneOptimizationCache,
             &PrecomputedCacheErrorMessage))
     {
         SetFallbackReason(
@@ -582,20 +541,20 @@ bool FWetRuntimeDataBuilder::InitializeBoneOptimizationCacheFromPrecomputedData(
     }
 
     const FWetBonePrimaryVertexCache& PrimaryCache =
-        Receiver.RuntimeData->BoneOptimizationCache.PrimaryVertexCache;
+        Receiver.MutableRuntimeData->BoneOptimizationCache.PrimaryVertexCache;
     if (PrimaryCache.SourceMesh != SkeletalMesh ||
         PrimaryCache.LODIndex != LODIndex ||
         PrimaryCache.BoneCount <= 0 ||
         PrimaryCache.VertexCount <= 0 ||
         PrimaryCache.BoneStartOffsets.Num() != PrimaryCache.BoneCount + 1)
     {
-        Receiver.RuntimeData->ResetBoneOptimizationCache();
+        Receiver.MutableRuntimeData->ResetBoneOptimizationCache();
         SetFallbackReason(TEXT("The copied precomputed bone cache contains no valid LOD primary-bone data."));
         return false;
     }
 
-    Receiver.RuntimeData->bHasBoneOptimizationCache = true;
-    Receiver.RuntimeData->BoneOptimizationCacheFallbackReason.Reset();
+    Receiver.MutableRuntimeData->bHasBoneOptimizationCache = true;
+    Receiver.MutableRuntimeData->BoneOptimizationCacheFallbackReason.Reset();
     return true;
 }
 

@@ -88,13 +88,13 @@ struct DWC_API FDWCWetClothingAssetSetupSettings
 
     /** Serialized as int32 for compatibility with existing WCA assets. Creation/Setup dialogs expose enum proxies. */
     UPROPERTY(VisibleAnywhere, Category = "Map Resolutions", meta = (DisplayName = "GPU Simulation"))
-    int32 GPUSimulationMapResolution = 1024;
+    int32 GPUSimulationMapResolution = 512;
 
     UPROPERTY(VisibleAnywhere, Category = "Map Resolutions", meta = (DisplayName = "Wrinkle"))
-    int32 WrinkleMapResolution = 2048;
+    int32 WrinkleMapResolution = 1024;
 
     UPROPERTY(VisibleAnywhere, Category = "Map Resolutions", meta = (DisplayName = "Transparency"))
-    int32 TransparencyMapResolution = 2048;
+    int32 TransparencyMapResolution = 1024;
 
     /** Currently initialized to UV0. Stored so a later asset-creation wizard may expose another imported UV. */
     UPROPERTY(VisibleAnywhere, Category = "Mesh")
@@ -167,7 +167,7 @@ struct DWC_API FDWCEditorUVTopologyData
 };
 
 USTRUCT(BlueprintType)
-struct DWC_API FDWCDataUVPerLOD
+struct DWC_API FDWCDataUVLODMetadata
 {
     GENERATED_BODY()
 
@@ -181,11 +181,21 @@ struct DWC_API FDWCDataUVPerLOD
     int32 RenderVertexCount = 0;
 
     UPROPERTY(VisibleAnywhere, Category = "DWC Data UV")
-    FString MeshSignature;
+    int32 MaterialSlotCount = 0;
 
-    /** Cached copy of the DWC Data UV channel per LOD render vertex, mirrored from the runtime mesh. */
     UPROPERTY(VisibleAnywhere, Category = "DWC Data UV")
-    TArray<FVector2f> DataUVs;
+    int32 UVChannelIndex = INDEX_NONE;
+
+    /** Signature of the mesh inputs used to generate this output. */
+    UPROPERTY(VisibleAnywhere, Category = "DWC Data UV")
+    FString MeshInputSignature;
+
+    /** Signature of the actual DWC Data UV channel stored on DWCSkeletalMesh. */
+    UPROPERTY(VisibleAnywhere, Category = "DWC Data UV")
+    FString DataUVOutputSignature;
+
+    UPROPERTY(VisibleAnywhere, Category = "DWC Data UV")
+    int32 GeneratorVersion = 1;
 };
 
 USTRUCT(BlueprintType)

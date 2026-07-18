@@ -1,6 +1,7 @@
 #include "WetClothingAssetMeshAnalyzer.h"
 
 #include "DataAssets/WetClothingAsset.h"
+#include "Utility/DWCDataUVBufferView.h"
 #include "Engine/SkeletalMesh.h"
 #include "DataAssets/WetClothingAssetSetupData.h"
 #include "Rendering/SkeletalMeshLODRenderData.h"
@@ -301,10 +302,10 @@ namespace WetClothingAssetMeshAnalyzerInternal
             return false;
         }
 
-        const FDWCDataUVPerLOD* DataUV = WetClothingAsset.FindGeneratedDataUVForLOD(LODIndex);
-        if (DataUV == nullptr || !DataUV->bIsValid)
+        const FDWCDataUVLODMetadata* DataUVMetadata = WetClothingAsset.FindDataUVMetadataForLOD(LODIndex);
+        if (DataUVMetadata == nullptr || !DataUVMetadata->bIsValid)
         {
-            FWetClothingAssetMeshAnalyzer::SetError(OutErrorMessage, TEXT("Generated DWC Data UV payload is missing for the requested LOD."));
+            FWetClothingAssetMeshAnalyzer::SetError(OutErrorMessage, TEXT("Generated DWC Data UV metadata is missing for the requested LOD."));
             return false;
         }
 
@@ -317,9 +318,14 @@ namespace WetClothingAssetMeshAnalyzerInternal
 
         const FSkeletalMeshLODRenderData& LODData = RenderData->LODRenderData[LODIndex];
         const int32 VertexCount = static_cast<int32>(LODData.GetNumVertices());
-        if (VertexCount <= 0 || DataUV->RenderVertexCount != VertexCount || DataUV->DataUVs.Num() != VertexCount)
+        FDWCDataUVBufferView DataUVView;
+        FString DataUVError;
+        if (!DataUVView.Initialize(RuntimeMesh, LODIndex, WetClothingAsset.GetDWCDataUVChannelIndex(), &DataUVError) ||
+            VertexCount <= 0 ||
+            DataUVMetadata->RenderVertexCount != VertexCount ||
+            DataUVView.NumVertices() != VertexCount)
         {
-            FWetClothingAssetMeshAnalyzer::SetError(OutErrorMessage, TEXT("Generated DWC Data UV payload does not match the Source Mesh render vertices."));
+            FWetClothingAssetMeshAnalyzer::SetError(OutErrorMessage, *FString::Printf(TEXT("Generated DWC Data UV does not match render vertices. %s"), *DataUVError));
             return false;
         }
 
@@ -327,9 +333,9 @@ namespace WetClothingAssetMeshAnalyzerInternal
             RuntimeMesh,
             LODIndex,
             WetClothingAsset.GetDWCDataUVChannelIndex());
-        if (CurrentSignature.IsEmpty() || DataUV->MeshSignature != CurrentSignature)
+        if (CurrentSignature.IsEmpty() || DataUVMetadata->DataUVOutputSignature != CurrentSignature)
         {
-            FWetClothingAssetMeshAnalyzer::SetError(OutErrorMessage, TEXT("Generated DWC Data UV payload is out of date."));
+            FWetClothingAssetMeshAnalyzer::SetError(OutErrorMessage, TEXT("Generated DWC Data UV metadata is out of date."));
             return false;
         }
 
@@ -367,9 +373,9 @@ namespace WetClothingAssetMeshAnalyzerInternal
                 FRawTriangle Triangle;
                 Triangle.TriangleID = TriangleIndex / 3;
                 Triangle.MaterialSlotIndex = MaterialSlotIndex;
-                Triangle.UVs[0] = FVector2D(DataUV->DataUVs[Index0]);
-                Triangle.UVs[1] = FVector2D(DataUV->DataUVs[Index1]);
-                Triangle.UVs[2] = FVector2D(DataUV->DataUVs[Index2]);
+                Triangle.UVs[0] = FVector2D(DataUVView.GetUV(Index0));
+                Triangle.UVs[1] = FVector2D(DataUVView.GetUV(Index1));
+                Triangle.UVs[2] = FVector2D(DataUVView.GetUV(Index2));
                 Triangle.LocalPositions[0] = FVector(LODData.StaticVertexBuffers.PositionVertexBuffer.VertexPosition(Index0));
                 Triangle.LocalPositions[1] = FVector(LODData.StaticVertexBuffers.PositionVertexBuffer.VertexPosition(Index1));
                 Triangle.LocalPositions[2] = FVector(LODData.StaticVertexBuffers.PositionVertexBuffer.VertexPosition(Index2));

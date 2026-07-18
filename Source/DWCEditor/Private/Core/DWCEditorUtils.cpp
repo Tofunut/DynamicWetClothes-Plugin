@@ -3,6 +3,9 @@
 #include "FileHelpers.h"
 #include "DataAssets/WetClothingAsset.h"
 #include "Engine/SkeletalMesh.h"
+#include "Engine/Texture2D.h"
+#include "Materials/Material.h"
+#include "Materials/MaterialInstanceConstant.h"
 #include "UObject/Object.h"
 #include "UObject/Package.h"
 #include "Framework/Notifications/NotificationManager.h"
@@ -48,6 +51,22 @@ bool DWCEditorUtils::SaveAsset(UObject* Asset)
     if (WetClothingAsset != nullptr)
     {
         WetClothingAsset->BeginRuntimeDataEditorSaveAttempt();
+
+        FString RuntimePreparationError;
+        if (WetClothingAsset->CanPrepareRuntimeDataForEditorSave())
+        {
+            if (!WetClothingAsset->PrepareRuntimeDataForEditorSave(&RuntimePreparationError))
+            {
+                WetClothingAsset->CompleteRuntimeDataEditorSaveAttempt(false);
+                ShowDWCEditorNotification(
+                    FText::FromString(RuntimePreparationError.IsEmpty()
+                        ? TEXT("Failed to prepare DWC precomputed simulation data for save.")
+                        : RuntimePreparationError),
+                    SNotificationItem::CS_Fail);
+                GDWCEditorAssetSaveAttemptFinished.Broadcast(Asset, false);
+                return false;
+            }
+        }
     }
 
     TUniquePtr<FScopedSlowTask> SaveSlowTask;
@@ -77,15 +96,62 @@ bool DWCEditorUtils::SaveAsset(UObject* Asset)
     PackagesToSave.Add(Package);
     if (WetClothingAsset != nullptr)
     {
-        if (USkeletalMesh* GeneratedDataUV = WetClothingAsset->GetRuntimeSkeletalMesh())
+        const auto AddDirtyGeneratedPackage = [&PackagesToSave, Package](UObject* GeneratedObject)
         {
-            if (UPackage* RuntimeMeshPackage = GeneratedDataUV->GetOutermost();
-                RuntimeMeshPackage != nullptr &&
-                RuntimeMeshPackage != Package &&
-                RuntimeMeshPackage->IsDirty())
+            if (GeneratedObject == nullptr)
             {
-                PackagesToSave.AddUnique(RuntimeMeshPackage);
+                return;
             }
+
+            UPackage* GeneratedPackage = GeneratedObject->GetOutermost();
+            if (GeneratedPackage != nullptr && GeneratedPackage != Package && GeneratedPackage->IsDirty())
+            {
+                PackagesToSave.AddUnique(GeneratedPackage);
+            }
+        };
+
+        AddDirtyGeneratedPackage(WetClothingAsset->GetRuntimeSkeletalMesh());
+        for (const FWetClothingGeneratedWetMaterialOverride& MaterialOverride :
+             WetClothingAsset->PartData.GeneratedWetMaterialOverrides)
+        {
+            AddDirtyGeneratedPackage(MaterialOverride.GeneratedMaterial.Get());
+            AddDirtyGeneratedPackage(MaterialOverride.CPUMaterialInstance.Get());
+            AddDirtyGeneratedPackage(MaterialOverride.GPUMaterialInstance.Get());
+        }
+
+        // A Bake Maps action is a complete persistence operation. Save every dirty
+        // generated package referenced by the WCA together with the WCA package so
+        // a successful bake never leaves a misleading "not saved yet" state.
+        for (const FWetClothingBakedWetnessProfileMap& ProfileMap :
+             WetClothingAsset->PartData.BakedWetnessProfileMaps)
+        {
+            AddDirtyGeneratedPackage(ProfileMap.WetnessProfileMap0.Get());
+        }
+
+        for (const FWetWrinkleBakedMapSet& WrinkleMap :
+             WetClothingAsset->WrinkleData.BakedWrinkleMaps)
+        {
+            AddDirtyGeneratedPackage(WrinkleMap.BakedWrinkleNormalMap.Get());
+            AddDirtyGeneratedPackage(WrinkleMap.BakedWrinkleMask.Get());
+        }
+
+        for (const FWetClothingTransparencyLayerData& TransparencyLayer :
+             WetClothingAsset->TransparencyData.TransparencyLayers)
+        {
+            for (const FWetClothingBakedTransparencyMap& TransparencyMap : TransparencyLayer.BakedMaps)
+            {
+                AddDirtyGeneratedPackage(TransparencyMap.TransparencyMap.Get());
+            }
+        }
+
+        for (const FWetClothingBakedTransparencyRevealLayer& RevealLayer :
+             WetClothingAsset->TransparencyData.BakedRevealLayers)
+        {
+            AddDirtyGeneratedPackage(RevealLayer.LookupMap.Get());
+            AddDirtyGeneratedPackage(RevealLayer.ColorMap.Get());
+            AddDirtyGeneratedPackage(RevealLayer.MaskMap.Get());
+            AddDirtyGeneratedPackage(RevealLayer.ConfidenceMap.Get());
+            AddDirtyGeneratedPackage(RevealLayer.RevealMaterial.Get());
         }
     }
 

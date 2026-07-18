@@ -6,6 +6,7 @@
 #include "Core/DWCEditorStyle.h"
 #include "Framework/MultiBox/MultiBoxBuilder.h"
 #include "Materials/MaterialInterface.h"
+#include "Materials/MaterialInstanceConstant.h"
 #include "Styling/AppStyle.h"
 #include "Styling/CoreStyle.h"
 #include "WetClothing/Common/Analysis/WetClothingAssetUVIslandCache.h"
@@ -83,20 +84,24 @@ namespace
 
     TSharedRef<SWidget> BuildGeneratedMaterialInfoRow(const FWetClothingGeneratedWetMaterialOverride& MaterialOverride)
     {
-        const UMaterialInterface* CPUWetMaterial = MaterialOverride.CPUWetMaterial.Get();
-        const UMaterialInterface* GPUWetMaterial = MaterialOverride.GPUWetMaterial.Get();
+        const UMaterialInterface* GeneratedMaterial = MaterialOverride.GeneratedMaterial.Get();
+        const UMaterialInterface* CPUMaterialInstance = MaterialOverride.CPUMaterialInstance.Get();
+        const UMaterialInterface* GPUMaterialInstance = MaterialOverride.GPUMaterialInstance.Get();
         const FString MaterialName = FString::Printf(
-            TEXT("CPU %s | GPU %s"),
-            *GetNameSafe(CPUWetMaterial),
-            *GetNameSafe(GPUWetMaterial));
+            TEXT("Shared %s | CPU %s | GPU %s"),
+            *GetNameSafe(GeneratedMaterial),
+            *GetNameSafe(CPUMaterialInstance),
+            *GetNameSafe(GPUMaterialInstance));
         const FString PackagePath = FString::Printf(
-            TEXT("CPU %s\nGPU %s"),
-            *GetMaterialPackagePath(CPUWetMaterial),
-            *GetMaterialPackagePath(GPUWetMaterial));
+            TEXT("Shared %s\nCPU %s\nGPU %s"),
+            *GetMaterialPackagePath(GeneratedMaterial),
+            *GetMaterialPackagePath(CPUMaterialInstance),
+            *GetMaterialPackagePath(GPUMaterialInstance));
         const FString ObjectPath = FString::Printf(
-            TEXT("CPU %s\nGPU %s"),
-            CPUWetMaterial != nullptr ? *CPUWetMaterial->GetPathName() : TEXT("None"),
-            GPUWetMaterial != nullptr ? *GPUWetMaterial->GetPathName() : TEXT("None"));
+            TEXT("Shared %s\nCPU %s\nGPU %s"),
+            GeneratedMaterial != nullptr ? *GeneratedMaterial->GetPathName() : TEXT("None"),
+            CPUMaterialInstance != nullptr ? *CPUMaterialInstance->GetPathName() : TEXT("None"),
+            GPUMaterialInstance != nullptr ? *GPUMaterialInstance->GetPathName() : TEXT("None"));
 
         return SNew(SBorder)
             .BorderImage(FAppStyle::Get().GetBrush(TEXT("NoBorder")))
@@ -622,52 +627,64 @@ TSharedRef<SWidget> FWetClothingEditorCommonWidgets::BuildBakeMapsMenu(const FWe
     MenuBuilder.BeginSection(TEXT("BakeMaps"), NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeMapsMenuSection", "BAKE MAPS"));
     MenuBuilder.AddMenuEntry(
         NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeAllMapsMenuItem", "Bake All Maps"),
-        NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeAllMapsMenuItemTooltip", "Bake all configured texture and texel maps. Runtime precomputed data is rebuilt automatically when the asset is saved."),
+        NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeAllMapsMenuItemTooltip", "Bake only configured map outputs that are missing, stale, or failed. Runtime precomputed data is rebuilt automatically when the asset is saved."),
         FSlateIcon(),
-        FUIAction(FExecuteAction::CreateLambda([OnBakeAllMaps = Args.OnBakeAllMaps]()
-        {
-            if (OnBakeAllMaps.IsBound()) OnBakeAllMaps.Execute();
-        })));
+        FUIAction(
+            FExecuteAction::CreateLambda([OnBakeAllMaps = Args.OnBakeAllMaps]()
+            {
+                if (OnBakeAllMaps.IsBound()) OnBakeAllMaps.Execute();
+            }),
+            Args.CanBakeAllMaps));
     MenuBuilder.AddMenuEntry(
         NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeGPUWetnessMapDataMenuItem", "Bake GPU Simulation Maps"),
         NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeGPUWetnessMapDataMenuItemTooltip", "Bake resolution-dependent simulation-LOD triangle-ID, barycentric, area, validity and same-material seam maps."),
         FSlateIcon(),
-        FUIAction(FExecuteAction::CreateLambda([OnBakeGPUWetnessMapData = Args.OnBakeGPUWetnessMapData]()
-        {
-            if (OnBakeGPUWetnessMapData.IsBound()) OnBakeGPUWetnessMapData.Execute();
-        })));
+        FUIAction(
+            FExecuteAction::CreateLambda([OnBakeGPUWetnessMapData = Args.OnBakeGPUWetnessMapData]()
+            {
+                if (OnBakeGPUWetnessMapData.IsBound()) OnBakeGPUWetnessMapData.Execute();
+            }),
+            Args.CanBakeGPUWetnessMapData));
     MenuBuilder.AddMenuEntry(
         NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeWetnessProfileMapsMenuItem", "Bake Wetness Profile Maps"),
         NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeWetnessProfileMapsMenuItemTooltip", "Bake wetness profile texture maps and update wet materials."),
         FSlateIcon(),
-        FUIAction(FExecuteAction::CreateLambda([OnBakeWetnessProfileMaps = Args.OnBakeWetnessProfileMaps]()
-        {
-            if (OnBakeWetnessProfileMaps.IsBound()) OnBakeWetnessProfileMaps.Execute();
-        })));
+        FUIAction(
+            FExecuteAction::CreateLambda([OnBakeWetnessProfileMaps = Args.OnBakeWetnessProfileMaps]()
+            {
+                if (OnBakeWetnessProfileMaps.IsBound()) OnBakeWetnessProfileMaps.Execute();
+            }),
+            Args.CanBakeWetnessProfileMaps));
     MenuBuilder.AddMenuEntry(
         NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeWrinkleNormalMapMenuItem", "Bake Wrinkle Normal Map"),
         NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeWrinkleNormalMapMenuItemTooltip", "Bake a wrinkle normal map."),
         FSlateIcon(),
-        FUIAction(FExecuteAction::CreateLambda([OnBakeWrinkleNormalMap = Args.OnBakeWrinkleNormalMap]()
-        {
-            if (OnBakeWrinkleNormalMap.IsBound()) OnBakeWrinkleNormalMap.Execute();
-        })));
+        FUIAction(
+            FExecuteAction::CreateLambda([OnBakeWrinkleNormalMap = Args.OnBakeWrinkleNormalMap]()
+            {
+                if (OnBakeWrinkleNormalMap.IsBound()) OnBakeWrinkleNormalMap.Execute();
+            }),
+            Args.CanBakeWrinkleNormalMap));
     MenuBuilder.AddMenuEntry(
         NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeWrinkleMaskMenuItem", "Bake Wrinkle Mask"),
         NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeWrinkleMaskMenuItemTooltip", "Bake a wrinkle mask."),
         FSlateIcon(),
-        FUIAction(FExecuteAction::CreateLambda([OnBakeWrinkleMask = Args.OnBakeWrinkleMask]()
-        {
-            if (OnBakeWrinkleMask.IsBound()) OnBakeWrinkleMask.Execute();
-        })));
+        FUIAction(
+            FExecuteAction::CreateLambda([OnBakeWrinkleMask = Args.OnBakeWrinkleMask]()
+            {
+                if (OnBakeWrinkleMask.IsBound()) OnBakeWrinkleMask.Execute();
+            }),
+            Args.CanBakeWrinkleMask));
     MenuBuilder.AddMenuEntry(
         NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeTransparencyRevealMapsMenuItem", "Bake Transparency Reveal Maps"),
         NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeTransparencyRevealMapsMenuItemTooltip", "Bake reveal textures/materials for Transparency mode and save the generated assets."),
         FSlateIcon(),
-        FUIAction(FExecuteAction::CreateLambda([OnBakeTransparencyRevealMaps = Args.OnBakeTransparencyRevealMaps]()
-        {
-            if (OnBakeTransparencyRevealMaps.IsBound()) OnBakeTransparencyRevealMaps.Execute();
-        })));
+        FUIAction(
+            FExecuteAction::CreateLambda([OnBakeTransparencyRevealMaps = Args.OnBakeTransparencyRevealMaps]()
+            {
+                if (OnBakeTransparencyRevealMaps.IsBound()) OnBakeTransparencyRevealMaps.Execute();
+            }),
+            Args.CanBakeTransparencyRevealMaps));
     MenuBuilder.EndSection();
 
     return MenuBuilder.MakeWidget();
@@ -679,28 +696,15 @@ TSharedRef<SWidget> FWetClothingEditorCommonWidgets::BuildGenerateMaterialsMenu(
 
     MenuBuilder.BeginSection(TEXT("GenerateMaterials"), NSLOCTEXT("WetClothingEditorCommonWidgets", "GenerateMaterialsMenuSection", "GENERATE MATERIALS"));
     MenuBuilder.AddMenuEntry(
-        NSLOCTEXT("WetClothingEditorCommonWidgets", "GenerateAllMaterialsMenuItem", "Generate CPU + GPU Materials"),
-        NSLOCTEXT("WetClothingEditorCommonWidgets", "GenerateAllMaterialsMenuItemTooltip", "Generate or overwrite both CPU and GPU DWC wet materials for each wettable slot."),
+        NSLOCTEXT("WetClothingEditorCommonWidgets", "GenerateUnifiedMaterialsMenuItem", "Generate Materials"),
+        NSLOCTEXT(
+            "WetClothingEditorCommonWidgets",
+            "GenerateUnifiedMaterialsMenuItemTooltip",
+            "Generate or refresh one shared DWC material graph and its CPU/GPU static permutations for every wettable slot."),
         FSlateIcon(),
-        FUIAction(FExecuteAction::CreateLambda([OnGenerateAllMaterials = Args.OnGenerateAllMaterials]()
+        FUIAction(FExecuteAction::CreateLambda([OnGenerateMaterials = Args.OnGenerateMaterials]()
         {
-            if (OnGenerateAllMaterials.IsBound()) OnGenerateAllMaterials.Execute();
-        })));
-    MenuBuilder.AddMenuEntry(
-        NSLOCTEXT("WetClothingEditorCommonWidgets", "GenerateCPUMaterialsMenuItem", "Generate CPU Materials"),
-        NSLOCTEXT("WetClothingEditorCommonWidgets", "GenerateCPUMaterialsMenuItemTooltip", "Generate or overwrite CPU DWC wet materials for each wettable slot."),
-        FSlateIcon(),
-        FUIAction(FExecuteAction::CreateLambda([OnGenerateCPUMaterials = Args.OnGenerateCPUMaterials]()
-        {
-            if (OnGenerateCPUMaterials.IsBound()) OnGenerateCPUMaterials.Execute();
-        })));
-    MenuBuilder.AddMenuEntry(
-        NSLOCTEXT("WetClothingEditorCommonWidgets", "GenerateGPUMaterialsMenuItem", "Generate GPU Materials"),
-        NSLOCTEXT("WetClothingEditorCommonWidgets", "GenerateGPUMaterialsMenuItemTooltip", "Generate or overwrite GPU DWC wetness-map materials for each wettable slot."),
-        FSlateIcon(),
-        FUIAction(FExecuteAction::CreateLambda([OnGenerateGPUMaterials = Args.OnGenerateGPUMaterials]()
-        {
-            if (OnGenerateGPUMaterials.IsBound()) OnGenerateGPUMaterials.Execute();
+            if (OnGenerateMaterials.IsBound()) OnGenerateMaterials.Execute();
         })));
     MenuBuilder.EndSection();
 
@@ -760,20 +764,13 @@ TSharedRef<ITableRow> FWetClothingEditorCommonWidgets::GenerateMaterialSlotRow(
         ThumbnailWidget = Thumbnail->MakeThumbnailWidget(ThumbnailConfig);
     }
 
-    TArray<FWetClothingAssetUVTriangle> SlotPreviewTriangles;
-    if (!bIsAllSlotsRow)
-    {
-        FWetClothingAssetUVIslandCache::BuildMaterialSlotPreviewTriangles(
-            Args.WetClothingAsset,
-            MaterialSlotIndex,
-            SlotPreviewTriangles);
-    }
-
+    // Keep the second 52x52 cell intentionally empty. Building per-slot UV wireframes here
+    // forced mesh/UV analysis during routine list refreshes and made WCA editor opening scale
+    // with mesh complexity. Detailed UV inspection belongs in the dedicated UV view.
     TSharedRef<SWidget> SlotPreviewWidget =
-        SNew(SWetClothingMaterialSlotPreview)
-        .Triangles(MoveTemp(SlotPreviewTriangles))
-        .PreviewTexture(nullptr)
-        .DrawWireframe(true);
+        SNew(SBox)
+        .WidthOverride(52.0f)
+        .HeightOverride(52.0f);
 
     TSharedRef<SHorizontalBox> RowContent = SNew(SHorizontalBox);
 
@@ -981,6 +978,9 @@ void FWetClothingEditorCommonWidgets::SetMaterialSlotWettable(UWetClothingAsset*
                 return MaterialOverride.MaterialSlotIndex == MaterialSlotIndex;
             });
     }
+    WetClothingAsset->MarkSimulationBakeOutOfDate();
+    WetClothingAsset->MarkVisualBakeOutOfDate();
+    WetClothingAsset->RefreshBakeState(false);
     WetClothingAsset->MarkPackageDirty();
 }
 

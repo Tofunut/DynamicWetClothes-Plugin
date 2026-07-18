@@ -265,7 +265,7 @@ struct DWC_API FWetWrinkleBakeSettings
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, Category = "Wet Wrinkle Bake", meta = (ClampMin = "16", ClampMax = "8192"))
-    int32 DefaultResolution = 2048;
+    int32 DefaultResolution = 1024;
 
     UPROPERTY(EditAnywhere, Category = "Wet Wrinkle Bake", meta = (ClampMin = "0", ClampMax = "64"))
     int32 PaddingPixels = 8;
@@ -321,7 +321,7 @@ struct DWC_API FWetWrinkleBakedMapSet
     int32 AlphaBuildVersion = 0;
 
     UPROPERTY(VisibleAnywhere, Category = "Wet Wrinkle Baked")
-    int32 Resolution = 2048;
+    int32 Resolution = 1024;
 
     UPROPERTY(VisibleAnywhere, Category = "Wet Wrinkle Baked")
     int32 PaddingPixels = 8;
@@ -361,7 +361,7 @@ struct DWC_API FWetClothingWrinkleData
 {
     GENERATED_BODY()
 
-    // Dedicated mesh UV channel used by wet wrinkle maps. For now DWC always uses imported UV 0.
+    // DWC Data UV channel used by wet wrinkle maps. The channel is generated during WCA Setup.
     UPROPERTY(EditAnywhere, Category = "Editable")
     int32 WrinkleUVChannelIndex = 0;
 

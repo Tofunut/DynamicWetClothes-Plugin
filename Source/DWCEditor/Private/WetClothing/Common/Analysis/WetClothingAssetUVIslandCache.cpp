@@ -130,21 +130,21 @@ bool FWetClothingAssetUVIslandCache::GetMaterialSlotUVIslands(
     FWetClothingAssetUVIslandCacheEntry NewEntry;
     bool bBuilt = false;
 #if WITH_EDITORONLY_DATA
-    const FDWCEditorUVTopologyData& Topology = WetClothingAsset->GetOriginalUVTopology();
+    const FDWCEditorUVTopologyData* Topology = WetClothingAsset->FindOriginalUVTopologyForLOD(LODIndex);
     const int32 OriginalUVChannelIndex = WetClothingAsset->GetOriginalUVChannelIndex();
-    if (Topology.bIsValid &&
-        Topology.LODIndex == LODIndex &&
-        Topology.UVChannelIndex == OriginalUVChannelIndex &&
+    if (Topology != nullptr &&
+        Topology->bIsValid &&
+        Topology->UVChannelIndex == OriginalUVChannelIndex &&
         UVChannelIndex == OriginalUVChannelIndex &&
-        !Topology.BuildSignature.IsEmpty() &&
-        !Topology.Islands.IsEmpty())
+        !Topology->BuildSignature.IsEmpty() &&
+        !Topology->Islands.IsEmpty())
     {
         bBuilt = FWetClothingAssetMeshAnalyzer::BuildMaterialSlotUVIslandsFromTopology(
             GeneratedDataUV,
             LODIndex,
             UVChannelIndex,
             MaterialSlotIndex,
-            Topology.Islands,
+            Topology->Islands,
             NewEntry.Islands,
             OutErrorMessage);
     }

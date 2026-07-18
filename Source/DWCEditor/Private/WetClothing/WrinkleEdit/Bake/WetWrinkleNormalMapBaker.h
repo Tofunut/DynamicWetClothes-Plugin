@@ -8,7 +8,7 @@ class UWetClothingAsset;
 
 struct FWetWrinkleNormalMapBakeSettings
 {
-    int32 Resolution = 2048;
+    int32 Resolution = 1024;
     int32 PaddingPixels = 8;
     bool bIncludeDisabledPatchStrokes = false;
     bool bBakeNormalMap = true;

@@ -4,6 +4,35 @@
 
 namespace DWCWetMaterialParameters
 {
+    DWC_API const FName& WetnessMap();
+    DWC_API const FName& WetPartDebugStrength();
+    DWC_API const FName& UnderColor();
+    DWC_API const FName& UnderColorBlendStrength();
+
+    DWC_API const FName& SurfaceWaterRT();
+    DWC_API const FName& SurfaceDropletRT();
+    DWC_API const FName& SurfaceFlowRT();
+    DWC_API const FName& SurfaceWaterTime();
+    DWC_API const FName& SurfaceWaterTexelSize();
+    DWC_API const FName& SurfaceWaterNormalStrength();
+    DWC_API const FName& SurfaceWaterRoughness();
+    DWC_API const FName& SurfaceDropletTiling();
+    DWC_API const FName& SurfaceAmountThresholdMin();
+    DWC_API const FName& SurfaceAmountThresholdMax();
+    DWC_API const FName& SurfaceDropletMaskMin();
+    DWC_API const FName& SurfaceDropletMaskMax();
+    DWC_API const FName& SurfaceDropletMaskTexture();
+    DWC_API const FName& SurfaceDropletNormalTexture();
+    DWC_API const FName& SurfaceFlowTiling();
+    DWC_API const FName& SurfaceFlowPanningX();
+    DWC_API const FName& SurfaceFlowPanningY();
+    DWC_API const FName& SurfaceFlowNormalStrength();
+    DWC_API const FName& SurfaceFlowRoughness();
+    DWC_API const FName& SurfaceFlowMaskMin();
+    DWC_API const FName& SurfaceFlowMaskMax();
+    DWC_API const FName& SurfaceFlowMaskTexture();
+    DWC_API const FName& SurfaceFlowNormalTexture();
+
     DWC_API const FName& WetnessProfileMap0();
     DWC_API const FName& UseWetnessProfileMap0();
 

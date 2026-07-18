@@ -20,7 +20,8 @@ class DWC_API UWetClothingAsset : public UDataAsset
     GENERATED_BODY()
 
   public:
-    static constexpr int32 CurrentAssetDataVersion = 3;
+    static constexpr int32 CurrentAssetDataVersion = 5;
+    static constexpr int32 FirstAssetVersionWithSerializedRuntimeBulkData = 4;
     static constexpr int32 CurrentPrecomputedSimulationDataVersion = 4;
     static constexpr int32 CurrentRuntimeBulkDataVersion = 2;
     static constexpr int32 RuntimeSimulationLODIndex = 0;
@@ -33,8 +34,7 @@ class DWC_API UWetClothingAsset : public UDataAsset
     bool InitializeNewAsset(USkeletalMesh* InSourceMesh, const FDWCWetClothingAssetSetupSettings& InSettings, FString* OutErrorMessage = nullptr);
     bool ApplySetupSettings(const FDWCWetClothingAssetSetupSettings& InSettings, FString* OutChangeSummary = nullptr);
     void SetGeneratedDataUVTarget(USkeletalMesh* InRuntimeMesh, int32 InDWCDataUVChannelIndex);
-    void SetGeneratedDataUVs(TArray<FDWCDataUVPerLOD>&& InGeneratedDataUVs);
-    void SetOriginalUVTopology(FDWCEditorUVTopologyData&& InTopology);
+    void SetDataUVMetadata(TArray<FDWCDataUVLODMetadata>&& InMetadata);
     void SetOriginalUVTopologies(TArray<FDWCEditorUVTopologyData>&& InTopologies);
     void MarkGeneratedDataUVOutOfDate();
     void MarkSimulationBakeOutOfDate();
@@ -49,8 +49,7 @@ class DWC_API UWetClothingAsset : public UDataAsset
     void MarkBakeOutputsSaved(int32 OutputMask);
     bool HasGeneratedBakeOutput(int32 OutputMask) const;
     bool HasSavedBakeOutput(int32 OutputMask) const;
-    bool PreloadRuntimeBulkDataForEditor() const;
-    void RefreshBakeState(bool bIncludeMapValidation = true);
+    void RefreshBakeState(bool bRunDeepValidation = false);
     bool RebuildPrecomputedSimulationData(FString* OutErrorMessage = nullptr, int32 LODIndex = 0);
     bool RebuildGPURuntimeData(FString* OutErrorMessage = nullptr);
     bool BakeGPUWetnessMaps(FString* OutErrorMessage = nullptr);
@@ -69,32 +68,39 @@ class DWC_API UWetClothingAsset : public UDataAsset
     void ClearGPUWetMapData();
     void ClearGPUMapData();
 
+    bool IsPrecomputedSimulationDataMetadataValidForMesh(const USkeletalMesh* SkeletalMesh, int32 LODIndex = 0) const;
     bool IsPrecomputedSimulationDataValidForMesh(const USkeletalMesh* SkeletalMesh, int32 LODIndex = 0) const;
+    bool IsGPURuntimeDataMetadataValidForMesh(const USkeletalMesh* SkeletalMesh, int32 LODIndex = 0) const;
     bool IsGPURuntimeDataValidForMesh(const USkeletalMesh* SkeletalMesh, int32 LODIndex = 0) const;
+    bool IsGPUWetMapDataMetadataValidForMesh(const USkeletalMesh* SkeletalMesh, int32 LODIndex = 0) const;
     bool IsGPUWetMapDataValidForMesh(const USkeletalMesh* SkeletalMesh, int32 LODIndex = 0) const;
     FString GetPrecomputedSimulationDataValidationSummary(const USkeletalMesh* SkeletalMesh, int32 LODIndex = 0) const;
     bool IsMaterialSlotWettable(int32 MaterialSlotIndex) const;
+    bool HasAnyWettableMaterialSlot() const;
+    bool HasWrinkleBakeContent() const;
+    bool HasTransparencyBakeContent() const;
 
     const FWetClothingPrecomputedSimulationData& GetPrecomputedSimulationData(int32 LODIndex = 0) const;
     const FDWCGPULODBakeData& GetGPUWetMapRuntimeData(int32 LODIndex = 0) const;
+    bool IsCurrentAssetDataVersion() const { return AssetDataVersion == CurrentAssetDataVersion; }
     bool HasCPURuntimeDataPayload() const;
     bool HasGPURuntimeDataPayload() const;
     bool HasGPUMapDataPayload() const;
 
     USkeletalMesh* GetSourceSkeletalMesh() const { return SourceSkeletalMesh.Get(); }
-    USkeletalMesh* GetPreparedSkeletalMesh() const { return PreparedSkeletalMesh.Get(); }
+    USkeletalMesh* GetDWCSkeletalMesh() const { return DWCSkeletalMesh.Get(); }
 
     UFUNCTION(BlueprintPure, Category = "Wet Clothing|Mesh")
     USkeletalMesh* GetRuntimeSkeletalMesh() const
     {
-        USkeletalMesh* FallbackMesh = SourceSkeletalMesh != nullptr ? SourceSkeletalMesh.Get() : TargetMesh.Get();
-        return !SetupSettings.bModifySourceMeshForDWCDataUV && PreparedSkeletalMesh != nullptr
-                   ? PreparedSkeletalMesh.Get()
-                   : FallbackMesh;
+        return DWCSkeletalMesh.Get();
     }
 
 #if WITH_EDITORONLY_DATA
-    USkeletalMesh* GetEditorPreviewSkeletalMesh() const { return GetRuntimeSkeletalMesh(); }
+    USkeletalMesh* GetEditorPreviewSkeletalMesh() const
+    {
+        return DWCSkeletalMesh != nullptr ? DWCSkeletalMesh.Get() : SourceSkeletalMesh.Get();
+    }
 #endif
 
     UFUNCTION(BlueprintPure, Category = "Wet Clothing|Mesh")
@@ -106,11 +112,12 @@ class DWC_API UWetClothingAsset : public UDataAsset
     UFUNCTION(BlueprintPure, Category = "Wet Clothing|Mesh")
     int32 GetDWCDataUVChannelIndex() const { return DWCDataUVChannelIndex; }
 
-    const FDWCDataUVPerLOD* FindGeneratedDataUVForLOD(int32 LODIndex) const;
+    const FDWCDataUVLODMetadata* FindDataUVMetadataForLOD(int32 LODIndex) const;
+    bool HasValidDataUVForLOD(int32 LODIndex) const;
+    int32 GetDataUVMetadataLODCount() const { return DataUVMetadataPerLOD.Num(); }
     const FDWCWetClothingAssetSetupSettings& GetSetupSettings() const { return SetupSettings; }
 
 #if WITH_EDITORONLY_DATA
-    const FDWCEditorUVTopologyData& GetOriginalUVTopology() const { return OriginalUVTopology; }
     const FDWCEditorUVTopologyData* FindOriginalUVTopologyForLOD(int32 LODIndex) const;
     const FDWCAssetBakeState& GetBakeState() const { return BakeState; }
     const FString& GetSourceMeshSignature() const { return SourceMeshSignature; }
@@ -120,9 +127,6 @@ class DWC_API UWetClothingAsset : public UDataAsset
 
     UPROPERTY(VisibleAnywhere, Category = "Wet Clothing|Version")
     int32 AssetDataVersion = 1;
-
-    UPROPERTY(EditAnywhere, Category = "Wet Clothing")
-    TObjectPtr<USkeletalMesh> TargetMesh = nullptr;
 
     UPROPERTY(EditAnywhere, Category = "Wet Clothing|Part")
     FWetClothingPartData PartData;
@@ -139,8 +143,9 @@ class DWC_API UWetClothingAsset : public UDataAsset
     UPROPERTY(VisibleAnywhere, Category = "Wet Clothing|GPU Wet Map")
     TArray<FDWCGPULODBakeData> BakedGPUWetMapLODs;
 
+    /** Metadata only. UV coordinates live exclusively in DWCSkeletalMesh's DWC Data UV channel. */
     UPROPERTY(VisibleAnywhere, Category = "Wet Clothing|DWC Data UV")
-    TArray<FDWCDataUVPerLOD> GeneratedDataUVsPerLOD;
+    TArray<FDWCDataUVLODMetadata> DataUVMetadataPerLOD;
 
 #if WITH_EDITORONLY_DATA
     UPROPERTY(EditAnywhere, Category = "Wet Clothing")
@@ -159,7 +164,7 @@ class DWC_API UWetClothingAsset : public UDataAsset
     TObjectPtr<USkeletalMesh> SourceSkeletalMesh = nullptr;
 
     UPROPERTY(VisibleAnywhere, Category = "Wet Clothing|Mesh", meta = (AllowPrivateAccess = "true"))
-    TObjectPtr<USkeletalMesh> PreparedSkeletalMesh = nullptr;
+    TObjectPtr<USkeletalMesh> DWCSkeletalMesh = nullptr;
 
     UPROPERTY(VisibleAnywhere, Category = "Wet Clothing|Mesh", meta = (AllowPrivateAccess = "true"))
     int32 OriginalUVChannelIndex = 0;
@@ -175,9 +180,6 @@ class DWC_API UWetClothingAsset : public UDataAsset
 
 #if WITH_EDITORONLY_DATA
     UPROPERTY(VisibleAnywhere, Category = "Wet Clothing|Editor Derived Data", meta = (AllowPrivateAccess = "true"))
-    FDWCEditorUVTopologyData OriginalUVTopology;
-
-    UPROPERTY(VisibleAnywhere, Category = "Wet Clothing|Editor Derived Data", meta = (AllowPrivateAccess = "true"))
     TArray<FDWCEditorUVTopologyData> OriginalUVTopologiesPerLOD;
 
     UPROPERTY(VisibleAnywhere, Category = "Wet Clothing|Bake Status", meta = (ShowOnlyInnerProperties, AllowPrivateAccess = "true"))
@@ -191,6 +193,11 @@ class DWC_API UWetClothingAsset : public UDataAsset
 #endif
 
 #if WITH_EDITOR
+    void RefreshBakeStateFast();
+    void RefreshBakeStateDeep();
+    void RefreshBakeStateInternal(bool bRunDeepValidation);
+    void LogOriginalUVTopologyMemoryStats() const;
+
     bool bRuntimeDataRebuildInProgress = false;
     bool bSkipNextPreSaveRuntimeDataRebuild = false;
     bool bRuntimeDataEditorSaveAttemptActive = false;

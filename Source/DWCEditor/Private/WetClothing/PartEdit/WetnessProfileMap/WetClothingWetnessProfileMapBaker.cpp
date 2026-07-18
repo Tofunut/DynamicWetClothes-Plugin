@@ -282,16 +282,18 @@ UTexture2D* FWetClothingWetnessProfileMapBaker::CreateOrUpdateTextureAsset(
     FString&              OutErrorMessage)
 {
 #if WITH_EDITORONLY_DATA
-    const FString AssetPackageName = WetClothingAsset.GetOutermost()->GetName();
-    const FString PackagePath = FPackageName::GetLongPackagePath(AssetPackageName);
-    if (PackagePath.IsEmpty())
+    const FString WcaPackageName = WetClothingAsset.GetOutermost()->GetName();
+    const FString WcaFolder = FPackageName::GetLongPackagePath(WcaPackageName);
+    if (WcaFolder.IsEmpty())
     {
         OutErrorMessage = TEXT("Could not resolve a package path for the Wet Clothing Asset.");
         return nullptr;
     }
 
     const FString ObjectName = BuildWetnessProfileMapObjectName(WetClothingAsset, SourceTexture, UVChannelIndex);
-    const FString TexturePackageName = PackagePath / ObjectName;
+    const FString GeneratedFolder =
+        WcaFolder / TEXT("Generated") / WetClothingAsset.GetName() / TEXT("Maps") / TEXT("WetnessProfiles");
+    const FString TexturePackageName = GeneratedFolder / ObjectName;
     const FString TextureObjectPath = TexturePackageName + TEXT(".") + ObjectName;
 
     UTexture2D* Texture = LoadObject<UTexture2D>(nullptr, *TextureObjectPath);

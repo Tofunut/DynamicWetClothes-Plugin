@@ -30,7 +30,7 @@ struct FDWCRevealBakeRayHit
 
 struct FDWCRevealBakeTexelSamplingSettings
 {
-    FIntPoint Resolution = FIntPoint(8192, 8192);
+    FIntPoint Resolution = FIntPoint(1024, 1024);
     int32 MaterialSlotIndex = INDEX_NONE;
 };
 

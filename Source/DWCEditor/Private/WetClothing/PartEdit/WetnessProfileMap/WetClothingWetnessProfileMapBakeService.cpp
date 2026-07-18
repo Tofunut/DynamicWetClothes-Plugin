@@ -5,6 +5,7 @@
 #include "Engine/Texture.h"
 #include "FileHelpers.h"
 #include "Materials/MaterialInterface.h"
+#include "Materials/MaterialInstanceConstant.h"
 #include "UObject/Package.h"
 #include "WetClothing/Common/Material/WetClothingMaterialSetup.h"
 #include "WetClothing/Common/Texture/WetClothingMaterialTextureResolver.h"
@@ -127,12 +128,13 @@ bool FWetClothingWetnessProfileMapBakeService::HasPendingVisualBakeTasks(
             continue;
         }
 
-        UMaterialInterface* ExistingCPUWetMaterial =
-            MaterialOverride != nullptr ? MaterialOverride->CPUWetMaterial.Get() : nullptr;
-        UMaterialInterface* ExistingGPUWetMaterial =
-            MaterialOverride != nullptr ? MaterialOverride->GPUWetMaterial.Get() : nullptr;
+        UMaterialInterface* ExistingCPUMaterialInstance =
+            MaterialOverride != nullptr ? MaterialOverride->CPUMaterialInstance.Get() : nullptr;
+        UMaterialInterface* ExistingGPUMaterialInstance =
+            MaterialOverride != nullptr ? MaterialOverride->GPUMaterialInstance.Get() : nullptr;
 
-        if (ExistingCPUWetMaterial == nullptr || ExistingGPUWetMaterial == nullptr)
+        if (MaterialOverride == nullptr || MaterialOverride->GeneratedMaterial == nullptr ||
+            ExistingCPUMaterialInstance == nullptr || ExistingGPUMaterialInstance == nullptr)
         {
             PendingLines.Add(FString::Printf(TEXT("Material setup needed for slot %d."), MaterialSlotIndex));
         }
@@ -140,10 +142,16 @@ bool FWetClothingWetnessProfileMapBakeService::HasPendingVisualBakeTasks(
         {
             PendingLines.Add(FString::Printf(TEXT("Material setup source changed for slot %d."), MaterialSlotIndex));
         }
-        else if (!FWetClothingMaterialSetup::IsMaterialConfiguredForDwc(ExistingCPUWetMaterial) ||
-                 !FWetClothingMaterialSetup::IsMaterialConfiguredForDwc(ExistingGPUWetMaterial))
+        else if (!FWetClothingMaterialSetup::IsMaterialConfiguredForDwc(
+                     ExistingCPUMaterialInstance,
+                     FWetClothingMaterialSetup::MakeOptionsForAsset(WetClothingAsset, EDWCSimulationMode::VertexCPU)) ||
+                 !FWetClothingMaterialSetup::IsMaterialConfiguredForDwc(
+                     ExistingGPUMaterialInstance,
+                     FWetClothingMaterialSetup::MakeOptionsForAsset(WetClothingAsset, EDWCSimulationMode::WetnessMapGPU)))
         {
-            PendingLines.Add(FString::Printf(TEXT("Wet material override on slot %d is missing DWC material functions."), MaterialSlotIndex));
+            PendingLines.Add(FString::Printf(
+                TEXT("Wet material override on slot %d is missing the unified DWC graph or a valid CPU/GPU static permutation."),
+                MaterialSlotIndex));
         }
     }
 
@@ -284,61 +292,35 @@ bool FWetClothingWetnessProfileMapBakeService::BakeWetnessProfileMapsAndUpdateMa
                 return MaterialOverride.MaterialSlotIndex == MaterialSlotIndex;
             });
 
-        const FWetClothingMaterialSetup::FOptions CPUMaterialSetupOptions =
+        const FWetClothingMaterialSetup::FOptions MaterialSetupOptions =
             FWetClothingMaterialSetup::MakeOptionsForAsset(WetClothingAsset, EDWCSimulationMode::VertexCPU);
-        const FWetClothingMaterialSetup::FOptions GPUMaterialSetupOptions =
-            FWetClothingMaterialSetup::MakeOptionsForAsset(WetClothingAsset, EDWCSimulationMode::WetnessMapGPU);
-        UMaterialInterface* ExistingCPUWetMaterial =
-            ExistingOverride != nullptr ? ExistingOverride->CPUWetMaterial.Get() : nullptr;
-        UMaterialInterface* ExistingGPUWetMaterial =
-            ExistingOverride != nullptr ? ExistingOverride->GPUWetMaterial.Get() : nullptr;
+        UMaterialInterface* ExistingCPUMaterialInstance =
+            ExistingOverride != nullptr ? ExistingOverride->CPUMaterialInstance.Get() : nullptr;
+        UMaterialInterface* ExistingGPUMaterialInstance =
+            ExistingOverride != nullptr ? ExistingOverride->GPUMaterialInstance.Get() : nullptr;
 
-        if (ExistingOverride != nullptr &&
+        const bool bExistingSetValid =
+            ExistingOverride != nullptr &&
             ExistingOverride->SourceMaterial == SourceMaterial &&
-            ExistingCPUWetMaterial != nullptr &&
-            ExistingGPUWetMaterial != nullptr &&
-            FWetClothingMaterialSetup::IsMaterialConfiguredForDwc(ExistingCPUWetMaterial, CPUMaterialSetupOptions) &&
-            FWetClothingMaterialSetup::IsMaterialConfiguredForDwc(ExistingGPUWetMaterial, GPUMaterialSetupOptions))
-        {
-            FWetClothingMaterialSetupResult CPURefreshResult = FWetClothingMaterialSetup::DuplicateAndApplyToMaterialInterface(
-                ExistingCPUWetMaterial,
-                CPUMaterialSetupOptions);
-            FWetClothingMaterialSetupResult GPURefreshResult = FWetClothingMaterialSetup::DuplicateAndApplyToMaterialInterface(
-                ExistingGPUWetMaterial,
-                GPUMaterialSetupOptions);
-            if (!CPURefreshResult.bSucceeded || !GPURefreshResult.bSucceeded)
-            {
-                Warnings.Add(FString::Printf(
-                    TEXT("Slot %d existing wet material refresh failed. CPU: %s GPU: %s"),
-                    MaterialSlotIndex,
-                    *CPURefreshResult.Message,
-                    *GPURefreshResult.Message));
-            }
-            else
-            {
-                Skipped.Add(FString::Printf(
-                    TEXT("Slot %d already has CPU '%s' and GPU '%s'. Refreshed for WCA DWC Data UV payloads."),
-                    MaterialSlotIndex,
-                    *GetNameSafe(ExistingCPUWetMaterial),
-                    *GetNameSafe(ExistingGPUWetMaterial)));
-            }
-            continue;
-        }
+            ExistingOverride->GeneratedMaterial != nullptr &&
+            ExistingCPUMaterialInstance != nullptr &&
+            ExistingGPUMaterialInstance != nullptr &&
+            FWetClothingMaterialSetup::IsMaterialConfiguredForDwc(
+                ExistingCPUMaterialInstance,
+                FWetClothingMaterialSetup::MakeOptionsForAsset(WetClothingAsset, EDWCSimulationMode::VertexCPU)) &&
+            FWetClothingMaterialSetup::IsMaterialConfiguredForDwc(
+                ExistingGPUMaterialInstance,
+                FWetClothingMaterialSetup::MakeOptionsForAsset(WetClothingAsset, EDWCSimulationMode::WetnessMapGPU));
 
-        FWetClothingMaterialSetupResult CPUResult = FWetClothingMaterialSetup::DuplicateAndApplyToMaterialInterface(
-            SourceMaterial,
-            CPUMaterialSetupOptions);
-        FWetClothingMaterialSetupResult GPUResult = FWetClothingMaterialSetup::DuplicateAndApplyToMaterialInterface(
-            SourceMaterial,
-            GPUMaterialSetupOptions);
-        if (!CPUResult.bSucceeded || CPUResult.ConfiguredMaterial == nullptr ||
-            !GPUResult.bSucceeded || GPUResult.ConfiguredMaterial == nullptr)
+        const FWetClothingUnifiedMaterialSetupResult MaterialSet =
+            FWetClothingMaterialSetup::CreateOrUpdateUnifiedMaterialSet(SourceMaterial, MaterialSetupOptions);
+        if (!MaterialSet.bSucceeded || MaterialSet.GeneratedMaterial == nullptr ||
+            MaterialSet.CPUMaterialInstance == nullptr || MaterialSet.GPUMaterialInstance == nullptr)
         {
             Warnings.Add(FString::Printf(
-                TEXT("Slot %d material setup failed. CPU: %s GPU: %s"),
+                TEXT("Slot %d material setup failed: %s"),
                 MaterialSlotIndex,
-                *CPUResult.Message,
-                *GPUResult.Message));
+                *MaterialSet.Message));
             continue;
         }
 
@@ -349,15 +331,29 @@ bool FWetClothingWetnessProfileMapBakeService::BakeWetnessProfileMapsAndUpdateMa
             ExistingOverride->MaterialSlotIndex = MaterialSlotIndex;
         }
         ExistingOverride->SourceMaterial = SourceMaterial;
-        ExistingOverride->CPUWetMaterial = CPUResult.ConfiguredMaterial;
-        ExistingOverride->GPUWetMaterial = GPUResult.ConfiguredMaterial;
+        ExistingOverride->GeneratedMaterial = MaterialSet.GeneratedMaterial;
+        ExistingOverride->CPUMaterialInstance = MaterialSet.CPUMaterialInstance;
+        ExistingOverride->GPUMaterialInstance = MaterialSet.GPUMaterialInstance;
         WetClothingAsset->MarkPackageDirty();
 
-        CreatedOrUpdatedMaterials.Add(FString::Printf(
-            TEXT("Slot %d -> CPU %s, GPU %s"),
-            MaterialSlotIndex,
-            *GetNameSafe(CPUResult.ConfiguredMaterial),
-            *GetNameSafe(GPUResult.ConfiguredMaterial)));
+        if (bExistingSetValid && MaterialSet.bAlreadyConfigured)
+        {
+            Skipped.Add(FString::Printf(
+                TEXT("Slot %d unified material set refreshed: %s / %s / %s."),
+                MaterialSlotIndex,
+                *GetNameSafe(MaterialSet.GeneratedMaterial),
+                *GetNameSafe(MaterialSet.CPUMaterialInstance),
+                *GetNameSafe(MaterialSet.GPUMaterialInstance)));
+        }
+        else
+        {
+            CreatedOrUpdatedMaterials.Add(FString::Printf(
+                TEXT("Slot %d -> shared %s, CPU %s, GPU %s"),
+                MaterialSlotIndex,
+                *GetNameSafe(MaterialSet.GeneratedMaterial),
+                *GetNameSafe(MaterialSet.CPUMaterialInstance),
+                *GetNameSafe(MaterialSet.GPUMaterialInstance)));
+        }
     }
 
     TSet<FString> BakedTextureUvKeys;
@@ -503,8 +499,9 @@ bool FWetClothingWetnessProfileMapBakeService::SaveBakedWetnessAssets(UWetClothi
 
     for (const FWetClothingGeneratedWetMaterialOverride& MaterialOverride : WetClothingAsset->PartData.GeneratedWetMaterialOverrides)
     {
-        AddWetnessProfileMapPackageForObject(MaterialOverride.CPUWetMaterial.Get(), PackagesToSave);
-        AddWetnessProfileMapPackageForObject(MaterialOverride.GPUWetMaterial.Get(), PackagesToSave);
+        AddWetnessProfileMapPackageForObject(MaterialOverride.GeneratedMaterial.Get(), PackagesToSave);
+        AddWetnessProfileMapPackageForObject(MaterialOverride.CPUMaterialInstance.Get(), PackagesToSave);
+        AddWetnessProfileMapPackageForObject(MaterialOverride.GPUMaterialInstance.Get(), PackagesToSave);
     }
 
     for (const FWetClothingBakedWetnessProfileMap& BakedWetnessProfileMap : WetClothingAsset->PartData.BakedWetnessProfileMaps)

@@ -182,7 +182,7 @@ struct DWC_API FWetClothingTransparencyAutoBakeMetadata
     int32 LODIndex = 0;
 
     UPROPERTY(VisibleAnywhere, Category = "Transparency Auto Bake")
-    int32 Resolution = 2048;
+    int32 Resolution = 1024;
 
     UPROPERTY(VisibleAnywhere, Category = "Transparency Auto Bake")
     int32 PaddingPixels = 8;
@@ -212,7 +212,7 @@ struct DWC_API FWetClothingBakedTransparencyMap
     TObjectPtr<UTexture2D> TransparencyMap = nullptr;
 
     UPROPERTY(VisibleAnywhere, Category = "Baked Transparency")
-    int32 Resolution = 2048;
+    int32 Resolution = 1024;
 
     UPROPERTY(VisibleAnywhere, Category = "Baked Transparency")
     int32 PaddingPixels = 8;
@@ -312,7 +312,7 @@ struct DWC_API FWetClothingTransparencyData
     TArray<FWetClothingTransparencyLayerData> TransparencyLayers;
 
     UPROPERTY(EditAnywhere, Category = "Transparency", meta = (ClampMin = "16", UIMin = "128", UIMax = "4096"))
-    int32 TransparencyBakeResolution = 2048;
+    int32 TransparencyBakeResolution = 1024;
 
     UPROPERTY(EditAnywhere, Category = "Transparency", meta = (ClampMin = "0", ClampMax = "64"))
     int32 TransparencyPaddingPixels = 8;
@@ -340,7 +340,7 @@ struct DWC_API FWetClothingTransparencyData
     TSoftClassPtr<AActor> SourceBlueprintClass;
 
     UPROPERTY(EditAnywhere, Category = "Legacy Bake", meta = (ClampMin = "16", UIMin = "128", UIMax = "4096"))
-    int32 RevealBakeResolution = 2048;
+    int32 RevealBakeResolution = 1024;
 
     UPROPERTY(EditAnywhere, Category = "Legacy Bake", meta = (ClampMin = "0.0", UIMin = "0.0", UIMax = "32.0"))
     float RevealMaskFeatherRadiusPixels = 4.0f;

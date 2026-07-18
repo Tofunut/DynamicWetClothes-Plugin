@@ -110,6 +110,20 @@ float ComputeTriangleContactRadius(const FVector& ContactPoint, const FVector& P
             static_cast<float>(FVector::Distance(ContactPoint, P2))));
 }
 
+float ComputeWetAreaSampleRadius(const FVector& P0, const FVector& P1, const FVector& P2)
+{
+    const float Edge01 = static_cast<float>(FVector::Distance(P0, P1));
+    const float Edge12 = static_cast<float>(FVector::Distance(P1, P2));
+    const float Edge20 = static_cast<float>(FVector::Distance(P2, P0));
+    const float MinEdge = FMath::Min3(Edge01, Edge12, Edge20);
+    const float TriangleArea = static_cast<float>(0.5 * FVector::CrossProduct(P1 - P0, P2 - P0).Size());
+    const float AreaRadius = TriangleArea > SMALL_NUMBER
+        ? FMath::Sqrt(TriangleArea / UE_PI)
+        : MinEdge * 0.5f;
+
+    return FMath::Max(1.0f, FMath::Min(MinEdge * 0.35f, AreaRadius * 0.75f));
+}
+
 float ResolveGPUAbsorptionMultiplier(
     const FDWCGPULODBakeData& GPUData,
     const FDWCGPUBakedTriangle& Triangle,
@@ -194,6 +208,7 @@ void KeepPrimaryContactSurface(
 
     const int32 PrimaryMaterialSlot = PrimaryTriangle->MaterialSlotIndex;
     const int32 PrimaryUVIsland = PrimaryTriangle->UVIslandID;
+    const FVector SharedContactWorldPosition = PrimaryContact.ClosestWorldPosition;
 
     InOutContacts.RemoveAll(
         [&GPUData, PrimaryMaterialSlot, PrimaryUVIsland](const FDWCResolvedSurfaceContact& Candidate)
@@ -205,6 +220,15 @@ void KeepPrimaryContactSurface(
                    CandidateTriangle->MaterialSlotIndex != PrimaryMaterialSlot ||
                    CandidateTriangle->UVIslandID != PrimaryUVIsland;
         });
+
+    // One input event is one surface stamp. All triangles retained for that stamp
+    // must evaluate their texels against the same center, otherwise each triangle
+    // creates a separate falloff and triangle boundaries become visible.
+    for (FDWCResolvedSurfaceContact& Candidate : InOutContacts)
+    {
+        Candidate.ContactWorldPosition = SharedContactWorldPosition;
+        Candidate.DistanceToSurface = 0.0f;
+    }
 }
 } // namespace DWCWetSurfaceContactResolverPrivate
 
@@ -615,8 +639,15 @@ bool FWetSurfaceContactResolver::ResolveWetArea(
         }
 
         const float EffectiveAmount = AreaData.Amount * Exposure;
+        TSet<int32> AddedTriangleIDs;
         for (const int32 TriangleID : (*Incident)->TriangleIDs)
         {
+            if (AddedTriangleIDs.Contains(TriangleID))
+            {
+                continue;
+            }
+            AddedTriangleIDs.Add(TriangleID);
+
             if (!GPUData.Triangles.IsValidIndex(TriangleID))
             {
                 continue;
@@ -655,9 +686,8 @@ bool FWetSurfaceContactResolver::ResolveWetArea(
             Resolved.DistanceToSurface = 0.0f;
             Resolved.TriangleInfluence = 1.0f;
             Resolved.Amount = EffectiveAmount;
-            Resolved.Radius = ComputeTriangleContactRadius(VertexWorldPosition, P0, P1, P2);
+            Resolved.Radius = ComputeWetAreaSampleRadius(P0, P1, P2);
             Resolved.AbsorptionMultiplier = ResolveGPUAbsorptionMultiplier(GPUData, Triangle, EffectiveAmount);
-            break;
         }
     }
 

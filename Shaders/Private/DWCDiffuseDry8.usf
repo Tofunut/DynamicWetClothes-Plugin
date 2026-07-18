@@ -1,0 +1,387 @@
+#include "/Engine/Public/Platform.ush"
+
+// 8-neighbor order:
+// 0: +X, 1: -X, 2: +Y, 3: -Y,
+// 4: +X+Y, 5: -X+Y, 6: +X-Y, 7: -X-Y
+
+StructuredBuffer<uint4> TexelLookup;
+StructuredBuffer<float4> TriangleFlow;
+
+// x=dot(dPdu,dPdu), y=dot(dPdu,dPdv),
+// z=dot(dPdv,dPdv), w=valid
+StructuredBuffer<float4> TriangleMetric;
+
+// x=SpreadRate/s, y=DryRate/s,
+// z=GravityStrength, w=valid profile
+StructuredBuffer<float4> Profiles;
+
+StructuredBuffer<uint> TriangleProfileIndices;
+
+int2 TextureSize;
+float DeltaSeconds;
+
+static const float DWCSpreadResponseScale = 1.75;
+static const float DWCGravityResponseScale = 1.50;
+
+// 한 방향으로의 강한 흐름은 허용한다.
+static const float DWCMaxEdgeTransferFraction = 0.35;
+
+// 한 texel이 한 step 동안 모든 방향으로 내보내는 총량 제한.
+static const float DWCMaxTotalTransferFraction = 0.45;
+
+static const int DWCNeighborCount = 8;
+
+static const int2 DWCNeighborOffsets[DWCNeighborCount] =
+{
+    int2( 1,  0),
+    int2(-1,  0),
+    int2( 0,  1),
+    int2( 0, -1),
+
+    int2( 1,  1),
+    int2(-1,  1),
+    int2( 1, -1),
+    int2(-1, -1)
+};
+
+static const float2 DWCNeighborDirections[DWCNeighborCount] =
+{
+    float2( 1.0,  0.0),
+    float2(-1.0,  0.0),
+    float2( 0.0,  1.0),
+    float2( 0.0, -1.0),
+
+    float2( 1.0,  1.0),
+    float2(-1.0,  1.0),
+    float2( 1.0, -1.0),
+    float2(-1.0, -1.0)
+};
+
+// 대각선의 기여도를 직교 방향보다 낮게 둔다.
+// 4 * 0.1464466094 + 4 * 0.1035533906 = 1.0
+static const float DWCNeighborSpreadWeights[DWCNeighborCount] =
+{
+    0.1464466094,
+    0.1464466094,
+    0.1464466094,
+    0.1464466094,
+
+    0.1035533906,
+    0.1035533906,
+    0.1035533906,
+    0.1035533906
+};
+
+static const uint DWCOppositeDirectionIndices[DWCNeighborCount] =
+{
+    1u,
+    0u,
+    3u,
+    2u,
+
+    7u,
+    6u,
+    5u,
+    4u
+};
+
+uint Flatten(int2 Texel)
+{
+    return (uint)(Texel.y * TextureSize.x + Texel.x);
+}
+
+bool IsInside(int2 Texel)
+{
+    return
+        Texel.x >= 0 &&
+        Texel.y >= 0 &&
+        Texel.x < TextureSize.x &&
+        Texel.y < TextureSize.y;
+}
+
+bool IsValidLookup(uint4 Lookup)
+{
+    return Lookup.w != 0u && Lookup.x != 0xffffffffu;
+}
+
+bool IsConnectedNeighbor(uint4 SourceLookup, uint4 NeighborLookup)
+{
+    return
+        IsValidLookup(NeighborLookup) &&
+        NeighborLookup.w == SourceLookup.w;
+}
+
+float TexelArea(uint4 Lookup)
+{
+    if (!IsValidLookup(Lookup))
+    {
+        return 0.0;
+    }
+
+    const float RestArea = max(asfloat(Lookup.z), 1.0e-10);
+    float AreaScale = TriangleFlow[Lookup.x].z;
+
+    if (!isfinite(AreaScale))
+    {
+        AreaScale = 1.0;
+    }
+
+    return RestArea * max(AreaScale, 1.0e-4);
+}
+
+float RawEdgeFraction(
+    uint4 Lookup,
+    float2 DirectionStep,
+    float SpreadWeight)
+{
+    const uint TriangleID = Lookup.x;
+    const uint ProfileIndex = TriangleProfileIndices[TriangleID];
+
+    float4 Profile = Profiles[ProfileIndex];
+    float4 Flow = TriangleFlow[TriangleID];
+    float4 Metric = TriangleMetric[TriangleID];
+
+    if (!all(isfinite(Profile.xyz)) ||
+        !all(isfinite(Flow.xyz)) ||
+        !all(isfinite(Metric.xyz)) ||
+        Profile.w <= 0.0 ||
+        Metric.w <= 0.0)
+    {
+        return 0.0;
+    }
+
+    const float2 SafeTextureSize =
+        max(float2(TextureSize), float2(1.0, 1.0));
+
+    // 실제 한 texel 이동 거리.
+    // 대각선은 자연스럽게 직교 방향보다 더 먼 거리로 계산된다.
+    const float2 DeltaUV =
+        DirectionStep / SafeTextureSize;
+
+    const float PhysicalDistanceSquared =
+        DeltaUV.x * DeltaUV.x * Metric.x +
+        2.0 * DeltaUV.x * DeltaUV.y * Metric.y +
+        DeltaUV.y * DeltaUV.y * Metric.z;
+
+    const float PhysicalDistance =
+        sqrt(max(PhysicalDistanceSquared, 1.0e-12));
+
+    const float CharacteristicLength =
+        sqrt(max(TexelArea(Lookup), 1.0e-12));
+
+    const float DistanceScale =
+        clamp(
+            CharacteristicLength / PhysicalDistance,
+            0.25,
+            4.0);
+
+    const float SpreadRate =
+        max(Profile.x, 0.0) *
+        SpreadWeight *
+        DWCSpreadResponseScale *
+        DistanceScale;
+
+    const float FlowLength = length(Flow.xy);
+
+    const float2 FlowDirection =
+        FlowLength > 1.0e-8
+            ? Flow.xy / FlowLength
+            : float2(0.0, 0.0);
+
+    const float2 UnitDirection =
+        normalize(DirectionStep);
+
+    const float GravityRate =
+        max(Profile.z, 0.0) *
+        DWCGravityResponseScale *
+        saturate(FlowLength) *
+        max(dot(FlowDirection, UnitDirection), 0.0) *
+        DistanceScale;
+
+    const float TimeStep = max(DeltaSeconds, 0.0);
+
+    const float Fraction =
+        TimeStep * (SpreadRate + GravityRate);
+
+    if (!isfinite(Fraction))
+    {
+        return 0.0;
+    }
+
+    return min(
+        saturate(Fraction),
+        DWCMaxEdgeTransferFraction);
+}
+
+
+Texture2D<float> SourceWetnessTexture;
+Texture2D<float> TransferScaleTexture;
+RWTexture2D<float> DestinationWetnessTexture;
+
+float MaxWetness;
+
+[numthreads(8, 8, 1)]
+void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+    const int2 Texel = int2(DispatchThreadId.xy);
+
+    if (!IsInside(Texel))
+    {
+        return;
+    }
+
+    const uint TexelIndex = Flatten(Texel);
+    const uint4 CenterLookup =
+        TexelLookup[TexelIndex];
+
+    if (!IsValidLookup(CenterLookup))
+    {
+        DestinationWetnessTexture[Texel] = 0.0;
+        return;
+    }
+
+    const float CenterArea =
+        TexelArea(CenterLookup);
+
+    float CenterWetness =
+        SourceWetnessTexture.Load(
+            int3(Texel, 0));
+
+    if (!isfinite(CenterWetness))
+    {
+        CenterWetness = 0.0;
+    }
+
+    CenterWetness = max(CenterWetness, 0.0);
+
+    float CenterTransferScale =
+        TransferScaleTexture.Load(
+            int3(Texel, 0));
+
+    if (!isfinite(CenterTransferScale))
+    {
+        CenterTransferScale = 0.0;
+    }
+
+    CenterTransferScale =
+        saturate(CenterTransferScale);
+
+    float NewMass =
+        CenterWetness * CenterArea;
+
+    [unroll]
+    for (uint DirectionIndex = 0u;
+         DirectionIndex < DWCNeighborCount;
+         ++DirectionIndex)
+    {
+        const int2 NeighborTexel =
+            Texel + DWCNeighborOffsets[DirectionIndex];
+
+        if (!IsInside(NeighborTexel))
+        {
+            continue;
+        }
+
+        const uint4 NeighborLookup =
+            TexelLookup[Flatten(NeighborTexel)];
+
+        if (!IsConnectedNeighbor(
+                CenterLookup,
+                NeighborLookup))
+        {
+            // 서로 다른 UV island는 Seam Gather Pass에서만 통신한다.
+            continue;
+        }
+
+        // 현재 texel → 이웃 texel.
+        const float OutFraction =
+            RawEdgeFraction(
+                CenterLookup,
+                DWCNeighborDirections[DirectionIndex],
+                DWCNeighborSpreadWeights[DirectionIndex]) *
+            CenterTransferScale;
+
+        NewMass -=
+            CenterWetness *
+            CenterArea *
+            OutFraction;
+
+        // 이웃 texel → 현재 texel.
+        const float NeighborArea =
+            TexelArea(NeighborLookup);
+
+        float NeighborWetness =
+            SourceWetnessTexture.Load(
+                int3(NeighborTexel, 0));
+
+        if (!isfinite(NeighborWetness))
+        {
+            NeighborWetness = 0.0;
+        }
+
+        NeighborWetness =
+            max(NeighborWetness, 0.0);
+
+        float NeighborTransferScale =
+            TransferScaleTexture.Load(
+                int3(NeighborTexel, 0));
+
+        if (!isfinite(NeighborTransferScale))
+        {
+            NeighborTransferScale = 0.0;
+        }
+
+        NeighborTransferScale =
+            saturate(NeighborTransferScale);
+
+        const uint OppositeDirectionIndex =
+            DWCOppositeDirectionIndices[DirectionIndex];
+
+        const float InFraction =
+            RawEdgeFraction(
+                NeighborLookup,
+                DWCNeighborDirections[OppositeDirectionIndex],
+                DWCNeighborSpreadWeights[OppositeDirectionIndex]) *
+            NeighborTransferScale;
+
+        NewMass +=
+            NeighborWetness *
+            NeighborArea *
+            InFraction;
+    }
+
+    const uint CenterProfileIndex =
+        TriangleProfileIndices[CenterLookup.x];
+
+    float DryRate =
+        Profiles[CenterProfileIndex].y;
+
+    if (!isfinite(DryRate))
+    {
+        DryRate = 0.0;
+    }
+
+    DryRate = max(DryRate, 0.0);
+
+    const float TimeStep =
+        max(DeltaSeconds, 0.0);
+
+    NewMass =
+        max(NewMass, 0.0) *
+        exp(-DryRate * TimeStep);
+
+    float NewWetness =
+        NewMass /
+        max(CenterArea, 1.0e-10);
+
+    if (!isfinite(NewWetness))
+    {
+        NewWetness = 0.0;
+    }
+
+    DestinationWetnessTexture[Texel] =
+        clamp(
+            NewWetness,
+            0.0,
+            MaxWetness);
+}

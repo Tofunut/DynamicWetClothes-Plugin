@@ -31,7 +31,7 @@ class DWC_API UDWCBakeComponent : public UActorComponent
     TArray<FDWCBakeLayer> Layers;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DWC|Reveal Bake", meta = (ClampMin = "16", UIMin = "128", UIMax = "4096"))
-    int32 RevealBakeResolution = 2048;
+    int32 RevealBakeResolution = 1024;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DWC|Reveal Bake", meta = (ClampMin = "0.0", UIMin = "0.0", UIMax = "32.0"))
     float RevealMaskFeatherRadiusPixels = 4.0f;

@@ -39,7 +39,7 @@ struct DWC_API FWetSurfaceContactResolverArgs
     USkeletalMeshComponent* TargetSkeletalMesh = nullptr;
     const FWetClothingSettings* WetnessSettings = nullptr;
     const UWetClothingAsset* WetClothingAsset = nullptr;
-    FWetClothingRuntimeData* RuntimeData = nullptr;
+    const FWetClothingRuntimeData* RuntimeData = nullptr;
     FWetRuntimeDataBuilder* RuntimeDataBuilder = nullptr;
     FWetClothingMeshSampler* MeshSampler = nullptr;
     int32 LODIndex = 0;

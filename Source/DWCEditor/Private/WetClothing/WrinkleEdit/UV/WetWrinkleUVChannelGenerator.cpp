@@ -504,7 +504,7 @@ FWetWrinkleUVChannelGenerationResult FWetWrinkleUVChannelGenerator::GenerateForA
         return Result;
     }
 
-    USkeletalMesh* TargetMesh = Asset->TargetMesh.Get();
+    USkeletalMesh* TargetMesh = Asset->GetDWCSkeletalMesh();
     if (TargetMesh == nullptr)
     {
         WetWrinkleUVChannelGeneratorInternal::SetFailure(Result, TEXT("No Target Mesh is assigned."));
@@ -591,7 +591,7 @@ FWetWrinkleUVChannelGenerationResult FWetWrinkleUVChannelGenerator::DeleteUVChan
         return Result;
     }
 
-    USkeletalMesh* TargetMesh = Asset->TargetMesh.Get();
+    USkeletalMesh* TargetMesh = Asset->GetDWCSkeletalMesh();
     if (TargetMesh == nullptr)
     {
         SetFailure(Result, TEXT("No Target Mesh is assigned."));

@@ -16,6 +16,7 @@
 #include "Misc/MessageDialog.h"
 #include "Misc/ScopedSlowTask.h"
 #include "Materials/MaterialInterface.h"
+#include "Materials/MaterialInstanceConstant.h"
 #include "PropertyEditorModule.h"
 #include "PropertyEditorDelegates.h"
 #include "Rendering/SkeletalMeshLODRenderData.h"
@@ -268,7 +269,7 @@ namespace
                 LOCTEXT("ValidationBakeMapsAction", "Use Bake Maps to rebuild them."),
                 Asset.IsBakeOutputSavePending(DWCBakeOutput::GPUMaps));
         }
-        if (HasWrinkleValidationData(Asset) && State.WrinkleMaps != EDWCBakeStatus::Disabled)
+        if (Asset.HasWrinkleBakeContent() && State.WrinkleMaps != EDWCBakeStatus::Disabled)
         {
             AddValidationActionIfRequired(
                 Result,
@@ -276,7 +277,7 @@ namespace
                 State.WrinkleMaps,
                 LOCTEXT("ValidationBakeMapsAction", "Use Bake Maps to rebuild them."));
         }
-        if (!Asset.TransparencyData.SourceBlueprintClass.IsNull() && State.TransparencyMaps != EDWCBakeStatus::Disabled)
+        if (Asset.HasTransparencyBakeContent() && State.TransparencyMaps != EDWCBakeStatus::Disabled)
         {
             AddValidationActionIfRequired(
                 Result,
@@ -286,7 +287,10 @@ namespace
         }
 
         TArray<FString> GeneratedMaterialMessages;
-        FWetClothingMaterialSetup::ValidateGeneratedMaterialOverrides(&Asset, GeneratedMaterialMessages);
+        if (Asset.HasAnyWettableMaterialSlot())
+        {
+            FWetClothingMaterialSetup::ValidateGeneratedMaterialOverrides(&Asset, GeneratedMaterialMessages);
+        }
         if (!GeneratedMaterialMessages.IsEmpty())
         {
             FDWCValidationActionItem Item;
@@ -732,7 +736,10 @@ namespace
         auto IsHeavyGeneratedProperty = [](const FName PropertyName)
         {
             return PropertyName == FName(TEXT("BakedGPUWetMapLODs")) ||
-                   PropertyName == FName(TEXT("OriginalUVTopology")) ||
+                   PropertyName == FName(TEXT("OriginalUVTopologiesPerLOD")) ||
+                   PropertyName == FName(TEXT("DataUVMetadataPerLOD")) ||
+                   PropertyName == FName(TEXT("BakeState")) ||
+                   PropertyName == FName(TEXT("ValidationSummary")) ||
                    PropertyName == FName(TEXT("PrecomputedSimulationData")) ||
                    PropertyName == FName(TEXT("Triangles")) ||
                    PropertyName == FName(TEXT("VertexIncidentTriangles")) ||
@@ -819,7 +826,7 @@ namespace
                 "DWC Data UV LODs: {1}\n"
                 "Simulation LOD: LOD{3}"),
             FText::FromString(GetNameSafe(Asset.GetSourceSkeletalMesh())),
-            FText::AsNumber(Asset.GeneratedDataUVsPerLOD.Num()),
+            FText::AsNumber(Asset.GetDataUVMetadataLODCount()),
             FText::AsNumber(Asset.GetOriginalUVChannelIndex()),
             FText::AsNumber(Asset.GetSimulationLODIndex()));
 
@@ -1107,6 +1114,7 @@ void FWetClothingAssetEditor::Initialize(const EToolkitMode::Type Mode, const TS
 {
     check(InWetClothingAsset != nullptr);
 
+    const double InitializeStartTime = FPlatformTime::Seconds();
     WetClothingAsset = InWetClothingAsset;
 
     FPropertyEditorModule& PropertyEditorModule = FModuleManager::LoadModuleChecked<FPropertyEditorModule>("PropertyEditor");
@@ -1117,7 +1125,14 @@ void FWetClothingAssetEditor::Initialize(const EToolkitMode::Type Mode, const TS
     DetailsViewArgs.bAllowSearch = false;
     DetailsView = PropertyEditorModule.CreateDetailView(DetailsViewArgs);
     DetailsView->SetIsPropertyVisibleDelegate(FIsPropertyVisible::CreateStatic(&ShouldShowWetClothingAssetDetailProperty));
+    const double DetailsSetObjectStartTime = FPlatformTime::Seconds();
     DetailsView->SetObject(InWetClothingAsset);
+    UE_LOG(
+        LogTemp,
+        Display,
+        TEXT("WetClothingAssetEditor Details SetObject: '%s' completed in %.2f ms."),
+        *GetNameSafe(InWetClothingAsset),
+        (FPlatformTime::Seconds() - DetailsSetObjectStartTime) * 1000.0);
     ObjectPropertyChangedHandle = FCoreUObjectDelegates::OnObjectPropertyChanged.AddSP(this, &FWetClothingAssetEditor::HandleObjectPropertyChanged);
     AssetSavedHandle = DWCEditorUtils::OnAssetSaveAttemptFinished().AddSP(
         this,
@@ -1140,6 +1155,12 @@ void FWetClothingAssetEditor::Initialize(const EToolkitMode::Type Mode, const TS
     AddToolbarExtender(ToolbarExtender);
 
     RegenerateMenusAndToolbars();
+    UE_LOG(
+        LogTemp,
+        Display,
+        TEXT("WetClothingAssetEditor Initialize: '%s' completed in %.2f ms."),
+        *GetNameSafe(InWetClothingAsset),
+        (FPlatformTime::Seconds() - InitializeStartTime) * 1000.0);
 }
 
 void FWetClothingAssetEditor::RegisterTabSpawners(const TSharedRef<FTabManager>& InTabManager)
@@ -1256,11 +1277,11 @@ void FWetClothingAssetEditor::HandleDWCEditorAssetSaveAttemptFinished(UObject* S
     RefreshAssetStateAndEditor(false);
 }
 
-void FWetClothingAssetEditor::RefreshAssetStateAndEditor(const bool bIncludeMapValidation)
+void FWetClothingAssetEditor::RefreshAssetStateAndEditor(const bool bRunDeepValidation)
 {
     if (UWetClothingAsset* Asset = WetClothingAsset.Get())
     {
-        Asset->RefreshBakeState(bIncludeMapValidation);
+        Asset->RefreshBakeState(bRunDeepValidation);
     }
     if (DetailsView.IsValid())
     {
@@ -1300,10 +1321,12 @@ void FWetClothingAssetEditor::FillAssetToolbar(FToolBarBuilder& ToolbarBuilder)
         LOCTEXT("AssetSetupToolbarTooltip", "Review immutable mesh information and change simulation-data and map-resolution settings."),
         FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Settings"));
     ToolbarBuilder.AddComboButton(
-        FUIAction(),
+        FUIAction(
+            FExecuteAction(),
+            FCanExecuteAction::CreateSP(this, &FWetClothingAssetEditor::CanBakeAnyMaps)),
         FOnGetContent::CreateSP(this, &FWetClothingAssetEditor::BuildBakeMapsMenu),
         LOCTEXT("BakeMapsToolbarLabel", "Bake Maps"),
-        LOCTEXT("BakeMapsToolbarTooltip", "Bake generated texture and simulation maps for this Wet Clothing Asset."),
+        LOCTEXT("BakeMapsToolbarTooltip", "Bake pending texture and simulation maps. Disabled when no map output requires work."),
         FSlateIcon(FDWCEditorStyle::GetStyleSetName(), TEXT("DWCEditor.Bake")),
         false);
     ToolbarBuilder.AddComboButton(
@@ -1448,11 +1471,15 @@ void FWetClothingAssetEditor::HandleGenerateGeneratedDataUVClicked()
 
 void FWetClothingAssetEditor::HandleValidationClicked()
 {
-    const UWetClothingAsset* Asset = WetClothingAsset.Get();
+    UWetClothingAsset* Asset = WetClothingAsset.Get();
     if (Asset == nullptr)
     {
         return;
     }
+
+    // Explicit validation is the only routine editor action that performs full
+    // runtime/map signature and generated-material graph validation.
+    Asset->RefreshBakeState(true);
 
 #if WITH_EDITORONLY_DATA
     const FDWCTriangleValidationSummary& Summary = Asset->GetValidationSummary();
@@ -1519,8 +1546,57 @@ FReply FWetClothingAssetEditor::HandleValidationResolveClicked(TWeakPtr<SWindow>
     return FReply::Handled();
 }
 
+bool FWetClothingAssetEditor::CanBakeGPUMaps() const
+{
+    const UWetClothingAsset* Asset = WetClothingAsset.Get();
+    if (Asset == nullptr || !Asset->HasAnyWettableMaterialSlot() || !Asset->GetSetupSettings().bBuildGPUWetnessMapSimulationData)
+    {
+        return false;
+    }
+    const EDWCBakeStatus Status = Asset->GetBakeState().GPUMaps;
+    return Status == EDWCBakeStatus::Required || Status == EDWCBakeStatus::OutOfDate || Status == EDWCBakeStatus::Failed;
+}
+
+bool FWetClothingAssetEditor::CanBakeWetnessProfileMaps() const
+{
+    const UWetClothingAsset* Asset = WetClothingAsset.Get();
+    return Asset != nullptr && Asset->HasAnyWettableMaterialSlot() &&
+           FWetClothingWetnessProfileMapBakeService::HasPendingVisualBakeTasks(Asset, nullptr);
+}
+
+bool FWetClothingAssetEditor::CanBakeWrinkleMaps() const
+{
+    const UWetClothingAsset* Asset = WetClothingAsset.Get();
+    if (Asset == nullptr || !Asset->HasWrinkleBakeContent())
+    {
+        return false;
+    }
+    const EDWCBakeStatus Status = Asset->GetBakeState().WrinkleMaps;
+    return Status == EDWCBakeStatus::Required || Status == EDWCBakeStatus::OutOfDate || Status == EDWCBakeStatus::Failed;
+}
+
+bool FWetClothingAssetEditor::CanBakeTransparencyMaps() const
+{
+    const UWetClothingAsset* Asset = WetClothingAsset.Get();
+    if (Asset == nullptr || !Asset->HasTransparencyBakeContent())
+    {
+        return false;
+    }
+    const EDWCBakeStatus Status = Asset->GetBakeState().TransparencyMaps;
+    return Status == EDWCBakeStatus::Required || Status == EDWCBakeStatus::OutOfDate || Status == EDWCBakeStatus::Failed;
+}
+
+bool FWetClothingAssetEditor::CanBakeAnyMaps() const
+{
+    return CanBakeGPUMaps() || CanBakeWetnessProfileMaps() || CanBakeWrinkleMaps() || CanBakeTransparencyMaps();
+}
+
 TSharedRef<SWidget> FWetClothingAssetEditor::BuildBakeMapsMenu()
 {
+    if (UWetClothingAsset* Asset = WetClothingAsset.Get())
+    {
+        Asset->RefreshBakeState(false);
+    }
     FWetClothingBakeMapsMenuArgs Args;
     Args.OnBakeAllMaps = FSimpleDelegate::CreateLambda([this]() { HandleBakeAllMapsClicked(); });
     Args.OnBakeWetnessProfileMaps = FSimpleDelegate::CreateLambda([this]() { HandleBakeWetnessProfileMapsClicked(); });
@@ -1528,6 +1604,12 @@ TSharedRef<SWidget> FWetClothingAssetEditor::BuildBakeMapsMenu()
     Args.OnBakeTransparencyRevealMaps = FSimpleDelegate::CreateLambda([this]() { HandleBakeTransparencyRevealMapsClicked(); });
     Args.OnBakeWrinkleNormalMap = FSimpleDelegate::CreateLambda([this]() { HandleBakeWrinkleNormalMapClicked(); });
     Args.OnBakeWrinkleMask = FSimpleDelegate::CreateLambda([this]() { HandleBakeWrinkleMaskClicked(); });
+    Args.CanBakeAllMaps = FCanExecuteAction::CreateSP(this, &FWetClothingAssetEditor::CanBakeAnyMaps);
+    Args.CanBakeWetnessProfileMaps = FCanExecuteAction::CreateSP(this, &FWetClothingAssetEditor::CanBakeWetnessProfileMaps);
+    Args.CanBakeGPUWetnessMapData = FCanExecuteAction::CreateSP(this, &FWetClothingAssetEditor::CanBakeGPUMaps);
+    Args.CanBakeTransparencyRevealMaps = FCanExecuteAction::CreateSP(this, &FWetClothingAssetEditor::CanBakeTransparencyMaps);
+    Args.CanBakeWrinkleNormalMap = FCanExecuteAction::CreateSP(this, &FWetClothingAssetEditor::CanBakeWrinkleMaps);
+    Args.CanBakeWrinkleMask = FCanExecuteAction::CreateSP(this, &FWetClothingAssetEditor::CanBakeWrinkleMaps);
     return FWetClothingEditorCommonWidgets::BuildBakeMapsMenu(Args);
 }
 
@@ -1535,20 +1617,10 @@ TSharedRef<SWidget> FWetClothingAssetEditor::BuildGenerateMaterialsMenu()
 {
     FWetClothingGenerateMaterialsMenuArgs Args;
     Args.WetClothingAsset = WetClothingAsset.Get();
-    Args.OnGenerateCPUMaterials = FSimpleDelegate::CreateLambda(
+    Args.OnGenerateMaterials = FSimpleDelegate::CreateLambda(
         [this]()
         {
-            HandleGenerateMaterialsClicked(EWetClothingGenerateMaterialMode::CPU);
-        });
-    Args.OnGenerateGPUMaterials = FSimpleDelegate::CreateLambda(
-        [this]()
-        {
-            HandleGenerateMaterialsClicked(EWetClothingGenerateMaterialMode::GPU);
-        });
-    Args.OnGenerateAllMaterials = FSimpleDelegate::CreateLambda(
-        [this]()
-        {
-            HandleGenerateMaterialsClicked(EWetClothingGenerateMaterialMode::All);
+            HandleGenerateMaterialsClicked();
         });
     return FWetClothingEditorCommonWidgets::BuildGenerateMaterialsMenu(Args);
 }
@@ -1561,10 +1633,20 @@ FReply FWetClothingAssetEditor::HandleBakeAllMapsClicked()
         return FReply::Handled();
     }
 
-    Asset->RefreshBakeState();
+    Asset->RefreshBakeState(false);
+    const bool bBakeGPU = CanBakeGPUMaps();
+    const bool bBakeProfiles = CanBakeWetnessProfileMaps();
+    const bool bBakeWrinkles = CanBakeWrinkleMaps();
+    const bool bBakeTransparency = CanBakeTransparencyMaps();
+    if (!bBakeGPU && !bBakeProfiles && !bBakeWrinkles && !bBakeTransparency)
+    {
+        return FReply::Handled();
+    }
+
 #if WITH_EDITORONLY_DATA
-    if (Asset->GetBakeState().GeneratedDataUV != EDWCBakeStatus::Valid ||
-        Asset->GetBakeState().OriginalUVTopology != EDWCBakeStatus::Valid)
+    if (bBakeGPU &&
+        (Asset->GetBakeState().GeneratedDataUV != EDWCBakeStatus::Valid ||
+         Asset->GetBakeState().OriginalUVTopology != EDWCBakeStatus::Valid))
     {
         FMessageDialog::Open(
             EAppMsgCategory::Warning,
@@ -1577,18 +1659,25 @@ FReply FWetClothingAssetEditor::HandleBakeAllMapsClicked()
     TArray<FString> Sections;
     TArray<FString> Failures;
     bool bHadWarnings = false;
+    bool bBakedAnyOutput = false;
 
+    const float TotalWork =
+        (bBakeGPU ? 2.0f : 0.0f) +
+        (bBakeProfiles ? 1.0f : 0.0f) +
+        (bBakeWrinkles ? 1.0f : 0.0f) +
+        (bBakeTransparency ? 1.0f : 0.0f) +
+        1.0f;
     FScopedSlowTask SlowTask(
-        6.0f,
-        FText::FromString(FString::Printf(TEXT("Baking maps for %s..."), *GetNameSafe(Asset))));
+        TotalWork,
+        FText::FromString(FString::Printf(TEXT("Baking pending maps for %s..."), *GetNameSafe(Asset))));
     SlowTask.MakeDialog(false);
 
     const FDWCWetClothingAssetSetupSettings& Setup = Asset->GetSetupSettings();
-    if (Setup.bBuildGPUWetnessMapSimulationData)
+    if (bBakeGPU)
     {
         SlowTask.EnterProgressFrame(
             1.0f,
-            LOCTEXT("BakeAllGPURuntimeProgress", "Preparing GPU runtime data before baking simulation maps..."));
+            LOCTEXT("BakeAllGPURuntimeProgress", "Checking GPU runtime data before baking simulation maps..."));
         FString RuntimeFailure;
         if (!EnsureGPURuntimeDataReadyForMapBake(Asset, RuntimeFailure))
         {
@@ -1606,6 +1695,7 @@ FReply FWetClothingAssetEditor::HandleBakeAllMapsClicked()
                 Asset->GetGPUWetMapRuntimeData(Asset->GetSimulationLODIndex()).MaterialSlotMapCount,
                 Setup.GetGPUSimulationMapResolution(),
                 Setup.GetGPUSimulationMapResolution()));
+            bBakedAnyOutput = true;
         }
         else if (RuntimeFailure.IsEmpty())
         {
@@ -1613,71 +1703,80 @@ FReply FWetClothingAssetEditor::HandleBakeAllMapsClicked()
         }
     }
 
-    SlowTask.EnterProgressFrame(
-        1.0f,
-        LOCTEXT("BakeAllWetnessProfileMapsProgress", "Baking wetness profile maps..."));
-    FString VisualSummary;
-    bool bVisualWarnings = false;
-    if (EditorPanel->BakeWetVisualAssets(VisualSummary, &bVisualWarnings))
+    if (bBakeProfiles)
     {
-        EditorPanel->SaveBakedVisualAssets();
-        Sections.Add(VisualSummary);
-        bHadWarnings |= bVisualWarnings;
-    }
-    else if (!VisualSummary.IsEmpty())
-    {
-        Failures.Add(FString::Printf(TEXT("Wetness profile maps: %s"), *VisualSummary));
-    }
-
-    SlowTask.EnterProgressFrame(
-        1.0f,
-        LOCTEXT("BakeAllWrinkleMapsProgress", "Baking wrinkle maps..."));
-    FString WrinkleSummary;
-    bool bWrinkleWarnings = false;
-    if (EditorPanel->BakeAllWrinkleMaps(WrinkleSummary, &bWrinkleWarnings))
-    {
-        Sections.Add(WrinkleSummary);
-        bHadWarnings |= bWrinkleWarnings;
-    }
-    else if (!WrinkleSummary.IsEmpty())
-    {
-        Failures.Add(FString::Printf(TEXT("Wrinkle maps: %s"), *WrinkleSummary));
+        SlowTask.EnterProgressFrame(
+            1.0f,
+            LOCTEXT("BakeAllWetnessProfileMapsProgress", "Baking wetness profile maps..."));
+        FString VisualSummary;
+        bool bVisualWarnings = false;
+        if (EditorPanel->BakeWetVisualAssets(VisualSummary, &bVisualWarnings))
+        {
+            Sections.Add(VisualSummary);
+            bHadWarnings |= bVisualWarnings;
+            bBakedAnyOutput = true;
+        }
+        else if (!VisualSummary.IsEmpty())
+        {
+            Failures.Add(FString::Printf(TEXT("Wetness profile maps: %s"), *VisualSummary));
+        }
     }
 
-    SlowTask.EnterProgressFrame(
-        1.0f,
-        LOCTEXT("BakeAllTransparencyMapsProgress", "Baking transparency reveal maps..."));
-    if (!Asset->TransparencyData.SourceBlueprintClass.IsNull())
+    if (bBakeWrinkles)
     {
+        SlowTask.EnterProgressFrame(
+            1.0f,
+            LOCTEXT("BakeAllWrinkleMapsProgress", "Baking wrinkle maps..."));
+        FString WrinkleSummary;
+        bool bWrinkleWarnings = false;
+        if (EditorPanel->BakeAllWrinkleMaps(WrinkleSummary, &bWrinkleWarnings))
+        {
+            Sections.Add(WrinkleSummary);
+            bHadWarnings |= bWrinkleWarnings;
+            bBakedAnyOutput = true;
+        }
+        else if (!WrinkleSummary.IsEmpty())
+        {
+            Failures.Add(FString::Printf(TEXT("Wrinkle maps: %s"), *WrinkleSummary));
+        }
+    }
+
+    if (bBakeTransparency)
+    {
+        SlowTask.EnterProgressFrame(
+            1.0f,
+            LOCTEXT("BakeAllTransparencyMapsProgress", "Baking transparency maps..."));
         FString TransparencySummary;
         bool bTransparencyWarnings = false;
         if (EditorPanel->BakeTransparencyRevealAssets(TransparencySummary, &bTransparencyWarnings))
         {
-            EditorPanel->SaveTransparencySetupAssets();
             Sections.Add(TransparencySummary);
             bHadWarnings |= bTransparencyWarnings;
+            bBakedAnyOutput = true;
         }
         else
         {
             Failures.Add(FString::Printf(TEXT("Transparency maps: %s"), *TransparencySummary));
         }
     }
-    else
-    {
-        Sections.Add(TEXT("Transparency maps: skipped because no Source Blueprint is configured."));
-    }
 
     SlowTask.EnterProgressFrame(
         1.0f,
-        LOCTEXT("BakeAllRefreshProgress", "Refreshing Wet Clothing Asset state..."));
-    Asset->RefreshBakeState();
-    Asset->MarkPackageDirty();
-    RefreshAssetStateAndEditor();
+        LOCTEXT("BakeAllRefreshProgress", "Saving baked outputs and refreshing Wet Clothing Asset state..."));
+    if (bBakedAnyOutput && !DWCEditorUtils::SaveAsset(Asset))
+    {
+        Failures.Add(TEXT("Baked outputs were generated, but the Wet Clothing Asset or one of its generated packages could not be saved."));
+    }
+    Asset->RefreshBakeState(false);
+    RefreshAssetStateAndEditor(false);
 
     FString Summary = FString::Join(Sections, TEXT("\n\n"));
     if (!Failures.IsEmpty())
     {
-        if (!Summary.IsEmpty()) Summary += TEXT("\n\n");
+        if (!Summary.IsEmpty())
+        {
+            Summary += TEXT("\n\n");
+        }
         Summary += FString::Printf(TEXT("Failures:\n- %s"), *FString::Join(Failures, TEXT("\n- ")));
     }
 
@@ -1690,6 +1789,10 @@ FReply FWetClothingAssetEditor::HandleBakeAllMapsClicked()
 
 FReply FWetClothingAssetEditor::HandleBakeWetnessProfileMapsClicked()
 {
+    if (!CanBakeWetnessProfileMaps())
+    {
+        return FReply::Handled();
+    }
     if (!EditorPanel.IsValid())
     {
         return FReply::Handled();
@@ -1715,7 +1818,16 @@ FReply FWetClothingAssetEditor::HandleBakeWetnessProfileMapsClicked()
     SlowTask.EnterProgressFrame(
         1.0f,
         LOCTEXT("BakeWetnessProfileMapsSaveProgress", "Saving baked wetness profile assets..."));
-    EditorPanel->SaveBakedVisualAssets();
+    UWetClothingAsset* Asset = WetClothingAsset.Get();
+    if (Asset == nullptr || !DWCEditorUtils::SaveAsset(Asset))
+    {
+        RefreshAssetStateAndEditor();
+        FMessageDialog::Open(
+            EAppMsgCategory::Warning,
+            EAppMsgType::Ok,
+            LOCTEXT("BakeWetnessProfileMapsSaveFailed", "Wetness profile maps were generated, but the generated textures or Wet Clothing Asset could not be saved."));
+        return FReply::Handled();
+    }
     RefreshAssetStateAndEditor();
 
     const EAppMsgCategory MessageCategory = bHadWarnings ? EAppMsgCategory::Warning : EAppMsgCategory::Success;
@@ -1725,6 +1837,10 @@ FReply FWetClothingAssetEditor::HandleBakeWetnessProfileMapsClicked()
 
 FReply FWetClothingAssetEditor::HandleBakeGPUWetnessMapDataClicked()
 {
+    if (!CanBakeGPUMaps())
+    {
+        return FReply::Handled();
+    }
     UWetClothingAsset* Asset = WetClothingAsset.Get();
     if (Asset == nullptr)
     {
@@ -1773,8 +1889,16 @@ FReply FWetClothingAssetEditor::HandleBakeGPUWetnessMapDataClicked()
 
     SlowTask.EnterProgressFrame(
         1.0f,
-        LOCTEXT("BakeGPUWetnessMapsRefreshProgress", "Refreshing Wet Clothing Asset state..."));
-    Asset->MarkPackageDirty();
+        LOCTEXT("BakeGPUWetnessMapsRefreshProgress", "Saving GPU simulation maps and Wet Clothing Asset..."));
+    if (!DWCEditorUtils::SaveAsset(Asset))
+    {
+        RefreshAssetStateAndEditor();
+        FMessageDialog::Open(
+            EAppMsgCategory::Warning,
+            EAppMsgType::Ok,
+            LOCTEXT("BakeGPUWetnessMapSaveFailed", "GPU simulation maps were generated, but the Wet Clothing Asset could not be saved."));
+        return FReply::Handled();
+    }
     RefreshAssetStateAndEditor();
 
     const FDWCGPULODBakeData& BakedGPUData = Asset->GetGPUWetMapRuntimeData(Asset->GetSimulationLODIndex());
@@ -1786,7 +1910,7 @@ FReply FWetClothingAssetEditor::HandleBakeGPUWetnessMapDataClicked()
         FText::Format(
             LOCTEXT(
                 "BakeGPUWetnessMapSucceeded",
-                "GPU simulation maps were baked for LOD{3}.\n\nTriangles: {0}\nMaterial-slot maps: {1}\nResolution: {2} x {2}\n\nBefore runtime use, enable Support Compute Skin Cache and enable Skin Cache Usage for the target skeletal-mesh LOD. The wet material must expose the DWC_WetnessMap texture parameter."),
+                "GPU simulation maps were baked and saved for LOD{3}.\n\nTriangles: {0}\nMaterial-slot maps: {1}\nResolution: {2} x {2}\n\nBefore runtime use, enable Support Compute Skin Cache and enable Skin Cache Usage for the target skeletal-mesh LOD. The wet material must expose the DWC_WetnessMap texture parameter."),
             FText::AsNumber(TriangleCount),
             FText::AsNumber(SlotCount),
             FText::AsNumber(Asset->GetSetupSettings().GetGPUSimulationMapResolution()),
@@ -1797,6 +1921,10 @@ FReply FWetClothingAssetEditor::HandleBakeGPUWetnessMapDataClicked()
 
 FReply FWetClothingAssetEditor::HandleBakeTransparencyRevealMapsClicked()
 {
+    if (!CanBakeTransparencyMaps())
+    {
+        return FReply::Handled();
+    }
     if (!EditorPanel.IsValid())
     {
         return FReply::Handled();
@@ -1822,7 +1950,16 @@ FReply FWetClothingAssetEditor::HandleBakeTransparencyRevealMapsClicked()
     SlowTask.EnterProgressFrame(
         1.0f,
         LOCTEXT("BakeTransparencyRevealMapsSaveProgress", "Saving transparency reveal assets..."));
-    EditorPanel->SaveTransparencySetupAssets();
+    UWetClothingAsset* Asset = WetClothingAsset.Get();
+    if (Asset == nullptr || !DWCEditorUtils::SaveAsset(Asset))
+    {
+        RefreshAssetStateAndEditor();
+        FMessageDialog::Open(
+            EAppMsgCategory::Warning,
+            EAppMsgType::Ok,
+            LOCTEXT("BakeTransparencyRevealMapsSaveFailed", "Transparency maps were generated, but the generated textures or Wet Clothing Asset could not be saved."));
+        return FReply::Handled();
+    }
     RefreshAssetStateAndEditor();
 
     const EAppMsgCategory MessageCategory = bHadWarnings ? EAppMsgCategory::Warning : EAppMsgCategory::Success;
@@ -1832,6 +1969,10 @@ FReply FWetClothingAssetEditor::HandleBakeTransparencyRevealMapsClicked()
 
 FReply FWetClothingAssetEditor::HandleBakeWrinkleNormalMapClicked()
 {
+    if (!CanBakeWrinkleMaps())
+    {
+        return FReply::Handled();
+    }
     if (!EditorPanel.IsValid())
     {
         return FReply::Handled();
@@ -1844,6 +1985,10 @@ FReply FWetClothingAssetEditor::HandleBakeWrinkleNormalMapClicked()
 
 FReply FWetClothingAssetEditor::HandleBakeWrinkleMaskClicked()
 {
+    if (!CanBakeWrinkleMaps())
+    {
+        return FReply::Handled();
+    }
     if (!EditorPanel.IsValid())
     {
         return FReply::Handled();
@@ -1854,13 +1999,14 @@ FReply FWetClothingAssetEditor::HandleBakeWrinkleMaskClicked()
     return Result;
 }
 
-FReply FWetClothingAssetEditor::HandleGenerateMaterialsClicked(const EWetClothingGenerateMaterialMode GenerateMode)
+FReply FWetClothingAssetEditor::HandleGenerateMaterialsClicked()
 {
-    return GenerateWetMaterials(GenerateMode);
+    return GenerateWetMaterials();
 }
 
-FReply FWetClothingAssetEditor::GenerateWetMaterials(const EWetClothingGenerateMaterialMode GenerateMode)
+FReply FWetClothingAssetEditor::GenerateWetMaterials()
 {
+
     UWetClothingAsset* Asset = WetClothingAsset.Get();
     if (Asset == nullptr)
     {
@@ -1870,47 +2016,19 @@ FReply FWetClothingAssetEditor::GenerateWetMaterials(const EWetClothingGenerateM
     USkeletalMesh* RuntimeMesh = Asset->GetRuntimeSkeletalMesh();
     if (RuntimeMesh == nullptr)
     {
-        FMessageDialog::Open(EAppMsgCategory::Error, EAppMsgType::Ok, LOCTEXT("GenerateMaterialsNoMesh", "Assign a runtime skeletal mesh before generating wet materials."));
+        FMessageDialog::Open(
+            EAppMsgCategory::Error,
+            EAppMsgType::Ok,
+            LOCTEXT("GenerateMaterialsNoMesh", "Assign a runtime skeletal mesh before generating wet materials."));
         return FReply::Handled();
     }
 
-    const FDWCWetClothingAssetSetupSettings& Setup = Asset->GetSetupSettings();
-    TArray<EDWCSimulationMode> SimulationModes;
-    if (GenerateMode == EWetClothingGenerateMaterialMode::CPU || GenerateMode == EWetClothingGenerateMaterialMode::All)
-    {
-        SimulationModes.Add(EDWCSimulationMode::VertexCPU);
-    }
-    if (GenerateMode == EWetClothingGenerateMaterialMode::GPU || GenerateMode == EWetClothingGenerateMaterialMode::All)
-    {
-        SimulationModes.Add(EDWCSimulationMode::WetnessMapGPU);
-    }
-
-    const bool bNeedsCPU = SimulationModes.Contains(EDWCSimulationMode::VertexCPU);
-    const bool bNeedsGPU = SimulationModes.Contains(EDWCSimulationMode::WetnessMapGPU);
-    TArray<FString> DisabledBackends;
-    if (bNeedsCPU && !Setup.bBuildCPUVertexSimulationData)
-    {
-        DisabledBackends.Add(TEXT("CPU Vertex Simulation Data"));
-    }
-    if (bNeedsGPU && !Setup.bBuildGPUWetnessMapSimulationData)
-    {
-        DisabledBackends.Add(TEXT("GPU Wetness Map Simulation Data"));
-    }
-    if (!DisabledBackends.IsEmpty())
+    if (!Asset->HasValidDataUVForLOD(Asset->GetSimulationLODIndex()))
     {
         FMessageDialog::Open(
             EAppMsgCategory::Warning,
             EAppMsgType::Ok,
-            FText::FromString(FString::Printf(
-                TEXT("Enable %s in Asset Setup before generating the requested wet materials."),
-                *FString::Join(DisabledBackends, TEXT(" and ")))));
-        return FReply::Handled();
-    }
-
-    const FDWCDataUVPerLOD* DataUV = Asset->FindGeneratedDataUVForLOD(Asset->GetSimulationLODIndex());
-    if (Asset->GetDWCDataUVChannelIndex() == INDEX_NONE || DataUV == nullptr || !DataUV->bIsValid)
-    {
-        FMessageDialog::Open(EAppMsgCategory::Warning, EAppMsgType::Ok, LOCTEXT("GenerateMaterialsNoDataUV", "Generate DWC Data UV before generating wet materials."));
+            LOCTEXT("GenerateMaterialsNoDataUV", "Generate DWC Data UV before generating wet materials."));
         return FReply::Handled();
     }
 
@@ -1925,7 +2043,10 @@ FReply FWetClothingAssetEditor::GenerateWetMaterials(const EWetClothingGenerateM
     WettableSlots.Sort();
     if (WettableSlots.IsEmpty())
     {
-        FMessageDialog::Open(EAppMsgCategory::Warning, EAppMsgType::Ok, LOCTEXT("GenerateMaterialsNoWettableSlots", "Mark at least one material slot as wettable before generating wet materials."));
+        FMessageDialog::Open(
+            EAppMsgCategory::Warning,
+            EAppMsgType::Ok,
+            LOCTEXT("GenerateMaterialsNoWettableSlots", "Mark at least one material slot as wettable before generating wet materials."));
         return FReply::Handled();
     }
 
@@ -1933,14 +2054,10 @@ FReply FWetClothingAssetEditor::GenerateWetMaterials(const EWetClothingGenerateM
     TArray<FString> UpdatedMaterials;
     TArray<FString> Failures;
 
-    const FString ModeLabel = GenerateMode == EWetClothingGenerateMaterialMode::All
-                                  ? TEXT("CPU + GPU")
-                                  : (GenerateMode == EWetClothingGenerateMaterialMode::GPU ? TEXT("GPU") : TEXT("CPU"));
     FScopedSlowTask SlowTask(
-        static_cast<float>(FMath::Max(1, WettableSlots.Num() * SimulationModes.Num() + 2)),
+        static_cast<float>(FMath::Max(1, WettableSlots.Num() + 2)),
         FText::FromString(FString::Printf(
-            TEXT("Generating %s wet materials for %s (%d slot%s)..."),
-            *ModeLabel,
+            TEXT("Generating unified DWC materials for %s (%d slot%s)..."),
             *GetNameSafe(Asset),
             WettableSlots.Num(),
             WettableSlots.Num() == 1 ? TEXT("") : TEXT("s"))));
@@ -1948,21 +2065,12 @@ FReply FWetClothingAssetEditor::GenerateWetMaterials(const EWetClothingGenerateM
     SlowTask.EnterProgressFrame(
         1.0f,
         FText::FromString(FString::Printf(
-            TEXT("Preparing %d wettable material slot%s for %s generation..."),
+            TEXT("Preparing %d wettable material slot%s..."),
             WettableSlots.Num(),
-            WettableSlots.Num() == 1 ? TEXT("") : TEXT("s"),
-            *ModeLabel)));
+            WettableSlots.Num() == 1 ? TEXT("") : TEXT("s"))));
 
-    TMap<EDWCSimulationMode, FWetClothingMaterialSetup::FOptions> MaterialSetupOptionsByMode;
-    for (const EDWCSimulationMode Mode : SimulationModes)
-    {
-        MaterialSetupOptionsByMode.Add(Mode, FWetClothingMaterialSetup::MakeOptionsForAsset(Asset, Mode));
-    }
-
-    auto GetModeLabel = [](const EDWCSimulationMode Mode) -> const TCHAR*
-    {
-        return Mode == EDWCSimulationMode::WetnessMapGPU ? TEXT("GPU") : TEXT("CPU");
-    };
+    const FWetClothingMaterialSetup::FOptions MaterialSetupOptions =
+        FWetClothingMaterialSetup::MakeOptionsForAsset(Asset, EDWCSimulationMode::VertexCPU);
 
     Asset->Modify();
     bool bUpdatedAnyMaterial = false;
@@ -1987,71 +2095,57 @@ FReply FWetClothingAssetEditor::GenerateWetMaterials(const EWetClothingGenerateM
                 {
                     return MaterialOverride.MaterialSlotIndex == MaterialSlotIndex;
                 });
-        const bool bHadOverride = ExistingOverride != nullptr &&
-                                  (ExistingOverride->CPUWetMaterial != nullptr ||
-                                   ExistingOverride->GPUWetMaterial != nullptr);
+        const bool bHadCompleteOverride =
+            ExistingOverride != nullptr &&
+            ExistingOverride->GeneratedMaterial != nullptr &&
+            ExistingOverride->CPUMaterialInstance != nullptr &&
+            ExistingOverride->GPUMaterialInstance != nullptr;
 
-        for (const EDWCSimulationMode Mode : SimulationModes)
-        {
-            const TCHAR* PerModeLabel = GetModeLabel(Mode);
-            const bool bGenerateGPU = Mode == EDWCSimulationMode::WetnessMapGPU;
-            UMaterialInterface* ExistingTargetMaterial =
-                ExistingOverride != nullptr
-                    ? (bGenerateGPU ? ExistingOverride->GPUWetMaterial.Get() : ExistingOverride->CPUWetMaterial.Get())
-                    : nullptr;
-
-            SlowTask.EnterProgressFrame(
-                1.0f,
-                FText::FromString(FString::Printf(
-                    TEXT("Generating %s material for slot %d from '%s'..."),
-                    PerModeLabel,
-                    MaterialSlotIndex,
-                    *GetNameSafe(SourceMaterial))));
-
-            const FWetClothingMaterialSetup::FOptions* MaterialSetupOptions = MaterialSetupOptionsByMode.Find(Mode);
-            FWetClothingMaterialSetupResult MaterialResult =
-                FWetClothingMaterialSetup::DuplicateAndApplyToMaterialInterface(
-                    SourceMaterial,
-                    MaterialSetupOptions != nullptr ? *MaterialSetupOptions : FWetClothingMaterialSetup::FOptions());
-            if (!MaterialResult.bSucceeded || MaterialResult.ConfiguredMaterial == nullptr)
-            {
-                Failures.Add(FString::Printf(TEXT("Slot %d %s: %s"), MaterialSlotIndex, PerModeLabel, *MaterialResult.Message));
-                continue;
-            }
-
-            if (ExistingOverride == nullptr)
-            {
-                ExistingOverride = &Asset->PartData.GeneratedWetMaterialOverrides.AddDefaulted_GetRef();
-                ExistingOverride->MaterialSlotIndex = MaterialSlotIndex;
-            }
-
-            ExistingOverride->SourceMaterial = SourceMaterial;
-            if (bGenerateGPU)
-            {
-                ExistingOverride->GPUWetMaterial = MaterialResult.ConfiguredMaterial;
-            }
-            else
-            {
-                ExistingOverride->CPUWetMaterial = MaterialResult.ConfiguredMaterial;
-            }
-            bUpdatedAnyMaterial = true;
-
-            UpdatedMaterials.Add(FString::Printf(
-                TEXT("Slot %d -> %s %s (%s)"),
+        SlowTask.EnterProgressFrame(
+            1.0f,
+            FText::FromString(FString::Printf(
+                TEXT("Generating shared material and CPU/GPU permutations for slot %d from '%s'..."),
                 MaterialSlotIndex,
-                PerModeLabel,
-                *GetNameSafe(MaterialResult.ConfiguredMaterial),
-                ExistingTargetMaterial != nullptr || MaterialResult.bAlreadyConfigured || bHadOverride
-                    ? TEXT("overwritten/refreshed")
-                    : TEXT("created")));
+                *GetNameSafe(SourceMaterial))));
+
+        const FWetClothingUnifiedMaterialSetupResult MaterialSet =
+            FWetClothingMaterialSetup::CreateOrUpdateUnifiedMaterialSet(SourceMaterial, MaterialSetupOptions);
+        if (!MaterialSet.bSucceeded || MaterialSet.GeneratedMaterial == nullptr ||
+            MaterialSet.CPUMaterialInstance == nullptr || MaterialSet.GPUMaterialInstance == nullptr)
+        {
+            Failures.Add(FString::Printf(
+                TEXT("Slot %d: %s"),
+                MaterialSlotIndex,
+                *MaterialSet.Message));
+            continue;
         }
+
+        if (ExistingOverride == nullptr)
+        {
+            ExistingOverride = &Asset->PartData.GeneratedWetMaterialOverrides.AddDefaulted_GetRef();
+            ExistingOverride->MaterialSlotIndex = MaterialSlotIndex;
+        }
+
+        ExistingOverride->SourceMaterial = SourceMaterial;
+        ExistingOverride->GeneratedMaterial = MaterialSet.GeneratedMaterial;
+        ExistingOverride->CPUMaterialInstance = MaterialSet.CPUMaterialInstance;
+        ExistingOverride->GPUMaterialInstance = MaterialSet.GPUMaterialInstance;
+        bUpdatedAnyMaterial = true;
+
+        UpdatedMaterials.Add(FString::Printf(
+            TEXT("Slot %d -> shared %s, CPU %s, GPU %s (%s)"),
+            MaterialSlotIndex,
+            *GetNameSafe(MaterialSet.GeneratedMaterial),
+            *GetNameSafe(MaterialSet.CPUMaterialInstance),
+            *GetNameSafe(MaterialSet.GPUMaterialInstance),
+            bHadCompleteOverride || MaterialSet.bAlreadyConfigured
+                ? TEXT("overwritten/refreshed")
+                : TEXT("created")));
     }
 
     SlowTask.EnterProgressFrame(
         1.0f,
-        FText::FromString(FString::Printf(
-            TEXT("Refreshing generated %s material state..."),
-            *ModeLabel)));
+        LOCTEXT("GenerateMaterialsRefreshState", "Refreshing generated material state..."));
 
     if (bUpdatedAnyMaterial)
     {
@@ -2059,19 +2153,12 @@ FReply FWetClothingAssetEditor::GenerateWetMaterials(const EWetClothingGenerateM
     }
     RefreshAssetStateAndEditor();
 
-    TArray<FString> SummarySections;
-    if (!UpdatedMaterials.IsEmpty())
-    {
-        SummarySections.Add(FString::Printf(
-            TEXT("Updated %s materials:\n- %s"),
-            *ModeLabel,
-            *FString::Join(UpdatedMaterials, TEXT("\n- "))));
-    }
-
-    const FString MaterialSummary = SummarySections.IsEmpty()
-                                        ? TEXT("No material overrides were updated.")
-                                        : FString::Join(SummarySections, TEXT("\n\n"));
-    FString Summary = FString::Printf(TEXT("Generated %s material overrides.\n\n%s"), *ModeLabel, *MaterialSummary);
+    const FString MaterialSummary = UpdatedMaterials.IsEmpty()
+        ? TEXT("No material overrides were updated.")
+        : FString::Printf(
+            TEXT("Updated unified material sets:\n- %s"),
+            *FString::Join(UpdatedMaterials, TEXT("\n- ")));
+    FString Summary = FString::Printf(TEXT("Generated unified DWC material overrides.\n\n%s"), *MaterialSummary);
     if (!Failures.IsEmpty())
     {
         Summary += FString::Printf(TEXT("\n\nFailures:\n- %s"), *FString::Join(Failures, TEXT("\n- ")));

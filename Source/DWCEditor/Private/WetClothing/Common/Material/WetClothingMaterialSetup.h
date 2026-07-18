@@ -3,15 +3,19 @@
 #include "CoreMinimal.h"
 #include "Core/DWCSimulationMode.h"
 
+class UMaterial;
+class UMaterialInstanceConstant;
 class UMaterialInterface;
 class UWetClothingAsset;
 
-struct FWetClothingMaterialSetupResult
+struct FWetClothingUnifiedMaterialSetupResult
 {
-    bool                bSucceeded = false;
-    bool                bAlreadyConfigured = false;
-    UMaterialInterface* ConfiguredMaterial = nullptr;
-    FString             Message;
+    bool bSucceeded = false;
+    bool bAlreadyConfigured = false;
+    UMaterial* GeneratedMaterial = nullptr;
+    UMaterialInstanceConstant* CPUMaterialInstance = nullptr;
+    UMaterialInstanceConstant* GPUMaterialInstance = nullptr;
+    FString Message;
 };
 
 class FWetClothingMaterialSetup
@@ -23,21 +27,26 @@ class FWetClothingMaterialSetup
         int32 DWCDataUVChannelIndex = INDEX_NONE;
         bool bEnableDWCDataUVSampling = false;
         bool bConnectWetnessMapPath = false;
+
+        /** Optional owner used to place generated assets in a WCA-specific deterministic folder. */
+        const UWetClothingAsset* OwningWetClothingAsset = nullptr;
     };
 
     static FOptions MakeOptionsForAsset(
         const UWetClothingAsset* WetClothingAsset,
         EDWCSimulationMode SimulationMode = EDWCSimulationMode::VertexCPU);
 
-    static FWetClothingMaterialSetupResult DuplicateAndApplyToMaterialInterface(
-        UMaterialInterface* MaterialInterface,
+    /** Creates one shared DWC material graph and two static CPU/GPU MIC permutations. */
+    static FWetClothingUnifiedMaterialSetupResult CreateOrUpdateUnifiedMaterialSet(
+        UMaterialInterface* SourceMaterial,
         const FOptions& Options = FOptions());
-    static FWetClothingMaterialSetupResult DuplicateAndApplyToMaterialInterface(
-        UMaterialInterface* MaterialInterface,
-        int32 WrinkleUVChannelIndex,
-        int32 FallbackDWCDataUVChannelIndex = 1);
+
     static bool IsMaterialConfiguredForDwc(UMaterialInterface* MaterialInterface);
     static bool IsMaterialConfiguredForDwc(UMaterialInterface* MaterialInterface, const FOptions& Options);
+    /** Fast reference-only validation used by routine editor status refreshes. */
+    static void ValidateGeneratedMaterialOverrideReferences(const UWetClothingAsset* WetClothingAsset, TArray<FString>& OutMessages);
+
+    /** Deep graph and static-permutation validation used by explicit validation/generation workflows. */
     static void ValidateGeneratedMaterialOverrides(const UWetClothingAsset* WetClothingAsset, TArray<FString>& OutMessages);
 
     // Routine material setup treats the shared functions as fixed, read-only assets.

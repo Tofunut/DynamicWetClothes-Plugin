@@ -27,6 +27,7 @@
 #include "FileHelpers.h"
 #include "Materials/Material.h"
 #include "Materials/MaterialInterface.h"
+#include "Materials/MaterialInstanceConstant.h"
 #include "Misc/MessageDialog.h"
 #include "Modules/ModuleManager.h"
 #include "PropertyCustomizationHelpers.h"
@@ -1575,21 +1576,15 @@ FReply SWetClothingPartEditorPanel::HandleApplyMaterialSetupClicked()
     UMaterialInterface* SourceMaterial = SelectedMaterial;
     UWetClothingAsset*  WetClothingAssetPtr = WetClothingAsset.Get();
 
-    const FWetClothingMaterialSetup::FOptions CPUMaterialSetupOptions =
+    const FWetClothingMaterialSetup::FOptions MaterialSetupOptions =
         FWetClothingMaterialSetup::MakeOptionsForAsset(WetClothingAssetPtr, EDWCSimulationMode::VertexCPU);
-    const FWetClothingMaterialSetup::FOptions GPUMaterialSetupOptions =
-        FWetClothingMaterialSetup::MakeOptionsForAsset(WetClothingAssetPtr, EDWCSimulationMode::WetnessMapGPU);
-    FWetClothingMaterialSetupResult CPUResult = FWetClothingMaterialSetup::DuplicateAndApplyToMaterialInterface(
-        SourceMaterial,
-        CPUMaterialSetupOptions);
-    FWetClothingMaterialSetupResult GPUResult = FWetClothingMaterialSetup::DuplicateAndApplyToMaterialInterface(
-        SourceMaterial,
-        GPUMaterialSetupOptions);
+    const FWetClothingUnifiedMaterialSetupResult MaterialSet =
+        FWetClothingMaterialSetup::CreateOrUpdateUnifiedMaterialSet(SourceMaterial, MaterialSetupOptions);
 
-    FString ResultMessage = FString::Printf(TEXT("CPU: %s\nGPU: %s"), *CPUResult.Message, *GPUResult.Message);
+    FString ResultMessage = MaterialSet.Message;
     const bool bSucceeded =
-        CPUResult.bSucceeded && CPUResult.ConfiguredMaterial != nullptr &&
-        GPUResult.bSucceeded && GPUResult.ConfiguredMaterial != nullptr;
+        MaterialSet.bSucceeded && MaterialSet.GeneratedMaterial != nullptr &&
+        MaterialSet.CPUMaterialInstance != nullptr && MaterialSet.GPUMaterialInstance != nullptr;
 
     if (bSucceeded && SourceMaterial != nullptr)
     {
@@ -1625,8 +1620,9 @@ FReply SWetClothingPartEditorPanel::HandleApplyMaterialSetupClicked()
                         }
 
                         ExistingOverride->SourceMaterial = SourceMaterial;
-                        ExistingOverride->CPUWetMaterial = CPUResult.ConfiguredMaterial;
-                        ExistingOverride->GPUWetMaterial = GPUResult.ConfiguredMaterial;
+                        ExistingOverride->GeneratedMaterial = MaterialSet.GeneratedMaterial;
+                        ExistingOverride->CPUMaterialInstance = MaterialSet.CPUMaterialInstance;
+                        ExistingOverride->GPUMaterialInstance = MaterialSet.GPUMaterialInstance;
                         FWetClothingEditorCommonWidgets::MarkMaterialSlotWettable(WetClothingAssetPtr, MaterialIndex);
                     }
                     WetClothingAssetPtr->MarkPackageDirty();
@@ -1643,9 +1639,10 @@ FReply SWetClothingPartEditorPanel::HandleApplyMaterialSetupClicked()
                     }
 
                     ResultMessage += FString::Printf(
-                        TEXT("\nStored CPU '%s' and GPU '%s' as runtime wet material overrides for %d material slot(s) on '%s': %s."),
-                        *CPUResult.ConfiguredMaterial->GetName(),
-                        *GPUResult.ConfiguredMaterial->GetName(),
+                        TEXT("\nStored shared '%s', CPU '%s', and GPU '%s' as runtime wet material overrides for %d material slot(s) on '%s': %s."),
+                        *MaterialSet.GeneratedMaterial->GetName(),
+                        *MaterialSet.CPUMaterialInstance->GetName(),
+                        *MaterialSet.GPUMaterialInstance->GetName(),
                         AssignedSlotIndices.Num(),
                         *GeneratedDataUV->GetName(),
                         *AssignedSlotText);
@@ -1681,8 +1678,7 @@ bool SWetClothingPartEditorPanel::IsApplyMaterialSetupEnabled() const
 
     if (Asset->GetSetupSettings().bBuildGPUWetnessMapSimulationData)
     {
-        const FDWCDataUVPerLOD* DataUV = Asset->FindGeneratedDataUVForLOD(Asset->GetSimulationLODIndex());
-        if (Asset->GetDWCDataUVChannelIndex() == INDEX_NONE || DataUV == nullptr || !DataUV->bIsValid)
+        if (!Asset->HasValidDataUVForLOD(Asset->GetSimulationLODIndex()))
         {
             return false;
         }

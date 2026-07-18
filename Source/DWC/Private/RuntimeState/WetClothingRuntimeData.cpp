@@ -7,7 +7,6 @@ void FWetClothingRuntimeData::ResetWetPartData()
     VertexAbsorbedWetnessFlags.Reset();
     VertexSurfaceWaterFlags.Reset();
     VertexWetnessProfileParameters.Reset();
-    VertexWetPartDebugColors.Reset();
     SurfaceWaterUVs.Reset();
     SurfaceWaterUVValidFlags.Reset();
     SurfaceWaterMaterialSlotIndices.Reset();

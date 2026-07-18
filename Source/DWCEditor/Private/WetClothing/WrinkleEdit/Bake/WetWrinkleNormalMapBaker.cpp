@@ -186,14 +186,14 @@ namespace
         TArray<uint8>& OutIslandMask)
     {
         OutIslandMask.Init(0, Width * Height);
-        if (WetClothingAsset.TargetMesh == nullptr || Width <= 0 || Height <= 0)
+        if (WetClothingAsset.GetDWCSkeletalMesh() == nullptr || Width <= 0 || Height <= 0)
         {
             return false;
         }
 
         TArray<FWetClothingAssetUVIsland> Islands;
         if (!FWetClothingAssetMeshAnalyzer::BuildMaterialSlotUVIslands(
-                WetClothingAsset.TargetMesh,
+                WetClothingAsset.GetDWCSkeletalMesh(),
                 LODIndex,
                 UVChannelIndex,
                 MaterialSlotIndex,
@@ -407,7 +407,7 @@ bool FWetWrinkleNormalMapBaker::BakeMaterialSlot(
         return false;
     }
 
-    const int32 WrinkleUVChannelIndex = 0;
+    const int32 WrinkleUVChannelIndex = WetClothingAsset->GetDWCDataUVChannelIndex();
 
     TSet<int32> TargetSlots;
     TargetSlots.Add(MaterialSlotIndex);

@@ -1,4 +1,5 @@
 #include "WetClothing/TransparencyBake/Viewport/SWetClothingTransparencyPreviewViewport.h"
+#include "Materials/MaterialInstanceConstant.h"
 
 #include "AdvancedPreviewScene.h"
 #include "Components/SkeletalMeshComponent.h"
@@ -510,7 +511,7 @@ void SWetClothingTransparencyPreviewViewport::ClearPreview()
 void SWetClothingTransparencyPreviewViewport::BuildTargetMeshPreview()
 {
     UWetClothingAsset* Asset = WetClothingAsset.Get();
-    if (Asset == nullptr || Asset->TargetMesh == nullptr || !PreviewScene.IsValid())
+    if (Asset == nullptr || Asset->GetDWCSkeletalMesh() == nullptr || !PreviewScene.IsValid())
     {
         return;
     }
@@ -518,7 +519,7 @@ void SWetClothingTransparencyPreviewViewport::BuildTargetMeshPreview()
     TargetMeshPreviewComponent = NewObject<USkeletalMeshComponent>(GetTransientPackage(), NAME_None, RF_Transient);
     TargetMeshPreviewComponent->SetMobility(EComponentMobility::Movable);
     TargetMeshPreviewComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-    TargetMeshPreviewComponent->SetSkeletalMeshAsset(Asset->TargetMesh);
+    TargetMeshPreviewComponent->SetSkeletalMeshAsset(Asset->GetDWCSkeletalMesh());
     PreviewScene->AddComponent(TargetMeshPreviewComponent, FTransform::Identity);
     ConfigurePreviewMeshComponent(TargetMeshPreviewComponent);
 
@@ -565,7 +566,7 @@ void SWetClothingTransparencyPreviewViewport::BuildFullBlueprintPreview()
     PreviewActor->GetComponents<USkeletalMeshComponent>(MeshComponents);
     for (USkeletalMeshComponent* MeshComponent : MeshComponents)
     {
-        if (MeshComponent != nullptr && MeshComponent->GetSkeletalMeshAsset() == Asset->TargetMesh)
+        if (MeshComponent != nullptr && MeshComponent->GetSkeletalMeshAsset() == Asset->GetDWCSkeletalMesh())
         {
             ConfigurePreviewMeshComponent(MeshComponent);
         }
@@ -601,7 +602,7 @@ void SWetClothingTransparencyPreviewViewport::ApplyRevealMaterials(USkeletalMesh
         return;
     }
 
-    const bool bIsTargetMesh = MeshComponent->GetSkeletalMeshAsset() == Asset->TargetMesh;
+    const bool bIsTargetMesh = MeshComponent->GetSkeletalMeshAsset() == Asset->GetDWCSkeletalMesh();
     if (!bIsTargetMesh)
     {
         return;
@@ -614,11 +615,11 @@ void SWetClothingTransparencyPreviewViewport::ApplyRevealMaterials(USkeletalMesh
             Asset->PartData.GeneratedWetMaterialOverrides.FindByPredicate(
                 [MaterialSlotIndex](const FWetClothingGeneratedWetMaterialOverride& Candidate)
                 {
-                    return Candidate.MaterialSlotIndex == MaterialSlotIndex && Candidate.WetMaterial != nullptr;
+                    return Candidate.MaterialSlotIndex == MaterialSlotIndex && Candidate.CPUMaterialInstance != nullptr;
                 });
         if (WetOverride != nullptr)
         {
-            MeshComponent->SetMaterial(MaterialSlotIndex, WetOverride->WetMaterial);
+            MeshComponent->SetMaterial(MaterialSlotIndex, WetOverride->CPUMaterialInstance);
         }
     }
 
@@ -797,7 +798,7 @@ void SWetClothingTransparencyPreviewViewport::RebuildHitTriangles()
 {
     CachedHitTriangles.Reset();
     const UWetClothingAsset* Asset = WetClothingAsset.Get();
-    if (Asset == nullptr || Asset->TargetMesh == nullptr || TargetMeshPreviewComponent == nullptr ||
+    if (Asset == nullptr || Asset->GetDWCSkeletalMesh() == nullptr || TargetMeshPreviewComponent == nullptr ||
         SelectedMaterialSlotIndex == INDEX_NONE || SelectedUVChannelIndex < 0)
     {
         return;
@@ -805,7 +806,7 @@ void SWetClothingTransparencyPreviewViewport::RebuildHitTriangles()
 
     TArray<FWetClothingAssetUVIsland> Islands;
     if (!FWetClothingAssetMeshAnalyzer::BuildMaterialSlotUVIslands(
-            Asset->TargetMesh,
+            Asset->GetDWCSkeletalMesh(),
             0,
             SelectedUVChannelIndex,
             SelectedMaterialSlotIndex,
@@ -1783,7 +1784,7 @@ USkeletalMeshComponent* SWetClothingTransparencyPreviewViewport::FindFocusMeshCo
     const UWetClothingAsset* Asset = WetClothingAsset.Get();
     for (USkeletalMeshComponent* MeshComponent : PreviewMeshComponents)
     {
-        if (MeshComponent != nullptr && (Asset == nullptr || MeshComponent->GetSkeletalMeshAsset() == Asset->TargetMesh))
+        if (MeshComponent != nullptr && (Asset == nullptr || MeshComponent->GetSkeletalMeshAsset() == Asset->GetDWCSkeletalMesh()))
         {
             return MeshComponent;
         }

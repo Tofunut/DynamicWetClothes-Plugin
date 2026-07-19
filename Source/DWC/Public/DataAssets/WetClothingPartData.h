@@ -164,10 +164,10 @@ struct DWC_API FWetClothingBakedWetnessProfileMap
     UPROPERTY(VisibleAnywhere, Category = "Baked Wetness Profile Map")
     TObjectPtr<UTexture2D> WetnessProfileMap0 = nullptr;
 
-    UPROPERTY(EditAnywhere, Category = "Baked Wetness Profile Map")
-    int32 Resolution = 512;
+    UPROPERTY(VisibleAnywhere, Category = "Baked Wetness Profile Map")
+    int32 Resolution = 256;
 
-    UPROPERTY(EditAnywhere, Category = "Baked Wetness Profile Map")
+    UPROPERTY(VisibleAnywhere, Category = "Baked Wetness Profile Map")
     int32 PaddingPixels = 4;
 
     UPROPERTY(VisibleAnywhere, Category = "Baked Wetness Profile Map")

@@ -37,7 +37,8 @@ class FDWCRevealBakeMaterialBuilder
         const FString&                  AssetNamePrefix,
         const UDWCBakeComponent&        BakeComponent,
         const FDWCBakeResolvedLayer&    OuterLayer,
-        const FDWCRevealBakeTextureSet& TextureSet);
+        const FDWCRevealBakeTextureSet& TextureSet,
+        const FString&                  TargetPackagePath = FString());
 
   private:
     static USkeletalMeshComponent* FindLayerComponent(const AActor& Actor, const FDWCBakeResolvedLayer& Layer);
@@ -73,7 +74,8 @@ class FDWCRevealBakeMaterialBuilder
 
     static UMaterial* DuplicateRevealMaterial(
         UMaterialInterface* SourceMaterialInterface,
-        const FString&      AssetNamePrefix);
+        const FString&      AssetNamePrefix,
+        const FString&      TargetPackagePath);
 
     static bool ConfigureRevealMaterialGraph(
         UMaterial*                      Material,
@@ -84,6 +86,7 @@ class FDWCRevealBakeMaterialBuilder
     static UMaterialInstanceConstant* CreateRevealMaterialInstanceForSource(
         const UMaterialInstance* SourceInstance,
         UMaterialInterface*      RevealParent,
-        const FString&           AssetNamePrefix);
+        const FString&           AssetNamePrefix,
+        const FString&           TargetPackagePath);
 
 };

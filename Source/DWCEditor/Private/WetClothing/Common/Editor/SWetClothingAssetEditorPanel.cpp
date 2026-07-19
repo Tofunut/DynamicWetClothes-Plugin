@@ -8,6 +8,7 @@
 #include "WetClothing/TransparencyBake/Editor/SWetClothingTransparencyBakePanel.h"
 #include "WetClothing/TransparencyBake/RevealBake/DWCTransparencyAssetBakeService.h"
 #include "WetClothing/Common/Material/WetClothingMaterialSetup.h"
+#include "WetClothing/Common/DerivedData/DWCEditorDerivedDataInvalidator.h"
 #include "WetClothing/WrinkleEdit/Bake/WetWrinkleBakeService.h"
 #include "WetClothing/WrinkleEdit/Editor/SWetWrinkleEditorPanel.h"
 #include "WetClothing/Common/Widgets/WetClothingEditorCommonWidgets.h"
@@ -219,7 +220,10 @@ FString FDWCEditorIssueStatus::BuildSummary() const
 
 SWetClothingAssetEditorPanel::~SWetClothingAssetEditorPanel()
 {
-    FWetClothingEditorCommonWidgets::ClearEditorSessionCaches();
+    if (const UWetClothingAsset* Asset = WetClothingAsset.Get())
+    {
+        FDWCEditorDerivedDataInvalidator::InvalidateAsset(*Asset);
+    }
 }
 
 void SWetClothingAssetEditorPanel::Construct(const FArguments& InArgs)

@@ -20,9 +20,9 @@ class DWC_API UWetClothingAsset : public UDataAsset
     GENERATED_BODY()
 
   public:
-    static constexpr int32 CurrentAssetDataVersion = 5;
+    static constexpr int32 CurrentAssetDataVersion = 6;
     static constexpr int32 FirstAssetVersionWithSerializedRuntimeBulkData = 4;
-    static constexpr int32 CurrentPrecomputedSimulationDataVersion = 4;
+    static constexpr int32 CurrentPrecomputedSimulationDataVersion = 7;
     static constexpr int32 CurrentRuntimeBulkDataVersion = 2;
     static constexpr int32 RuntimeSimulationLODIndex = 0;
 

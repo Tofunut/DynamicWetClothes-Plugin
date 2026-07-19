@@ -10,10 +10,18 @@ class UTexture;
 class UTexture2D;
 class UWetClothingAsset;
 
+namespace DWCWetnessProfileMapBake
+{
+    // Wetness Profile Maps are transitional generated data. Keep their bake
+    // footprint deterministic and independent from user-facing map settings.
+    constexpr int32 Resolution = 256;
+    constexpr int32 PaddingPixels = 4;
+}
+
 struct FWetClothingWetnessProfileMapBakeSettings
 {
-    int32 Resolution = 512;
-    int32 PaddingPixels = 4;
+    int32 Resolution = DWCWetnessProfileMapBake::Resolution;
+    int32 PaddingPixels = DWCWetnessProfileMapBake::PaddingPixels;
 };
 
 struct FWetClothingWetnessProfileMapBakeResult

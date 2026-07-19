@@ -109,24 +109,17 @@ class SWetWrinkleEditorPanel : public SCompoundWidget, public FEditorUndoClient
     void RefreshPartMapItems();
     void RefreshMaterialTextures();
     void RefreshTextureToggleWidgets();
-    void EnsureWrinkleUVChannelForModeEntry();
     bool HasUsableWrinkleUVChannel() const;
-    bool HasGeneratedWrinkleUVForMaterialSlot(int32 MaterialSlotIndex) const;
     bool EnsureWrinkleUVChannelForMaterialSlot(int32 MaterialSlotIndex, bool bShowFailureDialog);
     void InvalidateWrinkleUVViewCache();
-    void RefreshUVChannelOptions();
+    void RefreshDWCDataUVChannel();
     void RefreshWrinkleUVView();
     void RebuildWrinkleUVViewPatchMarkerCache();
     void RefreshWrinkleUVViewMarkersOnly();
     TSharedRef<SWidget> BuildWrinkleUVViewSection();
 
     int32 GetWrinkleUVViewChannelIndex() const;
-    int32 GetProtectedBaseUVChannelCount() const;
-    bool IsUVChannelDeleteAllowed(int32 UVChannelIndex) const;
-    FText GetWrinkleUVChannelText() const;
-    FText GetSelectedMeshUVChannelText() const;
-    FText GetMeshUVChannelDisplayText(int32 UVChannelIndex) const;
-    TSharedRef<SWidget> GenerateMeshUVChannelComboRow(TSharedPtr<int32> Item) const;
+    FText GetDWCDataUVChannelText() const;
     TSharedRef<SWidget> GenerateUVDisplayModeComboItem(FUVDisplayModeItemPtr Item) const;
     void HandleUVDisplayModeSelectionChanged(FUVDisplayModeItemPtr Item, ESelectInfo::Type SelectInfo);
     FText GetSelectedUVDisplayModeText() const;
@@ -136,10 +129,6 @@ class SWetWrinkleEditorPanel : public SCompoundWidget, public FEditorUndoClient
     void HandleUVViewBackgroundTextureOpacityChanged(float NewValue);
     void HandleUVViewIslandLineOpacityChanged(float NewValue);
     void HandleUVViewIslandLineThicknessScaleChanged(float NewValue);
-    void HandleMeshUVChannelComboChanged(TSharedPtr<int32> Item, ESelectInfo::Type SelectInfo);
-    FReply HandleDeleteMeshUVChannelClicked();
-    bool IsDeleteMeshUVChannelEnabled() const;
-    FReply HandleGenerateWrinkleUVChannelClicked();
     FReply HandleAutoGenerateClicked();
     FText GetHitInfoText() const;
     FText GetPatchListSummaryText() const;
@@ -200,7 +189,6 @@ class SWetWrinkleEditorPanel : public SCompoundWidget, public FEditorUndoClient
     void HandleStrokeNameCommitted(const FText& InText, ETextCommit::Type CommitType, FStrokeListItemPtr Item);
     FReply HandleDeleteStrokeClicked(FStrokeListItemPtr Item);
 
-    void HandleUVChannelChanged(int32 NewValue);
     void HandleMaterialSlotChanged(int32 NewValue);
     float GetBrushSizeCm() const;
     FText GetBrushSizeDisplayText() const;
@@ -305,14 +293,12 @@ class SWetWrinkleEditorPanel : public SCompoundWidget, public FEditorUndoClient
     int32 CachedWrinkleUVViewPatchMarkerChannelIndex = INDEX_NONE;
     int32 CachedWrinkleUVViewPatchMarkerMaterialSlotIndex = INDEX_NONE;
     TSharedPtr<class SComboBox<TSharedPtr<int32>>> MaterialSlotComboBox;
-    TSharedPtr<class SComboBox<TSharedPtr<int32>>> MeshUVChannelComboBox;
     TSharedPtr<class SComboBox<FUVDisplayModeItemPtr>> UVDisplayModeComboBox;
     TSharedPtr<class SListView<FMaterialSlotItemPtr>> MaterialSlotListView;
     TSharedPtr<class SComboButton> BrushSizeComboButton;
     TSharedPtr<class SListView<FStrokeListItemPtr>> StrokeListView;
     TArray<FStrokeListItemPtr> StrokeListItems;
     TArray<TSharedPtr<int32>> MaterialSlotOptions;
-    TArray<TSharedPtr<int32>> MeshUVChannelOptions;
     TArray<FUVDisplayModeItemPtr> UVDisplayModeItems;
     TArray<FMaterialSlotItemPtr> MaterialSlotItems;
     TArray<FWetPartEntryPtr> PartMapItems;
@@ -341,7 +327,6 @@ class SWetWrinkleEditorPanel : public SCompoundWidget, public FEditorUndoClient
     FVector2D LastStampUV = FVector2D::ZeroVector;
     int32 LastStampMaterialSlotIndex = INDEX_NONE;
     int32 LastStampUVChannelIndex = INDEX_NONE;
-    int32 SelectedMeshUVChannelIndex = INDEX_NONE;
     FUVDisplayModeItemPtr SelectedUVDisplayModeItem;
     EWetClothingAssetUVDisplayMode CurrentUVDisplayMode = EWetClothingAssetUVDisplayMode::Normal;
     float UVViewBackgroundTextureOpacity = 0.70f;

@@ -297,7 +297,9 @@ namespace
 
         FDWCRevealBakeTextureWriteSettings TextureSettings;
         TextureSettings.Resolution = SamplingSettings.Resolution;
-        TextureSettings.PackagePath = FDWCRevealBakeUtilities::GetDefaultRevealBakePackagePath();
+        TextureSettings.PackagePath = FDWCRevealBakeUtilities::GetGeneratedPackagePath(
+            WetClothingAsset,
+            TEXT("Maps/Transparency"));
         TextureSettings.MaskFeatherRadiusPixels = FMath::Max(0.0f, WetClothingAsset.TransparencyData.RevealMaskFeatherRadiusPixels);
         TextureSettings.AssetNamePrefix = FString::Printf(
             TEXT("T_DWCReveal_%s_%s"),
@@ -397,7 +399,10 @@ bool FDWCTransparencyAssetBakeService::BakeTransparencyRevealAssets(UWetClothing
             MaterialPrefix,
             *BakeActor.BakeComponent,
             *TargetLayer,
-            TextureSet);
+            TextureSet,
+            FDWCRevealBakeUtilities::GetGeneratedPackagePath(
+                *WetClothingAsset,
+                TEXT("Materials/Transparency")));
         if (RevealMaterial == nullptr)
         {
             OutSummary = FString::Printf(TEXT("Slot %d reveal material setup failed."), MaterialSlotIndex);

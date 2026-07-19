@@ -23,6 +23,14 @@ namespace DWCBuildStatus
     }
 }
 
+namespace DWCGeneratedDataVersion
+{
+    // Version 7 makes the DWC Prepared Skeletal Mesh the sole source for generated UV metadata
+    // and Original UV topology. Source meshes are used only to create the prepared mesh copy.
+    static constexpr int32 DataUV = 7;
+    static constexpr int32 OriginalUVTopology = 7;
+}
+
 namespace DWCBakeOutput
 {
     static constexpr int32 GeneratedDataUV = 1 << 0;
@@ -96,12 +104,9 @@ struct DWC_API FDWCWetClothingAssetSetupSettings
     UPROPERTY(VisibleAnywhere, Category = "Map Resolutions", meta = (DisplayName = "Transparency"))
     int32 TransparencyMapResolution = 1024;
 
-    /** Currently initialized to UV0. Stored so a later asset-creation wizard may expose another imported UV. */
+    /** Original UV channel on the DWC Prepared Skeletal Mesh used by Part Edit and Data UV generation. */
     UPROPERTY(VisibleAnywhere, Category = "Mesh")
     int32 OriginalUVChannelIndex = 0;
-
-    UPROPERTY(EditAnywhere, Category = "Mesh", meta = (DisplayName = "Modify Source Mesh"))
-    bool bModifySourceMeshForDWCDataUV = false;
 
     UPROPERTY(EditAnywhere, Category = "Mesh", meta = (ClampMin = "0", ClampMax = "7"))
     int32 PreferredDWCDataUVChannelIndex = 1;
@@ -119,6 +124,7 @@ struct DWC_API FDWCWetClothingAssetSetupSettings
         GPUSimulationMapResolution = DWCMapResolution::ToInt(DWCMapResolution::FromInt(GPUSimulationMapResolution));
         WrinkleMapResolution = DWCMapResolution::ToInt(DWCMapResolution::FromInt(WrinkleMapResolution));
         TransparencyMapResolution = DWCMapResolution::ToInt(DWCMapResolution::FromInt(TransparencyMapResolution));
+        OriginalUVChannelIndex = FMath::Clamp(OriginalUVChannelIndex, 0, 7);
         PreferredDWCDataUVChannelIndex = FMath::Clamp(PreferredDWCDataUVChannelIndex, 0, 7);
         SimulationLODIndex = 0;
     }
@@ -161,6 +167,9 @@ struct DWC_API FDWCEditorUVTopologyData
 
     UPROPERTY(VisibleAnywhere, Category = "Editor UV Topology")
     FString BuildSignature;
+
+    UPROPERTY(VisibleAnywhere, Category = "Editor UV Topology")
+    int32 GeneratorVersion = 1;
 
     UPROPERTY(VisibleAnywhere, Category = "Editor UV Topology")
     TArray<FDWCOriginalUVIslandTopology> Islands;

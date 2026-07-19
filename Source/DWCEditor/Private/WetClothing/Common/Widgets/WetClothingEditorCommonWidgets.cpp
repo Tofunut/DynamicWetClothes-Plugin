@@ -9,8 +9,6 @@
 #include "Materials/MaterialInstanceConstant.h"
 #include "Styling/AppStyle.h"
 #include "Styling/CoreStyle.h"
-#include "WetClothing/Common/Analysis/WetClothingAssetUVIslandCache.h"
-#include "WetClothing/Common/Texture/WetClothingTextureReadback.h"
 #include "WetClothing/Common/Widgets/SWetClothingMaterialSlotPreview.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SComboBox.h"
@@ -181,12 +179,6 @@ namespace
                 ScrollBox
             ];
     }
-}
-
-void FWetClothingEditorCommonWidgets::ClearEditorSessionCaches()
-{
-    FWetClothingAssetUVIslandCache::Clear();
-    FWetClothingTextureReadbackUtils::ClearCache();
 }
 
 TSharedRef<SWidget> FWetClothingEditorCommonWidgets::BuildSectionHeader(const TAttribute<FText>& Title, const TAttribute<FText>& Detail)

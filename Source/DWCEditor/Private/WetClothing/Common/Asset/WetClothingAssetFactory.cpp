@@ -21,7 +21,6 @@
 #include "UObject/UnrealType.h"
 #include "WetClothing/Common/MeshPreparation/DWCDataUVBuildService.h"
 #include "Widgets/Input/SButton.h"
-#include "Widgets/Input/SCheckBox.h"
 #include "Widgets/Input/SComboBox.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
@@ -54,15 +53,11 @@ namespace
         return UVChannelCount > 0 ? FMath::Clamp(UVChannelCount, 0, 7) : FMath::Clamp(OriginalUVChannelIndex + 1, 0, 7);
     }
 
-    FText BuildCreateDWCDataUVTargetText(const bool bModifySourceMesh)
+    FText BuildCreateDWCDataUVTargetText()
     {
-        return bModifySourceMesh
-            ? LOCTEXT(
-                  "CreateModifySourceTargetText",
-                  "Modify Source Mesh: generated Data UV will be written directly into the selected mesh asset.")
-            : LOCTEXT(
-                  "CreateDuplicateMeshTargetText",
-                  "Duplicate Mesh: DWC will create or update a prepared mesh copy, leaving the selected source mesh untouched.");
+        return LOCTEXT(
+            "CreatePreparedMeshTargetText",
+            "Prepared Mesh: DWC creates a dedicated skeletal mesh copy and writes all generated UV and topology data there. The source mesh remains untouched.");
     }
 
     FString BuildUVChannelList(const int32 FirstUVChannelIndex, const int32 LastUVChannelIndex)
@@ -99,7 +94,7 @@ namespace
         }
 
         return FText::Format(
-            LOCTEXT("SourceMeshUVInfo", "LOD0 has {0} source UV channel(s): {1}. DWC reads the original texture layout from UV0."),
+            LOCTEXT("SourceMeshUVInfo", "LOD0 has {0} source UV channel(s): {1}. Choose the Original UV channel in the setup settings."),
             FText::AsNumber(UVChannelCount),
             FText::FromString(BuildUVChannelList(0, UVChannelCount - 1)));
     }
@@ -109,26 +104,60 @@ namespace
         return UVChannelIndex >= 0 && UVChannelIndex < GetSkeletalMeshUVChannelCount(Mesh, 0);
     }
 
-    bool IsDWCDataUVSelectionValid(const USkeletalMesh* Mesh, const bool bUseRecommendedDWCDataUVChannel, const int32 SelectedUVChannelIndex)
+    bool IsDWCDataUVSelectionValid(
+        const USkeletalMesh* Mesh,
+        const int32 OriginalUVChannelIndex,
+        const bool bUseRecommendedDWCDataUVChannel,
+        const int32 SelectedUVChannelIndex)
     {
-        if (Mesh == nullptr)
+        if (Mesh == nullptr || !IsExistingSourceUVChannel(Mesh, OriginalUVChannelIndex))
         {
             return false;
         }
 
         const int32 EffectiveUVChannelIndex = bUseRecommendedDWCDataUVChannel
-            ? GetDefaultDWCDataUVChannelIndex(Mesh, 0)
+            ? GetDefaultDWCDataUVChannelIndex(Mesh, OriginalUVChannelIndex)
             : SelectedUVChannelIndex;
-        return !IsExistingSourceUVChannel(Mesh, EffectiveUVChannelIndex);
+        return EffectiveUVChannelIndex >= 0 &&
+               EffectiveUVChannelIndex <= 7 &&
+               EffectiveUVChannelIndex != OriginalUVChannelIndex;
     }
 
-    FText BuildDWCDataUVChannelLabel(const int32 Selection, const USkeletalMesh* Mesh)
+    bool ConfirmExistingDataUVOverwrite(
+        const USkeletalMesh* Mesh,
+        const int32 OriginalUVChannelIndex,
+        const int32 DataUVChannelIndex)
+    {
+        if (DataUVChannelIndex == OriginalUVChannelIndex)
+        {
+            FMessageDialog::Open(
+                EAppMsgType::Ok,
+                LOCTEXT(
+                    "DataUVMatchesOriginalUVError",
+                    "The DWC Data UV channel cannot be the same as the Original UV channel."));
+            return false;
+        }
+
+        if (!IsExistingSourceUVChannel(Mesh, DataUVChannelIndex))
+        {
+            return true;
+        }
+
+        const FText Warning = FText::Format(
+            LOCTEXT(
+                "ConfirmExistingDataUVOverwrite",
+                "UV{0} already contains UV data.\n\nCreating the DWC Data UV in this channel will replace the existing UV{0} data on the target mesh.\n\nContinue?"),
+            FText::AsNumber(DataUVChannelIndex));
+        return FMessageDialog::Open(EAppMsgType::YesNo, Warning) == EAppReturnType::Yes;
+    }
+
+    FText BuildDWCDataUVChannelLabel(const int32 Selection, const USkeletalMesh* Mesh, const int32 OriginalUVChannelIndex)
     {
         if (Selection == RecommendedDWCDataUVSelection)
         {
             return FText::Format(
                 LOCTEXT("RecommendedDWCDataUVChannelLabel", "Recommended (UV{0})"),
-                FText::AsNumber(GetDefaultDWCDataUVChannelIndex(Mesh, 0)));
+                FText::AsNumber(GetDefaultDWCDataUVChannelIndex(Mesh, OriginalUVChannelIndex)));
         }
 
         return FText::Format(LOCTEXT("ExplicitDWCDataUVChannelLabel", "UV{0}"), FText::AsNumber(Selection));
@@ -136,6 +165,7 @@ namespace
 
     FText BuildPreferredDWCDataUVInfoText(
         const USkeletalMesh* Mesh,
+        const int32 OriginalUVChannelIndex,
         const bool bUseRecommendedDWCDataUVChannel,
         const int32 PreferredDWCDataUVChannelIndex)
     {
@@ -147,13 +177,13 @@ namespace
                 FText::AsNumber(PreferredDWCDataUVChannelIndex));
         }
 
-        const int32 RecommendedUVChannelIndex = GetDefaultDWCDataUVChannelIndex(Mesh, 0);
+        const int32 RecommendedUVChannelIndex = GetDefaultDWCDataUVChannelIndex(Mesh, OriginalUVChannelIndex);
         if (bUseRecommendedDWCDataUVChannel)
         {
             if (IsExistingSourceUVChannel(Mesh, RecommendedUVChannelIndex))
             {
                 return FText::Format(
-                    LOCTEXT("PreferredDWCDataUVInfoRecommendedOccupied", "Recommended UV{0} already contains source mesh data. Choose an unused UV channel or add room for DWC Data UV."),
+                    LOCTEXT("PreferredDWCDataUVInfoRecommendedOccupied", "Recommended UV{0} already contains UV data. Creating will ask for confirmation before replacing it."),
                     FText::AsNumber(RecommendedUVChannelIndex));
             }
 
@@ -166,7 +196,7 @@ namespace
         if (IsExistingSourceUVChannel(Mesh, PreferredDWCDataUVChannelIndex))
         {
             return FText::Format(
-                LOCTEXT("PreferredDWCDataUVInfoOccupied", "UV{0} already contains source mesh data. Choose Recommended or an unused UV channel."),
+                LOCTEXT("PreferredDWCDataUVInfoOccupied", "UV{0} already contains UV data. Creating will ask for confirmation before replacing it."),
                 FText::AsNumber(PreferredDWCDataUVChannelIndex));
         }
 
@@ -213,8 +243,9 @@ void UWetClothingAssetCreationSettings::PostEditChangeProperty(FPropertyChangedE
         : NAME_None;
     if (PropertyName == GET_MEMBER_NAME_CHECKED(UWetClothingAssetCreationSettings, SourceSkeletalMesh))
     {
-        PreferredDWCDataUVChannelIndex = GetDefaultDWCDataUVChannelIndex(SourceSkeletalMesh, 0);
+        PreferredDWCDataUVChannelIndex = GetDefaultDWCDataUVChannelIndex(SourceSkeletalMesh, OriginalUVChannelIndex);
     }
+    OriginalUVChannelIndex = FMath::Clamp(OriginalUVChannelIndex, 0, 7);
     PreferredDWCDataUVChannelIndex = FMath::Clamp(PreferredDWCDataUVChannelIndex, 0, 7);
 }
 #endif
@@ -228,6 +259,7 @@ UWetClothingAssetFactory::UWetClothingAssetFactory()
 
 bool UWetClothingAssetFactory::ConfigureProperties()
 {
+    bConfirmedOverwriteExistingDataUVChannel = false;
     PendingCreationSettings = NewObject<UWetClothingAssetCreationSettings>(this, NAME_None, RF_Transient);
 
     FPropertyEditorModule& PropertyEditor = FModuleManager::LoadModuleChecked<FPropertyEditorModule>(TEXT("PropertyEditor"));
@@ -242,7 +274,6 @@ bool UWetClothingAssetFactory::ConfigureProperties()
     {
         const FName PropertyName = PropertyAndParent.Property.GetFName();
         return PropertyName != GET_MEMBER_NAME_CHECKED(UWetClothingAssetCreationSettings, SourceSkeletalMesh) &&
-               PropertyName != GET_MEMBER_NAME_CHECKED(UWetClothingAssetCreationSettings, bModifySourceMeshForDWCDataUV) &&
                PropertyName != GET_MEMBER_NAME_CHECKED(UWetClothingAssetCreationSettings, PreferredDWCDataUVChannelIndex);
     }));
     DetailsView->SetObject(PendingCreationSettings);
@@ -284,7 +315,7 @@ bool UWetClothingAssetFactory::ConfigureProperties()
             USkeletalMesh* NewSourceMesh = Cast<USkeletalMesh>(AssetData.GetAsset());
             PendingCreationSettings->SourceSkeletalMesh = NewSourceMesh;
             bUseRecommendedDWCDataUVChannel = true;
-            PendingCreationSettings->PreferredDWCDataUVChannelIndex = GetDefaultDWCDataUVChannelIndex(NewSourceMesh, 0);
+            PendingCreationSettings->PreferredDWCDataUVChannelIndex = GetDefaultDWCDataUVChannelIndex(NewSourceMesh, PendingCreationSettings->OriginalUVChannelIndex);
             RefreshSourceMeshThumbnail(SourceMeshThumbnail, SourceMeshThumbnailPool, NewSourceMesh);
             DetailsView->ForceRefresh();
         };
@@ -296,6 +327,7 @@ bool UWetClothingAssetFactory::ConfigureProperties()
                    PendingCreationSettings->SourceSkeletalMesh != nullptr &&
                    IsDWCDataUVSelectionValid(
                        PendingCreationSettings->SourceSkeletalMesh,
+                       PendingCreationSettings->OriginalUVChannelIndex,
                        bUseRecommendedDWCDataUVChannel,
                        PendingCreationSettings->PreferredDWCDataUVChannelIndex);
         };
@@ -413,70 +445,18 @@ bool UWetClothingAssetFactory::ConfigureProperties()
                     .AutoHeight()
                     [
                         SNew(STextBlock)
-                        .Text(LOCTEXT("DWCUVChannelSectionLabel", "DWC UV Channel"))
+                        .Text(LOCTEXT("DWCUVChannelSectionLabel", "DWC Data UV"))
                         .Font(FAppStyle::GetFontStyle(TEXT("NormalFontBold")))
                     ]
                     + SVerticalBox::Slot()
                     .AutoHeight()
                     .Padding(0.0f, 8.0f, 0.0f, 0.0f)
                     [
-                        SNew(SCheckBox)
-                        .IsChecked_Lambda([this]()
-                        {
-                            return PendingCreationSettings != nullptr && PendingCreationSettings->bModifySourceMeshForDWCDataUV
-                                ? ECheckBoxState::Checked
-                                : ECheckBoxState::Unchecked;
-                        })
-                        .OnCheckStateChanged_Lambda([this](ECheckBoxState NewState)
-                        {
-                            if (PendingCreationSettings != nullptr)
-                            {
-                                PendingCreationSettings->bModifySourceMeshForDWCDataUV = NewState == ECheckBoxState::Checked;
-                            }
-                        })
-                        [
-                            SNew(STextBlock)
-                            .Text(LOCTEXT("CreateModifySourceMeshCheckbox", "Modify Source Mesh"))
-                        ]
-                    ]
-                    + SVerticalBox::Slot()
-                    .AutoHeight()
-                    .Padding(0.0f, 6.0f, 0.0f, 0.0f)
-                    [
                         SNew(STextBlock)
                         .AutoWrapText(true)
                         .Font(FAppStyle::GetFontStyle(TEXT("SmallFont")))
-                        .ColorAndOpacity_Lambda([this]()
-                        {
-                            return PendingCreationSettings != nullptr && PendingCreationSettings->bModifySourceMeshForDWCDataUV
-                                ? FStyleColors::Warning
-                                : FStyleColors::AccentGreen;
-                        })
-                        .Text_Lambda([this]()
-                        {
-                            return PendingCreationSettings != nullptr
-                                ? BuildCreateDWCDataUVTargetText(PendingCreationSettings->bModifySourceMeshForDWCDataUV)
-                                : BuildCreateDWCDataUVTargetText(false);
-                        })
-                    ]
-                    + SVerticalBox::Slot()
-                    .AutoHeight()
-                    .Padding(0.0f, 6.0f, 0.0f, 0.0f)
-                    [
-                        SNew(STextBlock)
-                        .AutoWrapText(true)
-                        .Font(FAppStyle::GetFontStyle(TEXT("SmallFont")))
-                        .ColorAndOpacity(FStyleColors::Error)
-                        .Visibility_Lambda([this]()
-                        {
-                            return PendingCreationSettings != nullptr &&
-                                   PendingCreationSettings->bModifySourceMeshForDWCDataUV
-                                       ? EVisibility::Visible
-                                       : EVisibility::Collapsed;
-                        })
-                        .Text(LOCTEXT(
-                            "ModifySourceMeshWarning",
-                            "Warning: this modifies the selected Source Skeletal Mesh asset. Use Duplicate Mesh mode when the original asset should remain untouched."))
+                        .ColorAndOpacity(FStyleColors::AccentGreen)
+                        .Text(BuildCreateDWCDataUVTargetText())
                     ]
                     + SVerticalBox::Slot()
                     .AutoHeight()
@@ -506,7 +486,8 @@ bool UWetClothingAssetFactory::ConfigureProperties()
                                     return SNew(STextBlock)
                                         .Text(BuildDWCDataUVChannelLabel(
                                             Selection,
-                                            PendingCreationSettings != nullptr ? PendingCreationSettings->SourceSkeletalMesh : nullptr));
+                                            PendingCreationSettings != nullptr ? PendingCreationSettings->SourceSkeletalMesh : nullptr,
+                                            PendingCreationSettings != nullptr ? PendingCreationSettings->OriginalUVChannelIndex : 0));
                                 })
                                 .OnSelectionChanged_Lambda([this, &bUseRecommendedDWCDataUVChannel](TSharedPtr<int32> Item, ESelectInfo::Type)
                                 {
@@ -520,7 +501,7 @@ bool UWetClothingAssetFactory::ConfigureProperties()
                                     if (bUseRecommendedDWCDataUVChannel)
                                     {
                                         PendingCreationSettings->PreferredDWCDataUVChannelIndex =
-                                            GetDefaultDWCDataUVChannelIndex(PendingCreationSettings->SourceSkeletalMesh, 0);
+                                            GetDefaultDWCDataUVChannelIndex(PendingCreationSettings->SourceSkeletalMesh, PendingCreationSettings->OriginalUVChannelIndex);
                                     }
                                     else
                                     {
@@ -538,7 +519,8 @@ bool UWetClothingAssetFactory::ConfigureProperties()
                                                 : RecommendedDWCDataUVSelection);
                                         return BuildDWCDataUVChannelLabel(
                                             Selection,
-                                            PendingCreationSettings != nullptr ? PendingCreationSettings->SourceSkeletalMesh : nullptr);
+                                            PendingCreationSettings != nullptr ? PendingCreationSettings->SourceSkeletalMesh : nullptr,
+                                            PendingCreationSettings != nullptr ? PendingCreationSettings->OriginalUVChannelIndex : 0);
                                     })
                                 ]
                             ]
@@ -556,6 +538,7 @@ bool UWetClothingAssetFactory::ConfigureProperties()
                             return PendingCreationSettings != nullptr &&
                                    !IsDWCDataUVSelectionValid(
                                        PendingCreationSettings->SourceSkeletalMesh,
+                                       PendingCreationSettings->OriginalUVChannelIndex,
                                        bUseRecommendedDWCDataUVChannel,
                                        PendingCreationSettings->PreferredDWCDataUVChannelIndex)
                                        ? FStyleColors::Error
@@ -566,9 +549,10 @@ bool UWetClothingAssetFactory::ConfigureProperties()
                             return PendingCreationSettings != nullptr
                                 ? BuildPreferredDWCDataUVInfoText(
                                     PendingCreationSettings->SourceSkeletalMesh,
+                                    PendingCreationSettings->OriginalUVChannelIndex,
                                     bUseRecommendedDWCDataUVChannel,
                                     PendingCreationSettings->PreferredDWCDataUVChannelIndex)
-                                : BuildPreferredDWCDataUVInfoText(nullptr, true, 1);
+                                : BuildPreferredDWCDataUVInfoText(nullptr, 0, true, 1);
                         })
                     ]
                 ]
@@ -663,8 +647,29 @@ bool UWetClothingAssetFactory::ConfigureProperties()
                     SNew(SButton)
                     .Text(LOCTEXT("Create", "Create"))
                     .IsEnabled_Lambda(IsCreateEnabled)
-                    .OnClicked_Lambda([&bAccepted, Dialog]()
+                    .OnClicked_Lambda([this, &bAccepted, &bUseRecommendedDWCDataUVChannel, Dialog]()
                     {
+                        if (PendingCreationSettings == nullptr)
+                        {
+                            return FReply::Handled();
+                        }
+
+                        const int32 DataUVChannelIndex = bUseRecommendedDWCDataUVChannel
+                            ? GetDefaultDWCDataUVChannelIndex(
+                                PendingCreationSettings->SourceSkeletalMesh,
+                                PendingCreationSettings->OriginalUVChannelIndex)
+                            : PendingCreationSettings->PreferredDWCDataUVChannelIndex;
+                        if (!ConfirmExistingDataUVOverwrite(
+                                PendingCreationSettings->SourceSkeletalMesh,
+                                PendingCreationSettings->OriginalUVChannelIndex,
+                                DataUVChannelIndex))
+                        {
+                            return FReply::Handled();
+                        }
+
+                        PendingCreationSettings->PreferredDWCDataUVChannelIndex = DataUVChannelIndex;
+                        bConfirmedOverwriteExistingDataUVChannel =
+                            IsExistingSourceUVChannel(PendingCreationSettings->SourceSkeletalMesh, DataUVChannelIndex);
                         FMessageDialog::Open(
                             EAppMsgType::Ok,
                             LOCTEXT(
@@ -717,13 +722,14 @@ UObject* UWetClothingAssetFactory::FactoryCreateNew(
     {
         UE_LOG(LogTemp, Error, TEXT("DWC: Failed to initialize Wet Clothing Asset: %s"), *ErrorMessage);
         PendingCreationSettings = nullptr;
+        bConfirmedOverwriteExistingDataUVChannel = false;
         return nullptr;
     }
 
     SlowTask.EnterProgressFrame(
         1.0f,
-        LOCTEXT("CreateWCAGenerateDataUVProgress", "Generating DWC Data UV for the source mesh..."));
-    const FDWCDataUVBuildResult DataUVResult = FDWCDataUVBuildService::Generate(*Asset, true);
+        LOCTEXT("CreateWCAGenerateDataUVProgress", "Creating the DWC Prepared Skeletal Mesh and generating Data UV..."));
+    const FDWCDataUVBuildResult DataUVResult = FDWCDataUVBuildService::Generate(*Asset, true, bConfirmedOverwriteExistingDataUVChannel);
     if (!DataUVResult.bSucceeded)
     {
         Asset->SetLastBakeFailure(DataUVResult.Message);
@@ -735,6 +741,7 @@ UObject* UWetClothingAssetFactory::FactoryCreateNew(
         LOCTEXT("CreateWCAFinalizeProgress", "Finalizing Wet Clothing Asset creation..."));
     Asset->MarkPackageDirty();
     PendingCreationSettings = nullptr;
+    bConfirmedOverwriteExistingDataUVChannel = false;
     return Asset;
 }
 

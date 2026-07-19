@@ -16,7 +16,7 @@
 #include "WetClothing/PartEdit/Widgets/SWetPartAutoPartitionControls.h"
 #include "DataAssets/WetClothingAsset.h"
 #include "WetClothing/Common/Analysis/WetClothingAssetMeshAnalyzer.h"
-#include "WetClothing/Common/Analysis/WetClothingAssetUVIslandCache.h"
+#include "WetClothing/Common/Analysis/DWCUVIslandViewCache.h"
 #include "WetClothing/Common/Viewport/WetClothingAssetViewport.h"
 #include "DataAssets/WetnessProfile.h"
 #include "Engine/SkeletalMesh.h"
@@ -268,16 +268,14 @@ void SWetClothingPartEditorPanel::Construct(const FArguments& InArgs)
                                         + SHorizontalBox::Slot()
                                               .FillWidth(1.0f)
                                               .VAlign(VAlign_Center)
-                                                  [SAssignNew(UVChannelComboBox, SComboBox<FUVChannelItemPtr>)
-                                                       .OptionsSource(&UVChannelItems)
-                                                       .InitiallySelectedItem(SelectedUVChannelItem)
-                                                       .OnGenerateWidget(this, &SWetClothingPartEditorPanel::GenerateUVChannelComboItem)
-                                                       .OnSelectionChanged(this, &SWetClothingPartEditorPanel::HandleUVChannelSelectionChanged)
+                                                  [SNew(SBorder)
+                                                       .Padding(FMargin(8.0f, 3.0f))
+                                                       .BorderImage(FAppStyle::Get().GetBrush(TEXT("ToolPanel.GroupBorder")))
                                                            [SNew(STextBlock)
-                                                                .Text(this, &SWetClothingPartEditorPanel::GetSelectedUVChannelText)
+                                                                .Text(this, &SWetClothingPartEditorPanel::GetOriginalUVChannelText)
                                                                 .ToolTipText(LOCTEXT(
-                                                                    "OriginalUVComboTooltip",
-                                                                    "Choose the source mesh UV channel used by Wet Part editing and preview."))]]]
+                                                                    "OriginalUVReadOnlyTooltip",
+                                                                    "The Original UV channel configured in Asset Setup."))]]]
 
                              + SVerticalBox::Slot()
                                    .AutoHeight()
@@ -289,7 +287,7 @@ void SWetClothingPartEditorPanel::Construct(const FArguments& InArgs)
                                               .VAlign(VAlign_Center)
                                               .Padding(0.0f, 0.0f, 6.0f, 0.0f)
                                                   [SNew(STextBlock)
-                                                       .Text(LOCTEXT("WetnessProfileMapResolutionLabel", "Wetness Profile Map Resolution"))]
+                                                       .Text(LOCTEXT("WetnessProfileMapResolutionLabel", "Wetness Profile Map Resolution (Fixed)"))]
 
                                         + SHorizontalBox::Slot()
                                               .AutoWidth()
@@ -298,7 +296,7 @@ void SWetClothingPartEditorPanel::Construct(const FArguments& InArgs)
                                                        .Padding(FMargin(8.0f, 3.0f))
                                                        .BorderImage(FAppStyle::Get().GetBrush(TEXT("ToolPanel.GroupBorder")))
                                                            [SNew(STextBlock)
-                                                                .Text(LOCTEXT("WetnessProfileMapResolutionPlaceholder", "512 x 512"))
+                                                                .Text(LOCTEXT("WetnessProfileMapResolutionPlaceholder", "256"))
                                                                 .ColorAndOpacity(FSlateColor(FStyleColors::ForegroundHover))]]]
 
                              + SVerticalBox::Slot()
@@ -621,7 +619,7 @@ void SWetClothingPartEditorPanel::Construct(const FArguments& InArgs)
 void SWetClothingPartEditorPanel::RefreshFromAsset()
 {
     RefreshMaterialSlotItems();
-    RefreshUVChannels();
+    RefreshOriginalUVChannel();
     RefreshMaterialTextures();
 
     if (PreviewViewport.IsValid())
@@ -694,7 +692,7 @@ void SWetClothingPartEditorPanel::RefreshMaterialSlotItems()
 
 void SWetClothingPartEditorPanel::RefreshMaterialTextures(bool bRefreshUVView)
 {
-    const int32 UVChannelIndex = GetSelectedUVChannelIndex();
+    const int32 UVChannelIndex = GetOriginalUVChannelIndex();
 
     TextureThumbnails.Reset();
     FWetClothingMaterialTextureResolver::BuildTextureItemsForMaterialSlot(
@@ -766,54 +764,11 @@ void SWetClothingPartEditorPanel::RefreshTextureToggleWidgets()
             }));
 }
 
-void SWetClothingPartEditorPanel::RefreshUVChannels()
+void SWetClothingPartEditorPanel::RefreshOriginalUVChannel()
 {
-    const int32 PreviousSelectedUVChannel = SelectedUVChannelItem.IsValid() ? *SelectedUVChannelItem : 0;
-
-    UVChannelItems.Reset();
-    SelectedUVChannelItem.Reset();
-
-    if (const UWetClothingAsset* Asset = WetClothingAsset.Get())
-    {
-        const USkeletalMesh* SourceMesh = Asset->GetSourceSkeletalMesh();
-        const USkeletalMesh* UVChannelSourceMesh = SourceMesh != nullptr ? SourceMesh : Asset->GetRuntimeSkeletalMesh();
-        const int32          NumUVChannels = FWetClothingAssetMeshAnalyzer::GetNumUVChannels(UVChannelSourceMesh, 0);
-        const int32          DWCDataUVChannelIndex = Asset->GetDWCDataUVChannelIndex();
-        const int32          DesiredUVChannel = PreviousSelectedUVChannel >= 0 && PreviousSelectedUVChannel < NumUVChannels
-                                                    ? PreviousSelectedUVChannel
-                                                    : 0;
-
-        for (int32 UVChannelIndex = 0; UVChannelIndex < NumUVChannels; ++UVChannelIndex)
-        {
-            if (UVChannelIndex == DWCDataUVChannelIndex)
-            {
-                continue;
-            }
-
-            FUVChannelItemPtr UVChannelItem = MakeShared<int32>(UVChannelIndex);
-            UVChannelItems.Add(UVChannelItem);
-            if (UVChannelIndex == DesiredUVChannel)
-            {
-                SelectedUVChannelItem = UVChannelItem;
-            }
-        }
-    }
-
-    if (!SelectedUVChannelItem.IsValid() && !UVChannelItems.IsEmpty())
-    {
-        SelectedUVChannelItem = UVChannelItems[0];
-    }
-
-    if (UVChannelComboBox.IsValid())
-    {
-        UVChannelComboBox->RefreshOptions();
-        UVChannelComboBox->SetSelectedItem(SelectedUVChannelItem);
-    }
-
+    // Part Edit is permanently bound to the Original UV channel configured in Asset Setup.
     RefreshUVIslandList();
 
-    // Apply section visibility after every dependent refresh. Some refresh paths rebuild
-    // overlays/materials and would otherwise overwrite the selected-slot preview state.
     if (PreviewViewport.IsValid())
     {
         if (SelectedMaterialSlotIndex != INDEX_NONE)
@@ -845,15 +800,15 @@ void SWetClothingPartEditorPanel::RefreshUVIslandList()
     {
         UVStatusMessage = TEXT("Select a material slot to inspect its UV islands.");
     }
-    else if (!SelectedUVChannelItem.IsValid())
+    else if (!HasValidOriginalUVChannel())
     {
         UVStatusMessage = TEXT("No UV channels are available on LOD 0.");
     }
     else
     {
-        const int32 UVChannelIndex = GetSelectedUVChannelIndex();
+        const int32 UVChannelIndex = GetOriginalUVChannelIndex();
         FString ErrorMessage;
-        const bool bBuiltIslands = FWetClothingAssetUVIslandCache::GetMaterialSlotUVIslands(
+        const bool bBuiltIslands = FDWCUVIslandViewCache::GetMaterialSlotUVIslands(
             WetClothingAssetPtr,
             UVChannelIndex,
             SelectedMaterialSlotIndex,
@@ -965,7 +920,7 @@ void SWetClothingPartEditorPanel::RefreshWetPartList(bool bRefreshUVView)
 
     if (const UWetClothingAsset* WetClothingAssetPtr = WetClothingAsset.Get())
     {
-        const int32 UVChannelIndex = GetSelectedUVChannelIndex();
+        const int32 UVChannelIndex = GetOriginalUVChannelIndex();
         for (const FWetClothingWetPartEntry& Entry : WetClothingAssetPtr->PartData.EditableWetPartData.WetPartEntries)
         {
             if (Entry.MaterialSlotIndex == SelectedMaterialSlotIndex && Entry.UVChannelIndex == UVChannelIndex)
@@ -1071,7 +1026,7 @@ void SWetClothingPartEditorPanel::RefreshWetPartAssignmentViews()
 
     if (const UWetClothingAsset* WetClothingAssetPtr = WetClothingAsset.Get())
     {
-        const int32 UVChannelIndex = GetSelectedUVChannelIndex();
+        const int32 UVChannelIndex = GetOriginalUVChannelIndex();
         for (const FWetClothingWetPartEntry& Entry : WetClothingAssetPtr->PartData.EditableWetPartData.WetPartEntries)
         {
             if (Entry.MaterialSlotIndex != SelectedMaterialSlotIndex || Entry.UVChannelIndex != UVChannelIndex)
@@ -1155,18 +1110,33 @@ void SWetClothingPartEditorPanel::RefreshWetPartWidgets()
 void SWetClothingPartEditorPanel::EnsureDefaultWetPartForSelectedScope()
 {
     UWetClothingAsset* WetClothingAssetPtr = WetClothingAsset.Get();
-    if (WetClothingAssetPtr == nullptr || SelectedMaterialSlotIndex == INDEX_NONE || !SelectedUVChannelItem.IsValid())
+    if (WetClothingAssetPtr == nullptr || SelectedMaterialSlotIndex == INDEX_NONE || !HasValidOriginalUVChannel())
     {
         return;
     }
 
-    const FWetPartScope Scope = FWetPartEditingService::MakeScope(SelectedMaterialSlotIndex, GetSelectedUVChannelIndex());
+    const FWetPartScope Scope = FWetPartEditingService::MakeScope(SelectedMaterialSlotIndex, GetOriginalUVChannelIndex());
     FWetPartEditingService::EnsureDefaultWetPartForScope(WetClothingAssetPtr, Scope);
 }
 
-int32 SWetClothingPartEditorPanel::GetSelectedUVChannelIndex() const
+int32 SWetClothingPartEditorPanel::GetOriginalUVChannelIndex() const
 {
-    return SelectedUVChannelItem.IsValid() ? *SelectedUVChannelItem : 0;
+    return WetClothingAsset.IsValid() ? WetClothingAsset->GetOriginalUVChannelIndex() : 0;
+}
+
+bool SWetClothingPartEditorPanel::HasValidOriginalUVChannel() const
+{
+    const UWetClothingAsset* Asset = WetClothingAsset.Get();
+    if (Asset == nullptr)
+    {
+        return false;
+    }
+
+    const USkeletalMesh* PreparedMesh = Asset->GetRuntimeSkeletalMesh();
+    const int32 UVChannelIndex = Asset->GetOriginalUVChannelIndex();
+    return PreparedMesh != nullptr &&
+           UVChannelIndex >= 0 &&
+           UVChannelIndex < FWetClothingAssetMeshAnalyzer::GetNumUVChannels(PreparedMesh, 0);
 }
 
 int32 SWetClothingPartEditorPanel::FindNextWetPartForSelectedScope() const
@@ -1174,7 +1144,7 @@ int32 SWetClothingPartEditorPanel::FindNextWetPartForSelectedScope() const
     int32 MaxWetPartID = 0;
     if (const UWetClothingAsset* WetClothingAssetPtr = WetClothingAsset.Get())
     {
-        const int32 UVChannelIndex = GetSelectedUVChannelIndex();
+        const int32 UVChannelIndex = GetOriginalUVChannelIndex();
         for (const FWetClothingWetPartEntry& Entry : WetClothingAssetPtr->PartData.EditableWetPartData.WetPartEntries)
         {
             if (Entry.MaterialSlotIndex == SelectedMaterialSlotIndex && Entry.UVChannelIndex == UVChannelIndex)
@@ -1195,7 +1165,7 @@ FWetClothingWetPartEntry* SWetClothingPartEditorPanel::FindMutableWetPartEntry(i
         return nullptr;
     }
 
-    const int32 UVChannelIndex = GetSelectedUVChannelIndex();
+    const int32 UVChannelIndex = GetOriginalUVChannelIndex();
     for (FWetClothingWetPartEntry& Entry : WetClothingAssetPtr->PartData.EditableWetPartData.WetPartEntries)
     {
         if (Entry.MaterialSlotIndex == SelectedMaterialSlotIndex && Entry.UVChannelIndex == UVChannelIndex && Entry.WetPartID == WetPartID)
@@ -1242,7 +1212,7 @@ const FWetClothingWetPartEntry* SWetClothingPartEditorPanel::FindWetPartEntryFor
 {
     if (const UWetClothingAsset* WetClothingAssetPtr = WetClothingAsset.Get())
     {
-        const int32 UVChannelIndex = GetSelectedUVChannelIndex();
+        const int32 UVChannelIndex = GetOriginalUVChannelIndex();
         for (const FWetClothingWetPartEntry& Entry : WetClothingAssetPtr->PartData.EditableWetPartData.WetPartEntries)
         {
             if (Entry.MaterialSlotIndex == SelectedMaterialSlotIndex && Entry.UVChannelIndex == UVChannelIndex && Entry.AssignedUVIslandIDs.Contains(UVIslandID))
@@ -1693,35 +1663,6 @@ bool SWetClothingPartEditorPanel::IsApplyMaterialSetupEnabled() const
     }
 
     return false;
-}
-
-TSharedRef<SWidget> SWetClothingPartEditorPanel::GenerateUVChannelComboItem(FUVChannelItemPtr Item) const
-{
-    return SNew(STextBlock)
-        .Text(Item.IsValid()
-                  ? FText::Format(LOCTEXT("OriginalUVChannelComboItem", "UV{0}"), FText::AsNumber(*Item))
-                  : LOCTEXT("InvalidOriginalUVChannelComboItem", "Invalid UV"));
-}
-
-void SWetClothingPartEditorPanel::HandleUVChannelSelectionChanged(FUVChannelItemPtr Item, ESelectInfo::Type)
-{
-    if (!Item.IsValid())
-    {
-        return;
-    }
-
-    if (SelectedUVChannelItem.IsValid() && *SelectedUVChannelItem == *Item)
-    {
-        return;
-    }
-
-    SelectedUVChannelItem = Item;
-    SelectedWetPartID = INDEX_NONE;
-    SelectedAssignWetPartID = INDEX_NONE;
-    ResetIslandSelection();
-
-    RefreshMaterialTextures(false);
-    RefreshUVIslandList();
 }
 
 TSharedRef<SWidget> SWetClothingPartEditorPanel::GenerateUVDisplayModeComboItem(FUVDisplayModeItemPtr Item)
@@ -2205,7 +2146,7 @@ void SWetClothingPartEditorPanel::HandleAssignWetPartSelectionChanged(FWetPartEn
 FReply SWetClothingPartEditorPanel::HandleAddWetPartClicked()
 {
     UWetClothingAsset* WetClothingAssetPtr = WetClothingAsset.Get();
-    if (WetClothingAssetPtr == nullptr || SelectedMaterialSlotIndex == INDEX_NONE || !SelectedUVChannelItem.IsValid())
+    if (WetClothingAssetPtr == nullptr || SelectedMaterialSlotIndex == INDEX_NONE || !HasValidOriginalUVChannel())
     {
         return FReply::Handled();
     }
@@ -2215,7 +2156,7 @@ FReply SWetClothingPartEditorPanel::HandleAddWetPartClicked()
 
     FWetClothingWetPartEntry NewEntry;
     NewEntry.MaterialSlotIndex = SelectedMaterialSlotIndex;
-    NewEntry.UVChannelIndex = GetSelectedUVChannelIndex();
+    NewEntry.UVChannelIndex = GetOriginalUVChannelIndex();
     NewEntry.WetPartID = NewWetPartID;
     NewEntry.DisplayName = GetDefaultWetPartName(NewWetPartID);
     NewEntry.Color = GetDefaultWetPartColor(NewWetPartID);
@@ -2240,7 +2181,7 @@ FReply SWetClothingPartEditorPanel::HandleRemoveWetPartClicked()
     }
 
     const int32 RemovedWetPartID = SelectedWetPartID;
-    const int32 UVChannelIndex = GetSelectedUVChannelIndex();
+    const int32 UVChannelIndex = GetOriginalUVChannelIndex();
     WetClothingAssetPtr->Modify();
     for (int32 Index = WetClothingAssetPtr->PartData.EditableWetPartData.WetPartEntries.Num() - 1; Index >= 0; --Index)
     {
@@ -2271,14 +2212,14 @@ bool SWetClothingPartEditorPanel::IsWetPartRemoveEnabled() const
 
 bool SWetClothingPartEditorPanel::IsAutoPartitionEnabled() const
 {
-    return WetClothingAsset.IsValid() && SelectedMaterialSlotIndex != INDEX_NONE && SelectedUVChannelItem.IsValid() && UVIslandItems.Num() > 0;
+    return WetClothingAsset.IsValid() && SelectedMaterialSlotIndex != INDEX_NONE && HasValidOriginalUVChannel() && UVIslandItems.Num() > 0;
 }
 
 bool SWetClothingPartEditorPanel::HasAutoPartitionDataToReplace() const
 {
     if (const UWetClothingAsset* WetClothingAssetPtr = WetClothingAsset.Get())
     {
-        const int32 UVChannelIndex = GetSelectedUVChannelIndex();
+        const int32 UVChannelIndex = GetOriginalUVChannelIndex();
         for (const FWetClothingWetPartEntry& Entry : WetClothingAssetPtr->PartData.EditableWetPartData.WetPartEntries)
         {
             if (Entry.MaterialSlotIndex == SelectedMaterialSlotIndex && Entry.UVChannelIndex == UVChannelIndex && Entry.WetPartID != 0)
@@ -2600,7 +2541,7 @@ void SWetClothingPartEditorPanel::ApplyAutoPartitionClusters(const TArray<FWetPa
         return;
     }
 
-    const int32 UVChannelIndex = GetSelectedUVChannelIndex();
+    const int32 UVChannelIndex = GetOriginalUVChannelIndex();
     WetClothingAssetPtr->Modify();
     MarkSelectedMaterialSlotWettable();
 
@@ -2674,7 +2615,7 @@ FReply SWetClothingPartEditorPanel::HandleAssignSelectedUVIslandToWetPartClicked
         return FReply::Handled();
     }
 
-    const int32 UVChannelIndex = GetSelectedUVChannelIndex();
+    const int32 UVChannelIndex = GetOriginalUVChannelIndex();
     WetClothingAssetPtr->Modify();
     MarkSelectedMaterialSlotWettable();
     for (FWetClothingWetPartEntry& Entry : WetClothingAssetPtr->PartData.EditableWetPartData.WetPartEntries)
@@ -2740,16 +2681,16 @@ FText SWetClothingPartEditorPanel::GetSelectedMaterialSlotText() const
         FText::FromString(MaterialName));
 }
 
-FText SWetClothingPartEditorPanel::GetSelectedUVChannelText() const
+FText SWetClothingPartEditorPanel::GetOriginalUVChannelText() const
 {
-    if (!SelectedUVChannelItem.IsValid())
+    if (!HasValidOriginalUVChannel())
     {
-        return LOCTEXT("NoOriginalUVChannel", "Original UV unavailable");
+        return LOCTEXT("NoOriginalUVChannel", "Unavailable");
     }
 
     return FText::Format(
-        LOCTEXT("SelectedOriginalUVChannel", "UV{0}"),
-        FText::AsNumber(*SelectedUVChannelItem));
+        LOCTEXT("SelectedOriginalUVChannel", "UV {0}"),
+        FText::AsNumber(GetOriginalUVChannelIndex()));
 }
 
 FText SWetClothingPartEditorPanel::GetSelectedUVDisplayModeText() const
@@ -2821,13 +2762,13 @@ FText SWetClothingPartEditorPanel::GetWetnessProfileMapBakeSourceText() const
     return FText::Format(
         LOCTEXT("WetnessProfileMapBakeSource", "Source Texture: {0} / UV Channel {1}"),
         FText::FromString(SourceTexture->GetName()),
-        FText::AsNumber(GetSelectedUVChannelIndex()));
+        FText::AsNumber(GetOriginalUVChannelIndex()));
 }
 
 FText SWetClothingPartEditorPanel::GetWetnessProfileMapBakeSlotsText() const
 {
     TArray<int32> MaterialSlotIndices;
-    CollectMaterialSlotsForWetnessProfileMap(ResolveSelectedMaterialTexture(), GetSelectedUVChannelIndex(), MaterialSlotIndices);
+    CollectMaterialSlotsForWetnessProfileMap(ResolveSelectedMaterialTexture(), GetOriginalUVChannelIndex(), MaterialSlotIndices);
 
     if (MaterialSlotIndices.Num() == 0)
     {
@@ -2854,7 +2795,7 @@ FText SWetClothingPartEditorPanel::GetWetnessProfileMapBakeStatusText() const
         return LOCTEXT("WetnessProfileMapBakeStatusNoSource", "Select a material texture to prepare a texture-level Wetness Profile Map.");
     }
 
-    const FWetClothingBakedWetnessProfileMap* BakedWetnessProfileMap = FindBakedWetnessProfileMap(SourceTexture, GetSelectedUVChannelIndex());
+    const FWetClothingBakedWetnessProfileMap* BakedWetnessProfileMap = FindBakedWetnessProfileMap(SourceTexture, GetOriginalUVChannelIndex());
     if (BakedWetnessProfileMap == nullptr)
     {
         return LOCTEXT("WetnessProfileMapBakeStatusNotBaked", "Status: Not baked yet. Phase 2 will generate Wetness Profile Map 0 for this texture.");
@@ -2872,9 +2813,9 @@ FText SWetClothingPartEditorPanel::GetWetnessProfileMapBakeStatusText() const
 
 FText SWetClothingPartEditorPanel::GetWetnessProfileMapBakeSettingsText() const
 {
-    const FWetClothingBakedWetnessProfileMap* BakedWetnessProfileMap = FindBakedWetnessProfileMap(ResolveSelectedMaterialTexture(), GetSelectedUVChannelIndex());
-    const int32                                    Resolution = BakedWetnessProfileMap != nullptr ? BakedWetnessProfileMap->Resolution : 512;
-    const int32                                    PaddingPixels = BakedWetnessProfileMap != nullptr ? BakedWetnessProfileMap->PaddingPixels : 4;
+    const FWetClothingBakedWetnessProfileMap* BakedWetnessProfileMap = FindBakedWetnessProfileMap(ResolveSelectedMaterialTexture(), GetOriginalUVChannelIndex());
+    const int32 Resolution = DWCWetnessProfileMapBake::Resolution;
+    const int32 PaddingPixels = DWCWetnessProfileMapBake::PaddingPixels;
 
     if (BakedWetnessProfileMap != nullptr && BakedWetnessProfileMap->WetnessProfileMap0 != nullptr)
     {
@@ -3113,14 +3054,14 @@ FReply SWetClothingPartEditorPanel::HandleBakeAllMapsClicked()
 
 bool SWetClothingPartEditorPanel::IsWetnessProfileMapBakeSourceValid() const
 {
-    return WetClothingAsset.IsValid() && WetClothingAsset->GetRuntimeSkeletalMesh() != nullptr && ResolveSelectedMaterialTexture() != nullptr && SelectedUVChannelItem.IsValid();
+    return WetClothingAsset.IsValid() && WetClothingAsset->GetRuntimeSkeletalMesh() != nullptr && ResolveSelectedMaterialTexture() != nullptr && HasValidOriginalUVChannel();
 }
 
 bool SWetClothingPartEditorPanel::CanBakeAnyWetnessProfileMap() const
 {
     TArray<UTexture*> SourceTextures;
-    CollectWetnessProfileMapSourceTextures(GetSelectedUVChannelIndex(), SourceTextures);
-    return WetClothingAsset.IsValid() && WetClothingAsset->GetRuntimeSkeletalMesh() != nullptr && SelectedUVChannelItem.IsValid() && SourceTextures.Num() > 0;
+    CollectWetnessProfileMapSourceTextures(GetOriginalUVChannelIndex(), SourceTextures);
+    return WetClothingAsset.IsValid() && WetClothingAsset->GetRuntimeSkeletalMesh() != nullptr && HasValidOriginalUVChannel() && SourceTextures.Num() > 0;
 }
 
 FReply SWetClothingPartEditorPanel::HandleBakeSelectedWetnessProfileMapClicked()
@@ -3132,7 +3073,7 @@ FReply SWetClothingPartEditorPanel::HandleBakeSelectedWetnessProfileMapClicked()
         return FReply::Handled();
     }
 
-    const int32 UVChannelIndex = GetSelectedUVChannelIndex();
+    const int32 UVChannelIndex = GetOriginalUVChannelIndex();
 
     TArray<int32> MaterialSlotIndices;
     CollectMaterialSlotsForWetnessProfileMap(SourceTexture, UVChannelIndex, MaterialSlotIndices);
@@ -3142,13 +3083,7 @@ FReply SWetClothingPartEditorPanel::HandleBakeSelectedWetnessProfileMapClicked()
         return FReply::Handled();
     }
 
-    const FWetClothingBakedWetnessProfileMap* ExistingWetnessProfileMap = FindBakedWetnessProfileMap(SourceTexture, UVChannelIndex);
-    FWetClothingWetnessProfileMapBakeSettings      Settings;
-    if (ExistingWetnessProfileMap != nullptr)
-    {
-        Settings.Resolution = ExistingWetnessProfileMap->Resolution;
-        Settings.PaddingPixels = ExistingWetnessProfileMap->PaddingPixels;
-    }
+    const FWetClothingWetnessProfileMapBakeSettings Settings;
 
     FWetClothingWetnessProfileMapBakeResult Result;
     FString                                 ErrorMessage;
@@ -3189,7 +3124,7 @@ FReply SWetClothingPartEditorPanel::HandleBakeAllWetnessProfileMapsClicked()
         return FReply::Handled();
     }
 
-    const int32 UVChannelIndex = GetSelectedUVChannelIndex();
+    const int32 UVChannelIndex = GetOriginalUVChannelIndex();
 
     TArray<UTexture*> SourceTextures;
     CollectWetnessProfileMapSourceTextures(UVChannelIndex, SourceTextures);
@@ -3214,13 +3149,7 @@ FReply SWetClothingPartEditorPanel::HandleBakeAllWetnessProfileMapsClicked()
             continue;
         }
 
-        const FWetClothingBakedWetnessProfileMap* ExistingWetnessProfileMap = FindBakedWetnessProfileMap(SourceTexture, UVChannelIndex);
-        FWetClothingWetnessProfileMapBakeSettings      Settings;
-        if (ExistingWetnessProfileMap != nullptr)
-        {
-            Settings.Resolution = ExistingWetnessProfileMap->Resolution;
-            Settings.PaddingPixels = ExistingWetnessProfileMap->PaddingPixels;
-        }
+        const FWetClothingWetnessProfileMapBakeSettings Settings;
 
         FWetClothingWetnessProfileMapBakeResult Result;
         FString                                 ErrorMessage;
@@ -3379,7 +3308,7 @@ void SWetClothingPartEditorPanel::CollectWetnessProfileMapSourceTextures(int32 U
 
 void SWetClothingPartEditorPanel::SaveSelectedTexture()
 {
-    SaveTextureSelection(SelectedMaterialSlotIndex, GetSelectedUVChannelIndex(), ResolveSelectedMaterialTexture());
+    SaveTextureSelection(SelectedMaterialSlotIndex, GetOriginalUVChannelIndex(), ResolveSelectedMaterialTexture());
 }
 
 #undef LOCTEXT_NAMESPACE

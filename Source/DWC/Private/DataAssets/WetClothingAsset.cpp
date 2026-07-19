@@ -2,11 +2,13 @@
 
 #include "CoreGlobals.h"
 #include "Engine/SkeletalMesh.h"
+#include "DerivedData/DWCMeshContentSignature.h"
 #include "Misc/ScopedSlowTask.h"
 #include "Rendering/SkeletalMeshLODRenderData.h"
 #include "Rendering/SkeletalMeshRenderData.h"
 #include "RuntimeState/WetBoneOptimizationCacheBuilder.h"
 #include "RuntimeState/WetGPUMapBakeBuilder.h"
+#include "RuntimeState/DWCOriginalUVRuntimeTopology.h"
 #include "Serialization/MemoryReader.h"
 #include "Serialization/MemoryWriter.h"
 #include "Utility/DWCError.h"
@@ -14,7 +16,6 @@
 
 namespace
 {
-    static constexpr double UVQuantizeScale = 100000.0;
     static constexpr float CoincidentVertexNeighborTolerance = 0.001f;
     static constexpr int32 DWCRuntimeBulkPayloadMagic = 0x44574342; // DWCB
     static constexpr int64 RuntimeBulkProgressThresholdBytes = 8ll * 1024ll * 1024ll;
@@ -41,6 +42,172 @@ namespace
         DWCRuntimeBulkGPUHeaderProgress +
         DWCRuntimeBulkGPUProgress;
 
+    int32 GetLOD0UVChannelCount(const USkeletalMesh* Mesh)
+    {
+        const FSkeletalMeshRenderData* RenderData = Mesh != nullptr ? Mesh->GetResourceForRendering() : nullptr;
+        if (RenderData == nullptr || RenderData->LODRenderData.IsEmpty())
+        {
+            return 0;
+        }
+        return static_cast<int32>(RenderData->LODRenderData[0].GetNumTexCoords());
+    }
+
+    bool IsWettableMaterialSlot(
+        const FWetClothingEditableWetPartData& WetPartData,
+        const int32 MaterialSlotIndex)
+    {
+        const FWetClothingWettableMaterialSlotState* State =
+            WetPartData.WettableMaterialSlots.FindByPredicate(
+                [MaterialSlotIndex](const FWetClothingWettableMaterialSlotState& Candidate)
+                {
+                    return Candidate.MaterialSlotIndex == MaterialSlotIndex;
+                });
+        return State != nullptr && State->bIsWettableSlot;
+    }
+
+    FString MakeSourceDataSignature(
+        const FWetClothingEditableWetPartData& WetPartData,
+        const FSurfaceWaterSimulationSettings& SurfaceWaterSettings)
+    {
+        FString Signature = FString::Printf(
+            TEXT("DWC_SourceData_v1|SurfaceWater=%d|RT=%d"),
+            SurfaceWaterSettings.bEnabled ? 1 : 0,
+            SurfaceWaterSettings.RenderTargetResolution);
+
+        TArray<int32> SlotIndices;
+        for (int32 SlotIndex = 0; SlotIndex < WetPartData.WettableMaterialSlots.Num(); ++SlotIndex)
+        {
+            SlotIndices.Add(SlotIndex);
+        }
+        SlotIndices.Sort(
+            [&WetPartData](const int32 A, const int32 B)
+            {
+                const FWetClothingWettableMaterialSlotState& Left = WetPartData.WettableMaterialSlots[A];
+                const FWetClothingWettableMaterialSlotState& Right = WetPartData.WettableMaterialSlots[B];
+                if (Left.MaterialSlotIndex != Right.MaterialSlotIndex)
+                {
+                    return Left.MaterialSlotIndex < Right.MaterialSlotIndex;
+                }
+                return Left.ComponentPath < Right.ComponentPath;
+            });
+        Signature += FString::Printf(TEXT("|WettableSlots=%d"), SlotIndices.Num());
+        for (const int32 SlotIndex : SlotIndices)
+        {
+            const FWetClothingWettableMaterialSlotState& Slot = WetPartData.WettableMaterialSlots[SlotIndex];
+            Signature += FString::Printf(
+                TEXT("|Slot{%s,%d,%d}"),
+                *Slot.ComponentPath,
+                Slot.MaterialSlotIndex,
+                Slot.bIsWettableSlot ? 1 : 0);
+        }
+
+        TArray<int32> EntryIndices;
+        for (int32 EntryIndex = 0; EntryIndex < WetPartData.WetPartEntries.Num(); ++EntryIndex)
+        {
+            EntryIndices.Add(EntryIndex);
+        }
+        EntryIndices.Sort(
+            [&WetPartData](const int32 A, const int32 B)
+            {
+                const FWetClothingWetPartEntry& Left = WetPartData.WetPartEntries[A];
+                const FWetClothingWetPartEntry& Right = WetPartData.WetPartEntries[B];
+                if (Left.MaterialSlotIndex != Right.MaterialSlotIndex)
+                {
+                    return Left.MaterialSlotIndex < Right.MaterialSlotIndex;
+                }
+                if (Left.UVChannelIndex != Right.UVChannelIndex)
+                {
+                    return Left.UVChannelIndex < Right.UVChannelIndex;
+                }
+                if (Left.WetPartID != Right.WetPartID)
+                {
+                    return Left.WetPartID < Right.WetPartID;
+                }
+                return Left.ComponentPath < Right.ComponentPath;
+            });
+        Signature += FString::Printf(TEXT("|WetPartEntries=%d"), EntryIndices.Num());
+        for (const int32 EntryIndex : EntryIndices)
+        {
+            const FWetClothingWetPartEntry& Entry = WetPartData.WetPartEntries[EntryIndex];
+            TArray<int32> AssignedIslandIDs = Entry.AssignedUVIslandIDs;
+            AssignedIslandIDs.Sort();
+
+            Signature += FString::Printf(
+                TEXT("|Entry{%s,%d,%d,%d,%s,%d,%s"),
+                *Entry.ComponentPath,
+                Entry.MaterialSlotIndex,
+                Entry.UVChannelIndex,
+                Entry.WetPartID,
+                *Entry.DisplayName,
+                Entry.bViewEnabled ? 1 : 0,
+                *Entry.ProfileAssignment.SourceProfileName);
+            Signature += FString::Printf(TEXT(",Profile=%s"), *Entry.ProfileAssignment.SourceProfile.ToString());
+            Signature += FString::Printf(TEXT(",Blend=%d"), static_cast<int32>(Entry.ProfileAssignment.BlendMode));
+            Signature += FString::Printf(TEXT(",Islands=%d"), AssignedIslandIDs.Num());
+            for (const int32 IslandID : AssignedIslandIDs)
+            {
+                Signature += FString::Printf(TEXT(",%d"), IslandID);
+            }
+            Signature += TEXT("}");
+        }
+
+        TArray<int32> SurfaceSlotIndices;
+        for (int32 SurfaceSlotIndex = 0; SurfaceSlotIndex < SurfaceWaterSettings.SurfaceWaterMaterialSlots.Num(); ++SurfaceSlotIndex)
+        {
+            SurfaceSlotIndices.Add(SurfaceSlotIndex);
+        }
+        SurfaceSlotIndices.Sort(
+            [&SurfaceWaterSettings](const int32 A, const int32 B)
+            {
+                return SurfaceWaterSettings.SurfaceWaterMaterialSlots[A].MaterialSlotIndex <
+                       SurfaceWaterSettings.SurfaceWaterMaterialSlots[B].MaterialSlotIndex;
+            });
+        Signature += FString::Printf(TEXT("|SurfaceSlots=%d"), SurfaceSlotIndices.Num());
+        for (const int32 SurfaceSlotIndex : SurfaceSlotIndices)
+        {
+            const FSurfaceWaterMaterialSlotData& Slot = SurfaceWaterSettings.SurfaceWaterMaterialSlots[SurfaceSlotIndex];
+            Signature += FString::Printf(
+                TEXT("|SurfaceSlot{%d,%d,%d,%d,%d,%s}"),
+                Slot.MaterialSlotIndex,
+                Slot.bEnabled ? 1 : 0,
+                Slot.BakedFlowMap.bEnabled ? 1 : 0,
+                Slot.BakedFlowMap.bIsValid ? 1 : 0,
+                Slot.BakedFlowMap.Resolution,
+                *Slot.BakedFlowMap.BuildSignature);
+        }
+
+        return Signature;
+    }
+
+    bool ValidateSetupUVChannels(
+        const USkeletalMesh* SourceMesh,
+        const FDWCWetClothingAssetSetupSettings& Settings,
+        FString* OutErrorMessage)
+    {
+        const int32 UVChannelCount = GetLOD0UVChannelCount(SourceMesh);
+        if (Settings.OriginalUVChannelIndex < 0 || Settings.OriginalUVChannelIndex >= UVChannelCount)
+        {
+            DWC::Error::SetMessage(
+                OutErrorMessage,
+                FString::Printf(
+                    TEXT("Original UV Channel UV%d is unavailable. LOD0 has %d UV channel(s)."),
+                    Settings.OriginalUVChannelIndex,
+                    UVChannelCount));
+            return false;
+        }
+        if (Settings.PreferredDWCDataUVChannelIndex < 0 || Settings.PreferredDWCDataUVChannelIndex > 7)
+        {
+            DWC::Error::SetMessage(OutErrorMessage, TEXT("DWC Data UV Channel must be between UV0 and UV7."));
+            return false;
+        }
+        if (Settings.PreferredDWCDataUVChannelIndex == Settings.OriginalUVChannelIndex)
+        {
+            DWC::Error::SetMessage(OutErrorMessage, TEXT("DWC Data UV Channel cannot be the same as Original UV Channel."));
+            return false;
+        }
+        return true;
+    }
+
     void EnterRuntimeBulkProgressFrame(FScopedSlowTask* SlowTask, const float Work, const FText& Message)
     {
         if (SlowTask != nullptr)
@@ -61,38 +228,6 @@ namespace
             EnterRuntimeBulkProgressFrame(SlowTask, Delta, Message);
             ConsumedWork += Delta;
         }
-    }
-
-    struct FRuntimeQuantizedUV
-    {
-        int64 U = 0;
-        int64 V = 0;
-
-        FRuntimeQuantizedUV() = default;
-
-        explicit FRuntimeQuantizedUV(const FVector2D& InUV)
-        {
-            U = FMath::RoundToInt64(InUV.X * UVQuantizeScale);
-            V = FMath::RoundToInt64(InUV.Y * UVQuantizeScale);
-        }
-
-        bool operator==(const FRuntimeQuantizedUV& Other) const
-        {
-            return U == Other.U && V == Other.V;
-        }
-    };
-
-    uint32 HashInt64(int64 Value)
-    {
-        const uint64 UnsignedValue = static_cast<uint64>(Value);
-        const uint32 Low = static_cast<uint32>(UnsignedValue & 0xFFFFFFFFull);
-        const uint32 High = static_cast<uint32>((UnsignedValue >> 32) & 0xFFFFFFFFull);
-        return HashCombine(::GetTypeHash(Low), ::GetTypeHash(High));
-    }
-
-    uint32 GetTypeHash(const FRuntimeQuantizedUV& Value)
-    {
-        return HashCombine(HashInt64(Value.U), HashInt64(Value.V));
     }
 
     template <typename ElementType>
@@ -487,46 +622,6 @@ namespace
         }
     }
 
-    bool LessUV(const FRuntimeQuantizedUV& A, const FRuntimeQuantizedUV& B)
-    {
-        return A.U != B.U ? A.U < B.U : A.V < B.V;
-    }
-
-    struct FRuntimeUVEdgeKey
-    {
-        FRuntimeQuantizedUV A;
-        FRuntimeQuantizedUV B;
-
-        FRuntimeUVEdgeKey() = default;
-
-        FRuntimeUVEdgeKey(const FVector2D& InA, const FVector2D& InB)
-        {
-            FRuntimeQuantizedUV QuantizedA(InA);
-            FRuntimeQuantizedUV QuantizedB(InB);
-
-            if (LessUV(QuantizedB, QuantizedA))
-            {
-                A = QuantizedB;
-                B = QuantizedA;
-            }
-            else
-            {
-                A = QuantizedA;
-                B = QuantizedB;
-            }
-        }
-
-        bool operator==(const FRuntimeUVEdgeKey& Other) const
-        {
-            return A == Other.A && B == Other.B;
-        }
-    };
-
-    uint32 GetTypeHash(const FRuntimeUVEdgeKey& Key)
-    {
-        return HashCombine(GetTypeHash(Key.A), GetTypeHash(Key.B));
-    }
-
     struct FWetPartScopeKey
     {
         int32 MaterialSlotIndex = INDEX_NONE;
@@ -541,252 +636,6 @@ namespace
     uint32 GetTypeHash(const FWetPartScopeKey& Key)
     {
         return HashCombine(::GetTypeHash(Key.MaterialSlotIndex), ::GetTypeHash(Key.UVChannelIndex));
-    }
-
-    struct FRuntimeTriangle
-    {
-        int32     VertexIndices[3] = { INDEX_NONE, INDEX_NONE, INDEX_NONE };
-        FVector2D UVs[3];
-    };
-
-    struct FRuntimeIsland
-    {
-        int32       UVIslandID = INDEX_NONE;
-        TSet<int32> VertexIndices;
-    };
-
-
-    int32 FindParent(TArray<int32>& Parents, int32 Index)
-    {
-        if (Parents[Index] == Index)
-        {
-            return Index;
-        }
-
-        Parents[Index] = FindParent(Parents, Parents[Index]);
-        return Parents[Index];
-    }
-
-    void UnionParents(TArray<int32>& Parents, int32 A, int32 B)
-    {
-        const int32 RootA = FindParent(Parents, A);
-        const int32 RootB = FindParent(Parents, B);
-
-        if (RootA != RootB)
-        {
-            Parents[RootB] = RootA;
-        }
-    }
-
-    FString MakeMeshSignature(const USkeletalMesh* SkeletalMesh, const FSkeletalMeshLODRenderData& LODData, int32 LODIndex)
-    {
-        TArray<uint32> IndexBuffer;
-        LODData.MultiSizeIndexContainer.GetIndexBuffer(IndexBuffer);
-
-        return FString::Printf(
-            TEXT("%s|LOD=%d|Vertices=%d|Indices=%d|Materials=%d"),
-            *GetPathNameSafe(SkeletalMesh),
-            LODIndex,
-            LODData.GetNumVertices(),
-            IndexBuffer.Num(),
-            SkeletalMesh != nullptr ? SkeletalMesh->GetMaterials().Num() : 0);
-    }
-
-    bool IsWettableMaterialSlot(const FWetClothingEditableWetPartData& EditableWetPartData, const int32 MaterialSlotIndex)
-    {
-        if (MaterialSlotIndex == INDEX_NONE)
-        {
-            return false;
-        }
-
-        const FWetClothingWettableMaterialSlotState* State = EditableWetPartData.WettableMaterialSlots.FindByPredicate(
-            [MaterialSlotIndex](const FWetClothingWettableMaterialSlotState& Candidate)
-            {
-                return Candidate.MaterialSlotIndex == MaterialSlotIndex;
-            });
-
-        return State != nullptr && State->bIsWettableSlot;
-    }
-
-    FString MakeSourceDataSignature(const FWetClothingEditableWetPartData& EditableWetPartData, const FSurfaceWaterSimulationSettings& SurfaceWaterSettings)
-    {
-        TArray<FString> WettableSlotSignatures;
-        WettableSlotSignatures.Reserve(EditableWetPartData.WettableMaterialSlots.Num());
-        for (const FWetClothingWettableMaterialSlotState& SlotState : EditableWetPartData.WettableMaterialSlots)
-        {
-            WettableSlotSignatures.Add(FString::Printf(
-                TEXT("Slot=%d|Wettable=%d"),
-                SlotState.MaterialSlotIndex,
-                SlotState.bIsWettableSlot ? 1 : 0));
-        }
-        WettableSlotSignatures.Sort();
-
-        TArray<FString> SurfaceWaterSlotSignatures;
-        for (const FSurfaceWaterMaterialSlotData& SlotData : SurfaceWaterSettings.SurfaceWaterMaterialSlots)
-        {
-            SurfaceWaterSlotSignatures.Add(FString::Printf(TEXT("Slot=%d|Enabled=%d"), SlotData.MaterialSlotIndex, SlotData.bEnabled ? 1 : 0));
-        }
-        SurfaceWaterSlotSignatures.Sort();
-
-        TArray<FString> EntrySignatures;
-        EntrySignatures.Reserve(EditableWetPartData.WetPartEntries.Num());
-
-        for (const FWetClothingWetPartEntry& Entry : EditableWetPartData.WetPartEntries)
-        {
-            TArray<int32> SortedIslandIDs = Entry.AssignedUVIslandIDs;
-            SortedIslandIDs.Sort();
-
-            TArray<FString> IslandStrings;
-            IslandStrings.Reserve(SortedIslandIDs.Num());
-            for (const int32 IslandID : SortedIslandIDs)
-            {
-                IslandStrings.Add(FString::FromInt(IslandID));
-            }
-
-            EntrySignatures.Add(FString::Printf(
-                TEXT("Slot=%d|UV=%d|Part=%d|Islands=%s"),
-                Entry.MaterialSlotIndex,
-                Entry.UVChannelIndex,
-                Entry.WetPartID,
-                *FString::Join(IslandStrings, TEXT(","))));
-        }
-
-        EntrySignatures.Sort();
-        return FString::Printf(
-            TEXT("PrecomputedDataVersion=4|SurfaceWater=%d,%d|SurfaceWaterSlots=%s|WettableSlots=%s|Entries=%s"),
-            SurfaceWaterSettings.bEnabled ? 1 : 0, SurfaceWaterSettings.RenderTargetResolution,
-            *FString::Join(SurfaceWaterSlotSignatures, TEXT(";")),
-            *FString::Join(WettableSlotSignatures, TEXT(";")),
-            *FString::Join(EntrySignatures, TEXT(";")));
-    }
-
-    bool BuildRawTriangles(
-        const USkeletalMesh*              SkeletalMesh,
-        const FSkeletalMeshLODRenderData& LODData,
-        const TArray<uint32>&             IndexBuffer,
-        int32                             UVChannelIndex,
-        int32                             MaterialSlotIndex,
-        TArray<FRuntimeTriangle>&         OutTriangles,
-        FString*                          OutErrorMessage)
-    {
-        OutTriangles.Reset();
-
-        if (SkeletalMesh == nullptr || !SkeletalMesh->GetMaterials().IsValidIndex(MaterialSlotIndex))
-        {
-            DWC::Error::SetMessage(OutErrorMessage, TEXT("A wet part references an invalid material slot."));
-            return false;
-        }
-
-        const int32 NumUVChannels = static_cast<int32>(LODData.GetNumTexCoords());
-        if (UVChannelIndex < 0 || UVChannelIndex >= NumUVChannels)
-        {
-            DWC::Error::SetMessage(OutErrorMessage, TEXT("A wet part references a UV channel that is not available on the mesh."));
-            return false;
-        }
-
-        const int32 VertexCount = LODData.GetNumVertices();
-
-        for (const FSkelMeshRenderSection& Section : LODData.RenderSections)
-        {
-            if (!Section.IsValid() || Section.MaterialIndex != MaterialSlotIndex)
-            {
-                continue;
-            }
-
-            const int32 FirstIndex = static_cast<int32>(Section.BaseIndex);
-            const int32 LastIndex = FMath::Min(FirstIndex + static_cast<int32>(Section.NumTriangles * 3), IndexBuffer.Num());
-
-            for (int32 TriangleIndex = FirstIndex; TriangleIndex + 2 < LastIndex; TriangleIndex += 3)
-            {
-                const uint32 Index0 = IndexBuffer[TriangleIndex];
-                const uint32 Index1 = IndexBuffer[TriangleIndex + 1];
-                const uint32 Index2 = IndexBuffer[TriangleIndex + 2];
-
-                if (Index0 >= static_cast<uint32>(VertexCount) ||
-                    Index1 >= static_cast<uint32>(VertexCount) ||
-                    Index2 >= static_cast<uint32>(VertexCount))
-                {
-                    continue;
-                }
-
-                FRuntimeTriangle Triangle;
-                Triangle.VertexIndices[0] = static_cast<int32>(Index0);
-                Triangle.VertexIndices[1] = static_cast<int32>(Index1);
-                Triangle.VertexIndices[2] = static_cast<int32>(Index2);
-                Triangle.UVs[0] = FVector2D(LODData.StaticVertexBuffers.StaticMeshVertexBuffer.GetVertexUV(Index0, UVChannelIndex));
-                Triangle.UVs[1] = FVector2D(LODData.StaticVertexBuffers.StaticMeshVertexBuffer.GetVertexUV(Index1, UVChannelIndex));
-                Triangle.UVs[2] = FVector2D(LODData.StaticVertexBuffers.StaticMeshVertexBuffer.GetVertexUV(Index2, UVChannelIndex));
-                OutTriangles.Add(Triangle);
-            }
-        }
-
-        DWC::Error::SetMessage(OutErrorMessage, TEXT(""));
-        return true;
-    }
-
-    void BuildIslands(const TArray<FRuntimeTriangle>& RawTriangles, TArray<FRuntimeIsland>& OutIslands)
-    {
-        OutIslands.Reset();
-
-        if (RawTriangles.Num() == 0)
-        {
-            return;
-        }
-
-        TArray<int32> Parents;
-        Parents.SetNum(RawTriangles.Num());
-
-        for (int32 TriangleIndex = 0; TriangleIndex < RawTriangles.Num(); ++TriangleIndex)
-        {
-            Parents[TriangleIndex] = TriangleIndex;
-        }
-
-        TMap<FRuntimeUVEdgeKey, TArray<int32>> EdgeToTriangles;
-        for (int32 TriangleIndex = 0; TriangleIndex < RawTriangles.Num(); ++TriangleIndex)
-        {
-            const FRuntimeTriangle& Triangle = RawTriangles[TriangleIndex];
-            EdgeToTriangles.FindOrAdd(FRuntimeUVEdgeKey(Triangle.UVs[0], Triangle.UVs[1])).Add(TriangleIndex);
-            EdgeToTriangles.FindOrAdd(FRuntimeUVEdgeKey(Triangle.UVs[1], Triangle.UVs[2])).Add(TriangleIndex);
-            EdgeToTriangles.FindOrAdd(FRuntimeUVEdgeKey(Triangle.UVs[2], Triangle.UVs[0])).Add(TriangleIndex);
-        }
-
-        for (const TPair<FRuntimeUVEdgeKey, TArray<int32>>& Pair : EdgeToTriangles)
-        {
-            const TArray<int32>& ConnectedTriangles = Pair.Value;
-            if (ConnectedTriangles.Num() <= 1)
-            {
-                continue;
-            }
-
-            const int32 FirstTriangle = ConnectedTriangles[0];
-            for (int32 ConnectedIndex = 1; ConnectedIndex < ConnectedTriangles.Num(); ++ConnectedIndex)
-            {
-                UnionParents(Parents, FirstTriangle, ConnectedTriangles[ConnectedIndex]);
-            }
-        }
-
-        TMap<int32, int32> RootToIslandArrayIndex;
-        for (int32 TriangleIndex = 0; TriangleIndex < RawTriangles.Num(); ++TriangleIndex)
-        {
-            const int32 Root = FindParent(Parents, TriangleIndex);
-            int32*      ExistingIslandIndex = RootToIslandArrayIndex.Find(Root);
-
-            if (ExistingIslandIndex == nullptr)
-            {
-                FRuntimeIsland Island;
-                Island.UVIslandID = OutIslands.Num();
-
-                const int32 NewIslandIndex = OutIslands.Add(MoveTemp(Island));
-                RootToIslandArrayIndex.Add(Root, NewIslandIndex);
-                ExistingIslandIndex = RootToIslandArrayIndex.Find(Root);
-            }
-
-            FRuntimeIsland&         Island = OutIslands[*ExistingIslandIndex];
-            const FRuntimeTriangle& Triangle = RawTriangles[TriangleIndex];
-            Island.VertexIndices.Add(Triangle.VertexIndices[0]);
-            Island.VertexIndices.Add(Triangle.VertexIndices[1]);
-            Island.VertexIndices.Add(Triangle.VertexIndices[2]);
-        }
     }
 
     void AddNeighbor(TArray<FWetClothingPrecomputedVertexNeighbors>& NeighborGraph, int32 A, int32 B)
@@ -1183,6 +1032,12 @@ void UWetClothingAsset::PostLoad()
     Super::PostLoad();
     SetupSettings.SimulationLODIndex = RuntimeSimulationLODIndex;
     SimulationLODIndex = RuntimeSimulationLODIndex;
+    if (DWCSkeletalMesh != nullptr && DWCSkeletalMesh == SourceSkeletalMesh)
+    {
+        // Direct source-mesh modification is no longer supported. Old assets must rebuild a dedicated prepared mesh.
+        DWCSkeletalMesh = nullptr;
+        DWCDataUVChannelIndex = INDEX_NONE;
+    }
     bRuntimeBulkDataLoaded = RuntimeBulkData.GetBulkDataSize() == 0;
     bRuntimeBulkDataLoadFailed = false;
     bRuntimeBulkDataDirty = false;
@@ -1620,10 +1475,17 @@ bool UWetClothingAsset::InitializeNewAsset(
         return false;
     }
 
+    FDWCWetClothingAssetSetupSettings NormalizedSettings = InSettings;
+    NormalizedSettings.NormalizeMapResolutions();
+    if (!ValidateSetupUVChannels(InSourceMesh, NormalizedSettings, OutErrorMessage))
+    {
+        return false;
+    }
+
     SourceSkeletalMesh = InSourceMesh;
-    SetupSettings = InSettings;
-    DWCSkeletalMesh = SetupSettings.bModifySourceMeshForDWCDataUV ? InSourceMesh : nullptr;
-    SetupSettings.NormalizeMapResolutions();
+    SetupSettings = NormalizedSettings;
+    // The source mesh is immutable input. A dedicated prepared mesh is created by the Data UV build service.
+    DWCSkeletalMesh = nullptr;
     WrinkleData.BakeSettings.DefaultResolution = SetupSettings.GetWrinkleMapResolution();
     TransparencyData.TransparencyBakeResolution = SetupSettings.GetTransparencyMapResolution();
     TransparencyData.RevealBakeResolution = SetupSettings.GetTransparencyMapResolution();
@@ -1663,17 +1525,150 @@ bool UWetClothingAsset::ApplySetupSettings(
     const FDWCWetClothingAssetSetupSettings& InSettings,
     FString* OutChangeSummary)
 {
-    SetupSettings = InSettings;
-    SetupSettings.NormalizeMapResolutions();
-    WrinkleData.BakeSettings.DefaultResolution = SetupSettings.GetWrinkleMapResolution();
-    TransparencyData.TransparencyBakeResolution = SetupSettings.GetTransparencyMapResolution();
-    TransparencyData.RevealBakeResolution = SetupSettings.GetTransparencyMapResolution();
+    FDWCWetClothingAssetSetupSettings NewSettings = InSettings;
+    NewSettings.NormalizeMapResolutions();
+    if (!ValidateSetupUVChannels(GetSourceSkeletalMesh(), NewSettings, OutChangeSummary))
+    {
+        return false;
+    }
+
+    const FDWCWetClothingAssetSetupSettings PreviousSettings = SetupSettings;
+    const int32 PreviousOriginalUVChannelIndex = OriginalUVChannelIndex;
+    const bool bOriginalUVChanged = PreviousOriginalUVChannelIndex != NewSettings.OriginalUVChannelIndex;
+    const bool bDataUVTargetChanged =
+        PreviousSettings.PreferredDWCDataUVChannelIndex != NewSettings.PreferredDWCDataUVChannelIndex;
+    const bool bCPUSimulationSettingChanged =
+        PreviousSettings.bBuildCPUVertexSimulationData != NewSettings.bBuildCPUVertexSimulationData;
+    const bool bGPUSimulationSettingChanged =
+        PreviousSettings.bBuildGPUWetnessMapSimulationData != NewSettings.bBuildGPUWetnessMapSimulationData;
+    const bool bGPUResolutionChanged =
+        PreviousSettings.GetGPUSimulationMapResolution() != NewSettings.GetGPUSimulationMapResolution();
+    const bool bWrinkleResolutionChanged =
+        PreviousSettings.GetWrinkleMapResolution() != NewSettings.GetWrinkleMapResolution();
+    const bool bTransparencyResolutionChanged =
+        PreviousSettings.GetTransparencyMapResolution() != NewSettings.GetTransparencyMapResolution();
+
+    SetupSettings = NewSettings;
     OriginalUVChannelIndex = SetupSettings.OriginalUVChannelIndex;
     SetupSettings.SimulationLODIndex = RuntimeSimulationLODIndex;
     SimulationLODIndex = RuntimeSimulationLODIndex;
-    MarkSimulationBakeOutOfDate();
-    MarkVisualBakeOutOfDate();
-    DWC::Error::SetMessage(OutChangeSummary, TEXT("Wet Clothing setup settings updated."));
+    WrinkleData.BakeSettings.DefaultResolution = SetupSettings.GetWrinkleMapResolution();
+    TransparencyData.TransparencyBakeResolution = SetupSettings.GetTransparencyMapResolution();
+    TransparencyData.RevealBakeResolution = SetupSettings.GetTransparencyMapResolution();
+
+    if (bOriginalUVChanged)
+    {
+        // Preserve user-authored part/profile properties, but discard island IDs because they
+        // belong to the previous Original UV topology.
+        for (FWetClothingWetPartEntry& Entry : PartData.EditableWetPartData.WetPartEntries)
+        {
+            if (Entry.UVChannelIndex == PreviousOriginalUVChannelIndex)
+            {
+                Entry.UVChannelIndex = OriginalUVChannelIndex;
+                Entry.AssignedUVIslandIDs.Reset();
+            }
+        }
+        PartData.EditableWetPartData.SourceTextureSelections.RemoveAll(
+            [PreviousOriginalUVChannelIndex](const FWetClothingSourceTextureSelection& Selection)
+            {
+                return Selection.UVChannelIndex == PreviousOriginalUVChannelIndex;
+            });
+    }
+
+    if (bOriginalUVChanged || bDataUVTargetChanged)
+    {
+        BakeState.GeneratedDataUV = DataUVMetadataPerLOD.IsEmpty()
+            ? EDWCBakeStatus::Required
+            : EDWCBakeStatus::OutOfDate;
+        BakeState.OriginalUVTopology = OriginalUVTopologiesPerLOD.IsEmpty()
+            ? EDWCBakeStatus::Required
+            : EDWCBakeStatus::OutOfDate;
+    }
+
+    const bool bSimulationStructureChanged =
+        bOriginalUVChanged ||
+        bDataUVTargetChanged ||
+        bCPUSimulationSettingChanged ||
+        bGPUSimulationSettingChanged;
+
+    if (bSimulationStructureChanged)
+    {
+        MarkSimulationBakeOutOfDate();
+    }
+    else if (bGPUResolutionChanged)
+    {
+        // A resolution-only change does not invalidate CPU/GPU runtime topology.
+        // It invalidates only the generated GPU simulation maps.
+        BakeState.GPUMaps = SetupSettings.bBuildGPUWetnessMapSimulationData
+            ? (HasGPUMapDataPayload() ? EDWCBakeStatus::OutOfDate : EDWCBakeStatus::Required)
+            : EDWCBakeStatus::Disabled;
+    }
+
+    if (bOriginalUVChanged || bDataUVTargetChanged)
+    {
+        MarkVisualBakeOutOfDate();
+    }
+    else
+    {
+        if (bWrinkleResolutionChanged)
+        {
+            BakeState.WrinkleMaps = HasWrinkleBakeContent()
+                ? (HasSavedBakeOutput(DWCBakeOutput::WrinkleMaps)
+                    ? EDWCBakeStatus::OutOfDate
+                    : EDWCBakeStatus::Required)
+                : EDWCBakeStatus::Disabled;
+        }
+        if (bTransparencyResolutionChanged)
+        {
+            BakeState.TransparencyMaps = HasTransparencyBakeContent()
+                ? (HasSavedBakeOutput(DWCBakeOutput::TransparencyMaps)
+                    ? EDWCBakeStatus::OutOfDate
+                    : EDWCBakeStatus::Required)
+                : EDWCBakeStatus::Disabled;
+        }
+    }
+
+    TArray<FString> Changes;
+    if (bOriginalUVChanged)
+    {
+        Changes.Add(FString::Printf(TEXT("Original UV changed: UV%d -> UV%d. Existing island assignments were cleared."), PreviousOriginalUVChannelIndex, OriginalUVChannelIndex));
+    }
+    if (bDataUVTargetChanged)
+    {
+        Changes.Add(TEXT("DWC Data UV target changed. Rebuild is required."));
+    }
+    if (bCPUSimulationSettingChanged)
+    {
+        Changes.Add(FString::Printf(
+            TEXT("CPU vertex simulation data: %s -> %s."),
+            PreviousSettings.bBuildCPUVertexSimulationData ? TEXT("Enabled") : TEXT("Disabled"),
+            SetupSettings.bBuildCPUVertexSimulationData ? TEXT("Enabled") : TEXT("Disabled")));
+    }
+    if (bGPUSimulationSettingChanged)
+    {
+        Changes.Add(FString::Printf(
+            TEXT("GPU wetness-map simulation data: %s -> %s."),
+            PreviousSettings.bBuildGPUWetnessMapSimulationData ? TEXT("Enabled") : TEXT("Disabled"),
+            SetupSettings.bBuildGPUWetnessMapSimulationData ? TEXT("Enabled") : TEXT("Disabled")));
+    }
+    if (bGPUResolutionChanged)
+    {
+        Changes.Add(FString::Printf(TEXT("GPU Simulation Map resolution: %d -> %d."), PreviousSettings.GetGPUSimulationMapResolution(), SetupSettings.GetGPUSimulationMapResolution()));
+    }
+    if (bWrinkleResolutionChanged)
+    {
+        Changes.Add(FString::Printf(TEXT("Wrinkle Map resolution: %d -> %d."), PreviousSettings.GetWrinkleMapResolution(), SetupSettings.GetWrinkleMapResolution()));
+    }
+    if (bTransparencyResolutionChanged)
+    {
+        Changes.Add(FString::Printf(TEXT("Transparency Map resolution: %d -> %d."), PreviousSettings.GetTransparencyMapResolution(), SetupSettings.GetTransparencyMapResolution()));
+    }
+
+    DWC::Error::SetMessage(
+        OutChangeSummary,
+        Changes.IsEmpty()
+            ? TEXT("Wet Clothing setup settings are unchanged.")
+            : FString::Join(Changes, TEXT("\n")));
     return true;
 }
 
@@ -1877,9 +1872,22 @@ void UWetClothingAsset::RefreshBakeStateInternal(const bool bRunDeepValidation)
     const int32 RuntimeLODIndex = GetSimulationLODIndex();
 
     const FDWCDataUVLODMetadata* DataUVMetadata = FindDataUVMetadataForLOD(RuntimeLODIndex);
-    const bool bDataUVMetadataValid =
+    bool bDataUVMetadataValid =
         DataUVMetadata != nullptr && DataUVMetadata->bIsValid &&
-        DataUVMetadata->UVChannelIndex == DWCDataUVChannelIndex;
+        DataUVMetadata->UVChannelIndex == DWCDataUVChannelIndex &&
+        DataUVMetadata->GeneratorVersion == DWCGeneratedDataVersion::DataUV;
+    if (bDataUVMetadataValid && bRunDeepValidation)
+    {
+        const FString CurrentOriginalUVSignature = BuildMeshContentSignature(
+            RuntimeMesh, RuntimeLODIndex, OriginalUVChannelIndex);
+        const FString CurrentDataUVSignature = BuildMeshContentSignature(
+            RuntimeMesh, RuntimeLODIndex, DWCDataUVChannelIndex);
+        bDataUVMetadataValid =
+            !CurrentOriginalUVSignature.IsEmpty() &&
+            !CurrentDataUVSignature.IsEmpty() &&
+            DataUVMetadata->MeshInputSignature == CurrentOriginalUVSignature &&
+            DataUVMetadata->DataUVOutputSignature == CurrentDataUVSignature;
+    }
     BakeState.GeneratedDataUV = bDataUVMetadataValid
                                      ? EDWCBakeStatus::Valid
                                      : (DataUVMetadata != nullptr ? EDWCBakeStatus::OutOfDate : EDWCBakeStatus::Required);
@@ -1888,11 +1896,12 @@ void UWetClothingAsset::RefreshBakeStateInternal(const bool bRunDeepValidation)
     bool bTopologyValid =
         Topology != nullptr && Topology->bIsValid &&
         Topology->LODIndex == RuntimeLODIndex &&
-        Topology->UVChannelIndex == OriginalUVChannelIndex;
+        Topology->UVChannelIndex == OriginalUVChannelIndex &&
+        Topology->GeneratorVersion == DWCGeneratedDataVersion::OriginalUVTopology;
     if (bTopologyValid && bRunDeepValidation)
     {
         const FString CurrentTopologySignature = BuildMeshContentSignature(
-            GetSourceSkeletalMesh(), RuntimeLODIndex, OriginalUVChannelIndex);
+            RuntimeMesh, RuntimeLODIndex, OriginalUVChannelIndex);
         bTopologyValid = !CurrentTopologySignature.IsEmpty() && Topology->BuildSignature == CurrentTopologySignature;
     }
     BakeState.OriginalUVTopology = bTopologyValid
@@ -2006,7 +2015,7 @@ bool UWetClothingAsset::BakeGPUWetnessMaps(FString* OutErrorMessage)
 
     const int32 RuntimeLODIndex = GetSimulationLODIndex();
     FScopedSlowTask SlowTask(
-        7.0f,
+        7.25f,
         FText::FromString(FString::Printf(TEXT("Baking DWC GPU simulation maps for LOD%d..."), RuntimeLODIndex)));
     SlowTask.MakeDialog(false);
     SlowTask.EnterProgressFrame(
@@ -2301,8 +2310,10 @@ FString UWetClothingAsset::BuildMeshContentSignature(
         return FString();
     }
 
-    const FSkeletalMeshLODRenderData& LODData = RenderData->LODRenderData[LODIndex];
-    return FString::Printf(TEXT("%s|UV=%d"), *MakeMeshSignature(SkeletalMesh, LODData, LODIndex), UVChannelIndex);
+    return FDWCMeshContentSignature::BuildUVContent(
+        SkeletalMesh,
+        LODIndex,
+        UVChannelIndex);
 }
 
 void UWetClothingAsset::ClearMeshContentSignatureCache()
@@ -2400,7 +2411,7 @@ bool UWetClothingAsset::IsPrecomputedSimulationDataValidForMesh(const USkeletalM
            Data.LODIndex == LODIndex &&
            Data.VertexCount == LODData.GetNumVertices() &&
            bPayloadAvailable &&
-           Data.MeshSignature == MakeMeshSignature(SkeletalMesh, LODData, LODIndex) &&
+           Data.MeshSignature == FDWCMeshContentSignature::BuildStructure(SkeletalMesh, LODData, LODIndex) &&
            Data.SourceDataSignature == MakeSourceDataSignature(PartData.EditableWetPartData, SurfaceWaterSettings);
 }
 
@@ -2414,7 +2425,7 @@ FString UWetClothingAsset::GetPrecomputedSimulationDataValidationSummary(const U
     const bool bHasLODData = RenderData != nullptr && RenderData->LODRenderData.IsValidIndex(LODIndex);
     const int32 ExpectedVertexCount = bHasLODData ? RenderData->LODRenderData[LODIndex].GetNumVertices() : INDEX_NONE;
     const FString ExpectedMeshSignature = bHasLODData
-                                               ? MakeMeshSignature(SkeletalMesh, RenderData->LODRenderData[LODIndex], LODIndex)
+                                               ? FDWCMeshContentSignature::BuildStructure(SkeletalMesh, RenderData->LODRenderData[LODIndex], LODIndex)
                                                : FString();
     const FString ExpectedSourceSignature = MakeSourceDataSignature(PartData.EditableWetPartData, SurfaceWaterSettings);
 
@@ -2615,10 +2626,29 @@ bool UWetClothingAsset::RebuildPrecomputedSimulationData(FString* OutErrorMessag
     PartData.PrecomputedSimulationData.bIsValid = true;
     PartData.PrecomputedSimulationData.LODIndex = LODIndex;
     PartData.PrecomputedSimulationData.VertexCount = LODData.GetNumVertices();
-    PartData.PrecomputedSimulationData.MeshSignature = MakeMeshSignature(RuntimeMesh, LODData, LODIndex);
+    PartData.PrecomputedSimulationData.MeshSignature = FDWCMeshContentSignature::BuildStructure(RuntimeMesh, LODData, LODIndex);
     PartData.PrecomputedSimulationData.SourceDataSignature = MakeSourceDataSignature(PartData.EditableWetPartData, SurfaceWaterSettings);
     PartData.PrecomputedSimulationData.DataVersion = CurrentPrecomputedSimulationDataVersion;
     PartData.PrecomputedSimulationData.Vertices.SetNum(PartData.PrecomputedSimulationData.VertexCount);
+
+    const FDWCEditorUVTopologyData* OriginalUVTopology = FindOriginalUVTopologyForLOD(LODIndex);
+    const FString CurrentTopologySignature = BuildMeshContentSignature(
+        RuntimeMesh,
+        LODIndex,
+        OriginalUVChannelIndex);
+    if (OriginalUVTopology == nullptr ||
+        !OriginalUVTopology->bIsValid ||
+        OriginalUVTopology->UVChannelIndex != OriginalUVChannelIndex ||
+        OriginalUVTopology->GeneratorVersion != DWCGeneratedDataVersion::OriginalUVTopology ||
+        OriginalUVTopology->BuildSignature.IsEmpty() ||
+        OriginalUVTopology->BuildSignature != CurrentTopologySignature)
+    {
+        DWC::Error::SetMessage(
+            OutErrorMessage,
+            TEXT("Original UV topology is missing or out of date. Rebuild DWC Data UV before rebuilding runtime data."));
+        ClearPrecomputedSimulationData();
+        return false;
+    }
 
     TMap<FWetPartScopeKey, TArray<int32>> EntryIndicesByScope;
     for (int32 EntryIndex = 0; EntryIndex < PartData.EditableWetPartData.WetPartEntries.Num(); ++EntryIndex)
@@ -2639,8 +2669,8 @@ bool UWetClothingAsset::RebuildPrecomputedSimulationData(FString* OutErrorMessag
 
     for (const TPair<FWetPartScopeKey, TArray<int32>>& ScopePair : EntryIndicesByScope)
     {
-        TArray<FRuntimeTriangle> RawTriangles;
-        if (!BuildRawTriangles(
+        TArray<FDWCRuntimeTopologyTriangle> RawTriangles;
+        if (!FDWCOriginalUVRuntimeTopologyAdapter::ReadMaterialSlotTriangles(
                 RuntimeMesh,
                 LODData,
                 IndexBuffer,
@@ -2653,8 +2683,26 @@ bool UWetClothingAsset::RebuildPrecomputedSimulationData(FString* OutErrorMessag
             return false;
         }
 
-        TArray<FRuntimeIsland> Islands;
-        BuildIslands(RawTriangles, Islands);
+        if (ScopePair.Key.UVChannelIndex != OriginalUVTopology->UVChannelIndex)
+        {
+            DWC::Error::SetMessage(
+                OutErrorMessage,
+                TEXT("Wet Part data references a UV channel that is not the WCA Original UV channel."));
+            ClearPrecomputedSimulationData();
+            return false;
+        }
+
+        TArray<FDWCRuntimeOriginalUVIsland> Islands;
+        if (!FDWCOriginalUVRuntimeTopologyAdapter::BuildIslands(
+                RawTriangles,
+                *OriginalUVTopology,
+                ScopePair.Key.MaterialSlotIndex,
+                Islands,
+                OutErrorMessage))
+        {
+            ClearPrecomputedSimulationData();
+            return false;
+        }
 
         int32              DefaultEntryIndex = INDEX_NONE;
         TMap<int32, int32> AssignedUVIslandToEntryIndex;
@@ -2674,7 +2722,7 @@ bool UWetClothingAsset::RebuildPrecomputedSimulationData(FString* OutErrorMessag
             }
         }
 
-        for (const FRuntimeIsland& Island : Islands)
+        for (const FDWCRuntimeOriginalUVIsland& Island : Islands)
         {
             const int32* AssignedEntryIndex = AssignedUVIslandToEntryIndex.Find(Island.UVIslandID);
             const int32  EffectiveEntryIndex = AssignedEntryIndex != nullptr ? *AssignedEntryIndex : DefaultEntryIndex;

@@ -10,72 +10,16 @@
 #include "Rendering/RenderingCommon.h"
 #include "Rendering/SlateRenderer.h"
 #include "Styling/CoreStyle.h"
+#include "WetClothing/Common/UV/DWCUVEdgeKey.h"
 
 namespace
 {
-    constexpr double UVEdgeQuantizeScale = 100000.0;
-
-    struct FQuantizedUVPoint
-    {
-        int64 X = 0;
-        int64 Y = 0;
-
-        FQuantizedUVPoint() = default;
-
-        explicit FQuantizedUVPoint(const FVector2D& UV)
-            : X(FMath::RoundToInt64(UV.X * UVEdgeQuantizeScale)), Y(FMath::RoundToInt64(UV.Y * UVEdgeQuantizeScale))
-        {
-        }
-
-        bool operator==(const FQuantizedUVPoint& Other) const
-        {
-            return X == Other.X && Y == Other.Y;
-        }
-    };
-
-    uint32 GetTypeHash(const FQuantizedUVPoint& Point)
-    {
-        return HashCombine(::GetTypeHash(Point.X), ::GetTypeHash(Point.Y));
-    }
-
-    struct FQuantizedUVEdge
-    {
-        FQuantizedUVPoint A;
-        FQuantizedUVPoint B;
-
-        FQuantizedUVEdge() = default;
-
-        FQuantizedUVEdge(const FVector2D& InA, const FVector2D& InB)
-            : A(InA), B(InB)
-        {
-            if (B.X < A.X || (B.X == A.X && B.Y < A.Y))
-            {
-                Swap(A, B);
-            }
-        }
-
-        bool operator==(const FQuantizedUVEdge& Other) const
-        {
-            return A == Other.A && B == Other.B;
-        }
-    };
-
-    uint32 GetTypeHash(const FQuantizedUVEdge& Edge)
-    {
-        return HashCombine(GetTypeHash(Edge.A), GetTypeHash(Edge.B));
-    }
-
     struct FUVOutlineEdgeDrawData
     {
-        int32                       ForwardCount = 0;
-        int32                       ReverseCount = 0;
+        int32 ForwardCount = 0;
+        int32 ReverseCount = 0;
         TPair<FVector2D, FVector2D> Points;
     };
-
-    bool IsForwardCanonicalEdge(const FVector2D& Start, const FVector2D& End, const FQuantizedUVEdge& CanonicalEdge)
-    {
-        return FQuantizedUVPoint(Start) == CanonicalEdge.A && FQuantizedUVPoint(End) == CanonicalEdge.B;
-    }
 
     double ApplyUVViewTextureAddress(double Value, double IslandCenter, TextureAddress AddressMode)
     {
@@ -941,7 +885,7 @@ void SWetClothingAssetUVView::RebuildGeometryCache()
 
     for (const FWetClothingAssetUVIsland& Island : Islands)
     {
-        TMap<FQuantizedUVEdge, FUVOutlineEdgeDrawData> OutlineMap;
+        TMap<FDWCCanonicalUVEdge, FUVOutlineEdgeDrawData> OutlineMap;
         OutlineMap.Reserve(Island.UVTriangles.Num() * 3);
         for (const FWetClothingAssetUVTriangle& Triangle : Island.UVTriangles)
         {
@@ -951,19 +895,19 @@ void SWetClothingAssetUVView::RebuildGeometryCache()
                 const int32 NextIndex = (VertexIndex + 1) % 3;
                 const FVector2D StartUV = Triangle.UVs[VertexIndex];
                 const FVector2D EndUV = Triangle.UVs[NextIndex];
-                const FQuantizedUVEdge EdgeKey(StartUV, EndUV);
+                const FDWCCanonicalUVEdge EdgeKey(StartUV, EndUV);
                 FUVOutlineEdgeDrawData& EdgeData = OutlineMap.FindOrAdd(EdgeKey);
                 if (EdgeData.ForwardCount == 0 && EdgeData.ReverseCount == 0)
                 {
                     EdgeData.Points = TPair<FVector2D, FVector2D>(StartUV, EndUV);
                 }
-                if (IsForwardCanonicalEdge(StartUV, EndUV, EdgeKey)) ++EdgeData.ForwardCount;
+                if (EdgeKey.IsForward(StartUV, EndUV)) ++EdgeData.ForwardCount;
                 else ++EdgeData.ReverseCount;
             }
         }
 
         TArray<FCachedOutlineEdge>& CachedEdges = CachedOutlineEdgesByIsland.FindOrAdd(Island.UVIslandID);
-        for (const TPair<FQuantizedUVEdge, FUVOutlineEdgeDrawData>& Pair : OutlineMap)
+        for (const TPair<FDWCCanonicalUVEdge, FUVOutlineEdgeDrawData>& Pair : OutlineMap)
         {
             if (Pair.Value.ForwardCount != Pair.Value.ReverseCount)
             {

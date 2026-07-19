@@ -7,6 +7,7 @@
 #include "Materials/MaterialInterface.h"
 #include "WetClothing/Common/Analysis/WetClothingAssetMeshAnalyzer.h"
 #include "WetClothing/Common/Texture/WetClothingMaterialTextureResolver.h"
+#include "WetClothing/Common/UV/DWCUVEdgeKey.h"
 
 namespace
 {
@@ -140,52 +141,13 @@ namespace
         return FVector2D(FMath::FloorToDouble(Center.X), FMath::FloorToDouble(Center.Y));
     }
 
-    struct FWetWrinklePreviewEdgeKey
-    {
-        FIntPoint A = FIntPoint::ZeroValue;
-        FIntPoint B = FIntPoint::ZeroValue;
-
-        FWetWrinklePreviewEdgeKey() = default;
-
-        FWetWrinklePreviewEdgeKey(const FVector2D& InA, const FVector2D& InB)
-        {
-            constexpr double QuantizeScale = 100000.0;
-            FIntPoint QuantizedA(
-                FMath::RoundToInt(InA.X * QuantizeScale),
-                FMath::RoundToInt(InA.Y * QuantizeScale));
-            FIntPoint QuantizedB(
-                FMath::RoundToInt(InB.X * QuantizeScale),
-                FMath::RoundToInt(InB.Y * QuantizeScale));
-
-            if (QuantizedB.X < QuantizedA.X || (QuantizedB.X == QuantizedA.X && QuantizedB.Y < QuantizedA.Y))
-            {
-                Swap(QuantizedA, QuantizedB);
-            }
-
-            A = QuantizedA;
-            B = QuantizedB;
-        }
-
-        bool operator==(const FWetWrinklePreviewEdgeKey& Other) const
-        {
-            return A == Other.A && B == Other.B;
-        }
-    };
-
-    uint32 GetTypeHash(const FWetWrinklePreviewEdgeKey& Key)
-    {
-        const uint32 HashA = HashCombine(::GetTypeHash(Key.A.X), ::GetTypeHash(Key.A.Y));
-        const uint32 HashB = HashCombine(::GetTypeHash(Key.B.X), ::GetTypeHash(Key.B.Y));
-        return HashCombine(HashA, HashB);
-    }
-
     void WetWrinkleAddPreviewEdge(
         const FVector2D& A,
         const FVector2D& B,
-        TMap<FWetWrinklePreviewEdgeKey, int32>& EdgeUseCounts,
-        TMap<FWetWrinklePreviewEdgeKey, TPair<FVector2D, FVector2D>>& EdgeSegments)
+        TMap<FDWCCanonicalUVEdge, int32>& EdgeUseCounts,
+        TMap<FDWCCanonicalUVEdge, TPair<FVector2D, FVector2D>>& EdgeSegments)
     {
-        const FWetWrinklePreviewEdgeKey Key(A, B);
+        const FDWCCanonicalUVEdge Key(A, B);
         EdgeUseCounts.FindOrAdd(Key)++;
         EdgeSegments.FindOrAdd(Key, TPair<FVector2D, FVector2D>(A, B));
     }
@@ -532,8 +494,8 @@ bool FWetWrinkleTextureGenerator::GeneratePreviewMaterialSlotTexture(
     const FColor IslandOutlineColor(255, 244, 96, 255);
     for (const FWetClothingAssetUVIsland& Island : Islands)
     {
-        TMap<FWetWrinklePreviewEdgeKey, int32> EdgeUseCounts;
-        TMap<FWetWrinklePreviewEdgeKey, TPair<FVector2D, FVector2D>> EdgeSegments;
+        TMap<FDWCCanonicalUVEdge, int32> EdgeUseCounts;
+        TMap<FDWCCanonicalUVEdge, TPair<FVector2D, FVector2D>> EdgeSegments;
 
         for (const FWetClothingAssetUVTriangle& Triangle : Island.UVTriangles)
         {
@@ -547,7 +509,7 @@ bool FWetWrinkleTextureGenerator::GeneratePreviewMaterialSlotTexture(
             WetWrinkleAddPreviewEdge(UV2, UV0, EdgeUseCounts, EdgeSegments);
         }
 
-        for (const TPair<FWetWrinklePreviewEdgeKey, int32>& EdgeUseCount : EdgeUseCounts)
+        for (const TPair<FDWCCanonicalUVEdge, int32>& EdgeUseCount : EdgeUseCounts)
         {
             if (EdgeUseCount.Value != 1)
             {

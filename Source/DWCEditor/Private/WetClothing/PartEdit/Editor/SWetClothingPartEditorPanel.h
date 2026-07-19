@@ -38,7 +38,6 @@ class SWetClothingPartEditorPanel : public SCompoundWidget
   private:
     using FMaterialSlotItemPtr = TSharedPtr<FWetClothingMaterialSlotItem>;
     using FTextureItemPtr = TSharedPtr<FWetClothingTextureItem>;
-    using FUVChannelItemPtr = TSharedPtr<int32>;
     using FUVIslandItemPtr = TSharedPtr<FWetClothingAssetUVIsland>;
     using FUVSelectionToolItemPtr = TSharedPtr<FWetClothingUVSelectionToolItem>;
     using FUVDisplayModeItemPtr = TSharedPtr<EWetClothingAssetUVDisplayMode>;
@@ -48,7 +47,7 @@ class SWetClothingPartEditorPanel : public SCompoundWidget
     void RefreshMaterialSlotItems();
     void RefreshMaterialTextures(bool bRefreshUVView = true);
     void RefreshTextureToggleWidgets();
-    void RefreshUVChannels();
+    void RefreshOriginalUVChannel();
     void RefreshUVIslandList();
     void RefreshUVView();
     void RefreshPreviewIslandHighlight();
@@ -59,7 +58,8 @@ class SWetClothingPartEditorPanel : public SCompoundWidget
     void RefreshWetPartWidgets();
 
     void                                 EnsureDefaultWetPartForSelectedScope();
-    int32                                GetSelectedUVChannelIndex() const;
+    int32                                GetOriginalUVChannelIndex() const;
+    bool                                 HasValidOriginalUVChannel() const;
     int32                                FindNextWetPartForSelectedScope() const;
     FWetClothingWetPartEntry*       FindMutableWetPartEntry(int32 WetPartID) const;
     const FWetClothingWetPartEntry* FindWetPartEntry(int32 WetPartID) const;
@@ -91,8 +91,6 @@ class SWetClothingPartEditorPanel : public SCompoundWidget
     TSharedRef<SWidget>       BuildTextureComboContent(FTextureItemPtr Item, float ThumbnailSize, bool bCompactLayout);
     FReply                    HandleApplyMaterialSetupClicked();
     bool                      IsApplyMaterialSetupEnabled() const;
-    TSharedRef<SWidget>       GenerateUVChannelComboItem(FUVChannelItemPtr Item) const;
-    void                      HandleUVChannelSelectionChanged(FUVChannelItemPtr Item, ESelectInfo::Type SelectInfo);
     TSharedRef<SWidget>       GenerateUVDisplayModeComboItem(FUVDisplayModeItemPtr Item);
     void                      HandleUVDisplayModeSelectionChanged(FUVDisplayModeItemPtr Item, ESelectInfo::Type SelectInfo);
     TSharedRef<ITableRow>     GenerateUVIslandRow(FUVIslandItemPtr Item, const TSharedRef<STableViewBase>& OwnerTable);
@@ -134,7 +132,7 @@ class SWetClothingPartEditorPanel : public SCompoundWidget
     FText                                          GetWetnessProfileMapBakeSlotsText() const;
     FText                                          GetWetnessProfileMapBakeStatusText() const;
     FText                                          GetWetnessProfileMapBakeSettingsText() const;
-    FText                                          GetSelectedUVChannelText() const;
+    FText                                          GetOriginalUVChannelText() const;
     FText                                          GetSelectedUVDisplayModeText() const;
     float                                          GetUVViewBackgroundTextureOpacity() const;
     float                                          GetUVViewIslandLineOpacity() const;
@@ -192,9 +190,6 @@ class SWetClothingPartEditorPanel : public SCompoundWidget
     TSharedPtr<class SBox>                             SelectedTextureComboContentBox;
     TSharedPtr<class SBox>                             TextureSelectionContainer;
     bool                                               bShowMaterialTextureInUVView = true;
-    TArray<FUVChannelItemPtr>                          UVChannelItems;
-    FUVChannelItemPtr                                  SelectedUVChannelItem;
-    TSharedPtr<class SComboBox<FUVChannelItemPtr>>      UVChannelComboBox;
     TArray<FUVDisplayModeItemPtr>                      UVDisplayModeItems;
     FUVDisplayModeItemPtr                              SelectedUVDisplayModeItem;
     TSharedPtr<class SComboBox<FUVDisplayModeItemPtr>> UVDisplayModeComboBox;

@@ -357,16 +357,19 @@ FString FWetClothingWetnessProfileMapBaker::MakeBuildSignature(
 
     FString Canonical;
     Canonical.Reserve(4096);
-    Canonical += TEXT("DWC.WetnessProfileMap0.v2|");
+    Canonical += TEXT("DWC.WetnessProfileMap0.v3|");
     Canonical += SourceTexture->GetPathName();
 
     const int32 SourceWidth = FMath::Max(FMath::RoundToInt(SourceTexture->GetSurfaceWidth()), 1);
     const int32 SourceHeight = FMath::Max(FMath::RoundToInt(SourceTexture->GetSurfaceHeight()), 1);
     Canonical += FString::Printf(
-        TEXT("|UV=%d|Source=%dx%d"),
+        TEXT("|UV=%d|Source=%dx%d|Bake=%dx%d|Padding=%d"),
         UVChannelIndex,
         SourceWidth,
-        SourceHeight);
+        SourceHeight,
+        DWCWetnessProfileMapBake::Resolution,
+        DWCWetnessProfileMapBake::Resolution,
+        DWCWetnessProfileMapBake::PaddingPixels);
 
     if (const UTexture2D* SourceTexture2D = Cast<UTexture2D>(SourceTexture))
     {
@@ -442,7 +445,7 @@ bool FWetClothingWetnessProfileMapBaker::BakeWetnessProfileMap0(
     UTexture*                                        SourceTexture,
     int32                                            UVChannelIndex,
     const TArray<int32>&                             MaterialSlotIndices,
-    const FWetClothingWetnessProfileMapBakeSettings& Settings,
+    const FWetClothingWetnessProfileMapBakeSettings& /*Settings*/,
     FWetClothingWetnessProfileMapBakeResult&         OutResult,
     FString&                                         OutErrorMessage)
 {
@@ -466,7 +469,10 @@ bool FWetClothingWetnessProfileMapBaker::BakeWetnessProfileMap0(
         return false;
     }
 
-    const int32    MaxResolution = FMath::Clamp(Settings.Resolution, 16, 8192);
+    // This transitional map intentionally uses one internal resolution.
+    // Ignore caller/legacy asset values so rebakes cannot inherit an old size.
+    const int32    MaxResolution = DWCWetnessProfileMapBake::Resolution;
+    const int32    PaddingPixels = DWCWetnessProfileMapBake::PaddingPixels;
     const int32    SourceWidth = FMath::Max(SourceTexture->GetSurfaceWidth(), 1);
     const int32    SourceHeight = FMath::Max(SourceTexture->GetSurfaceHeight(), 1);
     const double   ResolutionScale = static_cast<double>(MaxResolution) / FMath::Max(SourceWidth, SourceHeight);
@@ -526,7 +532,7 @@ bool FWetClothingWetnessProfileMapBaker::BakeWetnessProfileMap0(
         }
     }
 
-    DilatePaintedPixels(Pixels, PaintedMask, Width, Height, Settings.PaddingPixels);
+    DilatePaintedPixels(Pixels, PaintedMask, Width, Height, PaddingPixels);
 
     UTexture2D* WetnessProfileMap0 = CreateOrUpdateTextureAsset(
         *WetClothingAsset,
@@ -559,7 +565,7 @@ bool FWetClothingWetnessProfileMapBaker::BakeWetnessProfileMap0(
     BakedWetnessProfileMap->MaterialSlotIndices = SortedMaterialSlotIndices;
     BakedWetnessProfileMap->WetnessProfileMap0 = WetnessProfileMap0;
     BakedWetnessProfileMap->Resolution = MaxResolution;
-    BakedWetnessProfileMap->PaddingPixels = Settings.PaddingPixels;
+    BakedWetnessProfileMap->PaddingPixels = PaddingPixels;
     BakedWetnessProfileMap->BuildSignature = MakeBuildSignature(WetClothingAsset, SourceTexture, UVChannelIndex, SortedMaterialSlotIndices);
     BakedWetnessProfileMap->BakeGuid = FGuid::NewGuid();
 

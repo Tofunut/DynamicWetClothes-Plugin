@@ -45,6 +45,7 @@ class FWetClothingAssetEditor : public FAssetEditorToolkit
     void                 FillAssetToolbar(FToolBarBuilder& ToolbarBuilder);
     void                 HandleAssetSetupClicked();
     void                 HandleGenerateGeneratedDataUVClicked();
+    void                 RebuildGeneratedDataUV(bool bAllowOverwriteExistingDataUVChannel);
     void                 HandleValidationClicked();
     FReply               HandleValidationResolveClicked(TWeakPtr<SWindow> DialogWindow);
     TSharedRef<SWidget>  BuildBakeMapsMenu();

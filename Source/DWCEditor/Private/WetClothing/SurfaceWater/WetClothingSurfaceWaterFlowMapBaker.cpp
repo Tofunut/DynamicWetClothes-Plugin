@@ -193,9 +193,10 @@ bool FWetClothingSurfaceWaterFlowMapBaker::CreateOrUpdateTexture(
 	UTexture2D*& OutTexture,
 	FString& OutError)
 {
-	const FString Path =
+	const FString WcaFolder =
 		FPackageName::GetLongPackagePath(
 			Asset.GetOutermost()->GetName());
+	const FString Path = WcaFolder / TEXT("Generated") / Asset.GetName() / TEXT("Maps") / TEXT("SurfaceWater");
 
 	if (Path.IsEmpty())
 	{
@@ -211,7 +212,7 @@ bool FWetClothingSurfaceWaterFlowMapBaker::CreateOrUpdateTexture(
 				*Asset.GetName(), MaterialSlotIndex));
 
 	const FString PackageName =
-		Path / FString(TEXT("SurfaceWater")) / Name;
+		Path / Name;
 
 	const FString ObjectPath =
 		PackageName + TEXT(".") + Name;

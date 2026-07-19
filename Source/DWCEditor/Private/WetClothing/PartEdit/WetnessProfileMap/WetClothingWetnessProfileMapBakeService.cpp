@@ -190,6 +190,11 @@ bool FWetClothingWetnessProfileMapBakeService::HasPendingVisualBakeTasks(
         {
             PendingLines.Add(FString::Printf(TEXT("Wetness Profile Map slot list is outdated for '%s' UV Channel %d."), *GetNameSafe(SourceTexture), WetPartScopePair.Y));
         }
+        else if (ExistingWetnessProfileMap->Resolution != DWCWetnessProfileMapBake::Resolution ||
+                 ExistingWetnessProfileMap->PaddingPixels != DWCWetnessProfileMapBake::PaddingPixels)
+        {
+            PendingLines.Add(FString::Printf(TEXT("Wetness Profile Map fixed bake settings are outdated for '%s' UV Channel %d."), *GetNameSafe(SourceTexture), WetPartScopePair.Y));
+        }
         else
         {
             const FString CurrentBuildSignature = FWetClothingWetnessProfileMapBaker::MakeBuildSignature(
@@ -406,6 +411,8 @@ bool FWetClothingWetnessProfileMapBakeService::BakeWetnessProfileMapsAndUpdateMa
         const bool bNeedsBake = ExistingWetnessProfileMap == nullptr ||
                                 ExistingWetnessProfileMap->WetnessProfileMap0 == nullptr ||
                                 ExistingWetnessProfileMap->MaterialSlotIndices != MaterialSlotIndices ||
+                                ExistingWetnessProfileMap->Resolution != DWCWetnessProfileMapBake::Resolution ||
+                                ExistingWetnessProfileMap->PaddingPixels != DWCWetnessProfileMapBake::PaddingPixels ||
                                 ExistingWetnessProfileMap->BuildSignature != CurrentBuildSignature;
         if (!bNeedsBake)
         {
@@ -413,12 +420,7 @@ bool FWetClothingWetnessProfileMapBakeService::BakeWetnessProfileMapsAndUpdateMa
             continue;
         }
 
-        FWetClothingWetnessProfileMapBakeSettings Settings;
-        if (ExistingWetnessProfileMap != nullptr)
-        {
-            Settings.Resolution = ExistingWetnessProfileMap->Resolution;
-            Settings.PaddingPixels = ExistingWetnessProfileMap->PaddingPixels;
-        }
+        const FWetClothingWetnessProfileMapBakeSettings Settings;
 
         FWetClothingWetnessProfileMapBakeResult Result;
         FString ErrorMessage;

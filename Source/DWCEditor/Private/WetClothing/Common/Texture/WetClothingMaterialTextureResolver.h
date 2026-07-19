@@ -48,5 +48,6 @@ class FWetClothingMaterialTextureResolver
         int32 MaterialSlotIndex,
         int32 UVChannelIndex,
         TArray<TSharedPtr<FWetClothingTextureItem>>& OutItems,
-        TSharedPtr<FWetClothingTextureItem>& OutSelectedItem);
+        TSharedPtr<FWetClothingTextureItem>& OutSelectedItem,
+        bool bDefaultToNone = false);
 };

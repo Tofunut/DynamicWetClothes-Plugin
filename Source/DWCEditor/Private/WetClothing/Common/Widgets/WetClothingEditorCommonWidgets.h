@@ -116,8 +116,6 @@ class FWetClothingEditorCommonWidgets
         TSharedPtr<FWetClothingWetPartEntry> Item,
         const TSharedRef<STableViewBase>& OwnerTable);
 
-    static void ClearEditorSessionCaches();
-
     static bool IsMaterialSlotWettable(const UWetClothingAsset* WetClothingAsset, int32 MaterialSlotIndex);
     static void SetMaterialSlotWettable(UWetClothingAsset* WetClothingAsset, int32 MaterialSlotIndex, bool bIsWettableSlot);
     static void MarkMaterialSlotWettable(UWetClothingAsset* WetClothingAsset, int32 MaterialSlotIndex);

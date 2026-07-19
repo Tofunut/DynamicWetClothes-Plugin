@@ -416,7 +416,8 @@ void FWetClothingMaterialTextureResolver::BuildTextureItemsForMaterialSlot(
     int32 MaterialSlotIndex,
     int32 UVChannelIndex,
     TArray<TSharedPtr<FWetClothingTextureItem>>& OutItems,
-    TSharedPtr<FWetClothingTextureItem>& OutSelectedItem)
+    TSharedPtr<FWetClothingTextureItem>& OutSelectedItem,
+    bool bDefaultToNone)
 {
     OutItems.Reset();
     OutSelectedItem.Reset();
@@ -442,6 +443,17 @@ void FWetClothingMaterialTextureResolver::BuildTextureItemsForMaterialSlot(
                     }
                 }
             }
+            else if (bDefaultToNone)
+            {
+                for (const TSharedPtr<FWetClothingTextureItem>& TextureItem : OutItems)
+                {
+                    if (TextureItem.IsValid() && !TextureItem->Texture.IsValid())
+                    {
+                        OutSelectedItem = TextureItem;
+                        break;
+                    }
+                }
+            }
             else
             {
                 for (const TSharedPtr<FWetClothingTextureItem>& TextureItem : OutItems)
@@ -461,7 +473,7 @@ void FWetClothingMaterialTextureResolver::BuildTextureItemsForMaterialSlot(
         OutSelectedItem = OutItems[0];
     }
 
-    if (!bHasSavedSelection && OutSelectedItem.IsValid() && OutSelectedItem->Texture.IsValid())
+    if (!bHasSavedSelection && !bDefaultToNone && OutSelectedItem.IsValid())
     {
         SaveTextureSelection(WetClothingAsset, MaterialSlotIndex, UVChannelIndex, OutSelectedItem->Texture.Get());
     }

@@ -17,8 +17,8 @@ public:
     UPROPERTY(EditAnywhere, Category = "Mesh", meta = (DisplayName = "Source Skeletal Mesh"))
     TObjectPtr<USkeletalMesh> SourceSkeletalMesh = nullptr;
 
-    UPROPERTY(EditAnywhere, Category = "Mesh", meta = (DisplayName = "Modify Source Mesh"))
-    bool bModifySourceMeshForDWCDataUV = false;
+    UPROPERTY(EditAnywhere, Category = "Mesh", meta = (DisplayName = "Original UV Channel", ClampMin = "0", ClampMax = "7"))
+    int32 OriginalUVChannelIndex = 0;
 
     UPROPERTY(EditAnywhere, Category = "Mesh", meta = (DisplayName = "Preferred DWC Data UV Channel", ClampMin = "0", ClampMax = "7"))
     int32 PreferredDWCDataUVChannelIndex = 1;
@@ -47,7 +47,7 @@ public:
         FDWCWetClothingAssetSetupSettings Result;
         Result.bBuildCPUVertexSimulationData = bBuildCPUVertexSimulationData;
         Result.bBuildGPUWetnessMapSimulationData = bBuildGPUWetnessMapSimulationData;
-        Result.bModifySourceMeshForDWCDataUV = bModifySourceMeshForDWCDataUV;
+        Result.OriginalUVChannelIndex = OriginalUVChannelIndex;
         Result.PreferredDWCDataUVChannelIndex = PreferredDWCDataUVChannelIndex;
         Result.GPUSimulationMapResolution = DWCMapResolution::ToInt(GPUSimulationMapResolution);
         Result.WrinkleMapResolution = DWCMapResolution::ToInt(WrinkleMapResolution);
@@ -62,8 +62,8 @@ class DWCEDITOR_API UWetClothingAssetSetupSettingsObject : public UObject
     GENERATED_BODY()
 
 public:
-    UPROPERTY(EditAnywhere, Category = "Mesh", meta = (DisplayName = "Modify Source Mesh"))
-    bool bModifySourceMeshForDWCDataUV = false;
+    UPROPERTY(EditAnywhere, Category = "Mesh", meta = (DisplayName = "Original UV Channel", ClampMin = "0", ClampMax = "7"))
+    int32 OriginalUVChannelIndex = 0;
 
     UPROPERTY(EditAnywhere, Category = "Mesh", meta = (DisplayName = "Preferred DWC Data UV Channel", ClampMin = "0", ClampMax = "7"))
     int32 PreferredDWCDataUVChannelIndex = 1;
@@ -87,7 +87,7 @@ public:
     {
         bBuildCPUVertexSimulationData = InSettings.bBuildCPUVertexSimulationData;
         bBuildGPUWetnessMapSimulationData = InSettings.bBuildGPUWetnessMapSimulationData;
-        bModifySourceMeshForDWCDataUV = InSettings.bModifySourceMeshForDWCDataUV;
+        OriginalUVChannelIndex = InSettings.OriginalUVChannelIndex;
         PreferredDWCDataUVChannelIndex = InSettings.PreferredDWCDataUVChannelIndex;
         GPUSimulationMapResolution = DWCMapResolution::FromInt(InSettings.GetGPUSimulationMapResolution());
         WrinkleMapResolution = DWCMapResolution::FromInt(InSettings.GetWrinkleMapResolution());
@@ -99,7 +99,7 @@ public:
         FDWCWetClothingAssetSetupSettings Result;
         Result.bBuildCPUVertexSimulationData = bBuildCPUVertexSimulationData;
         Result.bBuildGPUWetnessMapSimulationData = bBuildGPUWetnessMapSimulationData;
-        Result.bModifySourceMeshForDWCDataUV = bModifySourceMeshForDWCDataUV;
+        Result.OriginalUVChannelIndex = OriginalUVChannelIndex;
         Result.PreferredDWCDataUVChannelIndex = PreferredDWCDataUVChannelIndex;
         Result.GPUSimulationMapResolution = DWCMapResolution::ToInt(GPUSimulationMapResolution);
         Result.WrinkleMapResolution = DWCMapResolution::ToInt(WrinkleMapResolution);
@@ -129,4 +129,6 @@ public:
 private:
     UPROPERTY(Transient)
     TObjectPtr<UWetClothingAssetCreationSettings> PendingCreationSettings = nullptr;
+
+    bool bConfirmedOverwriteExistingDataUVChannel = false;
 };

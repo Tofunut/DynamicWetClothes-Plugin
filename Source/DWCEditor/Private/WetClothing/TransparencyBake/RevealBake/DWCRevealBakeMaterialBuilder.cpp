@@ -161,7 +161,8 @@ UMaterialExpressionMultiply* FDWCRevealBakeMaterialBuilder::CreateMultiply(
 
 UMaterial* FDWCRevealBakeMaterialBuilder::DuplicateRevealMaterial(
     UMaterialInterface* SourceMaterialInterface,
-    const FString&      AssetNamePrefix)
+    const FString&      AssetNamePrefix,
+    const FString&      TargetPackagePath)
 {
     if (SourceMaterialInterface == nullptr)
     {
@@ -175,9 +176,11 @@ UMaterial* FDWCRevealBakeMaterialBuilder::DuplicateRevealMaterial(
     }
 
     const FString SourcePackagePath = FPackageName::GetLongPackagePath(SourceMaterial->GetOutermost()->GetName());
-    const FString TargetPackagePath = SourcePackagePath.IsEmpty()
-        ? FString(FDWCRevealBakeUtilities::GetDefaultRevealBakePackagePath())
-        : SourcePackagePath;
+    const FString ResolvedTargetPackagePath = !TargetPackagePath.IsEmpty()
+        ? TargetPackagePath
+        : (SourcePackagePath.IsEmpty()
+            ? FString(FDWCRevealBakeUtilities::GetDefaultRevealBakePackagePath())
+            : SourcePackagePath);
     const FString TargetAssetBaseName = FString::Printf(
         TEXT("%s_%s_DWCReveal"),
         *FDWCRevealBakeUtilities::SanitizeAssetToken(AssetNamePrefix),
@@ -186,7 +189,7 @@ UMaterial* FDWCRevealBakeMaterialBuilder::DuplicateRevealMaterial(
     FString            UniquePackageName;
     FString            UniqueAssetName;
     FAssetToolsModule& AssetToolsModule = FModuleManager::LoadModuleChecked<FAssetToolsModule>(TEXT("AssetTools"));
-    AssetToolsModule.Get().CreateUniqueAssetName(TargetPackagePath / TargetAssetBaseName, FString(), UniquePackageName, UniqueAssetName);
+    AssetToolsModule.Get().CreateUniqueAssetName(ResolvedTargetPackagePath / TargetAssetBaseName, FString(), UniquePackageName, UniqueAssetName);
 
     return Cast<UMaterial>(AssetToolsModule.Get().DuplicateAsset(
         UniqueAssetName,
@@ -317,7 +320,8 @@ bool FDWCRevealBakeMaterialBuilder::ConfigureRevealMaterialGraph(
 UMaterialInstanceConstant* FDWCRevealBakeMaterialBuilder::CreateRevealMaterialInstanceForSource(
     const UMaterialInstance* SourceInstance,
     UMaterialInterface*      RevealParent,
-    const FString&           AssetNamePrefix)
+    const FString&           AssetNamePrefix,
+    const FString&           TargetPackagePath)
 {
     if (SourceInstance == nullptr || RevealParent == nullptr)
     {
@@ -328,7 +332,9 @@ UMaterialInstanceConstant* FDWCRevealBakeMaterialBuilder::CreateRevealMaterialIn
     FString            UniqueAssetName;
     FAssetToolsModule& AssetToolsModule = FModuleManager::LoadModuleChecked<FAssetToolsModule>(TEXT("AssetTools"));
     AssetToolsModule.Get().CreateUniqueAssetName(
-        FString(FDWCRevealBakeUtilities::GetDefaultRevealBakePackagePath()) / (AssetNamePrefix + TEXT("_MI")),
+        (!TargetPackagePath.IsEmpty()
+            ? TargetPackagePath
+            : FString(FDWCRevealBakeUtilities::GetDefaultRevealBakePackagePath())) / (AssetNamePrefix + TEXT("_MI")),
         FString(),
         UniquePackageName,
         UniqueAssetName);
@@ -476,9 +482,10 @@ UMaterialInterface* FDWCRevealBakeMaterialBuilder::CreateConfiguredRevealMateria
     const FString&                  AssetNamePrefix,
     const UDWCBakeComponent&        BakeComponent,
     const FDWCBakeResolvedLayer&    OuterLayer,
-    const FDWCRevealBakeTextureSet& TextureSet)
+    const FDWCRevealBakeTextureSet& TextureSet,
+    const FString&                  TargetPackagePath)
 {
-    UMaterial* RevealMaterial = DuplicateRevealMaterial(SourceMaterial, AssetNamePrefix);
+    UMaterial* RevealMaterial = DuplicateRevealMaterial(SourceMaterial, AssetNamePrefix, TargetPackagePath);
     if (RevealMaterial == nullptr)
     {
         return nullptr;
@@ -494,7 +501,8 @@ UMaterialInterface* FDWCRevealBakeMaterialBuilder::CreateConfiguredRevealMateria
         if (UMaterialInstanceConstant* RevealInstance = CreateRevealMaterialInstanceForSource(
                 SourceInstance,
                 RevealMaterial,
-                AssetNamePrefix))
+                AssetNamePrefix,
+                TargetPackagePath))
         {
             return RevealInstance;
         }

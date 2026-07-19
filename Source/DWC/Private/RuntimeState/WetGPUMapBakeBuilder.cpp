@@ -4,6 +4,7 @@
 #include "Utility/DWCDataUVBufferView.h"
 
 #include "Async/ParallelFor.h"
+#include "DataAssets/WetClothingGPUData.h"
 #include "DataAssets/WetClothingAsset.h"
 #include "Engine/SkeletalMesh.h"
 #include "DataAssets/WetnessProfile.h"
@@ -15,6 +16,7 @@ namespace DWCWetGPUMapBakePrivate
 {
 constexpr double PositionQuantizeScale = 1000.0;
 constexpr double UVEdgeEpsilon = 1.0e-6;
+constexpr int32 GPUWetMapPaddingPixels = 2;
 
 void SetGPUMapBakeError(FString* OutErrorMessage, const FString& Message)
 {
@@ -156,6 +158,91 @@ FVector3f UnpackBarycentricXY(const uint32 Packed)
     const float X = static_cast<float>(Packed & 0xffffu) / 65535.0f;
     const float Y = static_cast<float>((Packed >> 16u) & 0xffffu) / 65535.0f;
     return FVector3f(X, Y, 1.0f - X - Y);
+}
+
+template <typename IncrementCoveredFunc, typename MarkTouchedFunc>
+void DilateSlotTexelLookupIntoPadding(
+    FDWCGPUMaterialSlotBakeData& Slot,
+    const int32 Resolution,
+    const int32 PaddingPixels,
+    IncrementCoveredFunc&& IncrementCovered,
+    MarkTouchedFunc&& MarkTouched)
+{
+    if (Resolution <= 0 ||
+        Slot.ValidMask.Num() != Resolution * Resolution ||
+        Slot.TexelTriangleIDs.Num() != Resolution * Resolution ||
+        Slot.PackedTexelBarycentricXY.Num() != Resolution * Resolution)
+    {
+        return;
+    }
+
+    const int32 ClampedPaddingPixels = FMath::Clamp(PaddingPixels, 0, 16);
+    for (int32 PaddingStep = 0; PaddingStep < ClampedPaddingPixels; ++PaddingStep)
+    {
+        const TArray<uint8> PreviousMask = Slot.ValidMask;
+        const TArray<int32> PreviousTriangleIDs = Slot.TexelTriangleIDs;
+        const TArray<uint32> PreviousBarycentric = Slot.PackedTexelBarycentricXY;
+        bool bWroteTexel = false;
+
+        for (int32 Y = 0; Y < Resolution; ++Y)
+        {
+            for (int32 X = 0; X < Resolution; ++X)
+            {
+                const int32 TexelIndex = Y * Resolution + X;
+                if (PreviousMask[TexelIndex] != 0)
+                {
+                    continue;
+                }
+
+                int32 SourceTexelIndex = INDEX_NONE;
+                for (int32 OffsetY = -1; OffsetY <= 1 && SourceTexelIndex == INDEX_NONE; ++OffsetY)
+                {
+                    for (int32 OffsetX = -1; OffsetX <= 1; ++OffsetX)
+                    {
+                        if (OffsetX == 0 && OffsetY == 0)
+                        {
+                            continue;
+                        }
+
+                        const int32 NeighborX = X + OffsetX;
+                        const int32 NeighborY = Y + OffsetY;
+                        if (NeighborX < 0 || NeighborY < 0 || NeighborX >= Resolution || NeighborY >= Resolution)
+                        {
+                            continue;
+                        }
+
+                        const int32 NeighborIndex = NeighborY * Resolution + NeighborX;
+                        if (PreviousMask[NeighborIndex] == 0 ||
+                            PreviousTriangleIDs[NeighborIndex] == INDEX_NONE)
+                        {
+                            continue;
+                        }
+
+                        SourceTexelIndex = NeighborIndex;
+                        break;
+                    }
+                }
+
+                if (SourceTexelIndex == INDEX_NONE)
+                {
+                    continue;
+                }
+
+                const int32 TriangleID = PreviousTriangleIDs[SourceTexelIndex];
+                Slot.ValidMask[TexelIndex] = 1;
+                Slot.TexelTriangleIDs[TexelIndex] = TriangleID;
+                Slot.PackedTexelBarycentricXY[TexelIndex] = PreviousBarycentric[SourceTexelIndex];
+                IncrementCovered(TriangleID);
+                MarkTouched(TexelIndex);
+                bWroteTexel = true;
+            }
+        }
+
+        if (!bWroteTexel)
+        {
+            break;
+        }
+    }
 }
 
 int32 UVToTexelIndex(const FVector2D& UV, const int32 Resolution)
@@ -341,7 +428,7 @@ bool BuildTrianglePartLookup(
 #if WITH_EDITORONLY_DATA
     const FDWCEditorUVTopologyData* Topology = Asset.FindOriginalUVTopologyForLOD(LODIndex);
     const FString CurrentTopologySignature = UWetClothingAsset::BuildMeshContentSignature(
-        Asset.GetSourceSkeletalMesh(),
+        Asset.GetRuntimeSkeletalMesh(),
         LODIndex,
         Asset.GetOriginalUVChannelIndex());
     if (Topology == nullptr ||
@@ -534,7 +621,7 @@ bool ResolveWettableMaterialSlots(
     const int32 MaterialSlotCount = RuntimeMesh ? RuntimeMesh->GetMaterials().Num() : 0;
     if (RuntimeMesh == nullptr)
     {
-        SetGPUMapBakeError(OutErrorMessage, TEXT("No Source Skeletal Mesh is available."));
+        SetGPUMapBakeError(OutErrorMessage, TEXT("No DWC Prepared Skeletal Mesh is available."));
         return false;
     }
     for (const FWetClothingWettableMaterialSlotState& SlotState : Asset.PartData.EditableWetPartData.WettableMaterialSlots)
@@ -547,7 +634,7 @@ bool ResolveWettableMaterialSlots(
         {
             SetGPUMapBakeError(
                 OutErrorMessage,
-                FString::Printf(TEXT("Wettable material slot index %d is invalid for the Source Mesh."), SlotState.MaterialSlotIndex));
+                FString::Printf(TEXT("Wettable material slot index %d is invalid for the DWC Prepared Skeletal Mesh."), SlotState.MaterialSlotIndex));
             return false;
         }
         OutMaterialSlots.AddUnique(SlotState.MaterialSlotIndex);
@@ -578,6 +665,10 @@ FString BuildRuntimeSignatureCacheKey(
     Builder.AddString(DataUVMetadata.DataUVOutputSignature);
     Builder.AddValue(DataUVMetadata.RenderVertexCount);
     Builder.AddValue(DataUVMetadata.UVChannelIndex);
+
+    const FDWCEditorUVTopologyData* OriginalUVTopology = Asset.FindOriginalUVTopologyForLOD(LODIndex);
+    Builder.AddValue(OriginalUVTopology != nullptr ? OriginalUVTopology->GeneratorVersion : 0);
+    Builder.AddString(OriginalUVTopology != nullptr ? OriginalUVTopology->BuildSignature : FString());
 
     Builder.AddValue(WettableMaterialSlots.Num());
     for (const int32 MaterialSlotIndex : WettableMaterialSlots)
@@ -697,7 +788,7 @@ bool FWetGPUMapBakeBuilder::BuildLODRuntimeSignature(
     const USkeletalMesh* RuntimeMesh = Asset.GetRuntimeSkeletalMesh();
     if (RuntimeMesh == nullptr)
     {
-        SetGPUMapBakeError(OutErrorMessage, TEXT("No Source Skeletal Mesh is available."));
+        SetGPUMapBakeError(OutErrorMessage, TEXT("No DWC Prepared Skeletal Mesh is available."));
         return false;
     }
 
@@ -712,6 +803,22 @@ bool FWetGPUMapBakeBuilder::BuildLODRuntimeSignature(
     if (DataUVMetadata == nullptr || !DataUVMetadata->bIsValid)
     {
         SetGPUMapBakeError(OutErrorMessage, FString::Printf(TEXT("LOD%d has no generated DWC Data UV metadata."), LODIndex));
+        return false;
+    }
+
+    const FDWCEditorUVTopologyData* OriginalUVTopology = Asset.FindOriginalUVTopologyForLOD(LODIndex);
+    const FString CurrentOriginalUVSignature = UWetClothingAsset::BuildMeshContentSignature(
+        RuntimeMesh,
+        LODIndex,
+        Asset.GetOriginalUVChannelIndex());
+    if (OriginalUVTopology == nullptr ||
+        !OriginalUVTopology->bIsValid ||
+        OriginalUVTopology->GeneratorVersion != DWCGeneratedDataVersion::OriginalUVTopology ||
+        OriginalUVTopology->UVChannelIndex != Asset.GetOriginalUVChannelIndex() ||
+        CurrentOriginalUVSignature.IsEmpty() ||
+        OriginalUVTopology->BuildSignature != CurrentOriginalUVSignature)
+    {
+        SetGPUMapBakeError(OutErrorMessage, FString::Printf(TEXT("LOD%d Original UV topology is missing or stale for the DWC Prepared Skeletal Mesh."), LODIndex));
         return false;
     }
 
@@ -788,6 +895,8 @@ bool FWetGPUMapBakeBuilder::BuildLODRuntimeSignature(
     }
 
     Builder.AddString(DataUVMetadata->DataUVOutputSignature);
+    Builder.AddValue(OriginalUVTopology->GeneratorVersion);
+    Builder.AddString(OriginalUVTopology->BuildSignature);
     Builder.AddValue(DataUVView.NumVertices());
     for (int32 VertexIndex = 0; VertexIndex < DataUVView.NumVertices(); ++VertexIndex)
     {
@@ -940,7 +1049,7 @@ static bool BuildLODInternal(
     if (SlowTask == nullptr)
     {
         OwnedSlowTask = MakeUnique<FScopedSlowTask>(
-            bBuildMaps ? 7.0f : 5.0f,
+            bBuildMaps ? 7.25f : 5.0f,
             FText::FromString(FString::Printf(
                 TEXT("%s DWC GPU data for LOD%d..."),
                 bBuildMaps ? TEXT("Baking") : TEXT("Building"),
@@ -956,7 +1065,7 @@ static bool BuildLODInternal(
     USkeletalMesh* RuntimeMesh = Asset.GetRuntimeSkeletalMesh();
     if (RuntimeMesh == nullptr)
     {
-        SetGPUMapBakeError(OutErrorMessage, TEXT("No Source Skeletal Mesh is available."));
+        SetGPUMapBakeError(OutErrorMessage, TEXT("No DWC Prepared Skeletal Mesh is available."));
         return false;
     }
 
@@ -1043,7 +1152,7 @@ static bool BuildLODInternal(
     Output.MapBakeVersion = bBuildMaps ? FDWCGPULODBakeData::CurrentMapBakeVersion : 0;
     Output.LODIndex = LODIndex;
     Output.MeshSignature = DataUVMetadata->DataUVOutputSignature;
-    Output.SourceDataSignature = UWetClothingAsset::BuildMeshContentSignature(Asset.GetSourceSkeletalMesh(), LODIndex, Asset.GetOriginalUVChannelIndex());
+    Output.SourceDataSignature = UWetClothingAsset::BuildMeshContentSignature(Asset.GetRuntimeSkeletalMesh(), LODIndex, Asset.GetOriginalUVChannelIndex());
     Output.RuntimeSignature = MoveTemp(RuntimeSignature);
     Output.MapSignature = MoveTemp(MapSignature);
     Output.Triangles.Reserve(TriangleCapacity);
@@ -1281,6 +1390,25 @@ static bool BuildLODInternal(
 
     if (bBuildMaps)
     {
+        EnterGPUMapBakeProgressFrame(
+            SlowTask,
+            0.25f,
+            FText::FromString(FString::Printf(TEXT("Dilating LOD%d GPU wet-map island padding..."), LODIndex)));
+        for (FDWCGPUMaterialSlotBakeData& Slot : Output.MaterialSlots)
+        {
+            DilateSlotTexelLookupIntoPadding(
+                Slot,
+                Resolution,
+                GPUWetMapPaddingPixels,
+                [&CoveredTexelCountByTriangle](const int32 TriangleID)
+                {
+                    CoveredTexelCountByTriangle.FindOrAdd(TriangleID)++;
+                },
+                [](const int32)
+                {
+                });
+        }
+
         EnterGPUMapBakeProgressFrame(
             SlowTask,
             1.0f,
@@ -1575,7 +1703,7 @@ static bool BuildLODMapsOnly(
     if (SlowTask == nullptr)
     {
         OwnedSlowTask = MakeUnique<FScopedSlowTask>(
-            6.0f,
+            6.25f,
             FText::FromString(FString::Printf(TEXT("Baking DWC GPU maps for LOD%d..."), LODIndex)));
         SlowTask = OwnedSlowTask.Get();
         SlowTask->MakeDialog(false);
@@ -1785,6 +1913,31 @@ static bool BuildLODMapsOnly(
             TEXT("Rasterized LOD%d GPU wetness-map texels for %d triangles."),
             LODIndex,
             RuntimeData.Triangles.Num())));
+
+    EnterGPUMapBakeProgressFrame(
+        SlowTask,
+        0.25f,
+        FText::FromString(FString::Printf(TEXT("Dilating LOD%d GPU wet-map island padding..."), LODIndex)));
+    for (int32 SlotIndex = 0; SlotIndex < MapOutput.MaterialSlots.Num(); ++SlotIndex)
+    {
+        FDWCGPUMaterialSlotBakeData& Slot = MapOutput.MaterialSlots[SlotIndex];
+        TArray<int32>& TouchedTexels = TouchedTexelsBySlot[SlotIndex];
+        DilateSlotTexelLookupIntoPadding(
+            Slot,
+            Resolution,
+            GPUWetMapPaddingPixels,
+            [&CoveredTexelCountByTriangle](const int32 TriangleID)
+            {
+                if (CoveredTexelCountByTriangle.IsValidIndex(TriangleID))
+                {
+                    ++CoveredTexelCountByTriangle[TriangleID];
+                }
+            },
+            [&TouchedTexels](const int32 TexelIndex)
+            {
+                TouchedTexels.Add(TexelIndex);
+            });
+    }
 
     EnterGPUMapBakeProgressFrame(
         SlowTask,

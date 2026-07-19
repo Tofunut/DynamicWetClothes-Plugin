@@ -5,6 +5,8 @@
 #include "MeshDescription.h"
 #include "MeshUVChannelInfo.h"
 #include "SkeletalMeshAttributes.h"
+#include "WetClothing/Common/UV/DWCUVGeometry.h"
+#include "WetClothing/Common/UV/DWCUVIslandBuilder.h"
 
 namespace WetWrinkleUVChannelGeneratorInternal
 {
@@ -29,88 +31,6 @@ namespace WetWrinkleUVChannelGeneratorInternal
         double WorldDensityScale = 1.0;
     };
 
-
-    struct FSourceEdgeEndpointKey
-    {
-        FIntVector Position;
-        FIntPoint UV;
-
-        bool operator==(const FSourceEdgeEndpointKey& Other) const
-        {
-            return Position == Other.Position && UV == Other.UV;
-        }
-    };
-
-    FORCEINLINE uint32 GetTypeHash(const FSourceEdgeEndpointKey& Key)
-    {
-        return HashCombine(GetTypeHash(Key.Position), GetTypeHash(Key.UV));
-    }
-
-    struct FSourceEdgeKey
-    {
-        FSourceEdgeEndpointKey A;
-        FSourceEdgeEndpointKey B;
-
-        bool operator==(const FSourceEdgeKey& Other) const
-        {
-            return A == Other.A && B == Other.B;
-        }
-    };
-
-    FORCEINLINE uint32 GetTypeHash(const FSourceEdgeKey& Key)
-    {
-        return HashCombine(GetTypeHash(Key.A), GetTypeHash(Key.B));
-    }
-
-    static FIntVector QuantizeWrinkleSourcePosition(const FVector& Position)
-    {
-        constexpr double PositionScale = 1000.0;
-        return FIntVector(
-            FMath::RoundToInt(Position.X * PositionScale),
-            FMath::RoundToInt(Position.Y * PositionScale),
-            FMath::RoundToInt(Position.Z * PositionScale));
-    }
-
-    static FIntPoint QuantizeWrinkleSourceUV(const FVector2D& UV)
-    {
-        constexpr double UVScale = 100000.0;
-        return FIntPoint(
-            FMath::RoundToInt(UV.X * UVScale),
-            FMath::RoundToInt(UV.Y * UVScale));
-    }
-
-    static bool ShouldSwapWrinkleSourceEdgeEndpoints(const FSourceEdgeEndpointKey& A, const FSourceEdgeEndpointKey& B)
-    {
-        if (A.Position.X != B.Position.X) { return A.Position.X > B.Position.X; }
-        if (A.Position.Y != B.Position.Y) { return A.Position.Y > B.Position.Y; }
-        if (A.Position.Z != B.Position.Z) { return A.Position.Z > B.Position.Z; }
-        if (A.UV.X != B.UV.X) { return A.UV.X > B.UV.X; }
-        return A.UV.Y > B.UV.Y;
-    }
-
-    static FSourceEdgeKey MakeWrinkleSourceEdgeKey(
-        const FTriangleRecord& Triangle,
-        int32 CornerA,
-        int32 CornerB)
-    {
-        FSourceEdgeEndpointKey A;
-        A.Position = QuantizeWrinkleSourcePosition(Triangle.Positions[CornerA]);
-        A.UV = QuantizeWrinkleSourceUV(Triangle.SourceUVs[CornerA]);
-
-        FSourceEdgeEndpointKey B;
-        B.Position = QuantizeWrinkleSourcePosition(Triangle.Positions[CornerB]);
-        B.UV = QuantizeWrinkleSourceUV(Triangle.SourceUVs[CornerB]);
-
-        if (ShouldSwapWrinkleSourceEdgeEndpoints(A, B))
-        {
-            Swap(A, B);
-        }
-
-        FSourceEdgeKey Key;
-        Key.A = A;
-        Key.B = B;
-        return Key;
-    }
 
     static void SetFailure(FWetWrinkleUVChannelGenerationResult& Result, const FString& Message)
     {
@@ -182,32 +102,6 @@ namespace WetWrinkleUVChannelGeneratorInternal
         return ElementID.GetValue() != INDEX_NONE;
     }
 
-    static int32 FindParent(TArray<int32>& Parents, int32 Index)
-    {
-        if (!Parents.IsValidIndex(Index))
-        {
-            return INDEX_NONE;
-        }
-
-        if (Parents[Index] == Index)
-        {
-            return Index;
-        }
-
-        Parents[Index] = FindParent(Parents, Parents[Index]);
-        return Parents[Index];
-    }
-
-    static void UnionParents(TArray<int32>& Parents, int32 A, int32 B)
-    {
-        const int32 RootA = FindParent(Parents, A);
-        const int32 RootB = FindParent(Parents, B);
-        if (RootA != INDEX_NONE && RootB != INDEX_NONE && RootA != RootB)
-        {
-            Parents[RootB] = RootA;
-        }
-    }
-
     static int32 ResolveMaterialSlotIndex(
         const USkeletalMesh* SkeletalMesh,
         const FMeshDescription& MeshDescription,
@@ -247,71 +141,42 @@ namespace WetWrinkleUVChannelGeneratorInternal
         return Materials.IsValidIndex(FallbackIndex) ? FallbackIndex : INDEX_NONE;
     }
 
-    static double ComputeTriangleArea2D(const FVector2D& A, const FVector2D& B, const FVector2D& C)
-    {
-        return FMath::Abs((B.X - A.X) * (C.Y - A.Y) - (B.Y - A.Y) * (C.X - A.X)) * 0.5;
-    }
-
-    static double ComputeTriangleArea3D(const FVector& A, const FVector& B, const FVector& C)
-    {
-        return FVector::CrossProduct(B - A, C - A).Length() * 0.5;
-    }
-
-    static void BuildConnectedIslandsForSlot(
+    static void BuildOriginalUVIslandsForSlot(
         const TArray<FTriangleRecord>& Triangles,
         const TArray<int32>& SlotTriangleIndices,
         TArray<FIslandRecord>& OutIslands)
     {
-        if (SlotTriangleIndices.Num() == 0)
+        if (SlotTriangleIndices.IsEmpty())
         {
             return;
         }
 
-        TArray<int32> Parents;
-        Parents.SetNum(SlotTriangleIndices.Num());
-        for (int32 LocalIndex = 0; LocalIndex < SlotTriangleIndices.Num(); ++LocalIndex)
+        TArray<FDWCUVIslandBuildTriangle> BuildTriangles;
+        BuildTriangles.Reserve(SlotTriangleIndices.Num());
+        for (const int32 TriangleArrayIndex : SlotTriangleIndices)
         {
-            Parents[LocalIndex] = LocalIndex;
-        }
-
-        // Group by source UV island rather than by individual polygon or by mesh topology alone.
-        // The edge key includes both endpoint positions and source UVs, so duplicated vertices at
-        // import seams can still weld, while intentional UV seams remain separate islands.
-        TMap<FSourceEdgeKey, int32> EdgeToLocalTriangleIndex;
-        for (int32 LocalIndex = 0; LocalIndex < SlotTriangleIndices.Num(); ++LocalIndex)
-        {
-            const FTriangleRecord& Triangle = Triangles[SlotTriangleIndices[LocalIndex]];
-            const int32 EdgeCorners[3][2] = { {0, 1}, {1, 2}, {2, 0} };
-            for (int32 EdgeIndex = 0; EdgeIndex < 3; ++EdgeIndex)
+            if (!Triangles.IsValidIndex(TriangleArrayIndex))
             {
-                const FSourceEdgeKey EdgeKey = MakeWrinkleSourceEdgeKey(Triangle, EdgeCorners[EdgeIndex][0], EdgeCorners[EdgeIndex][1]);
-                if (int32* ExistingLocalTriangleIndex = EdgeToLocalTriangleIndex.Find(EdgeKey))
-                {
-                    UnionParents(Parents, *ExistingLocalTriangleIndex, LocalIndex);
-                }
-                else
-                {
-                    EdgeToLocalTriangleIndex.Add(EdgeKey, LocalIndex);
-                }
-            }
-        }
-
-        TMap<int32, int32> RootToIslandIndex;
-        for (int32 LocalIndex = 0; LocalIndex < SlotTriangleIndices.Num(); ++LocalIndex)
-        {
-            const int32 Root = FindParent(Parents, LocalIndex);
-            int32* ExistingIslandIndex = RootToIslandIndex.Find(Root);
-            if (ExistingIslandIndex == nullptr)
-            {
-                FIslandRecord Island;
-                Island.MaterialSlotIndex = Triangles[SlotTriangleIndices[LocalIndex]].MaterialSlotIndex;
-                Island.RawBounds = FBox2D(ForceInit);
-                const int32 NewIslandIndex = OutIslands.Add(Island);
-                RootToIslandIndex.Add(Root, NewIslandIndex);
-                ExistingIslandIndex = RootToIslandIndex.Find(Root);
+                continue;
             }
 
-            OutIslands[*ExistingIslandIndex].TriangleIndices.Add(SlotTriangleIndices[LocalIndex]);
+            const FTriangleRecord& Triangle = Triangles[TriangleArrayIndex];
+            FDWCUVIslandBuildTriangle& BuildTriangle = BuildTriangles.AddDefaulted_GetRef();
+            BuildTriangle.TriangleID = TriangleArrayIndex;
+            BuildTriangle.MaterialSlotIndex = Triangle.MaterialSlotIndex;
+            BuildTriangle.UVs[0] = Triangle.SourceUVs[0];
+            BuildTriangle.UVs[1] = Triangle.SourceUVs[1];
+            BuildTriangle.UVs[2] = Triangle.SourceUVs[2];
+        }
+
+        TArray<FDWCOriginalUVIslandBuildResult> BuiltIslands;
+        FDWCUVIslandBuilder::Build(BuildTriangles, BuiltIslands);
+        for (const FDWCOriginalUVIslandBuildResult& BuiltIsland : BuiltIslands)
+        {
+            FIslandRecord& Island = OutIslands.AddDefaulted_GetRef();
+            Island.MaterialSlotIndex = BuiltIsland.MaterialSlotIndex;
+            Island.RawBounds = FBox2D(ForceInit);
+            Island.TriangleIndices = BuiltIsland.TriangleIDs;
         }
     }
 
@@ -334,8 +199,8 @@ namespace WetWrinkleUVChannelGeneratorInternal
                 Island.RawBounds += RawUV;
             }
 
-            Island.RawArea += ComputeTriangleArea2D(Triangle.SourceUVs[0], Triangle.SourceUVs[1], Triangle.SourceUVs[2]);
-            Island.WorldArea += ComputeTriangleArea3D(Triangle.Positions[0], Triangle.Positions[1], Triangle.Positions[2]);
+            Island.RawArea += FDWCUVGeometry::ComputeTriangleArea2D(Triangle.SourceUVs[0], Triangle.SourceUVs[1], Triangle.SourceUVs[2]);
+            Island.WorldArea += FDWCUVGeometry::ComputeTriangleArea3D(Triangle.Positions[0], Triangle.Positions[1], Triangle.Positions[2]);
         }
 
         if (Island.RawArea > UE_DOUBLE_SMALL_NUMBER && Island.WorldArea > UE_DOUBLE_SMALL_NUMBER)
@@ -814,7 +679,7 @@ bool FWetWrinkleUVChannelGenerator::CalculateSharedWorldTexelDensity(
         }
 
         TArray<FIslandRecord> SlotIslands;
-        BuildConnectedIslandsForSlot(Triangles, *SlotTriangles, SlotIslands);
+        BuildOriginalUVIslandsForSlot(Triangles, *SlotTriangles, SlotIslands);
         for (FIslandRecord& Island : SlotIslands)
         {
             BuildRawIslandUVs(Triangles, Island);
@@ -878,7 +743,7 @@ FWetWrinkleUVChannelGenerationResult FWetWrinkleUVChannelGenerator::GenerateForS
     auto VertexPositions = Attributes.GetVertexPositions();
     auto VertexInstanceUVs = Attributes.GetVertexInstanceUVs();
     /*
-     * 
+     *
     [ Vertex Instance UVs ]
                    0번 채널      1번 채널      2번 채널 (Wet/Wrinkle)
                  ┌────────────┬────────────┬────────────┐
@@ -887,8 +752,8 @@ VertexInstance_1 │ (0.5, 0.0) │ (0.0, 0.0) │ (0.4, 0.8) │
 VertexInstance_2 │ (1.0, 1.0) │ (0.5, 0.5) │ (0.9, 0.1) │
 VertexInstance_3 │ ...        │ ...        │ ...        │
                  └────────────┴────────────┴────────────┘
-                 
-                 
+
+
                  * SetNumChannels(Current+1)은 가로로 채널 하나를 더 늘림
     * */
 
@@ -989,8 +854,8 @@ VertexInstance_3 │ ...        │ ...        │ ...        │
         return Result;
     }
 
-    
-    //3. Make Island. (Triangles for Mesh is all collected.) 
+
+    //3. Make Island. (Triangles for Mesh is all collected.)
     TArray<FIslandRecord> ResultIslands;
     TArray<int32> SortedSlotIndices;
     SlotToTriangleIndices.GenerateKeyArray(SortedSlotIndices);
@@ -1001,7 +866,7 @@ VertexInstance_3 │ ...        │ ...        │ ...        │
         const TArray<int32>* SlotTriangleIndices = SlotToTriangleIndices.Find(MaterialSlotIndex);
         if (SlotTriangleIndices != nullptr)
         {
-            BuildConnectedIslandsForSlot(Triangles, *SlotTriangleIndices, ResultIslands);
+            BuildOriginalUVIslandsForSlot(Triangles, *SlotTriangleIndices, ResultIslands);
         }
     }
 

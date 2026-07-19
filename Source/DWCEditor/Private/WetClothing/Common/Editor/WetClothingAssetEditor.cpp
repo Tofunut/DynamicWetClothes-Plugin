@@ -6,6 +6,7 @@
 #include "DataAssets/WetClothingAsset.h"
 #include "WetClothing/Common/Asset/WetClothingAssetFactory.h"
 #include "WetClothing/Common/Material/WetClothingMaterialSetup.h"
+#include "WetClothing/Common/DerivedData/DWCEditorDerivedDataInvalidator.h"
 #include "WetClothing/Common/MeshPreparation/DWCDataUVBuildService.h"
 #include "SWetClothingAssetEditorPanel.h"
 #include "DetailsViewArgs.h"
@@ -32,6 +33,7 @@
 #include "Widgets/Docking/SDockTab.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SCheckBox.h"
+#include "Widgets/Input/SComboBox.h"
 #include "Widgets/Images/SImage.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
@@ -70,8 +72,7 @@ namespace
     FText BuildAssetSetupSkeletalMeshUVChannelSummary(
         const USkeletalMesh* Mesh,
         const int32 OriginalUVChannelIndex,
-        const int32 PreferredDWCDataUVChannelIndex,
-        const bool bModifySourceMesh)
+        const int32 PreferredDWCDataUVChannelIndex)
     {
         if (Mesh == nullptr)
         {
@@ -85,10 +86,7 @@ namespace
         }
 
         FString Summary = FString::Printf(
-            TEXT("%s\n\nSource UV Channels\nOriginal UV: UV%d\nPreferred DWC Data UV: UV%d\n"),
-            bModifySourceMesh
-                ? TEXT("Mode: Modify Source Mesh. DWC will write the generated Data UV channel directly into the Source Skeletal Mesh asset.")
-                : TEXT("Mode: Duplicate Mesh. DWC will create or update a prepared skeletal mesh copy and leave the Source Skeletal Mesh untouched."),
+            TEXT("Mode: Prepared Mesh. DWC creates or updates a dedicated skeletal mesh copy and leaves the Source Skeletal Mesh untouched.\n\nSource UV Channels\nOriginal UV: UV%d\nPreferred DWC Data UV: UV%d\n"),
             OriginalUVChannelIndex,
             PreferredDWCDataUVChannelIndex);
 
@@ -132,15 +130,114 @@ namespace
         return UVChannelCount > 0 ? FMath::Clamp(UVChannelCount, 0, 7) : FMath::Clamp(OriginalUVChannelIndex + 1, 0, 7);
     }
 
-    FText BuildAssetSetupDWCDataUVTargetText(const bool bModifySourceMesh)
+    constexpr int32 RecommendedAssetSetupDataUVSelection = INDEX_NONE;
+
+    FText BuildAssetSetupDataUVChannelLabel(
+        const int32 Selection,
+        const USkeletalMesh* Mesh,
+        const int32 OriginalUVChannelIndex)
     {
-        return bModifySourceMesh
-            ? LOCTEXT(
-                  "AssetSetupModifySourceTargetText",
-                  "Mode: Modify Source Mesh. DWC will write the generated Data UV channel directly into the Source Skeletal Mesh asset.")
-            : LOCTEXT(
-                  "AssetSetupDuplicateMeshTargetText",
-                  "Mode: Duplicate Mesh. DWC will create or update a prepared skeletal mesh copy and leave the Source Skeletal Mesh untouched.");
+        if (Selection == RecommendedAssetSetupDataUVSelection)
+        {
+            return FText::Format(
+                LOCTEXT("AssetSetupRecommendedDataUVLabel", "Recommended (UV{0})"),
+                FText::AsNumber(GetAssetSetupDefaultDWCDataUVChannelIndex(Mesh, OriginalUVChannelIndex)));
+        }
+
+        return FText::Format(
+            LOCTEXT("AssetSetupExplicitDataUVLabel", "UV{0}"),
+            FText::AsNumber(Selection));
+    }
+
+    FText BuildAssetSetupPreferredDataUVInfoText(
+        const USkeletalMesh* Mesh,
+        const int32 OriginalUVChannelIndex,
+        const int32 DataUVChannelIndex)
+    {
+        if (DataUVChannelIndex == OriginalUVChannelIndex)
+        {
+            return LOCTEXT(
+                "AssetSetupDataUVMatchesOriginal",
+                "DWC Data UV cannot use the Original UV channel.");
+        }
+
+        const int32 UVChannelCount = GetAssetSetupSkeletalMeshUVChannelCount(Mesh, 0);
+        if (DataUVChannelIndex >= 0 && DataUVChannelIndex < UVChannelCount)
+        {
+            return FText::Format(
+                LOCTEXT(
+                    "AssetSetupDataUVExistingChannelInfo",
+                    "UV{0} already contains UV data. Update only stores this choice; Rebuild asks before replacing that channel."),
+                FText::AsNumber(DataUVChannelIndex));
+        }
+
+        return FText::Format(
+            LOCTEXT(
+                "AssetSetupDataUVNewChannelInfo",
+                "DWC Data UV will be generated in UV{0}."),
+            FText::AsNumber(DataUVChannelIndex));
+    }
+
+    bool IsAssetSetupUVSelectionValid(
+        const USkeletalMesh* Mesh,
+        const int32 OriginalUVChannelIndex,
+        const int32 DataUVChannelIndex)
+    {
+        const int32 UVChannelCount = GetAssetSetupSkeletalMeshUVChannelCount(Mesh, 0);
+        return OriginalUVChannelIndex >= 0 &&
+               OriginalUVChannelIndex < UVChannelCount &&
+               DataUVChannelIndex >= 0 &&
+               DataUVChannelIndex <= 7 &&
+               DataUVChannelIndex != OriginalUVChannelIndex;
+    }
+
+    bool ConfirmAssetSetupDataUVOverwrite(
+        const USkeletalMesh* Mesh,
+        const int32 OriginalUVChannelIndex,
+        const int32 DataUVChannelIndex,
+        const int32 ExistingGeneratedDataUVChannelIndex,
+        const bool bRebuildingSameTargetMode,
+        bool& OutConfirmedOverwrite)
+    {
+        OutConfirmedOverwrite = false;
+        if (!IsAssetSetupUVSelectionValid(Mesh, OriginalUVChannelIndex, DataUVChannelIndex))
+        {
+            FMessageDialog::Open(
+                EAppMsgType::Ok,
+                LOCTEXT(
+                    "AssetSetupInvalidUVSelection",
+                    "Select an existing Original UV channel and a different DWC Data UV channel."));
+            return false;
+        }
+
+        // Rebuilding the channel already owned by this WCA is not a new destructive choice.
+        if (bRebuildingSameTargetMode &&
+            DataUVChannelIndex == ExistingGeneratedDataUVChannelIndex)
+        {
+            return true;
+        }
+
+        const int32 UVChannelCount = GetAssetSetupSkeletalMeshUVChannelCount(Mesh, 0);
+        if (DataUVChannelIndex >= UVChannelCount)
+        {
+            return true;
+        }
+
+        const FText Warning = FText::Format(
+            LOCTEXT(
+                "AssetSetupConfirmDataUVOverwrite",
+                "UV{0} already contains UV data.\n\nRebuilding DWC Data UV in this channel will replace the existing UV{0} data on the target mesh.\n\nContinue?"),
+            FText::AsNumber(DataUVChannelIndex));
+        OutConfirmedOverwrite =
+            FMessageDialog::Open(EAppMsgType::YesNo, Warning) == EAppReturnType::Yes;
+        return OutConfirmedOverwrite;
+    }
+
+    FText BuildAssetSetupDWCDataUVTargetText()
+    {
+        return LOCTEXT(
+            "AssetSetupPreparedMeshTargetText",
+            "Mode: Prepared Mesh. DWC creates or updates a dedicated skeletal mesh copy and stores generated UV/topology data only on that copy.");
     }
 
     bool HasWrinkleValidationData(const UWetClothingAsset& Asset)
@@ -782,19 +879,20 @@ namespace
 
     enum class EWetClothingAssetSetupDialogResult : uint8
     {
-        Cancel,
-        ApplySettings,
-        RebuildGeneratedDataUV
+        Closed,
+        Update,
+        Rebuild
     };
 
-    EWetClothingAssetSetupDialogResult ShowWetClothingAssetSetupDialog(UWetClothingAsset& Asset, FDWCWetClothingAssetSetupSettings& OutSettings)
+    EWetClothingAssetSetupDialogResult ShowWetClothingAssetSetupDialog(
+        UWetClothingAsset& Asset,
+        FDWCWetClothingAssetSetupSettings& OutSettings,
+        bool& OutAllowOverwriteExistingDataUVChannel)
     {
+        OutAllowOverwriteExistingDataUVChannel = false;
         TStrongObjectPtr<UWetClothingAssetSetupSettingsObject> SetupObject(
             NewObject<UWetClothingAssetSetupSettingsObject>(GetTransientPackage()));
         SetupObject->InitializeFromSettings(Asset.GetSetupSettings());
-        SetupObject->PreferredDWCDataUVChannelIndex = GetAssetSetupDefaultDWCDataUVChannelIndex(
-            Asset.GetSourceSkeletalMesh(),
-            Asset.GetOriginalUVChannelIndex());
 
         FPropertyEditorModule& PropertyEditor = FModuleManager::LoadModuleChecked<FPropertyEditorModule>(TEXT("PropertyEditor"));
         FDetailsViewArgs DetailsArgs;
@@ -805,11 +903,46 @@ namespace
         TSharedRef<IDetailsView> SetupDetails = PropertyEditor.CreateDetailView(DetailsArgs);
         SetupDetails->SetIsPropertyVisibleDelegate(FIsPropertyVisible::CreateLambda([](const FPropertyAndParent& PropertyAndParent)
         {
-            return PropertyAndParent.Property.GetFName() != GET_MEMBER_NAME_CHECKED(UWetClothingAssetSetupSettingsObject, bModifySourceMeshForDWCDataUV);
+            const FName PropertyName = PropertyAndParent.Property.GetFName();
+            return PropertyName != GET_MEMBER_NAME_CHECKED(UWetClothingAssetSetupSettingsObject, PreferredDWCDataUVChannelIndex);
         }));
         SetupDetails->SetObject(SetupObject.Get());
 
-        EWetClothingAssetSetupDialogResult Result = EWetClothingAssetSetupDialogResult::Cancel;
+        TArray<TSharedPtr<int32>> DataUVChannelOptions;
+        DataUVChannelOptions.Add(MakeShared<int32>(RecommendedAssetSetupDataUVSelection));
+        for (int32 UVChannelIndex = 0; UVChannelIndex <= 7; ++UVChannelIndex)
+        {
+            DataUVChannelOptions.Add(MakeShared<int32>(UVChannelIndex));
+        }
+
+        const int32 InitialRecommendedDataUVChannel = GetAssetSetupDefaultDWCDataUVChannelIndex(
+            Asset.GetSourceSkeletalMesh(),
+            SetupObject->OriginalUVChannelIndex);
+        bool bUseRecommendedDataUVChannel =
+            SetupObject->PreferredDWCDataUVChannelIndex == InitialRecommendedDataUVChannel;
+        TSharedPtr<int32> InitialDataUVChannelItem = DataUVChannelOptions[0];
+        if (!bUseRecommendedDataUVChannel)
+        {
+            for (const TSharedPtr<int32>& Item : DataUVChannelOptions)
+            {
+                if (Item.IsValid() && *Item == SetupObject->PreferredDWCDataUVChannelIndex)
+                {
+                    InitialDataUVChannelItem = Item;
+                    break;
+                }
+            }
+        }
+
+        auto GetEffectiveDataUVChannel = [&Asset, SetupObject, &bUseRecommendedDataUVChannel]()
+        {
+            return bUseRecommendedDataUVChannel
+                ? GetAssetSetupDefaultDWCDataUVChannelIndex(
+                    Asset.GetSourceSkeletalMesh(),
+                    SetupObject->OriginalUVChannelIndex)
+                : FMath::Clamp(SetupObject->PreferredDWCDataUVChannelIndex, 0, 7);
+        };
+
+        EWetClothingAssetSetupDialogResult Result = EWetClothingAssetSetupDialogResult::Closed;
         TSharedRef<SWindow> Dialog =
             SNew(SWindow)
             .Title(LOCTEXT("AssetSetupTitle", "Wet Clothing Asset Setup"))
@@ -822,12 +955,10 @@ namespace
                 "AssetSetupMeshInfo",
                 "Mesh Information (Read Only)\n"
                 "Source: {0}\n"
-                "Original UV: UV{2}\n"
                 "DWC Data UV LODs: {1}\n"
-                "Simulation LOD: LOD{3}"),
+                "Simulation LOD: LOD{2}"),
             FText::FromString(GetNameSafe(Asset.GetSourceSkeletalMesh())),
             FText::AsNumber(Asset.GetDataUVMetadataLODCount()),
-            FText::AsNumber(Asset.GetOriginalUVChannelIndex()),
             FText::AsNumber(Asset.GetSimulationLODIndex()));
 
         Dialog->SetContent(
@@ -854,13 +985,12 @@ namespace
                     [
                         SNew(STextBlock)
                         .AutoWrapText(true)
-                        .Text_Lambda([&Asset, SetupObject]()
+                        .Text_Lambda([&Asset, SetupObject, &GetEffectiveDataUVChannel]()
                         {
                             return BuildAssetSetupSkeletalMeshUVChannelSummary(
                                 Asset.GetSourceSkeletalMesh(),
-                                Asset.GetOriginalUVChannelIndex(),
-                                SetupObject->PreferredDWCDataUVChannelIndex,
-                                SetupObject->bModifySourceMeshForDWCDataUV);
+                                SetupObject->OriginalUVChannelIndex,
+                                GetEffectiveDataUVChannel());
                         })
                     ]
                 ]
@@ -875,50 +1005,158 @@ namespace
                         SNew(SVerticalBox)
                         + SVerticalBox::Slot()
                         .AutoHeight()
+                        .Padding(0.0f, 0.0f, 0.0f, 8.0f)
                         [
-                            SNew(SCheckBox)
-                            .IsChecked_Lambda([SetupObject]()
-                            {
-                                return SetupObject->bModifySourceMeshForDWCDataUV
-                                    ? ECheckBoxState::Checked
-                                    : ECheckBoxState::Unchecked;
-                            })
-                            .OnCheckStateChanged_Lambda([SetupObject](ECheckBoxState NewState)
-                            {
-                                SetupObject->bModifySourceMeshForDWCDataUV = NewState == ECheckBoxState::Checked;
-                            })
+                            SNew(STextBlock)
+                            .Text(LOCTEXT("AssetSetupDataUVSection", "DWC Data UV"))
+                            .Font(FAppStyle::GetFontStyle(TEXT("NormalFontBold")))
+                        ]
+                        + SVerticalBox::Slot()
+                        .AutoHeight()
+                        .Padding(0.0f, 0.0f, 0.0f, 8.0f)
+                        [
+                            SNew(SHorizontalBox)
+                            + SHorizontalBox::Slot()
+                            .FillWidth(1.0f)
+                            .VAlign(VAlign_Center)
                             [
                                 SNew(STextBlock)
-                                .Text(LOCTEXT("AssetSetupModifySourceMeshCheckbox", "Modify Source Mesh"))
+                                .Text(LOCTEXT("AssetSetupPreferredDataUVChannel", "Preferred DWC Data UV Channel"))
+                            ]
+                            + SHorizontalBox::Slot()
+                            .AutoWidth()
+                            .VAlign(VAlign_Center)
+                            [
+                                SNew(SBox)
+                                .WidthOverride(180.0f)
+                                [
+                                    SNew(SComboBox<TSharedPtr<int32>>)
+                                    .OptionsSource(&DataUVChannelOptions)
+                                    .InitiallySelectedItem(InitialDataUVChannelItem)
+                                    .OnGenerateWidget_Lambda([&Asset, SetupObject](TSharedPtr<int32> Item)
+                                    {
+                                        const int32 Selection = Item.IsValid()
+                                            ? *Item
+                                            : RecommendedAssetSetupDataUVSelection;
+                                        return SNew(STextBlock)
+                                            .Text(BuildAssetSetupDataUVChannelLabel(
+                                                Selection,
+                                                Asset.GetSourceSkeletalMesh(),
+                                                SetupObject->OriginalUVChannelIndex));
+                                    })
+                                    .OnSelectionChanged_Lambda([SetupObject, &bUseRecommendedDataUVChannel](TSharedPtr<int32> Item, ESelectInfo::Type)
+                                    {
+                                        if (!Item.IsValid())
+                                        {
+                                            return;
+                                        }
+
+                                        const int32 Selection = *Item;
+                                        bUseRecommendedDataUVChannel =
+                                            Selection == RecommendedAssetSetupDataUVSelection;
+                                        if (!bUseRecommendedDataUVChannel)
+                                        {
+                                            SetupObject->PreferredDWCDataUVChannelIndex = FMath::Clamp(Selection, 0, 7);
+                                        }
+                                    })
+                                    [
+                                        SNew(STextBlock)
+                                        .Text_Lambda([&Asset, SetupObject, &bUseRecommendedDataUVChannel]()
+                                        {
+                                            const int32 Selection = bUseRecommendedDataUVChannel
+                                                ? RecommendedAssetSetupDataUVSelection
+                                                : SetupObject->PreferredDWCDataUVChannelIndex;
+                                            return BuildAssetSetupDataUVChannelLabel(
+                                                Selection,
+                                                Asset.GetSourceSkeletalMesh(),
+                                                SetupObject->OriginalUVChannelIndex);
+                                        })
+                                    ]
+                                ]
                             ]
                         ]
                         + SVerticalBox::Slot()
                         .AutoHeight()
-                        .Padding(0.0f, 6.0f, 0.0f, 0.0f)
+                        .Padding(0.0f, 0.0f, 0.0f, 8.0f)
                         [
                             SNew(STextBlock)
                             .AutoWrapText(true)
-                            .Text_Lambda([SetupObject]()
+                            .Font(FAppStyle::GetFontStyle(TEXT("SmallFont")))
+                            .ColorAndOpacity_Lambda([&Asset, SetupObject, &GetEffectiveDataUVChannel]()
                             {
-                                return BuildAssetSetupDWCDataUVTargetText(SetupObject->bModifySourceMeshForDWCDataUV);
+                                return IsAssetSetupUVSelectionValid(
+                                    Asset.GetSourceSkeletalMesh(),
+                                    SetupObject->OriginalUVChannelIndex,
+                                    GetEffectiveDataUVChannel())
+                                    ? FStyleColors::AccentBlue
+                                    : FStyleColors::Error;
+                            })
+                            .Text_Lambda([&Asset, SetupObject, &GetEffectiveDataUVChannel]()
+                            {
+                                return BuildAssetSetupPreferredDataUVInfoText(
+                                    Asset.GetSourceSkeletalMesh(),
+                                    SetupObject->OriginalUVChannelIndex,
+                                    GetEffectiveDataUVChannel());
                             })
                         ]
                         + SVerticalBox::Slot()
                         .AutoHeight()
-                        .Padding(0.0f, 6.0f, 0.0f, 0.0f)
                         [
                             SNew(STextBlock)
                             .AutoWrapText(true)
-                            .ColorAndOpacity(FSlateColor(FLinearColor(0.85f, 0.05f, 0.05f)))
-                            .Visibility_Lambda([SetupObject]()
+                            .Text(BuildAssetSetupDWCDataUVTargetText())
+                        ]
+                        + SVerticalBox::Slot()
+                        .AutoHeight()
+                        .HAlign(HAlign_Left)
+                        .Padding(0.0f, 10.0f, 0.0f, 0.0f)
+                        [
+                            SNew(SButton)
+                            .ToolTipText(LOCTEXT("RebuildGeneratedDataUVTooltip", "Apply these settings and rebuild DWC Data UV plus Original-UV topology."))
+                            .ContentPadding(FMargin(8.0f, 5.0f))
+                            .IsEnabled_Lambda([&Asset, SetupObject, &GetEffectiveDataUVChannel]()
                             {
-                                return SetupObject->bModifySourceMeshForDWCDataUV
-                                    ? EVisibility::Visible
-                                    : EVisibility::Collapsed;
+                                return IsAssetSetupUVSelectionValid(
+                                    Asset.GetSourceSkeletalMesh(),
+                                    SetupObject->OriginalUVChannelIndex,
+                                    GetEffectiveDataUVChannel());
                             })
-                            .Text(LOCTEXT(
-                                "AssetSetupModifySourceMeshWarning",
-                                "Warning: this modifies the Source Skeletal Mesh asset. Use Duplicate Mesh mode when the original asset should remain untouched."))
+                            .OnClicked_Lambda([&Asset, SetupObject, &Result, &OutAllowOverwriteExistingDataUVChannel, &GetEffectiveDataUVChannel, Dialog]()
+                            {
+                                const int32 EffectiveDataUVChannel = GetEffectiveDataUVChannel();
+                                if (!ConfirmAssetSetupDataUVOverwrite(
+                                        Asset.GetSourceSkeletalMesh(),
+                                        SetupObject->OriginalUVChannelIndex,
+                                        EffectiveDataUVChannel,
+                                        Asset.GetDWCDataUVChannelIndex(),
+                                        true,
+                                        OutAllowOverwriteExistingDataUVChannel))
+                                {
+                                    return FReply::Handled();
+                                }
+                                Result = EWetClothingAssetSetupDialogResult::Rebuild;
+                                Dialog->RequestDestroyWindow();
+                                return FReply::Handled();
+                            })
+                            [
+                                SNew(SHorizontalBox)
+                                + SHorizontalBox::Slot()
+                                .AutoWidth()
+                                .VAlign(VAlign_Center)
+                                .Padding(0.0f, 0.0f, 6.0f, 0.0f)
+                                [
+                                    SNew(SImage)
+                                    .DesiredSizeOverride(FVector2D(16.0f, 16.0f))
+                                    .Image(FAppStyle::Get().GetBrush(TEXT("Icons.Refresh")))
+                                ]
+                                + SHorizontalBox::Slot()
+                                .AutoWidth()
+                                .VAlign(VAlign_Center)
+                                [
+                                    SNew(STextBlock)
+                                    .Text(LOCTEXT("RebuildGeneratedDataUV", "Rebuild"))
+                                ]
+                            ]
                         ]
                     ]
                 ]
@@ -932,77 +1170,31 @@ namespace
                 ]
                 + SVerticalBox::Slot()
                 .AutoHeight()
+                .HAlign(HAlign_Right)
                 .Padding(0, 10, 0, 0)
                 [
-                    SNew(SHorizontalBox)
-                    + SHorizontalBox::Slot()
-                    .AutoWidth()
-                    .HAlign(HAlign_Left)
-                    [
-                        SNew(SButton)
-                        .ToolTipText(LOCTEXT("RebuildGeneratedDataUVTooltip", "Generate or rebuild DWC Data UV payloads and Original-UV topology."))
-                        .ContentPadding(FMargin(8.0f, 5.0f))
-                        .OnClicked_Lambda([&Result, Dialog]()
-                        {
-                            Result = EWetClothingAssetSetupDialogResult::RebuildGeneratedDataUV;
-                            Dialog->RequestDestroyWindow();
-                            return FReply::Handled();
-                        })
-                        [
-                            SNew(SHorizontalBox)
-                            + SHorizontalBox::Slot()
-                            .AutoWidth()
-                            .VAlign(VAlign_Center)
-                            .Padding(0.0f, 0.0f, 6.0f, 0.0f)
-                            [
-                                SNew(SImage)
-                                .DesiredSizeOverride(FVector2D(16.0f, 16.0f))
-                                .Image(FAppStyle::Get().GetBrush(TEXT("Icons.Refresh")))
-                            ]
-                            + SHorizontalBox::Slot()
-                            .AutoWidth()
-                            .VAlign(VAlign_Center)
-                            [
-                                SNew(STextBlock)
-                                .Text(LOCTEXT("RebuildGeneratedDataUV", "Rebuild DWC Data UV"))
-                            ]
-                        ]
-                    ]
-                    + SHorizontalBox::Slot()
-                    .FillWidth(1.0f)
-                    [
-                        SNullWidget::NullWidget
-                    ]
-                    + SHorizontalBox::Slot()
-                    .AutoWidth()
-                    .Padding(0, 0, 6, 0)
-                    [
-                        SNew(SButton)
-                        .Text(LOCTEXT("SetupCancel", "Cancel"))
-                        .OnClicked_Lambda([Dialog]()
-                        {
-                            Dialog->RequestDestroyWindow();
-                            return FReply::Handled();
-                        })
-                    ]
-                    + SHorizontalBox::Slot()
-                    .AutoWidth()
-                    [
-                        SNew(SButton)
-                        .Text(LOCTEXT("ApplySetup", "Apply Settings"))
-                        .OnClicked_Lambda([&Result, Dialog]()
-                        {
-                            Result = EWetClothingAssetSetupDialogResult::ApplySettings;
-                            Dialog->RequestDestroyWindow();
-                            return FReply::Handled();
-                        })
-                    ]
+                    SNew(SButton)
+                    .Text(LOCTEXT("ApplySetup", "Update"))
+                    .IsEnabled_Lambda([&Asset, SetupObject, &GetEffectiveDataUVChannel]()
+                    {
+                        return IsAssetSetupUVSelectionValid(
+                            Asset.GetSourceSkeletalMesh(),
+                            SetupObject->OriginalUVChannelIndex,
+                            GetEffectiveDataUVChannel());
+                    })
+                    .OnClicked_Lambda([&Result, Dialog]()
+                    {
+                        Result = EWetClothingAssetSetupDialogResult::Update;
+                        Dialog->RequestDestroyWindow();
+                        return FReply::Handled();
+                    })
                 ]
             ]);
 
         FSlateApplication::Get().AddModalWindow(Dialog, FSlateApplication::Get().GetActiveTopLevelWindow());
-        if (Result != EWetClothingAssetSetupDialogResult::Cancel)
+        if (Result != EWetClothingAssetSetupDialogResult::Closed)
         {
+            SetupObject->PreferredDWCDataUVChannelIndex = GetEffectiveDataUVChannel();
             OutSettings = SetupObject->BuildSettings();
         }
         return Result;
@@ -1394,8 +1586,12 @@ void FWetClothingAssetEditor::HandleAssetSetupClicked()
     }
 
     FDWCWetClothingAssetSetupSettings NewSettings;
-    const EWetClothingAssetSetupDialogResult DialogResult = ShowWetClothingAssetSetupDialog(*Asset, NewSettings);
-    if (DialogResult == EWetClothingAssetSetupDialogResult::Cancel)
+    bool bAllowOverwriteExistingDataUVChannel = false;
+    const EWetClothingAssetSetupDialogResult DialogResult = ShowWetClothingAssetSetupDialog(
+        *Asset,
+        NewSettings,
+        bAllowOverwriteExistingDataUVChannel);
+    if (DialogResult == EWetClothingAssetSetupDialogResult::Closed)
     {
         return;
     }
@@ -1410,7 +1606,7 @@ void FWetClothingAssetEditor::HandleAssetSetupClicked()
             FText::FromString(ChangeSummary.IsEmpty() ? TEXT("Failed to apply Wet Clothing Asset setup settings.") : ChangeSummary));
         return;
     }
-    FWetClothingEditorCommonWidgets::ClearEditorSessionCaches();
+    FDWCEditorDerivedDataInvalidator::InvalidateAsset(*Asset);
     Asset->MarkPackageDirty();
     if (DetailsView.IsValid())
     {
@@ -1422,18 +1618,46 @@ void FWetClothingAssetEditor::HandleAssetSetupClicked()
     }
     RegenerateMenusAndToolbars();
 
-    if (DialogResult == EWetClothingAssetSetupDialogResult::ApplySettings && !ChangeSummary.IsEmpty())
+    if (DialogResult == EWetClothingAssetSetupDialogResult::Update && !ChangeSummary.IsEmpty())
     {
         FMessageDialog::Open(EAppMsgType::Ok, FText::FromString(ChangeSummary));
     }
 
-    if (DialogResult == EWetClothingAssetSetupDialogResult::RebuildGeneratedDataUV)
+    if (DialogResult == EWetClothingAssetSetupDialogResult::Rebuild)
     {
-        HandleGenerateGeneratedDataUVClicked();
+        RebuildGeneratedDataUV(bAllowOverwriteExistingDataUVChannel);
     }
 }
 
 void FWetClothingAssetEditor::HandleGenerateGeneratedDataUVClicked()
+{
+    UWetClothingAsset* Asset = WetClothingAsset.Get();
+    if (Asset == nullptr)
+    {
+        return;
+    }
+
+    // Clicking Rebuild is an unconditional transient-derived-data invalidation boundary,
+    // even when a later overwrite confirmation is cancelled.
+    FDWCEditorDerivedDataInvalidator::InvalidateAsset(*Asset);
+
+    bool bAllowOverwriteExistingDataUVChannel = false;
+    const FDWCWetClothingAssetSetupSettings& Setup = Asset->GetSetupSettings();
+    if (!ConfirmAssetSetupDataUVOverwrite(
+            Asset->GetSourceSkeletalMesh(),
+            Setup.OriginalUVChannelIndex,
+            Setup.PreferredDWCDataUVChannelIndex,
+            Asset->GetDWCDataUVChannelIndex(),
+            true,
+            bAllowOverwriteExistingDataUVChannel))
+    {
+        return;
+    }
+
+    RebuildGeneratedDataUV(bAllowOverwriteExistingDataUVChannel);
+}
+
+void FWetClothingAssetEditor::RebuildGeneratedDataUV(const bool bAllowOverwriteExistingDataUVChannel)
 {
     UWetClothingAsset* Asset = WetClothingAsset.Get();
     if (Asset == nullptr)
@@ -1449,10 +1673,13 @@ void FWetClothingAssetEditor::HandleGenerateGeneratedDataUVClicked()
     SlowTask.EnterProgressFrame(
         1.0f,
         LOCTEXT("GenerateDataUVBuildProgress", "Building generated DWC mesh UV data..."));
-    const FDWCDataUVBuildResult Result = FDWCDataUVBuildService::Generate(*Asset, true);
+    const FDWCDataUVBuildResult Result = FDWCDataUVBuildService::Generate(*Asset, true, bAllowOverwriteExistingDataUVChannel);
     if (!Result.bSucceeded)
     {
         Asset->SetLastBakeFailure(Result.Message);
+        // Generate() already invalidated transient derived data. Refresh the editor as well so
+        // panels do not keep local copies of pre-rebuild UV view data after a failed rebuild.
+        RefreshAssetStateAndEditor();
         FMessageDialog::Open(EAppMsgType::Ok, FText::FromString(Result.Message));
         return;
     }
@@ -1460,7 +1687,6 @@ void FWetClothingAssetEditor::HandleGenerateGeneratedDataUVClicked()
     SlowTask.EnterProgressFrame(
         1.0f,
         LOCTEXT("GenerateDataUVRefreshProgress", "Refreshing Wet Clothing Asset editor state..."));
-    FWetClothingEditorCommonWidgets::ClearEditorSessionCaches();
     Asset->MarkPackageDirty();
     RefreshAssetStateAndEditor();
     FMessageDialog::Open(
@@ -2200,7 +2426,6 @@ bool FWetClothingAssetEditor::ResolveIssuesAndSave(FString& OutFailure)
             OutFailure = DataUVResult.Message;
             return false;
         }
-        FWetClothingEditorCommonWidgets::ClearEditorSessionCaches();
     }
 
     const bool bRuntimeBackendEnabled =

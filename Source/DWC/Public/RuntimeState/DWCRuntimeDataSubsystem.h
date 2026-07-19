@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Misc/Crc.h"
 #include "Subsystems/WorldSubsystem.h"
 #include "UObject/ObjectKey.h"
 #include "DWCRuntimeDataSubsystem.generated.h"
@@ -35,8 +36,8 @@ struct DWC_API FDWCSharedRuntimeDataKey
         uint32 Hash = HashCombine(GetTypeHash(Key.WetClothingAsset), GetTypeHash(Key.SkeletalMesh));
         Hash = HashCombine(Hash, GetTypeHash(Key.LODIndex));
         Hash = HashCombine(Hash, GetTypeHash(Key.DataVersion));
-        Hash = HashCombine(Hash, GetTypeHash(Key.MeshSignature));
-        return HashCombine(Hash, GetTypeHash(Key.SourceDataSignature));
+        Hash = HashCombine(Hash, FCrc::StrCrc32(*Key.MeshSignature));
+        return HashCombine(Hash, FCrc::StrCrc32(*Key.SourceDataSignature));
     }
 };
 
@@ -59,7 +60,7 @@ struct DWC_API FDWCSkinningStaticDataKey
     {
         uint32 Hash = HashCombine(GetTypeHash(Key.SkeletalMesh), GetTypeHash(Key.LODIndex));
         Hash = HashCombine(Hash, GetTypeHash(static_cast<uint64>(Key.SkinWeightBufferIdentity)));
-        return HashCombine(Hash, GetTypeHash(Key.MeshSignature));
+        return HashCombine(Hash, FCrc::StrCrc32(*Key.MeshSignature));
     }
 };
 

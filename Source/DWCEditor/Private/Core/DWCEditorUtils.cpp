@@ -119,6 +119,12 @@ bool DWCEditorUtils::SaveAsset(UObject* Asset)
             AddDirtyGeneratedPackage(MaterialOverride.GPUMaterialInstance.Get());
         }
 
+        for (const FWetClothingBakedWetnessProfileMap& ProfileMap :
+             WetClothingAsset->Derived.Inline.BakedWetnessProfileMaps)
+        {
+            AddDirtyGeneratedPackage(ProfileMap.WetnessProfileMap0.Get());
+        }
+
         for (const FWetWrinkleBakedMapSet& WrinkleMap :
              WetClothingAsset->Authored.WrinkleData.BakedWrinkleMaps)
         {

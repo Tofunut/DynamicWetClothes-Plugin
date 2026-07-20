@@ -163,6 +163,7 @@ class SWetClothingPartEditorPanel : public SCompoundWidget
     bool                                           CanBakeAnyWetnessProfileMap() const;
     FReply                                         HandleBakeSelectedWetnessProfileMapClicked();
     FReply                                         HandleBakeAllWetnessProfileMapsClicked();
+    const FWetClothingBakedWetnessProfileMap*      FindBakedWetnessProfileMap(UTexture* SourceTexture, int32 UVChannelIndex) const;
     UTexture*                                      ResolveSelectedMaterialTexture() const;
     UTexture*                                      ResolveTextureAddressTexture() const;
     void                                           SaveSelectedTexture();

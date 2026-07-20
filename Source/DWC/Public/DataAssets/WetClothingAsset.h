@@ -77,6 +77,9 @@ struct DWC_API FWCADerivedInlineData
     UPROPERTY(VisibleAnywhere, Category = "Wet Clothing|Generated Assets")
     TArray<FWetClothingGeneratedWetMaterialOverride> GeneratedWetMaterialOverrides;
 
+    UPROPERTY(VisibleAnywhere, Category = "Wet Clothing|Baked Wetness Profile Maps")
+    TArray<FWetClothingBakedWetnessProfileMap> BakedWetnessProfileMaps;
+
     /** Metadata only. UV coordinates live exclusively in the prepared mesh's DWC Data UV channel. */
     UPROPERTY(VisibleAnywhere, Category = "Wet Clothing|DWC Data UV")
     TArray<FDWCDataUVLODMetadata> DataUVMetadata;

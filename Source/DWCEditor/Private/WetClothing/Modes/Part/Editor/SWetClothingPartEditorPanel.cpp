@@ -2753,22 +2753,85 @@ FText SWetClothingPartEditorPanel::GetSelectedTextureText() const
 
 FText SWetClothingPartEditorPanel::GetWetnessProfileMapBakeSourceText() const
 {
-    return LOCTEXT("WetnessProfileMapRemovedSource", "Wetness Profile Maps removed");
+    UTexture* SourceTexture = ResolveSelectedMaterialTexture();
+    if (SourceTexture == nullptr)
+    {
+        return LOCTEXT("WetnessProfileMapBakeNoSource", "Source Texture: None");
+    }
+
+    return FText::Format(
+        LOCTEXT("WetnessProfileMapBakeSource", "Source Texture: {0} / UV Channel {1}"),
+        FText::FromString(SourceTexture->GetName()),
+        FText::AsNumber(GetOriginalUVChannelIndex()));
 }
 
 FText SWetClothingPartEditorPanel::GetWetnessProfileMapBakeSlotsText() const
 {
-    return LOCTEXT("WetnessProfileMapRemovedSlots", "Runtime uses resolved parameters");
+    TArray<int32> MaterialSlotIndices;
+    CollectMaterialSlotsForWetnessProfileMap(ResolveSelectedMaterialTexture(), GetOriginalUVChannelIndex(), MaterialSlotIndices);
+
+    if (MaterialSlotIndices.Num() == 0)
+    {
+        return LOCTEXT("WetnessProfileMapBakeNoSlots", "Material Slots: None");
+    }
+
+    TArray<FString> SlotLabels;
+    SlotLabels.Reserve(MaterialSlotIndices.Num());
+    for (const int32 MaterialSlotIndex : MaterialSlotIndices)
+    {
+        SlotLabels.Add(FString::Printf(TEXT("%d"), MaterialSlotIndex));
+    }
+
+    return FText::Format(
+        LOCTEXT("WetnessProfileMapBakeSlots", "Material Slots: {0}"),
+        FText::FromString(FString::Join(SlotLabels, TEXT(", "))));
 }
 
 FText SWetClothingPartEditorPanel::GetWetnessProfileMapBakeStatusText() const
 {
-    return LOCTEXT("WetnessProfileMapBakeStatusRemoved", "Status: Removed. Runtime cache is built from resolved Wetness Profile parameters.");
+    UTexture* SourceTexture = ResolveSelectedMaterialTexture();
+    if (SourceTexture == nullptr)
+    {
+        return LOCTEXT("WetnessProfileMapBakeStatusNoSource", "Select a material texture to prepare a texture-level Wetness Profile Map.");
+    }
+
+    const FWetClothingBakedWetnessProfileMap* BakedWetnessProfileMap = FindBakedWetnessProfileMap(SourceTexture, GetOriginalUVChannelIndex());
+    if (BakedWetnessProfileMap == nullptr)
+    {
+        return LOCTEXT("WetnessProfileMapBakeStatusNotBaked", "Status: Not baked yet. Phase 2 will generate Wetness Profile Map 0 for this texture.");
+    }
+
+    if (BakedWetnessProfileMap->WetnessProfileMap0 == nullptr)
+    {
+        return LOCTEXT("WetnessProfileMapBakeStatusMissingTexture", "Status: Bake entry exists, but Wetness Profile Map 0 is missing.");
+    }
+
+    return FText::Format(
+        LOCTEXT("WetnessProfileMapBakeStatusReady", "Status: {0}"),
+        FText::FromString(BakedWetnessProfileMap->WetnessProfileMap0->GetName()));
 }
 
 FText SWetClothingPartEditorPanel::GetWetnessProfileMapBakeSettingsText() const
 {
-    return LOCTEXT("WetnessProfileMapBakeSettingsRemoved", "No texture bake settings");
+    const FWetClothingBakedWetnessProfileMap* BakedWetnessProfileMap =
+        FindBakedWetnessProfileMap(ResolveSelectedMaterialTexture(), GetOriginalUVChannelIndex());
+    const int32 Resolution = DWCWetnessProfileMapBake::Resolution;
+    const int32 PaddingPixels = DWCWetnessProfileMapBake::PaddingPixels;
+
+    if (BakedWetnessProfileMap != nullptr && BakedWetnessProfileMap->WetnessProfileMap0 != nullptr)
+    {
+        return FText::Format(
+            LOCTEXT("WetnessProfileMapBakeSettingsWithSize", "Settings: Max {0} px / Output {1}x{2} / Padding {3} px"),
+            FText::AsNumber(Resolution),
+            FText::AsNumber(BakedWetnessProfileMap->WetnessProfileMap0->GetSurfaceWidth()),
+            FText::AsNumber(BakedWetnessProfileMap->WetnessProfileMap0->GetSurfaceHeight()),
+            FText::AsNumber(PaddingPixels));
+    }
+
+    return FText::Format(
+        LOCTEXT("WetnessProfileMapBakeSettings", "Settings: Max {0} px / Padding {1} px"),
+        FText::AsNumber(Resolution),
+        FText::AsNumber(PaddingPixels));
 }
 
 FText SWetClothingPartEditorPanel::GetUVIslandCountText() const
@@ -2987,26 +3050,135 @@ FReply SWetClothingPartEditorPanel::HandleSaveAssetClicked()
 
 FReply SWetClothingPartEditorPanel::HandleBakeAllMapsClicked()
 {
-    return FReply::Handled();
+    return HandleBakeAllWetnessProfileMapsClicked();
 }
 
 bool SWetClothingPartEditorPanel::IsWetnessProfileMapBakeSourceValid() const
 {
-    return false;
+    return WetClothingAsset.IsValid() && WetClothingAsset->GetRuntimeSkeletalMesh() != nullptr &&
+           ResolveSelectedMaterialTexture() != nullptr && HasValidOriginalUVChannel();
 }
 
 bool SWetClothingPartEditorPanel::CanBakeAnyWetnessProfileMap() const
 {
-    return false;
+    TArray<UTexture*> SourceTextures;
+    CollectWetnessProfileMapSourceTextures(GetOriginalUVChannelIndex(), SourceTextures);
+    return WetClothingAsset.IsValid() && WetClothingAsset->GetRuntimeSkeletalMesh() != nullptr &&
+           HasValidOriginalUVChannel() && SourceTextures.Num() > 0;
 }
 
 FReply SWetClothingPartEditorPanel::HandleBakeSelectedWetnessProfileMapClicked()
 {
+    UWetClothingAsset* WetClothingAssetPtr = WetClothingAsset.Get();
+    UTexture*          SourceTexture = ResolveSelectedMaterialTexture();
+    if (WetClothingAssetPtr == nullptr || SourceTexture == nullptr)
+    {
+        return FReply::Handled();
+    }
+
+    const int32 UVChannelIndex = GetOriginalUVChannelIndex();
+
+    TArray<int32> MaterialSlotIndices;
+    CollectMaterialSlotsForWetnessProfileMap(SourceTexture, UVChannelIndex, MaterialSlotIndices);
+    if (MaterialSlotIndices.Num() == 0)
+    {
+        FMessageDialog::Open(EAppMsgType::Ok, LOCTEXT("NoWetnessProfileMapBakeSlots", "No material slots were found for the selected texture."));
+        return FReply::Handled();
+    }
+
+    const FWetClothingWetnessProfileMapBakeSettings Settings;
+
+    FWetClothingWetnessProfileMapBakeResult Result;
+    FString                                 ErrorMessage;
+    if (!FWetClothingWetnessProfileMapBaker::BakeWetnessProfileMap0(
+            WetClothingAssetPtr,
+            SourceTexture,
+            UVChannelIndex,
+            MaterialSlotIndices,
+            Settings,
+            Result,
+            ErrorMessage))
+    {
+        FMessageDialog::Open(EAppMsgType::Ok, FText::FromString(ErrorMessage));
+        return FReply::Handled();
+    }
+
+    UE_LOG(
+        LogTemp,
+        Display,
+        TEXT("DWC: Baked Wetness Profile Map 0 '%s' for texture '%s' (%d painted pixels)."),
+        *GetNameSafe(Result.WetnessProfileMap0.Get()),
+        *GetNameSafe(SourceTexture),
+        Result.PaintedPixelCount);
+
+    if (DetailsView.IsValid())
+    {
+        DetailsView->ForceRefresh();
+    }
+
     return FReply::Handled();
 }
 
 FReply SWetClothingPartEditorPanel::HandleBakeAllWetnessProfileMapsClicked()
 {
+    UWetClothingAsset* WetClothingAssetPtr = WetClothingAsset.Get();
+    if (WetClothingAssetPtr == nullptr)
+    {
+        return FReply::Handled();
+    }
+
+    const int32 UVChannelIndex = GetOriginalUVChannelIndex();
+
+    TArray<UTexture*> SourceTextures;
+    CollectWetnessProfileMapSourceTextures(UVChannelIndex, SourceTextures);
+    if (SourceTextures.Num() == 0)
+    {
+        FMessageDialog::Open(EAppMsgType::Ok, LOCTEXT("NoWetnessProfileMapBakeSources", "No source textures were found for the selected UV channel."));
+        return FReply::Handled();
+    }
+
+    int32 BakedCount = 0;
+    for (UTexture* SourceTexture : SourceTextures)
+    {
+        if (SourceTexture == nullptr)
+        {
+            continue;
+        }
+
+        TArray<int32> MaterialSlotIndices;
+        CollectMaterialSlotsForWetnessProfileMap(SourceTexture, UVChannelIndex, MaterialSlotIndices);
+        if (MaterialSlotIndices.Num() == 0)
+        {
+            continue;
+        }
+
+        const FWetClothingWetnessProfileMapBakeSettings Settings;
+
+        FWetClothingWetnessProfileMapBakeResult Result;
+        FString                                 ErrorMessage;
+        if (!FWetClothingWetnessProfileMapBaker::BakeWetnessProfileMap0(
+                WetClothingAssetPtr,
+                SourceTexture,
+                UVChannelIndex,
+                MaterialSlotIndices,
+                Settings,
+                Result,
+                ErrorMessage))
+        {
+            FMessageDialog::Open(EAppMsgType::Ok, FText::FromString(ErrorMessage));
+            return FReply::Handled();
+        }
+
+        ++BakedCount;
+    }
+
+    UE_LOG(LogTemp, Display, TEXT("DWC: Baked %d Wetness Profile Map texture(s)."), BakedCount);
+
+    if (DetailsView.IsValid())
+    {
+        DetailsView->ForceRefresh();
+    }
+
     return FReply::Handled();
 }
 
@@ -3072,6 +3244,22 @@ bool SWetClothingPartEditorPanel::BakeWetnessProfileMapsAndUpdateMaterials(FStri
 bool SWetClothingPartEditorPanel::SaveBakedWetnessAssets() const
 {
     return FWetClothingWetnessProfileMapBakeService::SaveBakedWetnessAssets(WetClothingAsset.Get());
+}
+
+const FWetClothingBakedWetnessProfileMap* SWetClothingPartEditorPanel::FindBakedWetnessProfileMap(UTexture* SourceTexture, int32 UVChannelIndex) const
+{
+    const UWetClothingAsset* WetClothingAssetPtr = WetClothingAsset.Get();
+    if (WetClothingAssetPtr == nullptr || SourceTexture == nullptr || UVChannelIndex == INDEX_NONE)
+    {
+        return nullptr;
+    }
+
+    return WetClothingAssetPtr->Derived.Inline.BakedWetnessProfileMaps.FindByPredicate(
+        [SourceTexture, UVChannelIndex](const FWetClothingBakedWetnessProfileMap& BakedWetnessProfileMap)
+        {
+            return BakedWetnessProfileMap.SourceTexture == SourceTexture &&
+                   BakedWetnessProfileMap.UVChannelIndex == UVChannelIndex;
+        });
 }
 
 void SWetClothingPartEditorPanel::CollectMaterialSlotsForWetnessProfileMap(UTexture* SourceTexture, int32 UVChannelIndex, TArray<int32>& OutMaterialSlotIndices) const

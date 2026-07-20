@@ -2150,6 +2150,7 @@ bool UWetClothingAsset::RebuildRuntimeDataForSave(FString* OutErrorMessage)
         ClearGPUWetMapData();
         Derived.Inline.ResolvedWetnessProfileParameters.Reset();
         Derived.Inline.GeneratedWetMaterialOverrides.Reset();
+        Derived.Inline.BakedWetnessProfileMaps.Reset();
         Authored.WrinkleData.BakedWrinkleMaps.Reset();
         Authored.TransparencyData.BakedRevealLayers.Reset();
         for (FWetClothingTransparencyLayerData& Layer : Authored.TransparencyData.TransparencyLayers)
@@ -2726,6 +2727,19 @@ bool UWetClothingAsset::RebuildPrecomputedSimulationData(FString* OutErrorMessag
         {
             return MaterialOverride.MaterialSlotIndex != INDEX_NONE &&
                    !IsWettableMaterialSlot(Authored.PartData.EditableWetPartData, MaterialOverride.MaterialSlotIndex);
+        });
+
+    Derived.Inline.BakedWetnessProfileMaps.RemoveAll(
+        [this](const FWetClothingBakedWetnessProfileMap& BakedMap)
+        {
+            for (const int32 MaterialSlotIndex : BakedMap.MaterialSlotIndices)
+            {
+                if (IsWettableMaterialSlot(Authored.PartData.EditableWetPartData, MaterialSlotIndex))
+                {
+                    return false;
+                }
+            }
+            return true;
         });
 
     Derived.Bulk.NeighborRuntimeData.bIsValid = true;

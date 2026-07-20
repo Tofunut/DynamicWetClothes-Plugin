@@ -628,6 +628,16 @@ TSharedRef<SWidget> FWCAEditorWidgets::BuildBakeMapsMenu(const FWCABakeMapsMenuA
             }),
             Args.CanBakeAllMaps));
     MenuBuilder.AddMenuEntry(
+        NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeWetnessProfileMapsMenuItem", "Bake Wetness Profile Maps"),
+        NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeWetnessProfileMapsMenuItemTooltip", "Bake wetness profile texture maps and update wet materials."),
+        FSlateIcon(),
+        FUIAction(
+            FExecuteAction::CreateLambda([OnBakeWetnessProfileMaps = Args.OnBakeWetnessProfileMaps]()
+            {
+                if (OnBakeWetnessProfileMaps.IsBound()) OnBakeWetnessProfileMaps.Execute();
+            }),
+            Args.CanBakeWetnessProfileMaps));
+    MenuBuilder.AddMenuEntry(
         NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeGPUWetnessMapDataMenuItem", "Bake GPU Simulation Maps"),
         NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeGPUWetnessMapDataMenuItemTooltip", "Bake resolution-dependent simulation-LOD triangle-ID, barycentric, area, validity and same-material seam maps."),
         FSlateIcon(),

@@ -10,6 +10,8 @@ namespace DWCWetMaterialParameters
         }
 
     DWC_DEFINE_MATERIAL_PARAMETER(WetnessMap, "DWC_WetnessMap")
+    DWC_DEFINE_MATERIAL_PARAMETER(WetnessProfileMap0, "DWC_WetnessProfileMap0")
+    DWC_DEFINE_MATERIAL_PARAMETER(UseWetnessProfileMap0, "DWC_UseWetnessProfileMap0")
     DWC_DEFINE_MATERIAL_PARAMETER(WetPartDebugStrength, "DWC_WetPartDebugStrength")
     DWC_DEFINE_MATERIAL_PARAMETER(UnderColor, "DWC_UnderColor")
     DWC_DEFINE_MATERIAL_PARAMETER(UnderColorBlendStrength, "DWC_UnderColorBlendStrength")

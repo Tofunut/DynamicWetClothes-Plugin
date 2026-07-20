@@ -6,6 +6,7 @@
 #include "DataAssets/WetClothingAsset.h"
 #include "WetClothing/Asset/WetClothingAssetFactory.h"
 #include "WetClothing/DerivedAssets/Materials/WCAMaterialGenerator.h"
+#include "WetClothing/DerivedAssets/Textures/WetnessProfile/WetClothingWetnessProfileMapBakeService.h"
 #include "WetClothing/WCAEditor/WCAGeneratedDataInvalidator.h"
 #include "WetClothing/Asset/Setup/DWCDataUVBuildService.h"
 #include "WetClothing/WCAEditor/UI/SWCAEditorPanel.h"
@@ -1970,7 +1971,9 @@ bool FWCAEditor::CanBakeGPUMaps() const
 
 bool FWCAEditor::CanBakeWetnessProfileMaps() const
 {
-    return false;
+    const UWetClothingAsset* Asset = WetClothingAsset.Get();
+    return Asset != nullptr && Asset->HasAnyWettableMaterialSlot() &&
+           FWetClothingWetnessProfileMapBakeService::HasPendingVisualBakeTasks(Asset, nullptr);
 }
 
 bool FWCAEditor::CanBakeWrinkleMaps() const
@@ -1997,7 +2000,7 @@ bool FWCAEditor::CanBakeTransparencyMaps() const
 
 bool FWCAEditor::CanBakeAnyMaps() const
 {
-    return CanBakeGPUMaps() || CanBakeWrinkleMaps() || CanBakeTransparencyMaps();
+    return CanBakeGPUMaps() || CanBakeWetnessProfileMaps() || CanBakeWrinkleMaps() || CanBakeTransparencyMaps();
 }
 
 TSharedRef<SWidget> FWCAEditor::BuildBakeMapsMenu()
@@ -2008,7 +2011,7 @@ TSharedRef<SWidget> FWCAEditor::BuildBakeMapsMenu()
     }
     FWCABakeMapsMenuArgs Args;
     Args.OnBakeAllMaps = FSimpleDelegate::CreateLambda([this]() { HandleBakeAllMapsClicked(); });
-    Args.OnBakeWetnessProfileMaps = FSimpleDelegate();
+    Args.OnBakeWetnessProfileMaps = FSimpleDelegate::CreateLambda([this]() { HandleBakeWetnessProfileMapsClicked(); });
     Args.OnBakeGPUWetnessMapData = FSimpleDelegate::CreateLambda([this]() { HandleBakeGPUWetnessMapDataClicked(); });
     Args.OnBakeTransparencyRevealMaps = FSimpleDelegate::CreateLambda([this]() { HandleBakeTransparencyRevealMapsClicked(); });
     Args.OnBakeWrinkleNormalMap = FSimpleDelegate::CreateLambda([this]() { HandleBakeWrinkleNormalMapClicked(); });
@@ -2044,7 +2047,7 @@ FReply FWCAEditor::HandleBakeAllMapsClicked()
 
     Asset->RefreshBakeState(false);
     const bool bBakeGPU = CanBakeGPUMaps();
-    const bool bBakeProfiles = false;
+    const bool bBakeProfiles = CanBakeWetnessProfileMaps();
     const bool bBakeWrinkles = CanBakeWrinkleMaps();
     const bool bBakeTransparency = CanBakeTransparencyMaps();
     if (!bBakeGPU && !bBakeProfiles && !bBakeWrinkles && !bBakeTransparency)
@@ -2072,6 +2075,7 @@ FReply FWCAEditor::HandleBakeAllMapsClicked()
 
     const float TotalWork =
         (bBakeGPU ? 2.0f : 0.0f) +
+        (bBakeProfiles ? 1.0f : 0.0f) +
         (bBakeWrinkles ? 1.0f : 0.0f) +
         (bBakeTransparency ? 1.0f : 0.0f) +
         1.0f;
@@ -2108,6 +2112,25 @@ FReply FWCAEditor::HandleBakeAllMapsClicked()
         else if (RuntimeFailure.IsEmpty())
         {
             Failures.Add(FString::Printf(TEXT("GPU maps: %s"), *ErrorMessage));
+        }
+    }
+
+    if (bBakeProfiles)
+    {
+        SlowTask.EnterProgressFrame(
+            1.0f,
+            LOCTEXT("BakeAllWetnessProfileMapsProgress", "Baking wetness profile maps..."));
+        FString ProfileSummary;
+        bool bProfileWarnings = false;
+        if (EditorPanel->BakeWetVisualAssets(ProfileSummary, &bProfileWarnings))
+        {
+            Sections.Add(ProfileSummary);
+            bHadWarnings |= bProfileWarnings;
+            bBakedAnyOutput = true;
+        }
+        else if (!ProfileSummary.IsEmpty())
+        {
+            Failures.Add(FString::Printf(TEXT("Wetness profile maps: %s"), *ProfileSummary));
         }
     }
 
@@ -2178,6 +2201,49 @@ FReply FWCAEditor::HandleBakeAllMapsClicked()
 
 FReply FWCAEditor::HandleBakeWetnessProfileMapsClicked()
 {
+    if (!CanBakeWetnessProfileMaps())
+    {
+        return FReply::Handled();
+    }
+    if (!EditorPanel.IsValid())
+    {
+        return FReply::Handled();
+    }
+
+    FScopedSlowTask SlowTask(
+        2.0f,
+        LOCTEXT("BakeWetnessProfileMapsProgress", "Baking wetness profile maps..."));
+    SlowTask.MakeDialog(false);
+    SlowTask.EnterProgressFrame(
+        1.0f,
+        LOCTEXT("BakeWetnessProfileMapsBuildProgress", "Generating wetness profile textures..."));
+
+    FString Summary;
+    bool    bHadWarnings = false;
+    if (!EditorPanel->BakeWetVisualAssets(Summary, &bHadWarnings))
+    {
+        RefreshAssetStateAndEditor();
+        FMessageDialog::Open(EAppMsgType::Ok, FText::FromString(Summary));
+        return FReply::Handled();
+    }
+
+    SlowTask.EnterProgressFrame(
+        1.0f,
+        LOCTEXT("BakeWetnessProfileMapsSaveProgress", "Saving baked wetness profile assets..."));
+    UWetClothingAsset* Asset = WetClothingAsset.Get();
+    if (Asset == nullptr || !DWCEditorUtils::SaveAsset(Asset))
+    {
+        RefreshAssetStateAndEditor();
+        FMessageDialog::Open(
+            EAppMsgCategory::Warning,
+            EAppMsgType::Ok,
+            LOCTEXT("BakeWetnessProfileMapsSaveFailed", "Wetness profile maps were generated, but the generated textures or Wet Clothing Asset could not be saved."));
+        return FReply::Handled();
+    }
+    RefreshAssetStateAndEditor();
+
+    const EAppMsgCategory MessageCategory = bHadWarnings ? EAppMsgCategory::Warning : EAppMsgCategory::Success;
+    FMessageDialog::Open(MessageCategory, EAppMsgType::Ok, FText::FromString(Summary));
     return FReply::Handled();
 }
 

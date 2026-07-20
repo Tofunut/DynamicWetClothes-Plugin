@@ -10,6 +10,7 @@ class UMaterial;
 class UMaterialInstanceConstant;
 class UMaterialInterface;
 class UTexture;
+class UTexture2D;
 
 UENUM(BlueprintType)
 enum class EWetPartProfileBlendMode : uint8
@@ -141,6 +142,39 @@ struct DWC_API FWetClothingGeneratedWetMaterialOverride
     /** GPU shader permutation: DWC_UseGPUBackend = true. */
     UPROPERTY(VisibleAnywhere, Category = "Generated Wet Material")
     TObjectPtr<UMaterialInstanceConstant> GPUMaterialInstance = nullptr;
+};
+
+USTRUCT(BlueprintType)
+struct DWC_API FWetClothingBakedWetnessProfileMap
+{
+    GENERATED_BODY()
+
+    UPROPERTY(VisibleAnywhere, Category = "Baked Wetness Profile Map")
+    FString ComponentPath;
+
+    UPROPERTY(VisibleAnywhere, Category = "Baked Wetness Profile Map")
+    TObjectPtr<UTexture> SourceTexture = nullptr;
+
+    UPROPERTY(VisibleAnywhere, Category = "Baked Wetness Profile Map")
+    int32 UVChannelIndex = 0;
+
+    UPROPERTY(VisibleAnywhere, Category = "Baked Wetness Profile Map")
+    TArray<int32> MaterialSlotIndices;
+
+    UPROPERTY(VisibleAnywhere, Category = "Baked Wetness Profile Map")
+    TObjectPtr<UTexture2D> WetnessProfileMap0 = nullptr;
+
+    UPROPERTY(VisibleAnywhere, Category = "Baked Wetness Profile Map")
+    int32 Resolution = 256;
+
+    UPROPERTY(VisibleAnywhere, Category = "Baked Wetness Profile Map")
+    int32 PaddingPixels = 4;
+
+    UPROPERTY(VisibleAnywhere, Category = "Baked Wetness Profile Map")
+    FString BuildSignature;
+
+    UPROPERTY(VisibleAnywhere, Category = "Baked Wetness Profile Map")
+    FGuid BakeGuid;
 };
 
 USTRUCT(BlueprintType)

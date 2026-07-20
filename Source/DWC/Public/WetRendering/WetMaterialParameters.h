@@ -5,6 +5,8 @@
 namespace DWCWetMaterialParameters
 {
     DWC_API const FName& WetnessMap();
+    DWC_API const FName& WetnessProfileMap0();
+    DWC_API const FName& UseWetnessProfileMap0();
     DWC_API const FName& WetPartDebugStrength();
     DWC_API const FName& UnderColor();
     DWC_API const FName& UnderColorBlendStrength();

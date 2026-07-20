@@ -1,6 +1,5 @@
 #include "WetWrinkleViewport.h"
 
-#include "DataAssets/WetWrinklePreset.h"
 #include "AdvancedPreviewScene.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "DataAssets/WetClothingAsset.h"
@@ -392,7 +391,7 @@ namespace
 
     void RasterizeWetWrinkleAccumulatedStamp(const FWetWrinklePatchPlacement& Stamp, const FIntPoint& TextureSize, TArray<FColor>& InOutPixels)
     {
-        UTexture2D* CorrectedNormalTexture = Stamp.WrinklePreset != nullptr ? Stamp.WrinklePreset->GetNormalTextureForBrush() : nullptr;
+        UTexture2D* CorrectedNormalTexture = Stamp.WrinkleNormalTexture;
         if (TextureSize.X <= 0 || TextureSize.Y <= 0 || InOutPixels.Num() != TextureSize.X * TextureSize.Y || CorrectedNormalTexture == nullptr ||
             Stamp.BrushRadiusUV <= 0.0f || Stamp.Strength <= 0.0f)
         {
@@ -667,7 +666,7 @@ void SWetWrinkleViewport::AddReferencedObjects(FReferenceCollector& Collector)
     }
     Collector.AddReferencedObject(TransientProceduralPreviewState.SourceTexture);
     Collector.AddReferencedObject(TransientProceduralPreviewState.NormalTexture);
-    Collector.AddReferencedObject(BrushSettings.WrinklePreset);
+    Collector.AddReferencedObject(BrushSettings.WrinkleNormalTexture);
 }
 
 void SWetWrinkleViewport::RefreshPreviewMesh()
@@ -1451,7 +1450,7 @@ void SWetWrinkleViewport::RefreshWrinklePreviewMaterials()
                         1.0f);
                 }
 
-                UTexture2D* HoverNormalTexture = BrushSettings.WrinklePreset != nullptr ? BrushSettings.WrinklePreset->GetNormalTextureForBrush() : nullptr;
+                UTexture2D* HoverNormalTexture = BrushSettings.WrinkleNormalTexture;
                 if (BrushSettings.ToolMode == EWetWrinkleToolMode::Patch &&
                     BrushSettings.bShowPreview && CurrentSurfaceHit.bHit && CurrentSurfaceHit.MaterialSlotIndex == ActiveMaterialSlotIndex &&
                     CurrentSurfaceHit.UVChannelIndex == BrushSettings.UVChannelIndex && HoverNormalTexture != nullptr)
@@ -1529,8 +1528,7 @@ void SWetWrinkleViewport::RefreshWrinklePreviewHoverParameters()
         CurrentSurfaceHit.bHit &&
         CurrentSurfaceHit.MaterialSlotIndex == ActiveMaterialSlotIndex &&
         CurrentSurfaceHit.UVChannelIndex == BrushSettings.UVChannelIndex &&
-        BrushSettings.WrinklePreset != nullptr &&
-        BrushSettings.WrinklePreset->GetNormalTextureForBrush() != nullptr;
+        BrushSettings.WrinkleNormalTexture != nullptr;
 
     if (!bEnableHover)
     {
@@ -1541,7 +1539,7 @@ void SWetWrinkleViewport::RefreshWrinklePreviewHoverParameters()
     {
         SlotState.PreviewMID->SetTextureParameterValue(
             WetWrinklePreviewMaterialParameters::HoverNormal,
-            BrushSettings.WrinklePreset->GetNormalTextureForBrush());
+            BrushSettings.WrinkleNormalTexture);
         SlotState.PreviewMID->SetScalarParameterValue(WetWrinklePreviewMaterialParameters::HoverEnabled, 1.0f);
         SlotState.PreviewMID->SetVectorParameterValue(
             WetWrinklePreviewMaterialParameters::HoverCenterUV,

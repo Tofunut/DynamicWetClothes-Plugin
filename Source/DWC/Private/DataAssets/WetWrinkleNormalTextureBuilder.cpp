@@ -1,7 +1,6 @@
-#include "DataAssets/WetWrinklePresetBuilder.h"
+#include "DataAssets/WetWrinkleNormalTextureBuilder.h"
 
 #include "Engine/Texture2D.h"
-#include "Misc/SecureHash.h"
 
 namespace
 {
@@ -371,11 +370,11 @@ namespace
         const TArray<FColor>& CorrectedPixels,
         const FIntPoint Size,
         const bool bFlipGreenChannel,
-        const FWetWrinklePresetSeparationSettings& Settings,
-        FWetWrinklePresetScalarBuffer& OutBuffer,
+        const FWetWrinkleCoverageExtractionSettings& Settings,
+        FWetWrinkleTextureScalarBuffer& OutBuffer,
         FString& OutError)
     {
-        OutBuffer = FWetWrinklePresetScalarBuffer();
+        OutBuffer = FWetWrinkleTextureScalarBuffer();
         const int32 PixelCount = Size.X * Size.Y;
         if (Size.X <= 0 || Size.Y <= 0 || CorrectedPixels.Num() != PixelCount)
         {
@@ -560,7 +559,7 @@ namespace
 
 }
 
-float FWetWrinklePresetScalarBuffer::SampleBilinear(const FVector2D& UV) const
+float FWetWrinkleTextureScalarBuffer::SampleBilinear(const FVector2D& UV) const
 {
     if (!IsValid())
     {
@@ -581,30 +580,26 @@ float FWetWrinklePresetScalarBuffer::SampleBilinear(const FVector2D& UV) const
         FracY);
 }
 
-bool FWetWrinklePresetBuilder::BuildPresetBuffers(
-    const UWetWrinklePreset* Preset,
-    FWetWrinklePresetBuildOutput& OutOutput,
+bool FWetWrinkleNormalTextureBuilder::BuildTextureBuffers(
+    UTexture2D* SourceNormalTexture,
+    const bool bUseCorrection,
+    const FWetWrinkleNormalCorrectionSettings& Settings,
+    const FWetWrinkleCoverageExtractionSettings& CoverageSettings,
+    FWetWrinkleNormalBuildOutput& OutOutput,
     FString& OutError)
 {
-    OutOutput = FWetWrinklePresetBuildOutput();
+    OutOutput = FWetWrinkleNormalBuildOutput();
     OutError.Reset();
-
-    if (Preset == nullptr)
-    {
-        OutError = TEXT("Wet wrinkle preset is null.");
-        return false;
-    }
 
     TArray<FColor> SourcePixels;
     FIntPoint SourceSize = FIntPoint::ZeroValue;
-    if (!ReadTextureSourcePixels(Preset->SourceNormalTexture, SourcePixels, SourceSize, OutError))
+    if (!ReadTextureSourcePixels(SourceNormalTexture, SourcePixels, SourceSize, OutError))
     {
         return false;
     }
 
-    const FWetWrinklePresetCorrectionSettings& Settings = Preset->CorrectionSettings;
-    const bool bApplyGreenFlip = Preset->bUseCorrection && Settings.bFlipGreen;
-    const FVector2f BackgroundAverageXY = Preset->bUseCorrection
+    const bool bApplyGreenFlip = bUseCorrection && Settings.bFlipGreen;
+    const FVector2f BackgroundAverageXY = bUseCorrection
                                               ? EstimateBorderAverageXY(SourcePixels, SourceSize, bApplyGreenFlip, Settings.BorderPercent)
                                               : FVector2f::ZeroVector;
 
@@ -619,7 +614,7 @@ bool FWetWrinklePresetBuilder::BuildPresetBuffers(
     OutOutput.ConvexSeparationPreview.Pixels.SetNumUninitialized(PixelCount);
 
     const float FlatThreshold = FMath::Clamp(Settings.FlatThreshold, 0.0f, 1.0f);
-    const float EffectiveFlatThreshold = Preset->bUseCorrection
+    const float EffectiveFlatThreshold = bUseCorrection
                                              ? EstimateBorderNoiseThreshold(SourcePixels, SourceSize, bApplyGreenFlip, Settings.BorderPercent, BackgroundAverageXY, FlatThreshold)
                                              : FlatThreshold;
     const float DeviationAmplify = FMath::Max(Settings.DeviationPreviewAmplify, 0.0f);
@@ -631,11 +626,11 @@ bool FWetWrinklePresetBuilder::BuildPresetBuffers(
         const FColor SourceColor = SourcePixels[PixelIndex];
         const FVector3f SourceNormal = DecodeNormalFromColor(SourceColor, bApplyGreenFlip);
         const FVector2f SourceXY = GetNormalXY(SourceNormal);
-        const FVector2f CorrectedXY = Preset->bUseCorrection ? SourceXY - BackgroundAverageXY : SourceXY;
+        const FVector2f CorrectedXY = bUseCorrection ? SourceXY - BackgroundAverageXY : SourceXY;
         const float XYDeviation = CorrectedXY.Length();
 
         FVector3f CorrectedNormal;
-        if (Preset->bUseCorrection)
+        if (bUseCorrection)
         {
             if (XYDeviation < EffectiveFlatThreshold)
             {
@@ -663,7 +658,7 @@ bool FWetWrinklePresetBuilder::BuildPresetBuffers(
         }
         MaxXYDeviation = FMath::Max(MaxXYDeviation, XYDeviation);
 
-        OutOutput.CorrectedNormal.Pixels[PixelIndex] = Preset->bUseCorrection ? EncodeNormalToColor(CorrectedNormal) : SourceColor;
+        OutOutput.CorrectedNormal.Pixels[PixelIndex] = bUseCorrection ? EncodeNormalToColor(CorrectedNormal) : SourceColor;
         OutOutput.DeviationPreview.Pixels[PixelIndex] = FColor(DeviationByte, DeviationByte, DeviationByte, 255);
         OutOutput.CorrectedDeviationPreview.Pixels[PixelIndex] = FColor(CorrectedDeviationByte, CorrectedDeviationByte, CorrectedDeviationByte, 255);
     }
@@ -672,7 +667,7 @@ bool FWetWrinklePresetBuilder::BuildPresetBuffers(
             OutOutput.CorrectedNormal.Pixels,
             SourceSize,
             false,
-            Preset->SeparationSettings,
+            CoverageSettings,
             OutOutput.ConvexSeparation,
             OutError))
     {
@@ -692,10 +687,10 @@ bool FWetWrinklePresetBuilder::BuildPresetBuffers(
     return true;
 }
 
-bool FWetWrinklePresetBuilder::BuildConvexSeparationBuffer(
+bool FWetWrinkleNormalTextureBuilder::BuildConvexSeparationBuffer(
     UTexture2D* CorrectedNormalTexture,
-    const FWetWrinklePresetSeparationSettings& Settings,
-    FWetWrinklePresetScalarBuffer& OutBuffer,
+    const FWetWrinkleCoverageExtractionSettings& Settings,
+    FWetWrinkleTextureScalarBuffer& OutBuffer,
     FString& OutError)
 {
     TArray<FColor> CorrectedPixels;
@@ -711,34 +706,4 @@ bool FWetWrinklePresetBuilder::BuildConvexSeparationBuffer(
         Settings,
         OutBuffer,
         OutError);
-}
-
-FString FWetWrinklePresetBuilder::MakeBuildSignature(const UWetWrinklePreset* Preset)
-{
-    if (Preset == nullptr)
-    {
-        return FString();
-    }
-
-    const UTexture2D* SourceTexture = Preset->SourceNormalTexture;
-    const FString SourcePath = SourceTexture != nullptr ? SourceTexture->GetPathName() : FString(TEXT("None"));
-    const FIntPoint SourceSize = SourceTexture != nullptr
-                                     ? FIntPoint(SourceTexture->GetSizeX(), SourceTexture->GetSizeY())
-                                     : FIntPoint::ZeroValue;
-    const FWetWrinklePresetCorrectionSettings& Settings = Preset->CorrectionSettings;
-    const FString SignatureSource = FString::Printf(
-        TEXT("DWC.WetWrinklePreset.v3.BinaryConvexCore;Source=%s;Size=%dx%d;UseCorrection=%d;Border=%.6f;Flat=%.6f;FlipG=%d;SepBlur=%d;SepThreshold=%.6f;SepMinComponent=%d;SepInvert=%d"),
-        *SourcePath,
-        SourceSize.X,
-        SourceSize.Y,
-        Preset->bUseCorrection ? 1 : 0,
-        Settings.BorderPercent,
-        Settings.FlatThreshold,
-        Settings.bFlipGreen ? 1 : 0,
-        Preset->SeparationSettings.InputBlurRadiusPixels,
-        Preset->SeparationSettings.ConvexityThreshold,
-        Preset->SeparationSettings.MinimumComponentPixels,
-        Preset->SeparationSettings.bInvertConvexity ? 1 : 0);
-
-    return FMD5::HashAnsiString(*SignatureSource);
 }

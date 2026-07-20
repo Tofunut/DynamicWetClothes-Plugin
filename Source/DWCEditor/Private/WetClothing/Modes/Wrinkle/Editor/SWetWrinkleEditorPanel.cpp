@@ -4,7 +4,6 @@
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Core/DWCEditorUtils.h"
 #include "DataAssets/WetClothingAsset.h"
-#include "DataAssets/WetWrinklePreset.h"
 #include "Editor.h"
 #include "Engine/SkeletalMesh.h"
 #include "Engine/Texture2D.h"
@@ -12,6 +11,7 @@
 #include "Brushes/SlateRoundedBoxBrush.h"
 #include "Core/DWCEditorStyle.h"
 #include "Brushes/SlateImageBrush.h"
+#include "Framework/MultiBox/MultiBoxBuilder.h"
 #include "Materials/MaterialInterface.h"
 #include "Modules/ModuleManager.h"
 #include "IDetailsView.h"
@@ -27,12 +27,15 @@
 #include "WetClothing/WCAEditor/UI/Widgets/WCAEditorWidgets.h"
 #include "WetClothing/Modes/Part/Partition/WetPartEditingService.h"
 #include "WetClothing/DerivedAssets/Textures/Wrinkle/WetWrinkleNormalMapBaker.h"
+#include "WetClothing/Modes/Wrinkle/Correction/SWetWrinkleNormalCorrectionDialog.h"
 #include "WetClothing/Modes/Wrinkle/Generate/WetWrinkleTextureGenerator.h"
+#include "WetClothing/Modes/Wrinkle/Editor/WetWrinkleEditorSettings.h"
 #include "WetClothing/Modes/Wrinkle/Viewport/WetWrinkleViewport.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SCheckBox.h"
 #include "Widgets/Input/SComboButton.h"
 #include "Widgets/Input/SComboBox.h"
+#include "Widgets/Input/SEditableTextBox.h"
 #include "Widgets/Images/SImage.h"
 #include "Widgets/Input/SSpinBox.h"
 #include "Widgets/Layout/SBorder.h"
@@ -56,6 +59,35 @@
 
 namespace
 {
+    DECLARE_DELEGATE_RetVal_OneParam(FReply, FOnWetWrinkleTextureTileContextMenu, const FPointerEvent&);
+
+    class SWetWrinkleTexturePaletteTile : public SCompoundWidget
+    {
+      public:
+        SLATE_BEGIN_ARGS(SWetWrinkleTexturePaletteTile) {}
+        SLATE_DEFAULT_SLOT(FArguments, Content)
+        SLATE_EVENT(FOnWetWrinkleTextureTileContextMenu, OnContextMenu)
+        SLATE_END_ARGS()
+
+        void Construct(const FArguments& InArgs)
+        {
+            OnContextMenu = InArgs._OnContextMenu;
+            ChildSlot[InArgs._Content.Widget];
+        }
+
+        virtual FReply OnMouseButtonUp(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override
+        {
+            if (MouseEvent.GetEffectingButton() == EKeys::RightMouseButton && OnContextMenu.IsBound())
+            {
+                return OnContextMenu.Execute(MouseEvent);
+            }
+            return SCompoundWidget::OnMouseButtonUp(MyGeometry, MouseEvent);
+        }
+
+      private:
+        FOnWetWrinkleTextureTileContextMenu OnContextMenu;
+    };
+
     float WrapWetRidgeDelta(const float Delta)
     {
         return Delta - FMath::RoundToFloat(Delta);
@@ -715,23 +747,22 @@ void SWetWrinkleEditorPanel::Construct(const FArguments& InArgs)
     RefreshDWCDataUVChannel();
     RefreshMaterialTextures();
     RefreshBrushPresetOptions();
-    RefreshWrinklePresetPalette();
+    RefreshWrinkleTexturePalette();
     SizeCm = WetWrinkleDefaultSizeCm;
     SizeUV = WetWrinkleDefaultSizeUV;
     BrushSettings.BrushRadiusUV = SizeUV;
-    SelectedWrinklePresetThumbnailBrush.SetImageSize(FVector2D(128.0f, 128.0f));
-    WrinklePresetPaletteButtonStyle = FButtonStyle()
+    SelectedWrinkleNormalThumbnailBrush.SetImageSize(FVector2D(128.0f, 128.0f));
+    WrinkleTexturePaletteButtonStyle = FButtonStyle()
         .SetNormal(FSlateRoundedBoxBrush(FLinearColor::White, 6.0f))
         .SetHovered(FSlateRoundedBoxBrush(FLinearColor(1.15f, 1.15f, 1.15f, 1.0f), 6.0f))
         .SetPressed(FSlateRoundedBoxBrush(FLinearColor(0.85f, 0.85f, 0.85f, 1.0f), 6.0f))
         .SetDisabled(FSlateRoundedBoxBrush(FLinearColor::White, 6.0f))
         .SetNormalPadding(FMargin(0.0f))
         .SetPressedPadding(FMargin(0.0f));
-    // Preset palette refresh is event-driven through Asset Registry notifications.
-    // Avoid polling every second while the editor is open.
     FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
-    AssetRegistryModule.Get().OnAssetRemoved().AddSP(this, &SWetWrinkleEditorPanel::HandleWrinklePresetPaletteAssetRemoved);
-    AssetRegistryModule.Get().OnAssetUpdated().AddSP(this, &SWetWrinkleEditorPanel::HandleWrinklePresetPaletteAssetUpdated);
+    AssetRegistryModule.Get().OnAssetAdded().AddSP(this, &SWetWrinkleEditorPanel::HandleWrinkleTextureAssetAdded);
+    AssetRegistryModule.Get().OnAssetRemoved().AddSP(this, &SWetWrinkleEditorPanel::HandleWrinkleTextureAssetRemoved);
+    AssetRegistryModule.Get().OnAssetUpdated().AddSP(this, &SWetWrinkleEditorPanel::HandleWrinkleTextureAssetUpdated);
 
     const FSlateFontInfo PanelHeadingFont = FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), 16);
 
@@ -1035,7 +1066,7 @@ TSharedRef<SWidget> SWetWrinkleEditorPanel::BuildPatchBrushSection()
                    .AutoHeight()
                    .Padding(0.0f, 0.0f, 0.0f, 6.0f)
                        [SNew(STextBlock)
-                            .Text(LOCTEXT("WetWrinklePresetLabel", "Wet Wrinkle Preset"))]
+                            .Text(LOCTEXT("WrinkleNormalTextureLabel", "Wrinkle Normal Texture"))]
 
              + SVerticalBox::Slot()
                    .AutoHeight()
@@ -1046,9 +1077,9 @@ TSharedRef<SWidget> SWetWrinkleEditorPanel::BuildPatchBrushSection()
                               .FillWidth(1.0f)
                                   [SNew(SObjectPropertyEntryBox)
                                        .IsEnabled_Lambda([this]() { return BrushSettings.ToolMode == EWetWrinkleToolMode::Patch; })
-                                       .AllowedClass(UWetWrinklePreset::StaticClass())
-                                       .ObjectPath(this, &SWetWrinkleEditorPanel::GetWrinklePresetObjectPath)
-                                       .OnObjectChanged(this, &SWetWrinkleEditorPanel::HandleWrinklePresetChanged)]
+                                       .AllowedClass(UTexture2D::StaticClass())
+                                       .ObjectPath(this, &SWetWrinkleEditorPanel::GetWrinkleNormalTextureObjectPath)
+                                       .OnObjectChanged(this, &SWetWrinkleEditorPanel::HandleWrinkleNormalTextureChanged)]
 
                         + SHorizontalBox::Slot()
                               .AutoWidth()
@@ -1060,18 +1091,54 @@ TSharedRef<SWidget> SWetWrinkleEditorPanel::BuildPatchBrushSection()
                                            [SNew(SButton)
                                                 .ButtonStyle(FAppStyle::Get(), "SimpleButton")
                                                 .ContentPadding(0.0f)
-                                                .ToolTipText(LOCTEXT("RefreshWrinklePresetPaletteTooltip", "Refresh the Wet Wrinkle Preset palette."))
-                                                .OnClicked(this, &SWetWrinkleEditorPanel::HandleRefreshWrinklePresetPaletteClicked)
+                                                .ToolTipText(LOCTEXT("RefreshWrinkleTexturePaletteTooltip", "Refresh the wrinkle normal texture palette."))
+                                                .OnClicked(this, &SWetWrinkleEditorPanel::HandleRefreshWrinkleTexturePaletteClicked)
                                                     [SNew(SImage)
                                                          .Image(FAppStyle::GetBrush("Icons.Refresh"))
                                                          .ColorAndOpacity(FSlateColor::UseForeground())]]]]
 
              + SVerticalBox::Slot()
                    .AutoHeight()
+                   .Padding(0.0f, 0.0f, 0.0f, 6.0f)
+                       [SNew(SHorizontalBox)
+
+                        + SHorizontalBox::Slot()
+                              .FillWidth(1.0f)
+                                  [SAssignNew(WrinkleTextureSearchPathTextBox, SEditableTextBox)
+                                   .HintText(LOCTEXT("WrinkleTexturePathHint", "/Game/Wrinkles"))]
+
+                        + SHorizontalBox::Slot()
+                              .AutoWidth()
+                              .Padding(4.0f, 0.0f)
+                                  [SNew(SButton)
+                                   .ButtonStyle(FAppStyle::Get(), "SimpleButton")
+                                   .ToolTipText(LOCTEXT("AddWrinkleTexturePathTooltip", "Add an Unreal Content path to the palette."))
+                                   .OnClicked(this, &SWetWrinkleEditorPanel::HandleAddWrinkleTextureSearchPathClicked)
+                                       [SNew(SImage).Image(FAppStyle::GetBrush("Icons.Plus"))]]
+
+                        + SHorizontalBox::Slot()
+                              .AutoWidth()
+                                  [SNew(SComboButton)
+                                   .ButtonStyle(FAppStyle::Get(), "SimpleButton")
+                                   .ToolTipText(LOCTEXT("WrinkleTexturePathsTooltip", "View and remove wrinkle normal texture search paths."))
+                                   .OnGetMenuContent(this, &SWetWrinkleEditorPanel::BuildWrinkleTextureSearchPathMenu)
+                                   .ButtonContent()
+                                       [SNew(SImage).Image(FAppStyle::GetBrush("Icons.FolderOpen"))]]]
+
+             + SVerticalBox::Slot()
+                   .AutoHeight()
+                   .Padding(0.0f, 0.0f, 0.0f, 6.0f)
+                       [SNew(SCheckBox)
+                        .IsChecked(this, &SWetWrinkleEditorPanel::GetShowHiddenWrinkleTexturesState)
+                        .OnCheckStateChanged(this, &SWetWrinkleEditorPanel::HandleShowHiddenWrinkleTexturesChanged)
+                            [SNew(STextBlock).Text(LOCTEXT("ShowHiddenWrinkleTextures", "Show Hidden Textures"))]]
+
+             + SVerticalBox::Slot()
+                   .AutoHeight()
                    .Padding(0.0f, 0.0f, 0.0f, 8.0f)
                        [SNew(SBox)
                             .IsEnabled_Lambda([this]() { return BrushSettings.ToolMode == EWetWrinkleToolMode::Patch; })
-                                [BuildWrinklePresetPalette()]]
+                                [BuildWrinkleTexturePalette()]]
 
              + SVerticalBox::Slot()
                    .AutoHeight()
@@ -1083,17 +1150,17 @@ TSharedRef<SWidget> SWetWrinkleEditorPanel::BuildPatchBrushSection()
                               .VAlign(VAlign_Center)
                                   [SNew(STextBlock)
                                        .AutoWrapText(true)
-                                       .ColorAndOpacity(this, &SWetWrinkleEditorPanel::GetWrinklePresetStatusColor)
-                                       .Text(this, &SWetWrinkleEditorPanel::GetWrinklePresetStatusText)]
+                                       .ColorAndOpacity(this, &SWetWrinkleEditorPanel::GetWrinkleNormalStatusColor)
+                                       .Text(this, &SWetWrinkleEditorPanel::GetWrinkleNormalStatusText)]
 
                         + SHorizontalBox::Slot()
                               .AutoWidth()
                               .VAlign(VAlign_Center)
                               .Padding(6.0f, 0.0f, 0.0f, 0.0f)
                                       [SNew(SButton)
-                                       .IsEnabled_Lambda([this]() { return BrushSettings.ToolMode == EWetWrinkleToolMode::Patch && CanOpenWrinklePreset(); })
-                                       .Text(LOCTEXT("OpenWrinklePresetButton", "Open"))
-                                       .OnClicked(this, &SWetWrinkleEditorPanel::HandleOpenWrinklePresetClicked)]]
+                                       .IsEnabled_Lambda([this]() { return BrushSettings.ToolMode == EWetWrinkleToolMode::Patch && CanOpenWrinkleNormalTexture(); })
+                                       .Text(LOCTEXT("OpenWrinkleNormalTextureButton", "Open"))
+                                       .OnClicked(this, &SWetWrinkleEditorPanel::HandleOpenWrinkleNormalTextureClicked)]]
 
              + SVerticalBox::Slot()
                    .AutoHeight()
@@ -1104,7 +1171,7 @@ TSharedRef<SWidget> SWetWrinkleEditorPanel::BuildPatchBrushSection()
                               .AutoHeight()
                               .Padding(0.0f, 0.0f, 0.0f, 4.0f)
                                   [SNew(STextBlock)
-                                       .Text(LOCTEXT("SelectedWrinklePresetThumbnailLabel", "Wrinkle Normal"))]
+                                       .Text(LOCTEXT("SelectedWrinkleNormalThumbnailLabel", "Wrinkle Normal"))]
 
                         + SVerticalBox::Slot()
                               .AutoHeight()
@@ -1120,8 +1187,8 @@ TSharedRef<SWidget> SWetWrinkleEditorPanel::BuildPatchBrushSection()
                                                                   .Stretch(EStretch::ScaleToFitX)
                                                                   .StretchDirection(EStretchDirection::DownOnly)
                                                                       [SNew(SImage)
-                                                                           .Image(this, &SWetWrinkleEditorPanel::GetWrinklePresetThumbnailBrush)
-                                                                           .Visibility(this, &SWetWrinkleEditorPanel::GetWrinklePresetThumbnailVisibility)]]]]]]
+                                                                           .Image(this, &SWetWrinkleEditorPanel::GetWrinkleNormalThumbnailBrush)
+                                                                           .Visibility(this, &SWetWrinkleEditorPanel::GetWrinkleNormalThumbnailVisibility)]]]]]]
 
              + SVerticalBox::Slot()
                    .AutoHeight()
@@ -1627,10 +1694,10 @@ void SWetWrinkleEditorPanel::RefreshFromAsset()
     RefreshDWCDataUVChannel();
     RefreshMaterialTextures();
     RefreshBrushPresetOptions();
-    RefreshWrinklePresetPalette();
+    RefreshWrinkleTexturePalette();
     RefreshPartMapItems();
     RefreshStrokeList();
-    RefreshWrinklePresetThumbnail();
+    RefreshWrinkleNormalThumbnail();
     InvalidateWrinkleUVViewCache();
 
     if (PreviewViewport.IsValid())
@@ -1893,7 +1960,7 @@ void SWetWrinkleEditorPanel::HandlePaintStrokeStarted(const FWetWrinkleSurfaceHi
     }
 
     FString PresetReason;
-    if (!IsCurrentWrinklePresetUsable(&PresetReason))
+    if (!IsCurrentWrinkleNormalUsable(&PresetReason))
     {
         FMessageDialog::Open(EAppMsgType::Ok, FText::FromString(PresetReason));
         return;
@@ -1952,7 +2019,7 @@ void SWetWrinkleEditorPanel::HandlePaintStampRequested(const FWetWrinkleSurfaceH
     }
 
     FString PresetReason;
-    if (!IsCurrentWrinklePresetUsable(&PresetReason))
+    if (!IsCurrentWrinkleNormalUsable(&PresetReason))
     {
         return;
     }
@@ -2679,9 +2746,9 @@ void SWetWrinkleEditorPanel::RefreshBrushPresetOptions()
 
 }
 
-void SWetWrinkleEditorPanel::RefreshWrinklePresetPalette(bool bForceAssetScan)
+void SWetWrinkleEditorPanel::RefreshWrinkleTexturePalette(bool bForceAssetScan)
 {
-    WrinklePresetPaletteItems.Reset();
+    WrinkleTexturePaletteItems.Reset();
 
     FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
     if (bForceAssetScan)
@@ -2689,70 +2756,90 @@ void SWetWrinkleEditorPanel::RefreshWrinklePresetPalette(bool bForceAssetScan)
         AssetRegistryModule.Get().SearchAllAssets(true);
     }
 
-    TArray<FAssetData> PresetAssets;
-    AssetRegistryModule.Get().GetAssetsByClass(UWetWrinklePreset::StaticClass()->GetClassPathName(), PresetAssets, true);
-    PresetAssets.Sort([](const FAssetData& A, const FAssetData& B)
+    TArray<FString> SearchPaths;
+    GetDefault<UWetWrinkleEditorSettings>()->GetNormalTextureSearchPaths(SearchPaths);
+    TMap<FSoftObjectPath, FAssetData> UniqueTextureAssets;
+    for (const FString& SearchPath : SearchPaths)
     {
-        return A.AssetName.ToString() < B.AssetName.ToString();
+        TArray<FAssetData> PathAssets;
+        AssetRegistryModule.Get().GetAssetsByPath(FName(*SearchPath), PathAssets, true);
+        for (const FAssetData& AssetData : PathAssets)
+        {
+            if (AssetData.AssetClassPath == UTexture2D::StaticClass()->GetClassPathName())
+            {
+                UniqueTextureAssets.FindOrAdd(AssetData.ToSoftObjectPath()) = AssetData;
+            }
+        }
+    }
+
+    TArray<FAssetData> TextureAssets;
+    UniqueTextureAssets.GenerateValueArray(TextureAssets);
+    TextureAssets.Sort([](const FAssetData& A, const FAssetData& B)
+    {
+        const int32 NameCompare = A.AssetName.ToString().Compare(B.AssetName.ToString());
+        return NameCompare == 0 ? A.PackageName.ToString() < B.PackageName.ToString() : NameCompare < 0;
     });
 
-    for (const FAssetData& PresetAsset : PresetAssets)
+    const UWetWrinkleEditorSettings* UserSettings = GetDefault<UWetWrinkleEditorSettings>();
+    for (const FAssetData& TextureAsset : TextureAssets)
     {
-        UWetWrinklePreset* Preset = Cast<UWetWrinklePreset>(PresetAsset.GetAsset());
-        if (Preset == nullptr)
+        UTexture2D* Texture = Cast<UTexture2D>(TextureAsset.GetAsset());
+        if (Texture == nullptr)
         {
             continue;
         }
 
-        TSharedPtr<FWetWrinklePresetPaletteItem> Item = MakeShared<FWetWrinklePresetPaletteItem>();
-        Item->DisplayName = FText::FromName(PresetAsset.AssetName);
-        Item->PresetPath = PresetAsset.ToSoftObjectPath();
-        Item->Preset = Preset;
-        Item->bRemoved = false;
-        RefreshWrinklePresetPaletteItemState(Item);
-        WrinklePresetPaletteItems.Add(Item);
+        TSharedPtr<FWetWrinkleTexturePaletteItem> Item = MakeShared<FWetWrinkleTexturePaletteItem>();
+        Item->DisplayName = FText::FromName(TextureAsset.AssetName);
+        Item->TexturePath = TextureAsset.ToSoftObjectPath();
+        Item->Texture = Texture;
+        Item->bHidden = UserSettings->IsNormalTextureHidden(Item->TexturePath);
+        RefreshWrinkleTexturePaletteItemState(Item);
+        WrinkleTexturePaletteItems.Add(Item);
     }
 
-    RebuildWrinklePresetPaletteWidget();
+    RebuildWrinkleTexturePaletteWidget();
 }
 
-void SWetWrinkleEditorPanel::RebuildWrinklePresetPaletteWidget()
+void SWetWrinkleEditorPanel::RebuildWrinkleTexturePaletteWidget()
 {
-    if (!WrinklePresetPaletteWrapBox.IsValid())
+    if (!WrinkleTexturePaletteWrapBox.IsValid())
     {
         return;
     }
 
-    WrinklePresetPaletteWrapBox->ClearChildren();
-
-    if (WrinklePresetPaletteItems.Num() == 0)
+    WrinkleTexturePaletteWrapBox->ClearChildren();
+    int32 VisibleItemCount = 0;
+    for (TSharedPtr<FWetWrinkleTexturePaletteItem> Item : WrinkleTexturePaletteItems)
     {
-        WrinklePresetPaletteWrapBox->AddSlot()
+        if (GetWrinkleTexturePaletteTileVisibility(Item) == EVisibility::Visible)
+        {
+            ++VisibleItemCount;
+        }
+        WrinkleTexturePaletteWrapBox->AddSlot()[GenerateWrinkleTexturePaletteTile(Item)];
+    }
+
+    if (VisibleItemCount == 0)
+    {
+        WrinkleTexturePaletteWrapBox->AddSlot()
             [SNew(STextBlock)
-                 .AutoWrapText(true)
-                 .ColorAndOpacity(FSlateColor(FLinearColor(0.65f, 0.65f, 0.65f)))
-                 .Text(LOCTEXT("NoWetWrinklePresetPaletteItems", "No Wet Wrinkle Presets found."))];
-        return;
-    }
-
-    for (TSharedPtr<FWetWrinklePresetPaletteItem> Item : WrinklePresetPaletteItems)
-    {
-        WrinklePresetPaletteWrapBox->AddSlot()
-            [GenerateWrinklePresetPaletteTile(Item)];
+             .AutoWrapText(true)
+             .ColorAndOpacity(FSlateColor(FLinearColor(0.65f, 0.65f, 0.65f)))
+             .Text(LOCTEXT("NoWrinkleTexturePaletteItems", "No wrinkle normal textures were found in the configured paths."))];
     }
 }
 
-void SWetWrinkleEditorPanel::RefreshWrinklePresetPaletteState()
+void SWetWrinkleEditorPanel::RefreshWrinkleTexturePaletteState()
 {
-    for (const TSharedPtr<FWetWrinklePresetPaletteItem>& Item : WrinklePresetPaletteItems)
+    for (const TSharedPtr<FWetWrinkleTexturePaletteItem>& Item : WrinkleTexturePaletteItems)
     {
-        RefreshWrinklePresetPaletteItemState(Item);
+        RefreshWrinkleTexturePaletteItemState(Item);
     }
-
-    RefreshWrinklePresetThumbnail();
+    RebuildWrinkleTexturePaletteWidget();
+    RefreshWrinkleNormalThumbnail();
 }
 
-void SWetWrinkleEditorPanel::RefreshWrinklePresetPaletteItemState(const TSharedPtr<FWetWrinklePresetPaletteItem>& Item)
+void SWetWrinkleEditorPanel::RefreshWrinkleTexturePaletteItemState(const TSharedPtr<FWetWrinkleTexturePaletteItem>& Item)
 {
     if (!Item.IsValid())
     {
@@ -2761,157 +2848,129 @@ void SWetWrinkleEditorPanel::RefreshWrinklePresetPaletteItemState(const TSharedP
 
     if (Item->bRemoved)
     {
-        Item->Preset.Reset();
-        Item->ThumbnailTexturePath.Reset();
+        Item->Texture.Reset();
         Item->ThumbnailBrush.SetResourceObject(nullptr);
         return;
     }
 
-    UWetWrinklePreset* Preset = Item->Preset.Get();
-    if (Preset == nullptr && Item->PresetPath.IsValid())
+    UTexture2D* Texture = Item->Texture.Get();
+    if (Texture == nullptr && Item->TexturePath.IsValid())
     {
-        Preset = Cast<UWetWrinklePreset>(Item->PresetPath.TryLoad());
-        Item->Preset = Preset;
+        Texture = Cast<UTexture2D>(Item->TexturePath.TryLoad());
+        Item->Texture = Texture;
     }
 
-    UTexture2D* ThumbnailTexture = Preset != nullptr ? Preset->GetNormalTextureForBrush() : nullptr;
-
-    Item->ThumbnailTexturePath = ThumbnailTexture != nullptr ? FSoftObjectPath(ThumbnailTexture) : FSoftObjectPath();
-    Item->ThumbnailBrush.SetResourceObject(ThumbnailTexture);
+    Item->bHidden = GetDefault<UWetWrinkleEditorSettings>()->IsNormalTextureHidden(Item->TexturePath);
+    Item->ThumbnailBrush.SetResourceObject(Texture);
     Item->ThumbnailBrush.SetImageSize(
-        ThumbnailTexture != nullptr
-            ? FVector2D(FMath::Max(ThumbnailTexture->GetSizeX(), 1), FMath::Max(ThumbnailTexture->GetSizeY(), 1))
+        Texture != nullptr
+            ? FVector2D(FMath::Max(Texture->GetSizeX(), 1), FMath::Max(Texture->GetSizeY(), 1))
             : FVector2D(144.0f, 144.0f));
 }
 
-EActiveTimerReturnType SWetWrinkleEditorPanel::HandleWrinklePresetPaletteRefreshTimer(double, float)
+bool SWetWrinkleEditorPanel::IsAssetInsideWrinkleTextureSearchPaths(const FAssetData& AssetData) const
 {
-    RefreshWrinklePresetPaletteState();
-    return EActiveTimerReturnType::Continue;
+    if (AssetData.AssetClassPath != UTexture2D::StaticClass()->GetClassPathName())
+    {
+        return false;
+    }
+
+    TArray<FString> SearchPaths;
+    GetDefault<UWetWrinkleEditorSettings>()->GetNormalTextureSearchPaths(SearchPaths);
+    const FString PackagePath = AssetData.PackagePath.ToString();
+    return SearchPaths.ContainsByPredicate(
+        [&PackagePath](const FString& SearchPath)
+        {
+            return PackagePath == SearchPath || PackagePath.StartsWith(SearchPath + TEXT("/"));
+        });
 }
 
-void SWetWrinkleEditorPanel::HandleWrinklePresetPaletteAssetRemoved(const FAssetData& AssetData)
+void SWetWrinkleEditorPanel::HandleWrinkleTextureAssetAdded(const FAssetData& AssetData)
 {
-    const FSoftObjectPath RemovedAssetPath = AssetData.ToSoftObjectPath();
-    bool bClearedSelectedThumbnail = false;
-
-    for (const TSharedPtr<FWetWrinklePresetPaletteItem>& Item : WrinklePresetPaletteItems)
+    if (IsAssetInsideWrinkleTextureSearchPaths(AssetData))
     {
-        if (!Item.IsValid())
-        {
-            continue;
-        }
-
-        if (Item->PresetPath == RemovedAssetPath)
-        {
-            Item->Preset.Reset();
-            Item->bRemoved = true;
-            Item->ThumbnailTexturePath.Reset();
-            Item->ThumbnailBrush.SetResourceObject(nullptr);
-        }
-        else if (Item->ThumbnailTexturePath == RemovedAssetPath)
-        {
-            Item->ThumbnailTexturePath.Reset();
-            Item->ThumbnailBrush.SetResourceObject(nullptr);
-        }
+        RefreshWrinkleTexturePalette();
     }
+}
 
-    if (SelectedWrinklePresetThumbnailBrush.GetResourceObject() != nullptr &&
-        FSoftObjectPath(SelectedWrinklePresetThumbnailBrush.GetResourceObject()) == RemovedAssetPath)
+void SWetWrinkleEditorPanel::HandleWrinkleTextureAssetRemoved(const FAssetData& AssetData)
+{
+    const FSoftObjectPath RemovedPath = AssetData.ToSoftObjectPath();
+    GetMutableDefault<UWetWrinkleEditorSettings>()->SetNormalTextureHidden(RemovedPath, false);
+    if (BrushSettings.WrinkleNormalTexture != nullptr &&
+        FSoftObjectPath(BrushSettings.WrinkleNormalTexture.Get()) == RemovedPath)
     {
-        SelectedWrinklePresetThumbnailBrush.SetResourceObject(nullptr);
-        bClearedSelectedThumbnail = true;
-    }
-
-    if (BrushSettings.WrinklePreset != nullptr && FSoftObjectPath(BrushSettings.WrinklePreset.Get()) == RemovedAssetPath)
-    {
-        BrushSettings.WrinklePreset = nullptr;
-        RefreshWrinklePresetThumbnail();
+        BrushSettings.WrinkleNormalTexture = nullptr;
         PushBrushSettingsToViewport();
         RefreshStrokeOverlay();
     }
+    RefreshWrinkleTexturePalette();
+    RefreshWrinkleNormalThumbnail();
+}
 
-    if (!bClearedSelectedThumbnail)
+void SWetWrinkleEditorPanel::HandleWrinkleTextureAssetUpdated(const FAssetData& AssetData)
+{
+    if (IsAssetInsideWrinkleTextureSearchPaths(AssetData))
     {
-        RefreshWrinklePresetThumbnail();
+        RefreshWrinkleTexturePalette();
+        RefreshWrinkleNormalThumbnail();
     }
 }
 
-void SWetWrinkleEditorPanel::HandleWrinklePresetPaletteAssetUpdated(const FAssetData& AssetData)
+TSharedRef<SWidget> SWetWrinkleEditorPanel::BuildWrinkleTexturePalette()
 {
-    const FSoftObjectPath UpdatedAssetPath = AssetData.ToSoftObjectPath();
-    for (const TSharedPtr<FWetWrinklePresetPaletteItem>& Item : WrinklePresetPaletteItems)
-    {
-        if (Item.IsValid() && (Item->PresetPath == UpdatedAssetPath || Item->ThumbnailTexturePath == UpdatedAssetPath))
-        {
-            RefreshWrinklePresetPaletteItemState(Item);
-        }
-    }
-
-    RefreshWrinklePresetThumbnail();
-}
-
-TSharedRef<SWidget> SWetWrinkleEditorPanel::BuildWrinklePresetPalette()
-{
-    TSharedRef<SWrapBox> WrapBox = SAssignNew(WrinklePresetPaletteWrapBox, SWrapBox)
+    TSharedRef<SWrapBox> WrapBox = SAssignNew(WrinkleTexturePaletteWrapBox, SWrapBox)
         .UseAllottedSize(true)
         .InnerSlotPadding(FVector2D(4.0f, 4.0f));
 
-    RebuildWrinklePresetPaletteWidget();
-
+    RebuildWrinkleTexturePaletteWidget();
     return SNew(SBox)
         .HeightOverride(332.0f)
             [SNew(SScrollBox)
-             + SScrollBox::Slot()
-                   [WrapBox]];
+             + SScrollBox::Slot()[WrapBox]];
 }
 
-TSharedRef<SWidget> SWetWrinkleEditorPanel::GenerateWrinklePresetPaletteTile(TSharedPtr<FWetWrinklePresetPaletteItem> Item)
+TSharedRef<SWidget> SWetWrinkleEditorPanel::GenerateWrinkleTexturePaletteTile(TSharedPtr<FWetWrinkleTexturePaletteItem> Item)
 {
-    return SNew(SButton)
-        .ButtonStyle(&WrinklePresetPaletteButtonStyle)
-        .ContentPadding(6.0f)
-        .ButtonColorAndOpacity(this, &SWetWrinkleEditorPanel::GetWrinklePresetPaletteTileColor, Item)
-        .Visibility(this, &SWetWrinkleEditorPanel::GetWrinklePresetPaletteTileVisibility, Item)
-        .ToolTipText(this, &SWetWrinkleEditorPanel::GetWrinklePresetPaletteTooltipText, Item)
-        .OnClicked(this, &SWetWrinkleEditorPanel::HandleWrinklePresetPaletteClicked, Item)
-            [SNew(SBox)
-                 .WidthOverride(144.0f)
-                 .HeightOverride(144.0f)
-                     [SNew(SScaleBox)
-                          .Stretch(EStretch::ScaleToFit)
-                          .StretchDirection(EStretchDirection::Both)
-                              [SNew(SImage)
-                                   .Image(Item.IsValid() ? &Item->ThumbnailBrush : nullptr)
-                                   .Visibility(this, &SWetWrinkleEditorPanel::GetWrinklePresetPaletteThumbnailVisibility, Item)]]];
+    return SNew(SWetWrinkleTexturePaletteTile)
+        .OnContextMenu(FOnWetWrinkleTextureTileContextMenu::CreateSP(
+            this,
+            &SWetWrinkleEditorPanel::HandleWrinkleTexturePaletteContextMenu,
+            Item))
+            [SNew(SButton)
+             .ButtonStyle(&WrinkleTexturePaletteButtonStyle)
+             .ContentPadding(6.0f)
+             .ButtonColorAndOpacity(this, &SWetWrinkleEditorPanel::GetWrinkleTexturePaletteTileColor, Item)
+             .Visibility(this, &SWetWrinkleEditorPanel::GetWrinkleTexturePaletteTileVisibility, Item)
+             .ToolTipText(this, &SWetWrinkleEditorPanel::GetWrinkleTexturePaletteTooltipText, Item)
+             .OnClicked(this, &SWetWrinkleEditorPanel::HandleWrinkleTexturePaletteClicked, Item)
+                 [SNew(SBox)
+                  .WidthOverride(144.0f)
+                  .HeightOverride(144.0f)
+                      [SNew(SScaleBox)
+                       .Stretch(EStretch::ScaleToFit)
+                       .StretchDirection(EStretchDirection::Both)
+                           [SNew(SImage)
+                            .Image(Item.IsValid() ? &Item->ThumbnailBrush : nullptr)
+                            .Visibility(this, &SWetWrinkleEditorPanel::GetWrinkleTexturePaletteThumbnailVisibility, Item)]]]];
 }
 
-FReply SWetWrinkleEditorPanel::HandleWrinklePresetPaletteClicked(TSharedPtr<FWetWrinklePresetPaletteItem> Item)
+FReply SWetWrinkleEditorPanel::HandleWrinkleTexturePaletteClicked(TSharedPtr<FWetWrinkleTexturePaletteItem> Item)
 {
     if (!Item.IsValid())
     {
         return FReply::Handled();
     }
 
-    UWetWrinklePreset* Preset = Item->Preset.Get();
-    if (Preset == nullptr && Item->PresetPath.IsValid())
+    UTexture2D* Texture = Item->Texture.Get();
+    if (Texture == nullptr && Item->TexturePath.IsValid())
     {
-        Preset = Cast<UWetWrinklePreset>(Item->PresetPath.TryLoad());
-        Item->Preset = Preset;
+        Texture = Cast<UTexture2D>(Item->TexturePath.TryLoad());
+        Item->Texture = Texture;
     }
 
-    BrushSettings.WrinklePreset = Preset;
-    if (Preset != nullptr)
-    {
-        const FWetWrinklePresetBrushDefaults& Defaults = Preset->BrushDefaults;
-        SizeCm = FMath::Max(Defaults.DefaultSizeCm, 0.1f);
-        SizeUV = SizeCm * WetWrinkleUVPerCm;
-        BrushSettings.BrushRadiusUV = SizeUV;
-        BrushSettings.Strength = FMath::Clamp(Defaults.DefaultStrength, 0.0f, 4.0f);
-        BrushSettings.Falloff = FMath::Clamp(Defaults.DefaultFalloff, 0.0f, 1.0f);
-    }
-
-    RefreshWrinklePresetThumbnail();
+    BrushSettings.WrinkleNormalTexture = Texture;
+    RefreshWrinkleNormalThumbnail();
     PushBrushSettingsToViewport();
     RefreshStrokeOverlay();
     RefreshStrokeList();
@@ -2919,74 +2978,104 @@ FReply SWetWrinkleEditorPanel::HandleWrinklePresetPaletteClicked(TSharedPtr<FWet
     return FReply::Handled();
 }
 
-FReply SWetWrinkleEditorPanel::HandleRefreshWrinklePresetPaletteClicked()
+FReply SWetWrinkleEditorPanel::HandleWrinkleTexturePaletteContextMenu(
+    const FPointerEvent& MouseEvent,
+    TSharedPtr<FWetWrinkleTexturePaletteItem> Item)
 {
-    RefreshWrinklePresetPalette(true);
-    RefreshWrinklePresetThumbnail();
-    PushBrushSettingsToViewport();
-    RefreshStrokeOverlay();
-    RefreshStrokeList();
-    RefreshWrinkleUVViewMarkersOnly();
+    if (!Item.IsValid())
+    {
+        return FReply::Handled();
+    }
+
+    FMenuBuilder MenuBuilder(true, nullptr);
+    MenuBuilder.AddMenuEntry(
+        Item->bHidden ? LOCTEXT("UnhideWrinkleTexture", "Unhide") : LOCTEXT("HideWrinkleTexture", "Hide"),
+        LOCTEXT("HideWrinkleTextureTooltip", "Change whether this texture is shown in the Wrinkle Editor palette."),
+        FSlateIcon(),
+        FUIAction(FExecuteAction::CreateSP(
+            this,
+            &SWetWrinkleEditorPanel::HandleSetWrinkleTextureHidden,
+            Item,
+            !Item->bHidden)));
+    MenuBuilder.AddMenuEntry(
+        LOCTEXT("CorrectWrinkleTexture", "Correct Normal"),
+        LOCTEXT("CorrectWrinkleTextureTooltip", "Open the normal correction preview and create a corrected Texture2D."),
+        FSlateIcon(),
+        FUIAction(FExecuteAction::CreateSP(this, &SWetWrinkleEditorPanel::HandleCorrectWrinkleTexture, Item)));
+    MenuBuilder.AddMenuEntry(
+        LOCTEXT("BrowseWrinkleTexture", "Browse to Asset"),
+        LOCTEXT("BrowseWrinkleTextureTooltip", "Select this texture in the Content Browser."),
+        FSlateIcon(),
+        FUIAction(FExecuteAction::CreateLambda([Item]()
+        {
+            if (GEditor != nullptr && Item.IsValid() && Item->Texture.IsValid())
+            {
+                TArray<UObject*> Objects{Item->Texture.Get()};
+                GEditor->SyncBrowserToObjects(Objects);
+            }
+        })));
+
+    FSlateApplication::Get().PushMenu(
+        AsShared(),
+        FWidgetPath(),
+        MenuBuilder.MakeWidget(),
+        MouseEvent.GetScreenSpacePosition(),
+        FPopupTransitionEffect(FPopupTransitionEffect::ContextMenu));
     return FReply::Handled();
 }
 
-EVisibility SWetWrinkleEditorPanel::GetWrinklePresetPaletteThumbnailVisibility(TSharedPtr<FWetWrinklePresetPaletteItem> Item) const
+FReply SWetWrinkleEditorPanel::HandleRefreshWrinkleTexturePaletteClicked()
+{
+    RefreshWrinkleTexturePalette(true);
+    RefreshWrinkleNormalThumbnail();
+    PushBrushSettingsToViewport();
+    return FReply::Handled();
+}
+
+EVisibility SWetWrinkleEditorPanel::GetWrinkleTexturePaletteThumbnailVisibility(TSharedPtr<FWetWrinkleTexturePaletteItem> Item) const
 {
     return Item.IsValid() && IsValid(Item->ThumbnailBrush.GetResourceObject()) ? EVisibility::Visible : EVisibility::Hidden;
 }
 
-EVisibility SWetWrinkleEditorPanel::GetWrinklePresetPaletteTileVisibility(TSharedPtr<FWetWrinklePresetPaletteItem> Item) const
+EVisibility SWetWrinkleEditorPanel::GetWrinkleTexturePaletteTileVisibility(TSharedPtr<FWetWrinkleTexturePaletteItem> Item) const
 {
-    return Item.IsValid() && !Item->bRemoved ? EVisibility::Visible : EVisibility::Collapsed;
+    if (!Item.IsValid() || Item->bRemoved)
+    {
+        return EVisibility::Collapsed;
+    }
+    return !Item->bHidden || GetDefault<UWetWrinkleEditorSettings>()->bShowHiddenNormalTextures
+               ? EVisibility::Visible
+               : EVisibility::Collapsed;
 }
 
-FText SWetWrinkleEditorPanel::GetWrinklePresetPaletteTooltipText(TSharedPtr<FWetWrinklePresetPaletteItem> Item) const
+FText SWetWrinkleEditorPanel::GetWrinkleTexturePaletteTooltipText(TSharedPtr<FWetWrinkleTexturePaletteItem> Item) const
 {
     if (!Item.IsValid())
     {
         return FText::GetEmpty();
     }
 
-    const UWetWrinklePreset* Preset = Item->Preset.Get();
-    FText StateText = LOCTEXT("WrinklePresetPaletteMissingTooltip", "Missing");
-    if (Preset != nullptr)
-    {
-        if (Preset->IsUsableForBrush())
-        {
-            StateText = Preset->IsBuildStale()
-                            ? LOCTEXT("WrinklePresetPaletteStaleTooltip", "Stale")
-                            : LOCTEXT("WrinklePresetPaletteReadyTooltip", "Ready");
-        }
-    }
-
     return FText::Format(
-        LOCTEXT("WrinklePresetPaletteTooltip", "{0}\nTexture Status : {1}"),
+        LOCTEXT("WrinkleTexturePaletteTooltip", "{0}\n{1}\nTexture Status : {2}"),
         Item->DisplayName,
-        StateText);
+        FText::FromString(Item->TexturePath.ToString()),
+        Item->bHidden ? LOCTEXT("TextureHidden", "Hidden") : LOCTEXT("TextureVisible", "Visible"));
 }
 
-FSlateColor SWetWrinkleEditorPanel::GetWrinklePresetPaletteTileColor(TSharedPtr<FWetWrinklePresetPaletteItem> Item) const
+FSlateColor SWetWrinkleEditorPanel::GetWrinkleTexturePaletteTileColor(TSharedPtr<FWetWrinkleTexturePaletteItem> Item) const
 {
-    const UWetWrinklePreset* ItemPreset = Item.IsValid() ? Item->Preset.Get() : nullptr;
-    const bool bIsSelected = ItemPreset != nullptr &&
-        (BrushSettings.WrinklePreset == ItemPreset ||
-         (BrushSettings.WrinklePreset != nullptr && Item.IsValid() && Item->PresetPath == FSoftObjectPath(BrushSettings.WrinklePreset.Get())));
-    if (bIsSelected)
-    {
-        return FSlateColor(FLinearColor(0.18f, 0.42f, 0.80f, 1.0f));
-    }
-
-    const bool bUsable = ItemPreset != nullptr && ItemPreset->IsUsableForBrush();
-    if (!bUsable)
+    if (!Item.IsValid() || !Item->Texture.IsValid())
     {
         return FSlateColor(FLinearColor(0.15f, 0.08f, 0.08f, 1.0f));
     }
-
-    if (ItemPreset->IsBuildStale())
+    if (BrushSettings.WrinkleNormalTexture == Item->Texture.Get())
     {
-        return FSlateColor(FLinearColor(0.22f, 0.17f, 0.05f, 1.0f));
+        return FSlateColor(FLinearColor(0.18f, 0.42f, 0.80f, 1.0f));
     }
-
+    if (Item->bHidden)
+    {
+        return FSlateColor(FLinearColor(0.16f, 0.12f, 0.06f, 1.0f));
+    }
     return FSlateColor(FLinearColor(0.10f, 0.10f, 0.10f, 1.0f));
 }
 
@@ -3498,110 +3587,222 @@ TSharedRef<ITableRow> SWetWrinkleEditorPanel::GeneratePartMapRow(FWetPartEntryPt
     return FWCAEditorWidgets::GeneratePartMapRow(Item, OwnerTable);
 }
 
-FString SWetWrinkleEditorPanel::GetWrinklePresetObjectPath() const
+FString SWetWrinkleEditorPanel::GetWrinkleNormalTextureObjectPath() const
 {
-    return BrushSettings.WrinklePreset != nullptr ? BrushSettings.WrinklePreset->GetPathName() : FString();
+    return BrushSettings.WrinkleNormalTexture != nullptr ? BrushSettings.WrinkleNormalTexture->GetPathName() : FString();
 }
 
-void SWetWrinkleEditorPanel::HandleWrinklePresetChanged(const FAssetData& AssetData)
+void SWetWrinkleEditorPanel::HandleWrinkleNormalTextureChanged(const FAssetData& AssetData)
 {
-    BrushSettings.WrinklePreset = Cast<UWetWrinklePreset>(AssetData.GetAsset());
-    FString UnusableReason;
-    IsCurrentWrinklePresetUsable(&UnusableReason);
-
-    if (BrushSettings.WrinklePreset != nullptr)
-    {
-        const FWetWrinklePresetBrushDefaults& Defaults = BrushSettings.WrinklePreset->BrushDefaults;
-        SizeCm = FMath::Max(Defaults.DefaultSizeCm, 0.1f);
-        SizeUV = SizeCm * WetWrinkleUVPerCm;
-        BrushSettings.BrushRadiusUV = SizeUV;
-        BrushSettings.Strength = FMath::Clamp(Defaults.DefaultStrength, 0.0f, 4.0f);
-        BrushSettings.Falloff = FMath::Clamp(Defaults.DefaultFalloff, 0.0f, 1.0f);
-    }
-
-    RefreshWrinklePresetThumbnail();
+    BrushSettings.WrinkleNormalTexture = Cast<UTexture2D>(AssetData.GetAsset());
+    RefreshWrinkleNormalThumbnail();
     PushBrushSettingsToViewport();
     RefreshStrokeOverlay();
     RefreshStrokeList();
     RefreshWrinkleUVViewMarkersOnly();
 }
 
-void SWetWrinkleEditorPanel::RefreshWrinklePresetThumbnail()
+void SWetWrinkleEditorPanel::RefreshWrinkleNormalThumbnail()
 {
-    UTexture2D* CorrectedNormalTexture = BrushSettings.WrinklePreset != nullptr
-                                             ? BrushSettings.WrinklePreset->GetNormalTextureForBrush()
-                                             : nullptr;
-    SelectedWrinklePresetThumbnailBrush.SetResourceObject(CorrectedNormalTexture);
-    SelectedWrinklePresetThumbnailBrush.SetImageSize(
-        CorrectedNormalTexture != nullptr
-            ? FVector2D(FMath::Max(CorrectedNormalTexture->GetSizeX(), 1), FMath::Max(CorrectedNormalTexture->GetSizeY(), 1))
+    UTexture2D* Texture = BrushSettings.WrinkleNormalTexture;
+    SelectedWrinkleNormalThumbnailBrush.SetResourceObject(Texture);
+    SelectedWrinkleNormalThumbnailBrush.SetImageSize(
+        Texture != nullptr
+            ? FVector2D(FMath::Max(Texture->GetSizeX(), 1), FMath::Max(Texture->GetSizeY(), 1))
             : FVector2D(128.0f, 128.0f));
 }
 
-const FSlateBrush* SWetWrinkleEditorPanel::GetWrinklePresetThumbnailBrush() const
+const FSlateBrush* SWetWrinkleEditorPanel::GetWrinkleNormalThumbnailBrush() const
 {
-    return &SelectedWrinklePresetThumbnailBrush;
+    return &SelectedWrinkleNormalThumbnailBrush;
 }
 
-EVisibility SWetWrinkleEditorPanel::GetWrinklePresetThumbnailVisibility() const
+EVisibility SWetWrinkleEditorPanel::GetWrinkleNormalThumbnailVisibility() const
 {
-    return IsValid(SelectedWrinklePresetThumbnailBrush.GetResourceObject()) ? EVisibility::Visible : EVisibility::Hidden;
+    return IsValid(SelectedWrinkleNormalThumbnailBrush.GetResourceObject()) ? EVisibility::Visible : EVisibility::Hidden;
 }
 
-FText SWetWrinkleEditorPanel::GetWrinklePresetStatusText() const
+FText SWetWrinkleEditorPanel::GetWrinkleNormalStatusText() const
 {
-    const UWetWrinklePreset* Preset = BrushSettings.WrinklePreset.Get();
-    if (Preset == nullptr)
-    {
-        return LOCTEXT("WrinklePresetNoSelection", "No preset selected.");
-    }
-
-    FString Reason;
-    if (!Preset->IsUsableForBrush(&Reason))
-    {
-        return FText::FromString(Reason);
-    }
-
-    if (Preset->IsBuildStale())
-    {
-        return LOCTEXT("WrinklePresetStale", "Preset is stale. Existing generated textures will be used; rebuild is recommended.");
-    }
-
-    return LOCTEXT("WrinklePresetReady", "Ready.");
+    return BrushSettings.WrinkleNormalTexture != nullptr
+               ? FText::Format(
+                     LOCTEXT("WrinkleNormalSelected", "Texture: {0}"),
+                     FText::FromString(BrushSettings.WrinkleNormalTexture->GetName()))
+               : LOCTEXT("WrinkleNormalNoSelection", "No wrinkle normal texture selected.");
 }
 
-FSlateColor SWetWrinkleEditorPanel::GetWrinklePresetStatusColor() const
+FSlateColor SWetWrinkleEditorPanel::GetWrinkleNormalStatusColor() const
 {
-    const UWetWrinklePreset* Preset = BrushSettings.WrinklePreset.Get();
-    if (Preset == nullptr || !Preset->IsUsableForBrush())
-    {
-        return FSlateColor(FLinearColor(1.0f, 0.35f, 0.25f));
-    }
-
-    if (Preset->IsBuildStale())
-    {
-        return FSlateColor(FLinearColor(1.0f, 0.75f, 0.25f));
-    }
-
-    return FSlateColor(FLinearColor(0.35f, 0.9f, 0.45f));
+    return BrushSettings.WrinkleNormalTexture != nullptr
+               ? FSlateColor(FLinearColor(0.35f, 0.9f, 0.45f))
+               : FSlateColor(FLinearColor(1.0f, 0.55f, 0.25f));
 }
 
-FReply SWetWrinkleEditorPanel::HandleOpenWrinklePresetClicked()
+FReply SWetWrinkleEditorPanel::HandleOpenWrinkleNormalTextureClicked()
 {
     if (UAssetEditorSubsystem* AssetEditorSubsystem = GEditor != nullptr ? GEditor->GetEditorSubsystem<UAssetEditorSubsystem>() : nullptr)
     {
-        if (BrushSettings.WrinklePreset != nullptr)
+        if (BrushSettings.WrinkleNormalTexture != nullptr)
         {
-            AssetEditorSubsystem->OpenEditorForAsset(BrushSettings.WrinklePreset.Get());
+            AssetEditorSubsystem->OpenEditorForAsset(BrushSettings.WrinkleNormalTexture.Get());
         }
     }
-
     return FReply::Handled();
 }
 
-bool SWetWrinkleEditorPanel::CanOpenWrinklePreset() const
+bool SWetWrinkleEditorPanel::CanOpenWrinkleNormalTexture() const
 {
-    return BrushSettings.WrinklePreset != nullptr;
+    return BrushSettings.WrinkleNormalTexture != nullptr;
+}
+
+FReply SWetWrinkleEditorPanel::HandleAddWrinkleTextureSearchPathClicked()
+{
+    const FString Path = WrinkleTextureSearchPathTextBox.IsValid()
+                             ? WrinkleTextureSearchPathTextBox->GetText().ToString()
+                             : FString();
+    if (!GetMutableDefault<UWetWrinkleEditorSettings>()->AddNormalTextureSearchPath(Path))
+    {
+        FMessageDialog::Open(
+            EAppMsgType::Ok,
+            LOCTEXT("InvalidWrinkleTexturePath", "Enter a unique Unreal Content path beginning with '/', for example /Game/Wrinkles."));
+        return FReply::Handled();
+    }
+
+    WrinkleTextureSearchPathTextBox->SetText(FText::GetEmpty());
+    RefreshWrinkleTexturePalette(true);
+    return FReply::Handled();
+}
+
+TSharedRef<SWidget> SWetWrinkleEditorPanel::BuildWrinkleTextureSearchPathMenu()
+{
+    FMenuBuilder MenuBuilder(true, nullptr);
+    TArray<FString> SearchPaths;
+    GetDefault<UWetWrinkleEditorSettings>()->GetNormalTextureSearchPaths(SearchPaths);
+    for (const FString& Path : SearchPaths)
+    {
+        const bool bDefaultPath = Path == UWetWrinkleEditorSettings::DefaultNormalTexturePath;
+        MenuBuilder.AddWidget(
+            SNew(SHorizontalBox)
+            + SHorizontalBox::Slot()
+                  .FillWidth(1.0f)
+                  .VAlign(VAlign_Center)
+                      [SNew(STextBlock).Text(FText::FromString(Path))]
+            + SHorizontalBox::Slot()
+                  .AutoWidth()
+                      [SNew(SButton)
+                       .Visibility(bDefaultPath ? EVisibility::Collapsed : EVisibility::Visible)
+                       .ButtonStyle(FAppStyle::Get(), "SimpleButton")
+                       .ToolTipText(LOCTEXT("RemoveWrinkleTexturePath", "Remove this search path."))
+                       .OnClicked_Lambda([this, Path]()
+                       {
+                           HandleRemoveWrinkleTextureSearchPath(Path);
+                           return FReply::Handled();
+                       })
+                           [SNew(SImage).Image(FAppStyle::GetBrush("Icons.Delete"))]],
+            FText::GetEmpty(),
+            true);
+    }
+    return MenuBuilder.MakeWidget();
+}
+
+void SWetWrinkleEditorPanel::HandleRemoveWrinkleTextureSearchPath(FString Path)
+{
+    GetMutableDefault<UWetWrinkleEditorSettings>()->RemoveNormalTextureSearchPath(Path);
+    RefreshWrinkleTexturePalette();
+}
+
+ECheckBoxState SWetWrinkleEditorPanel::GetShowHiddenWrinkleTexturesState() const
+{
+    return GetDefault<UWetWrinkleEditorSettings>()->bShowHiddenNormalTextures
+               ? ECheckBoxState::Checked
+               : ECheckBoxState::Unchecked;
+}
+
+void SWetWrinkleEditorPanel::HandleShowHiddenWrinkleTexturesChanged(const ECheckBoxState NewState)
+{
+    UWetWrinkleEditorSettings* UserSettings = GetMutableDefault<UWetWrinkleEditorSettings>();
+    UserSettings->bShowHiddenNormalTextures = NewState == ECheckBoxState::Checked;
+    UserSettings->SaveConfig();
+    RebuildWrinkleTexturePaletteWidget();
+}
+
+void SWetWrinkleEditorPanel::HandleSetWrinkleTextureHidden(
+    TSharedPtr<FWetWrinkleTexturePaletteItem> Item,
+    const bool bHidden)
+{
+    if (!Item.IsValid())
+    {
+        return;
+    }
+    GetMutableDefault<UWetWrinkleEditorSettings>()->SetNormalTextureHidden(Item->TexturePath, bHidden);
+    Item->bHidden = bHidden;
+    RebuildWrinkleTexturePaletteWidget();
+}
+
+void SWetWrinkleEditorPanel::HandleCorrectWrinkleTexture(TSharedPtr<FWetWrinkleTexturePaletteItem> Item)
+{
+    if (!Item.IsValid())
+    {
+        return;
+    }
+
+    UTexture2D* Texture = Item->Texture.Get();
+    if (Texture == nullptr)
+    {
+        Texture = Cast<UTexture2D>(Item->TexturePath.TryLoad());
+    }
+    if (Texture == nullptr)
+    {
+        return;
+    }
+
+    TSharedRef<SWindow> CorrectionWindow =
+        SNew(SWindow)
+        .Title(FText::Format(LOCTEXT("CorrectWrinkleNormalWindowTitle", "Correct Wrinkle Normal - {0}"), Item->DisplayName))
+        .ClientSize(FVector2D(1200.0f, 800.0f))
+        .SupportsMaximize(true)
+        .SupportsMinimize(false);
+    CorrectionWindow->SetContent(
+        SNew(SWetWrinkleNormalCorrectionDialog)
+        .ParentWindow(CorrectionWindow)
+        .SourceTexture(Texture)
+        .WetClothingAsset(WetClothingAsset.Get())
+        .OnCorrectedTextureCreated(FOnWetWrinkleCorrectedTextureCreated::CreateSP(
+            this,
+            &SWetWrinkleEditorPanel::HandleCorrectedWrinkleTextureCreated,
+            Item->TexturePath)));
+
+    if (const TSharedPtr<SWindow> OwnerWindow = FSlateApplication::Get().FindWidgetWindow(AsShared()))
+    {
+        FSlateApplication::Get().AddWindowAsNativeChild(CorrectionWindow, OwnerWindow.ToSharedRef());
+    }
+    else
+    {
+        FSlateApplication::Get().AddWindow(CorrectionWindow);
+    }
+}
+
+void SWetWrinkleEditorPanel::HandleCorrectedWrinkleTextureCreated(
+    UTexture2D* CorrectedTexture,
+    const bool bHideOriginal,
+    const FSoftObjectPath OriginalPath)
+{
+    if (CorrectedTexture == nullptr)
+    {
+        return;
+    }
+
+    UWetWrinkleEditorSettings* UserSettings = GetMutableDefault<UWetWrinkleEditorSettings>();
+    if (bHideOriginal)
+    {
+        UserSettings->SetNormalTextureHidden(OriginalPath, true);
+    }
+
+    BrushSettings.WrinkleNormalTexture = CorrectedTexture;
+    RefreshWrinkleTexturePalette(true);
+    RefreshWrinkleNormalThumbnail();
+    PushBrushSettingsToViewport();
+    RefreshStrokeOverlay();
 }
 
 TSharedRef<ITableRow> SWetWrinkleEditorPanel::GenerateStrokeRow(FStrokeListItemPtr Item, const TSharedRef<STableViewBase>& OwnerTable)
@@ -5228,7 +5429,7 @@ FWetWrinklePatchPlacement SWetWrinkleEditorPanel::MakeStampFromHit(const FWetWri
     Stamp.Scale = FVector2D(1.0f, 1.0f);
     Stamp.Strength = BrushSettings.Strength;
     Stamp.Falloff = BrushSettings.Falloff;
-    Stamp.WrinklePreset = BrushSettings.WrinklePreset.Get();
+    Stamp.WrinkleNormalTexture = BrushSettings.WrinkleNormalTexture;
     Stamp.AffectedWetPartID = INDEX_NONE;
 #if WITH_EDITORONLY_DATA
     Stamp.bHasEditorSurface = true;
@@ -5248,19 +5449,22 @@ UTexture* SWetWrinkleEditorPanel::ResolveSourceTextureForStamp(int32 MaterialSlo
         UVChannelIndex);
 }
 
-bool SWetWrinkleEditorPanel::IsCurrentWrinklePresetUsable(FString* OutReason) const
+bool SWetWrinkleEditorPanel::IsCurrentWrinkleNormalUsable(FString* OutReason) const
 {
-    const UWetWrinklePreset* Preset = BrushSettings.WrinklePreset.Get();
-    if (Preset == nullptr)
+    if (BrushSettings.WrinkleNormalTexture == nullptr)
     {
         if (OutReason != nullptr)
         {
-            *OutReason = TEXT("Select a Wet Wrinkle Preset before painting wrinkle patches.");
+            *OutReason = TEXT("Select a wrinkle normal texture before painting wrinkle patches.");
         }
         return false;
     }
 
-    return Preset->IsUsableForBrush(OutReason);
+    if (OutReason != nullptr)
+    {
+        OutReason->Reset();
+    }
+    return true;
 }
 
 FText SWetWrinkleEditorPanel::GetMaterialSlotDisplayText(int32 MaterialSlotIndex) const

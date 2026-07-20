@@ -23,7 +23,6 @@ class STableViewBase;
 class UWetClothingAsset;
 class UTexture;
 class UTexture2D;
-class UWetWrinklePreset;
 struct FAssetData;
 struct FWetClothingWetPartEntry;
 struct FWetWrinklePatchPlacement;
@@ -49,14 +48,14 @@ struct FWetWrinkleBrushPresetOption
     FSoftObjectPath TexturePath;
 };
 
-struct FWetWrinklePresetPaletteItem
+struct FWetWrinkleTexturePaletteItem
 {
     FText DisplayName;
-    FSoftObjectPath PresetPath;
-    FSoftObjectPath ThumbnailTexturePath;
-    TWeakObjectPtr<UWetWrinklePreset> Preset;
+    FSoftObjectPath TexturePath;
+    TWeakObjectPtr<UTexture2D> Texture;
     FSlateBrush ThumbnailBrush;
     bool bRemoved = false;
+    bool bHidden = false;
 };
 
 class SWetWrinkleEditorPanel : public SCompoundWidget, public FEditorUndoClient
@@ -99,13 +98,13 @@ class SWetWrinkleEditorPanel : public SCompoundWidget, public FEditorUndoClient
     void RefreshStrokeOverlay(bool bRebuildAccumulatedPreview = true);
     void RefreshMaterialSlotOptions();
     void RefreshBrushPresetOptions();
-    void RefreshWrinklePresetPalette(bool bForceAssetScan = false);
-    void RebuildWrinklePresetPaletteWidget();
-    void RefreshWrinklePresetPaletteState();
-    void RefreshWrinklePresetPaletteItemState(const TSharedPtr<FWetWrinklePresetPaletteItem>& Item);
-    EActiveTimerReturnType HandleWrinklePresetPaletteRefreshTimer(double InCurrentTime, float InDeltaTime);
-    void HandleWrinklePresetPaletteAssetRemoved(const FAssetData& AssetData);
-    void HandleWrinklePresetPaletteAssetUpdated(const FAssetData& AssetData);
+    void RefreshWrinkleTexturePalette(bool bForceAssetScan = false);
+    void RebuildWrinkleTexturePaletteWidget();
+    void RefreshWrinkleTexturePaletteState();
+    void RefreshWrinkleTexturePaletteItemState(const TSharedPtr<FWetWrinkleTexturePaletteItem>& Item);
+    void HandleWrinkleTextureAssetAdded(const FAssetData& AssetData);
+    void HandleWrinkleTextureAssetRemoved(const FAssetData& AssetData);
+    void HandleWrinkleTextureAssetUpdated(const FAssetData& AssetData);
     void RefreshPartMapItems();
     void RefreshMaterialTextures();
     void RefreshTextureToggleWidgets();
@@ -164,23 +163,33 @@ class SWetWrinkleEditorPanel : public SCompoundWidget, public FEditorUndoClient
     UTexture* ResolveTextureAddressTexture() const;
     void SaveSelectedTexture();
 
-    FString GetWrinklePresetObjectPath() const;
-    void HandleWrinklePresetChanged(const FAssetData& AssetData);
-    TSharedRef<SWidget> BuildWrinklePresetPalette();
-    TSharedRef<SWidget> GenerateWrinklePresetPaletteTile(TSharedPtr<FWetWrinklePresetPaletteItem> Item);
-    FReply HandleWrinklePresetPaletteClicked(TSharedPtr<FWetWrinklePresetPaletteItem> Item);
-    FReply HandleRefreshWrinklePresetPaletteClicked();
-    FSlateColor GetWrinklePresetPaletteTileColor(TSharedPtr<FWetWrinklePresetPaletteItem> Item) const;
-    EVisibility GetWrinklePresetPaletteTileVisibility(TSharedPtr<FWetWrinklePresetPaletteItem> Item) const;
-    FText GetWrinklePresetPaletteTooltipText(TSharedPtr<FWetWrinklePresetPaletteItem> Item) const;
-    EVisibility GetWrinklePresetPaletteThumbnailVisibility(TSharedPtr<FWetWrinklePresetPaletteItem> Item) const;
-    void RefreshWrinklePresetThumbnail();
-    const FSlateBrush* GetWrinklePresetThumbnailBrush() const;
-    EVisibility GetWrinklePresetThumbnailVisibility() const;
-    FText GetWrinklePresetStatusText() const;
-    FSlateColor GetWrinklePresetStatusColor() const;
-    FReply HandleOpenWrinklePresetClicked();
-    bool CanOpenWrinklePreset() const;
+    FString GetWrinkleNormalTextureObjectPath() const;
+    void HandleWrinkleNormalTextureChanged(const FAssetData& AssetData);
+    TSharedRef<SWidget> BuildWrinkleTexturePalette();
+    TSharedRef<SWidget> GenerateWrinkleTexturePaletteTile(TSharedPtr<FWetWrinkleTexturePaletteItem> Item);
+    FReply HandleWrinkleTexturePaletteClicked(TSharedPtr<FWetWrinkleTexturePaletteItem> Item);
+    FReply HandleWrinkleTexturePaletteContextMenu(const FPointerEvent& MouseEvent, TSharedPtr<FWetWrinkleTexturePaletteItem> Item);
+    FReply HandleRefreshWrinkleTexturePaletteClicked();
+    FSlateColor GetWrinkleTexturePaletteTileColor(TSharedPtr<FWetWrinkleTexturePaletteItem> Item) const;
+    EVisibility GetWrinkleTexturePaletteTileVisibility(TSharedPtr<FWetWrinkleTexturePaletteItem> Item) const;
+    FText GetWrinkleTexturePaletteTooltipText(TSharedPtr<FWetWrinkleTexturePaletteItem> Item) const;
+    EVisibility GetWrinkleTexturePaletteThumbnailVisibility(TSharedPtr<FWetWrinkleTexturePaletteItem> Item) const;
+    void RefreshWrinkleNormalThumbnail();
+    const FSlateBrush* GetWrinkleNormalThumbnailBrush() const;
+    EVisibility GetWrinkleNormalThumbnailVisibility() const;
+    FText GetWrinkleNormalStatusText() const;
+    FSlateColor GetWrinkleNormalStatusColor() const;
+    FReply HandleOpenWrinkleNormalTextureClicked();
+    bool CanOpenWrinkleNormalTexture() const;
+    FReply HandleAddWrinkleTextureSearchPathClicked();
+    TSharedRef<SWidget> BuildWrinkleTextureSearchPathMenu();
+    void HandleRemoveWrinkleTextureSearchPath(FString Path);
+    ECheckBoxState GetShowHiddenWrinkleTexturesState() const;
+    void HandleShowHiddenWrinkleTexturesChanged(ECheckBoxState NewState);
+    void HandleSetWrinkleTextureHidden(TSharedPtr<FWetWrinkleTexturePaletteItem> Item, bool bHidden);
+    void HandleCorrectWrinkleTexture(TSharedPtr<FWetWrinkleTexturePaletteItem> Item);
+    void HandleCorrectedWrinkleTextureCreated(UTexture2D* CorrectedTexture, bool bHideOriginal, FSoftObjectPath OriginalPath);
+    bool IsAssetInsideWrinkleTextureSearchPaths(const FAssetData& AssetData) const;
     TSharedRef<ITableRow> GenerateStrokeRow(FStrokeListItemPtr Item, const TSharedRef<STableViewBase>& OwnerTable);
     void HandleStrokeSelectionChanged(FStrokeListItemPtr Item, ESelectInfo::Type SelectInfo);
     FReply HandleClearStrokesClicked();
@@ -267,7 +276,7 @@ class SWetWrinkleEditorPanel : public SCompoundWidget, public FEditorUndoClient
     bool ShouldAddProceduralRidgePoint(const FWetWrinkleSurfaceHit& SurfaceHit) const;
     TArray<FWetWrinkleSurfaceHit> BuildSmoothedProceduralRidgeHits() const;
     UTexture* ResolveSourceTextureForStamp(int32 MaterialSlotIndex, int32 UVChannelIndex) const;
-    bool IsCurrentWrinklePresetUsable(FString* OutReason = nullptr) const;
+    bool IsCurrentWrinkleNormalUsable(FString* OutReason = nullptr) const;
     FText GetMaterialSlotDisplayText(int32 MaterialSlotIndex) const;
     TSharedPtr<int32> FindMaterialSlotOption(int32 MaterialSlotIndex) const;
     FMaterialSlotItemPtr FindMaterialSlotItem(int32 MaterialSlotIndex) const;
@@ -303,9 +312,9 @@ class SWetWrinkleEditorPanel : public SCompoundWidget, public FEditorUndoClient
     TArray<FMaterialSlotItemPtr> MaterialSlotItems;
     TArray<FWetPartEntryPtr> PartMapItems;
     TArray<TSharedPtr<FWetWrinkleBrushPresetOption>> BrushPresetOptions;
-    TArray<TSharedPtr<FWetWrinklePresetPaletteItem>> WrinklePresetPaletteItems;
-    TSharedPtr<SWrapBox> WrinklePresetPaletteWrapBox;
-    FButtonStyle WrinklePresetPaletteButtonStyle;
+    TArray<TSharedPtr<FWetWrinkleTexturePaletteItem>> WrinkleTexturePaletteItems;
+    TSharedPtr<SWrapBox> WrinkleTexturePaletteWrapBox;
+    FButtonStyle WrinkleTexturePaletteButtonStyle;
     TSharedPtr<FAssetThumbnailPool> MaterialThumbnailPool;
     TArray<TSharedPtr<FAssetThumbnail>> MaterialSlotThumbnails;
     TArray<FTextureItemPtr> TextureItems;
@@ -314,7 +323,8 @@ class SWetWrinkleEditorPanel : public SCompoundWidget, public FEditorUndoClient
     TSharedPtr<class SComboBox<FTextureItemPtr>> TextureComboBox;
     TSharedPtr<class SBox> SelectedTextureComboContentBox;
     TSharedPtr<class SBox> TextureSelectionContainer;
-    FSlateBrush SelectedWrinklePresetThumbnailBrush;
+    FSlateBrush SelectedWrinkleNormalThumbnailBrush;
+    TSharedPtr<class SEditableTextBox> WrinkleTextureSearchPathTextBox;
     bool bShowMaterialTextureInUVView = true;
     TSharedPtr<class SListView<FWetPartEntryPtr>> PartMapListView;
     FWetWrinkleBrushSettings BrushSettings;

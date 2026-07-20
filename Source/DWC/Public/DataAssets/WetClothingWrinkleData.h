@@ -5,7 +5,6 @@
 
 class UTexture;
 class UTexture2D;
-class UWetWrinklePreset;
 
 USTRUCT(BlueprintType)
 struct DWC_API FWetWrinklePatchPlacement
@@ -49,8 +48,9 @@ struct DWC_API FWetWrinklePatchPlacement
     UPROPERTY(EditAnywhere, Category = "Wet Wrinkle Patch", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float Falloff = 0.5f;
 
+    // Canonical normal source for patch preview and bake.
     UPROPERTY(EditAnywhere, Category = "Wet Wrinkle Patch")
-    TObjectPtr<UWetWrinklePreset> WrinklePreset = nullptr;
+    TObjectPtr<UTexture2D> WrinkleNormalTexture = nullptr;
 
     UPROPERTY(EditAnywhere, Category = "Wet Wrinkle Patch")
     int32 AffectedWetPartID = INDEX_NONE;
@@ -357,6 +357,24 @@ struct DWC_API FWetWrinkleGeneratedUVSlot
 };
 
 USTRUCT(BlueprintType)
+struct DWC_API FWetWrinkleCoverageExtractionSettings
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Coverage", meta = (ClampMin = "0", ClampMax = "8"))
+    int32 InputBlurRadiusPixels = 2;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Coverage", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float ConvexityThreshold = 0.2f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Coverage", meta = (ClampMin = "1", ClampMax = "1024"))
+    int32 MinimumComponentPixels = 8;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Coverage")
+    bool bInvertConvexity = false;
+};
+
+USTRUCT(BlueprintType)
 struct DWC_API FWetClothingWrinkleData
 {
     GENERATED_BODY()
@@ -389,6 +407,9 @@ struct DWC_API FWetClothingWrinkleData
 
     UPROPERTY(EditAnywhere, Category = "Bake")
     FWetWrinkleBakeSettings BakeSettings;
+
+    UPROPERTY(EditAnywhere, Category = "Bake|Coverage")
+    FWetWrinkleCoverageExtractionSettings CoverageExtractionSettings;
 
     UPROPERTY(VisibleAnywhere, Category = "Baked")
     TArray<FWetWrinkleBakedMapSet> BakedWrinkleMaps;

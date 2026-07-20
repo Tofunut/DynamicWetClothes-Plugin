@@ -1,15 +1,12 @@
 #include "Core/DWCEditorStyle.h"
-#include "AssetToolsModule.h"
 #include "Components/DynamicWetClothesComponentCustomization.h"
 #include "Editor.h"
 #include "HAL/IConsoleManager.h"
-#include "IAssetTools.h"
 #include "Misc/MessageDialog.h"
 #include "Modules/ModuleManager.h"
 #include "PropertyEditorModule.h"
 #include "Subsystems/EditorAssetSubsystem.h"
 #include "WetClothing/DerivedAssets/Materials/WCAMaterialGenerator.h"
-#include "WetClothing/Modes/Wrinkle/Preset/WetWrinklePresetAssetTypeActions.h"
 
 class FDWCEditorModule : public IModuleInterface
 {
@@ -17,10 +14,6 @@ class FDWCEditorModule : public IModuleInterface
     virtual void StartupModule() override
     {
         FDWCEditorStyle::Initialize();
-
-        IAssetTools& AssetTools = FModuleManager::LoadModuleChecked<FAssetToolsModule>(TEXT("AssetTools")).Get();
-        WetWrinklePresetAssetTypeActions = MakeShared<FWetWrinklePresetAssetTypeActions>();
-        AssetTools.RegisterAssetTypeActions(WetWrinklePresetAssetTypeActions.ToSharedRef());
 
         FPropertyEditorModule& PropertyEditorModule = FModuleManager::LoadModuleChecked<FPropertyEditorModule>(TEXT("PropertyEditor"));
         PropertyEditorModule.RegisterCustomClassLayout(
@@ -51,13 +44,6 @@ class FDWCEditorModule : public IModuleInterface
         {
             IConsoleManager::Get().UnregisterConsoleObject(ValidateApplyWetnessFunctionCommand);
             ValidateApplyWetnessFunctionCommand = nullptr;
-        }
-
-        if (WetWrinklePresetAssetTypeActions.IsValid() && FModuleManager::Get().IsModuleLoaded(TEXT("AssetTools")))
-        {
-            IAssetTools& AssetTools = FModuleManager::GetModuleChecked<FAssetToolsModule>(TEXT("AssetTools")).Get();
-            AssetTools.UnregisterAssetTypeActions(WetWrinklePresetAssetTypeActions.ToSharedRef());
-            WetWrinklePresetAssetTypeActions.Reset();
         }
 
         if (FModuleManager::Get().IsModuleLoaded(TEXT("PropertyEditor")))
@@ -133,7 +119,6 @@ class FDWCEditorModule : public IModuleInterface
         }
     }
 
-    TSharedPtr<IAssetTypeActions> WetWrinklePresetAssetTypeActions;
     IConsoleObject*               RepairApplyWetnessFunctionCommand = nullptr;
     IConsoleObject*               ValidateApplyWetnessFunctionCommand = nullptr;
 };

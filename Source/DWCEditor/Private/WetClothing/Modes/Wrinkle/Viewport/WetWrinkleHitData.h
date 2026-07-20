@@ -4,7 +4,6 @@
 #include "DataAssets/WetClothingWrinkleData.h"
 
 class UTexture2D;
-class UWetWrinklePreset;
 
 enum class EWetWrinkleToolMode : uint8
 {
@@ -28,7 +27,7 @@ struct FWetWrinkleBrushSettings
     EWetWrinkleToolMode ToolMode = EWetWrinkleToolMode::Patch;
     int32 UVChannelIndex = INDEX_NONE;
     int32 MaterialSlotIndex = INDEX_NONE;
-    TObjectPtr<UWetWrinklePreset> WrinklePreset = nullptr;
+    TObjectPtr<UTexture2D> WrinkleNormalTexture = nullptr;
     float BrushRadiusUV = 0.025f;
     float Strength = 1.0f;
     float Falloff = 0.5f;

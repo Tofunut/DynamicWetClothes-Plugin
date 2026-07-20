@@ -2,8 +2,7 @@
 
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "DataAssets/WetClothingAsset.h"
-#include "DataAssets/WetWrinklePreset.h"
-#include "DataAssets/WetWrinklePresetBuilder.h"
+#include "DataAssets/WetWrinkleNormalTextureBuilder.h"
 #include "WetClothing/Foundation/MeshAnalysis/WetClothingAssetMeshAnalyzer.h"
 #include "WetClothing/Foundation/TextureAccess/WetClothingMaterialTextureResolver.h"
 #include "WetClothing/Modes/Wrinkle/Stroke/WetProceduralRidgeRasterizer.h"
@@ -419,8 +418,7 @@ bool FWetWrinkleNormalMapBaker::BakeMaterialSlot(
     }
 
     int32 MatchingSlotUVStampCount = 0;
-    int32 MissingPresetStampCount = 0;
-    int32 MissingCorrectedNormalStampCount = 0;
+    int32 MissingNormalTextureStampCount = 0;
     int32 MissingSourceTextureStampCount = 0;
     int32 MatchingProceduralStrokeCount = 0;
     int32 InvalidProceduralStrokeCount = 0;
@@ -449,15 +447,9 @@ bool FWetWrinkleNormalMapBaker::BakeMaterialSlot(
 
                 ++MatchingSlotUVStampCount;
 
-                if (Stamp.WrinklePreset == nullptr)
+                if (Stamp.WrinkleNormalTexture == nullptr)
                 {
-                    ++MissingPresetStampCount;
-                    continue;
-                }
-
-                if (Stamp.WrinklePreset->GetNormalTextureForBrush() == nullptr)
-                {
-                    ++MissingCorrectedNormalStampCount;
+                    ++MissingNormalTextureStampCount;
                     continue;
                 }
 
@@ -522,12 +514,11 @@ bool FWetWrinkleNormalMapBaker::BakeMaterialSlot(
                 TEXT("No wrinkle patches or procedural ridge strokes were found for the selected material slot on UV channel %d."),
                 WrinkleUVChannelIndex);
         }
-        else if (MissingPresetStampCount > 0 || MissingCorrectedNormalStampCount > 0)
+        else if (MissingNormalTextureStampCount > 0)
         {
             OutErrorMessage = FString::Printf(
-                TEXT("Wrinkle patches were found, but none could be baked. Missing presets: %d, missing generated corrected normals: %d. Rebuild Wet Wrinkle Presets before baking."),
-                MissingPresetStampCount,
-                MissingCorrectedNormalStampCount);
+                TEXT("Wrinkle patches were found, but %d patch(es) do not reference a wrinkle normal texture."),
+                MissingNormalTextureStampCount);
         }
         else if (MissingSourceTextureStampCount > 0)
         {
@@ -587,33 +578,39 @@ bool FWetWrinkleNormalMapBaker::BakeGroup(
     CoverageBuffer.Init(0.0f, Width * Height);
 
     int32 BakedStampCount = 0;
-    TMap<const UWetWrinklePreset*, FWetWrinklePresetScalarBuffer> SeparationSources;
+    const FWetWrinkleCoverageExtractionSettings& CoverageSettings =
+        WetClothingAsset.Authored.WrinkleData.CoverageExtractionSettings;
+    TMap<const UTexture2D*, FWetWrinkleTextureScalarBuffer> SeparationSources;
     for (const FWetWrinklePatchPlacement* StampPtr : Group.Stamps)
     {
         const FWetWrinklePatchPlacement& Stamp = *StampPtr;
-        UTexture2D* CorrectedNormalTexture = Stamp.WrinklePreset != nullptr ? Stamp.WrinklePreset->GetNormalTextureForBrush() : nullptr;
+        UTexture2D* CorrectedNormalTexture = Stamp.WrinkleNormalTexture;
         FWetWrinkleNormalSource NormalSource(CorrectedNormalTexture);
         if (!NormalSource.IsValid() || Stamp.BrushRadiusUV <= 0.0f || Stamp.Strength <= 0.0f)
         {
             continue;
         }
 
-        const UWetWrinklePreset* Preset = Stamp.WrinklePreset.Get();
-        FWetWrinklePresetScalarBuffer* SeparationSource = SeparationSources.Find(Preset);
+        FWetWrinkleTextureScalarBuffer* SeparationSource = SeparationSources.Find(CorrectedNormalTexture);
         if (SeparationSource == nullptr)
         {
-            FWetWrinklePresetScalarBuffer NewSeparationSource;
+            FWetWrinkleTextureScalarBuffer NewSeparationSource;
             FString SeparationError;
-            if (!FWetWrinklePresetBuilder::BuildConvexSeparationBuffer(
+            if (!FWetWrinkleNormalTextureBuilder::BuildConvexSeparationBuffer(
                     CorrectedNormalTexture,
-                    Preset->SeparationSettings,
+                    CoverageSettings,
                     NewSeparationSource,
                     SeparationError))
             {
-                UE_LOG(LogTemp, Warning, TEXT("DWC wrinkle bake skipped preset '%s': %s"), *GetNameSafe(Preset), *SeparationError);
+                UE_LOG(
+                    LogTemp,
+                    Warning,
+                    TEXT("DWC wrinkle bake skipped normal texture '%s': %s"),
+                    *GetNameSafe(CorrectedNormalTexture),
+                    *SeparationError);
                 continue;
             }
-            SeparationSource = &SeparationSources.Add(Preset, MoveTemp(NewSeparationSource));
+            SeparationSource = &SeparationSources.Add(CorrectedNormalTexture, MoveTemp(NewSeparationSource));
         }
 
         ++BakedStampCount;
@@ -856,7 +853,7 @@ FString FWetWrinkleNormalMapBaker::MakeBuildSignature(
 {
     FString Canonical;
     Canonical.Reserve(4096);
-    Canonical += TEXT("DWC.WrinkleNormalMap.v15.FlaredEndpoint|");
+    Canonical += TEXT("DWC.WrinkleNormalMap.v16.Texture2DCoverage|");
     Canonical += WetClothingAsset.GetPathName();
     Canonical += FString::Printf(
         TEXT("|Slot=%d|UV=%d|LOD=%d|Size=%dx%d|Padding=%d|Source=%s"),
@@ -867,12 +864,25 @@ FString FWetWrinkleNormalMapBaker::MakeBuildSignature(
         Height,
         FMath::Clamp(Settings.PaddingPixels, 0, 64),
         *GetPathNameSafe(Group.SourceTexture));
+    const FWetWrinkleCoverageExtractionSettings& CoverageSettings =
+        WetClothingAsset.Authored.WrinkleData.CoverageExtractionSettings;
+    Canonical += FString::Printf(
+        TEXT("|CoverageBlur=%d|CoverageThreshold=%.9g|CoverageMinComponent=%d|CoverageInvert=%d"),
+        CoverageSettings.InputBlurRadiusPixels,
+        CoverageSettings.ConvexityThreshold,
+        CoverageSettings.MinimumComponentPixels,
+        CoverageSettings.bInvertConvexity ? 1 : 0);
 
     for (const FWetWrinklePatchPlacement* Stamp : Group.Stamps)
     {
-        const UWetWrinklePreset* Preset = Stamp != nullptr ? Stamp->WrinklePreset.Get() : nullptr;
+        if (Stamp == nullptr)
+        {
+            continue;
+        }
+
+        const UTexture2D* NormalTexture = Stamp->WrinkleNormalTexture;
         Canonical += FString::Printf(
-            TEXT("|Stamp:%s;UV=%.9g,%.9g;Radius=%.9g;Rot=%.9g;Scale=%.9g,%.9g;Strength=%.9g;Falloff=%.9g;Preset=%s;PresetBuild=%s;SepBlur=%d;SepThreshold=%.9g;SepMinComponent=%d;SepInvert=%d"),
+            TEXT("|Stamp:%s;UV=%.9g,%.9g;Radius=%.9g;Rot=%.9g;Scale=%.9g,%.9g;Strength=%.9g;Falloff=%.9g;NormalTexture=%s;NormalSource=%s"),
             *Stamp->PatchGuid.ToString(EGuidFormats::Digits),
             Stamp->PositionUV.X,
             Stamp->PositionUV.Y,
@@ -882,12 +892,8 @@ FString FWetWrinkleNormalMapBaker::MakeBuildSignature(
             Stamp->Scale.Y,
             Stamp->Strength,
             Stamp->Falloff,
-            *GetPathNameSafe(Preset),
-            Preset != nullptr ? *Preset->BuildSignature : TEXT(""),
-            Preset != nullptr ? Preset->SeparationSettings.InputBlurRadiusPixels : 0,
-            Preset != nullptr ? Preset->SeparationSettings.ConvexityThreshold : 0.0f,
-            Preset != nullptr ? Preset->SeparationSettings.MinimumComponentPixels : 0,
-            Preset != nullptr && Preset->SeparationSettings.bInvertConvexity ? 1 : 0);
+            *GetPathNameSafe(NormalTexture),
+            NormalTexture != nullptr ? *NormalTexture->Source.GetId().ToString(EGuidFormats::Digits) : TEXT(""));
     }
 
     for (const FWetProceduralRidgeStroke* Stroke : Group.ProceduralRidgeStrokes)

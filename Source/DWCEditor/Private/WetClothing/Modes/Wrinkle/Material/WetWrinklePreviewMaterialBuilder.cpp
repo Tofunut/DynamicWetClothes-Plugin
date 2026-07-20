@@ -615,8 +615,7 @@ return PreviewVertexColor;
             return { TEXT("Cannot compile a null wrinkle preview material.") };
         }
 
-        bool bNeedsRecompile = false;
-        Material->SetMaterialUsage(bNeedsRecompile, MATUSAGE_SkeletalMesh);
+        Material->SetMaterialUsage(MATUSAGE_SkeletalMesh);
         Material->UpdateCachedExpressionData();
 
         {

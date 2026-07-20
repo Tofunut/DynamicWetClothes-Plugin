@@ -6,6 +6,7 @@
 #include "IAssetTools.h"
 #include "MaterialEditingLibrary.h"
 #include "Interfaces/IPluginManager.h"
+#include "MaterialShared.h"
 #include "Materials/Material.h"
 #include "Materials/MaterialExpressionConstant.h"
 #include "Materials/MaterialExpressionConstant3Vector.h"
@@ -1308,6 +1309,13 @@ namespace
             return false;
         }
         bConnected &= ConnectTextureCoordinateChecked(DWCDataUV, WetnessMap, FailureReasons);
+        bConnected &= ConnectExpressionToBothApplyCalls(
+            DWCDataUV,
+            FString(),
+            CPUApply,
+            GPUApply,
+            TEXT("SurfaceWaterUV"),
+            FailureReasons);
         bConnected &= ConnectChecked(WetnessMap, TEXT("R"), GPUApply, TEXT("WetnessMap"), FailureReasons);
 
         FString CPUBaseColorOutput;
@@ -1892,6 +1900,8 @@ bool FWetClothingMaterialSetup::IsMaterialConfiguredForDwc(
         FindScalarParameter(Material, TEXT("DWC_WetRoughness")) == nullptr ||
         FindScalarParameter(Material, TEXT("DWC_SurfaceWaterStrength")) == nullptr ||
         !IsFunctionInputConnected(CPUApply, TEXT("Wetness")) ||
+        !IsFunctionInputConnected(CPUApply, TEXT("SurfaceWaterUV")) ||
+        !IsFunctionInputConnected(GPUApply, TEXT("SurfaceWaterUV")) ||
         !IsFunctionInputConnected(GPUApply, TEXT("WetnessMap")))
     {
         return false;

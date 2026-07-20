@@ -90,7 +90,7 @@ struct DWC_API FSurfaceWaterProfileParameters
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rendering", meta=(ClampMin="0.001"))
     float MaterialTimeUpdateInterval = 1.0f / 30.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rendering", meta=(ClampMin="0.0", ClampMax="8.0"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet", meta=(ClampMin="0.0", ClampMax="8.0", DisplayName="Normal Strength"))
     float NormalStrength = 1.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rendering", meta=(ClampMin="0.0", ClampMax="1.0"))
@@ -124,26 +124,26 @@ struct DWC_API FSurfaceWaterProfileParameters
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Flow")
     TObjectPtr<UTexture2D> FlowNormalTexture = nullptr;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Static Droplets", meta=(ClampMin="0.01", ClampMax="100.0"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet", meta=(ClampMin="0.01", ClampMax="100.0"))
     float DropletTiling = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Static Droplets", meta=(ClampMin="0.0", ClampMax="1.0"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet", meta=(ClampMin="0.0", ClampMax="1.0"))
     float SurfaceAmountThresholdMin = 0.25f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Static Droplets", meta=(ClampMin="0.0", ClampMax="1.0"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet", meta=(ClampMin="0.0", ClampMax="1.0"))
     float SurfaceAmountThresholdMax = 0.65f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Static Droplets", meta=(ClampMin="0.0", ClampMax="1.0"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet", meta=(ClampMin="0.0", ClampMax="1.0"))
     float DropletMaskMin = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Static Droplets", meta=(ClampMin="0.0", ClampMax="1.0"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet", meta=(ClampMin="0.0", ClampMax="1.0"))
     float DropletMaskMax = 1.0f;
 
     /** Optional profile overrides. Null keeps the Material Function defaults. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Static Droplets")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet")
     TObjectPtr<UTexture2D> DropletMaskTexture = nullptr;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Static Droplets")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet")
     TObjectPtr<UTexture2D> DropletNormalTexture = nullptr;
 
 };

@@ -16,11 +16,13 @@
 #include "WetSimulation/SurfaceWater/SurfaceWaterSimulationState.h"
 #include "Runtime/Engine/Public/Rendering/SkeletalMeshLODRenderData.h"
 #include "UObject/UnrealType.h"
+#include "Engine/SkeletalMesh.h"
 #include "Engine/Texture2D.h"
 #include "Engine/World.h"
 #include "Materials/MaterialInterface.h"
 #include "Materials/MaterialInstanceConstant.h"
 #include "Modules/ModuleManager.h"
+#include "TimerManager.h"
 #include "Utility/DWCLog.h"
 #include "Utility/DWCProfiling.h"
 
@@ -93,6 +95,130 @@ namespace
     bool IsGPUWetnessMode(const EDWCSimulationMode Mode)
     {
         return Mode == EDWCSimulationMode::WetnessMapGPU;
+    }
+
+    struct FGPUSurfaceWaterAccumulator
+    {
+        float TotalSurfaceAmount = 0.0f;
+        float BestInfluence = -1.0f;
+        FVector2f BestUV = FVector2f::ZeroVector;
+        FSurfaceWaterProfileParameters Profile;
+        bool bHasProfile = false;
+    };
+
+    int32 GetDominantTriangleVertexIndex(
+        const FDWCGPUBakedTriangle& Triangle,
+        const FVector3f& Barycentric)
+    {
+        if (Barycentric.X >= Barycentric.Y && Barycentric.X >= Barycentric.Z)
+        {
+            return Triangle.VertexIndices.X;
+        }
+        if (Barycentric.Y >= Barycentric.Z)
+        {
+            return Triangle.VertexIndices.Y;
+        }
+        return Triangle.VertexIndices.Z;
+    }
+
+    bool QueueGPUSurfaceWaterStamps(
+        FDWCWetMeshReceiverRuntime& Receiver,
+        const TArray<FDWCResolvedSurfaceContact>& Contacts)
+    {
+        const UWetClothingAsset* Asset = Receiver.WetClothingAsset.Get();
+        if (Asset == nullptr || !Receiver.SharedRuntimeData.IsValid() || !Receiver.InputStage.IsValid() ||
+            !Asset->SurfaceWaterSettings.bEnabled || Receiver.SurfaceWaterStatesByMaterialSlot.IsEmpty() ||
+            Contacts.IsEmpty())
+        {
+            return false;
+        }
+
+        const FDWCGPULODBakeData& GPUData =
+            Asset->GetGPUWetMapRuntimeData(UWetClothingAsset::RuntimeSimulationLODIndex);
+        TMap<int32, FGPUSurfaceWaterAccumulator> Accumulators;
+
+        for (const FDWCResolvedSurfaceContact& Contact : Contacts)
+        {
+            if (Contact.Amount <= 0.0f || Contact.MaterialSlotIndex == INDEX_NONE ||
+                !GPUData.Triangles.IsValidIndex(Contact.TriangleID) || Contact.ContactUV.ContainsNaN() ||
+                !FMath::IsFinite(Contact.ContactUV.X) || !FMath::IsFinite(Contact.ContactUV.Y))
+            {
+                continue;
+            }
+
+            const FDWCGPUBakedTriangle& Triangle = GPUData.Triangles[Contact.TriangleID];
+            if (Triangle.MaterialSlotIndex != Contact.MaterialSlotIndex)
+            {
+                continue;
+            }
+
+            const int32 ProfileVertexIndex = GetDominantTriangleVertexIndex(Triangle, Contact.Barycentric);
+            if (!Receiver.SharedRuntimeData->VertexWetnessProfileParameters.IsValidIndex(ProfileVertexIndex) ||
+                !Receiver.SharedRuntimeData->SupportsSurfaceWater(ProfileVertexIndex))
+            {
+                continue;
+            }
+
+            const FWetnessProfileParameters& WetnessProfile =
+                Receiver.SharedRuntimeData->VertexWetnessProfileParameters[ProfileVertexIndex];
+            const FSurfaceWaterProfileParameters& SurfaceProfile = WetnessProfile.SurfaceWater;
+            const float SurfaceAmount = Contact.Amount *
+                FMath::Clamp(Contact.TriangleInfluence, 0.0f, 1.0f) *
+                WetnessProfile.GetRejectedWaterFraction() *
+                FMath::Clamp(SurfaceProfile.SurfaceRepresentationFraction, 0.0f, 1.0f);
+            if (SurfaceAmount <= 0.0f)
+            {
+                continue;
+            }
+
+            FGPUSurfaceWaterAccumulator& Accumulator = Accumulators.FindOrAdd(Contact.MaterialSlotIndex);
+            Accumulator.TotalSurfaceAmount += SurfaceAmount;
+            if (Contact.TriangleInfluence > Accumulator.BestInfluence)
+            {
+                Accumulator.BestInfluence = Contact.TriangleInfluence;
+                Accumulator.BestUV = Contact.ContactUV;
+                Accumulator.Profile = SurfaceProfile;
+                Accumulator.bHasProfile = true;
+            }
+        }
+
+        FRandomStream& RandomStream = Receiver.InputStage->GetSurfaceWaterRandomStream();
+        bool bAnyQueued = false;
+        for (const TPair<int32, FGPUSurfaceWaterAccumulator>& Pair : Accumulators)
+        {
+            const FGPUSurfaceWaterAccumulator& Accumulator = Pair.Value;
+            TUniquePtr<FSurfaceWaterSimulationState>* State =
+                Receiver.SurfaceWaterStatesByMaterialSlot.Find(Pair.Key);
+            if (!Accumulator.bHasProfile || State == nullptr || !State->IsValid())
+            {
+                continue;
+            }
+
+            const FSurfaceWaterProfileParameters& Surface = Accumulator.Profile;
+            if (RandomStream.FRand() < FMath::Clamp(Surface.DropletSpawnProbability, 0.0f, 1.0f))
+            {
+                (*State)->QueueDropletStamp(
+                    Accumulator.BestUV,
+                    Accumulator.TotalSurfaceAmount * FMath::Max(0.0f, Surface.DropletIntensityMultiplier),
+                    Surface.DropletRadiusPixels,
+                    Surface.DropletLifetimeSeconds);
+                bAnyQueued = true;
+            }
+
+            if (Accumulator.TotalSurfaceAmount >= FMath::Max(0.0f, Surface.MinimumFlowSurfaceAmount) &&
+                RandomStream.FRand() < FMath::Clamp(Surface.FlowSpawnProbability, 0.0f, 1.0f))
+            {
+                (*State)->QueueFlowStamp(
+                    Accumulator.BestUV,
+                    Accumulator.TotalSurfaceAmount * FMath::Max(0.0f, Surface.FlowIntensityMultiplier),
+                    Surface.FlowWidthPixels,
+                    Surface.FlowLengthPixels,
+                    Surface.FlowLifetimeSeconds);
+                bAnyQueued = true;
+            }
+        }
+
+        return bAnyQueued;
     }
 
     void ShutdownGPUBackend(FDWCWetMeshReceiverRuntime& Receiver)
@@ -551,34 +677,32 @@ bool UDynamicWetClothesComponent::InitializeWetMeshReceiverRuntime(FDWCWetMeshRe
     Receiver.RuntimeDataBuilder->EnsureWetnessBufferSize(RuntimeDataBuildArgs, LODData->GetNumVertices());
     Receiver.SimulationState->MarkAllWetVertexColorsDirty();
 
-    if (IsGPUWetnessMode(GetActiveSimulationMode()))
+    if (!IsGPUWetnessMode(GetActiveSimulationMode()))
     {
-        return true;
-    }
+        if (!Receiver.SharedRuntimeData->bHasNeighborGraph)
+        {
+            UE_LOG(
+                LogDWC,
+                Error,
+                TEXT("DynamicWetClothesComponent: CPU simulation requires a valid shared neighbor graph for WCA '%s'. Save the WCA to rebuild precomputed data."),
+                *GetNameSafe(Receiver.WetClothingAsset.Get()));
+            return false;
+        }
 
-    if (!Receiver.SharedRuntimeData->bHasNeighborGraph)
-    {
-        UE_LOG(
-            LogDWC,
-            Error,
-            TEXT("DynamicWetClothesComponent: CPU simulation requires a valid shared neighbor graph for WCA '%s'. Save the WCA to rebuild precomputed data."),
-            *GetNameSafe(Receiver.WetClothingAsset.Get()));
-        return false;
-    }
-
-    const FWetClothingPrecomputedSimulationData& PrecomputedData =
-        Receiver.WetClothingAsset->GetPrecomputedSimulationData(RuntimeDataBuildArgs.LODIndex);
-    Receiver.SkinningStaticData = RuntimeDataSubsystem->AcquireSkinningStaticData(
-        *Receiver.MeshComponent.Get(),
-        PrecomputedData.MeshSignature,
-        RuntimeDataBuildArgs.LODIndex);
-    if (!Receiver.SkinningStaticData.IsValid())
-    {
-        UE_LOG(
-            LogTemp,
-            Warning,
-            TEXT("DynamicWetClothesComponent: Failed to build CPU skinning static data on %s."),
-            *GetNameSafe(GetOwner()));
+        const FWetClothingPrecomputedSimulationData& PrecomputedData =
+            Receiver.WetClothingAsset->GetPrecomputedSimulationData(RuntimeDataBuildArgs.LODIndex);
+        Receiver.SkinningStaticData = RuntimeDataSubsystem->AcquireSkinningStaticData(
+            *Receiver.MeshComponent.Get(),
+            PrecomputedData.MeshSignature,
+            RuntimeDataBuildArgs.LODIndex);
+        if (!Receiver.SkinningStaticData.IsValid())
+        {
+            UE_LOG(
+                LogTemp,
+                Warning,
+                TEXT("DynamicWetClothesComponent: Failed to build CPU skinning static data on %s."),
+                *GetNameSafe(GetOwner()));
+        }
     }
 
     const FSurfaceWaterSimulationSettings& SurfaceSimulationSettings = Receiver.WetClothingAsset->SurfaceWaterSettings;
@@ -1014,6 +1138,7 @@ bool UDynamicWetClothesComponent::ApplyWetContact(const FDWCWetContact& Contact,
             if (Receiver->SurfaceContactResolver->ResolveContact(ResolverArgs, Contact, ResolvedContacts) &&
                 Receiver->GPUBackend->EnqueueResolvedContacts(ResolvedContacts))
             {
+                QueueGPUSurfaceWaterStamps(*Receiver, ResolvedContacts);
                 bAnyQueued = true;
             }
         }
@@ -1076,6 +1201,7 @@ bool UDynamicWetClothesComponent::ApplyWetContacts(const TArray<FDWCWetContact>&
             if (Receiver->SurfaceContactResolver->ResolveContacts(ResolverArgs, ReceiverContacts, ResolvedContacts) &&
                 Receiver->GPUBackend->EnqueueResolvedContacts(ResolvedContacts))
             {
+                QueueGPUSurfaceWaterStamps(*Receiver, ResolvedContacts);
                 bAnyQueued = true;
             }
         }
@@ -1136,6 +1262,7 @@ bool UDynamicWetClothesComponent::ApplyWetArea(const FDWCWetAreaData& AreaData, 
             if (Receiver->SurfaceContactResolver->ResolveWetArea(ResolverArgs, AreaData, ResolvedContacts) &&
                 Receiver->GPUBackend->EnqueueResolvedContacts(ResolvedContacts))
             {
+                QueueGPUSurfaceWaterStamps(*Receiver, ResolvedContacts);
                 bAnyQueued = true;
             }
         }
@@ -1187,6 +1314,7 @@ bool UDynamicWetClothesComponent::ApplyWetSurface(
             if (Receiver->SurfaceContactResolver->ResolveWaterSurface(ResolverArgs, WaterSurfaceData, Amount, ResolvedContacts) &&
                 Receiver->GPUBackend->EnqueueResolvedContacts(ResolvedContacts))
             {
+                QueueGPUSurfaceWaterStamps(*Receiver, ResolvedContacts);
                 bAnyQueued = true;
             }
         }
@@ -1441,6 +1569,7 @@ bool UDynamicWetClothesComponent::FlushPendingWetContacts()
             if (Receiver->SurfaceContactResolver->ResolveContacts(ResolverArgs, ReceiverContacts, ResolvedContacts) &&
                 Receiver->GPUBackend->EnqueueResolvedContacts(ResolvedContacts))
             {
+                QueueGPUSurfaceWaterStamps(*Receiver, ResolvedContacts);
                 bAnyQueued = true;
             }
         }

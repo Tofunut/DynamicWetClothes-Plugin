@@ -23,6 +23,12 @@ public:
     UPROPERTY(EditAnywhere, Category = "Mesh", meta = (DisplayName = "Preferred DWC Data UV Channel", ClampMin = "0", ClampMax = "7"))
     int32 PreferredDWCDataUVChannelIndex = 1;
 
+    UPROPERTY(EditAnywhere, Category = "Mesh|LOD Mapping Range", meta = (DisplayName = "First Mapped LOD", ClampMin = "0"))
+    int32 FirstGeneratedLODIndex = 0;
+
+    UPROPERTY(EditAnywhere, Category = "Mesh|LOD Mapping Range", meta = (DisplayName = "Last Mapped LOD", ClampMin = "0"))
+    int32 LastGeneratedLODIndex = 0;
+
 #if WITH_EDITOR
     virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
 #endif
@@ -49,6 +55,8 @@ public:
         Result.bBuildGPUWetnessMapSimulationData = bBuildGPUWetnessMapSimulationData;
         Result.OriginalUVChannelIndex = OriginalUVChannelIndex;
         Result.PreferredDWCDataUVChannelIndex = PreferredDWCDataUVChannelIndex;
+        Result.FirstGeneratedLODIndex = FirstGeneratedLODIndex;
+        Result.LastGeneratedLODIndex = LastGeneratedLODIndex;
         Result.GPUSimulationMapResolution = DWCMapResolution::ToInt(GPUSimulationMapResolution);
         Result.WrinkleMapResolution = DWCMapResolution::ToInt(WrinkleMapResolution);
         Result.TransparencyMapResolution = DWCMapResolution::ToInt(TransparencyMapResolution);
@@ -67,6 +75,12 @@ public:
 
     UPROPERTY(EditAnywhere, Category = "Mesh", meta = (DisplayName = "Preferred DWC Data UV Channel", ClampMin = "0", ClampMax = "7"))
     int32 PreferredDWCDataUVChannelIndex = 1;
+
+    UPROPERTY(EditAnywhere, Category = "Mesh|LOD Mapping Range", meta = (DisplayName = "First Mapped LOD", ClampMin = "0"))
+    int32 FirstGeneratedLODIndex = 0;
+
+    UPROPERTY(EditAnywhere, Category = "Mesh|LOD Mapping Range", meta = (DisplayName = "Last Mapped LOD", ClampMin = "0"))
+    int32 LastGeneratedLODIndex = 0;
 
     UPROPERTY(EditAnywhere, Category = "Simulation Data", meta = (DisplayName = "CPU Vertex Simulation Data"))
     bool bBuildCPUVertexSimulationData = true;
@@ -89,6 +103,8 @@ public:
         bBuildGPUWetnessMapSimulationData = InSettings.bBuildGPUWetnessMapSimulationData;
         OriginalUVChannelIndex = InSettings.OriginalUVChannelIndex;
         PreferredDWCDataUVChannelIndex = InSettings.PreferredDWCDataUVChannelIndex;
+        FirstGeneratedLODIndex = InSettings.FirstGeneratedLODIndex;
+        LastGeneratedLODIndex = InSettings.LastGeneratedLODIndex;
         GPUSimulationMapResolution = DWCMapResolution::FromInt(InSettings.GetGPUSimulationMapResolution());
         WrinkleMapResolution = DWCMapResolution::FromInt(InSettings.GetWrinkleMapResolution());
         TransparencyMapResolution = DWCMapResolution::FromInt(InSettings.GetTransparencyMapResolution());
@@ -101,6 +117,8 @@ public:
         Result.bBuildGPUWetnessMapSimulationData = bBuildGPUWetnessMapSimulationData;
         Result.OriginalUVChannelIndex = OriginalUVChannelIndex;
         Result.PreferredDWCDataUVChannelIndex = PreferredDWCDataUVChannelIndex;
+        Result.FirstGeneratedLODIndex = FirstGeneratedLODIndex;
+        Result.LastGeneratedLODIndex = LastGeneratedLODIndex;
         Result.GPUSimulationMapResolution = DWCMapResolution::ToInt(GPUSimulationMapResolution);
         Result.WrinkleMapResolution = DWCMapResolution::ToInt(WrinkleMapResolution);
         Result.TransparencyMapResolution = DWCMapResolution::ToInt(TransparencyMapResolution);

@@ -59,7 +59,7 @@ namespace
         }
 
         int32 MissingProfilePartCount = 0;
-        for (const FWetClothingWetPartEntry& Entry : WetClothingAsset->PartData.EditableWetPartData.WetPartEntries)
+        for (const FWetClothingWetPartEntry& Entry : WetClothingAsset->Authored.PartData.EditableWetPartData.WetPartEntries)
         {
             if (Entry.MaterialSlotIndex == MaterialSlotIndex &&
                 !Entry.ProfileAssignment.SourceProfile.IsValid())
@@ -135,7 +135,7 @@ namespace
 
     TSharedRef<SWidget> BuildGeneratedMaterialInfoMenuContent(const UWetClothingAsset* WetClothingAsset)
     {
-        if (WetClothingAsset == nullptr || WetClothingAsset->PartData.GeneratedWetMaterialOverrides.IsEmpty())
+        if (WetClothingAsset == nullptr || WetClothingAsset->Derived.Inline.GeneratedWetMaterialOverrides.IsEmpty())
         {
             return SNew(STextBlock)
                 .Text(NSLOCTEXT("WetClothingEditorCommonWidgets", "NoGeneratedMaterialInfo", "No generated wet materials yet."))
@@ -144,8 +144,8 @@ namespace
         }
 
         TArray<const FWetClothingGeneratedWetMaterialOverride*> SortedOverrides;
-        SortedOverrides.Reserve(WetClothingAsset->PartData.GeneratedWetMaterialOverrides.Num());
-        for (const FWetClothingGeneratedWetMaterialOverride& MaterialOverride : WetClothingAsset->PartData.GeneratedWetMaterialOverrides)
+        SortedOverrides.Reserve(WetClothingAsset->Derived.Inline.GeneratedWetMaterialOverrides.Num());
+        for (const FWetClothingGeneratedWetMaterialOverride& MaterialOverride : WetClothingAsset->Derived.Inline.GeneratedWetMaterialOverrides)
         {
             SortedOverrides.Add(&MaterialOverride);
         }
@@ -638,16 +638,6 @@ TSharedRef<SWidget> FWCAEditorWidgets::BuildBakeMapsMenu(const FWCABakeMapsMenuA
             }),
             Args.CanBakeGPUWetnessMapData));
     MenuBuilder.AddMenuEntry(
-        NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeWetnessProfileMapsMenuItem", "Bake Wetness Profile Maps"),
-        NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeWetnessProfileMapsMenuItemTooltip", "Bake wetness profile texture maps and update wet materials."),
-        FSlateIcon(),
-        FUIAction(
-            FExecuteAction::CreateLambda([OnBakeWetnessProfileMaps = Args.OnBakeWetnessProfileMaps]()
-            {
-                if (OnBakeWetnessProfileMaps.IsBound()) OnBakeWetnessProfileMaps.Execute();
-            }),
-            Args.CanBakeWetnessProfileMaps));
-    MenuBuilder.AddMenuEntry(
         NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeWrinkleNormalMapMenuItem", "Bake Wrinkle Normal Map"),
         NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeWrinkleNormalMapMenuItemTooltip", "Bake a wrinkle normal map."),
         FSlateIcon(),
@@ -919,7 +909,7 @@ bool FWCAEditorWidgets::IsMaterialSlotWettable(const UWetClothingAsset* WetCloth
     }
 
     const FWetClothingWettableMaterialSlotState* State =
-        WetClothingAsset->PartData.EditableWetPartData.WettableMaterialSlots.FindByPredicate(
+        WetClothingAsset->Authored.PartData.EditableWetPartData.WettableMaterialSlots.FindByPredicate(
             [MaterialSlotIndex](const FWetClothingWettableMaterialSlotState& Candidate)
             {
                 return Candidate.MaterialSlotIndex == MaterialSlotIndex;
@@ -936,7 +926,7 @@ void FWCAEditorWidgets::SetMaterialSlotWettable(UWetClothingAsset* WetClothingAs
     }
 
     FWetClothingWettableMaterialSlotState* State =
-        WetClothingAsset->PartData.EditableWetPartData.WettableMaterialSlots.FindByPredicate(
+        WetClothingAsset->Authored.PartData.EditableWetPartData.WettableMaterialSlots.FindByPredicate(
             [MaterialSlotIndex](const FWetClothingWettableMaterialSlotState& Candidate)
             {
                 return Candidate.MaterialSlotIndex == MaterialSlotIndex;
@@ -944,7 +934,7 @@ void FWCAEditorWidgets::SetMaterialSlotWettable(UWetClothingAsset* WetClothingAs
 
     const bool bHasStaleMaterialOverrides =
         !bIsWettableSlot &&
-        WetClothingAsset->PartData.GeneratedWetMaterialOverrides.ContainsByPredicate(
+        WetClothingAsset->Derived.Inline.GeneratedWetMaterialOverrides.ContainsByPredicate(
             [MaterialSlotIndex](const FWetClothingGeneratedWetMaterialOverride& MaterialOverride)
             {
                 return MaterialOverride.MaterialSlotIndex == MaterialSlotIndex;
@@ -957,14 +947,14 @@ void FWCAEditorWidgets::SetMaterialSlotWettable(UWetClothingAsset* WetClothingAs
     WetClothingAsset->Modify();
     if (State == nullptr)
     {
-        State = &WetClothingAsset->PartData.EditableWetPartData.WettableMaterialSlots.AddDefaulted_GetRef();
+        State = &WetClothingAsset->Authored.PartData.EditableWetPartData.WettableMaterialSlots.AddDefaulted_GetRef();
         State->MaterialSlotIndex = MaterialSlotIndex;
     }
 
     State->bIsWettableSlot = bIsWettableSlot;
     if (!bIsWettableSlot)
     {
-        WetClothingAsset->PartData.GeneratedWetMaterialOverrides.RemoveAll(
+        WetClothingAsset->Derived.Inline.GeneratedWetMaterialOverrides.RemoveAll(
             [MaterialSlotIndex](const FWetClothingGeneratedWetMaterialOverride& MaterialOverride)
             {
                 return MaterialOverride.MaterialSlotIndex == MaterialSlotIndex;

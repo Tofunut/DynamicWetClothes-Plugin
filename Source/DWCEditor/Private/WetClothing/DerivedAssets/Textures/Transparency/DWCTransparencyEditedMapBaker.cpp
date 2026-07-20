@@ -81,7 +81,7 @@ bool FDWCTransparencyEditedMapBaker::Bake(
     BakedMap->LODIndex = AutoResult.LODIndex;
     BakedMap->TransparencyMap = Texture;
     BakedMap->Resolution = AutoResult.Resolution.X;
-    BakedMap->PaddingPixels = WetClothingAsset.TransparencyData.TransparencyPaddingPixels;
+    BakedMap->PaddingPixels = WetClothingAsset.Authored.TransparencyData.TransparencyPaddingPixels;
     BakedMap->BakeGuid = FGuid::NewGuid();
     BakedMap->BuildSignature = AutoResult.BuildSignature;
     BakedMap->bContainsColorRGB = true;

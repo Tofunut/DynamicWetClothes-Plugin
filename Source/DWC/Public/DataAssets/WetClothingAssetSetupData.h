@@ -111,7 +111,13 @@ struct DWC_API FDWCWetClothingAssetSetupSettings
     UPROPERTY(EditAnywhere, Category = "Mesh", meta = (ClampMin = "0", ClampMax = "7"))
     int32 PreferredDWCDataUVChannelIndex = 1;
 
-    /** Render LOD used by CPU/GPU simulation runtime data. Multi-LOD is not supported yet, so this is fixed to LOD0. */
+    UPROPERTY(EditAnywhere, Category = "Mesh|LOD Mapping Range", meta = (DisplayName = "First Mapped LOD", ClampMin = "0"))
+    int32 FirstGeneratedLODIndex = 0;
+
+    UPROPERTY(EditAnywhere, Category = "Mesh|LOD Mapping Range", meta = (DisplayName = "Last Mapped LOD", ClampMin = "0"))
+    int32 LastGeneratedLODIndex = 0;
+
+    /** Render LOD used by CPU/GPU simulation runtime data. */
     UPROPERTY(VisibleAnywhere, Category = "Mesh")
     int32 SimulationLODIndex = 0;
 
@@ -126,6 +132,8 @@ struct DWC_API FDWCWetClothingAssetSetupSettings
         TransparencyMapResolution = DWCMapResolution::ToInt(DWCMapResolution::FromInt(TransparencyMapResolution));
         OriginalUVChannelIndex = FMath::Clamp(OriginalUVChannelIndex, 0, 7);
         PreferredDWCDataUVChannelIndex = FMath::Clamp(PreferredDWCDataUVChannelIndex, 0, 7);
+        FirstGeneratedLODIndex = FMath::Max(0, FirstGeneratedLODIndex);
+        LastGeneratedLODIndex = FMath::Max(FirstGeneratedLODIndex, LastGeneratedLODIndex);
         SimulationLODIndex = 0;
     }
 };

@@ -34,6 +34,7 @@
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SCheckBox.h"
 #include "Widgets/Input/SComboBox.h"
+#include "Widgets/Input/SSpinBox.h"
 #include "Widgets/Images/SImage.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
@@ -122,6 +123,48 @@ namespace
         }
 
         return static_cast<int32>(RenderData->LODRenderData[LODIndex].GetNumTexCoords());
+    }
+
+    int32 GetAssetSetupSkeletalMeshLODCount(const USkeletalMesh* Mesh)
+    {
+        const FSkeletalMeshRenderData* RenderData = Mesh != nullptr ? Mesh->GetResourceForRendering() : nullptr;
+        return RenderData != nullptr ? RenderData->LODRenderData.Num() : 0;
+    }
+
+    void ClampAssetSetupLODRangeForMesh(
+        const USkeletalMesh* Mesh,
+        int32& FirstLODIndex,
+        int32& LastLODIndex)
+    {
+        const int32 LODCount = GetAssetSetupSkeletalMeshLODCount(Mesh);
+        if (LODCount <= 0)
+        {
+            FirstLODIndex = 0;
+            LastLODIndex = 0;
+            return;
+        }
+
+        const int32 LastAvailableLODIndex = LODCount - 1;
+        FirstLODIndex = FMath::Clamp(FirstLODIndex, 0, LastAvailableLODIndex);
+        LastLODIndex = FMath::Clamp(LastLODIndex, FirstLODIndex, LastAvailableLODIndex);
+    }
+
+    FText BuildAssetSetupLODRangeInfoText(
+        const USkeletalMesh* Mesh,
+        const int32 FirstLODIndex,
+        const int32 LastLODIndex)
+    {
+        const int32 LODCount = GetAssetSetupSkeletalMeshLODCount(Mesh);
+        if (LODCount <= 0)
+        {
+            return LOCTEXT("AssetSetupLODRangeInfoNoMesh", "Source mesh LOD data is unavailable.");
+        }
+
+        return FText::Format(
+            LOCTEXT("AssetSetupLODRangeInfo", "Available LODs: LOD0 - LOD{0}. DWC Data UV and Original UV topology will be generated for LOD{1} - LOD{2}."),
+            FText::AsNumber(LODCount - 1),
+            FText::AsNumber(FirstLODIndex),
+            FText::AsNumber(LastLODIndex));
     }
 
     int32 GetAssetSetupDefaultDWCDataUVChannelIndex(const USkeletalMesh* Mesh, const int32 OriginalUVChannelIndex)
@@ -242,11 +285,11 @@ namespace
 
     bool HasWrinkleValidationData(const UWetClothingAsset& Asset)
     {
-        if (!Asset.WrinkleData.BakedWrinkleMaps.IsEmpty())
+        if (!Asset.Authored.WrinkleData.BakedWrinkleMaps.IsEmpty())
         {
             return true;
         }
-        for (const FWetWrinklePatchStroke& Stroke : Asset.WrinkleData.EditablePatchStrokes)
+        for (const FWetWrinklePatchStroke& Stroke : Asset.Authored.WrinkleData.EditablePatchStrokes)
         {
             if (!Stroke.PatchPlacements.IsEmpty())
             {
@@ -893,6 +936,10 @@ namespace
         TStrongObjectPtr<UWetClothingAssetSetupSettingsObject> SetupObject(
             NewObject<UWetClothingAssetSetupSettingsObject>(GetTransientPackage()));
         SetupObject->InitializeFromSettings(Asset.GetSetupSettings());
+        ClampAssetSetupLODRangeForMesh(
+            Asset.GetSourceSkeletalMesh(),
+            SetupObject->FirstGeneratedLODIndex,
+            SetupObject->LastGeneratedLODIndex);
 
         FPropertyEditorModule& PropertyEditor = FModuleManager::LoadModuleChecked<FPropertyEditorModule>(TEXT("PropertyEditor"));
         FDetailsViewArgs DetailsArgs;
@@ -904,7 +951,9 @@ namespace
         SetupDetails->SetIsPropertyVisibleDelegate(FIsPropertyVisible::CreateLambda([](const FPropertyAndParent& PropertyAndParent)
         {
             const FName PropertyName = PropertyAndParent.Property.GetFName();
-            return PropertyName != GET_MEMBER_NAME_CHECKED(UWetClothingAssetSetupSettingsObject, PreferredDWCDataUVChannelIndex);
+            return PropertyName != GET_MEMBER_NAME_CHECKED(UWetClothingAssetSetupSettingsObject, PreferredDWCDataUVChannelIndex) &&
+                   PropertyName != GET_MEMBER_NAME_CHECKED(UWetClothingAssetSetupSettingsObject, FirstGeneratedLODIndex) &&
+                   PropertyName != GET_MEMBER_NAME_CHECKED(UWetClothingAssetSetupSettingsObject, LastGeneratedLODIndex);
         }));
         SetupDetails->SetObject(SetupObject.Get());
 
@@ -950,17 +999,6 @@ namespace
             .SupportsMaximize(false)
             .SupportsMinimize(false);
 
-        const FText MeshInformation = FText::Format(
-            LOCTEXT(
-                "AssetSetupMeshInfo",
-                "Mesh Information (Read Only)\n"
-                "Source: {0}\n"
-                "DWC Data UV LODs: {1}\n"
-                "Simulation LOD: LOD{2}"),
-            FText::FromString(GetNameSafe(Asset.GetSourceSkeletalMesh())),
-            FText::AsNumber(Asset.GetDataUVMetadataLODCount()),
-            FText::AsNumber(Asset.GetSimulationLODIndex()));
-
         Dialog->SetContent(
             SNew(SBorder)
             .Padding(12.0f)
@@ -973,7 +1011,25 @@ namespace
                     SNew(SBorder)
                     .Padding(8.0f)
                     .BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
-                    [SNew(STextBlock).Text(MeshInformation)]
+                    [
+                        SNew(STextBlock)
+                        .Text_Lambda([&Asset, SetupObject]()
+                        {
+                            return FText::Format(
+                                LOCTEXT(
+                                    "AssetSetupMeshInfo",
+                                    "Mesh Information (Read Only)\n"
+                                    "Source: {0}\n"
+                                    "DWC Data UV LODs: {1}\n"
+                                    "LOD Mapping Range: LOD{2} - LOD{3}\n"
+                                    "Simulation Source LOD: LOD{4}"),
+                                FText::FromString(GetNameSafe(Asset.GetSourceSkeletalMesh())),
+                                FText::AsNumber(Asset.GetDataUVMetadataLODCount()),
+                                FText::AsNumber(SetupObject->FirstGeneratedLODIndex),
+                                FText::AsNumber(SetupObject->LastGeneratedLODIndex),
+                                FText::AsNumber(Asset.GetSimulationLODIndex()));
+                        })
+                    ]
                 ]
                 + SVerticalBox::Slot()
                 .AutoHeight()
@@ -1123,6 +1179,10 @@ namespace
                             })
                             .OnClicked_Lambda([&Asset, SetupObject, &Result, &OutAllowOverwriteExistingDataUVChannel, &GetEffectiveDataUVChannel, Dialog]()
                             {
+                                ClampAssetSetupLODRangeForMesh(
+                                    Asset.GetSourceSkeletalMesh(),
+                                    SetupObject->FirstGeneratedLODIndex,
+                                    SetupObject->LastGeneratedLODIndex);
                                 const int32 EffectiveDataUVChannel = GetEffectiveDataUVChannel();
                                 if (!ConfirmAssetSetupDataUVOverwrite(
                                         Asset.GetSourceSkeletalMesh(),
@@ -1162,6 +1222,127 @@ namespace
                 ]
                 + SVerticalBox::Slot()
                 .AutoHeight()
+                .Padding(0, 0, 0, 10)
+                [
+                    SNew(SBorder)
+                    .Padding(8.0f)
+                    .BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
+                    [
+                        SNew(SVerticalBox)
+                        + SVerticalBox::Slot()
+                        .AutoHeight()
+                        [
+                            SNew(STextBlock)
+                            .Text(LOCTEXT("AssetSetupLODRangeSection", "LOD Mapping Range"))
+                            .Font(FAppStyle::GetFontStyle(TEXT("NormalFontBold")))
+                        ]
+                        + SVerticalBox::Slot()
+                        .AutoHeight()
+                        .Padding(0.0f, 6.0f, 0.0f, 0.0f)
+                        [
+                            SNew(SHorizontalBox)
+                            + SHorizontalBox::Slot()
+                            .FillWidth(1.0f)
+                            .VAlign(VAlign_Center)
+                            [
+                                SNew(STextBlock)
+                                .Text(LOCTEXT("AssetSetupFirstGeneratedLODLabel", "First Mapped LOD"))
+                            ]
+                            + SHorizontalBox::Slot()
+                            .AutoWidth()
+                            .VAlign(VAlign_Center)
+                            [
+                                SNew(SBox)
+                                .WidthOverride(120.0f)
+                                [
+                                    SNew(SSpinBox<int32>)
+                                    .MinValue(0)
+                                    .MaxValue_Lambda([&Asset]()
+                                    {
+                                        return FMath::Max(0, GetAssetSetupSkeletalMeshLODCount(Asset.GetSourceSkeletalMesh()) - 1);
+                                    })
+                                    .Value_Lambda([SetupObject]()
+                                    {
+                                        return SetupObject->FirstGeneratedLODIndex;
+                                    })
+                                    .OnValueChanged_Lambda([&Asset, SetupObject](int32 NewValue)
+                                    {
+                                        SetupObject->FirstGeneratedLODIndex = NewValue;
+                                        ClampAssetSetupLODRangeForMesh(
+                                            Asset.GetSourceSkeletalMesh(),
+                                            SetupObject->FirstGeneratedLODIndex,
+                                            SetupObject->LastGeneratedLODIndex);
+                                    })
+                                ]
+                            ]
+                        ]
+                        + SVerticalBox::Slot()
+                        .AutoHeight()
+                        .Padding(0.0f, 6.0f, 0.0f, 0.0f)
+                        [
+                            SNew(SHorizontalBox)
+                            + SHorizontalBox::Slot()
+                            .FillWidth(1.0f)
+                            .VAlign(VAlign_Center)
+                            [
+                                SNew(STextBlock)
+                                .Text(LOCTEXT("AssetSetupLastGeneratedLODLabel", "Last Mapped LOD"))
+                            ]
+                            + SHorizontalBox::Slot()
+                            .AutoWidth()
+                            .VAlign(VAlign_Center)
+                            [
+                                SNew(SBox)
+                                .WidthOverride(120.0f)
+                                [
+                                    SNew(SSpinBox<int32>)
+                                    .MinValue_Lambda([SetupObject]()
+                                    {
+                                        return SetupObject->FirstGeneratedLODIndex;
+                                    })
+                                    .MaxValue_Lambda([&Asset]()
+                                    {
+                                        return FMath::Max(0, GetAssetSetupSkeletalMeshLODCount(Asset.GetSourceSkeletalMesh()) - 1);
+                                    })
+                                    .Value_Lambda([SetupObject]()
+                                    {
+                                        return SetupObject->LastGeneratedLODIndex;
+                                    })
+                                    .OnValueChanged_Lambda([&Asset, SetupObject](int32 NewValue)
+                                    {
+                                        SetupObject->LastGeneratedLODIndex = NewValue;
+                                        ClampAssetSetupLODRangeForMesh(
+                                            Asset.GetSourceSkeletalMesh(),
+                                            SetupObject->FirstGeneratedLODIndex,
+                                            SetupObject->LastGeneratedLODIndex);
+                                    })
+                                ]
+                            ]
+                        ]
+                        + SVerticalBox::Slot()
+                        .AutoHeight()
+                        .Padding(0.0f, 6.0f, 0.0f, 0.0f)
+                        [
+                            SNew(STextBlock)
+                            .AutoWrapText(true)
+                            .Font(FAppStyle::GetFontStyle(TEXT("SmallFont")))
+                            .ColorAndOpacity(FStyleColors::AccentBlue)
+                            .Text_Lambda([&Asset, SetupObject]()
+                            {
+                                ClampAssetSetupLODRangeForMesh(
+                                    Asset.GetSourceSkeletalMesh(),
+                                    SetupObject->FirstGeneratedLODIndex,
+                                    SetupObject->LastGeneratedLODIndex);
+                                return BuildAssetSetupLODRangeInfoText(
+                                    Asset.GetSourceSkeletalMesh(),
+                                    SetupObject->FirstGeneratedLODIndex,
+                                    SetupObject->LastGeneratedLODIndex);
+                            })
+                        ]
+                    ]
+                ]
+                + SVerticalBox::Slot()
+                .AutoHeight()
                 [
                     SNew(SBox)
                     .WidthOverride(560.0f)
@@ -1182,8 +1363,12 @@ namespace
                             SetupObject->OriginalUVChannelIndex,
                             GetEffectiveDataUVChannel());
                     })
-                    .OnClicked_Lambda([&Result, Dialog]()
+                    .OnClicked_Lambda([&Asset, SetupObject, &Result, Dialog]()
                     {
+                        ClampAssetSetupLODRangeForMesh(
+                            Asset.GetSourceSkeletalMesh(),
+                            SetupObject->FirstGeneratedLODIndex,
+                            SetupObject->LastGeneratedLODIndex);
                         Result = EWCASetupDialogResult::Update;
                         Dialog->RequestDestroyWindow();
                         return FReply::Handled();
@@ -1785,9 +1970,7 @@ bool FWCAEditor::CanBakeGPUMaps() const
 
 bool FWCAEditor::CanBakeWetnessProfileMaps() const
 {
-    const UWetClothingAsset* Asset = WetClothingAsset.Get();
-    return Asset != nullptr && Asset->HasAnyWettableMaterialSlot() &&
-           FWetClothingWetnessProfileMapBakeService::HasPendingVisualBakeTasks(Asset, nullptr);
+    return false;
 }
 
 bool FWCAEditor::CanBakeWrinkleMaps() const
@@ -1814,7 +1997,7 @@ bool FWCAEditor::CanBakeTransparencyMaps() const
 
 bool FWCAEditor::CanBakeAnyMaps() const
 {
-    return CanBakeGPUMaps() || CanBakeWetnessProfileMaps() || CanBakeWrinkleMaps() || CanBakeTransparencyMaps();
+    return CanBakeGPUMaps() || CanBakeWrinkleMaps() || CanBakeTransparencyMaps();
 }
 
 TSharedRef<SWidget> FWCAEditor::BuildBakeMapsMenu()
@@ -1825,7 +2008,7 @@ TSharedRef<SWidget> FWCAEditor::BuildBakeMapsMenu()
     }
     FWCABakeMapsMenuArgs Args;
     Args.OnBakeAllMaps = FSimpleDelegate::CreateLambda([this]() { HandleBakeAllMapsClicked(); });
-    Args.OnBakeWetnessProfileMaps = FSimpleDelegate::CreateLambda([this]() { HandleBakeWetnessProfileMapsClicked(); });
+    Args.OnBakeWetnessProfileMaps = FSimpleDelegate();
     Args.OnBakeGPUWetnessMapData = FSimpleDelegate::CreateLambda([this]() { HandleBakeGPUWetnessMapDataClicked(); });
     Args.OnBakeTransparencyRevealMaps = FSimpleDelegate::CreateLambda([this]() { HandleBakeTransparencyRevealMapsClicked(); });
     Args.OnBakeWrinkleNormalMap = FSimpleDelegate::CreateLambda([this]() { HandleBakeWrinkleNormalMapClicked(); });
@@ -1861,7 +2044,7 @@ FReply FWCAEditor::HandleBakeAllMapsClicked()
 
     Asset->RefreshBakeState(false);
     const bool bBakeGPU = CanBakeGPUMaps();
-    const bool bBakeProfiles = CanBakeWetnessProfileMaps();
+    const bool bBakeProfiles = false;
     const bool bBakeWrinkles = CanBakeWrinkleMaps();
     const bool bBakeTransparency = CanBakeTransparencyMaps();
     if (!bBakeGPU && !bBakeProfiles && !bBakeWrinkles && !bBakeTransparency)
@@ -1889,7 +2072,6 @@ FReply FWCAEditor::HandleBakeAllMapsClicked()
 
     const float TotalWork =
         (bBakeGPU ? 2.0f : 0.0f) +
-        (bBakeProfiles ? 1.0f : 0.0f) +
         (bBakeWrinkles ? 1.0f : 0.0f) +
         (bBakeTransparency ? 1.0f : 0.0f) +
         1.0f;
@@ -1926,25 +2108,6 @@ FReply FWCAEditor::HandleBakeAllMapsClicked()
         else if (RuntimeFailure.IsEmpty())
         {
             Failures.Add(FString::Printf(TEXT("GPU maps: %s"), *ErrorMessage));
-        }
-    }
-
-    if (bBakeProfiles)
-    {
-        SlowTask.EnterProgressFrame(
-            1.0f,
-            LOCTEXT("BakeAllWetnessProfileMapsProgress", "Baking wetness profile maps..."));
-        FString VisualSummary;
-        bool bVisualWarnings = false;
-        if (EditorPanel->BakeWetVisualAssets(VisualSummary, &bVisualWarnings))
-        {
-            Sections.Add(VisualSummary);
-            bHadWarnings |= bVisualWarnings;
-            bBakedAnyOutput = true;
-        }
-        else if (!VisualSummary.IsEmpty())
-        {
-            Failures.Add(FString::Printf(TEXT("Wetness profile maps: %s"), *VisualSummary));
         }
     }
 
@@ -2015,49 +2178,6 @@ FReply FWCAEditor::HandleBakeAllMapsClicked()
 
 FReply FWCAEditor::HandleBakeWetnessProfileMapsClicked()
 {
-    if (!CanBakeWetnessProfileMaps())
-    {
-        return FReply::Handled();
-    }
-    if (!EditorPanel.IsValid())
-    {
-        return FReply::Handled();
-    }
-
-    FScopedSlowTask SlowTask(
-        2.0f,
-        LOCTEXT("BakeWetnessProfileMapsProgress", "Baking wetness profile maps..."));
-    SlowTask.MakeDialog(false);
-    SlowTask.EnterProgressFrame(
-        1.0f,
-        LOCTEXT("BakeWetnessProfileMapsBuildProgress", "Generating wetness profile textures..."));
-
-    FString Summary;
-    bool    bHadWarnings = false;
-    if (!EditorPanel->BakeWetVisualAssets(Summary, &bHadWarnings))
-    {
-        RefreshAssetStateAndEditor();
-        FMessageDialog::Open(EAppMsgType::Ok, FText::FromString(Summary));
-        return FReply::Handled();
-    }
-
-    SlowTask.EnterProgressFrame(
-        1.0f,
-        LOCTEXT("BakeWetnessProfileMapsSaveProgress", "Saving baked wetness profile assets..."));
-    UWetClothingAsset* Asset = WetClothingAsset.Get();
-    if (Asset == nullptr || !DWCEditorUtils::SaveAsset(Asset))
-    {
-        RefreshAssetStateAndEditor();
-        FMessageDialog::Open(
-            EAppMsgCategory::Warning,
-            EAppMsgType::Ok,
-            LOCTEXT("BakeWetnessProfileMapsSaveFailed", "Wetness profile maps were generated, but the generated textures or Wet Clothing Asset could not be saved."));
-        return FReply::Handled();
-    }
-    RefreshAssetStateAndEditor();
-
-    const EAppMsgCategory MessageCategory = bHadWarnings ? EAppMsgCategory::Warning : EAppMsgCategory::Success;
-    FMessageDialog::Open(MessageCategory, EAppMsgType::Ok, FText::FromString(Summary));
     return FReply::Handled();
 }
 
@@ -2259,7 +2379,7 @@ FReply FWCAEditor::GenerateWetMaterials()
     }
 
     TArray<int32> WettableSlots;
-    for (const FWetClothingWettableMaterialSlotState& SlotState : Asset->PartData.EditableWetPartData.WettableMaterialSlots)
+    for (const FWetClothingWettableMaterialSlotState& SlotState : Asset->Authored.PartData.EditableWetPartData.WettableMaterialSlots)
     {
         if (SlotState.bIsWettableSlot && SlotState.MaterialSlotIndex != INDEX_NONE)
         {
@@ -2316,7 +2436,7 @@ FReply FWCAEditor::GenerateWetMaterials()
         }
 
         FWetClothingGeneratedWetMaterialOverride* ExistingOverride =
-            Asset->PartData.GeneratedWetMaterialOverrides.FindByPredicate(
+            Asset->Derived.Inline.GeneratedWetMaterialOverrides.FindByPredicate(
                 [MaterialSlotIndex](const FWetClothingGeneratedWetMaterialOverride& MaterialOverride)
                 {
                     return MaterialOverride.MaterialSlotIndex == MaterialSlotIndex;
@@ -2348,7 +2468,7 @@ FReply FWCAEditor::GenerateWetMaterials()
 
         if (ExistingOverride == nullptr)
         {
-            ExistingOverride = &Asset->PartData.GeneratedWetMaterialOverrides.AddDefaulted_GetRef();
+            ExistingOverride = &Asset->Derived.Inline.GeneratedWetMaterialOverrides.AddDefaulted_GetRef();
             ExistingOverride->MaterialSlotIndex = MaterialSlotIndex;
         }
 
@@ -2490,8 +2610,8 @@ bool FWCAEditor::ResolveIssuesAndSave(FString& OutFailure)
         EditorPanel->SaveBakedVisualAssets();
     }
 
-    bool bHasWrinkleContent = !Asset->WrinkleData.BakedWrinkleMaps.IsEmpty();
-    for (const FWetWrinklePatchStroke& Stroke : Asset->WrinkleData.EditablePatchStrokes)
+    bool bHasWrinkleContent = !Asset->Authored.WrinkleData.BakedWrinkleMaps.IsEmpty();
+    for (const FWetWrinklePatchStroke& Stroke : Asset->Authored.WrinkleData.EditablePatchStrokes)
     {
         bHasWrinkleContent |= !Stroke.PatchPlacements.IsEmpty();
     }
@@ -2509,7 +2629,7 @@ bool FWCAEditor::ResolveIssuesAndSave(FString& OutFailure)
         }
     }
 
-    if (!Asset->TransparencyData.SourceBlueprintClass.IsNull() &&
+    if (!Asset->Authored.TransparencyData.SourceBlueprintClass.IsNull() &&
         !DWCBuildStatus::IsUsable(Asset->GetBakeState().TransparencyMaps))
     {
         SlowTask.EnterProgressFrame(

@@ -412,7 +412,7 @@ bool FWetWrinkleNormalMapBaker::BakeMaterialSlot(
     TSet<int32> TargetSlots;
     TargetSlots.Add(MaterialSlotIndex);
 
-    TArray<int32> LODIndices = WetClothingAsset->WrinkleData.BakeSettings.TargetLODIndices;
+    TArray<int32> LODIndices = WetClothingAsset->Authored.WrinkleData.BakeSettings.TargetLODIndices;
     if (LODIndices.Num() == 0)
     {
         LODIndices.Add(0);
@@ -432,7 +432,7 @@ bool FWetWrinkleNormalMapBaker::BakeMaterialSlot(
         Group.MaterialSlotIndex = MaterialSlotIndex;
         Group.UVChannelIndex = WrinkleUVChannelIndex;
 
-        for (const FWetWrinklePatchStroke& Stroke : WetClothingAsset->WrinkleData.EditablePatchStrokes)
+        for (const FWetWrinklePatchStroke& Stroke : WetClothingAsset->Authored.WrinkleData.EditablePatchStrokes)
         {
             if (!Stroke.bEnabled && !Settings.bIncludeDisabledPatchStrokes)
             {
@@ -479,7 +479,7 @@ bool FWetWrinkleNormalMapBaker::BakeMaterialSlot(
             }
         }
 
-        for (const FWetProceduralRidgeStroke& Stroke : WetClothingAsset->WrinkleData.EditableProceduralRidgeStrokes)
+        for (const FWetProceduralRidgeStroke& Stroke : WetClothingAsset->Authored.WrinkleData.EditableProceduralRidgeStrokes)
         {
             if ((!Stroke.bEnabled && !Settings.bIncludeDisabledPatchStrokes) ||
                 Stroke.MaterialSlotIndex != MaterialSlotIndex ||
@@ -796,7 +796,7 @@ bool FWetWrinkleNormalMapBaker::BakeGroup(
     }
 
     WetClothingAsset.Modify();
-    FWetWrinkleBakedMapSet* BakedMap = WetClothingAsset.WrinkleData.BakedWrinkleMaps.FindByPredicate(
+    FWetWrinkleBakedMapSet* BakedMap = WetClothingAsset.Authored.WrinkleData.BakedWrinkleMaps.FindByPredicate(
         [&Group](const FWetWrinkleBakedMapSet& ExistingMap)
         {
             return ExistingMap.LODIndex == Group.LODIndex &&
@@ -805,7 +805,7 @@ bool FWetWrinkleNormalMapBaker::BakeGroup(
         });
     if (BakedMap == nullptr)
     {
-        BakedMap = &WetClothingAsset.WrinkleData.BakedWrinkleMaps.AddDefaulted_GetRef();
+        BakedMap = &WetClothingAsset.Authored.WrinkleData.BakedWrinkleMaps.AddDefaulted_GetRef();
     }
 
     BakedMap->LODIndex = Group.LODIndex;

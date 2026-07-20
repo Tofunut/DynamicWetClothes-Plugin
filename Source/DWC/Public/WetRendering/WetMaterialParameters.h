@@ -33,8 +33,6 @@ namespace DWCWetMaterialParameters
     DWC_API const FName& SurfaceFlowMaskTexture();
     DWC_API const FName& SurfaceFlowNormalTexture();
 
-    DWC_API const FName& WetnessProfileMap0();
-    DWC_API const FName& UseWetnessProfileMap0();
 
     DWC_API const FName& WrinkleNormalMap();
     DWC_API const FName& UseWrinkleNormalMap();

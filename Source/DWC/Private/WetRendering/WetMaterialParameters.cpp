@@ -39,18 +39,6 @@ namespace DWCWetMaterialParameters
 
     #undef DWC_DEFINE_MATERIAL_PARAMETER
 
-    const FName& WetnessProfileMap0()
-    {
-        static const FName Name(TEXT("DWC_WetnessProfileMap0"));
-        return Name;
-    }
-
-    const FName& UseWetnessProfileMap0()
-    {
-        static const FName Name(TEXT("DWC_UseWetnessProfileMap0"));
-        return Name;
-    }
-
     const FName& WrinkleNormalMap()
     {
         static const FName Name(TEXT("DWC_WrinkleNormalMap"));

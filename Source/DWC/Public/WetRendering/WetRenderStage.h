@@ -60,7 +60,6 @@ class DWC_API FWetRenderStage
 
     void         InitializeWetMaterialInstance(FWetRenderStageArgs& Args);
     void         ApplyWetMaterialParameters(FWetRenderStageArgs& Args);
-    void         ApplyWetnessProfileMapParameters(FWetRenderStageArgs& Args);
     void         ApplyWetWrinkleNormalMapParameters(FWetRenderStageArgs& Args);
     void         ApplyWetTransparencyMapParameters(FWetRenderStageArgs& Args);
     void         ApplyWetnessToMaterial(FWetRenderStageArgs& Args);

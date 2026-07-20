@@ -17,9 +17,9 @@ bool FWetWrinkleBakeService::BakeAllWrinkleMaps(UWetClothingAsset* WetClothingAs
     }
 
     TSet<int32> AuthoredMaterialSlots;
-    for (const FWetWrinklePatchStroke& Stroke : WetClothingAsset->WrinkleData.EditablePatchStrokes)
+    for (const FWetWrinklePatchStroke& Stroke : WetClothingAsset->Authored.WrinkleData.EditablePatchStrokes)
     {
-        if (!Stroke.bEnabled && !WetClothingAsset->WrinkleData.BakeSettings.bIncludeDisabledPatchStrokes)
+        if (!Stroke.bEnabled && !WetClothingAsset->Authored.WrinkleData.BakeSettings.bIncludeDisabledPatchStrokes)
         {
             continue;
         }
@@ -41,11 +41,11 @@ bool FWetWrinkleBakeService::BakeAllWrinkleMaps(UWetClothingAsset* WetClothingAs
     }
 
     FWetWrinkleNormalMapBakeSettings Settings;
-    Settings.Resolution = WetClothingAsset->WrinkleData.BakeSettings.DefaultResolution;
-    Settings.PaddingPixels = WetClothingAsset->WrinkleData.BakeSettings.PaddingPixels;
-    Settings.bIncludeDisabledPatchStrokes = WetClothingAsset->WrinkleData.BakeSettings.bIncludeDisabledPatchStrokes;
-    Settings.bBakeNormalMap = WetClothingAsset->WrinkleData.BakeSettings.bBakeNormalMap;
-    Settings.bBakeMask = WetClothingAsset->WrinkleData.BakeSettings.bBakeMask;
+    Settings.Resolution = WetClothingAsset->Authored.WrinkleData.BakeSettings.DefaultResolution;
+    Settings.PaddingPixels = WetClothingAsset->Authored.WrinkleData.BakeSettings.PaddingPixels;
+    Settings.bIncludeDisabledPatchStrokes = WetClothingAsset->Authored.WrinkleData.BakeSettings.bIncludeDisabledPatchStrokes;
+    Settings.bBakeNormalMap = WetClothingAsset->Authored.WrinkleData.BakeSettings.bBakeNormalMap;
+    Settings.bBakeMask = WetClothingAsset->Authored.WrinkleData.BakeSettings.bBakeMask;
 
     int32 TotalMapCount = 0;
     int32 TotalStampCount = 0;

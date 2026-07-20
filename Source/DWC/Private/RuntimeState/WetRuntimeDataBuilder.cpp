@@ -16,30 +16,6 @@
 #include "Runtime/Engine/Public/Rendering/SkeletalMeshLODRenderData.h"
 #include "Runtime/Engine/Public/Rendering/SkeletalMeshRenderData.h"
 #include "DataAssets/WetClothingAsset.h"
-#include "DataAssets/WetnessProfile.h"
-
-namespace
-{
-    bool ResolveWetPartProfileParameters(
-        const FWetClothingWetPartEntry& WetPartEntry,
-        FWetnessProfileParameters&           OutParameters)
-    {
-        if (WetPartEntry.ProfileAssignment.SourceProfile.IsValid())
-        {
-            const UWetnessProfile* SourceProfile =
-                Cast<UWetnessProfile>(WetPartEntry.ProfileAssignment.SourceProfile.TryLoad());
-            if (SourceProfile != nullptr)
-            {
-                OutParameters = SourceProfile->GetParameters();
-                return true;
-            }
-        }
-
-        OutParameters = WetPartEntry.ProfileAssignment.Parameters;
-        return true;
-    }
-} // namespace
-
 void FWetRuntimeDataBuilder::InitializeAbsorbedWetnessData(FWetRuntimeDataBuildArgs& Receiver)
 {
     constexpr int32 RuntimeLODIndex = UWetClothingAsset::RuntimeSimulationLODIndex;
@@ -202,15 +178,15 @@ bool FWetRuntimeDataBuilder::InitializeWetPartVertexDataFromPrecomputedData(
     }
 
     TMap<int32, FWetnessProfileParameters> ResolvedWetPartParametersByEntryIndex;
-    for (int32 EntryIndex = 0; EntryIndex < Receiver.WetClothingAsset->PartData.EditableWetPartData.WetPartEntries.Num(); ++EntryIndex)
+    for (int32 EntryIndex = 0; EntryIndex < Receiver.WetClothingAsset->Authored.PartData.EditableWetPartData.WetPartEntries.Num(); ++EntryIndex)
     {
-        const FWetClothingWetPartEntry& WetPartEntry = Receiver.WetClothingAsset->PartData.EditableWetPartData.WetPartEntries[EntryIndex];
+        const FWetClothingWetPartEntry& WetPartEntry = Receiver.WetClothingAsset->Authored.PartData.EditableWetPartData.WetPartEntries[EntryIndex];
 
-        FWetnessProfileParameters ResolvedParameters;
-        if (ResolveWetPartProfileParameters(WetPartEntry, ResolvedParameters))
-        {
-            ResolvedWetPartParametersByEntryIndex.Add(EntryIndex, ResolvedParameters);
-        }
+        const FWetnessProfileParameters& ResolvedParameters =
+            Receiver.WetClothingAsset->Derived.Inline.ResolvedWetnessProfileParameters.IsValidIndex(EntryIndex)
+                ? Receiver.WetClothingAsset->Derived.Inline.ResolvedWetnessProfileParameters[EntryIndex]
+                : WetPartEntry.ProfileAssignment.Parameters;
+        ResolvedWetPartParametersByEntryIndex.Add(EntryIndex, ResolvedParameters);
     }
 
     int32 PrecomputedWettableVertexCount = 0;
@@ -234,7 +210,7 @@ bool FWetRuntimeDataBuilder::InitializeWetPartVertexDataFromPrecomputedData(
         }
 
         if (PrecomputedVertex.bIsWettable &&
-            Receiver.WetClothingAsset->PartData.EditableWetPartData.WetPartEntries.IsValidIndex(PrecomputedVertex.WetPartEntryIndex) &&
+            Receiver.WetClothingAsset->Authored.PartData.EditableWetPartData.WetPartEntries.IsValidIndex(PrecomputedVertex.WetPartEntryIndex) &&
             ResolvedWetPartParametersByEntryIndex.Contains(PrecomputedVertex.WetPartEntryIndex))
         {
             Receiver.MutableRuntimeData->VertexWettableFlags[VertexIndex] = true;

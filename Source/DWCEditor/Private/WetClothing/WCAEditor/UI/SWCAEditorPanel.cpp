@@ -183,11 +183,11 @@ namespace
 
     bool HasWrinkleContent(const UWetClothingAsset& Asset)
     {
-        if (!Asset.WrinkleData.BakedWrinkleMaps.IsEmpty())
+        if (!Asset.Authored.WrinkleData.BakedWrinkleMaps.IsEmpty())
         {
             return true;
         }
-        for (const FWetWrinklePatchStroke& Stroke : Asset.WrinkleData.EditablePatchStrokes)
+        for (const FWetWrinklePatchStroke& Stroke : Asset.Authored.WrinkleData.EditablePatchStrokes)
         {
             if (!Stroke.PatchPlacements.IsEmpty())
             {
@@ -203,7 +203,8 @@ namespace
         {
             return;
         }
-        Sections.Add(FString::Printf(TEXT("%s\n• %s"), Heading, *FString::Join(Messages, TEXT("\n• "))));
+
+        Sections.Add(FString::Printf(TEXT("%s\n%s"), Heading, *FString::Join(Messages, TEXT("\n"))));
     }
 }
 

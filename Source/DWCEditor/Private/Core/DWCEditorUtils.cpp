@@ -112,31 +112,22 @@ bool DWCEditorUtils::SaveAsset(UObject* Asset)
 
         AddDirtyGeneratedPackage(WetClothingAsset->GetRuntimeSkeletalMesh());
         for (const FWetClothingGeneratedWetMaterialOverride& MaterialOverride :
-             WetClothingAsset->PartData.GeneratedWetMaterialOverrides)
+             WetClothingAsset->Derived.Inline.GeneratedWetMaterialOverrides)
         {
             AddDirtyGeneratedPackage(MaterialOverride.GeneratedMaterial.Get());
             AddDirtyGeneratedPackage(MaterialOverride.CPUMaterialInstance.Get());
             AddDirtyGeneratedPackage(MaterialOverride.GPUMaterialInstance.Get());
         }
 
-        // A Bake Maps action is a complete persistence operation. Save every dirty
-        // generated package referenced by the WCA together with the WCA package so
-        // a successful bake never leaves a misleading "not saved yet" state.
-        for (const FWetClothingBakedWetnessProfileMap& ProfileMap :
-             WetClothingAsset->PartData.BakedWetnessProfileMaps)
-        {
-            AddDirtyGeneratedPackage(ProfileMap.WetnessProfileMap0.Get());
-        }
-
         for (const FWetWrinkleBakedMapSet& WrinkleMap :
-             WetClothingAsset->WrinkleData.BakedWrinkleMaps)
+             WetClothingAsset->Authored.WrinkleData.BakedWrinkleMaps)
         {
             AddDirtyGeneratedPackage(WrinkleMap.BakedWrinkleNormalMap.Get());
             AddDirtyGeneratedPackage(WrinkleMap.BakedWrinkleMask.Get());
         }
 
         for (const FWetClothingTransparencyLayerData& TransparencyLayer :
-             WetClothingAsset->TransparencyData.TransparencyLayers)
+             WetClothingAsset->Authored.TransparencyData.TransparencyLayers)
         {
             for (const FWetClothingBakedTransparencyMap& TransparencyMap : TransparencyLayer.BakedMaps)
             {
@@ -145,7 +136,7 @@ bool DWCEditorUtils::SaveAsset(UObject* Asset)
         }
 
         for (const FWetClothingBakedTransparencyRevealLayer& RevealLayer :
-             WetClothingAsset->TransparencyData.BakedRevealLayers)
+             WetClothingAsset->Authored.TransparencyData.BakedRevealLayers)
         {
             AddDirtyGeneratedPackage(RevealLayer.LookupMap.Get());
             AddDirtyGeneratedPackage(RevealLayer.ColorMap.Get());

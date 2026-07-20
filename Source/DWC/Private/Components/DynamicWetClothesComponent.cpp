@@ -83,7 +83,7 @@ namespace
             return false;
         }
 
-        const FWetClothingWettableMaterialSlotState* State = WetClothingAsset->PartData.EditableWetPartData.WettableMaterialSlots.FindByPredicate(
+        const FWetClothingWettableMaterialSlotState* State = WetClothingAsset->Authored.PartData.EditableWetPartData.WettableMaterialSlots.FindByPredicate(
             [MaterialSlotIndex](const FWetClothingWettableMaterialSlotState& Candidate)
             {
                 return Candidate.MaterialSlotIndex == MaterialSlotIndex;
@@ -127,7 +127,7 @@ namespace
     {
         const UWetClothingAsset* Asset = Receiver.WetClothingAsset.Get();
         if (Asset == nullptr || !Receiver.SharedRuntimeData.IsValid() || !Receiver.InputStage.IsValid() ||
-            !Asset->SurfaceWaterSettings.bEnabled || Receiver.SurfaceWaterStatesByMaterialSlot.IsEmpty() ||
+            !Asset->Authored.SurfaceWaterSettings.bEnabled || Receiver.SurfaceWaterStatesByMaterialSlot.IsEmpty() ||
             Contacts.IsEmpty())
         {
             return false;
@@ -523,7 +523,7 @@ bool UDynamicWetClothesComponent::RebuildWetMeshReceivers()
                 Error,
                 TEXT("DynamicWetClothesComponent: Wet Clothing Asset '%s' uses unsupported schema version %d (current: %d). Recreate or regenerate the WCA before play."),
                 *GetNameSafe(Asset),
-                Asset->AssetDataVersion,
+                Asset->Metadata.AssetDataVersion,
                 UWetClothingAsset::CurrentAssetDataVersion);
             continue;
         }
@@ -717,6 +717,29 @@ bool UDynamicWetClothesComponent::InitializeWetMeshReceiverRuntime(FDWCWetMeshRe
         }
     }
 
+    if (Receiver.WetClothingAsset.IsValid() && Receiver.SharedRuntimeData.IsValid())
+    {
+        const FString& MeshSignature = Receiver.SharedRuntimeData->MeshSignature;
+        for (const FWCALODVertexColorRuntimeData& RuntimeData :
+             Receiver.WetClothingAsset->Derived.Bulk.LODVertexColorRuntimeData)
+        {
+            const TSharedPtr<const FDWCLODVertexStaticData, ESPMode::ThreadSafe> TargetLODData =
+                Receiver.LODVertexStaticDataByLOD.FindRef(RuntimeData.TargetLODIndex);
+            if (!RuntimeData.IsValid() ||
+                RuntimeData.SourceLODIndex != RuntimeLODIndex ||
+                RuntimeData.MeshSignature != MeshSignature ||
+                !TargetLODData.IsValid() ||
+                TargetLODData->Geometry.VertexCount != RuntimeData.TargetVertexCount)
+            {
+                continue;
+            }
+
+            Receiver.LODVertexColorTransferMapsByLOD.Add(
+                RuntimeData.TargetLODIndex,
+                MakeShared<TArray<int32>, ESPMode::ThreadSafe>(RuntimeData.TargetToSourceVertex));
+        }
+    }
+
     const FWetClothingPrecomputedSimulationData& PrecomputedData =
         Receiver.WetClothingAsset->GetPrecomputedSimulationData();
     Receiver.SkinningStaticData = RuntimeDataSubsystem->AcquireSkinningStaticData(
@@ -731,7 +754,7 @@ bool UDynamicWetClothesComponent::InitializeWetMeshReceiverRuntime(FDWCWetMeshRe
             *GetNameSafe(GetOwner()));
     }
 
-    const FSurfaceWaterSimulationSettings& SurfaceSimulationSettings = Receiver.WetClothingAsset->SurfaceWaterSettings;
+    const FSurfaceWaterSimulationSettings& SurfaceSimulationSettings = Receiver.WetClothingAsset->Authored.SurfaceWaterSettings;
     if (SurfaceSimulationSettings.bEnabled)
     {
         TSet<int32> SurfaceEnabledMaterialSlots;
@@ -877,7 +900,7 @@ FWetInputStageArgs UDynamicWetClothesComponent::MakeWetInputStageArgs(FDWCWetMes
     Args.RuntimeData = Receiver.SharedRuntimeData.Get();
     Args.SimulationState = Receiver.SimulationState.Get();
     Args.SurfaceWaterStatesByMaterialSlot = &Receiver.SurfaceWaterStatesByMaterialSlot;
-    Args.SurfaceWaterSettings = Receiver.WetClothingAsset.IsValid() ? &Receiver.WetClothingAsset->SurfaceWaterSettings : nullptr;
+    Args.SurfaceWaterSettings = Receiver.WetClothingAsset.IsValid() ? &Receiver.WetClothingAsset->Authored.SurfaceWaterSettings : nullptr;
     Args.SurfaceWaterRandomStream = &Receiver.InputStage->GetSurfaceWaterRandomStream();
     Args.RuntimeDataBuilder = Receiver.RuntimeDataBuilder.Get();
     Args.MeshSampler = Receiver.MeshSampler.Get();
@@ -1019,7 +1042,7 @@ void UDynamicWetClothesComponent::ApplyGeneratedWetMaterialOverrides()
             continue;
         }
 
-        for (const FWetClothingGeneratedWetMaterialOverride& MaterialOverride : ReceiverWetClothingAsset->PartData.GeneratedWetMaterialOverrides)
+        for (const FWetClothingGeneratedWetMaterialOverride& MaterialOverride : ReceiverWetClothingAsset->Derived.Inline.GeneratedWetMaterialOverrides)
         {
             UMaterialInterface* WetMaterial = GetActiveSimulationMode() == EDWCSimulationMode::WetnessMapGPU
                 ? static_cast<UMaterialInterface*>(MaterialOverride.GPUMaterialInstance.Get())
@@ -1048,7 +1071,7 @@ void UDynamicWetClothesComponent::ApplyGeneratedWetMaterialOverrides()
 
         }
 
-        for (const FWetClothingBakedTransparencyRevealLayer& RevealLayer : ReceiverWetClothingAsset->TransparencyData.BakedRevealLayers)
+        for (const FWetClothingBakedTransparencyRevealLayer& RevealLayer : ReceiverWetClothingAsset->Authored.TransparencyData.BakedRevealLayers)
         {
             if (RevealLayer.MaterialSlotIndex == INDEX_NONE || RevealLayer.RevealMaterial == nullptr)
             {
@@ -1891,7 +1914,7 @@ void UDynamicWetClothesComponent::UpdateSurfaceWater()
     for (const TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver : Receivers)
     {
         if (!Receiver.IsValid() || !Receiver->WetClothingAsset.IsValid()) continue;
-        const FSurfaceWaterSimulationSettings& Settings = Receiver->WetClothingAsset->SurfaceWaterSettings;
+        const FSurfaceWaterSimulationSettings& Settings = Receiver->WetClothingAsset->Authored.SurfaceWaterSettings;
         if (!Settings.bEnabled) continue;
         bool bAnyChanged = false;
         for (TPair<int32, TUniquePtr<FSurfaceWaterSimulationState>>& Pair : Receiver->SurfaceWaterStatesByMaterialSlot)

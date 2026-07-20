@@ -22,6 +22,7 @@
 #include "WetClothing/Asset/Setup/DWCDataUVBuildService.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SComboBox.h"
+#include "Widgets/Input/SSpinBox.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/SBoxPanel.h"
@@ -45,6 +46,42 @@ namespace
         }
 
         return static_cast<int32>(RenderData->LODRenderData[LODIndex].GetNumTexCoords());
+    }
+
+    int32 GetSkeletalMeshLODCount(const USkeletalMesh* Mesh)
+    {
+        const FSkeletalMeshRenderData* RenderData = Mesh != nullptr ? Mesh->GetResourceForRendering() : nullptr;
+        return RenderData != nullptr ? RenderData->LODRenderData.Num() : 0;
+    }
+
+    void ClampLODRangeForMesh(const USkeletalMesh* Mesh, int32& FirstLODIndex, int32& LastLODIndex)
+    {
+        const int32 LODCount = GetSkeletalMeshLODCount(Mesh);
+        if (LODCount <= 0)
+        {
+            FirstLODIndex = 0;
+            LastLODIndex = 0;
+            return;
+        }
+
+        const int32 LastAvailableLODIndex = LODCount - 1;
+        FirstLODIndex = FMath::Clamp(FirstLODIndex, 0, LastAvailableLODIndex);
+        LastLODIndex = FMath::Clamp(LastLODIndex, FirstLODIndex, LastAvailableLODIndex);
+    }
+
+    FText BuildLODRangeInfoText(const USkeletalMesh* Mesh, const int32 FirstLODIndex, const int32 LastLODIndex)
+    {
+        const int32 LODCount = GetSkeletalMeshLODCount(Mesh);
+        if (LODCount <= 0)
+        {
+            return LOCTEXT("LODRangeInfoNoMesh", "Select a source mesh to inspect available LODs.");
+        }
+
+        return FText::Format(
+            LOCTEXT("LODRangeInfo", "Available LODs: LOD0 - LOD{0}. DWC Data UV and Original UV topology will be generated for LOD{1} - LOD{2}."),
+            FText::AsNumber(LODCount - 1),
+            FText::AsNumber(FirstLODIndex),
+            FText::AsNumber(LastLODIndex));
     }
 
     int32 GetDefaultDWCDataUVChannelIndex(const USkeletalMesh* Mesh, const int32 OriginalUVChannelIndex)
@@ -247,6 +284,7 @@ void UWetClothingAssetCreationSettings::PostEditChangeProperty(FPropertyChangedE
     }
     OriginalUVChannelIndex = FMath::Clamp(OriginalUVChannelIndex, 0, 7);
     PreferredDWCDataUVChannelIndex = FMath::Clamp(PreferredDWCDataUVChannelIndex, 0, 7);
+    ClampLODRangeForMesh(SourceSkeletalMesh, FirstGeneratedLODIndex, LastGeneratedLODIndex);
 }
 #endif
 
@@ -274,7 +312,9 @@ bool UWetClothingAssetFactory::ConfigureProperties()
     {
         const FName PropertyName = PropertyAndParent.Property.GetFName();
         return PropertyName != GET_MEMBER_NAME_CHECKED(UWetClothingAssetCreationSettings, SourceSkeletalMesh) &&
-               PropertyName != GET_MEMBER_NAME_CHECKED(UWetClothingAssetCreationSettings, PreferredDWCDataUVChannelIndex);
+               PropertyName != GET_MEMBER_NAME_CHECKED(UWetClothingAssetCreationSettings, PreferredDWCDataUVChannelIndex) &&
+               PropertyName != GET_MEMBER_NAME_CHECKED(UWetClothingAssetCreationSettings, FirstGeneratedLODIndex) &&
+               PropertyName != GET_MEMBER_NAME_CHECKED(UWetClothingAssetCreationSettings, LastGeneratedLODIndex);
     }));
     DetailsView->SetObject(PendingCreationSettings);
 
@@ -285,9 +325,6 @@ bool UWetClothingAssetFactory::ConfigureProperties()
         DWCDataUVChannelOptions.Add(MakeShared<int32>(UVChannelIndex));
     }
     bool bUseRecommendedDWCDataUVChannel = true;
-    TArray<TSharedPtr<FString>> LODScopeOptions;
-    LODScopeOptions.Add(MakeShared<FString>(TEXT("LOD0 Only")));
-    TSharedPtr<FString> SelectedLODScopeOption = LODScopeOptions[0];
     TSharedPtr<FAssetThumbnailPool> SourceMeshThumbnailPool = UThumbnailManager::Get().GetSharedThumbnailPool();
     TSharedPtr<FAssetThumbnail> SourceMeshThumbnail = MakeShared<FAssetThumbnail>(
         PendingCreationSettings->SourceSkeletalMesh.Get(),
@@ -316,6 +353,9 @@ bool UWetClothingAssetFactory::ConfigureProperties()
             PendingCreationSettings->SourceSkeletalMesh = NewSourceMesh;
             bUseRecommendedDWCDataUVChannel = true;
             PendingCreationSettings->PreferredDWCDataUVChannelIndex = GetDefaultDWCDataUVChannelIndex(NewSourceMesh, PendingCreationSettings->OriginalUVChannelIndex);
+            PendingCreationSettings->FirstGeneratedLODIndex = 0;
+            PendingCreationSettings->LastGeneratedLODIndex = FMath::Max(0, GetSkeletalMeshLODCount(NewSourceMesh) - 1);
+            ClampLODRangeForMesh(NewSourceMesh, PendingCreationSettings->FirstGeneratedLODIndex, PendingCreationSettings->LastGeneratedLODIndex);
             RefreshSourceMeshThumbnail(SourceMeshThumbnail, SourceMeshThumbnailPool, NewSourceMesh);
             DetailsView->ForceRefresh();
         };
@@ -575,29 +615,92 @@ bool UWetClothingAssetFactory::ConfigureProperties()
                         .VAlign(VAlign_Center)
                         [
                             SNew(STextBlock)
-                            .Text(LOCTEXT("LODScopeLabel", "LOD Scope"))
+                            .Text(LOCTEXT("LODRangeLabel", "LOD Mapping Range"))
                             .Font(FAppStyle::GetFontStyle(TEXT("NormalFontBold")))
+                        ]
+                    ]
+                    + SVerticalBox::Slot()
+                    .AutoHeight()
+                    .Padding(0.0f, 6.0f, 0.0f, 0.0f)
+                    [
+                        SNew(SHorizontalBox)
+                        + SHorizontalBox::Slot()
+                        .FillWidth(1.0f)
+                        .VAlign(VAlign_Center)
+                        [
+                            SNew(STextBlock)
+                            .Text(LOCTEXT("FirstGeneratedLODLabel", "First Mapped LOD"))
                         ]
                         + SHorizontalBox::Slot()
                         .AutoWidth()
                         .VAlign(VAlign_Center)
                         [
                             SNew(SBox)
-                            .WidthOverride(180.0f)
+                            .WidthOverride(120.0f)
                             [
-                                SNew(SComboBox<TSharedPtr<FString>>)
-                                .OptionsSource(&LODScopeOptions)
-                                .InitiallySelectedItem(SelectedLODScopeOption)
-                                .IsEnabled(false)
-                                .OnGenerateWidget_Lambda([](TSharedPtr<FString> Item)
+                                SNew(SSpinBox<int32>)
+                                .MinValue(0)
+                                .MaxValue_Lambda([this]()
                                 {
-                                    return SNew(STextBlock)
-                                        .Text(Item.IsValid() ? FText::FromString(*Item) : LOCTEXT("LODScopeInvalidOption", "LOD0 Only"));
+                                    return FMath::Max(0, GetSkeletalMeshLODCount(PendingCreationSettings != nullptr ? PendingCreationSettings->SourceSkeletalMesh : nullptr) - 1);
                                 })
-                                [
-                                    SNew(STextBlock)
-                                    .Text(LOCTEXT("LODScopeLOD0Only", "LOD0 Only"))
-                                ]
+                                .Value_Lambda([this]()
+                                {
+                                    return PendingCreationSettings != nullptr ? PendingCreationSettings->FirstGeneratedLODIndex : 0;
+                                })
+                                .OnValueChanged_Lambda([this](int32 NewValue)
+                                {
+                                    if (PendingCreationSettings == nullptr)
+                                    {
+                                        return;
+                                    }
+                                    PendingCreationSettings->FirstGeneratedLODIndex = NewValue;
+                                    ClampLODRangeForMesh(PendingCreationSettings->SourceSkeletalMesh, PendingCreationSettings->FirstGeneratedLODIndex, PendingCreationSettings->LastGeneratedLODIndex);
+                                })
+                            ]
+                        ]
+                    ]
+                    + SVerticalBox::Slot()
+                    .AutoHeight()
+                    .Padding(0.0f, 6.0f, 0.0f, 0.0f)
+                    [
+                        SNew(SHorizontalBox)
+                        + SHorizontalBox::Slot()
+                        .FillWidth(1.0f)
+                        .VAlign(VAlign_Center)
+                        [
+                            SNew(STextBlock)
+                            .Text(LOCTEXT("LastGeneratedLODLabel", "Last Mapped LOD"))
+                        ]
+                        + SHorizontalBox::Slot()
+                        .AutoWidth()
+                        .VAlign(VAlign_Center)
+                        [
+                            SNew(SBox)
+                            .WidthOverride(120.0f)
+                            [
+                                SNew(SSpinBox<int32>)
+                                .MinValue_Lambda([this]()
+                                {
+                                    return PendingCreationSettings != nullptr ? PendingCreationSettings->FirstGeneratedLODIndex : 0;
+                                })
+                                .MaxValue_Lambda([this]()
+                                {
+                                    return FMath::Max(0, GetSkeletalMeshLODCount(PendingCreationSettings != nullptr ? PendingCreationSettings->SourceSkeletalMesh : nullptr) - 1);
+                                })
+                                .Value_Lambda([this]()
+                                {
+                                    return PendingCreationSettings != nullptr ? PendingCreationSettings->LastGeneratedLODIndex : 0;
+                                })
+                                .OnValueChanged_Lambda([this](int32 NewValue)
+                                {
+                                    if (PendingCreationSettings == nullptr)
+                                    {
+                                        return;
+                                    }
+                                    PendingCreationSettings->LastGeneratedLODIndex = NewValue;
+                                    ClampLODRangeForMesh(PendingCreationSettings->SourceSkeletalMesh, PendingCreationSettings->FirstGeneratedLODIndex, PendingCreationSettings->LastGeneratedLODIndex);
+                                })
                             ]
                         ]
                     ]
@@ -609,9 +712,18 @@ bool UWetClothingAssetFactory::ConfigureProperties()
                         .AutoWrapText(true)
                         .Font(FAppStyle::GetFontStyle(TEXT("SmallFont")))
                         .ColorAndOpacity(FStyleColors::AccentBlue)
-                        .Text(LOCTEXT(
-                            "LODScopePlaceholderInfo",
-                            "Multi-LOD generation is planned. Current setup prepares LOD0 only."))
+                        .Text_Lambda([this]()
+                        {
+                            if (PendingCreationSettings == nullptr)
+                            {
+                                return BuildLODRangeInfoText(nullptr, 0, 0);
+                            }
+                            ClampLODRangeForMesh(PendingCreationSettings->SourceSkeletalMesh, PendingCreationSettings->FirstGeneratedLODIndex, PendingCreationSettings->LastGeneratedLODIndex);
+                            return BuildLODRangeInfoText(
+                                PendingCreationSettings->SourceSkeletalMesh,
+                                PendingCreationSettings->FirstGeneratedLODIndex,
+                                PendingCreationSettings->LastGeneratedLODIndex);
+                        })
                     ]
                 ]
             ]
@@ -668,13 +780,12 @@ bool UWetClothingAssetFactory::ConfigureProperties()
                         }
 
                         PendingCreationSettings->PreferredDWCDataUVChannelIndex = DataUVChannelIndex;
+                        ClampLODRangeForMesh(
+                            PendingCreationSettings->SourceSkeletalMesh,
+                            PendingCreationSettings->FirstGeneratedLODIndex,
+                            PendingCreationSettings->LastGeneratedLODIndex);
                         bConfirmedOverwriteExistingDataUVChannel =
                             IsExistingSourceUVChannel(PendingCreationSettings->SourceSkeletalMesh, DataUVChannelIndex);
-                        FMessageDialog::Open(
-                            EAppMsgType::Ok,
-                            LOCTEXT(
-                                "MultiLODCreatePlaceholderMessage",
-                                "Multi-LOD generation is not supported yet. This asset will be created for LOD0 only."));
                         bAccepted = true;
                         Dialog->RequestDestroyWindow();
                         return FReply::Handled();

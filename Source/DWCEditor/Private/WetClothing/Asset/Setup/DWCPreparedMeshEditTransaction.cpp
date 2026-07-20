@@ -16,49 +16,33 @@ FDWCPreparedMeshEditTransaction::~FDWCPreparedMeshEditTransaction()
     }
 }
 
-bool FDWCPreparedMeshEditTransaction::CaptureAllEditableLODs(FString* OutErrorMessage)
+bool FDWCPreparedMeshEditTransaction::CaptureEditableLOD(const int32 LODIndex, FString* OutErrorMessage)
 {
     Backups.Reset();
     bCommitted = false;
     bRolledBack = false;
 
-    const FSkeletalMeshRenderData* RenderData = Mesh != nullptr ? Mesh->GetResourceForRendering() : nullptr;
-    if (Mesh == nullptr || RenderData == nullptr || RenderData->LODRenderData.IsEmpty())
+    if (Mesh == nullptr)
     {
-        if (OutErrorMessage) *OutErrorMessage = TEXT("The Prepared Mesh has no editable LOD data to capture.");
+        if (OutErrorMessage) *OutErrorMessage = TEXT("The Prepared Mesh is unavailable.");
         return false;
     }
 
-    Backups.Reserve(RenderData->LODRenderData.Num());
-    for (int32 LODIndex = 0; LODIndex < RenderData->LODRenderData.Num(); ++LODIndex)
+    FMeshDescription* MeshDescription = Mesh->GetMeshDescription(LODIndex);
+    if (MeshDescription == nullptr)
     {
-        FMeshDescription* MeshDescription = Mesh->GetMeshDescription(LODIndex);
-        if (MeshDescription == nullptr)
+        if (OutErrorMessage)
         {
-            if (RenderData->LODRenderData[LODIndex].GetNumVertices() > 0)
-            {
-                if (OutErrorMessage)
-                {
-                    *OutErrorMessage = FString::Printf(
-                        TEXT("LOD%d does not expose editable MeshDescription data."),
-                        LODIndex);
-                }
-                Backups.Reset();
-                return false;
-            }
-            continue;
+            *OutErrorMessage = FString::Printf(
+                TEXT("LOD%d does not expose editable MeshDescription data."),
+                LODIndex);
         }
-
-        FLODBackup& Backup = Backups.AddDefaulted_GetRef();
-        Backup.LODIndex = LODIndex;
-        Backup.MeshDescription = *MeshDescription;
-    }
-
-    if (Backups.IsEmpty())
-    {
-        if (OutErrorMessage) *OutErrorMessage = TEXT("The Prepared Mesh produced no editable LOD backups.");
         return false;
     }
+
+    FLODBackup& Backup = Backups.AddDefaulted_GetRef();
+    Backup.LODIndex = LODIndex;
+    Backup.MeshDescription = *MeshDescription;
 
     if (OutErrorMessage) OutErrorMessage->Reset();
     return true;

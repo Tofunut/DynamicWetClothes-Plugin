@@ -135,7 +135,7 @@ void FillTriangleUVs(const FDWCGPUBakedTriangle& Triangle, FTriangleAbsorptionDi
 void CollectExpectedWettableSlots(const UWetClothingAsset& Asset, TSet<int32>& OutMaterialSlots)
 {
     OutMaterialSlots.Reset();
-    for (const FWetClothingWettableMaterialSlotState& SlotState : Asset.PartData.EditableWetPartData.WettableMaterialSlots)
+    for (const FWetClothingWettableMaterialSlotState& SlotState : Asset.Authored.PartData.EditableWetPartData.WettableMaterialSlots)
     {
         if (SlotState.bIsWettableSlot && SlotState.MaterialSlotIndex != INDEX_NONE)
         {

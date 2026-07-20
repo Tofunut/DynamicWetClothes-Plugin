@@ -542,7 +542,7 @@ void SWetClothingTransparencyPreviewViewport::BuildFullBlueprintPreview()
         return;
     }
 
-    TSubclassOf<AActor> BlueprintClass = Asset->TransparencyData.SourceBlueprintClass.LoadSynchronous();
+    TSubclassOf<AActor> BlueprintClass = Asset->Authored.TransparencyData.SourceBlueprintClass.LoadSynchronous();
     if (BlueprintClass == nullptr)
     {
         BuildTargetMeshPreview();
@@ -612,7 +612,7 @@ void SWetClothingTransparencyPreviewViewport::ApplyRevealMaterials(USkeletalMesh
     for (int32 MaterialSlotIndex = 0; MaterialSlotIndex < MaterialCount; ++MaterialSlotIndex)
     {
         const FWetClothingGeneratedWetMaterialOverride* WetOverride =
-            Asset->PartData.GeneratedWetMaterialOverrides.FindByPredicate(
+            Asset->Derived.Inline.GeneratedWetMaterialOverrides.FindByPredicate(
                 [MaterialSlotIndex](const FWetClothingGeneratedWetMaterialOverride& Candidate)
                 {
                     return Candidate.MaterialSlotIndex == MaterialSlotIndex && Candidate.CPUMaterialInstance != nullptr;
@@ -623,7 +623,7 @@ void SWetClothingTransparencyPreviewViewport::ApplyRevealMaterials(USkeletalMesh
         }
     }
 
-    for (const FWetClothingBakedTransparencyRevealLayer& BakedLayer : Asset->TransparencyData.BakedRevealLayers)
+    for (const FWetClothingBakedTransparencyRevealLayer& BakedLayer : Asset->Authored.TransparencyData.BakedRevealLayers)
     {
         if (BakedLayer.MaterialSlotIndex == INDEX_NONE || BakedLayer.RevealMaterial == nullptr)
         {
@@ -674,7 +674,7 @@ void SWetClothingTransparencyPreviewViewport::ApplyRevealMaterials(USkeletalMesh
         PreviewMIDs[MaterialSlotIndex] = MID;
     }
 
-    for (const FWetClothingBakedTransparencyRevealLayer& BakedLayer : Asset->TransparencyData.BakedRevealLayers)
+    for (const FWetClothingBakedTransparencyRevealLayer& BakedLayer : Asset->Authored.TransparencyData.BakedRevealLayers)
     {
         if (!PreviewMIDs.IsValidIndex(BakedLayer.MaterialSlotIndex))
         {
@@ -763,7 +763,7 @@ void SWetClothingTransparencyPreviewViewport::ApplyTransparencyPreviewParameters
 
     const UWetClothingAsset* Asset = WetClothingAsset.Get();
     const FWetWrinkleBakedMapSet* WrinkleMap = Asset != nullptr
-        ? Asset->WrinkleData.FindBakedWrinkleMap(SelectedMaterialSlotIndex, SelectedUVChannelIndex, AutoBakePreviewResult->LODIndex)
+        ? Asset->Authored.WrinkleData.FindBakedWrinkleMap(SelectedMaterialSlotIndex, SelectedUVChannelIndex, AutoBakePreviewResult->LODIndex)
         : nullptr;
     const bool bHasWrinkleCoverage = WrinkleMap != nullptr &&
         WrinkleMap->BakedWrinkleNormalMap != nullptr &&
@@ -778,7 +778,7 @@ void SWetClothingTransparencyPreviewViewport::ApplyTransparencyPreviewParameters
 FWetClothingTransparencyLayerData* SWetClothingTransparencyPreviewViewport::GetSelectedLayer()
 {
     UWetClothingAsset* Asset = WetClothingAsset.Get();
-    return Asset != nullptr ? Asset->TransparencyData.TransparencyLayers.FindByPredicate(
+    return Asset != nullptr ? Asset->Authored.TransparencyData.TransparencyLayers.FindByPredicate(
         [this](const FWetClothingTransparencyLayerData& Layer)
         {
             return Layer.LayerGuid == SelectedLayerGuid;
@@ -1395,7 +1395,7 @@ bool SWetClothingTransparencyPreviewViewport::RebuildWrinkleSuppressionBuffer()
     WrinkleSuppressionBuffer.Init(0, PixelCount);
     const UWetClothingAsset* Asset = WetClothingAsset.Get();
     const FWetWrinkleBakedMapSet* WrinkleMap = Asset != nullptr
-        ? Asset->WrinkleData.FindBakedWrinkleMap(
+        ? Asset->Authored.WrinkleData.FindBakedWrinkleMap(
             SelectedMaterialSlotIndex,
             SelectedUVChannelIndex,
             Result.LODIndex)

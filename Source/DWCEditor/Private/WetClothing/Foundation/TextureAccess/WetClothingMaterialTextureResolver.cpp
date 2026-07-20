@@ -1,5 +1,5 @@
 /*
- *  Material에서 미리보기와 Auto Partition에 적합한 텍스처 후보를 수집하고 점수화합니다.
+ *  Material?먯꽌 誘몃━蹂닿린? Auto Partition???곹빀???띿뒪泥??꾨낫瑜??섏쭛?섍퀬 ?먯닔?뷀빀?덈떎.
  */
 
 #include "WetClothing/Foundation/TextureAccess/WetClothingMaterialTextureResolver.h"
@@ -316,7 +316,7 @@ UTexture* FWetClothingMaterialTextureResolver::FindSavedTextureSelection(
         return nullptr;
     }
 
-    for (const FWetClothingSourceTextureSelection& Selection : WetClothingAsset->PartData.EditableWetPartData.SourceTextureSelections)
+    for (const FWetClothingSourceTextureSelection& Selection : WetClothingAsset->Authored.PartData.EditableWetPartData.SourceTextureSelections)
     {
         if (Selection.MaterialSlotIndex == MaterialSlotIndex && Selection.UVChannelIndex == UVChannelIndex)
         {
@@ -337,7 +337,7 @@ bool FWetClothingMaterialTextureResolver::HasSavedTextureSelection(
         return false;
     }
 
-    return WetClothingAsset->PartData.EditableWetPartData.SourceTextureSelections.ContainsByPredicate(
+    return WetClothingAsset->Authored.PartData.EditableWetPartData.SourceTextureSelections.ContainsByPredicate(
         [MaterialSlotIndex, UVChannelIndex](const FWetClothingSourceTextureSelection& Selection)
         {
             return Selection.MaterialSlotIndex == MaterialSlotIndex && Selection.UVChannelIndex == UVChannelIndex;
@@ -357,7 +357,7 @@ void FWetClothingMaterialTextureResolver::SaveTextureSelection(
 
     WetClothingAsset->Modify();
 
-    for (FWetClothingSourceTextureSelection& Selection : WetClothingAsset->PartData.EditableWetPartData.SourceTextureSelections)
+    for (FWetClothingSourceTextureSelection& Selection : WetClothingAsset->Authored.PartData.EditableWetPartData.SourceTextureSelections)
     {
         if (Selection.MaterialSlotIndex == MaterialSlotIndex && Selection.UVChannelIndex == UVChannelIndex)
         {
@@ -371,7 +371,7 @@ void FWetClothingMaterialTextureResolver::SaveTextureSelection(
     NewSelection.MaterialSlotIndex = MaterialSlotIndex;
     NewSelection.UVChannelIndex = UVChannelIndex;
     NewSelection.Texture = Texture;
-    WetClothingAsset->PartData.EditableWetPartData.SourceTextureSelections.Add(NewSelection);
+    WetClothingAsset->Authored.PartData.EditableWetPartData.SourceTextureSelections.Add(NewSelection);
     WetClothingAsset->MarkPackageDirty();
 }
 

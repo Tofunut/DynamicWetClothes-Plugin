@@ -1,5 +1,5 @@
 /*
- *  Wet Part 검색, 기본 Part 생성, Island 매핑, 표시 이름/색상 계산 등 편집 서비스 로직을 구현합니다.
+ *  Wet Part 寃?? 湲곕낯 Part ?앹꽦, Island 留ㅽ븨, ?쒖떆 ?대쫫/?됱긽 怨꾩궛 ???몄쭛 ?쒕퉬??濡쒖쭅??援ы쁽?⑸땲??
  */
 
 #include "WetClothing/Modes/Part/Partition/WetPartEditingService.h"
@@ -24,7 +24,7 @@ bool FWetPartEditingService::EnsureDefaultWetPartForScope(UWetClothingAsset* Wet
         return false;
     }
 
-    for (FWetClothingWetPartEntry& Entry : WetClothingAsset->PartData.EditableWetPartData.WetPartEntries)
+    for (FWetClothingWetPartEntry& Entry : WetClothingAsset->Authored.PartData.EditableWetPartData.WetPartEntries)
     {
         if (MatchesScope(Entry, Scope) && Entry.WetPartID == 0)
         {
@@ -42,7 +42,7 @@ bool FWetPartEditingService::EnsureDefaultWetPartForScope(UWetClothingAsset* Wet
     NewEntry.Color = GetDefaultWetPartColor(NewEntry.WetPartID);
     NewEntry.bViewEnabled = true;
 
-    WetClothingAsset->PartData.EditableWetPartData.WetPartEntries.Add(NewEntry);
+    WetClothingAsset->Authored.PartData.EditableWetPartData.WetPartEntries.Add(NewEntry);
     WetClothingAsset->MarkPackageDirty();
     return true;
 }
@@ -52,7 +52,7 @@ int32 FWetPartEditingService::FindNextWetPartIDForScope(const UWetClothingAsset*
     int32 MaxWetPartID = 0;
     if (WetClothingAsset != nullptr && Scope.IsValid())
     {
-        for (const FWetClothingWetPartEntry& Entry : WetClothingAsset->PartData.EditableWetPartData.WetPartEntries)
+        for (const FWetClothingWetPartEntry& Entry : WetClothingAsset->Authored.PartData.EditableWetPartData.WetPartEntries)
         {
             if (MatchesScope(Entry, Scope))
             {
@@ -71,7 +71,7 @@ FWetClothingWetPartEntry* FWetPartEditingService::FindMutableEntry(UWetClothingA
         return nullptr;
     }
 
-    for (FWetClothingWetPartEntry& Entry : WetClothingAsset->PartData.EditableWetPartData.WetPartEntries)
+    for (FWetClothingWetPartEntry& Entry : WetClothingAsset->Authored.PartData.EditableWetPartData.WetPartEntries)
     {
         if (MatchesScope(Entry, Scope) && Entry.WetPartID == WetPartID)
         {
@@ -89,7 +89,7 @@ const FWetClothingWetPartEntry* FWetPartEditingService::FindEntry(const UWetClot
         return nullptr;
     }
 
-    for (const FWetClothingWetPartEntry& Entry : WetClothingAsset->PartData.EditableWetPartData.WetPartEntries)
+    for (const FWetClothingWetPartEntry& Entry : WetClothingAsset->Authored.PartData.EditableWetPartData.WetPartEntries)
     {
         if (MatchesScope(Entry, Scope) && Entry.WetPartID == WetPartID)
         {
@@ -107,7 +107,7 @@ const FWetClothingWetPartEntry* FWetPartEditingService::FindEntryForUVIsland(con
         return nullptr;
     }
 
-    for (const FWetClothingWetPartEntry& Entry : WetClothingAsset->PartData.EditableWetPartData.WetPartEntries)
+    for (const FWetClothingWetPartEntry& Entry : WetClothingAsset->Authored.PartData.EditableWetPartData.WetPartEntries)
     {
         if (MatchesScope(Entry, Scope) && Entry.AssignedUVIslandIDs.Contains(UVIslandID))
         {
@@ -140,7 +140,7 @@ void FWetPartEditingService::BuildWetPartItemsForScope(
         return;
     }
 
-    for (const FWetClothingWetPartEntry& Entry : WetClothingAsset->PartData.EditableWetPartData.WetPartEntries)
+    for (const FWetClothingWetPartEntry& Entry : WetClothingAsset->Authored.PartData.EditableWetPartData.WetPartEntries)
     {
         if (MatchesScope(Entry, Scope))
         {

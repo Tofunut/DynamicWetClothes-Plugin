@@ -64,16 +64,16 @@ namespace WetWrinkleUVChannelGeneratorInternal
         }
 
 #if WITH_EDITORONLY_DATA
-        if (Asset->WrinkleData.OriginalUVChannelCount != INDEX_NONE)
+        if (Asset->Authored.WrinkleData.OriginalUVChannelCount != INDEX_NONE)
         {
-            return Asset->WrinkleData.OriginalUVChannelCount;
+            return Asset->Authored.WrinkleData.OriginalUVChannelCount;
         }
 #endif
 
         const int32 CurrentUVChannelCount = GetEditableUVChannelCount(TargetMesh, LODIndex);
         int32 FirstKnownGeneratedChannel = TNumericLimits<int32>::Max();
 
-        for (const FWetWrinkleGeneratedUVSlot& GeneratedSlot : Asset->WrinkleData.GeneratedWrinkleUVSlots)
+        for (const FWetWrinkleGeneratedUVSlot& GeneratedSlot : Asset->Authored.WrinkleData.GeneratedWrinkleUVSlots)
         {
             if (GeneratedSlot.UVChannelIndex >= 0)
             {
@@ -82,9 +82,9 @@ namespace WetWrinkleUVChannelGeneratorInternal
         }
 
 #if WITH_EDITORONLY_DATA
-        if (Asset->WrinkleData.bHasGeneratedWrinkleUV && Asset->WrinkleData.WrinkleUVChannelIndex >= 0)
+        if (Asset->Authored.WrinkleData.bHasGeneratedWrinkleUV && Asset->Authored.WrinkleData.WrinkleUVChannelIndex >= 0)
         {
-            FirstKnownGeneratedChannel = FMath::Min(FirstKnownGeneratedChannel, Asset->WrinkleData.WrinkleUVChannelIndex);
+            FirstKnownGeneratedChannel = FMath::Min(FirstKnownGeneratedChannel, Asset->Authored.WrinkleData.WrinkleUVChannelIndex);
         }
 #endif
 
@@ -377,22 +377,22 @@ FWetWrinkleUVChannelGenerationResult FWetWrinkleUVChannelGenerator::GenerateForA
     }
 
 #if WITH_EDITORONLY_DATA
-    if (Asset->WrinkleData.OriginalUVChannelCount == INDEX_NONE)
+    if (Asset->Authored.WrinkleData.OriginalUVChannelCount == INDEX_NONE)
     {
         Asset->Modify();
-        Asset->WrinkleData.OriginalUVChannelCount = WetWrinkleUVChannelGeneratorInternal::DeriveOriginalUVChannelCount(Asset, TargetMesh, Settings.LODIndex);
+        Asset->Authored.WrinkleData.OriginalUVChannelCount = WetWrinkleUVChannelGeneratorInternal::DeriveOriginalUVChannelCount(Asset, TargetMesh, Settings.LODIndex);
     }
 #endif
 
     bool bCanOverwriteRecordedGeneratedChannel =
         Settings.bAllowOverwriteExistingGeneratedChannel &&
-        Asset->WrinkleData.WrinkleUVChannelIndex != INDEX_NONE;
+        Asset->Authored.WrinkleData.WrinkleUVChannelIndex != INDEX_NONE;
 #if WITH_EDITORONLY_DATA
-    bCanOverwriteRecordedGeneratedChannel = bCanOverwriteRecordedGeneratedChannel && Asset->WrinkleData.bHasGeneratedWrinkleUV;
+    bCanOverwriteRecordedGeneratedChannel = bCanOverwriteRecordedGeneratedChannel && Asset->Authored.WrinkleData.bHasGeneratedWrinkleUV;
 #endif
 
     const int32 PreferredUVChannelIndex = bCanOverwriteRecordedGeneratedChannel
-                                           ? Asset->WrinkleData.WrinkleUVChannelIndex
+                                           ? Asset->Authored.WrinkleData.WrinkleUVChannelIndex
                                            : Settings.PreferredUVChannelIndex;
 
     Result = GenerateForSkeletalMesh(
@@ -407,22 +407,22 @@ FWetWrinkleUVChannelGenerationResult FWetWrinkleUVChannelGenerator::GenerateForA
     if (Result.bSucceeded)
     {
         Asset->Modify();
-        Asset->WrinkleData.WrinkleUVChannelIndex = Result.UVChannelIndex;
+        Asset->Authored.WrinkleData.WrinkleUVChannelIndex = Result.UVChannelIndex;
 #if WITH_EDITORONLY_DATA
-        Asset->WrinkleData.bHasGeneratedWrinkleUV = true;
-        Asset->WrinkleData.GeneratedWrinkleUVBuildGuid = FGuid::NewGuid();
+        Asset->Authored.WrinkleData.bHasGeneratedWrinkleUV = true;
+        Asset->Authored.WrinkleData.GeneratedWrinkleUVBuildGuid = FGuid::NewGuid();
 #endif
 
         if (Settings.TargetMaterialSlotIndex != INDEX_NONE)
         {
-            FWetWrinkleGeneratedUVSlot* ExistingSlot = Asset->WrinkleData.GeneratedWrinkleUVSlots.FindByPredicate(
+            FWetWrinkleGeneratedUVSlot* ExistingSlot = Asset->Authored.WrinkleData.GeneratedWrinkleUVSlots.FindByPredicate(
                 [&Settings](const FWetWrinkleGeneratedUVSlot& Candidate)
                 {
                     return Candidate.MaterialSlotIndex == Settings.TargetMaterialSlotIndex;
                 });
             if (ExistingSlot == nullptr)
             {
-                ExistingSlot = &Asset->WrinkleData.GeneratedWrinkleUVSlots.AddDefaulted_GetRef();
+                ExistingSlot = &Asset->Authored.WrinkleData.GeneratedWrinkleUVSlots.AddDefaulted_GetRef();
             }
 
             ExistingSlot->MaterialSlotIndex = Settings.TargetMaterialSlotIndex;
@@ -483,10 +483,10 @@ FWetWrinkleUVChannelGenerationResult FWetWrinkleUVChannelGenerator::DeleteUVChan
 
     int32 OriginalUVChannelCount = DeriveOriginalUVChannelCount(Asset, TargetMesh, LODIndex);
 #if WITH_EDITORONLY_DATA
-    if (Asset->WrinkleData.OriginalUVChannelCount == INDEX_NONE)
+    if (Asset->Authored.WrinkleData.OriginalUVChannelCount == INDEX_NONE)
     {
         Asset->Modify();
-        Asset->WrinkleData.OriginalUVChannelCount = OriginalUVChannelCount;
+        Asset->Authored.WrinkleData.OriginalUVChannelCount = OriginalUVChannelCount;
     }
 #endif
 
@@ -524,12 +524,12 @@ FWetWrinkleUVChannelGenerationResult FWetWrinkleUVChannelGenerator::DeleteUVChan
         }
     };
 
-    for (int32 SlotIndex = Asset->WrinkleData.GeneratedWrinkleUVSlots.Num() - 1; SlotIndex >= 0; --SlotIndex)
+    for (int32 SlotIndex = Asset->Authored.WrinkleData.GeneratedWrinkleUVSlots.Num() - 1; SlotIndex >= 0; --SlotIndex)
     {
-        FWetWrinkleGeneratedUVSlot& GeneratedSlot = Asset->WrinkleData.GeneratedWrinkleUVSlots[SlotIndex];
+        FWetWrinkleGeneratedUVSlot& GeneratedSlot = Asset->Authored.WrinkleData.GeneratedWrinkleUVSlots[SlotIndex];
         if (GeneratedSlot.UVChannelIndex == UVChannelIndex)
         {
-            Asset->WrinkleData.GeneratedWrinkleUVSlots.RemoveAt(SlotIndex);
+            Asset->Authored.WrinkleData.GeneratedWrinkleUVSlots.RemoveAt(SlotIndex);
         }
         else if (GeneratedSlot.UVChannelIndex > UVChannelIndex)
         {
@@ -538,7 +538,7 @@ FWetWrinkleUVChannelGenerationResult FWetWrinkleUVChannelGenerator::DeleteUVChan
     }
 
     int32 RemovedPatchCount = 0;
-    for (FWetWrinklePatchStroke& Stroke : Asset->WrinkleData.EditablePatchStrokes)
+    for (FWetWrinklePatchStroke& Stroke : Asset->Authored.WrinkleData.EditablePatchStrokes)
     {
         for (int32 PatchIndex = Stroke.PatchPlacements.Num() - 1; PatchIndex >= 0; --PatchIndex)
         {
@@ -555,12 +555,12 @@ FWetWrinkleUVChannelGenerationResult FWetWrinkleUVChannelGenerator::DeleteUVChan
         }
     }
 
-    for (int32 BakedIndex = Asset->WrinkleData.BakedWrinkleMaps.Num() - 1; BakedIndex >= 0; --BakedIndex)
+    for (int32 BakedIndex = Asset->Authored.WrinkleData.BakedWrinkleMaps.Num() - 1; BakedIndex >= 0; --BakedIndex)
     {
-        FWetWrinkleBakedMapSet& BakedMap = Asset->WrinkleData.BakedWrinkleMaps[BakedIndex];
+        FWetWrinkleBakedMapSet& BakedMap = Asset->Authored.WrinkleData.BakedWrinkleMaps[BakedIndex];
         if (BakedMap.UVChannelIndex == UVChannelIndex)
         {
-            Asset->WrinkleData.BakedWrinkleMaps.RemoveAt(BakedIndex);
+            Asset->Authored.WrinkleData.BakedWrinkleMaps.RemoveAt(BakedIndex);
         }
         else if (BakedMap.UVChannelIndex > UVChannelIndex)
         {
@@ -568,11 +568,11 @@ FWetWrinkleUVChannelGenerationResult FWetWrinkleUVChannelGenerator::DeleteUVChan
         }
     }
 
-    ShiftOrInvalidateChannel(Asset->WrinkleData.WrinkleUVChannelIndex);
+    ShiftOrInvalidateChannel(Asset->Authored.WrinkleData.WrinkleUVChannelIndex);
 
 #if WITH_EDITORONLY_DATA
-    Asset->WrinkleData.bHasGeneratedWrinkleUV = Asset->WrinkleData.GeneratedWrinkleUVSlots.Num() > 0;
-    Asset->WrinkleData.GeneratedWrinkleUVBuildGuid = FGuid::NewGuid();
+    Asset->Authored.WrinkleData.bHasGeneratedWrinkleUV = Asset->Authored.WrinkleData.GeneratedWrinkleUVSlots.Num() > 0;
+    Asset->Authored.WrinkleData.GeneratedWrinkleUVBuildGuid = FGuid::NewGuid();
 #endif
 
     TargetMesh->CommitMeshDescription(LODIndex);
@@ -745,16 +745,16 @@ FWetWrinkleUVChannelGenerationResult FWetWrinkleUVChannelGenerator::GenerateForS
     /*
      *
     [ Vertex Instance UVs ]
-                   0번 채널      1번 채널      2번 채널 (Wet/Wrinkle)
-                 ┌────────────┬────────────┬────────────┐
-VertexInstance_0 │ (0.0, 0.0) │ (1.0, 0.5) │ (0.1, 0.2) │
-VertexInstance_1 │ (0.5, 0.0) │ (0.0, 0.0) │ (0.4, 0.8) │
-VertexInstance_2 │ (1.0, 1.0) │ (0.5, 0.5) │ (0.9, 0.1) │
-VertexInstance_3 │ ...        │ ...        │ ...        │
-                 └────────────┴────────────┴────────────┘
+                   0踰?梨꾨꼸      1踰?梨꾨꼸      2踰?梨꾨꼸 (Wet/Wrinkle)
+                 ?뚢?????????????р?????????????р??????????????
+VertexInstance_0 ??(0.0, 0.0) ??(1.0, 0.5) ??(0.1, 0.2) ??
+VertexInstance_1 ??(0.5, 0.0) ??(0.0, 0.0) ??(0.4, 0.8) ??
+VertexInstance_2 ??(1.0, 1.0) ??(0.5, 0.5) ??(0.9, 0.1) ??
+VertexInstance_3 ??...        ??...        ??...        ??
+                 ?붴?????????????닳?????????????닳??????????????
 
 
-                 * SetNumChannels(Current+1)은 가로로 채널 하나를 더 늘림
+                 * SetNumChannels(Current+1)? 媛濡쒕줈 梨꾨꼸 ?섎굹瑜????섎┝
     * */
 
     const int32 ExistingUVChannelCount = VertexInstanceUVs.GetNumChannels(); // How many UVChannels Is this Skeletal Mesh Using?

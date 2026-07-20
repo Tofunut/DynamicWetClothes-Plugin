@@ -22,7 +22,7 @@ bool UDWCMaterialSetupEditorLibrary::RepairGeneratedWetMaterials(
         FWCAMaterialGenerator::MakeOptionsForAsset(WetClothingAsset, EDWCSimulationMode::VertexCPU);
 
     for (FWetClothingGeneratedWetMaterialOverride& MaterialOverride :
-         WetClothingAsset->PartData.GeneratedWetMaterialOverrides)
+         WetClothingAsset->Derived.Inline.GeneratedWetMaterialOverrides)
     {
         UMaterialInterface* SourceMaterial = MaterialOverride.SourceMaterial.Get();
         if (!SourceMaterial)

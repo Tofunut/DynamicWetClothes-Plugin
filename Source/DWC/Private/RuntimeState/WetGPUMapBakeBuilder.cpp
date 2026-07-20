@@ -370,21 +370,17 @@ FWetnessProfileParameters ResolveProfileParametersForEntry(
     const UWetClothingAsset& Asset,
     const int32 EntryIndex)
 {
-    if (!Asset.PartData.EditableWetPartData.WetPartEntries.IsValidIndex(EntryIndex))
+    if (!Asset.Authored.PartData.EditableWetPartData.WetPartEntries.IsValidIndex(EntryIndex))
     {
         return FWetnessProfileParameters();
     }
 
-    const FWetPartProfileAssignment& Assignment =
-        Asset.PartData.EditableWetPartData.WetPartEntries[EntryIndex].ProfileAssignment;
-    if (Assignment.SourceProfile.IsValid())
+    if (Asset.Derived.Inline.ResolvedWetnessProfileParameters.IsValidIndex(EntryIndex))
     {
-        if (const UWetnessProfile* SourceProfile = Cast<UWetnessProfile>(Assignment.SourceProfile.TryLoad()))
-        {
-            return SourceProfile->GetParameters();
-        }
+        return Asset.Derived.Inline.ResolvedWetnessProfileParameters[EntryIndex];
     }
-    return Assignment.Parameters;
+
+    return Asset.Authored.PartData.EditableWetPartData.WetPartEntries[EntryIndex].ProfileAssignment.Parameters;
 }
 
 FDWCGPUProfileParameters MakeGPUProfile(const FWetnessProfileParameters& Parameters)
@@ -443,7 +439,7 @@ bool BuildTrianglePartLookup(
     }
 
     TMap<int32, TMap<int32, int32>> EntryByIslandByMaterial;
-    const TArray<FWetClothingWetPartEntry>& Entries = Asset.PartData.EditableWetPartData.WetPartEntries;
+    const TArray<FWetClothingWetPartEntry>& Entries = Asset.Authored.PartData.EditableWetPartData.WetPartEntries;
     for (int32 EntryIndex = 0; EntryIndex < Entries.Num(); ++EntryIndex)
     {
         const FWetClothingWetPartEntry& Entry = Entries[EntryIndex];
@@ -624,7 +620,7 @@ bool ResolveWettableMaterialSlots(
         SetGPUMapBakeError(OutErrorMessage, TEXT("No DWC Prepared Skeletal Mesh is available."));
         return false;
     }
-    for (const FWetClothingWettableMaterialSlotState& SlotState : Asset.PartData.EditableWetPartData.WettableMaterialSlots)
+    for (const FWetClothingWettableMaterialSlotState& SlotState : Asset.Authored.PartData.EditableWetPartData.WettableMaterialSlots)
     {
         if (!SlotState.bIsWettableSlot)
         {
@@ -687,7 +683,7 @@ FString BuildRuntimeSignatureCacheKey(
     }
 
     const TArray<FWetClothingWettableMaterialSlotState>& WettableSlots =
-        Asset.PartData.EditableWetPartData.WettableMaterialSlots;
+        Asset.Authored.PartData.EditableWetPartData.WettableMaterialSlots;
     TArray<int32> WettableSlotIndices;
     for (int32 SlotStateIndex = 0; SlotStateIndex < WettableSlots.Num(); ++SlotStateIndex)
     {
@@ -714,7 +710,7 @@ FString BuildRuntimeSignatureCacheKey(
         Builder.AddValue(SlotState.MaterialSlotIndex);
     }
 
-    const TArray<FWetClothingWetPartEntry>& Entries = Asset.PartData.EditableWetPartData.WetPartEntries;
+    const TArray<FWetClothingWetPartEntry>& Entries = Asset.Authored.PartData.EditableWetPartData.WetPartEntries;
     TArray<int32> WettableEntryIndices;
     for (int32 EntryIndex = 0; EntryIndex < Entries.Num(); ++EntryIndex)
     {
@@ -923,7 +919,7 @@ bool FWetGPUMapBakeBuilder::BuildLODRuntimeSignature(
     }
 
     const TArray<FWetClothingWettableMaterialSlotState>& WettableSlots =
-        Asset.PartData.EditableWetPartData.WettableMaterialSlots;
+        Asset.Authored.PartData.EditableWetPartData.WettableMaterialSlots;
     TArray<int32> WettableSlotIndices;
     for (int32 SlotStateIndex = 0; SlotStateIndex < WettableSlots.Num(); ++SlotStateIndex)
     {
@@ -950,7 +946,7 @@ bool FWetGPUMapBakeBuilder::BuildLODRuntimeSignature(
         Builder.AddValue(SlotState.MaterialSlotIndex);
     }
 
-    const TArray<FWetClothingWetPartEntry>& Entries = Asset.PartData.EditableWetPartData.WetPartEntries;
+    const TArray<FWetClothingWetPartEntry>& Entries = Asset.Authored.PartData.EditableWetPartData.WetPartEntries;
     TArray<int32> WettableEntryIndices;
     for (int32 EntryIndex = 0; EntryIndex < Entries.Num(); ++EntryIndex)
     {
@@ -1596,7 +1592,7 @@ static bool BuildLODInternal(
             FText::FromString(FString::Printf(TEXT("Committing LOD%d GPU simulation maps into the WCA runtime payload..."), LODIndex)));
         // Explicit map baking must not replace Save-generated runtime structures. Only commit the
         // resolution-dependent texel/seam payload after confirming it was built against the same runtime signature.
-        FDWCGPULODBakeData* Existing = Asset.BakedGPUWetMapLODs.FindByPredicate(
+        FDWCGPULODBakeData* Existing = Asset.Derived.Bulk.GPURuntimeData.FindByPredicate(
             [LODIndex](const FDWCGPULODBakeData& Candidate)
             {
                 return Candidate.LODIndex == LODIndex;
@@ -1631,7 +1627,7 @@ static bool BuildLODInternal(
     }
     else
     {
-        if (FDWCGPULODBakeData* Existing = Asset.BakedGPUWetMapLODs.FindByPredicate(
+        if (FDWCGPULODBakeData* Existing = Asset.Derived.Bulk.GPURuntimeData.FindByPredicate(
                 [LODIndex](const FDWCGPULODBakeData& Candidate)
                 {
                     return Candidate.LODIndex == LODIndex;
@@ -1641,7 +1637,7 @@ static bool BuildLODInternal(
         }
         else
         {
-            Asset.BakedGPUWetMapLODs.Add(MoveTemp(Output));
+            Asset.Derived.Bulk.GPURuntimeData.Add(MoveTemp(Output));
         }
     }
 
@@ -2126,7 +2122,7 @@ static bool BuildLODMapsOnly(
         0.25f,
         FText::FromString(FString::Printf(TEXT("Committing LOD%d GPU simulation maps into the WCA runtime payload..."), LODIndex)));
 
-    FDWCGPULODBakeData* Existing = Asset.BakedGPUWetMapLODs.FindByPredicate(
+    FDWCGPULODBakeData* Existing = Asset.Derived.Bulk.GPURuntimeData.FindByPredicate(
         [LODIndex](const FDWCGPULODBakeData& Candidate)
         {
             return Candidate.LODIndex == LODIndex;

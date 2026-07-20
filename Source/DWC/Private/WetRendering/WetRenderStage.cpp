@@ -55,7 +55,7 @@ namespace
             return false;
         }
 
-        const FWetClothingWettableMaterialSlotState* State = WetClothingAsset->PartData.EditableWetPartData.WettableMaterialSlots.FindByPredicate(
+        const FWetClothingWettableMaterialSlotState* State = WetClothingAsset->Authored.PartData.EditableWetPartData.WettableMaterialSlots.FindByPredicate(
             [MaterialSlotIndex](const FWetClothingWettableMaterialSlotState& Candidate)
             {
                 return Candidate.MaterialSlotIndex == MaterialSlotIndex;
@@ -227,79 +227,8 @@ void FWetRenderStage::ApplyWetMaterialParameters(FWetRenderStageArgs& Receiver)
         }
     }
 
-    ApplyWetnessProfileMapParameters(Receiver);
     ApplyWetWrinkleNormalMapParameters(Receiver);
     ApplyWetTransparencyMapParameters(Receiver);
-}
-
-void FWetRenderStage::ApplyWetnessProfileMapParameters(FWetRenderStageArgs& Receiver)
-{
-    DWC_PROFILE_SCOPE(DWC_Render_ApplyWetnessProfileMapParameters);
-
-    if (DWCWetMaterialParameters::WetnessProfileMap0().IsNone() && DWCWetMaterialParameters::UseWetnessProfileMap0().IsNone())
-    {
-        return;
-    }
-
-    TArray<bool> bWetnessProfileMapAssigned;
-    bWetnessProfileMapAssigned.Init(false, Receiver.WetMaterialInstances->Num());
-
-    if (Receiver.WetClothingAsset)
-    {
-        for (const FWetClothingBakedWetnessProfileMap& BakedWetnessProfileMap : Receiver.WetClothingAsset->PartData.BakedWetnessProfileMaps)
-        {
-            if (BakedWetnessProfileMap.WetnessProfileMap0 == nullptr)
-            {
-                continue;
-            }
-
-            for (const int32 MaterialSlotIndex : BakedWetnessProfileMap.MaterialSlotIndices)
-            {
-                if (!Receiver.WetMaterialInstances->IsValidIndex(MaterialSlotIndex) ||
-                    !IsMaterialSlotWettableForRender(Receiver.WetClothingAsset, MaterialSlotIndex))
-                {
-                    continue;
-                }
-
-                UMaterialInstanceDynamic* MID = (*Receiver.WetMaterialInstances)[MaterialSlotIndex];
-                if (MID == nullptr)
-                {
-                    continue;
-                }
-
-                if (!DWCWetMaterialParameters::WetnessProfileMap0().IsNone())
-                {
-                    MID->SetTextureParameterValue(DWCWetMaterialParameters::WetnessProfileMap0(), BakedWetnessProfileMap.WetnessProfileMap0);
-                }
-
-                if (!DWCWetMaterialParameters::UseWetnessProfileMap0().IsNone())
-                {
-                    MID->SetScalarParameterValue(DWCWetMaterialParameters::UseWetnessProfileMap0(), 1.0f);
-                }
-
-                bWetnessProfileMapAssigned[MaterialSlotIndex] = true;
-            }
-        }
-    }
-
-    if (DWCWetMaterialParameters::UseWetnessProfileMap0().IsNone())
-    {
-        return;
-    }
-
-    for (int32 MaterialSlotIndex = 0; MaterialSlotIndex < Receiver.WetMaterialInstances->Num(); ++MaterialSlotIndex)
-    {
-        if (bWetnessProfileMapAssigned.IsValidIndex(MaterialSlotIndex) && bWetnessProfileMapAssigned[MaterialSlotIndex])
-        {
-            continue;
-        }
-
-        UMaterialInstanceDynamic* MID = (*Receiver.WetMaterialInstances)[MaterialSlotIndex];
-        if (MID != nullptr)
-        {
-            MID->SetScalarParameterValue(DWCWetMaterialParameters::UseWetnessProfileMap0(), 0.0f);
-        }
-    }
 }
 
 void FWetRenderStage::ApplyWetWrinkleNormalMapParameters(FWetRenderStageArgs& Receiver)
@@ -330,8 +259,8 @@ void FWetRenderStage::ApplyWetWrinkleNormalMapParameters(FWetRenderStageArgs& Re
     if (Receiver.WetClothingAsset != nullptr)
     {
         const int32 PreferredUVChannelIndex =
-            Receiver.WetClothingAsset->WrinkleData.WrinkleUVChannelIndex != INDEX_NONE
-                ? Receiver.WetClothingAsset->WrinkleData.WrinkleUVChannelIndex
+            Receiver.WetClothingAsset->Authored.WrinkleData.WrinkleUVChannelIndex != INDEX_NONE
+                ? Receiver.WetClothingAsset->Authored.WrinkleData.WrinkleUVChannelIndex
                 : 0;
         for (int32 MaterialSlotIndex = 0; MaterialSlotIndex < Receiver.WetMaterialInstances->Num(); ++MaterialSlotIndex)
         {
@@ -343,7 +272,7 @@ void FWetRenderStage::ApplyWetWrinkleNormalMapParameters(FWetRenderStageArgs& Re
             }
 
             const FWetWrinkleBakedMapSet* BakedWrinkleMap =
-                Receiver.WetClothingAsset->WrinkleData.FindBakedWrinkleMap(MaterialSlotIndex, PreferredUVChannelIndex, Receiver.LODIndex);
+                Receiver.WetClothingAsset->Authored.WrinkleData.FindBakedWrinkleMap(MaterialSlotIndex, PreferredUVChannelIndex, Receiver.LODIndex);
             if (BakedWrinkleMap == nullptr || BakedWrinkleMap->BakedWrinkleNormalMap == nullptr)
             {
                 continue;
@@ -464,10 +393,10 @@ void FWetRenderStage::ApplyWetTransparencyMapParameters(FWetRenderStageArgs& Rec
     const float SafeWetnessMin = FMath::Clamp(Receiver.TransparencyWetnessMin, 0.0f, 1.0f);
     const float SafeWetnessMax = FMath::Max(SafeWetnessMin, FMath::Clamp(Receiver.TransparencyWetnessMax, 0.0f, 1.0f));
     const float TransparencyStrength = Receiver.WetClothingAsset != nullptr
-                                           ? FMath::Max(0.0f, Receiver.WetClothingAsset->TransparencyData.TransparencyPreviewStrength)
+                                           ? FMath::Max(0.0f, Receiver.WetClothingAsset->Authored.TransparencyData.TransparencyPreviewStrength)
                                            : 0.0f;
     const float WrinkleSuppressionStrength = Receiver.WetClothingAsset != nullptr
-                                                 ? FMath::Max(0.0f, Receiver.WetClothingAsset->TransparencyData.WrinkleSuppressionStrength)
+                                                 ? FMath::Max(0.0f, Receiver.WetClothingAsset->Authored.TransparencyData.WrinkleSuppressionStrength)
                                                  : 0.0f;
 
     TArray<bool> bTransparencyMapAssigned;
@@ -483,7 +412,7 @@ void FWetRenderStage::ApplyWetTransparencyMapParameters(FWetRenderStageArgs& Rec
             }
 
             const FWetClothingTransparencyLayerData* Layer =
-                Receiver.WetClothingAsset->TransparencyData.TransparencyLayers.FindByPredicate(
+                Receiver.WetClothingAsset->Authored.TransparencyData.TransparencyLayers.FindByPredicate(
                     [MaterialSlotIndex](const FWetClothingTransparencyLayerData& Candidate)
                     {
                         return Candidate.TargetSurface.OuterMaterialSlotIndex == MaterialSlotIndex;
@@ -495,7 +424,7 @@ void FWetRenderStage::ApplyWetTransparencyMapParameters(FWetRenderStageArgs& Rec
 
             EDWCTransparencyBakedMapMatch Match = EDWCTransparencyBakedMapMatch::None;
             const FWetClothingBakedTransparencyMap* BakedMap =
-                Receiver.WetClothingAsset->TransparencyData.FindBakedTransparencyMap(
+                Receiver.WetClothingAsset->Authored.TransparencyData.FindBakedTransparencyMap(
                     MaterialSlotIndex,
                     Layer->TargetSurface.OuterUVChannel,
                     Receiver.LODIndex,
@@ -638,7 +567,7 @@ void FWetRenderStage::ApplyWetnessToMaterial(FWetRenderStageArgs& Receiver)
         if (Receiver.WetClothingAsset != nullptr)
         {
             for (const FWetClothingWetPartEntry& Entry :
-                 Receiver.WetClothingAsset->PartData.EditableWetPartData.WetPartEntries)
+                 Receiver.WetClothingAsset->Authored.PartData.EditableWetPartData.WetPartEntries)
             {
                 CachedWetPartDebugColorsByID.FindOrAdd(Entry.WetPartID, Entry.Color);
             }

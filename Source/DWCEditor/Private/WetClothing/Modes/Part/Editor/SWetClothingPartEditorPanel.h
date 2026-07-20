@@ -170,7 +170,6 @@ class SWetClothingPartEditorPanel : public SCompoundWidget
     UTexture*                                      ResolveOrSaveTextureSelection(int32 MaterialSlotIndex, int32 UVChannelIndex);
     bool                                           HasSavedTextureSelection(int32 MaterialSlotIndex, int32 UVChannelIndex) const;
     void                                           SaveTextureSelection(int32 MaterialSlotIndex, int32 UVChannelIndex, UTexture* Texture);
-    const FWetClothingBakedWetnessProfileMap* FindBakedWetnessProfileMap(UTexture* SourceTexture, int32 UVChannelIndex) const;
     void                                           CollectMaterialSlotsForWetnessProfileMap(UTexture* SourceTexture, int32 UVChannelIndex, TArray<int32>& OutMaterialSlotIndices) const;
     void                                           CollectWetnessProfileMapSourceTextures(int32 UVChannelIndex, TArray<UTexture*>& OutSourceTextures) const;
 

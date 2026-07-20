@@ -28,7 +28,7 @@ bool FDWCTransparencyAutoMapGenerator::GenerateSameMesh(
         return false;
     }
 
-    const int32 Resolution = FMath::Clamp(WetClothingAsset.TransparencyData.TransparencyBakeResolution, 16, 4096);
+    const int32 Resolution = FMath::Clamp(WetClothingAsset.Authored.TransparencyData.TransparencyBakeResolution, 16, 4096);
     const int32 PixelCount = Resolution * Resolution;
     OutResult.LayerGuid = Layer.LayerGuid;
     OutResult.MaterialSlotIndex = Layer.TargetSurface.OuterMaterialSlotIndex;

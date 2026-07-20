@@ -105,7 +105,7 @@ namespace
     TArray<int32> CollectWettableMaterialSlotIndices(const UWetClothingAsset& WetClothingAsset)
     {
         TArray<int32> WettableSlots;
-        for (const FWetClothingWettableMaterialSlotState& SlotState : WetClothingAsset.PartData.EditableWetPartData.WettableMaterialSlots)
+        for (const FWetClothingWettableMaterialSlotState& SlotState : WetClothingAsset.Authored.PartData.EditableWetPartData.WettableMaterialSlots)
         {
             if (SlotState.bIsWettableSlot && SlotState.MaterialSlotIndex != INDEX_NONE)
             {
@@ -120,7 +120,7 @@ namespace
         const UWetClothingAsset& WetClothingAsset,
         const int32              MaterialSlotIndex)
     {
-        return WetClothingAsset.PartData.GeneratedWetMaterialOverrides.FindByPredicate(
+        return WetClothingAsset.Derived.Inline.GeneratedWetMaterialOverrides.FindByPredicate(
             [MaterialSlotIndex](const FWetClothingGeneratedWetMaterialOverride& MaterialOverride)
             {
                 return MaterialOverride.MaterialSlotIndex == MaterialSlotIndex;
@@ -156,7 +156,7 @@ namespace
         const TArray<FString> InputNames =
             UMaterialEditingLibrary::GetMaterialExpressionInputNames(Expression);
 
-        // 이름 없는 단일 기본 입력을 사용하는 노드
+        // ?대쫫 ?녿뒗 ?⑥씪 湲곕낯 ?낅젰???ъ슜?섎뒗 ?몃뱶
         if (InputName.IsEmpty())
         {
             return InputNames.IsEmpty();

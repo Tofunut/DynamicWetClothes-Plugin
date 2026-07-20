@@ -20,6 +20,7 @@ namespace DWCDataUVBuildServicePrivate
         Result.bSucceeded = false;
         Result.Message = Message;
     }
+
 }
 
 bool FDWCDataUVBuildService::BuildOriginalUVTopology(
@@ -32,44 +33,36 @@ bool FDWCDataUVBuildService::BuildOriginalUVTopology(
         FWCAGeneratedDataInvalidator::InvalidateAsset(Asset);
     };
 
+    constexpr int32 SourceLODIndex = UWetClothingAsset::RuntimeSimulationLODIndex;
     USkeletalMesh* PreparedMesh = Asset.GetRuntimeSkeletalMesh();
     const FSkeletalMeshRenderData* RenderData = PreparedMesh != nullptr
         ? PreparedMesh->GetResourceForRendering()
         : nullptr;
-    if (RenderData == nullptr || RenderData->LODRenderData.IsEmpty())
+    if (RenderData == nullptr || !RenderData->LODRenderData.IsValidIndex(SourceLODIndex))
     {
-        if (OutErrorMessage) *OutErrorMessage = TEXT("The DWC Prepared Skeletal Mesh has no render LOD data.");
+        if (OutErrorMessage) *OutErrorMessage = TEXT("The DWC Prepared Skeletal Mesh has no LOD0 render data.");
+        return false;
+    }
+
+    if (RenderData->LODRenderData[SourceLODIndex].GetNumVertices() <= 0)
+    {
+        if (OutErrorMessage) *OutErrorMessage = TEXT("The DWC Prepared Skeletal Mesh LOD0 has no vertices.");
+        return false;
+    }
+
+    FDWCEditorUVTopologyData Topology;
+    if (!FDWCOriginalUVTopologyBuilder::BuildLOD(
+            Asset,
+            PreparedMesh,
+            SourceLODIndex,
+            Topology,
+            OutErrorMessage))
+    {
         return false;
     }
 
     TArray<FDWCEditorUVTopologyData> Topologies;
-    Topologies.Reserve(RenderData->LODRenderData.Num());
-    for (int32 LODIndex = 0; LODIndex < RenderData->LODRenderData.Num(); ++LODIndex)
-    {
-        if (RenderData->LODRenderData[LODIndex].GetNumVertices() <= 0)
-        {
-            continue;
-        }
-
-        FDWCEditorUVTopologyData Topology;
-        if (!FDWCOriginalUVTopologyBuilder::BuildLOD(
-                Asset,
-                PreparedMesh,
-                LODIndex,
-                Topology,
-                OutErrorMessage))
-        {
-            return false;
-        }
-        Topologies.Add(MoveTemp(Topology));
-    }
-
-    if (Topologies.IsEmpty())
-    {
-        if (OutErrorMessage) *OutErrorMessage = TEXT("The DWC Prepared Skeletal Mesh produced no Original UV topology data.");
-        return false;
-    }
-
+    Topologies.Add(MoveTemp(Topology));
     Asset.SetOriginalUVTopologies(MoveTemp(Topologies));
     if (OutErrorMessage) OutErrorMessage->Reset();
     return true;
@@ -120,15 +113,22 @@ FDWCDataUVBuildResult FDWCDataUVBuildService::Generate(
         return Result;
     }
 
+    constexpr int32 SourceLODIndex = UWetClothingAsset::RuntimeSimulationLODIndex;
+    if (!RenderData->LODRenderData.IsValidIndex(SourceLODIndex))
+    {
+        SetFailure(Result, TEXT("The DWC Prepared Skeletal Mesh has no LOD0 render data."));
+        return Result;
+    }
+
     FDWCPreparedMeshEditTransaction MeshEditTransaction(PreparedMesh);
     FString TransactionError;
-    if (!MeshEditTransaction.CaptureAllEditableLODs(&TransactionError))
+    if (!MeshEditTransaction.CaptureEditableLOD(SourceLODIndex, &TransactionError))
     {
         SetFailure(Result, TransactionError);
         return Result;
     }
 
-    const int32 PreparedUVCount = FWetClothingAssetMeshAnalyzer::GetNumUVChannels(PreparedMesh, 0);
+    const int32 PreparedUVCount = FWetClothingAssetMeshAnalyzer::GetNumUVChannels(PreparedMesh, SourceLODIndex);
     if (PreparedUVCount <= 0)
     {
         SetFailure(Result, TEXT("The DWC Prepared Skeletal Mesh must have at least one UV channel."));
@@ -141,9 +141,9 @@ FDWCDataUVBuildResult FDWCDataUVBuildService::Generate(
     }
 
     TArray<FDWCDataUVLODMetadata> DataUVMetadata;
-    DataUVMetadata.Reserve(RenderData->LODRenderData.Num());
+    DataUVMetadata.Reserve(1);
     TArray<FDWCEditorUVTopologyData> OriginalUVTopologies;
-    OriginalUVTopologies.Reserve(RenderData->LODRenderData.Num());
+    OriginalUVTopologies.Reserve(1);
 
     int32 ExcludedTriangleCount = 0;
     int32 SplitOriginalUVIslandCount = 0;
@@ -167,87 +167,71 @@ FDWCDataUVBuildResult FDWCDataUVBuildService::Generate(
 
     UWetClothingAsset::ClearMeshContentSignatureCache();
 
-    const int32 LODCount = RenderData->LODRenderData.Num();
-    for (int32 LODIndex = 0; LODIndex < LODCount; ++LODIndex)
+    const FSkeletalMeshLODRenderData& SourceLODData = RenderData->LODRenderData[SourceLODIndex];
+    if (SourceLODData.GetNumVertices() <= 0)
     {
-        const FSkeletalMeshRenderData* CurrentRenderData = PreparedMesh->GetResourceForRendering();
-        if (CurrentRenderData == nullptr || !CurrentRenderData->LODRenderData.IsValidIndex(LODIndex))
-        {
-            SetFailure(Result, FString::Printf(
-                TEXT("LOD%d render data became unavailable during DWC Data UV generation."),
-                LODIndex));
-            return Result;
-        }
-
-        const FSkeletalMeshLODRenderData& LODData = CurrentRenderData->LODRenderData[LODIndex];
-        if (LODData.GetNumVertices() <= 0)
-        {
-            continue;
-        }
-
-        const bool bAllowOverwriteExistingChannel =
-            bAllowOverwriteExistingDataUVChannel ||
-            Asset.GetDWCDataUVChannelIndex() == DataUVChannelIndex ||
-            LODIndex > 0;
-        FDWCDataUVGenerationResult UVResult = FDWCDataUVGenerator::GenerateForSkeletalMesh(
-            PreparedMesh,
-            LODIndex,
-            Asset.GetOriginalUVChannelIndex(),
-            DataUVChannelIndex,
-            bAllowOverwriteExistingChannel,
-            INDEX_NONE);
-        if (!UVResult.bSucceeded)
-        {
-            SetFailure(Result, FString::Printf(
-                TEXT("LOD%d DWC Data UV generation failed: %s"),
-                LODIndex,
-                *UVResult.Message));
-            return Result;
-        }
-
-        DataUVChannelIndex = UVResult.UVChannelIndex;
-        UWetClothingAsset::ClearMeshContentSignatureCache();
-
-        FDWCEditorUVTopologyData OriginalUVTopology;
-        FString TopologyError;
-        if (!FDWCOriginalUVTopologyBuilder::BuildLOD(
-                Asset,
-                PreparedMesh,
-                LODIndex,
-                OriginalUVTopology,
-                &TopologyError))
-        {
-            SetFailure(Result, FString::Printf(
-                TEXT("LOD%d Original UV topology failed: %s"),
-                LODIndex,
-                *TopologyError));
-            return Result;
-        }
-
-        FDWCDataUVLODMetadata& Metadata = DataUVMetadata.AddDefaulted_GetRef();
-        FString MetadataError;
-        if (!FDWCDataUVMetadataBuilder::BuildLOD(
-                Asset,
-                PreparedMesh,
-                LODIndex,
-                DataUVChannelIndex,
-                Metadata,
-                &MetadataError))
-        {
-            SetFailure(Result, FString::Printf(
-                TEXT("LOD%d generated invalid DWC Data UV metadata: %s"),
-                LODIndex,
-                *MetadataError));
-            return Result;
-        }
-
-        bGeneratedWithWarnings |= UVResult.HasWarnings();
-        ExcludedTriangleCount += UVResult.DegenerateSourceUVTriangleCount + UVResult.InvalidSourceUVTriangleCount;
-        SplitOriginalUVIslandCount += UVResult.SplitOriginalUVIslandCount;
-        SelfOverlapPairCount += UVResult.SelfOverlapPairCount;
-        TriangleFallbackChartCount += UVResult.TriangleFallbackChartCount;
-        OriginalUVTopologies.Add(MoveTemp(OriginalUVTopology));
+        SetFailure(Result, TEXT("The DWC Prepared Skeletal Mesh LOD0 has no vertices."));
+        return Result;
     }
+
+    const bool bAllowOverwriteExistingChannel =
+        bAllowOverwriteExistingDataUVChannel ||
+        Asset.GetDWCDataUVChannelIndex() == DataUVChannelIndex;
+    FDWCDataUVGenerationResult UVResult = FDWCDataUVGenerator::GenerateForSkeletalMesh(
+        PreparedMesh,
+        SourceLODIndex,
+        Asset.GetOriginalUVChannelIndex(),
+        DataUVChannelIndex,
+        bAllowOverwriteExistingChannel,
+        INDEX_NONE);
+    if (!UVResult.bSucceeded)
+    {
+        SetFailure(Result, FString::Printf(
+            TEXT("LOD0 DWC Data UV generation failed: %s"),
+            *UVResult.Message));
+        return Result;
+    }
+
+    DataUVChannelIndex = UVResult.UVChannelIndex;
+    UWetClothingAsset::ClearMeshContentSignatureCache();
+
+    FDWCEditorUVTopologyData OriginalUVTopology;
+    FString TopologyError;
+    if (!FDWCOriginalUVTopologyBuilder::BuildLOD(
+            Asset,
+            PreparedMesh,
+            SourceLODIndex,
+            OriginalUVTopology,
+            &TopologyError))
+    {
+        SetFailure(Result, FString::Printf(
+            TEXT("LOD0 Original UV topology failed: %s"),
+            *TopologyError));
+        return Result;
+    }
+
+    FDWCDataUVLODMetadata& Metadata = DataUVMetadata.AddDefaulted_GetRef();
+    FString MetadataError;
+    if (!FDWCDataUVMetadataBuilder::BuildLOD(
+            Asset,
+            PreparedMesh,
+            SourceLODIndex,
+            DataUVChannelIndex,
+            Metadata,
+            &MetadataError))
+    {
+        SetFailure(Result, FString::Printf(
+            TEXT("LOD0 generated invalid DWC Data UV metadata: %s"),
+            *MetadataError));
+        return Result;
+    }
+
+    bGeneratedWithWarnings = UVResult.HasWarnings();
+    ExcludedTriangleCount = UVResult.DegenerateSourceUVTriangleCount + UVResult.InvalidSourceUVTriangleCount;
+    SplitOriginalUVIslandCount = UVResult.SplitOriginalUVIslandCount;
+    SelfOverlapPairCount = UVResult.SelfOverlapPairCount;
+    TriangleFallbackChartCount = UVResult.TriangleFallbackChartCount;
+    OriginalUVTopologies.Add(MoveTemp(OriginalUVTopology));
 
     if (DataUVMetadata.IsEmpty())
     {
@@ -261,7 +245,7 @@ FDWCDataUVBuildResult FDWCDataUVBuildService::Generate(
         OriginalUVIslandCount += Topology.Islands.Num();
     }
 
-    // Persistent derived data is committed only after every LOD has generated and validated.
+    // Persistent LOD0-derived data is committed only after generation and validation succeed.
     Asset.SetGeneratedDataUVTarget(PreparedMesh, DataUVChannelIndex);
     Asset.SetDataUVMetadata(MoveTemp(DataUVMetadata));
     Asset.SetOriginalUVTopologies(MoveTemp(OriginalUVTopologies));
@@ -276,9 +260,8 @@ FDWCDataUVBuildResult FDWCDataUVBuildService::Generate(
     Result.SelfOverlapPairCount = SelfOverlapPairCount;
     Result.TriangleFallbackChartCount = TriangleFallbackChartCount;
     Result.Message = FString::Printf(
-        TEXT("Generated DWC Data UV channel %d on the DWC Prepared Skeletal Mesh for %d LOD(s) and %d Original UV island record(s)."),
+        TEXT("Generated DWC Data UV channel %d on LOD0 of the DWC Prepared Skeletal Mesh with %d Original UV island record(s)."),
         DataUVChannelIndex,
-        Asset.GetDataUVMetadataLODCount(),
         Result.OriginalUVIslandCount);
 
     if (Result.bGeneratedWithWarnings)

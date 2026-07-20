@@ -34,7 +34,7 @@ namespace
 
     FWetClothingGeneratedWetMaterialOverride* FindPartGeneratedWetMaterialOverride(UWetClothingAsset& WetClothingAsset, const int32 MaterialSlotIndex)
     {
-        return WetClothingAsset.PartData.GeneratedWetMaterialOverrides.FindByPredicate(
+        return WetClothingAsset.Derived.Inline.GeneratedWetMaterialOverrides.FindByPredicate(
             [MaterialSlotIndex](const FWetClothingGeneratedWetMaterialOverride& Candidate)
             {
                 return Candidate.MaterialSlotIndex == MaterialSlotIndex;
@@ -43,7 +43,7 @@ namespace
 
     bool IsMaterialSlotWettableForBake(const UWetClothingAsset& WetClothingAsset, const int32 MaterialSlotIndex, const FString& ComponentPath)
     {
-        const FWetClothingWettableMaterialSlotState* State = WetClothingAsset.PartData.EditableWetPartData.WettableMaterialSlots.FindByPredicate(
+        const FWetClothingWettableMaterialSlotState* State = WetClothingAsset.Authored.PartData.EditableWetPartData.WettableMaterialSlots.FindByPredicate(
             [MaterialSlotIndex, &ComponentPath](const FWetClothingWettableMaterialSlotState& Candidate)
             {
                 return Candidate.MaterialSlotIndex == MaterialSlotIndex &&
@@ -102,7 +102,7 @@ namespace
         FWetClothingGeneratedWetMaterialOverride* Override = FindPartGeneratedWetMaterialOverride(WetClothingAsset, MaterialSlotIndex);
         if (Override == nullptr)
         {
-            Override = &WetClothingAsset.PartData.GeneratedWetMaterialOverrides.AddDefaulted_GetRef();
+            Override = &WetClothingAsset.Derived.Inline.GeneratedWetMaterialOverrides.AddDefaulted_GetRef();
             Override->MaterialSlotIndex = MaterialSlotIndex;
         }
         Override->SourceMaterial = SourceMaterial;
@@ -128,19 +128,19 @@ namespace
     {
         return FString::Printf(
             TEXT("DWCTransparencyReveal_v1|BP=%s|TargetMesh=%s|Layer=%s|Slot=%d|Resolution=%d|Feather=%g|Snapshot=%s|Material=%s"),
-            *WetClothingAsset.TransparencyData.SourceBlueprintClass.ToSoftObjectPath().ToString(),
+            *WetClothingAsset.Authored.TransparencyData.SourceBlueprintClass.ToSoftObjectPath().ToString(),
             *GetPathNameSafe(WetClothingAsset.GetDWCSkeletalMesh()),
             *OuterLayer.LayerId.ToString(),
             MaterialSlotIndex,
-            FMath::Clamp(WetClothingAsset.TransparencyData.RevealBakeResolution, MinRevealBakeResolution, MaxRevealBakeResolution),
-            FMath::Max(0.0f, WetClothingAsset.TransparencyData.RevealMaskFeatherRadiusPixels),
+            FMath::Clamp(WetClothingAsset.Authored.TransparencyData.RevealBakeResolution, MinRevealBakeResolution, MaxRevealBakeResolution),
+            FMath::Max(0.0f, WetClothingAsset.Authored.TransparencyData.RevealMaskFeatherRadiusPixels),
             *Snapshot.BuildSignature,
             *GetPathNameSafe(SourceMaterial));
     }
 
     bool SpawnBlueprintBakeActor(UWetClothingAsset& WetClothingAsset, FDWCTransientBakeActor& OutBakeActor, FString& OutErrorMessage)
     {
-        TSubclassOf<AActor> BlueprintClass = WetClothingAsset.TransparencyData.SourceBlueprintClass.LoadSynchronous();
+        TSubclassOf<AActor> BlueprintClass = WetClothingAsset.Authored.TransparencyData.SourceBlueprintClass.LoadSynchronous();
         if (BlueprintClass == nullptr)
         {
             OutErrorMessage = TEXT("Assign a Source Blueprint before baking Transparency.");
@@ -276,8 +276,8 @@ namespace
 
         FDWCRevealBakeTexelSamplingSettings SamplingSettings;
         SamplingSettings.Resolution = FIntPoint(
-            FMath::Clamp(WetClothingAsset.TransparencyData.RevealBakeResolution, MinRevealBakeResolution, MaxRevealBakeResolution),
-            FMath::Clamp(WetClothingAsset.TransparencyData.RevealBakeResolution, MinRevealBakeResolution, MaxRevealBakeResolution));
+            FMath::Clamp(WetClothingAsset.Authored.TransparencyData.RevealBakeResolution, MinRevealBakeResolution, MaxRevealBakeResolution),
+            FMath::Clamp(WetClothingAsset.Authored.TransparencyData.RevealBakeResolution, MinRevealBakeResolution, MaxRevealBakeResolution));
         SamplingSettings.MaterialSlotIndex = INDEX_NONE;
 
         TArray<FDWCRevealBakeTexelSample> Samples;
@@ -300,7 +300,7 @@ namespace
         TextureSettings.PackagePath = FDWCRevealBakeUtilities::GetGeneratedPackagePath(
             WetClothingAsset,
             TEXT("Maps/Transparency"));
-        TextureSettings.MaskFeatherRadiusPixels = FMath::Max(0.0f, WetClothingAsset.TransparencyData.RevealMaskFeatherRadiusPixels);
+        TextureSettings.MaskFeatherRadiusPixels = FMath::Max(0.0f, WetClothingAsset.Authored.TransparencyData.RevealMaskFeatherRadiusPixels);
         TextureSettings.AssetNamePrefix = FString::Printf(
             TEXT("T_DWCReveal_%s_%s"),
             *FDWCRevealBakeUtilities::SanitizeAssetToken(WetClothingAsset.GetName()),
@@ -425,7 +425,7 @@ bool FDWCTransparencyAssetBakeService::BakeTransparencyRevealAssets(UWetClothing
     }
 
     WetClothingAsset->Modify();
-    WetClothingAsset->TransparencyData.BakedRevealLayers = MoveTemp(NewBakedLayers);
+    WetClothingAsset->Authored.TransparencyData.BakedRevealLayers = MoveTemp(NewBakedLayers);
     WetClothingAsset->MarkPackageDirty();
 
     TArray<FString> Sections;
@@ -445,7 +445,7 @@ bool FDWCTransparencyAssetBakeService::BakeTransparencyRevealAssets(UWetClothing
 
 bool FDWCTransparencyAssetBakeService::HasPendingTransparencySetup(UWetClothingAsset* WetClothingAsset, FString* OutSummary)
 {
-    if (WetClothingAsset == nullptr || WetClothingAsset->TransparencyData.SourceBlueprintClass.IsNull())
+    if (WetClothingAsset == nullptr || WetClothingAsset->Authored.TransparencyData.SourceBlueprintClass.IsNull())
     {
         if (OutSummary != nullptr)
         {
@@ -454,7 +454,7 @@ bool FDWCTransparencyAssetBakeService::HasPendingTransparencySetup(UWetClothingA
         return false;
     }
 
-    if (WetClothingAsset->TransparencyData.BakedRevealLayers.Num() == 0)
+    if (WetClothingAsset->Authored.TransparencyData.BakedRevealLayers.Num() == 0)
     {
         if (OutSummary != nullptr)
         {
@@ -470,7 +470,7 @@ bool FDWCTransparencyAssetBakeService::HasPendingTransparencySetup(UWetClothingA
     };
 
     TArray<FString> DirtyOutputs;
-    for (const FWetClothingBakedTransparencyRevealLayer& BakedLayer : WetClothingAsset->TransparencyData.BakedRevealLayers)
+    for (const FWetClothingBakedTransparencyRevealLayer& BakedLayer : WetClothingAsset->Authored.TransparencyData.BakedRevealLayers)
     {
         if (IsOutputPackageDirty(BakedLayer.LookupMap.Get()))
         {
@@ -517,13 +517,13 @@ bool FDWCTransparencyAssetBakeService::SaveTransparencySetupAssets(UWetClothingA
 
     TArray<UPackage*> PackagesToSave;
     AddPackageForObject(WetClothingAsset, PackagesToSave);
-    for (const FWetClothingGeneratedWetMaterialOverride& MaterialOverride : WetClothingAsset->PartData.GeneratedWetMaterialOverrides)
+    for (const FWetClothingGeneratedWetMaterialOverride& MaterialOverride : WetClothingAsset->Derived.Inline.GeneratedWetMaterialOverrides)
     {
         AddPackageForObject(MaterialOverride.GeneratedMaterial.Get(), PackagesToSave);
         AddPackageForObject(MaterialOverride.CPUMaterialInstance.Get(), PackagesToSave);
         AddPackageForObject(MaterialOverride.GPUMaterialInstance.Get(), PackagesToSave);
     }
-    for (const FWetClothingBakedTransparencyRevealLayer& BakedLayer : WetClothingAsset->TransparencyData.BakedRevealLayers)
+    for (const FWetClothingBakedTransparencyRevealLayer& BakedLayer : WetClothingAsset->Authored.TransparencyData.BakedRevealLayers)
     {
         AddPackageForObject(BakedLayer.LookupMap.Get(), PackagesToSave);
         AddPackageForObject(BakedLayer.ColorMap.Get(), PackagesToSave);
@@ -531,7 +531,7 @@ bool FDWCTransparencyAssetBakeService::SaveTransparencySetupAssets(UWetClothingA
         AddPackageForObject(BakedLayer.ConfidenceMap.Get(), PackagesToSave);
         AddPackageForObject(BakedLayer.RevealMaterial.Get(), PackagesToSave);
     }
-    for (const FWetClothingTransparencyLayerData& Layer : WetClothingAsset->TransparencyData.TransparencyLayers)
+    for (const FWetClothingTransparencyLayerData& Layer : WetClothingAsset->Authored.TransparencyData.TransparencyLayers)
     {
         for (const FWetClothingBakedTransparencyMap& BakedMap : Layer.BakedMaps)
         {

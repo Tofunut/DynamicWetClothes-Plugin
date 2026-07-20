@@ -13,14 +13,12 @@ class DWC_API FWetPrecomputedSimulationDataBridge
     static bool TryCopyPrecomputedBoneOptimizationCache(
         const UWetClothingAsset*   WetClothingAsset,
         USkeletalMesh*             SkeletalMesh,
-        int32                      LODIndex,
         FWetBoneOptimizationCache& OutRuntimeCache,
         FString*                   OutErrorMessage = nullptr);
 
     static bool TryCopyPrecomputedNeighborGraph(
         const UWetClothingAsset*         WetClothingAsset,
         const USkeletalMesh*             SkeletalMesh,
-        int32                            LODIndex,
         int32                            VertexCount,
         TArray<FWetVertexNeighborRange>& OutNeighborRanges,
         TArray<int32>&                   OutFlatNeighborIndices,

@@ -621,7 +621,7 @@ bool FDWCGPUBackend::BuildDebugVertexLookup()
         return false;
     }
 
-    const FWetClothingPrecomputedSimulationData& Precomputed = Asset->GetPrecomputedSimulationData(LODIndex);
+    const FWetClothingPrecomputedSimulationData& Precomputed = Asset->GetPrecomputedSimulationData();
     const int32 VertexCount = DataUVView.NumVertices();
     if (VertexCount <= 0 || Precomputed.Vertices.Num() != VertexCount)
     {

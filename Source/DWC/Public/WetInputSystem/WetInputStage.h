@@ -41,8 +41,6 @@ struct DWC_API FWetInputStageArgs
     FWetClothingMeshSampler* MeshSampler = nullptr;
     FWetSimulationStage*     SimulationStage = nullptr;
 
-    int32 LODIndex = 0;
-
     // Set by callers that need complete per-vertex callback/output data.
     // Such requests intentionally bypass the bone cache.
     bool bRequireFullVertexTraversal = false;

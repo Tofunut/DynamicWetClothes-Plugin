@@ -18,7 +18,6 @@ struct DWC_API FDWCSharedRuntimeDataKey
 {
     FObjectKey WetClothingAsset;
     FObjectKey SkeletalMesh;
-    int32 LODIndex = INDEX_NONE;
     int32 DataVersion = 0;
     FString MeshSignature;
     FString SourceDataSignature;
@@ -27,7 +26,6 @@ struct DWC_API FDWCSharedRuntimeDataKey
     {
         return WetClothingAsset == Other.WetClothingAsset &&
                SkeletalMesh == Other.SkeletalMesh &&
-               LODIndex == Other.LODIndex &&
                DataVersion == Other.DataVersion &&
                MeshSignature == Other.MeshSignature &&
                SourceDataSignature == Other.SourceDataSignature;
@@ -36,7 +34,6 @@ struct DWC_API FDWCSharedRuntimeDataKey
     friend uint32 GetTypeHash(const FDWCSharedRuntimeDataKey& Key)
     {
         uint32 Hash = HashCombine(GetTypeHash(Key.WetClothingAsset), GetTypeHash(Key.SkeletalMesh));
-        Hash = HashCombine(Hash, GetTypeHash(Key.LODIndex));
         Hash = HashCombine(Hash, GetTypeHash(Key.DataVersion));
         Hash = HashCombine(Hash, FCrc::StrCrc32(*Key.MeshSignature));
         return HashCombine(Hash, FCrc::StrCrc32(*Key.SourceDataSignature));
@@ -141,7 +138,6 @@ public:
     TSharedPtr<const FWetClothingRuntimeData, ESPMode::ThreadSafe> AcquireSharedRuntimeData(
         const UWetClothingAsset& WetClothingAsset,
         USkeletalMeshComponent& TargetSkeletalMesh,
-        int32 LODIndex,
         UObject* OwnerForLogs = nullptr);
 
     TSharedPtr<const FDWCSkinningStaticData, ESPMode::ThreadSafe> AcquireSkinningStaticData(

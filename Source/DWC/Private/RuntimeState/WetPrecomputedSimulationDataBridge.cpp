@@ -8,10 +8,10 @@
 bool FWetPrecomputedSimulationDataBridge::TryCopyPrecomputedBoneOptimizationCache(
     const UWetClothingAsset*   WetClothingAsset,
     USkeletalMesh*             SkeletalMesh,
-    const int32                LODIndex,
     FWetBoneOptimizationCache& OutRuntimeCache,
     FString*                   OutErrorMessage)
 {
+    constexpr int32 RuntimeLODIndex = UWetClothingAsset::RuntimeSimulationLODIndex;
     OutRuntimeCache = FWetBoneOptimizationCache();
 
     if (WetClothingAsset == nullptr || SkeletalMesh == nullptr)
@@ -20,7 +20,7 @@ bool FWetPrecomputedSimulationDataBridge::TryCopyPrecomputedBoneOptimizationCach
         return false;
     }
 
-    if (!WetClothingAsset->IsPrecomputedSimulationDataValidForMesh(SkeletalMesh, LODIndex))
+    if (!WetClothingAsset->IsPrecomputedSimulationDataValidForMesh(SkeletalMesh))
     {
         DWC::Error::SetMessage(OutErrorMessage, TEXT("Precomputed simulation data is stale or invalid for the target mesh."));
         return false;
@@ -29,7 +29,7 @@ bool FWetPrecomputedSimulationDataBridge::TryCopyPrecomputedBoneOptimizationCach
     const FWetClothingPrecomputedSimulationData& PrecomputedData = WetClothingAsset->GetPrecomputedSimulationData();
     if (!PrecomputedData.BoneOptimizationCache.IsValidForMesh(
             SkeletalMesh,
-            LODIndex,
+            RuntimeLODIndex,
             PrecomputedData.VertexCount,
             PrecomputedData.MeshSignature))
     {
@@ -50,7 +50,6 @@ bool FWetPrecomputedSimulationDataBridge::TryCopyPrecomputedBoneOptimizationCach
 bool FWetPrecomputedSimulationDataBridge::TryCopyPrecomputedNeighborGraph(
     const UWetClothingAsset*         WetClothingAsset,
     const USkeletalMesh*             SkeletalMesh,
-    const int32                      LODIndex,
     const int32                      VertexCount,
     TArray<FWetVertexNeighborRange>& OutNeighborRanges,
     TArray<int32>&                   OutFlatNeighborIndices,
@@ -65,7 +64,7 @@ bool FWetPrecomputedSimulationDataBridge::TryCopyPrecomputedNeighborGraph(
         return false;
     }
 
-    if (!WetClothingAsset->IsPrecomputedSimulationDataValidForMesh(SkeletalMesh, LODIndex))
+    if (!WetClothingAsset->IsPrecomputedSimulationDataValidForMesh(SkeletalMesh))
     {
         DWC::Error::SetMessage(OutErrorMessage, TEXT("Precomputed simulation data is stale or invalid for the target mesh."));
         return false;

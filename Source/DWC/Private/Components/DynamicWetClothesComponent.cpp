@@ -253,8 +253,8 @@ namespace
             return;
         }
 
-        const FString CPUDiagnostics = Asset->GetPrecomputedSimulationDataValidationSummary(SkeletalMesh, LODIndex);
-        const bool bCPUDataValid = Asset->IsPrecomputedSimulationDataValidForMesh(SkeletalMesh, LODIndex);
+        const FString CPUDiagnostics = Asset->GetPrecomputedSimulationDataValidationSummary(SkeletalMesh);
+        const bool bCPUDataValid = Asset->IsPrecomputedSimulationDataValidForMesh(SkeletalMesh);
 
         if (Mode == EDWCSimulationMode::VertexCPU)
         {
@@ -629,13 +629,14 @@ void UDynamicWetClothesComponent::GetResolvedWetMeshComponents(TArray<USkeletalM
 
 bool UDynamicWetClothesComponent::InitializeWetMeshReceiverRuntime(FDWCWetMeshReceiverRuntime& Receiver)
 {
+    constexpr int32 RuntimeLODIndex = UWetClothingAsset::RuntimeSimulationLODIndex;
     if (Receiver.MeshComponent.Get() == nullptr)
     {
         return false;
     }
 
     FWetRuntimeDataBuildArgs RuntimeDataBuildArgs = MakeRuntimeDataBuildArgs(Receiver);
-    LogRuntimeModeData(this, Receiver, GetActiveSimulationMode(), RuntimeDataBuildArgs.LODIndex);
+    LogRuntimeModeData(this, Receiver, GetActiveSimulationMode(), RuntimeLODIndex);
 
     UWorld* World = GetWorld();
     UDWCRuntimeDataSubsystem* RuntimeDataSubsystem =
@@ -649,8 +650,6 @@ bool UDynamicWetClothesComponent::InitializeWetMeshReceiverRuntime(FDWCWetMeshRe
     Receiver.SharedRuntimeData = RuntimeDataSubsystem->AcquireSharedRuntimeData(
         *Receiver.WetClothingAsset.Get(),
         *Receiver.MeshComponent.Get(),
-
-        RuntimeDataBuildArgs.LODIndex,
         GetOwner());
     if (!Receiver.SharedRuntimeData.IsValid())
     {
@@ -669,7 +668,7 @@ bool UDynamicWetClothesComponent::InitializeWetMeshReceiverRuntime(FDWCWetMeshRe
     FSkeletalMeshLODRenderData* LODData = nullptr;
     if (!Receiver.RuntimeDataBuilder->GetLODRenderData(
             Receiver.MeshComponent.Get(),
-            RuntimeDataBuildArgs.LODIndex,
+            RuntimeLODIndex,
             LODData) ||
         LODData == nullptr)
     {
@@ -719,7 +718,7 @@ bool UDynamicWetClothesComponent::InitializeWetMeshReceiverRuntime(FDWCWetMeshRe
     }
 
     const FWetClothingPrecomputedSimulationData& PrecomputedData =
-        Receiver.WetClothingAsset->GetPrecomputedSimulationData(RuntimeDataBuildArgs.LODIndex);
+        Receiver.WetClothingAsset->GetPrecomputedSimulationData();
     Receiver.SkinningStaticData = RuntimeDataSubsystem->AcquireSkinningStaticData(
         *Receiver.MeshComponent.Get(),
         PrecomputedData.MeshSignature);
@@ -857,7 +856,6 @@ FWetRuntimeDataBuildArgs UDynamicWetClothesComponent::MakeRuntimeDataBuildArgs(F
     Args.RuntimeData = nullptr;
     Args.SimulationState = Receiver.SimulationState.Get();
     Args.CachedWetVertexColors = &Receiver.RenderStage->CachedWetVertexColors;
-    Args.LODIndex = UWetClothingAsset::RuntimeSimulationLODIndex;
 
     Args.bUsePrecomputedSimulationData = true;
     Args.bUsePrecomputedBoneOptimizationCache = true;
@@ -884,7 +882,6 @@ FWetInputStageArgs UDynamicWetClothesComponent::MakeWetInputStageArgs(FDWCWetMes
     Args.RuntimeDataBuilder = Receiver.RuntimeDataBuilder.Get();
     Args.MeshSampler = Receiver.MeshSampler.Get();
     Args.SimulationStage = Receiver.SimulationStage.Get();
-    Args.LODIndex = UWetClothingAsset::RuntimeSimulationLODIndex;
     return Args;
 }
 
@@ -921,7 +918,6 @@ FWetSimulationStageArgs UDynamicWetClothesComponent::MakeWetSimulationStageArgs(
     Args.SimulationState = Receiver.SimulationState.Get();
     Args.RuntimeDataBuilder = Receiver.RuntimeDataBuilder.Get();
     Args.MeshSampler = Receiver.MeshSampler.Get();
-    Args.LODIndex = UWetClothingAsset::RuntimeSimulationLODIndex;
     return Args;
 }
 

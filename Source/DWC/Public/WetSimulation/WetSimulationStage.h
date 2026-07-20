@@ -29,7 +29,6 @@ struct DWC_API FWetSimulationStageArgs
     FWetRuntimeDataBuilder*  RuntimeDataBuilder = nullptr;
     FWetClothingMeshSampler* MeshSampler = nullptr;
 
-    int32 LODIndex = 0;
     bool  bAsyncSkinningRequested = false;
 
     TFunction<bool(bool bComputePositions, bool bComputeNormals)> RequestAsyncSkinning;

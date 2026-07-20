@@ -18,24 +18,23 @@ TSharedPtr<const FWetClothingRuntimeData, ESPMode::ThreadSafe>
 UDWCRuntimeDataSubsystem::AcquireSharedRuntimeData(
     const UWetClothingAsset& WetClothingAsset,
     USkeletalMeshComponent& TargetSkeletalMesh,
-    const int32 LODIndex,
     UObject* OwnerForLogs)
 {
+    constexpr int32 RuntimeLODIndex = UWetClothingAsset::RuntimeSimulationLODIndex;
     USkeletalMesh* SkeletalMesh = TargetSkeletalMesh.GetSkeletalMeshAsset();
     if (SkeletalMesh == nullptr ||
         WetClothingAsset.GetDWCSkeletalMesh() != SkeletalMesh ||
-        !WetClothingAsset.IsPrecomputedSimulationDataMetadataValidForMesh(SkeletalMesh, LODIndex))
+        !WetClothingAsset.IsPrecomputedSimulationDataMetadataValidForMesh(SkeletalMesh))
     {
         return nullptr;
     }
 
     const FWetClothingPrecomputedSimulationData& PrecomputedData =
-        WetClothingAsset.GetPrecomputedSimulationData(LODIndex);
+        WetClothingAsset.GetPrecomputedSimulationData();
 
     FDWCSharedRuntimeDataKey Key;
     Key.WetClothingAsset = FObjectKey(&WetClothingAsset);
     Key.SkeletalMesh = FObjectKey(SkeletalMesh);
-    Key.LODIndex = LODIndex;
     Key.DataVersion = PrecomputedData.DataVersion;
     Key.MeshSignature = PrecomputedData.MeshSignature;
     Key.SourceDataSignature = PrecomputedData.SourceDataSignature;
@@ -53,14 +52,14 @@ UDWCRuntimeDataSubsystem::AcquireSharedRuntimeData(
     // Full mesh/source signature validation is intentionally performed only on
     // cache miss. Additional receivers using the same immutable payload reuse
     // the validated shared object without repeating full mesh traversal.
-    if (!WetClothingAsset.IsPrecomputedSimulationDataValidForMesh(SkeletalMesh, LODIndex))
+    if (!WetClothingAsset.IsPrecomputedSimulationDataValidForMesh(SkeletalMesh))
     {
         return nullptr;
     }
 
     TSharedPtr<FWetClothingRuntimeData, ESPMode::ThreadSafe> MutableData =
         MakeShared<FWetClothingRuntimeData, ESPMode::ThreadSafe>();
-    MutableData->LODIndex = LODIndex;
+    MutableData->LODIndex = RuntimeLODIndex;
     MutableData->VertexCount = PrecomputedData.VertexCount;
     MutableData->DataVersion = PrecomputedData.DataVersion;
     MutableData->MeshSignature = PrecomputedData.MeshSignature;
@@ -73,7 +72,6 @@ UDWCRuntimeDataSubsystem::AcquireSharedRuntimeData(
     Args.WetClothingAsset = &WetClothingAsset;
     Args.MutableRuntimeData = MutableData.Get();
     Args.RuntimeData = MutableData.Get();
-    Args.LODIndex = LODIndex;
     Args.bUsePrecomputedSimulationData = true;
     Args.bUsePrecomputedBoneOptimizationCache = true;
     Args.bPrecomputedDataAlreadyValidated = true;
@@ -85,7 +83,7 @@ UDWCRuntimeDataSubsystem::AcquireSharedRuntimeData(
 
     // The bone cache is a broad-phase optimization. Its absence is non-fatal;
     // contact resolution will use its existing full-vertex fallback.
-    Builder.InitializeBoneOptimizationCacheFromPrecomputedData(Args, LODIndex);
+    Builder.InitializeBoneOptimizationCacheFromPrecomputedData(Args);
 
     // Neighbor data is required only by the CPU spread simulation. Build it
     // once when available, but keep common data usable by GPU-only receivers.
@@ -97,7 +95,7 @@ UDWCRuntimeDataSubsystem::AcquireSharedRuntimeData(
             Warning,
             TEXT("DWC shared runtime data: neighbor graph is unavailable for '%s' LOD %d. GPU receivers remain usable; CPU spread requires regenerated precomputed data."),
             *GetNameSafe(&WetClothingAsset),
-            LODIndex);
+            RuntimeLODIndex);
     }
 
     TSharedPtr<const FWetClothingRuntimeData, ESPMode::ThreadSafe> SharedData = MutableData;

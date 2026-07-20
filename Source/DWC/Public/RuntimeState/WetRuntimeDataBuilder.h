@@ -27,7 +27,6 @@ struct DWC_API FWetRuntimeDataBuildArgs
     FAbsorbedWetnessSimulationState* SimulationState = nullptr;
     TArray<FColor>*                  CachedWetVertexColors = nullptr;
 
-    int32 LODIndex = 0;
     bool  bUsePrecomputedSimulationData = true;
     bool  bUsePrecomputedBoneOptimizationCache = true;
     bool  bPrecomputedDataAlreadyValidated = false;
@@ -54,7 +53,7 @@ class DWC_API FWetRuntimeDataBuilder
     Failure does not disable the receiver. It records why the runtime must use
     full-vertex traversal when a wet contact is processed.
     */
-    bool InitializeBoneOptimizationCacheFromPrecomputedData(FWetRuntimeDataBuildArgs& Args, int32 LODIndex = 0);
+    bool InitializeBoneOptimizationCacheFromPrecomputedData(FWetRuntimeDataBuildArgs& Args);
 
     /*
     Resolves HitResult::BoneName to the target bone plus the pre-flattened

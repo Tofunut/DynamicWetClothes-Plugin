@@ -42,8 +42,9 @@ namespace
 
 void FWetRuntimeDataBuilder::InitializeAbsorbedWetnessData(FWetRuntimeDataBuildArgs& Receiver)
 {
+    constexpr int32 RuntimeLODIndex = UWetClothingAsset::RuntimeSimulationLODIndex;
     FSkeletalMeshLODRenderData* LODData = nullptr;
-    if (!GetLODRenderData(Receiver.TargetSkeletalMesh, Receiver.LODIndex, LODData))
+    if (!GetLODRenderData(Receiver.TargetSkeletalMesh, RuntimeLODIndex, LODData))
     {
         return;
     }
@@ -64,19 +65,20 @@ void FWetRuntimeDataBuilder::InitializeAbsorbedWetnessData(FWetRuntimeDataBuildA
 
     FWetVertexColorBuffer::ApplyVertexColorOverride(
         *Receiver.TargetSkeletalMesh,
-        Receiver.LODIndex,
+        RuntimeLODIndex,
         *Receiver.CachedWetVertexColors);
 }
 
 bool FWetRuntimeDataBuilder::InitializeWetPartVertexData(FWetRuntimeDataBuildArgs& Receiver)
 {
+    constexpr int32 RuntimeLODIndex = UWetClothingAsset::RuntimeSimulationLODIndex;
     if (Receiver.MutableRuntimeData == nullptr)
     {
         return false;
     }
 
     FSkeletalMeshLODRenderData* LODData = nullptr;
-    if (!GetLODRenderData(Receiver.TargetSkeletalMesh, Receiver.LODIndex, LODData))
+    if (!GetLODRenderData(Receiver.TargetSkeletalMesh, RuntimeLODIndex, LODData))
     {
         return false;
     }
@@ -132,7 +134,7 @@ bool FWetRuntimeDataBuilder::InitializeWetPartVertexData(FWetRuntimeDataBuildArg
                                                ? Receiver.TargetSkeletalMesh->GetSkeletalMeshAsset()
                                                : nullptr;
         const FString ValidationSummary = Receiver.WetClothingAsset != nullptr
-                                              ? Receiver.WetClothingAsset->GetPrecomputedSimulationDataValidationSummary(RuntimeMesh, Receiver.LODIndex)
+                                              ? Receiver.WetClothingAsset->GetPrecomputedSimulationDataValidationSummary(RuntimeMesh)
                                               : FString(TEXT("CPUPrecomputed{asset=null}"));
         UE_LOG(
             LogTemp,
@@ -157,10 +159,10 @@ bool FWetRuntimeDataBuilder::InitializeWetPartVertexDataFromPrecomputedData(
 
     const USkeletalMesh* SkeletalMesh = Receiver.TargetSkeletalMesh->GetSkeletalMeshAsset();
     if (!Receiver.bPrecomputedDataAlreadyValidated &&
-        !Receiver.WetClothingAsset->IsPrecomputedSimulationDataValidForMesh(SkeletalMesh, Receiver.LODIndex))
+        !Receiver.WetClothingAsset->IsPrecomputedSimulationDataValidForMesh(SkeletalMesh))
     {
         const FString ValidationSummary =
-            Receiver.WetClothingAsset->GetPrecomputedSimulationDataValidationSummary(SkeletalMesh, Receiver.LODIndex);
+            Receiver.WetClothingAsset->GetPrecomputedSimulationDataValidationSummary(SkeletalMesh);
         if (Receiver.WetClothingAsset->GetPrecomputedSimulationData().bIsValid)
         {
             UE_LOG(
@@ -186,7 +188,7 @@ bool FWetRuntimeDataBuilder::InitializeWetPartVertexDataFromPrecomputedData(
     if (PrecomputedData.VertexCount != VertexCount || PrecomputedData.Vertices.Num() != VertexCount)
     {
         const FString ValidationSummary =
-            Receiver.WetClothingAsset->GetPrecomputedSimulationDataValidationSummary(SkeletalMesh, Receiver.LODIndex);
+            Receiver.WetClothingAsset->GetPrecomputedSimulationDataValidationSummary(SkeletalMesh);
         UE_LOG(
             LogTemp,
             Warning,
@@ -287,13 +289,14 @@ bool FWetRuntimeDataBuilder::InitializeWetPartVertexDataFromPrecomputedData(
 
 bool FWetRuntimeDataBuilder::InitializeNeighborGraphFromPrecomputedData(FWetRuntimeDataBuildArgs& Receiver)
 {
+    constexpr int32 RuntimeLODIndex = UWetClothingAsset::RuntimeSimulationLODIndex;
     if (Receiver.MutableRuntimeData == nullptr)
     {
         return false;
     }
 
     FSkeletalMeshLODRenderData* LODData = nullptr;
-    if (!GetLODRenderData(Receiver.TargetSkeletalMesh, Receiver.LODIndex, LODData))
+    if (!GetLODRenderData(Receiver.TargetSkeletalMesh, RuntimeLODIndex, LODData))
     {
         return false;
     }
@@ -306,7 +309,6 @@ bool FWetRuntimeDataBuilder::InitializeNeighborGraphFromPrecomputedData(FWetRunt
     if (!FWetPrecomputedSimulationDataBridge::TryCopyPrecomputedNeighborGraph(
             Receiver.WetClothingAsset,
             SkeletalMesh,
-            Receiver.LODIndex,
             VertexCount,
             Receiver.MutableRuntimeData->NeighborRanges,
             Receiver.MutableRuntimeData->FlatNeighborIndices,
@@ -482,9 +484,9 @@ bool FWetRuntimeDataBuilder::GetLODRenderData(
 }
 
 bool FWetRuntimeDataBuilder::InitializeBoneOptimizationCacheFromPrecomputedData(
-    FWetRuntimeDataBuildArgs& Receiver,
-    const int32               LODIndex)
+    FWetRuntimeDataBuildArgs& Receiver)
 {
+    constexpr int32 RuntimeLODIndex = UWetClothingAsset::RuntimeSimulationLODIndex;
     if (!Receiver.MutableRuntimeData)
     {
         return false;
@@ -529,7 +531,6 @@ bool FWetRuntimeDataBuilder::InitializeBoneOptimizationCacheFromPrecomputedData(
     if (!FWetPrecomputedSimulationDataBridge::TryCopyPrecomputedBoneOptimizationCache(
             Receiver.WetClothingAsset,
             SkeletalMesh,
-            LODIndex,
             Receiver.MutableRuntimeData->BoneOptimizationCache,
             &PrecomputedCacheErrorMessage))
     {
@@ -543,7 +544,7 @@ bool FWetRuntimeDataBuilder::InitializeBoneOptimizationCacheFromPrecomputedData(
     const FWetBonePrimaryVertexCache& PrimaryCache =
         Receiver.MutableRuntimeData->BoneOptimizationCache.PrimaryVertexCache;
     if (PrimaryCache.SourceMesh != SkeletalMesh ||
-        PrimaryCache.LODIndex != LODIndex ||
+        PrimaryCache.LODIndex != RuntimeLODIndex ||
         PrimaryCache.BoneCount <= 0 ||
         PrimaryCache.VertexCount <= 0 ||
         PrimaryCache.BoneStartOffsets.Num() != PrimaryCache.BoneCount + 1)

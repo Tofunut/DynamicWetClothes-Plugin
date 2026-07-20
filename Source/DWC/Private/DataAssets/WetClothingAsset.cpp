@@ -861,7 +861,7 @@ void UWetClothingAsset::ClearGPUMapData()
     MarkRuntimeBulkDataDirty(DWCBakeOutput::GPUMaps);
 }
 
-const FWetClothingPrecomputedSimulationData& UWetClothingAsset::GetPrecomputedSimulationData(int32 /*LODIndex*/) const
+const FWetClothingPrecomputedSimulationData& UWetClothingAsset::GetPrecomputedSimulationData() const
 {
     EnsureRuntimeBulkDataLoaded();
     return PartData.PrecomputedSimulationData;
@@ -1909,8 +1909,8 @@ void UWetClothingAsset::RefreshBakeStateInternal(const bool bRunDeepValidation)
                                        : (Topology != nullptr ? EDWCBakeStatus::OutOfDate : EDWCBakeStatus::Required);
 
     const bool bCPUDataValid = bRunDeepValidation
-                                   ? IsPrecomputedSimulationDataValidForMesh(RuntimeMesh, RuntimeLODIndex)
-                                   : IsPrecomputedSimulationDataMetadataValidForMesh(RuntimeMesh, RuntimeLODIndex);
+                                   ? IsPrecomputedSimulationDataValidForMesh(RuntimeMesh)
+                                   : IsPrecomputedSimulationDataMetadataValidForMesh(RuntimeMesh);
     const bool bGPUDataValid = bRunDeepValidation
                                    ? IsGPURuntimeDataValidForMesh(RuntimeMesh, RuntimeLODIndex)
                                    : IsGPURuntimeDataMetadataValidForMesh(RuntimeMesh, RuntimeLODIndex);
@@ -2095,7 +2095,7 @@ bool UWetClothingAsset::RebuildRuntimeDataForSave(FString* OutErrorMessage)
 
     if (SetupSettings.bBuildCPUVertexSimulationData)
     {
-        if (IsPrecomputedSimulationDataValidForMesh(RuntimeMesh, RuntimeLODIndex))
+        if (IsPrecomputedSimulationDataValidForMesh(RuntimeMesh))
         {
             SlowTask.EnterProgressFrame(
                 1.25f,
@@ -2113,7 +2113,7 @@ bool UWetClothingAsset::RebuildRuntimeDataForSave(FString* OutErrorMessage)
                     TEXT("Building CPU vertex simulation data for LOD%d..."),
                     RuntimeLODIndex)));
             FString CPUError;
-            bCPUSucceeded = RebuildPrecomputedSimulationData(&CPUError, RuntimeLODIndex);
+            bCPUSucceeded = RebuildPrecomputedSimulationData(&CPUError);
             BakeState.CPURuntimeData = bCPUSucceeded ? EDWCBakeStatus::Valid : EDWCBakeStatus::Failed;
             if (bCPUSucceeded)
             {
@@ -2367,8 +2367,7 @@ void UWetClothingAsset::SetValidationSummary(const FDWCTriangleValidationSummary
 #endif // WITH_EDITOR
 
 bool UWetClothingAsset::IsPrecomputedSimulationDataMetadataValidForMesh(
-    const USkeletalMesh* SkeletalMesh,
-    int32 /*LODIndex*/) const
+    const USkeletalMesh* SkeletalMesh) const
 {
     const int32 LODIndex = RuntimeSimulationLODIndex;
     const FWetClothingPrecomputedSimulationData& Data = PartData.PrecomputedSimulationData;
@@ -2387,7 +2386,7 @@ bool UWetClothingAsset::IsPrecomputedSimulationDataMetadataValidForMesh(
            HasCPURuntimeDataPayload();
 }
 
-bool UWetClothingAsset::IsPrecomputedSimulationDataValidForMesh(const USkeletalMesh* SkeletalMesh, int32 /*LODIndex*/) const
+bool UWetClothingAsset::IsPrecomputedSimulationDataValidForMesh(const USkeletalMesh* SkeletalMesh) const
 {
     const int32 LODIndex = RuntimeSimulationLODIndex;
     const FWetClothingPrecomputedSimulationData& Data = PartData.PrecomputedSimulationData;
@@ -2415,7 +2414,7 @@ bool UWetClothingAsset::IsPrecomputedSimulationDataValidForMesh(const USkeletalM
            Data.SourceDataSignature == MakeSourceDataSignature(PartData.EditableWetPartData, SurfaceWaterSettings);
 }
 
-FString UWetClothingAsset::GetPrecomputedSimulationDataValidationSummary(const USkeletalMesh* SkeletalMesh, int32 /*LODIndex*/) const
+FString UWetClothingAsset::GetPrecomputedSimulationDataValidationSummary(const USkeletalMesh* SkeletalMesh) const
 {
     const int32 LODIndex = RuntimeSimulationLODIndex;
     EnsureRuntimeBulkDataLoaded();
@@ -2579,7 +2578,7 @@ bool UWetClothingAsset::IsGPUWetMapDataValidForMesh(const USkeletalMesh* Skeleta
 }
 
 #if WITH_EDITOR
-bool UWetClothingAsset::RebuildPrecomputedSimulationData(FString* OutErrorMessage, int32 /*LODIndex*/)
+bool UWetClothingAsset::RebuildPrecomputedSimulationData(FString* OutErrorMessage)
 {
     const int32 LODIndex = RuntimeSimulationLODIndex;
     ClearPrecomputedSimulationData();

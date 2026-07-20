@@ -13,6 +13,7 @@
 #include "WetSimulation/AbsorbedWetness/AbsorbedWetnessSimulationState.h"
 #include "WetSimulation/SurfaceWater/SurfaceWaterSimulationState.h"
 #include "WetSimulation/SurfaceWater/SurfaceWaterSimulationSettings.h"
+#include "DataAssets/WetClothingAsset.h"
 #include "Runtime/Engine/Classes/Engine/SkeletalMesh.h"
 #include "Runtime/Engine/Public/Rendering/SkeletalMeshLODRenderData.h"
 #include "Runtime/Engine/Public/Rendering/SkeletalMeshRenderData.h"
@@ -792,7 +793,8 @@ bool FWetInputStage::ApplyWetArea(FWetInputStageArgs&    Receiver,
     }
 
     FSkeletalMeshLODRenderData* LODData = nullptr;
-    if (!Receiver.RuntimeDataBuilder->GetLODRenderData(Receiver.TargetSkeletalMesh, Receiver.LODIndex, LODData) || !LODData)
+    constexpr int32 RuntimeLODIndex = UWetClothingAsset::RuntimeSimulationLODIndex;
+    if (!Receiver.RuntimeDataBuilder->GetLODRenderData(Receiver.TargetSkeletalMesh, RuntimeLODIndex, LODData) || !LODData)
     {
         return false;
     }
@@ -938,9 +940,10 @@ bool FWetInputStage::ApplyWetContact(
     if (!ResolvedContact.bUseFullVertexFallback)
     {
         FSkeletalMeshLODRenderData*    LODData = nullptr;
-        const FSkinWeightVertexBuffer* SkinWeightBuffer = Receiver.TargetSkeletalMesh->GetSkinWeightBuffer(Receiver.LODIndex);
+        constexpr int32 RuntimeLODIndex = UWetClothingAsset::RuntimeSimulationLODIndex;
+        const FSkinWeightVertexBuffer* SkinWeightBuffer = Receiver.TargetSkeletalMesh->GetSkinWeightBuffer(RuntimeLODIndex);
         if (SkinWeightBuffer &&
-            Receiver.RuntimeDataBuilder->GetLODRenderData(Receiver.TargetSkeletalMesh, Receiver.LODIndex, LODData) &&
+            Receiver.RuntimeDataBuilder->GetLODRenderData(Receiver.TargetSkeletalMesh, RuntimeLODIndex, LODData) &&
             LODData &&
             Receiver.MeshSampler->UpdateSkinningMatrices(Receiver.TargetSkeletalMesh))
         {
@@ -1021,9 +1024,10 @@ bool FWetInputStage::ApplyWetContacts(FWetInputStageArgs& Receiver, const TArray
     if (bAllContactsUseCache)
     {
         FSkeletalMeshLODRenderData*    LODData = nullptr;
-        const FSkinWeightVertexBuffer* SkinWeightBuffer = Receiver.TargetSkeletalMesh->GetSkinWeightBuffer(Receiver.LODIndex);
+        constexpr int32 RuntimeLODIndex = UWetClothingAsset::RuntimeSimulationLODIndex;
+        const FSkinWeightVertexBuffer* SkinWeightBuffer = Receiver.TargetSkeletalMesh->GetSkinWeightBuffer(RuntimeLODIndex);
         if (SkinWeightBuffer &&
-            Receiver.RuntimeDataBuilder->GetLODRenderData(Receiver.TargetSkeletalMesh, Receiver.LODIndex, LODData) &&
+            Receiver.RuntimeDataBuilder->GetLODRenderData(Receiver.TargetSkeletalMesh, RuntimeLODIndex, LODData) &&
             LODData &&
             Receiver.MeshSampler->UpdateSkinningMatrices(Receiver.TargetSkeletalMesh))
         {

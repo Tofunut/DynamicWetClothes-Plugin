@@ -623,7 +623,6 @@ FWetSimulationStageArgs SWetnessProfileViewport::MakePreviewWetSimulationArgs()
     Args.RuntimeData = PreviewRuntimeData.Get();
     Args.SimulationState = PreviewSimulationState.Get();
     Args.MeshSampler = PreviewMeshSampler.Get();
-    Args.LODIndex = 0;
     return Args;
 }
 

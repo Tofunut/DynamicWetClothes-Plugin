@@ -50,7 +50,7 @@ class DWC_API UWetClothingAsset : public UDataAsset
     bool HasGeneratedBakeOutput(int32 OutputMask) const;
     bool HasSavedBakeOutput(int32 OutputMask) const;
     void RefreshBakeState(bool bRunDeepValidation = false);
-    bool RebuildPrecomputedSimulationData(FString* OutErrorMessage = nullptr, int32 LODIndex = 0);
+    bool RebuildPrecomputedSimulationData(FString* OutErrorMessage = nullptr);
     bool RebuildGPURuntimeData(FString* OutErrorMessage = nullptr);
     bool BakeGPUWetnessMaps(FString* OutErrorMessage = nullptr);
     bool RebuildRuntimeDataForSave(FString* OutErrorMessage = nullptr);
@@ -68,19 +68,19 @@ class DWC_API UWetClothingAsset : public UDataAsset
     void ClearGPUWetMapData();
     void ClearGPUMapData();
 
-    bool IsPrecomputedSimulationDataMetadataValidForMesh(const USkeletalMesh* SkeletalMesh, int32 LODIndex = 0) const;
-    bool IsPrecomputedSimulationDataValidForMesh(const USkeletalMesh* SkeletalMesh, int32 LODIndex = 0) const;
+    bool IsPrecomputedSimulationDataMetadataValidForMesh(const USkeletalMesh* SkeletalMesh) const;
+    bool IsPrecomputedSimulationDataValidForMesh(const USkeletalMesh* SkeletalMesh) const;
     bool IsGPURuntimeDataMetadataValidForMesh(const USkeletalMesh* SkeletalMesh, int32 LODIndex = 0) const;
     bool IsGPURuntimeDataValidForMesh(const USkeletalMesh* SkeletalMesh, int32 LODIndex = 0) const;
     bool IsGPUWetMapDataMetadataValidForMesh(const USkeletalMesh* SkeletalMesh, int32 LODIndex = 0) const;
     bool IsGPUWetMapDataValidForMesh(const USkeletalMesh* SkeletalMesh, int32 LODIndex = 0) const;
-    FString GetPrecomputedSimulationDataValidationSummary(const USkeletalMesh* SkeletalMesh, int32 LODIndex = 0) const;
+    FString GetPrecomputedSimulationDataValidationSummary(const USkeletalMesh* SkeletalMesh) const;
     bool IsMaterialSlotWettable(int32 MaterialSlotIndex) const;
     bool HasAnyWettableMaterialSlot() const;
     bool HasWrinkleBakeContent() const;
     bool HasTransparencyBakeContent() const;
 
-    const FWetClothingPrecomputedSimulationData& GetPrecomputedSimulationData(int32 LODIndex = 0) const;
+    const FWetClothingPrecomputedSimulationData& GetPrecomputedSimulationData() const;
     const FDWCGPULODBakeData& GetGPUWetMapRuntimeData(int32 LODIndex = 0) const;
     bool IsCurrentAssetDataVersion() const { return AssetDataVersion == CurrentAssetDataVersion; }
     bool HasCPURuntimeDataPayload() const;

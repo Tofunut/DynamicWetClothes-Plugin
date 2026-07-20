@@ -4,7 +4,7 @@
 #include "Components/StaticMeshComponent.h"
 #include "Engine/World.h"
 #include "SEditorViewport.h"
-#include "WetnessProfileViewport.h"
+#include "SWetnessProfileViewport.h"
 
 FWetnessProfileViewportClient::FWetnessProfileViewportClient(FAdvancedPreviewScene* InPreviewScene, const TSharedRef<SWetnessProfileViewport>& InViewportWidget)
     : FEditorViewportClient(nullptr, InPreviewScene, StaticCastSharedRef<SEditorViewport>(InViewportWidget)), PreviewScene(InPreviewScene)

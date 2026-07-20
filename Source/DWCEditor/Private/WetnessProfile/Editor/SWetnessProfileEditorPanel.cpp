@@ -5,7 +5,7 @@
 #include "Styling/AppStyle.h"
 #include "Styling/CoreStyle.h"
 #include "DataAssets/WetnessProfile.h"
-#include "WetnessProfile/Viewport/WetnessProfileViewport.h"
+#include "WetnessProfile/Viewport/SWetnessProfileViewport.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SCheckBox.h"
 #include "Widgets/Input/SSpinBox.h"

@@ -8,8 +8,8 @@
 #include "Modules/ModuleManager.h"
 #include "PropertyEditorModule.h"
 #include "Subsystems/EditorAssetSubsystem.h"
-#include "WetClothing/Common/Material/WetClothingMaterialSetup.h"
-#include "WetClothing/WrinkleEdit/Preset/WetWrinklePresetAssetTypeActions.h"
+#include "WetClothing/DerivedAssets/Materials/WCAMaterialGenerator.h"
+#include "WetClothing/Modes/Wrinkle/Preset/WetWrinklePresetAssetTypeActions.h"
 
 class FDWCEditorModule : public IModuleInterface
 {
@@ -74,7 +74,7 @@ class FDWCEditorModule : public IModuleInterface
     void ValidateApplyWetnessFunction()
     {
         FString ErrorMessage;
-        if (!FWetClothingMaterialSetup::ValidateSharedApplyWetnessFunction(ErrorMessage))
+        if (!FWCAMaterialGenerator::ValidateSharedApplyWetnessFunction(ErrorMessage))
         {
             UE_LOG(LogTemp, Error, TEXT("MF_DWC_ApplyWetness_CPU/GPU fixed asset validation failed:\n%s"), *ErrorMessage);
             return;
@@ -91,7 +91,7 @@ class FDWCEditorModule : public IModuleInterface
         UE_LOG(LogTemp, Display, TEXT("DWC material function repair started."));
 
         FString ErrorMessage;
-        if (!FWetClothingMaterialSetup::RepairOrUpgradeSharedApplyWetnessFunction(ErrorMessage))
+        if (!FWCAMaterialGenerator::RepairOrUpgradeSharedApplyWetnessFunction(ErrorMessage))
         {
             UE_LOG(LogTemp, Error, TEXT("MF_DWC_ApplyWetness_CPU/GPU repair/upgrade failed:\n%s"), *ErrorMessage);
             if (!FApp::IsUnattended())

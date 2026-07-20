@@ -2,6 +2,7 @@
 
 #include "Components/DynamicWetClothesComponent.h"
 
+#include "Async/DWCLODVertexColorTasks.h"
 #include "Async/DWCSkinningTasks.h"
 #include "Async/DWCTaskQueue.h"
 #include "Runtime/Engine/Classes/Components/SkeletalMeshComponent.h"
@@ -9,6 +10,7 @@
 #include "WetInputSystem/Sampling/WetClothingMeshSampler.h"
 #include "WetRendering/WetRenderStage.h"
 #include "WetRendering/WetMaterialParameters.h"
+#include "WetRendering/WetVertexColorBuffer.h"
 #include "RuntimeState/WetClothingRuntimeData.h"
 #include "RuntimeState/DWCRuntimeDataSubsystem.h"
 #include "WetSimulation/WetSimulationStage.h"
@@ -16,13 +18,11 @@
 #include "WetSimulation/SurfaceWater/SurfaceWaterSimulationState.h"
 #include "Runtime/Engine/Public/Rendering/SkeletalMeshLODRenderData.h"
 #include "UObject/UnrealType.h"
-#include "Engine/SkeletalMesh.h"
 #include "Engine/Texture2D.h"
 #include "Engine/World.h"
 #include "Materials/MaterialInterface.h"
 #include "Materials/MaterialInstanceConstant.h"
 #include "Modules/ModuleManager.h"
-#include "TimerManager.h"
 #include "Utility/DWCLog.h"
 #include "Utility/DWCProfiling.h"
 
@@ -456,6 +456,7 @@ bool UDynamicWetClothesComponent::InitializeWetRuntime()
         if (Receiver->SimulationState.IsValid() && Receiver->SimulationState->DirtyWetVertexIndices.Num() > 0)
         {
             Receiver->RenderStage->ApplyWetnessToMaterial(RenderArgs);
+            RequestLODVertexColorTransferTask(*Receiver);
             Receiver->bWetRenderDirty = false;
         }
     }
@@ -648,6 +649,7 @@ bool UDynamicWetClothesComponent::InitializeWetMeshReceiverRuntime(FDWCWetMeshRe
     Receiver.SharedRuntimeData = RuntimeDataSubsystem->AcquireSharedRuntimeData(
         *Receiver.WetClothingAsset.Get(),
         *Receiver.MeshComponent.Get(),
+
         RuntimeDataBuildArgs.LODIndex,
         GetOwner());
     if (!Receiver.SharedRuntimeData.IsValid())
@@ -677,32 +679,57 @@ bool UDynamicWetClothesComponent::InitializeWetMeshReceiverRuntime(FDWCWetMeshRe
     Receiver.RuntimeDataBuilder->EnsureWetnessBufferSize(RuntimeDataBuildArgs, LODData->GetNumVertices());
     Receiver.SimulationState->MarkAllWetVertexColorsDirty();
 
-    if (!IsGPUWetnessMode(GetActiveSimulationMode()))
-    {
-        if (!Receiver.SharedRuntimeData->bHasNeighborGraph)
-        {
-            UE_LOG(
-                LogDWC,
-                Error,
-                TEXT("DynamicWetClothesComponent: CPU simulation requires a valid shared neighbor graph for WCA '%s'. Save the WCA to rebuild precomputed data."),
-                *GetNameSafe(Receiver.WetClothingAsset.Get()));
-            return false;
-        }
+    Receiver.LODVertexStaticDataByLOD.Reset();
+    Receiver.LODVertexColorTransferMapsByLOD.Reset();
+    Receiver.LODVertexColorCachesByLOD.Reset();
+    Receiver.PendingLODVertexColorDirtySourceVertices.Reset();
 
-        const FWetClothingPrecomputedSimulationData& PrecomputedData =
-            Receiver.WetClothingAsset->GetPrecomputedSimulationData(RuntimeDataBuildArgs.LODIndex);
-        Receiver.SkinningStaticData = RuntimeDataSubsystem->AcquireSkinningStaticData(
-            *Receiver.MeshComponent.Get(),
-            PrecomputedData.MeshSignature,
-            RuntimeDataBuildArgs.LODIndex);
-        if (!Receiver.SkinningStaticData.IsValid())
+    if (IsGPUWetnessMode(GetActiveSimulationMode()))
+    {
+        return true;
+    }
+
+    if (!Receiver.SharedRuntimeData->bHasNeighborGraph)
+    {
+        UE_LOG(
+            LogDWC,
+            Error,
+            TEXT("DynamicWetClothesComponent: CPU simulation requires a valid shared neighbor graph for WCA '%s'. Save the WCA to rebuild precomputed data."),
+            *GetNameSafe(Receiver.WetClothingAsset.Get()));
+        return false;
+    }
+
+    USkeletalMeshComponent* Mesh = Receiver.MeshComponent.Get();
+    const USkeletalMesh* SkeletalMesh = Mesh != nullptr ? Mesh->GetSkeletalMeshAsset() : nullptr;
+    FSkeletalMeshRenderData* RenderData = SkeletalMesh != nullptr ? SkeletalMesh->GetResourceForRendering() : nullptr;
+    if (RenderData != nullptr)
+    {
+        for (int32 LODIndex = 0; LODIndex < RenderData->LODRenderData.Num(); ++LODIndex)
         {
-            UE_LOG(
-                LogTemp,
-                Warning,
-                TEXT("DynamicWetClothesComponent: Failed to build CPU skinning static data on %s."),
-                *GetNameSafe(GetOwner()));
+            TSharedPtr<const FDWCLODVertexStaticData, ESPMode::ThreadSafe> LODVertexData =
+                RuntimeDataSubsystem->AcquireLODVertexStaticData(
+                    *Mesh,
+                    LODIndex,
+                    Receiver.SharedRuntimeData->MeshSignature);
+            if (LODVertexData.IsValid())
+            {
+                Receiver.LODVertexStaticDataByLOD.Add(LODIndex, LODVertexData);
+            }
         }
+    }
+
+    const FWetClothingPrecomputedSimulationData& PrecomputedData =
+        Receiver.WetClothingAsset->GetPrecomputedSimulationData(RuntimeDataBuildArgs.LODIndex);
+    Receiver.SkinningStaticData = RuntimeDataSubsystem->AcquireSkinningStaticData(
+        *Receiver.MeshComponent.Get(),
+        PrecomputedData.MeshSignature);
+    if (!Receiver.SkinningStaticData.IsValid())
+    {
+        UE_LOG(
+            LogTemp,
+            Warning,
+            TEXT("DynamicWetClothesComponent: Failed to build CPU skinning static data on %s."),
+            *GetNameSafe(GetOwner()));
     }
 
     const FSurfaceWaterSimulationSettings& SurfaceSimulationSettings = Receiver.WetClothingAsset->SurfaceWaterSettings;
@@ -1343,7 +1370,6 @@ bool UDynamicWetClothesComponent::ApplyWetSurface(
     return bAnyChanged;
 }
 
-
 bool UDynamicWetClothesComponent::GetWetnessWorldBounds(FBox& OutBounds) const
 {
     OutBounds = FBox(ForceInit);
@@ -1380,7 +1406,7 @@ void UDynamicWetClothesComponent::CommitCpuSkinningTaskResult(FDWCSkinningTaskRe
     {
         if (!Receiver.IsValid() ||
             !Receiver->MeshSampler.IsValid() ||
-            Receiver->ReceiverId != Result.VertexTarget.Target.TargetId)
+            Receiver->ReceiverId != Result.ReceiverId)
         {
             continue;
         }
@@ -1395,7 +1421,7 @@ void UDynamicWetClothesComponent::CommitCpuSkinningTaskResult(FDWCSkinningTaskRe
         {
             Receiver->MeshSampler->CommitSkinnedCacheFromTask(
                 Mesh,
-                Result.VertexTarget.LODIndex,
+                UWetClothingAsset::RuntimeSimulationLODIndex,
                 Result.FrameNumber,
                 MoveTemp(Result.SkinnedPositions),
                 MoveTemp(Result.SkinnedNormals));
@@ -1406,6 +1432,89 @@ void UDynamicWetClothesComponent::CommitCpuSkinningTaskResult(FDWCSkinningTaskRe
         Receiver->bCpuSkinningTaskNeedsNormals = false;
 
         SetComponentTickEnabled(true);
+        return;
+    }
+}
+
+void UDynamicWetClothesComponent::CommitLODVertexColorTransferResult(FDWCLODVertexColorTransferResult&& Result)
+{
+    DWC_PROFILE_SCOPE(DWC_Component_CommitLODVertexColorTransferResult);
+
+    for (const TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver : Receivers)
+    {
+        if (!Receiver.IsValid() ||
+            Receiver->ReceiverId != Result.ReceiverId ||
+            Receiver->LODVertexColorTransferGeneration != Result.Generation)
+        {
+            continue;
+        }
+
+        Receiver->bLODVertexColorTransferPending = false;
+
+        USkeletalMeshComponent* Mesh = Receiver->MeshComponent.Get();
+        if (Mesh == nullptr)
+        {
+            return;
+        }
+
+        UWorld* World = GetWorld();
+        UDWCRuntimeDataSubsystem* RuntimeDataSubsystem =
+            World != nullptr ? World->GetSubsystem<UDWCRuntimeDataSubsystem>() : nullptr;
+        const TSharedPtr<const FDWCLODVertexStaticData, ESPMode::ThreadSafe> SourceLODData =
+            Receiver->LODVertexStaticDataByLOD.FindRef(UWetClothingAsset::RuntimeSimulationLODIndex);
+        const FString MeshSignature = Receiver->SharedRuntimeData.IsValid()
+                                          ? Receiver->SharedRuntimeData->MeshSignature
+                                          : FString();
+
+        for (FDWCLODVertexColorTransferResult::FLODColors& LODResult : Result.LODResults)
+        {
+            if (LODResult.LODIndex == UWetClothingAsset::RuntimeSimulationLODIndex ||
+                LODResult.Colors.IsEmpty())
+            {
+                continue;
+            }
+
+            if (!LODResult.TargetToSourceVertex.IsEmpty())
+            {
+                TSharedPtr<const TArray<int32>, ESPMode::ThreadSafe> TransferMap;
+                const TSharedPtr<const FDWCLODVertexStaticData, ESPMode::ThreadSafe> TargetLODData =
+                    Receiver->LODVertexStaticDataByLOD.FindRef(LODResult.LODIndex);
+                if (RuntimeDataSubsystem != nullptr && SourceLODData.IsValid() && TargetLODData.IsValid())
+                {
+                    TransferMap = RuntimeDataSubsystem->CacheLODVertexColorTransferMap(
+                        *Mesh,
+                        *SourceLODData,
+                        *TargetLODData,
+                        MeshSignature,
+                        FDWCLODVertexColorTransferSettings(),
+                        MoveTemp(LODResult.TargetToSourceVertex));
+                }
+
+                if (!TransferMap.IsValid())
+                {
+                    TransferMap = MakeShared<TArray<int32>, ESPMode::ThreadSafe>(MoveTemp(LODResult.TargetToSourceVertex));
+                }
+
+                if (TransferMap.IsValid())
+                {
+                    Receiver->LODVertexColorTransferMapsByLOD.Add(LODResult.LODIndex, TransferMap);
+                }
+            }
+
+            TSharedRef<TArray<FColor>, ESPMode::ThreadSafe> ColorCache =
+                MakeShared<TArray<FColor>, ESPMode::ThreadSafe>(LODResult.Colors);
+            Receiver->LODVertexColorCachesByLOD.Add(LODResult.LODIndex, ColorCache);
+
+            FWetVertexColorBuffer::ApplyVertexColorOverride(*Mesh, LODResult.LODIndex, LODResult.Colors);
+        }
+
+        if (Receiver->bLODVertexColorTransferRequestedAgain)
+        {
+            Receiver->bLODVertexColorTransferRequestedAgain = false;
+            RequestLODVertexColorTransferTask(*Receiver);
+        }
+
+        SetComponentTickEnabled(HasPendingCpuSkinningTasks() || HasPendingLODVertexColorTransferTasks());
         return;
     }
 }
@@ -1458,11 +1567,9 @@ bool UDynamicWetClothesComponent::RequestCpuSkinningTask(
     }
 
     FDWCSkinningTaskSnapshot Snapshot;
-    const FDWCTaskTargetSnapshot TargetSnapshot{Receiver.ReceiverId, UWetClothingAsset::RuntimeSimulationLODIndex};
     if (!BuildDWCSkinningTaskSnapshot(
             Mesh,
-            UWetClothingAsset::RuntimeSimulationLODIndex,
-            TargetSnapshot,
+            Receiver.ReceiverId,
             Receiver.SkinningStaticData,
             bComputePositions,
             bComputeNormals,
@@ -1476,6 +1583,102 @@ bool UDynamicWetClothesComponent::RequestCpuSkinningTask(
     Receiver.bCpuSkinningTaskNeedsNormals = bComputeNormals;
 
     AsyncTaskQueue->Enqueue(MakeShared<FDWCCpuSkinningTask, ESPMode::ThreadSafe>(this, MoveTemp(Snapshot)));
+    SetComponentTickEnabled(true);
+    return true;
+}
+
+bool UDynamicWetClothesComponent::RequestLODVertexColorTransferTask(FDWCWetMeshReceiverRuntime& Receiver)
+{
+    DWC_PROFILE_SCOPE(DWC_Component_RequestLODVertexColorTransferTask);
+
+    if (!AsyncTaskQueue.IsValid() ||
+        !Receiver.RenderStage.IsValid() ||
+        Receiver.LODVertexStaticDataByLOD.Num() <= 1)
+    {
+        return false;
+    }
+
+    USkeletalMeshComponent* Mesh = Receiver.MeshComponent.Get();
+    if (Mesh == nullptr)
+    {
+        return false;
+    }
+
+    if (Receiver.bLODVertexColorTransferPending)
+    {
+        Receiver.bLODVertexColorTransferRequestedAgain = true;
+        SetComponentTickEnabled(true);
+        return true;
+    }
+
+    const int32 SourceLODIndex = UWetClothingAsset::RuntimeSimulationLODIndex;
+    TSharedPtr<const FDWCLODVertexStaticData, ESPMode::ThreadSafe> SourceLODData =
+        Receiver.LODVertexStaticDataByLOD.FindRef(SourceLODIndex);
+    if (!SourceLODData.IsValid() ||
+        Receiver.RenderStage->CachedWetVertexColors.Num() != SourceLODData->Geometry.VertexCount)
+    {
+        return false;
+    }
+
+    FDWCLODVertexColorTransferSnapshot Snapshot;
+    Snapshot.ReceiverId = Receiver.ReceiverId;
+    Snapshot.Generation = ++Receiver.LODVertexColorTransferGeneration;
+    Snapshot.SourceLODData = SourceLODData;
+    Snapshot.SourceColors = Receiver.RenderStage->CachedWetVertexColors;
+    Snapshot.DirtySourceVertices = Receiver.PendingLODVertexColorDirtySourceVertices;
+    Receiver.PendingLODVertexColorDirtySourceVertices.Reset();
+
+    UWorld* World = GetWorld();
+    UDWCRuntimeDataSubsystem* RuntimeDataSubsystem =
+        World != nullptr ? World->GetSubsystem<UDWCRuntimeDataSubsystem>() : nullptr;
+    const FString MeshSignature = Receiver.SharedRuntimeData.IsValid()
+                                      ? Receiver.SharedRuntimeData->MeshSignature
+                                      : FString();
+
+    for (const TPair<int32, TSharedPtr<const FDWCLODVertexStaticData, ESPMode::ThreadSafe>>& Pair : Receiver.LODVertexStaticDataByLOD)
+    {
+        if (Pair.Key == SourceLODIndex || !Pair.Value.IsValid())
+        {
+            continue;
+        }
+
+        Snapshot.TargetLODData.Add(Pair.Value);
+
+        TSharedPtr<const TArray<int32>, ESPMode::ThreadSafe> CachedTransferMap =
+            Receiver.LODVertexColorTransferMapsByLOD.FindRef(Pair.Key);
+        if (!CachedTransferMap.IsValid() && RuntimeDataSubsystem != nullptr)
+        {
+            CachedTransferMap = RuntimeDataSubsystem->FindLODVertexColorTransferMap(
+                *Mesh,
+                *SourceLODData,
+                *Pair.Value,
+                MeshSignature,
+                Snapshot.Settings);
+            if (CachedTransferMap.IsValid())
+            {
+                Receiver.LODVertexColorTransferMapsByLOD.Add(Pair.Key, CachedTransferMap);
+            }
+        }
+
+        if (CachedTransferMap.IsValid())
+        {
+            Snapshot.CachedTargetToSourceVertexByLOD.Add(Pair.Key, CachedTransferMap);
+        }
+        if (const TSharedPtr<const TArray<FColor>, ESPMode::ThreadSafe>* CachedColors = Receiver.LODVertexColorCachesByLOD.Find(Pair.Key))
+        {
+            Snapshot.CachedTargetColorsByLOD.Add(Pair.Key, *CachedColors);
+        }
+    }
+
+    if (Snapshot.TargetLODData.IsEmpty())
+    {
+        return false;
+    }
+
+    Receiver.bLODVertexColorTransferPending = true;
+    Receiver.bLODVertexColorTransferRequestedAgain = false;
+
+    AsyncTaskQueue->Enqueue(MakeShared<FDWCLODVertexColorTransferTask, ESPMode::ThreadSafe>(this, MoveTemp(Snapshot)));
     SetComponentTickEnabled(true);
     return true;
 }
@@ -1503,6 +1706,19 @@ bool UDynamicWetClothesComponent::HasPendingCpuSkinningTasks() const
     for (const TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver : Receivers)
     {
         if (Receiver.IsValid() && Receiver->bCpuSkinningTaskPending)
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool UDynamicWetClothesComponent::HasPendingLODVertexColorTransferTasks() const
+{
+    for (const TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver : Receivers)
+    {
+        if (Receiver.IsValid() && Receiver->bLODVertexColorTransferPending)
         {
             return true;
         }
@@ -1714,6 +1930,12 @@ void UDynamicWetClothesComponent::UpdateWetRendering()
             continue;
         }
 
+        const bool bHadDirtyWetVertexColors = Receiver->SimulationState->DirtyWetVertexIndices.Num() > 0;
+        if (bHadDirtyWetVertexColors)
+        {
+            Receiver->PendingLODVertexColorDirtySourceVertices = Receiver->SimulationState->DirtyWetVertexIndices;
+        }
+
         FWetRenderStageArgs RenderArgs = MakeWetRenderStageArgs(*Receiver);
         if (IsGPUWetnessMode(GetActiveSimulationMode()))
         {
@@ -1728,6 +1950,10 @@ void UDynamicWetClothesComponent::UpdateWetRendering()
         else
         {
             Receiver->RenderStage->ApplyWetnessToMaterial(RenderArgs);
+            if (bHadDirtyWetVertexColors)
+            {
+                RequestLODVertexColorTransferTask(*Receiver);
+            }
         }
         Receiver->bWetRenderDirty = false;
     }
@@ -1766,7 +1992,7 @@ void UDynamicWetClothesComponent::TickComponent(float DeltaTime, ELevelTick Tick
 
     FlushAsyncTaskQueueGameThread();
     FlushPendingWetContacts();
-    SetComponentTickEnabled(HasPendingCpuSkinningTasks());
+    SetComponentTickEnabled(HasPendingCpuSkinningTasks() || HasPendingLODVertexColorTransferTasks());
 }
 
 #if WITH_EDITOR

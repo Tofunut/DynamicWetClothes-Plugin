@@ -22,7 +22,7 @@ struct DWC_API FDWCSkinningVertexSnapshot
 
 struct DWC_API FDWCSkinningTaskSnapshot
 {
-    FDWCVertexTaskSnapshot VertexTarget;
+    FName ReceiverId = NAME_None;
     uint64 FrameNumber = 0;
     bool bComputePositions = true;
     bool bComputeNormals = false;
@@ -33,28 +33,21 @@ struct DWC_API FDWCSkinningTaskSnapshot
 
 struct DWC_API FDWCSkinningStaticData
 {
-    UPTRINT SkeletalMeshIdentity = 0;
+    FDWCVertexGeometryStaticData Geometry;
     UPTRINT SkinWeightBufferIdentity = 0;
-    int32 LODIndex = INDEX_NONE;
-    int32 VertexCount = 0;
-    TArray<FVector3f> LocalPositions;
-    TArray<FVector3f> LocalNormals;
     TArray<FDWCSkinningVertexSnapshot> Vertices;
     TArray<FDWCSkinningInfluenceSnapshot> Influences;
 
-    bool IsValidFor(const FDWCVertexTaskSnapshot& InVertexTarget) const
+    bool IsValid() const
     {
-        return LODIndex == InVertexTarget.LODIndex &&
-               VertexCount == InVertexTarget.VertexCount &&
-               Vertices.Num() == InVertexTarget.VertexCount &&
-               LocalPositions.Num() == InVertexTarget.VertexCount &&
-               LocalNormals.Num() == InVertexTarget.VertexCount;
+        return Geometry.IsValid() &&
+               Vertices.Num() == Geometry.VertexCount;
     }
 };
 
 struct DWC_API FDWCSkinningTaskResult
 {
-    FDWCVertexTaskSnapshot VertexTarget;
+    FName ReceiverId = NAME_None;
     uint64 FrameNumber = 0;
     TArray<FVector3f> SkinnedPositions;
     TArray<FVector3f> SkinnedNormals;
@@ -95,13 +88,11 @@ class DWC_API FDWCCpuSkinningTask final : public IDWCTaskRequest
 
 DWC_API bool BuildDWCSkinningTaskSnapshot(
     USkeletalMeshComponent*       TargetSkeletalMesh,
-    int32                         LODIndex,
-    const FDWCTaskTargetSnapshot& Target,
+    FName                         ReceiverId,
     const TSharedPtr<const FDWCSkinningStaticData, ESPMode::ThreadSafe>& StaticData,
     bool                          bComputePositions,
     bool                          bComputeNormals,
     FDWCSkinningTaskSnapshot&     OutSnapshot);
 
 DWC_API TSharedPtr<const FDWCSkinningStaticData, ESPMode::ThreadSafe> BuildDWCSkinningStaticData(
-    USkeletalMeshComponent* TargetSkeletalMesh,
-    int32 LODIndex);
+    USkeletalMeshComponent* TargetSkeletalMesh);

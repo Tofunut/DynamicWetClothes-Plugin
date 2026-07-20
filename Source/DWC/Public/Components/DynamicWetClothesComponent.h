@@ -36,6 +36,8 @@ class UMaterialInstanceDynamic;
 class FDWCTaskQueue;
 struct FDWCSkinningTaskResult;
 struct FDWCSkinningStaticData;
+struct FDWCLODVertexColorTransferResult;
+struct FDWCLODVertexStaticData;
 
 struct FDWCWetMeshReceiverRuntime
 {
@@ -56,11 +58,18 @@ struct FDWCWetMeshReceiverRuntime
     TUniquePtr<FWetRenderStage> RenderStage;
     TArray<TObjectPtr<UMaterialInstanceDynamic>> WetMaterialInstances;
     TSharedPtr<const FDWCSkinningStaticData, ESPMode::ThreadSafe> SkinningStaticData;
+    TMap<int32, TSharedPtr<const FDWCLODVertexStaticData, ESPMode::ThreadSafe>> LODVertexStaticDataByLOD;
+    TMap<int32, TSharedPtr<const TArray<int32>, ESPMode::ThreadSafe>> LODVertexColorTransferMapsByLOD;
+    TMap<int32, TSharedPtr<const TArray<FColor>, ESPMode::ThreadSafe>> LODVertexColorCachesByLOD;
+    TArray<int32> PendingLODVertexColorDirtySourceVertices;
+    int32 LODVertexColorTransferGeneration = 0;
 
     bool bWetRenderDirty = false;
     bool bCpuSkinningTaskPending = false;
     bool bCpuSkinningTaskRequestedAgain = false;
     bool bCpuSkinningTaskNeedsNormals = false;
+    bool bLODVertexColorTransferPending = false;
+    bool bLODVertexColorTransferRequestedAgain = false;
 };
 
 UCLASS(ClassGroup = (Wetness), DisplayName = "Dynamic Wet Clothes", meta = (BlueprintSpawnableComponent))
@@ -89,6 +98,7 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
     void SetWetPartDebugColorsEnabled(bool bEnabled);
     int32 GetWetSurfaceSampleResolution() const;
     void CommitCpuSkinningTaskResult(FDWCSkinningTaskResult&& Result);
+    void CommitLODVertexColorTransferResult(FDWCLODVertexColorTransferResult&& Result);
 
     EDWCSimulationMode GetActiveSimulationMode() const
     {
@@ -127,6 +137,8 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
     bool                     RequestCpuSkinningTask(FDWCWetMeshReceiverRuntime& Receiver, bool bComputePositions, bool bComputeNormals);
     void                     RequestContinuousCpuSkinningTasks();
     bool                     HasPendingCpuSkinningTasks() const;
+    bool                     RequestLODVertexColorTransferTask(FDWCWetMeshReceiverRuntime& Receiver);
+    bool                     HasPendingLODVertexColorTransferTasks() const;
     void                     FlushAsyncTaskQueueGameThread();
     bool                     FlushPendingWetContacts();
 

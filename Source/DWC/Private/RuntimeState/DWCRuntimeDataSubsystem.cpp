@@ -1,13 +1,18 @@
 #include "RuntimeState/DWCRuntimeDataSubsystem.h"
 
+#include "Async/DWCLODVertexColorTasks.h"
 #include "Async/DWCSkinningTasks.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "DataAssets/WetClothingAsset.h"
 #include "Engine/SkeletalMesh.h"
+#include "Rendering/SkeletalMeshLODRenderData.h"
+#include "Rendering/SkeletalMeshRenderData.h"
 #include "Rendering/SkinWeightVertexBuffer.h"
 #include "RuntimeState/WetClothingRuntimeData.h"
 #include "RuntimeState/WetRuntimeDataBuilder.h"
 #include "Utility/DWCLog.h"
+
+#include "DataAssets/WetClothingAsset.h"
 
 TSharedPtr<const FWetClothingRuntimeData, ESPMode::ThreadSafe>
 UDWCRuntimeDataSubsystem::AcquireSharedRuntimeData(
@@ -101,11 +106,48 @@ UDWCRuntimeDataSubsystem::AcquireSharedRuntimeData(
     return SharedData;
 }
 
+FDWCLODVertexStaticDataKey UDWCRuntimeDataSubsystem::MakeLODVertexStaticDataKey(
+    const USkeletalMeshComponent& TargetSkeletalMesh,
+    const int32 LODIndex,
+    const FString& MeshSignature) const
+{
+    FDWCLODVertexStaticDataKey Key;
+    const USkeletalMesh* SkeletalMesh = TargetSkeletalMesh.GetSkeletalMeshAsset();
+    Key.SkeletalMesh = FObjectKey(SkeletalMesh);
+    Key.LODIndex = LODIndex;
+    Key.MeshSignature = MeshSignature;
+
+    const FSkeletalMeshRenderData* RenderData = SkeletalMesh != nullptr ? SkeletalMesh->GetResourceForRendering() : nullptr;
+    if (RenderData != nullptr && RenderData->LODRenderData.IsValidIndex(LODIndex))
+    {
+        Key.LODRenderDataIdentity = reinterpret_cast<UPTRINT>(&RenderData->LODRenderData[LODIndex]);
+    }
+
+    return Key;
+}
+
+FDWCLODVertexColorTransferMapKey UDWCRuntimeDataSubsystem::MakeLODVertexColorTransferMapKey(
+    const USkeletalMeshComponent& TargetSkeletalMesh,
+    const FDWCLODVertexStaticData& SourceLODData,
+    const FDWCLODVertexStaticData& TargetLODData,
+    const FString& MeshSignature,
+    const FDWCLODVertexColorTransferSettings& Settings) const
+{
+    FDWCLODVertexColorTransferMapKey Key;
+    Key.SkeletalMesh = FObjectKey(TargetSkeletalMesh.GetSkeletalMeshAsset());
+    Key.SourceLODRenderDataIdentity = SourceLODData.Geometry.VertexDataIdentity;
+    Key.TargetLODRenderDataIdentity = TargetLODData.Geometry.VertexDataIdentity;
+    Key.SourceLODIndex = SourceLODData.LODIndex;
+    Key.TargetLODIndex = TargetLODData.LODIndex;
+    Key.MeshSignature = MeshSignature;
+    Key.Settings = Settings;
+    return Key;
+}
+
 TSharedPtr<const FDWCSkinningStaticData, ESPMode::ThreadSafe>
 UDWCRuntimeDataSubsystem::AcquireSkinningStaticData(
     USkeletalMeshComponent& TargetSkeletalMesh,
-    const FString& MeshSignature,
-    const int32 LODIndex)
+    const FString& MeshSignature)
 {
     USkeletalMesh* SkeletalMesh = TargetSkeletalMesh.GetSkeletalMeshAsset();
     if (SkeletalMesh == nullptr || MeshSignature.IsEmpty())
@@ -113,7 +155,8 @@ UDWCRuntimeDataSubsystem::AcquireSkinningStaticData(
         return nullptr;
     }
 
-    const FSkinWeightVertexBuffer* SkinWeightBuffer = TargetSkeletalMesh.GetSkinWeightBuffer(LODIndex);
+    constexpr int32 RuntimeLODIndex = UWetClothingAsset::RuntimeSimulationLODIndex;
+    const FSkinWeightVertexBuffer* SkinWeightBuffer = TargetSkeletalMesh.GetSkinWeightBuffer(RuntimeLODIndex);
     if (SkinWeightBuffer == nullptr)
     {
         return nullptr;
@@ -121,7 +164,6 @@ UDWCRuntimeDataSubsystem::AcquireSkinningStaticData(
 
     FDWCSkinningStaticDataKey Key;
     Key.SkeletalMesh = FObjectKey(SkeletalMesh);
-    Key.LODIndex = LODIndex;
     Key.SkinWeightBufferIdentity = reinterpret_cast<UPTRINT>(SkinWeightBuffer);
     Key.MeshSignature = MeshSignature;
 
@@ -136,13 +178,119 @@ UDWCRuntimeDataSubsystem::AcquireSkinningStaticData(
     }
 
     TSharedPtr<const FDWCSkinningStaticData, ESPMode::ThreadSafe> SharedData =
-        BuildDWCSkinningStaticData(&TargetSkeletalMesh, LODIndex);
+        BuildDWCSkinningStaticData(&TargetSkeletalMesh);
     if (SharedData.IsValid())
     {
         SkinningStaticDataCache.Add(Key, SharedData);
         PruneExpiredEntries();
     }
     return SharedData;
+}
+
+TSharedPtr<const FDWCLODVertexStaticData, ESPMode::ThreadSafe>
+UDWCRuntimeDataSubsystem::AcquireLODVertexStaticData(
+    USkeletalMeshComponent& TargetSkeletalMesh,
+    const int32 LODIndex,
+    const FString& MeshSignature)
+{
+    USkeletalMesh* SkeletalMesh = TargetSkeletalMesh.GetSkeletalMeshAsset();
+    if (SkeletalMesh == nullptr || MeshSignature.IsEmpty())
+    {
+        return nullptr;
+    }
+
+    FDWCLODVertexStaticDataKey Key = MakeLODVertexStaticDataKey(TargetSkeletalMesh, LODIndex, MeshSignature);
+    if (Key.LODRenderDataIdentity == 0)
+    {
+        return nullptr;
+    }
+
+    if (const TWeakPtr<const FDWCLODVertexStaticData, ESPMode::ThreadSafe>* ExistingWeak =
+            LODVertexStaticDataCache.Find(Key))
+    {
+        if (TSharedPtr<const FDWCLODVertexStaticData, ESPMode::ThreadSafe> Existing = ExistingWeak->Pin())
+        {
+            return Existing;
+        }
+        LODVertexStaticDataCache.Remove(Key);
+    }
+
+    TSharedPtr<const FDWCLODVertexStaticData, ESPMode::ThreadSafe> SharedData =
+        BuildDWCLODVertexStaticData(&TargetSkeletalMesh, LODIndex);
+    if (SharedData.IsValid())
+    {
+        LODVertexStaticDataCache.Add(Key, SharedData);
+        PruneExpiredEntries();
+    }
+    return SharedData;
+}
+
+TSharedPtr<const TArray<int32>, ESPMode::ThreadSafe>
+UDWCRuntimeDataSubsystem::FindLODVertexColorTransferMap(
+    const USkeletalMeshComponent& TargetSkeletalMesh,
+    const FDWCLODVertexStaticData& SourceLODData,
+    const FDWCLODVertexStaticData& TargetLODData,
+    const FString& MeshSignature,
+    const FDWCLODVertexColorTransferSettings& Settings)
+{
+    if (TargetSkeletalMesh.GetSkeletalMeshAsset() == nullptr ||
+        MeshSignature.IsEmpty() ||
+        !SourceLODData.IsValid() ||
+        !TargetLODData.IsValid())
+    {
+        return nullptr;
+    }
+
+    FDWCLODVertexColorTransferMapKey Key =
+        MakeLODVertexColorTransferMapKey(TargetSkeletalMesh, SourceLODData, TargetLODData, MeshSignature, Settings);
+    if (Key.SourceLODRenderDataIdentity == 0 || Key.TargetLODRenderDataIdentity == 0)
+    {
+        return nullptr;
+    }
+
+    if (const TWeakPtr<const TArray<int32>, ESPMode::ThreadSafe>* ExistingWeak =
+            LODVertexColorTransferMapCache.Find(Key))
+    {
+        if (TSharedPtr<const TArray<int32>, ESPMode::ThreadSafe> Existing = ExistingWeak->Pin())
+        {
+            return Existing;
+        }
+        LODVertexColorTransferMapCache.Remove(Key);
+    }
+
+    return nullptr;
+}
+
+TSharedPtr<const TArray<int32>, ESPMode::ThreadSafe>
+UDWCRuntimeDataSubsystem::CacheLODVertexColorTransferMap(
+    const USkeletalMeshComponent& TargetSkeletalMesh,
+    const FDWCLODVertexStaticData& SourceLODData,
+    const FDWCLODVertexStaticData& TargetLODData,
+    const FString& MeshSignature,
+    const FDWCLODVertexColorTransferSettings& Settings,
+    TArray<int32>&& TargetToSourceVertex)
+{
+    if (TargetSkeletalMesh.GetSkeletalMeshAsset() == nullptr ||
+        MeshSignature.IsEmpty() ||
+        !SourceLODData.IsValid() ||
+        !TargetLODData.IsValid() ||
+        TargetToSourceVertex.Num() != TargetLODData.Geometry.VertexCount)
+    {
+        return nullptr;
+    }
+
+    FDWCLODVertexColorTransferMapKey Key =
+        MakeLODVertexColorTransferMapKey(TargetSkeletalMesh, SourceLODData, TargetLODData, MeshSignature, Settings);
+    if (Key.SourceLODRenderDataIdentity == 0 || Key.TargetLODRenderDataIdentity == 0)
+    {
+        return nullptr;
+    }
+
+    TSharedRef<TArray<int32>, ESPMode::ThreadSafe> SharedMap =
+        MakeShared<TArray<int32>, ESPMode::ThreadSafe>(MoveTemp(TargetToSourceVertex));
+    LODVertexColorTransferMapCache.Add(Key, SharedMap);
+    PruneExpiredEntries();
+    return SharedMap;
 }
 
 void UDWCRuntimeDataSubsystem::PruneExpiredEntries()
@@ -156,6 +304,22 @@ void UDWCRuntimeDataSubsystem::PruneExpiredEntries()
     }
 
     for (auto It = SkinningStaticDataCache.CreateIterator(); It; ++It)
+    {
+        if (!It.Value().Pin().IsValid())
+        {
+            It.RemoveCurrent();
+        }
+    }
+
+    for (auto It = LODVertexStaticDataCache.CreateIterator(); It; ++It)
+    {
+        if (!It.Value().Pin().IsValid())
+        {
+            It.RemoveCurrent();
+        }
+    }
+
+    for (auto It = LODVertexColorTransferMapCache.CreateIterator(); It; ++It)
     {
         if (!It.Value().Pin().IsValid())
         {

@@ -22,17 +22,29 @@ enum class EDWCTaskStatus : uint8
     Canceled
 };
 
-struct DWC_API FDWCTaskTargetSnapshot
-{
-    FName TargetId = NAME_None;
-    int32 TargetGeneration = 0;
-};
-
 struct DWC_API FDWCVertexTaskSnapshot
 {
-    FDWCTaskTargetSnapshot Target;
+    FName ReceiverId = NAME_None;
     int32 LODIndex = 0;
     int32 VertexCount = 0;
+};
+
+struct DWC_API FDWCVertexGeometryStaticData
+{
+    UPTRINT SkeletalMeshIdentity = 0;
+    UPTRINT VertexDataIdentity = 0;
+    int32 VertexCount = 0;
+    TArray<FVector3f> LocalPositions;
+    TArray<FVector3f> LocalNormals;
+
+    bool IsValid() const
+    {
+        return SkeletalMeshIdentity != 0 &&
+               VertexDataIdentity != 0 &&
+               VertexCount > 0 &&
+               LocalPositions.Num() == VertexCount &&
+               LocalNormals.Num() == VertexCount;
+    }
 };
 
 class DWC_API IDWCTaskRequest

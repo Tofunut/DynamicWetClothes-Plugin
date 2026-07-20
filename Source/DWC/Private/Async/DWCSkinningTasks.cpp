@@ -3,6 +3,7 @@
 #include "Async/ParallelFor.h"
 #include "Components/DynamicWetClothesComponent.h"
 #include "CoreGlobals.h"
+#include "DataAssets/WetClothingAsset.h"
 #include "Engine/SkeletalMesh.h"
 #include "Runtime/Engine/Classes/Components/SkeletalMeshComponent.h"
 #include "Runtime/Engine/Public/Rendering/SkeletalMeshLODRenderData.h"
@@ -60,15 +61,15 @@ void FDWCCpuSkinningTask::ExecuteWorker()
 
     SetStatus(EDWCTaskStatus::Running);
 
-    Result.VertexTarget = Snapshot.VertexTarget;
+    Result.ReceiverId = Snapshot.ReceiverId;
     Result.FrameNumber = Snapshot.FrameNumber;
     Result.SkinnedPositions.Reset();
     Result.SkinnedNormals.Reset();
 
-    const int32 VertexCount = Snapshot.VertexTarget.VertexCount;
+    const int32 VertexCount = Snapshot.StaticData.IsValid() ? Snapshot.StaticData->Geometry.VertexCount : 0;
     if (VertexCount <= 0 ||
         !Snapshot.StaticData.IsValid() ||
-        !Snapshot.StaticData->IsValidFor(Snapshot.VertexTarget))
+        !Snapshot.StaticData->IsValid())
     {
         SetStatus(EDWCTaskStatus::Failed);
         return;
@@ -114,13 +115,13 @@ void FDWCCpuSkinningTask::ExecuteWorker()
             const FMatrix44f& BoneMatrix = Snapshot.RefToLocalMatrices[Influence.BoneIndex];
             if (Snapshot.bComputePositions)
             {
-                const FVector4f Position4f = BoneMatrix.TransformPosition(StaticData.LocalPositions[VertexIndex]);
+                const FVector4f Position4f = BoneMatrix.TransformPosition(StaticData.Geometry.LocalPositions[VertexIndex]);
                 SkinnedPosition += FVector3f(Position4f.X, Position4f.Y, Position4f.Z) * Influence.Weight;
             }
 
             if (Snapshot.bComputeNormals)
             {
-                const FVector4f Normal4f = BoneMatrix.TransformVector(StaticData.LocalNormals[VertexIndex]);
+                const FVector4f Normal4f = BoneMatrix.TransformVector(StaticData.Geometry.LocalNormals[VertexIndex]);
                 SkinnedNormal += FVector3f(Normal4f.X, Normal4f.Y, Normal4f.Z) * Influence.Weight;
             }
 
@@ -167,8 +168,7 @@ void FDWCCpuSkinningTask::CommitGameThread()
 
 bool BuildDWCSkinningTaskSnapshot(
     USkeletalMeshComponent*       TargetSkeletalMesh,
-    const int32                   LODIndex,
-    const FDWCTaskTargetSnapshot& Target,
+    const FName                   ReceiverId,
     const TSharedPtr<const FDWCSkinningStaticData, ESPMode::ThreadSafe>& StaticData,
     const bool                    bComputePositions,
     const bool                    bComputeNormals,
@@ -183,11 +183,12 @@ bool BuildDWCSkinningTaskSnapshot(
         return false;
     }
 
+    constexpr int32 RuntimeLODIndex = UWetClothingAsset::RuntimeSimulationLODIndex;
     const USkeletalMesh* CurrentMesh = TargetSkeletalMesh->GetSkeletalMeshAsset();
-    const FSkinWeightVertexBuffer* CurrentSkinWeightBuffer = TargetSkeletalMesh->GetSkinWeightBuffer(LODIndex);
+    const FSkinWeightVertexBuffer* CurrentSkinWeightBuffer = TargetSkeletalMesh->GetSkinWeightBuffer(RuntimeLODIndex);
     if (CurrentMesh == nullptr ||
         CurrentSkinWeightBuffer == nullptr ||
-        StaticData->SkeletalMeshIdentity != reinterpret_cast<UPTRINT>(CurrentMesh) ||
+        StaticData->Geometry.SkeletalMeshIdentity != reinterpret_cast<UPTRINT>(CurrentMesh) ||
         StaticData->SkinWeightBufferIdentity != reinterpret_cast<UPTRINT>(CurrentSkinWeightBuffer))
     {
         return false;
@@ -200,20 +201,18 @@ bool BuildDWCSkinningTaskSnapshot(
         return false;
     }
 
-    const int32 VertexCount = StaticData->VertexCount;
+    const int32 VertexCount = StaticData->Geometry.VertexCount;
     if (VertexCount <= 0)
     {
         return false;
     }
 
-    OutSnapshot.VertexTarget.Target = Target;
-    OutSnapshot.VertexTarget.LODIndex = LODIndex;
-    OutSnapshot.VertexTarget.VertexCount = VertexCount;
-    if (!StaticData->IsValidFor(OutSnapshot.VertexTarget))
+    if (!StaticData->IsValid())
     {
         return false;
     }
 
+    OutSnapshot.ReceiverId = ReceiverId;
     OutSnapshot.FrameNumber = GFrameCounter;
     OutSnapshot.bComputePositions = bComputePositions;
     OutSnapshot.bComputeNormals = bComputeNormals;
@@ -224,8 +223,7 @@ bool BuildDWCSkinningTaskSnapshot(
 }
 
 TSharedPtr<const FDWCSkinningStaticData, ESPMode::ThreadSafe> BuildDWCSkinningStaticData(
-    USkeletalMeshComponent* TargetSkeletalMesh,
-    const int32 LODIndex)
+    USkeletalMeshComponent* TargetSkeletalMesh)
 {
     DWC_PROFILE_SCOPE(DWC_BuildCpuSkinningStaticData);
 
@@ -234,13 +232,14 @@ TSharedPtr<const FDWCSkinningStaticData, ESPMode::ThreadSafe> BuildDWCSkinningSt
         return nullptr;
     }
 
+    constexpr int32 RuntimeLODIndex = UWetClothingAsset::RuntimeSimulationLODIndex;
     FSkeletalMeshLODRenderData* LODData = nullptr;
-    if (!GetLODRenderData(TargetSkeletalMesh, LODIndex, LODData))
+    if (!GetLODRenderData(TargetSkeletalMesh, RuntimeLODIndex, LODData))
     {
         return nullptr;
     }
 
-    const FSkinWeightVertexBuffer* SkinWeightBuffer = TargetSkeletalMesh->GetSkinWeightBuffer(LODIndex);
+    const FSkinWeightVertexBuffer* SkinWeightBuffer = TargetSkeletalMesh->GetSkinWeightBuffer(RuntimeLODIndex);
     if (!SkinWeightBuffer)
     {
         return nullptr;
@@ -254,12 +253,12 @@ TSharedPtr<const FDWCSkinningStaticData, ESPMode::ThreadSafe> BuildDWCSkinningSt
 
     TSharedRef<FDWCSkinningStaticData, ESPMode::ThreadSafe> StaticData =
         MakeShared<FDWCSkinningStaticData, ESPMode::ThreadSafe>();
-    StaticData->SkeletalMeshIdentity = reinterpret_cast<UPTRINT>(TargetSkeletalMesh->GetSkeletalMeshAsset());
+    StaticData->Geometry.SkeletalMeshIdentity = reinterpret_cast<UPTRINT>(TargetSkeletalMesh->GetSkeletalMeshAsset());
+    StaticData->Geometry.VertexDataIdentity = reinterpret_cast<UPTRINT>(LODData);
     StaticData->SkinWeightBufferIdentity = reinterpret_cast<UPTRINT>(SkinWeightBuffer);
-    StaticData->LODIndex = LODIndex;
-    StaticData->VertexCount = VertexCount;
-    StaticData->LocalPositions.SetNumZeroed(VertexCount);
-    StaticData->LocalNormals.SetNumZeroed(VertexCount);
+    StaticData->Geometry.VertexCount = VertexCount;
+    StaticData->Geometry.LocalPositions.SetNumZeroed(VertexCount);
+    StaticData->Geometry.LocalNormals.SetNumZeroed(VertexCount);
     StaticData->Vertices.SetNumZeroed(VertexCount);
 
     const uint32 MaxInfluences = SkinWeightBuffer->GetMaxBoneInfluences();
@@ -287,10 +286,10 @@ TSharedPtr<const FDWCSkinningStaticData, ESPMode::ThreadSafe> BuildDWCSkinningSt
         Vertex.BufferVertexIndex = BufferVertexIndex;
         Vertex.InfluenceOffset = StaticData->Influences.Num();
 
-        StaticData->LocalPositions[VertexIndex] =
+        StaticData->Geometry.LocalPositions[VertexIndex] =
             LODData->StaticVertexBuffers.PositionVertexBuffer.VertexPosition(BufferVertexIndex);
 
-        StaticData->LocalNormals[VertexIndex] =
+        StaticData->Geometry.LocalNormals[VertexIndex] =
             LODData->StaticVertexBuffers.StaticMeshVertexBuffer.VertexTangentZ(BufferVertexIndex).GetSafeNormal();
 
         for (uint32 InfluenceIndex = 0; InfluenceIndex < MaxInfluences; ++InfluenceIndex)

@@ -86,7 +86,7 @@ void FDWCWetSurfaceInputTask::CommitGameThread()
     }
 
     // Intentionally empty for the initial scaffold. The next step is to expose
-    // a component-side commit API that validates VertexTarget.Target and merges
+    // a component-side commit API that validates VertexTarget.ReceiverId and merges
     // Result into the current runtime state on the game thread.
 }
 

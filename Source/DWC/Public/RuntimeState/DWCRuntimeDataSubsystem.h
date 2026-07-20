@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Async/DWCLODVertexColorTypes.h"
 #include "CoreMinimal.h"
 #include "Misc/Crc.h"
 #include "Subsystems/WorldSubsystem.h"
@@ -11,6 +12,7 @@ class UWetClothingAsset;
 class USkeletalMeshComponent;
 class USkeletalMesh;
 struct FDWCSkinningStaticData;
+struct FDWCLODVertexStaticData;
 
 struct DWC_API FDWCSharedRuntimeDataKey
 {
@@ -44,23 +46,84 @@ struct DWC_API FDWCSharedRuntimeDataKey
 struct DWC_API FDWCSkinningStaticDataKey
 {
     FObjectKey SkeletalMesh;
-    int32 LODIndex = INDEX_NONE;
     UPTRINT SkinWeightBufferIdentity = 0;
     FString MeshSignature;
 
     bool operator==(const FDWCSkinningStaticDataKey& Other) const
     {
         return SkeletalMesh == Other.SkeletalMesh &&
-               LODIndex == Other.LODIndex &&
                SkinWeightBufferIdentity == Other.SkinWeightBufferIdentity &&
                MeshSignature == Other.MeshSignature;
     }
 
     friend uint32 GetTypeHash(const FDWCSkinningStaticDataKey& Key)
     {
-        uint32 Hash = HashCombine(GetTypeHash(Key.SkeletalMesh), GetTypeHash(Key.LODIndex));
+        uint32 Hash = GetTypeHash(Key.SkeletalMesh);
         Hash = HashCombine(Hash, GetTypeHash(static_cast<uint64>(Key.SkinWeightBufferIdentity)));
         return HashCombine(Hash, FCrc::StrCrc32(*Key.MeshSignature));
+    }
+};
+
+struct DWC_API FDWCLODVertexStaticDataKey
+{
+    FObjectKey SkeletalMesh;
+    UPTRINT LODRenderDataIdentity = 0;
+    int32 LODIndex = INDEX_NONE;
+    FString MeshSignature;
+
+    bool operator==(const FDWCLODVertexStaticDataKey& Other) const
+    {
+        return SkeletalMesh == Other.SkeletalMesh &&
+               LODRenderDataIdentity == Other.LODRenderDataIdentity &&
+               LODIndex == Other.LODIndex &&
+               MeshSignature == Other.MeshSignature;
+    }
+
+    friend uint32 GetTypeHash(const FDWCLODVertexStaticDataKey& Key)
+    {
+        uint32 Hash = GetTypeHash(Key.SkeletalMesh);
+        Hash = HashCombine(Hash, GetTypeHash(static_cast<uint64>(Key.LODRenderDataIdentity)));
+        Hash = HashCombine(Hash, GetTypeHash(Key.LODIndex));
+        return HashCombine(Hash, FCrc::StrCrc32(*Key.MeshSignature));
+    }
+};
+
+struct DWC_API FDWCLODVertexColorTransferMapKey
+{
+    FObjectKey SkeletalMesh;
+    UPTRINT SourceLODRenderDataIdentity = 0;
+    UPTRINT TargetLODRenderDataIdentity = 0;
+    int32 SourceLODIndex = INDEX_NONE;
+    int32 TargetLODIndex = INDEX_NONE;
+    FString MeshSignature;
+    FDWCLODVertexColorTransferSettings Settings;
+
+    bool operator==(const FDWCLODVertexColorTransferMapKey& Other) const
+    {
+        return SkeletalMesh == Other.SkeletalMesh &&
+               SourceLODRenderDataIdentity == Other.SourceLODRenderDataIdentity &&
+               TargetLODRenderDataIdentity == Other.TargetLODRenderDataIdentity &&
+               SourceLODIndex == Other.SourceLODIndex &&
+               TargetLODIndex == Other.TargetLODIndex &&
+               MeshSignature == Other.MeshSignature &&
+               Settings.MaxNormalAngleDot == Other.Settings.MaxNormalAngleDot &&
+               Settings.DistanceTieTolerance == Other.Settings.DistanceTieTolerance &&
+               Settings.InitialSearchRadius == Other.Settings.InitialSearchRadius &&
+               Settings.MaxSearchRadius == Other.Settings.MaxSearchRadius;
+    }
+
+    friend uint32 GetTypeHash(const FDWCLODVertexColorTransferMapKey& Key)
+    {
+        uint32 Hash = GetTypeHash(Key.SkeletalMesh);
+        Hash = HashCombine(Hash, GetTypeHash(static_cast<uint64>(Key.SourceLODRenderDataIdentity)));
+        Hash = HashCombine(Hash, GetTypeHash(static_cast<uint64>(Key.TargetLODRenderDataIdentity)));
+        Hash = HashCombine(Hash, GetTypeHash(Key.SourceLODIndex));
+        Hash = HashCombine(Hash, GetTypeHash(Key.TargetLODIndex));
+        Hash = HashCombine(Hash, FCrc::StrCrc32(*Key.MeshSignature));
+        Hash = HashCombine(Hash, GetTypeHash(Key.Settings.MaxNormalAngleDot));
+        Hash = HashCombine(Hash, GetTypeHash(Key.Settings.DistanceTieTolerance));
+        Hash = HashCombine(Hash, GetTypeHash(Key.Settings.InitialSearchRadius));
+        return HashCombine(Hash, GetTypeHash(Key.Settings.MaxSearchRadius));
     }
 };
 
@@ -83,12 +146,45 @@ public:
 
     TSharedPtr<const FDWCSkinningStaticData, ESPMode::ThreadSafe> AcquireSkinningStaticData(
         USkeletalMeshComponent& TargetSkeletalMesh,
+        const FString& MeshSignature);
+
+    TSharedPtr<const FDWCLODVertexStaticData, ESPMode::ThreadSafe> AcquireLODVertexStaticData(
+        USkeletalMeshComponent& TargetSkeletalMesh,
+        int32 LODIndex,
+        const FString& MeshSignature);
+
+    TSharedPtr<const TArray<int32>, ESPMode::ThreadSafe> FindLODVertexColorTransferMap(
+        const USkeletalMeshComponent& TargetSkeletalMesh,
+        const FDWCLODVertexStaticData& SourceLODData,
+        const FDWCLODVertexStaticData& TargetLODData,
         const FString& MeshSignature,
-        int32 LODIndex);
+        const FDWCLODVertexColorTransferSettings& Settings);
+
+    TSharedPtr<const TArray<int32>, ESPMode::ThreadSafe> CacheLODVertexColorTransferMap(
+        const USkeletalMeshComponent& TargetSkeletalMesh,
+        const FDWCLODVertexStaticData& SourceLODData,
+        const FDWCLODVertexStaticData& TargetLODData,
+        const FString& MeshSignature,
+        const FDWCLODVertexColorTransferSettings& Settings,
+        TArray<int32>&& TargetToSourceVertex);
 
     void PruneExpiredEntries();
 
 private:
+    FDWCLODVertexStaticDataKey MakeLODVertexStaticDataKey(
+        const USkeletalMeshComponent& TargetSkeletalMesh,
+        int32 LODIndex,
+        const FString& MeshSignature) const;
+
+    FDWCLODVertexColorTransferMapKey MakeLODVertexColorTransferMapKey(
+        const USkeletalMeshComponent& TargetSkeletalMesh,
+        const FDWCLODVertexStaticData& SourceLODData,
+        const FDWCLODVertexStaticData& TargetLODData,
+        const FString& MeshSignature,
+        const FDWCLODVertexColorTransferSettings& Settings) const;
+
     TMap<FDWCSharedRuntimeDataKey, TWeakPtr<const FWetClothingRuntimeData, ESPMode::ThreadSafe>> SharedRuntimeDataCache;
     TMap<FDWCSkinningStaticDataKey, TWeakPtr<const FDWCSkinningStaticData, ESPMode::ThreadSafe>> SkinningStaticDataCache;
+    TMap<FDWCLODVertexStaticDataKey, TWeakPtr<const FDWCLODVertexStaticData, ESPMode::ThreadSafe>> LODVertexStaticDataCache;
+    TMap<FDWCLODVertexColorTransferMapKey, TWeakPtr<const TArray<int32>, ESPMode::ThreadSafe>> LODVertexColorTransferMapCache;
 };

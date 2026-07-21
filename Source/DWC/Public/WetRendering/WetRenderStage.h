@@ -42,8 +42,10 @@ struct DWC_API FWetRenderStageArgs
     float WrinkleStrength = DWCWetMaterialParameters::DefaultWrinkleStrength();
     float WrinkleWetnessMin = DWCWetMaterialParameters::DefaultWrinkleWetnessMin();
     float WrinkleWetnessMax = DWCWetMaterialParameters::DefaultWrinkleWetnessMax();
+    bool bEnableWrinkle = true;
     float TransparencyWetnessMin = DWCWetMaterialParameters::DefaultTransparencyWetnessMin();
     float TransparencyWetnessMax = DWCWetMaterialParameters::DefaultTransparencyWetnessMax();
+    bool bEnableTransparency = true;
 
     float SurfaceWaterTimeSeconds = 0.0f;
 

@@ -5,6 +5,7 @@
 #include "Async/DWCLODVertexColorTasks.h"
 #include "Async/DWCSkinningTasks.h"
 #include "Async/DWCTaskQueue.h"
+#include "Core/DWCQualityLODController.h"
 #include "Runtime/Engine/Classes/Components/SkeletalMeshComponent.h"
 #include "WetInputSystem/WetInputStage.h"
 #include "WetInputSystem/Sampling/WetClothingMeshSampler.h"
@@ -344,6 +345,7 @@ UDynamicWetClothesComponent::UDynamicWetClothesComponent()
     PrimaryComponentTick.bCanEverTick = true;
     PrimaryComponentTick.bStartWithTickEnabled = false;
     AsyncTaskQueue = MakeUnique<FDWCTaskQueue>();
+    QualityLODController = MakeUnique<FDWCQualityLODController>();
 }
 
 UDynamicWetClothesComponent::~UDynamicWetClothesComponent() = default;
@@ -458,6 +460,15 @@ bool UDynamicWetClothesComponent::InitializeWetRuntime()
                 TEXT("DynamicWetClothesComponent: No GPU wet mesh receiver could be initialized on %s. Bake GPU Simulation Maps and generate GPU materials for the Wet Clothing Asset."),
                 *GetNameSafe(GetOwner()));
             return false;
+        }
+    }
+
+    ConfigureQualityLODController();
+    for (const TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver : Receivers)
+    {
+        if (Receiver.IsValid())
+        {
+            SetReceiverQualityLOD(*Receiver, CurrentQualityLOD);
         }
     }
 
@@ -893,6 +904,7 @@ void UDynamicWetClothesComponent::StartWetnessTimers()
         &UDynamicWetClothesComponent::UpdateWetRendering,
         RenderInterval,
         true);
+    SurfaceWaterTimerInterval = SurfaceWaterInterval;
     GetWorld()->GetTimerManager().SetTimer(SurfaceWaterSimulationTimer, this, &UDynamicWetClothesComponent::UpdateSurfaceWater, SurfaceWaterInterval, true);
 
     if (HasAnyRenderLODSettings())
@@ -1041,6 +1053,10 @@ void UDynamicWetClothesComponent::UpdateRenderLOD()
     }
 
     RenderLODState.ActiveLODLevel = NewLODLevel;
+    if (CurrentQualityLOD != NewLODLevel)
+    {
+        SetDWCQualityLOD(NewLODLevel);
+    }
 }
 
 FWetRuntimeDataBuildArgs UDynamicWetClothesComponent::MakeRuntimeDataBuildArgs(FDWCWetMeshReceiverRuntime& Receiver)
@@ -1140,8 +1156,10 @@ FWetRenderStageArgs UDynamicWetClothesComponent::MakeWetRenderStageArgs(FDWCWetM
     Args.WrinkleStrength = WrinkleStrength;
     Args.WrinkleWetnessMin = WrinkleWetnessMin;
     Args.WrinkleWetnessMax = WrinkleWetnessMax;
+    Args.bEnableWrinkle = !QualityLODController.IsValid() || QualityLODController->ShouldUpdateWrinkle(Receiver.QualityLODState);
     Args.TransparencyWetnessMin = TransparencyWetnessMin;
     Args.TransparencyWetnessMax = TransparencyWetnessMax;
+    Args.bEnableTransparency = !QualityLODController.IsValid() || QualityLODController->ShouldUpdateTransparency(Receiver.QualityLODState);
     Args.UnderColor = FallbackUnderColor;
     Args.UnderColorBlendStrength = WetUnderColorBlendStrength;
     Args.bShowWetPartDebugColors = bShowWetPartDebugColors;
@@ -1378,7 +1396,9 @@ bool UDynamicWetClothesComponent::ApplyWetContact(const FDWCWetContact& Contact,
     bool bAnyChanged = false;
     for (const TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver : Receivers)
     {
-        if (!Receiver.IsValid() || !Receiver->InputStage.IsValid() || !ShouldReceiverConsiderContact(*Receiver, Contact))
+        if (!Receiver.IsValid() ||
+            !Receiver->InputStage.IsValid() ||
+            !ShouldReceiverConsiderContact(*Receiver, Contact))
         {
             continue;
         }
@@ -1414,7 +1434,9 @@ bool UDynamicWetClothesComponent::ApplyWetContacts(const TArray<FDWCWetContact>&
         bool bAnyQueued = false;
         for (const TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver : Receivers)
         {
-            if (!Receiver.IsValid() || !Receiver->SurfaceContactResolver.IsValid() || !Receiver->GPUBackend.IsValid())
+            if (!Receiver.IsValid() ||
+                !Receiver->SurfaceContactResolver.IsValid() ||
+                !Receiver->GPUBackend.IsValid())
             {
                 continue;
             }
@@ -1433,7 +1455,6 @@ bool UDynamicWetClothesComponent::ApplyWetContacts(const TArray<FDWCWetContact>&
             {
                 continue;
             }
-
             TArray<FDWCResolvedSurfaceContact> ResolvedContacts;
             FWetSurfaceContactResolverArgs ResolverArgs = MakeWetSurfaceContactResolverArgs(*Receiver);
             if (Receiver->SurfaceContactResolver->ResolveContacts(ResolverArgs, ReceiverContacts, ResolvedContacts) &&
@@ -1468,7 +1489,6 @@ bool UDynamicWetClothesComponent::ApplyWetContacts(const TArray<FDWCWetContact>&
         {
             continue;
         }
-
         FWetInputStageArgs InputArgs = MakeWetInputStageArgs(*Receiver);
         const bool bChanged = Receiver->InputStage->ApplyWetContacts(InputArgs, ReceiverContacts, bApplyMaterial);
         if (bChanged)
@@ -1490,7 +1510,9 @@ bool UDynamicWetClothesComponent::ApplyWetArea(const FDWCWetAreaData& AreaData, 
         bool bAnyQueued = false;
         for (const TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver : Receivers)
         {
-            if (!Receiver.IsValid() || !Receiver->SurfaceContactResolver.IsValid() || !Receiver->GPUBackend.IsValid())
+            if (!Receiver.IsValid() ||
+                !Receiver->SurfaceContactResolver.IsValid() ||
+                !Receiver->GPUBackend.IsValid())
             {
                 continue;
             }
@@ -1562,7 +1584,9 @@ bool UDynamicWetClothesComponent::ApplyWetSurface(
     bool bAnyChanged = false;
     for (const TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver : Receivers)
     {
-        if (!Receiver.IsValid() || !Receiver->InputStage.IsValid() || !ShouldReceiverConsiderSurface(*Receiver, WaterSurfaceData))
+        if (!Receiver.IsValid() ||
+            !Receiver->InputStage.IsValid() ||
+            !ShouldReceiverConsiderSurface(*Receiver, WaterSurfaceData))
         {
             continue;
         }
@@ -1756,6 +1780,130 @@ void UDynamicWetClothesComponent::RequestWetRenderingUpdate(FDWCWetMeshReceiverR
     bWetRenderDirty = true;
 }
 
+void UDynamicWetClothesComponent::SetReceiverQualityLOD(FDWCWetMeshReceiverRuntime& Receiver, const int32 InQualityLOD)
+{
+    if (QualityLODController.IsValid())
+    {
+        QualityLODController->SetLOD(Receiver.QualityLODState, InQualityLOD);
+    }
+}
+
+void UDynamicWetClothesComponent::ApplyQualityLODMaterialParameters(FDWCWetMeshReceiverRuntime& Receiver)
+{
+    if (!Receiver.RenderStage.IsValid() ||
+        !Receiver.SharedRuntimeData.IsValid() ||
+        !Receiver.SimulationState.IsValid())
+    {
+        return;
+    }
+
+    FWetRenderStageArgs RenderArgs = MakeWetRenderStageArgs(Receiver);
+    Receiver.RenderStage->ApplyWetMaterialParameters(RenderArgs);
+}
+
+void UDynamicWetClothesComponent::ConfigureQualityLODController()
+{
+    if (!QualityLODController.IsValid())
+    {
+        return;
+    }
+
+    QualityLODController->SetEnabled(bEnableDWCQualityLOD);
+    QualityLODController->SetProfile(QualityLODProfile.Get());
+}
+
+void UDynamicWetClothesComponent::RefreshResolvedQualityLODPolicies()
+{
+    ConfigureQualityLODController();
+    if (!QualityLODController.IsValid())
+    {
+        return;
+    }
+
+    for (const TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver : Receivers)
+    {
+        if (Receiver.IsValid())
+        {
+            QualityLODController->RefreshPolicy(Receiver->QualityLODState);
+            ApplyQualityLODMaterialParameters(*Receiver);
+        }
+    }
+}
+
+bool UDynamicWetClothesComponent::ShouldUpdateGPUWetness(FDWCWetMeshReceiverRuntime& Receiver) const
+{
+    if (!Receiver.GPUBackend.IsValid())
+    {
+        return false;
+    }
+
+    return !QualityLODController.IsValid() ||
+           QualityLODController->ShouldRunWetness(Receiver.QualityLODState, WetnessSettings.WetnessUpdateInterval);
+}
+
+bool UDynamicWetClothesComponent::ShouldUpdateCPUWetness(FDWCWetMeshReceiverRuntime& Receiver) const
+{
+    if (!Receiver.SimulationStage.IsValid())
+    {
+        return false;
+    }
+
+    return !QualityLODController.IsValid() ||
+           QualityLODController->ShouldRunWetness(Receiver.QualityLODState, WetnessSettings.WetnessUpdateInterval);
+}
+
+bool UDynamicWetClothesComponent::ShouldUpdateSurfaceWater(FDWCWetMeshReceiverRuntime& Receiver) const
+{
+    if (!Receiver.WetClothingAsset.IsValid())
+    {
+        return false;
+    }
+
+    return !QualityLODController.IsValid() ||
+           QualityLODController->ShouldRunSurfaceWater(Receiver.QualityLODState, SurfaceWaterTimerInterval);
+}
+
+bool UDynamicWetClothesComponent::ShouldUpdateWetRendering(FDWCWetMeshReceiverRuntime& Receiver) const
+{
+    if (!Receiver.RenderStage.IsValid() || !Receiver.SimulationState.IsValid())
+    {
+        return false;
+    }
+
+    return !QualityLODController.IsValid() ||
+           QualityLODController->ShouldRunRendering(Receiver.QualityLODState, WetnessSettings.WetnessRenderUpdateInterval);
+}
+
+void UDynamicWetClothesComponent::SetDWCQualityLOD(const int32 InQualityLOD)
+{
+    CurrentQualityLOD = FMath::Max(0, InQualityLOD);
+    ConfigureQualityLODController();
+    for (const TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver : Receivers)
+    {
+        if (Receiver.IsValid())
+        {
+            SetReceiverQualityLOD(*Receiver, CurrentQualityLOD);
+            ApplyQualityLODMaterialParameters(*Receiver);
+        }
+    }
+}
+
+bool UDynamicWetClothesComponent::SetReceiverDWCQualityLOD(const FName ReceiverId, const int32 InQualityLOD)
+{
+    ConfigureQualityLODController();
+    for (const TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver : Receivers)
+    {
+        if (Receiver.IsValid() && Receiver->ReceiverId == ReceiverId)
+        {
+            SetReceiverQualityLOD(*Receiver, InQualityLOD);
+            ApplyQualityLODMaterialParameters(*Receiver);
+            return true;
+        }
+    }
+
+    return false;
+}
+
 bool UDynamicWetClothesComponent::RequestCpuSkinningTask(
     FDWCWetMeshReceiverRuntime& Receiver,
     const bool                  bComputePositions,
@@ -1910,7 +2058,10 @@ void UDynamicWetClothesComponent::RequestContinuousCpuSkinningTasks()
 
     for (const TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver : Receivers)
     {
-        if (!Receiver.IsValid() || Receiver->bCpuSkinningTaskPending)
+        if (!Receiver.IsValid() ||
+            Receiver->bCpuSkinningTaskPending ||
+            (QualityLODController.IsValid() &&
+             !QualityLODController->ShouldUpdateWetnessSimulation(Receiver->QualityLODState)))
         {
             continue;
         }
@@ -1980,7 +2131,9 @@ bool UDynamicWetClothesComponent::FlushPendingWetContacts()
         bool bAnyQueued = false;
         for (const TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver : Receivers)
         {
-            if (!Receiver.IsValid() || !Receiver->SurfaceContactResolver.IsValid() || !Receiver->GPUBackend.IsValid())
+            if (!Receiver.IsValid() ||
+                !Receiver->SurfaceContactResolver.IsValid() ||
+                !Receiver->GPUBackend.IsValid())
             {
                 continue;
             }
@@ -2084,10 +2237,12 @@ void UDynamicWetClothesComponent::UpdateWetness()
             : FMath::Max(KINDA_SMALL_NUMBER, WetnessSettings.WetnessUpdateInterval);
         for (const TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver : Receivers)
         {
-            if (Receiver.IsValid() && Receiver->GPUBackend.IsValid())
+            if (!Receiver.IsValid() || !ShouldUpdateGPUWetness(*Receiver))
             {
-                Receiver->GPUBackend->Update(DeltaSeconds);
+                continue;
             }
+
+            Receiver->GPUBackend->Update(DeltaSeconds);
         }
         return;
     }
@@ -2098,7 +2253,7 @@ void UDynamicWetClothesComponent::UpdateWetness()
 
     for (const TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver : Receivers)
     {
-        if (!Receiver.IsValid() || !Receiver->SimulationStage.IsValid())
+        if (!Receiver.IsValid() || !ShouldUpdateCPUWetness(*Receiver))
         {
             continue;
         }
@@ -2129,7 +2284,11 @@ void UDynamicWetClothesComponent::UpdateSurfaceWater()
     const float CurrentSurfaceTimeSeconds = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
     for (const TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver : Receivers)
     {
-        if (!Receiver.IsValid() || !Receiver->WetClothingAsset.IsValid()) continue;
+        if (!Receiver.IsValid() || !ShouldUpdateSurfaceWater(*Receiver))
+        {
+            continue;
+        }
+
         const FSurfaceWaterSimulationSettings& Settings = Receiver->WetClothingAsset->Authored.SurfaceWaterSettings;
         if (!Settings.bEnabled) continue;
         bool bAnyChanged = false;
@@ -2155,7 +2314,7 @@ void UDynamicWetClothesComponent::UpdateWetRendering()
 
     for (const TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver : Receivers)
     {
-        if (!Receiver.IsValid() || !Receiver->RenderStage.IsValid() || !Receiver->SimulationState.IsValid())
+        if (!Receiver.IsValid() || !ShouldUpdateWetRendering(*Receiver))
         {
             continue;
         }
@@ -2241,6 +2400,8 @@ void UDynamicWetClothesComponent::PostEditChangeProperty(FPropertyChangedEvent& 
         PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, SimulationMode);
     const bool bRequiresMaterialRefresh =
         bRequiresRuntimeRebuild ||
+        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, bEnableDWCQualityLOD) ||
+        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, QualityLODProfile) ||
         PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, WrinkleStrength) ||
         PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, WrinkleWetnessMin) ||
         PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, WrinkleWetnessMax) ||
@@ -2258,6 +2419,11 @@ void UDynamicWetClothesComponent::PostEditChangeProperty(FPropertyChangedEvent& 
     if (bRequiresRuntimeRebuild || Receivers.IsEmpty())
     {
         InitializeWetRuntime();
+    }
+    else if (PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, bEnableDWCQualityLOD) ||
+             PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, QualityLODProfile))
+    {
+        RefreshResolvedQualityLODPolicies();
     }
 
     if (PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, bShowWetPartDebugColors))

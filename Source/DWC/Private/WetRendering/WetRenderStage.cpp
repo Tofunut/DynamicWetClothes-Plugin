@@ -359,6 +359,34 @@ void FWetRenderStage::ApplyWetWrinkleNormalMapParameters(FWetRenderStageArgs& Re
         return;
     }
 
+    if (!Receiver.bEnableWrinkle)
+    {
+        for (int32 MaterialSlotIndex = 0; MaterialSlotIndex < Receiver.WetMaterialInstances->Num(); ++MaterialSlotIndex)
+        {
+            UMaterialInstanceDynamic* MID = (*Receiver.WetMaterialInstances)[MaterialSlotIndex];
+            if (MID == nullptr)
+            {
+                continue;
+            }
+
+            if (!DWCWetMaterialParameters::WrinkleNormalMap().IsNone())
+            {
+                MID->SetTextureParameterValue(DWCWetMaterialParameters::WrinkleNormalMap(), nullptr);
+            }
+
+            if (!DWCWetMaterialParameters::UseWrinkleNormalMap().IsNone())
+            {
+                MID->SetScalarParameterValue(DWCWetMaterialParameters::UseWrinkleNormalMap(), 0.0f);
+            }
+
+            if (!DWCWetMaterialParameters::WrinkleStrength().IsNone())
+            {
+                MID->SetScalarParameterValue(DWCWetMaterialParameters::WrinkleStrength(), 0.0f);
+            }
+        }
+        return;
+    }
+
     const float SafeWrinkleWetnessMin = FMath::Clamp(Receiver.WrinkleWetnessMin, 0.0f, 1.0f);
     const float SafeWrinkleWetnessMax = FMath::Max(SafeWrinkleWetnessMin, FMath::Clamp(Receiver.WrinkleWetnessMax, 0.0f, 1.0f));
     const float SafeWrinkleStrength = FMath::Max(0.0f, Receiver.WrinkleStrength);
@@ -497,6 +525,40 @@ void FWetRenderStage::ApplyWetTransparencyMapParameters(FWetRenderStageArgs& Rec
         DWCWetMaterialParameters::TransparencyUVChannel().IsNone() &&
         DWCWetMaterialParameters::WrinkleSuppressionStrength().IsNone())
     {
+        return;
+    }
+
+    if (!Receiver.bEnableTransparency)
+    {
+        for (int32 MaterialSlotIndex = 0; MaterialSlotIndex < Receiver.WetMaterialInstances->Num(); ++MaterialSlotIndex)
+        {
+            UMaterialInstanceDynamic* MID = (*Receiver.WetMaterialInstances)[MaterialSlotIndex];
+            if (MID == nullptr)
+            {
+                continue;
+            }
+
+            if (!DWCWetMaterialParameters::TransparencyMap().IsNone())
+            {
+                MID->SetTextureParameterValue(DWCWetMaterialParameters::TransparencyMap(), nullptr);
+            }
+            if (!DWCWetMaterialParameters::UseTransparencyMap().IsNone())
+            {
+                MID->SetScalarParameterValue(DWCWetMaterialParameters::UseTransparencyMap(), 0.0f);
+            }
+            if (!DWCWetMaterialParameters::TransparencyStrength().IsNone())
+            {
+                MID->SetScalarParameterValue(DWCWetMaterialParameters::TransparencyStrength(), 0.0f);
+            }
+            if (!DWCWetMaterialParameters::TransparencyUVChannel().IsNone())
+            {
+                MID->SetScalarParameterValue(DWCWetMaterialParameters::TransparencyUVChannel(), 0.0f);
+            }
+            if (!DWCWetMaterialParameters::WrinkleSuppressionStrength().IsNone())
+            {
+                MID->SetScalarParameterValue(DWCWetMaterialParameters::WrinkleSuppressionStrength(), 0.0f);
+            }
+        }
         return;
     }
 

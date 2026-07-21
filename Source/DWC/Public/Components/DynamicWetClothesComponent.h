@@ -9,6 +9,7 @@
 #include "WetInputSystem/Sampling/WetClothingMeshSampler.h"
 #include "RuntimeState/WetRuntimeDataBuilder.h"
 #include "RuntimeState/WetClothingRuntimeData.h"
+#include "Core/DWCQualityLODProfile.h"
 #include "Core/WetClothingSettings.h"
 #include "Core/DWCSimulationMode.h"
 #include "GPU/DWCGPUBackend.h"
@@ -33,6 +34,7 @@ enum class EDWCGPUDiffusionNeighborMode : uint8
 class USkeletalMeshComponent;
 class USkeletalMesh;
 class UMaterialInstanceDynamic;
+class FDWCQualityLODController;
 class FDWCTaskQueue;
 class UDWCStatsSubsystem;
 struct FDWCSkinningTaskResult;
@@ -97,6 +99,7 @@ struct FDWCWetMeshReceiverRuntime
     // Usually small, but capacity can grow with the dirty source-vertex count.
     TArray<int32> PendingLODVertexColorDirtySourceVertices;
     int32 LODVertexColorTransferGeneration = 0;
+    FDWCQualityLODRuntimeState QualityLODState;
 
     bool bWetRenderDirty = false;
     bool bCpuSkinningTaskPending = false;
@@ -112,11 +115,11 @@ struct DWC_API FDWCRenderLODRatioLevel
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Rendering LOD", meta = (ClampMin = "0"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|LOD", meta = (ClampMin = "0"))
     int32 LODLevel = 0;
 
     /** This LOD becomes active when the merged receiver bounds occupy at least this screen-size ratio. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Rendering LOD", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|LOD", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float MinScreenSize = 0.0f;
 };
 
@@ -151,8 +154,17 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
     bool ApplyWetSurface(const FDWCWaterSurfaceData& WaterSurfaceData, float Amount, bool bApplyMaterial = true);
     bool GetWetnessWorldBounds(FBox& OutBounds) const;
 
-    UFUNCTION(BlueprintCallable, Category = "DWC|Debug")
+    UFUNCTION(BlueprintCallable, Category = "Wetness|Debug")
     void SetWetPartDebugColorsEnabled(bool bEnabled);
+    UFUNCTION(BlueprintCallable, Category = "Wetness|LOD")
+    void SetDWCQualityLOD(int32 InQualityLOD);
+    UFUNCTION(BlueprintCallable, Category = "Wetness|LOD")
+    bool SetReceiverDWCQualityLOD(FName ReceiverId, int32 InQualityLOD);
+    UFUNCTION(BlueprintPure, Category = "Wetness|LOD")
+    int32 GetDWCQualityLOD() const
+    {
+        return CurrentQualityLOD;
+    }
     int32 GetWetSurfaceSampleResolution() const;
     void CommitCpuSkinningTaskResult(FDWCSkinningTaskResult&& Result);
     void CommitLODVertexColorTransferResult(FDWCLODVertexColorTransferResult&& Result);
@@ -164,10 +176,10 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
 
     void GetResolvedWetMeshComponents(TArray<USkeletalMeshComponent*>& OutComponents) const;
 
-    UFUNCTION(BlueprintPure, Category = "Wetness|Rendering LOD")
+    UFUNCTION(BlueprintPure, Category = "Wetness|LOD")
     int32 GetCurrentRenderLODLevel() const { return RenderLODState.ActiveLODLevel; }
 
-    UFUNCTION(BlueprintPure, Category = "Wetness|Rendering LOD")
+    UFUNCTION(BlueprintPure, Category = "Wetness|LOD")
     float GetMergedReceiverScreenSize() const { return RenderLODState.ScreenSize; }
 
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
@@ -200,6 +212,14 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
     void                     UpdateWetRendering();
     void                     RequestWetRenderingUpdate();
     void                     RequestWetRenderingUpdate(FDWCWetMeshReceiverRuntime& Receiver);
+    void                     ApplyQualityLODMaterialParameters(FDWCWetMeshReceiverRuntime& Receiver);
+    void                     ConfigureQualityLODController();
+    void                     SetReceiverQualityLOD(FDWCWetMeshReceiverRuntime& Receiver, int32 InQualityLOD);
+    void                     RefreshResolvedQualityLODPolicies();
+    bool                     ShouldUpdateGPUWetness(FDWCWetMeshReceiverRuntime& Receiver) const;
+    bool                     ShouldUpdateCPUWetness(FDWCWetMeshReceiverRuntime& Receiver) const;
+    bool                     ShouldUpdateSurfaceWater(FDWCWetMeshReceiverRuntime& Receiver) const;
+    bool                     ShouldUpdateWetRendering(FDWCWetMeshReceiverRuntime& Receiver) const;
     bool                     RequestCpuSkinningTask(FDWCWetMeshReceiverRuntime& Receiver, bool bComputePositions, bool bComputeNormals);
     void                     RequestContinuousCpuSkinningTasks();
     bool                     HasPendingCpuSkinningTasks() const;
@@ -244,6 +264,12 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
     UPROPERTY(EditAnywhere, Category = "Wetness", meta = (ShowOnlyInnerProperties))
     FWetClothingSettings WetnessSettings;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|LOD")
+    bool bEnableDWCQualityLOD = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|LOD", meta = (EditCondition = "bEnableDWCQualityLOD"))
+    TObjectPtr<UDWCQualityLODProfile> QualityLODProfile = nullptr;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Contact", meta = (AllowPrivateAccess = "true"))
     bool bBatchWetContactsPerFrame = true;
 
@@ -260,11 +286,11 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
     float WetUnderColorBlendStrength = 0.3f;
 
     /** Component-wide LOD number and merged-bounds screen-size ratio pairs. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Rendering LOD", meta = (TitleProperty = "LODLevel"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|LOD", meta = (TitleProperty = "LODLevel"))
     TArray<FDWCRenderLODRatioLevel> RenderLODRatioLevels;
 
     /** How often the merged receiver bounds are evaluated for component rendering LOD selection. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Rendering LOD", meta = (ClampMin = "0.01", AdvancedDisplay))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|LOD", meta = (ClampMin = "0.01", AdvancedDisplay))
     float RenderLODEvaluationInterval = 0.1f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Wrinkle", meta = (ClampMin = "0.0"))
@@ -296,7 +322,11 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
     UPROPERTY(Transient)
     bool bSimulationModeLocked = false;
 
+    UPROPERTY(Transient)
+    int32 CurrentQualityLOD = 0;
+
     TUniquePtr<FDWCTaskQueue> AsyncTaskQueue;
+    TUniquePtr<FDWCQualityLODController> QualityLODController;
     TArray<TUniquePtr<FDWCWetMeshReceiverRuntime>> Receivers;
     FDWCRenderLODRuntimeState RenderLODState;
 
@@ -304,6 +334,7 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
     FTimerHandle           SurfaceWaterSimulationTimer;
     FTimerHandle           WetnessRenderTimer;
     FTimerHandle           RenderLODEvaluationTimer;
+    float                  SurfaceWaterTimerInterval = 1.0f / 30.0f;
     TArray<FDWCWetContact> PendingWetContacts;
     bool                   bPendingWetContactsApplyMaterial = false;
     bool                   bWetRenderDirty = false;

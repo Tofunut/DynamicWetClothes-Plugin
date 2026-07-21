@@ -42,6 +42,9 @@ public:
     UPROPERTY(EditAnywhere, Category = "Map Resolutions", meta = (DisplayName = "GPU Simulation"))
     EDWCMapResolution GPUSimulationMapResolution = EDWCMapResolution::Resolution512;
 
+    UPROPERTY(EditAnywhere, Category = "Map Resolutions", meta = (DisplayName = "Surface Water RT"))
+    EDWCMapResolution SurfaceWaterRTResolution = EDWCMapResolution::Resolution1024;
+
     UPROPERTY(EditAnywhere, Category = "Map Resolutions", meta = (DisplayName = "Wrinkle"))
     EDWCMapResolution WrinkleMapResolution = EDWCMapResolution::Resolution1024;
 
@@ -58,6 +61,7 @@ public:
         Result.FirstGeneratedLODIndex = FirstGeneratedLODIndex;
         Result.LastGeneratedLODIndex = LastGeneratedLODIndex;
         Result.GPUSimulationMapResolution = DWCMapResolution::ToInt(GPUSimulationMapResolution);
+        Result.SurfaceWaterRTResolution = DWCMapResolution::ToInt(SurfaceWaterRTResolution);
         Result.WrinkleMapResolution = DWCMapResolution::ToInt(WrinkleMapResolution);
         Result.TransparencyMapResolution = DWCMapResolution::ToInt(TransparencyMapResolution);
         return Result;
@@ -91,6 +95,9 @@ public:
     UPROPERTY(EditAnywhere, Category = "Map Resolutions", meta = (DisplayName = "GPU Simulation"))
     EDWCMapResolution GPUSimulationMapResolution = EDWCMapResolution::Resolution512;
 
+    UPROPERTY(EditAnywhere, Category = "Map Resolutions", meta = (DisplayName = "Surface Water RT"))
+    EDWCMapResolution SurfaceWaterRTResolution = EDWCMapResolution::Resolution1024;
+
     UPROPERTY(EditAnywhere, Category = "Map Resolutions", meta = (DisplayName = "Wrinkle"))
     EDWCMapResolution WrinkleMapResolution = EDWCMapResolution::Resolution1024;
 
@@ -106,6 +113,7 @@ public:
         FirstGeneratedLODIndex = InSettings.FirstGeneratedLODIndex;
         LastGeneratedLODIndex = InSettings.LastGeneratedLODIndex;
         GPUSimulationMapResolution = DWCMapResolution::FromInt(InSettings.GetGPUSimulationMapResolution());
+        SurfaceWaterRTResolution = DWCMapResolution::FromInt(InSettings.GetSurfaceWaterRTResolution());
         WrinkleMapResolution = DWCMapResolution::FromInt(InSettings.GetWrinkleMapResolution());
         TransparencyMapResolution = DWCMapResolution::FromInt(InSettings.GetTransparencyMapResolution());
     }
@@ -120,6 +128,7 @@ public:
         Result.FirstGeneratedLODIndex = FirstGeneratedLODIndex;
         Result.LastGeneratedLODIndex = LastGeneratedLODIndex;
         Result.GPUSimulationMapResolution = DWCMapResolution::ToInt(GPUSimulationMapResolution);
+        Result.SurfaceWaterRTResolution = DWCMapResolution::ToInt(SurfaceWaterRTResolution);
         Result.WrinkleMapResolution = DWCMapResolution::ToInt(WrinkleMapResolution);
         Result.TransparencyMapResolution = DWCMapResolution::ToInt(TransparencyMapResolution);
         return Result;

@@ -1,5 +1,7 @@
 #include "WetSimulation/SurfaceWater/SurfaceWaterSimulationState.h"
 
+#include "Profiling/DWCStats.h"
+
 #include "Engine/Texture2D.h"
 #include "Engine/TextureRenderTarget2D.h"
 #include "RenderGraphBuilder.h"
@@ -102,6 +104,7 @@ void FSurfaceWaterSimulationState::QueueStamp(const FSurfaceWaterStamp& Stamp)
         return;
     }
     PendingStamps.Add(Stamp);
+    FDWCWorkloadStats::RecordSurfaceWaterStampQueued(PendingStamps.Num());
 }
 
 FSurfaceWaterStamp FSurfaceWaterSimulationState::BuildStamp(
@@ -155,6 +158,11 @@ uint64 FSurfaceWaterSimulationState::GetEstimatedGpuMemoryBytes() const
     return Resolution > 0 ? static_cast<uint64>(Resolution) * Resolution * 16ull * 2ull : 0ull;
 }
 
+uint64 FSurfaceWaterSimulationState::GetAllocatedMemoryBytes() const
+{
+    return sizeof(*this) + PendingStamps.GetAllocatedSize();
+}
+
 bool FSurfaceWaterSimulationState::FlushStamps(UTexture2D* FlowMap, const float CurrentSurfaceTimeSeconds)
 {
     if (!IsValid() || bSimulationPaused || PendingStamps.IsEmpty())
@@ -168,6 +176,7 @@ bool FSurfaceWaterSimulationState::FlushStamps(UTexture2D* FlowMap, const float 
     const int32 TargetResolution = Resolution;
     TArray<FSurfaceWaterStamp> StampsToApply = MoveTemp(PendingStamps);
     PendingStamps.Reset();
+    FDWCWorkloadStats::RecordSurfaceWaterStampsSubmitted(StampsToApply.Num());
 
     TArray<FSurfaceWaterRenderStamp> RenderStamps;
     RenderStamps.Reserve(StampsToApply.Num());
@@ -232,6 +241,7 @@ bool FSurfaceWaterSimulationState::FlushStamps(UTexture2D* FlowMap, const float 
                 Parameters->TargetSurface = GraphBuilder.CreateUAV(
                     Stamp.Type == ESurfaceWaterStampType::Flow ? FlowTexture : DropletTexture);
 
+                FDWCWorkloadStats::RecordSurfaceWaterGPUDispatch();
                 FComputeShaderUtils::AddPass(
                     GraphBuilder,
                     RDG_EVENT_NAME("DWC Surface %s Stamp", Stamp.Type == ESurfaceWaterStampType::Flow ? TEXT("Flow") : TEXT("Droplet")),

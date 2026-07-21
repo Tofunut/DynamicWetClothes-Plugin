@@ -38,6 +38,15 @@ struct DWC_API FDWCSkinningStaticData
     TArray<FDWCSkinningVertexSnapshot> Vertices;
     TArray<FDWCSkinningInfluenceSnapshot> Influences;
 
+    uint64 GetAllocatedMemoryBytes() const
+    {
+        return sizeof(*this) +
+               Geometry.LocalPositions.GetAllocatedSize() +
+               Geometry.LocalNormals.GetAllocatedSize() +
+               Vertices.GetAllocatedSize() +
+               Influences.GetAllocatedSize();
+    }
+
     bool IsValid() const
     {
         return Geometry.IsValid() &&

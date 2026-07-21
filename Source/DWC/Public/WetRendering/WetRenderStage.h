@@ -50,11 +50,13 @@ struct DWC_API FWetRenderStageArgs
     FLinearColor UnderColor = FLinearColor(0.8f, 0.55f, 0.42f, 1.0f);
     float        UnderColorBlendStrength = 0.3f;
     int32 LODIndex = 0;
+
 };
 
 class DWC_API FWetRenderStage
 {
   public:
+    uint64 GetAllocatedMemoryBytes() const;
     void ResetCachedVertexColors();
     void InitializeCachedVertexColors(int32 VertexCount);
 

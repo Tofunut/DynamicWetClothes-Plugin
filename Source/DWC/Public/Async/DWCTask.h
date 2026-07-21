@@ -37,6 +37,13 @@ struct DWC_API FDWCVertexGeometryStaticData
     TArray<FVector3f> LocalPositions;
     TArray<FVector3f> LocalNormals;
 
+    uint64 GetAllocatedMemoryBytes() const
+    {
+        return sizeof(*this) +
+               LocalPositions.GetAllocatedSize() +
+               LocalNormals.GetAllocatedSize();
+    }
+
     bool IsValid() const
     {
         return SkeletalMeshIdentity != 0 &&

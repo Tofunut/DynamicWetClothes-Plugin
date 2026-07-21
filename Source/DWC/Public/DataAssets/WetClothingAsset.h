@@ -169,6 +169,7 @@ class DWC_API UWetClothingAsset : public UDataAsset
     virtual void PostLoad() override;
 
 #if WITH_EDITOR
+    virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
     virtual void PreSave(FObjectPreSaveContext SaveContext) override;
     bool InitializeNewAsset(USkeletalMesh* InSourceMesh, const FDWCWetClothingAssetSetupSettings& InSettings, FString* OutErrorMessage = nullptr);
     bool ApplySetupSettings(const FDWCWetClothingAssetSetupSettings& InSettings, FString* OutChangeSummary = nullptr);
@@ -218,7 +219,6 @@ class DWC_API UWetClothingAsset : public UDataAsset
     bool HasAnyWettableMaterialSlot() const;
     bool HasWrinkleBakeContent() const;
     bool HasTransparencyBakeContent() const;
-
     const FWetClothingPrecomputedSimulationData& GetPrecomputedSimulationData() const;
     const FDWCGPULODBakeData& GetGPUWetMapRuntimeData(int32 LODIndex = 0) const;
     bool IsCurrentAssetDataVersion() const { return Metadata.AssetDataVersion == CurrentAssetDataVersion; }

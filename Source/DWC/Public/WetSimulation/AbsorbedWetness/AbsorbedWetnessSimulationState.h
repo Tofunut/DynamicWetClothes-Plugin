@@ -10,6 +10,7 @@ class DWC_API FAbsorbedWetnessSimulationState
     void MarkWetVertexDirty(int32 VertexIndex);
     void MarkAllWetVertexColorsDirty();
     void ClearDirtyWetVertexIndices();
+    uint64 GetAllocatedMemoryBytes() const;
 
     TArray<float> AbsorbedWetnessPerVertex;
     TArray<float> UpdatingPendingWetnessAmounts;

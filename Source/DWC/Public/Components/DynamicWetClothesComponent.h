@@ -34,6 +34,7 @@ class USkeletalMeshComponent;
 class USkeletalMesh;
 class UMaterialInstanceDynamic;
 class FDWCTaskQueue;
+class UDWCStatsSubsystem;
 struct FDWCSkinningTaskResult;
 struct FDWCSkinningStaticData;
 struct FDWCLODVertexColorTransferResult;
@@ -45,22 +46,55 @@ struct FDWCWetMeshReceiverRuntime
     TWeakObjectPtr<USkeletalMeshComponent> MeshComponent;
     TWeakObjectPtr<UWetClothingAsset> WetClothingAsset;
 
+    // Shared CPU data. The TSharedPtr itself is small; the pointed-to payload
+    // can be large and must be counted once per unique payload, not once per
+    // receiver.
     TSharedPtr<const FWetClothingRuntimeData, ESPMode::ThreadSafe> SharedRuntimeData;
-    TUniquePtr<FWetRuntimeDataBuilder> RuntimeDataBuilder;
+    TSharedPtr<const FDWCSkinningStaticData, ESPMode::ThreadSafe> SkinningStaticData;
+
+    // Per-receiver CPU simulation/render data. These are the main CPU-memory
+    // consumers and generally scale with the active vertex count.
     TUniquePtr<FAbsorbedWetnessSimulationState> SimulationState;
-    TMap<int32, TUniquePtr<FSurfaceWaterSimulationState>> SurfaceWaterStatesByMaterialSlot;
-    TMap<int32, FSurfaceWaterProfileParameters> SurfaceWaterProfilesByMaterialSlot;
-    TUniquePtr<FWetSimulationStage> SimulationStage;
-    TUniquePtr<FWetInputStage> InputStage;
-    TUniquePtr<FWetSurfaceContactResolver> SurfaceContactResolver;
-    TUniquePtr<IDWCGPUBackend> GPUBackend;
     TUniquePtr<FWetClothingMeshSampler> MeshSampler;
     TUniquePtr<FWetRenderStage> RenderStage;
+
+    // Per-receiver CPU/GPU surface-water state. The CPU side owns pending
+    // stamps and container overhead; each valid state also owns two GPU
+    // render targets, so GPU memory is estimated through the state API.
+    TMap<int32, TUniquePtr<FSurfaceWaterSimulationState>> SurfaceWaterStatesByMaterialSlot;
+
+    // Per-receiver GPU simulation backend. The interface object is small, but
+    // its implementation may own GPU render targets and CPU staging data;
+    // query it through a backend stats API instead of sizeof(pointer).
+    TUniquePtr<IDWCGPUBackend> GPUBackend;
+
+    // Small per-slot settings/handles. Count material bindings if needed, but
+    // do not treat the UObject memory behind the material pointers as owned
+    // receiver memory.
+    TMap<int32, FSurfaceWaterProfileParameters> SurfaceWaterProfilesByMaterialSlot;
     TArray<TObjectPtr<UMaterialInstanceDynamic>> WetMaterialInstances;
-    TSharedPtr<const FDWCSkinningStaticData, ESPMode::ThreadSafe> SkinningStaticData;
+
+    // Lightweight helper/state objects. Their pointees currently contain no
+    // large persistent arrays, so they are normally negligible in memory
+    // stats (apart from their own object size).
+    TUniquePtr<FWetRuntimeDataBuilder> RuntimeDataBuilder;
+    TUniquePtr<FWetSimulationStage> SimulationStage;
+    TUniquePtr<FWetSurfaceContactResolver> SurfaceContactResolver;
+    TUniquePtr<FWetInputStage> InputStage;
+
+    // Shared/cache-backed CPU data for LOD vertex-color transfer. Static LOD
+    // data and transfer maps can be shared by multiple receivers, so dedupe
+    // them by pointed-to object when aggregating globally.
     TMap<int32, TSharedPtr<const FDWCLODVertexStaticData, ESPMode::ThreadSafe>> LODVertexStaticDataByLOD;
     TMap<int32, TSharedPtr<const TArray<int32>, ESPMode::ThreadSafe>> LODVertexColorTransferMapsByLOD;
+
+    // Per-receiver LOD color cache. The shared pointer provides lifetime and
+    // task hand-off safety; the color array itself is generally receiver-owned
+    // and may scale with the target LOD vertex count.
     TMap<int32, TSharedPtr<const TArray<FColor>, ESPMode::ThreadSafe>> LODVertexColorCachesByLOD;
+
+    // Per-receiver transient CPU work data for LOD vertex-color updates.
+    // Usually small, but capacity can grow with the dirty source-vertex count.
     TArray<int32> PendingLODVertexColorDirtySourceVertices;
     int32 LODVertexColorTransferGeneration = 0;
 
@@ -70,6 +104,29 @@ struct FDWCWetMeshReceiverRuntime
     bool bCpuSkinningTaskNeedsNormals = false;
     bool bLODVertexColorTransferPending = false;
     bool bLODVertexColorTransferRequestedAgain = false;
+};
+
+/** One component-wide LOD threshold for the merged DWC receiver bounds. */
+USTRUCT(BlueprintType)
+struct DWC_API FDWCRenderLODRatioLevel
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Rendering LOD", meta = (ClampMin = "0"))
+    int32 LODLevel = 0;
+
+    /** This LOD becomes active when the merged receiver bounds occupy at least this screen-size ratio. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Rendering LOD", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float MinScreenSize = 0.0f;
+};
+
+/** Component-wide rendering LOD state derived from the merged bounds of all receivers. */
+struct FDWCRenderLODRuntimeState
+{
+    FBoxSphereBounds MergedBounds;
+    float ScreenSize = 0.0f;
+    bool bHasValidScreenSize = false;
+    int32 ActiveLODLevel = INDEX_NONE;
 };
 
 UCLASS(ClassGroup = (Wetness), DisplayName = "Dynamic Wet Clothes", meta = (BlueprintSpawnableComponent))
@@ -107,6 +164,12 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
 
     void GetResolvedWetMeshComponents(TArray<USkeletalMeshComponent*>& OutComponents) const;
 
+    UFUNCTION(BlueprintPure, Category = "Wetness|Rendering LOD")
+    int32 GetCurrentRenderLODLevel() const { return RenderLODState.ActiveLODLevel; }
+
+    UFUNCTION(BlueprintPure, Category = "Wetness|Rendering LOD")
+    float GetMergedReceiverScreenSize() const { return RenderLODState.ScreenSize; }
+
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 #if WITH_EDITOR
@@ -119,6 +182,8 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
   private:
+    friend class UDWCStatsSubsystem;
+
     FWetRuntimeDataBuildArgs MakeRuntimeDataBuildArgs(FDWCWetMeshReceiverRuntime& Receiver);
     FWetInputStageArgs       MakeWetInputStageArgs(FDWCWetMeshReceiverRuntime& Receiver);
     FWetSurfaceContactResolverArgs MakeWetSurfaceContactResolverArgs(FDWCWetMeshReceiverRuntime& Receiver);
@@ -129,6 +194,7 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
     bool                     InitializeWetMeshReceiverRuntime(FDWCWetMeshReceiverRuntime& Receiver);
     bool                     InitializeGPUBackend(FDWCWetMeshReceiverRuntime& Receiver);
     void                     StartWetnessTimers();
+    void                     UpdateRenderLOD();
     void                     UpdateWetness();
     void                     UpdateSurfaceWater();
     void                     UpdateWetRendering();
@@ -141,6 +207,10 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
     bool                     HasPendingLODVertexColorTransferTasks() const;
     void                     FlushAsyncTaskQueueGameThread();
     bool                     FlushPendingWetContacts();
+    bool                     HasAnyRenderLODSettings() const;
+    bool                     CalculateRenderLODScreenSize(float& OutScreenSize, FBoxSphereBounds& OutBounds) const;
+    bool                     FindRenderLODLevel(float ScreenSize, int32& OutLODLevel) const;
+    void                     ResetRenderLODState();
 
     void                    ApplyGeneratedWetMaterialOverrides();
     bool                    ShouldReceiverConsiderContact(const FDWCWetMeshReceiverRuntime& Receiver, const FDWCWetContact& Contact) const;
@@ -189,6 +259,14 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
     UPROPERTY(EditAnywhere, Category = "Wetness|Visual", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float WetUnderColorBlendStrength = 0.3f;
 
+    /** Component-wide LOD number and merged-bounds screen-size ratio pairs. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Rendering LOD", meta = (TitleProperty = "LODLevel"))
+    TArray<FDWCRenderLODRatioLevel> RenderLODRatioLevels;
+
+    /** How often the merged receiver bounds are evaluated for component rendering LOD selection. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Rendering LOD", meta = (ClampMin = "0.01", AdvancedDisplay))
+    float RenderLODEvaluationInterval = 0.1f;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Wrinkle", meta = (ClampMin = "0.0"))
     float WrinkleStrength = 1.0f;
 
@@ -220,10 +298,12 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
 
     TUniquePtr<FDWCTaskQueue> AsyncTaskQueue;
     TArray<TUniquePtr<FDWCWetMeshReceiverRuntime>> Receivers;
+    FDWCRenderLODRuntimeState RenderLODState;
 
     FTimerHandle           WetnessSimulationTimer;
     FTimerHandle           SurfaceWaterSimulationTimer;
     FTimerHandle           WetnessRenderTimer;
+    FTimerHandle           RenderLODEvaluationTimer;
     TArray<FDWCWetContact> PendingWetContacts;
     bool                   bPendingWetContactsApplyMaterial = false;
     bool                   bWetRenderDirty = false;

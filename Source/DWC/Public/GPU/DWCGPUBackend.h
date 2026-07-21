@@ -25,6 +25,13 @@ struct DWC_API FDWCGPUBackendInitArgs
     bool bUseEightDirectionDiffusion = false;
 };
 
+struct DWC_API FDWCGPUBackendStats
+{
+    uint32 ActiveMaterialCount = 0;
+    uint64 CPUBytes = 0;
+    uint64 GPUBytes = 0;
+};
+
 /** DWC-facing interface. It intentionally contains no RHI/RenderCore types. */
 class DWC_API IDWCGPUBackend
 {
@@ -36,6 +43,7 @@ public:
     virtual bool EnqueueResolvedContacts(const TArray<FDWCResolvedSurfaceContact>& Contacts) = 0;
     virtual bool ApplyWetAll(float Amount) = 0;
     virtual void Update(float DeltaSeconds) = 0;
+    virtual FDWCGPUBackendStats GetStats() const = 0;
 
     virtual void Shutdown() = 0;
 };

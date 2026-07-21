@@ -58,7 +58,9 @@ class DWC_API FSurfaceWaterSimulationState
     void SetSimulationPaused(bool bPaused) { bSimulationPaused = bPaused; }
     bool IsSimulationPaused() const { return bSimulationPaused; }
     int32 GetResolution() const { return Resolution; }
+    int32 GetPendingStampCount() const { return PendingStamps.Num(); }
     ETextureRenderTargetFormat GetFormat() const { return Format; }
+    uint64 GetAllocatedMemoryBytes() const;
     uint64 GetEstimatedGpuMemoryBytes() const;
 
   private:

@@ -97,10 +97,10 @@ namespace
         const FWetClothingEditableWetPartData& WetPartData,
         const FSurfaceWaterSimulationSettings& SurfaceWaterSettings)
     {
-        FString Signature = FString::Printf(
-            TEXT("DWC_SourceData_v1|SurfaceWater=%d|RT=%d"),
-            SurfaceWaterSettings.bEnabled ? 1 : 0,
-            SurfaceWaterSettings.RenderTargetResolution);
+    FString Signature = FString::Printf(
+        TEXT("DWC_SourceData_v1|SurfaceWater=%d|RT=%d"),
+        SurfaceWaterSettings.bEnabled ? 1 : 0,
+        SurfaceWaterSettings.RenderTargetResolution);
 
         TArray<int32> SlotIndices;
         for (int32 SlotIndex = 0; SlotIndex < WetPartData.WettableMaterialSlots.Num(); ++SlotIndex)
@@ -1093,6 +1093,10 @@ void UWetClothingAsset::PostLoad()
     ClampSetupLODRangeToMesh(
         Metadata.DWCSkeletalMesh != nullptr ? Metadata.DWCSkeletalMesh.Get() : Metadata.SourceSkeletalMesh.Get(),
         Metadata.SetupSettings);
+    // Surface Water RT resolution is mirrored into setup settings so the
+    // consolidated Map Resolutions panel reflects the runtime value for old assets.
+    Metadata.SetupSettings.SurfaceWaterRTResolution = DWCMapResolution::ToInt(
+        DWCMapResolution::FromInt(Authored.SurfaceWaterSettings.RenderTargetResolution));
     Metadata.SetupSettings.SimulationLODIndex = RuntimeSimulationLODIndex;
     Metadata.SimulationLODIndex = RuntimeSimulationLODIndex;
     if (Metadata.DWCSkeletalMesh != nullptr && Metadata.DWCSkeletalMesh == Metadata.SourceSkeletalMesh)
@@ -1167,6 +1171,21 @@ void UWetClothingAsset::PostLoad()
         bRuntimeBulkDataLoaded ? TEXT("true") : TEXT("false"),
         static_cast<double>(RuntimeBulkData.GetBulkDataSize()) / (1024.0 * 1024.0));
 }
+
+#if WITH_EDITOR
+void UWetClothingAsset::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
+{
+    Super::PostEditChangeProperty(PropertyChangedEvent);
+
+    const FName PropertyName = PropertyChangedEvent.GetPropertyName();
+    if (PropertyName == GET_MEMBER_NAME_CHECKED(FSurfaceWaterSimulationSettings, RenderTargetResolution) ||
+        PropertyName == GET_MEMBER_NAME_CHECKED(FWCAAuthoredData, SurfaceWaterSettings))
+    {
+        Metadata.SetupSettings.SurfaceWaterRTResolution = DWCMapResolution::ToInt(
+            DWCMapResolution::FromInt(Authored.SurfaceWaterSettings.RenderTargetResolution));
+    }
+}
+#endif
 
 void UWetClothingAsset::EnsureRuntimeBulkDataLoaded() const
 {
@@ -1553,6 +1572,7 @@ bool UWetClothingAsset::InitializeNewAsset(
     Authored.WrinkleData.BakeSettings.DefaultResolution = Metadata.SetupSettings.GetWrinkleMapResolution();
     Authored.TransparencyData.TransparencyBakeResolution = Metadata.SetupSettings.GetTransparencyMapResolution();
     Authored.TransparencyData.RevealBakeResolution = Metadata.SetupSettings.GetTransparencyMapResolution();
+    Authored.SurfaceWaterSettings.RenderTargetResolution = Metadata.SetupSettings.GetSurfaceWaterRTResolution();
     Metadata.OriginalUVChannelIndex = Metadata.SetupSettings.OriginalUVChannelIndex;
     Metadata.SetupSettings.SimulationLODIndex = RuntimeSimulationLODIndex;
     Metadata.SimulationLODIndex = RuntimeSimulationLODIndex;
@@ -1615,6 +1635,8 @@ bool UWetClothingAsset::ApplySetupSettings(
         PreviousSettings.GetWrinkleMapResolution() != NewSettings.GetWrinkleMapResolution();
     const bool bTransparencyResolutionChanged =
         PreviousSettings.GetTransparencyMapResolution() != NewSettings.GetTransparencyMapResolution();
+    const bool bSurfaceWaterRTResolutionChanged =
+        PreviousSettings.GetSurfaceWaterRTResolution() != NewSettings.GetSurfaceWaterRTResolution();
 
     Metadata.SetupSettings = NewSettings;
     Metadata.OriginalUVChannelIndex = Metadata.SetupSettings.OriginalUVChannelIndex;
@@ -1623,6 +1645,7 @@ bool UWetClothingAsset::ApplySetupSettings(
     Authored.WrinkleData.BakeSettings.DefaultResolution = Metadata.SetupSettings.GetWrinkleMapResolution();
     Authored.TransparencyData.TransparencyBakeResolution = Metadata.SetupSettings.GetTransparencyMapResolution();
     Authored.TransparencyData.RevealBakeResolution = Metadata.SetupSettings.GetTransparencyMapResolution();
+    Authored.SurfaceWaterSettings.RenderTargetResolution = Metadata.SetupSettings.GetSurfaceWaterRTResolution();
 
     if (bOriginalUVChanged)
     {
@@ -1739,6 +1762,10 @@ bool UWetClothingAsset::ApplySetupSettings(
     if (bTransparencyResolutionChanged)
     {
         Changes.Add(FString::Printf(TEXT("Transparency Map resolution: %d -> %d."), PreviousSettings.GetTransparencyMapResolution(), Metadata.SetupSettings.GetTransparencyMapResolution()));
+    }
+    if (bSurfaceWaterRTResolutionChanged)
+    {
+        Changes.Add(FString::Printf(TEXT("Surface Water RT resolution: %d -> %d."), PreviousSettings.GetSurfaceWaterRTResolution(), Metadata.SetupSettings.GetSurfaceWaterRTResolution()));
     }
 
     DWC::Error::SetMessage(

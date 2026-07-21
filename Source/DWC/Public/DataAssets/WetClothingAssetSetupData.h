@@ -98,6 +98,10 @@ struct DWC_API FDWCWetClothingAssetSetupSettings
     UPROPERTY(VisibleAnywhere, Category = "Map Resolutions", meta = (DisplayName = "GPU Simulation"))
     int32 GPUSimulationMapResolution = 512;
 
+    /** Runtime Surface Water render-target resolution. This is independent from the GPU wetness-map bake resolution. */
+    UPROPERTY(VisibleAnywhere, Category = "Map Resolutions", meta = (DisplayName = "Surface Water RT"))
+    int32 SurfaceWaterRTResolution = 1024;
+
     UPROPERTY(VisibleAnywhere, Category = "Map Resolutions", meta = (DisplayName = "Wrinkle"))
     int32 WrinkleMapResolution = 1024;
 
@@ -122,12 +126,14 @@ struct DWC_API FDWCWetClothingAssetSetupSettings
     int32 SimulationLODIndex = 0;
 
     int32 GetGPUSimulationMapResolution() const { return GPUSimulationMapResolution; }
+    int32 GetSurfaceWaterRTResolution() const { return SurfaceWaterRTResolution; }
     int32 GetWrinkleMapResolution() const { return WrinkleMapResolution; }
     int32 GetTransparencyMapResolution() const { return TransparencyMapResolution; }
 
     void NormalizeMapResolutions()
     {
         GPUSimulationMapResolution = DWCMapResolution::ToInt(DWCMapResolution::FromInt(GPUSimulationMapResolution));
+        SurfaceWaterRTResolution = DWCMapResolution::ToInt(DWCMapResolution::FromInt(SurfaceWaterRTResolution));
         WrinkleMapResolution = DWCMapResolution::ToInt(DWCMapResolution::FromInt(WrinkleMapResolution));
         TransparencyMapResolution = DWCMapResolution::ToInt(DWCMapResolution::FromInt(TransparencyMapResolution));
         OriginalUVChannelIndex = FMath::Clamp(OriginalUVChannelIndex, 0, 7);

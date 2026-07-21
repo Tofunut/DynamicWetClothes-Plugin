@@ -38,6 +38,7 @@ class DWC_API FWetClothingRuntimeData
     void ResetWetPartData();
     void ResetNeighborGraph();
     void ResetBoneOptimizationCache();
+    uint64 GetAllocatedMemoryBytes() const;
 
     TArray<int32>                     VertexWetPartIDs;
     TArray<bool>                      VertexWettableFlags;

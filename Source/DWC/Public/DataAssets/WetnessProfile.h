@@ -117,10 +117,11 @@ struct DWC_API FSurfaceWaterProfileParameters
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Flow", meta=(ClampMin="0.0", ClampMax="1.0"))
     float FlowMaskMax = 1.0f;
 
-    /** Optional profile overrides. Null keeps the Material Function defaults. */
+    /** Optional profile override. Null disables the mask contribution. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Flow")
     TObjectPtr<UTexture2D> FlowMaskTexture = nullptr;
 
+    /** Optional profile override. Null disables the normal contribution. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Flow")
     TObjectPtr<UTexture2D> FlowNormalTexture = nullptr;
 
@@ -139,10 +140,11 @@ struct DWC_API FSurfaceWaterProfileParameters
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet", meta=(ClampMin="0.0", ClampMax="1.0"))
     float DropletMaskMax = 1.0f;
 
-    /** Optional profile overrides. Null keeps the Material Function defaults. */
+    /** Optional profile override. Null disables the mask contribution. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet")
     TObjectPtr<UTexture2D> DropletMaskTexture = nullptr;
 
+    /** Optional profile override. Null disables the normal contribution. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet")
     TObjectPtr<UTexture2D> DropletNormalTexture = nullptr;
 

@@ -257,6 +257,7 @@ void FDWCLODVertexColorTransferTask::ExecuteWorker()
 
     Result.ReceiverId = Snapshot.ReceiverId;
     Result.Generation = Snapshot.Generation;
+    Result.DirtySourceVertexCount = Snapshot.DirtySourceVertices.Num();
 
     if (!Snapshot.SourceLODData.IsValid() ||
         Snapshot.SourceLODData->Geometry.LocalPositions.Num() == 0 ||

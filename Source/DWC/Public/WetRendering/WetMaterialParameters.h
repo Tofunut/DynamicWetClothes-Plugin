@@ -10,7 +10,6 @@ namespace DWCWetMaterialParameters
     DWC_API const FName& WetPartDebugStrength();
     DWC_API const FName& UnderColor();
     DWC_API const FName& UnderColorBlendStrength();
-
     DWC_API const FName& SurfaceWaterRT();
     DWC_API const FName& SurfaceDropletRT();
     DWC_API const FName& SurfaceFlowRT();

@@ -40,14 +40,38 @@ namespace
     }
 } // namespace
 #include "Runtime/Engine/Public/Materials/MaterialInstanceDynamic.h"
+#include "Engine/Texture.h"
 #include "DataAssets/WetClothingAsset.h"
 #include "DataAssets/WetClothingTransparencyData.h"
 #include "DataAssets/WetClothingWrinkleData.h"
+#include "Profiling/DWCStats.h"
 #include "WetSimulation/SurfaceWater/SurfaceWaterSimulationState.h"
 #include "Utility/DWCLog.h"
 
 namespace
 {
+    UTexture* ResolveOptionalSurfaceMaskTexture(UTexture* Texture)
+    {
+        // A texture sample cannot compile with a null texture. Use a semantically neutral
+        // engine texture so an unassigned optional profile texture has no visual effect.
+        static TWeakObjectPtr<UTexture> NeutralTexture;
+        if (Texture == nullptr && !NeutralTexture.IsValid())
+        {
+            NeutralTexture = LoadObject<UTexture>(nullptr, TEXT("/Engine/EngineResources/Black.Black"));
+        }
+        return Texture != nullptr ? Texture : NeutralTexture.Get();
+    }
+
+    UTexture* ResolveOptionalSurfaceNormalTexture(UTexture* Texture)
+    {
+        static TWeakObjectPtr<UTexture> NeutralTexture;
+        if (Texture == nullptr && !NeutralTexture.IsValid())
+        {
+            NeutralTexture = LoadObject<UTexture>(nullptr, TEXT("/Engine/EngineMaterials/DefaultNormal.DefaultNormal"));
+        }
+        return Texture != nullptr ? Texture : NeutralTexture.Get();
+    }
+
     bool IsMaterialSlotWettableForRender(const UWetClothingAsset* WetClothingAsset, const int32 MaterialSlotIndex)
     {
         if (WetClothingAsset == nullptr || MaterialSlotIndex == INDEX_NONE)
@@ -64,6 +88,13 @@ namespace
         return State != nullptr && State->bIsWettableSlot;
     }
 
+}
+
+uint64 FWetRenderStage::GetAllocatedMemoryBytes() const
+{
+    return sizeof(*this) +
+           CachedWetVertexColors.GetAllocatedSize() +
+           CachedWetPartDebugColorsByID.GetAllocatedSize();
 }
 
 void FWetRenderStage::ResetCachedVertexColors()
@@ -103,6 +134,7 @@ void FWetRenderStage::ApplyWetMaterialParameters(FWetRenderStageArgs& Receiver)
 {
     DWC_PROFILE_SCOPE(DWC_Render_ApplyWetMaterialParameters);
 
+    uint32 UpdatedMaterialCount = 0;
     for (int32 MaterialSlotIndex = 0; MaterialSlotIndex < Receiver.WetMaterialInstances->Num(); ++MaterialSlotIndex)
     {
         UMaterialInstanceDynamic* MID = (*Receiver.WetMaterialInstances)[MaterialSlotIndex];
@@ -110,6 +142,7 @@ void FWetRenderStage::ApplyWetMaterialParameters(FWetRenderStageArgs& Receiver)
         {
             continue;
         }
+        ++UpdatedMaterialCount;
         if (!DWCWetMaterialParameters::WetPartDebugStrength().IsNone())
         {
             MID->SetScalarParameterValue(
@@ -197,22 +230,20 @@ void FWetRenderStage::ApplyWetMaterialParameters(FWetRenderStageArgs& Receiver)
         MID->SetScalarParameterValue(DWCWetMaterialParameters::SurfaceFlowRoughness(), FMath::Clamp(SurfaceProfile->FlowRoughness, 0.0f, 1.0f));
         MID->SetScalarParameterValue(DWCWetMaterialParameters::SurfaceFlowMaskMin(), FlowMaskMin);
         MID->SetScalarParameterValue(DWCWetMaterialParameters::SurfaceFlowMaskMax(), FlowMaskMax);
-        if (SurfaceProfile->DropletMaskTexture)
-        {
-            MID->SetTextureParameterValue(DWCWetMaterialParameters::SurfaceDropletMaskTexture(), SurfaceProfile->DropletMaskTexture);
-        }
-        if (SurfaceProfile->DropletNormalTexture)
-        {
-            MID->SetTextureParameterValue(DWCWetMaterialParameters::SurfaceDropletNormalTexture(), SurfaceProfile->DropletNormalTexture);
-        }
-        if (SurfaceProfile->FlowMaskTexture)
-        {
-            MID->SetTextureParameterValue(DWCWetMaterialParameters::SurfaceFlowMaskTexture(), SurfaceProfile->FlowMaskTexture);
-        }
-        if (SurfaceProfile->FlowNormalTexture)
-        {
-            MID->SetTextureParameterValue(DWCWetMaterialParameters::SurfaceFlowNormalTexture(), SurfaceProfile->FlowNormalTexture);
-        }
+        // Always update optional textures. This clears a previous profile override when the
+        // current profile leaves one unassigned instead of exposing authored function defaults.
+        MID->SetTextureParameterValue(
+            DWCWetMaterialParameters::SurfaceDropletMaskTexture(),
+            ResolveOptionalSurfaceMaskTexture(SurfaceProfile->DropletMaskTexture));
+        MID->SetTextureParameterValue(
+            DWCWetMaterialParameters::SurfaceDropletNormalTexture(),
+            ResolveOptionalSurfaceNormalTexture(SurfaceProfile->DropletNormalTexture));
+        MID->SetTextureParameterValue(
+            DWCWetMaterialParameters::SurfaceFlowMaskTexture(),
+            ResolveOptionalSurfaceMaskTexture(SurfaceProfile->FlowMaskTexture));
+        MID->SetTextureParameterValue(
+            DWCWetMaterialParameters::SurfaceFlowNormalTexture(),
+            ResolveOptionalSurfaceNormalTexture(SurfaceProfile->FlowNormalTexture));
 
         if (!DWCWetMaterialParameters::UnderColor().IsNone())
         {
@@ -230,6 +261,7 @@ void FWetRenderStage::ApplyWetMaterialParameters(FWetRenderStageArgs& Receiver)
     ApplyWetnessProfileMapParameters(Receiver);
     ApplyWetWrinkleNormalMapParameters(Receiver);
     ApplyWetTransparencyMapParameters(Receiver);
+    FDWCWorkloadStats::RecordRenderUpdate(UpdatedMaterialCount);
 }
 
 void FWetRenderStage::ApplyWetnessProfileMapParameters(FWetRenderStageArgs& Receiver)
@@ -703,4 +735,5 @@ void FWetRenderStage::ApplyWetnessToMaterial(FWetRenderStageArgs& Receiver)
         *Receiver.TargetSkeletalMesh,
         Receiver.LODIndex,
         CachedWetVertexColors);
+    FDWCWorkloadStats::RecordRenderUpdate(0);
 }

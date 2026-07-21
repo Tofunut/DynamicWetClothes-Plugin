@@ -1,5 +1,13 @@
 #include "WetInputSystem/Sampling/WetClothingMeshSampler.h"
 
+uint64 FWetClothingMeshSampler::GetAllocatedMemoryBytes() const
+{
+    return sizeof(*this) +
+           CachedSkinnedPositions.GetAllocatedSize() +
+           CachedSkinnedNormals.GetAllocatedSize() +
+           CachedRefToLocalMatrices.GetAllocatedSize();
+}
+
 #include "Async/ParallelFor.h"
 #include "CoreGlobals.h"
 #include "HAL/ThreadSafeBool.h"

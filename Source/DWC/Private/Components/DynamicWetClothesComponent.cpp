@@ -16,13 +16,22 @@
 #include "WetSimulation/WetSimulationStage.h"
 #include "WetSimulation/AbsorbedWetness/AbsorbedWetnessSimulationState.h"
 #include "WetSimulation/SurfaceWater/SurfaceWaterSimulationState.h"
+#include "Engine/SkeletalMesh.h"
+#include "Engine/GameInstance.h"
+#include "Engine/GameViewportClient.h"
+#include "Engine/LocalPlayer.h"
 #include "Runtime/Engine/Public/Rendering/SkeletalMeshLODRenderData.h"
+#include "Rendering/SkeletalMeshRenderData.h"
+#include "SceneManagement.h"
+#include "Slate/SceneViewport.h"
 #include "UObject/UnrealType.h"
 #include "Engine/Texture2D.h"
 #include "Engine/World.h"
 #include "Materials/MaterialInterface.h"
 #include "Materials/MaterialInstanceConstant.h"
 #include "Modules/ModuleManager.h"
+#include "Profiling/DWCStatsSubsystem.h"
+#include "TimerManager.h"
 #include "Utility/DWCLog.h"
 #include "Utility/DWCProfiling.h"
 
@@ -354,11 +363,20 @@ void UDynamicWetClothesComponent::BeginPlay()
     }
 
     StartWetnessTimers();
+    UpdateRenderLOD();
     RequestContinuousCpuSkinningTasks();
 }
 
 void UDynamicWetClothesComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+    if (UWorld* World = GetWorld())
+    {
+        if (UDWCStatsSubsystem* StatsSubsystem = World->GetSubsystem<UDWCStatsSubsystem>())
+        {
+            StatsSubsystem->UnregisterComponent(this);
+        }
+    }
+
     if (AsyncTaskQueue.IsValid())
     {
         AsyncTaskQueue->Shutdown();
@@ -369,6 +387,7 @@ void UDynamicWetClothesComponent::EndPlay(const EEndPlayReason::Type EndPlayReas
         GetWorld()->GetTimerManager().ClearTimer(WetnessSimulationTimer);
         GetWorld()->GetTimerManager().ClearTimer(SurfaceWaterSimulationTimer);
         GetWorld()->GetTimerManager().ClearTimer(WetnessRenderTimer);
+        GetWorld()->GetTimerManager().ClearTimer(RenderLODEvaluationTimer);
     }
 
     // TStrongObjectPtr roots the transient RT. It must be released before PIE world GC.
@@ -388,6 +407,8 @@ void UDynamicWetClothesComponent::EndPlay(const EEndPlayReason::Type EndPlayReas
 
 bool UDynamicWetClothesComponent::InitializeWetRuntime()
 {
+    ResetRenderLODState();
+
     if (!RebuildWetMeshReceivers())
     {
         return false;
@@ -468,7 +489,18 @@ bool UDynamicWetClothesComponent::InitializeWetRuntime()
         Receivers.Num(),
         *GetNameSafe(GetOwner()));
 
-    return Receivers.Num() > 0;
+    const bool bInitialized = Receivers.Num() > 0;
+    if (bInitialized && HasBegunPlay())
+    {
+        if (UWorld* World = GetWorld())
+        {
+            if (UDWCStatsSubsystem* StatsSubsystem = World->GetSubsystem<UDWCStatsSubsystem>())
+            {
+                StatsSubsystem->RegisterComponent(this);
+            }
+        }
+    }
+    return bInitialized;
 }
 
 bool UDynamicWetClothesComponent::RebuildWetMeshReceivers()
@@ -683,75 +715,73 @@ bool UDynamicWetClothesComponent::InitializeWetMeshReceiverRuntime(FDWCWetMeshRe
     Receiver.LODVertexColorCachesByLOD.Reset();
     Receiver.PendingLODVertexColorDirtySourceVertices.Reset();
 
-    if (IsGPUWetnessMode(GetActiveSimulationMode()))
+    if (!IsGPUWetnessMode(GetActiveSimulationMode()))
     {
-        return true;
-    }
-
-    if (!Receiver.SharedRuntimeData->bHasNeighborGraph)
-    {
-        UE_LOG(
-            LogDWC,
-            Error,
-            TEXT("DynamicWetClothesComponent: CPU simulation requires a valid shared neighbor graph for WCA '%s'. Save the WCA to rebuild precomputed data."),
-            *GetNameSafe(Receiver.WetClothingAsset.Get()));
-        return false;
-    }
-
-    USkeletalMeshComponent* Mesh = Receiver.MeshComponent.Get();
-    const USkeletalMesh* SkeletalMesh = Mesh != nullptr ? Mesh->GetSkeletalMeshAsset() : nullptr;
-    FSkeletalMeshRenderData* RenderData = SkeletalMesh != nullptr ? SkeletalMesh->GetResourceForRendering() : nullptr;
-    if (RenderData != nullptr)
-    {
-        for (int32 LODIndex = 0; LODIndex < RenderData->LODRenderData.Num(); ++LODIndex)
+        if (!Receiver.SharedRuntimeData->bHasNeighborGraph)
         {
-            TSharedPtr<const FDWCLODVertexStaticData, ESPMode::ThreadSafe> LODVertexData =
-                RuntimeDataSubsystem->AcquireLODVertexStaticData(
-                    *Mesh,
-                    LODIndex,
-                    Receiver.SharedRuntimeData->MeshSignature);
-            if (LODVertexData.IsValid())
+            UE_LOG(
+                LogDWC,
+                Error,
+                TEXT("DynamicWetClothesComponent: CPU simulation requires a valid shared neighbor graph for WCA '%s'. Save the WCA to rebuild precomputed data."),
+                *GetNameSafe(Receiver.WetClothingAsset.Get()));
+            return false;
+        }
+
+        USkeletalMeshComponent* Mesh = Receiver.MeshComponent.Get();
+        const USkeletalMesh* SkeletalMesh = Mesh != nullptr ? Mesh->GetSkeletalMeshAsset() : nullptr;
+        FSkeletalMeshRenderData* RenderData = SkeletalMesh != nullptr ? SkeletalMesh->GetResourceForRendering() : nullptr;
+        if (RenderData != nullptr)
+        {
+            for (int32 LODIndex = 0; LODIndex < RenderData->LODRenderData.Num(); ++LODIndex)
             {
-                Receiver.LODVertexStaticDataByLOD.Add(LODIndex, LODVertexData);
+                TSharedPtr<const FDWCLODVertexStaticData, ESPMode::ThreadSafe> LODVertexData =
+                    RuntimeDataSubsystem->AcquireLODVertexStaticData(
+                        *Mesh,
+                        LODIndex,
+                        Receiver.SharedRuntimeData->MeshSignature);
+                if (LODVertexData.IsValid())
+                {
+                    Receiver.LODVertexStaticDataByLOD.Add(LODIndex, LODVertexData);
+                }
             }
         }
-    }
 
-    if (Receiver.WetClothingAsset.IsValid() && Receiver.SharedRuntimeData.IsValid())
-    {
-        const FString& MeshSignature = Receiver.SharedRuntimeData->MeshSignature;
-        for (const FWCALODVertexColorRuntimeData& RuntimeData :
-             Receiver.WetClothingAsset->Derived.Bulk.LODVertexColorRuntimeData)
+        if (Receiver.WetClothingAsset.IsValid() && Receiver.SharedRuntimeData.IsValid())
         {
-            const TSharedPtr<const FDWCLODVertexStaticData, ESPMode::ThreadSafe> TargetLODData =
-                Receiver.LODVertexStaticDataByLOD.FindRef(RuntimeData.TargetLODIndex);
-            if (!RuntimeData.IsValid() ||
-                RuntimeData.SourceLODIndex != RuntimeLODIndex ||
-                RuntimeData.MeshSignature != MeshSignature ||
-                !TargetLODData.IsValid() ||
-                TargetLODData->Geometry.VertexCount != RuntimeData.TargetVertexCount)
+            const FString& MeshSignature = Receiver.SharedRuntimeData->MeshSignature;
+            for (const FWCALODVertexColorRuntimeData& RuntimeData :
+                 Receiver.WetClothingAsset->Derived.Bulk.LODVertexColorRuntimeData)
             {
-                continue;
+                const TSharedPtr<const FDWCLODVertexStaticData, ESPMode::ThreadSafe> TargetLODData =
+                    Receiver.LODVertexStaticDataByLOD.FindRef(RuntimeData.TargetLODIndex);
+                if (!RuntimeData.IsValid() ||
+                    RuntimeData.SourceLODIndex != RuntimeLODIndex ||
+                    RuntimeData.MeshSignature != MeshSignature ||
+                    !TargetLODData.IsValid() ||
+                    TargetLODData->Geometry.VertexCount != RuntimeData.TargetVertexCount)
+                {
+                    continue;
+                }
+
+                Receiver.LODVertexColorTransferMapsByLOD.Add(
+                    RuntimeData.TargetLODIndex,
+                    MakeShared<TArray<int32>, ESPMode::ThreadSafe>(RuntimeData.TargetToSourceVertex));
             }
-
-            Receiver.LODVertexColorTransferMapsByLOD.Add(
-                RuntimeData.TargetLODIndex,
-                MakeShared<TArray<int32>, ESPMode::ThreadSafe>(RuntimeData.TargetToSourceVertex));
         }
-    }
 
-    const FWetClothingPrecomputedSimulationData& PrecomputedData =
-        Receiver.WetClothingAsset->GetPrecomputedSimulationData();
-    Receiver.SkinningStaticData = RuntimeDataSubsystem->AcquireSkinningStaticData(
-        *Receiver.MeshComponent.Get(),
-        PrecomputedData.MeshSignature);
-    if (!Receiver.SkinningStaticData.IsValid())
-    {
-        UE_LOG(
-            LogTemp,
-            Warning,
-            TEXT("DynamicWetClothesComponent: Failed to build CPU skinning static data on %s."),
-            *GetNameSafe(GetOwner()));
+        const FWetClothingPrecomputedSimulationData& PrecomputedData =
+            Receiver.WetClothingAsset->GetPrecomputedSimulationData();
+        Receiver.SkinningStaticData = RuntimeDataSubsystem->AcquireSkinningStaticData(
+            *Receiver.MeshComponent.Get(),
+            PrecomputedData.MeshSignature);
+        if (!Receiver.SkinningStaticData.IsValid())
+        {
+            UE_LOG(
+                LogTemp,
+                Warning,
+                TEXT("DynamicWetClothesComponent: Failed to build CPU skinning static data on %s."),
+                *GetNameSafe(GetOwner()));
+        }
     }
 
     const FSurfaceWaterSimulationSettings& SurfaceSimulationSettings = Receiver.WetClothingAsset->Authored.SurfaceWaterSettings;
@@ -864,6 +894,153 @@ void UDynamicWetClothesComponent::StartWetnessTimers()
         RenderInterval,
         true);
     GetWorld()->GetTimerManager().SetTimer(SurfaceWaterSimulationTimer, this, &UDynamicWetClothesComponent::UpdateSurfaceWater, SurfaceWaterInterval, true);
+
+    if (HasAnyRenderLODSettings())
+    {
+        GetWorld()->GetTimerManager().SetTimer(
+            RenderLODEvaluationTimer,
+            this,
+            &UDynamicWetClothesComponent::UpdateRenderLOD,
+            FMath::Max(0.01f, RenderLODEvaluationInterval),
+            true);
+    }
+}
+
+bool UDynamicWetClothesComponent::HasAnyRenderLODSettings() const
+{
+    return !RenderLODRatioLevels.IsEmpty();
+}
+
+bool UDynamicWetClothesComponent::CalculateRenderLODScreenSize(
+    float& OutScreenSize,
+    FBoxSphereBounds& OutBounds) const
+{
+    OutScreenSize = 0.0f;
+    OutBounds = FBoxSphereBounds();
+
+    UWorld* World = GetWorld();
+    UGameViewportClient* GameViewport = World != nullptr ? World->GetGameViewport() : nullptr;
+    UGameInstance* GameInstance = World != nullptr ? World->GetGameInstance() : nullptr;
+    FSceneViewport* SceneViewport = GameViewport != nullptr ? GameViewport->GetGameViewport() : nullptr;
+    ULocalPlayer* LocalPlayer = GameInstance != nullptr ? GameInstance->GetFirstGamePlayer() : nullptr;
+    if (SceneViewport == nullptr || LocalPlayer == nullptr)
+    {
+        return false;
+    }
+
+    FBox MergedBox(ForceInit);
+    for (const TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver : Receivers)
+    {
+        USkeletalMeshComponent* Mesh = Receiver.IsValid() ? Receiver->MeshComponent.Get() : nullptr;
+        if (Mesh != nullptr && Mesh->Bounds.SphereRadius > KINDA_SMALL_NUMBER)
+        {
+            MergedBox += Mesh->Bounds.GetBox();
+        }
+    }
+
+    if (!MergedBox.IsValid)
+    {
+        return false;
+    }
+
+    FSceneViewProjectionData ProjectionData;
+    if (!LocalPlayer->GetProjectionData(SceneViewport, ProjectionData, INDEX_NONE))
+    {
+        return false;
+    }
+
+    OutBounds = FBoxSphereBounds(MergedBox);
+    if (OutBounds.SphereRadius <= KINDA_SMALL_NUMBER)
+    {
+        return false;
+    }
+
+    OutScreenSize = FMath::Clamp(
+        ComputeBoundsScreenSize(
+            FVector4(OutBounds.Origin, 1.0f),
+            OutBounds.SphereRadius,
+            FVector4(ProjectionData.ViewOrigin, 1.0f),
+            ProjectionData.ProjectionMatrix),
+        0.0f,
+        1.0f);
+    return true;
+}
+
+bool UDynamicWetClothesComponent::FindRenderLODLevel(const float ScreenSize, int32& OutLODLevel) const
+{
+    OutLODLevel = INDEX_NONE;
+
+    const float ClampedScreenSize = FMath::Clamp(ScreenSize, 0.0f, 1.0f);
+    const FDWCRenderLODRatioLevel* BestLevel = nullptr;
+    float BestMinScreenSize = -1.0f;
+    const FDWCRenderLODRatioLevel* LowestLevel = nullptr;
+    float LowestMinScreenSize = 1.0f + KINDA_SMALL_NUMBER;
+
+    for (const FDWCRenderLODRatioLevel& Candidate : RenderLODRatioLevels)
+    {
+        const float CandidateMinScreenSize = FMath::Clamp(Candidate.MinScreenSize, 0.0f, 1.0f);
+        if (CandidateMinScreenSize < LowestMinScreenSize)
+        {
+            LowestLevel = &Candidate;
+            LowestMinScreenSize = CandidateMinScreenSize;
+        }
+
+        if (ClampedScreenSize >= CandidateMinScreenSize && CandidateMinScreenSize > BestMinScreenSize)
+        {
+            BestLevel = &Candidate;
+            BestMinScreenSize = CandidateMinScreenSize;
+        }
+    }
+
+    const FDWCRenderLODRatioLevel* SelectedLevel = BestLevel != nullptr ? BestLevel : LowestLevel;
+    if (SelectedLevel == nullptr)
+    {
+        return false;
+    }
+
+    OutLODLevel = FMath::Max(0, SelectedLevel->LODLevel);
+    return true;
+}
+
+void UDynamicWetClothesComponent::ResetRenderLODState()
+{
+    RenderLODState = FDWCRenderLODRuntimeState();
+}
+
+void UDynamicWetClothesComponent::UpdateRenderLOD()
+{
+    float ScreenSize = 0.0f;
+    FBoxSphereBounds MergedBounds;
+    //Calculate Merged Sphere Bound of Actor
+    if (!CalculateRenderLODScreenSize(ScreenSize, MergedBounds))
+    {
+        return;
+    }
+
+    RenderLODState.ScreenSize = ScreenSize;
+    RenderLODState.MergedBounds = MergedBounds;
+    RenderLODState.bHasValidScreenSize = true;
+
+    int32 NewLODLevel = INDEX_NONE;
+    if (!FindRenderLODLevel(ScreenSize, NewLODLevel))
+    {
+        return;
+    }
+
+    const int32 PreviousLODLevel = RenderLODState.ActiveLODLevel;
+    if (PreviousLODLevel != NewLODLevel)
+    {
+        UE_LOG(
+            LogDWC,
+            Warning,
+            TEXT("DWC Rendering LOD changed on '%s': LOD %d -> %d (Merged Screen Size: %.4f)."),
+            *GetNameSafe(GetOwner()),
+            PreviousLODLevel,
+            NewLODLevel,
+            ScreenSize);
+    }
+
+    RenderLODState.ActiveLODLevel = NewLODLevel;
 }
 
 FWetRuntimeDataBuildArgs UDynamicWetClothesComponent::MakeRuntimeDataBuildArgs(FDWCWetMeshReceiverRuntime& Receiver)
@@ -1152,12 +1329,19 @@ void UDynamicWetClothesComponent::ApplyWetAll(const float Amount)
 
 bool UDynamicWetClothesComponent::ApplyWetContact(const FDWCWetContact& Contact, const bool bApplyMaterial)
 {
+    FDWCWorkloadStats::RecordWetContactsReceived(1);
+    const auto RecordContactResult = [](const bool bApplied)
+    {
+        FDWCWorkloadStats::RecordWetContactsOutcome(1, bApplied);
+        return bApplied;
+    };
+
     if (bBatchWetContactsPerFrame)
     {
         const int32 MaxQueuedContacts = FMath::Max(1, MaxBatchedWetContactsPerFrame);
         if (FMath::IsNearlyZero(Contact.Amount) || PendingWetContacts.Num() >= MaxQueuedContacts)
         {
-            return false;
+            return RecordContactResult(false);
         }
 
         PendingWetContacts.Add(Contact);
@@ -1188,7 +1372,7 @@ bool UDynamicWetClothesComponent::ApplyWetContact(const FDWCWetContact& Contact,
                 bAnyQueued = true;
             }
         }
-        return bAnyQueued;
+        return RecordContactResult(bAnyQueued);
     }
 
     bool bAnyChanged = false;
@@ -1210,11 +1394,19 @@ bool UDynamicWetClothesComponent::ApplyWetContact(const FDWCWetContact& Contact,
             }
         }
     }
-    return bAnyChanged;
+    return RecordContactResult(bAnyChanged);
 }
 
 bool UDynamicWetClothesComponent::ApplyWetContacts(const TArray<FDWCWetContact>& Contacts, const bool bApplyMaterial)
 {
+    const uint32 ContactCount = static_cast<uint32>(Contacts.Num());
+    FDWCWorkloadStats::RecordWetContactsReceived(ContactCount);
+    const auto RecordContactResults = [ContactCount](const bool bApplied)
+    {
+        FDWCWorkloadStats::RecordWetContactsOutcome(ContactCount, bApplied);
+        return bApplied;
+    };
+
     FlushPendingWetContacts();
 
     if (IsGPUWetnessMode(GetActiveSimulationMode()))
@@ -1251,7 +1443,7 @@ bool UDynamicWetClothesComponent::ApplyWetContacts(const TArray<FDWCWetContact>&
                 bAnyQueued = true;
             }
         }
-        return bAnyQueued;
+        return RecordContactResults(bAnyQueued);
     }
 
     bool bAnyChanged = false;
@@ -1288,7 +1480,7 @@ bool UDynamicWetClothesComponent::ApplyWetContacts(const TArray<FDWCWetContact>&
             }
         }
     }
-    return bAnyChanged;
+    return RecordContactResults(bAnyChanged);
 }
 
 bool UDynamicWetClothesComponent::ApplyWetArea(const FDWCWetAreaData& AreaData, const bool bApplyMaterial)
@@ -1438,6 +1630,10 @@ void UDynamicWetClothesComponent::CommitCpuSkinningTaskResult(FDWCSkinningTaskRe
 
         if (Result.HasPositions() || Result.HasNormals())
         {
+            const uint32 ProcessedVertexCount = static_cast<uint32>(FMath::Max(
+                Result.SkinnedPositions.Num(),
+                Result.SkinnedNormals.Num()));
+            FDWCWorkloadStats::RecordCPUSkinningCompleted(ProcessedVertexCount);
             Receiver->MeshSampler->CommitSkinnedCacheFromTask(
                 Mesh,
                 UWetClothingAsset::RuntimeSimulationLODIndex,
@@ -1475,6 +1671,9 @@ void UDynamicWetClothesComponent::CommitLODVertexColorTransferResult(FDWCLODVert
         {
             return;
         }
+
+        FDWCWorkloadStats::RecordLODTransferCompleted(
+            static_cast<uint32>(FMath::Max(0, Result.DirtySourceVertexCount)));
 
         UWorld* World = GetWorld();
         UDWCRuntimeDataSubsystem* RuntimeDataSubsystem =
@@ -1765,12 +1964,14 @@ bool UDynamicWetClothesComponent::FlushPendingWetContacts()
     TArray<FDWCWetContact> ContactsToApply;
     ContactsToApply.Reserve(PendingWetContacts.Num());
     Swap(ContactsToApply, PendingWetContacts);
+    const uint32 ContactCount = static_cast<uint32>(ContactsToApply.Num());
 
     const bool bApplyMaterial = bPendingWetContactsApplyMaterial;
     bPendingWetContactsApplyMaterial = false;
 
     if (Receivers.IsEmpty() && !InitializeWetRuntime())
     {
+        FDWCWorkloadStats::RecordWetContactsOutcome(ContactCount, false);
         return false;
     }
 
@@ -1808,6 +2009,7 @@ bool UDynamicWetClothesComponent::FlushPendingWetContacts()
                 bAnyQueued = true;
             }
         }
+        FDWCWorkloadStats::RecordWetContactsOutcome(ContactCount, bAnyQueued);
         return bAnyQueued;
     }
 
@@ -1862,8 +2064,10 @@ bool UDynamicWetClothesComponent::FlushPendingWetContacts()
         PendingWetContacts = MoveTemp(ContactsToApply);
         bPendingWetContactsApplyMaterial |= bApplyMaterial;
         SetComponentTickEnabled(true);
+        return false;
     }
 
+    FDWCWorkloadStats::RecordWetContactsOutcome(ContactCount, bAnyChanged);
     return bAnyChanged;
 }
 
@@ -1900,7 +2104,19 @@ void UDynamicWetClothesComponent::UpdateWetness()
         }
 
         FWetSimulationStageArgs SimulationArgs = MakeWetSimulationStageArgs(*Receiver);
+        const int32 DirtyVertexCountBeforeUpdate = Receiver->SimulationState.IsValid()
+            ? Receiver->SimulationState->DirtyWetVertexIndices.Num()
+            : 0;
         const bool bChanged = Receiver->SimulationStage->UpdateWetness(SimulationArgs);
+        FDWCWorkloadStats::RecordWetnessSimulationUpdate(bChanged);
+        if (Receiver->SimulationState.IsValid())
+        {
+            const int32 GeneratedDirtyVertexCount = FMath::Max(
+                0,
+                Receiver->SimulationState->DirtyWetVertexIndices.Num() - DirtyVertexCountBeforeUpdate);
+            FDWCWorkloadStats::RecordDirtyVerticesGenerated(
+                static_cast<uint32>(GeneratedDirtyVertexCount));
+        }
         if (bChanged)
         {
             RequestWetRenderingUpdate(*Receiver);

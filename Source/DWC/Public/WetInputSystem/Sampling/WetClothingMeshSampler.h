@@ -9,6 +9,7 @@ class FSkinWeightVertexBuffer;
 class FWetClothingMeshSampler
 {
   public:
+    uint64 GetAllocatedMemoryBytes() const;
     void ResetPositions();
     void ResetNormals();
 

@@ -11,6 +11,13 @@ struct DWC_API FDWCLODVertexStaticData
     FDWCVertexGeometryStaticData Geometry;
     int32 LODIndex = INDEX_NONE;
 
+    uint64 GetAllocatedMemoryBytes() const
+    {
+        return sizeof(*this) +
+               Geometry.LocalPositions.GetAllocatedSize() +
+               Geometry.LocalNormals.GetAllocatedSize();
+    }
+
     bool IsValid() const
     {
         return LODIndex != INDEX_NONE &&
@@ -37,6 +44,7 @@ struct DWC_API FDWCLODVertexColorTransferResult
 {
     FName ReceiverId = NAME_None;
     int32 Generation = 0;
+    int32 DirtySourceVertexCount = 0;
 
     struct FLODColors
     {

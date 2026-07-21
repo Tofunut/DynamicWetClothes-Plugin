@@ -1,5 +1,19 @@
 #include "WetSimulation/AbsorbedWetness/AbsorbedWetnessSimulationState.h"
 
+uint64 FAbsorbedWetnessSimulationState::GetAllocatedMemoryBytes() const
+{
+    return sizeof(*this) +
+           AbsorbedWetnessPerVertex.GetAllocatedSize() +
+           UpdatingPendingWetnessAmounts.GetAllocatedSize() +
+           WetnessDryHoldTimePerVertex.GetAllocatedSize() +
+           UpdatingPendingWetnessVertexIndexQueue.GetAllocatedSize() +
+           CurrentPendingWetnessVertexIndexQueue.GetAllocatedSize() +
+           CurrentPendingWetnessAmounts.GetAllocatedSize() +
+           bPendingWetnessQueued.GetAllocatedSize() +
+           DirtyWetVertexIndices.GetAllocatedSize() +
+           bDirtyWetVertexQueued.GetAllocatedSize();
+}
+
 void FAbsorbedWetnessSimulationState::ResetAll()
 {
     AbsorbedWetnessPerVertex.Reset();

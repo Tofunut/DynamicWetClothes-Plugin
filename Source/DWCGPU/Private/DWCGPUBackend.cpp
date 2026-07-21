@@ -14,6 +14,7 @@
 #include "Engine/TextureRenderTarget2D.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
+#include "Profiling/DWCStats.h"
 #include "Engine/World.h"
 #include "RenderGraphBuilder.h"
 #include "RenderGraphUtils.h"
@@ -1070,6 +1071,7 @@ void FDWCGPUBackend::DispatchSimulation(
         }
     }
 
+    FDWCWorkloadStats::RecordGPUBackendUpdateSubmitted();
     ENQUEUE_RENDER_COMMAND(DWCFullWetMapSimulation)(
         [MeshObject, StaticData, RTState, SlotDispatches = MoveTemp(SlotDispatches), DeltaSeconds, MaxWetnessValue, WorldGravityDirection, SimulationLODIndex, bUseEightDirectionDiffusion = bUseEightDirectionDiffusion](FRHICommandListImmediate& RHICmdList) mutable
         {
@@ -1170,6 +1172,7 @@ void FDWCGPUBackend::DispatchSimulation(
                     Parameters->TriangleMetric = MetricUAV;
 
                     TShaderMapRef<FDWCUpdateTriangleFlowCS> Shader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
+                    FDWCWorkloadStats::RecordGPUBackendDispatch();
                     FComputeShaderUtils::AddPass(
                         GraphBuilder,
                         RDG_EVENT_NAME("DWC Update Triangle Flow Section %d", SectionIndex),
@@ -1241,6 +1244,7 @@ void FDWCGPUBackend::DispatchSimulation(
                     Parameters->P1AndMaxWetness = Dispatch.P1AndMaxWetness;
                     Parameters->P2AndMode = Dispatch.P2AndMode;
                     Parameters->WetnessTexture = InputUAV;
+                    FDWCWorkloadStats::RecordGPUBackendDispatch();
                     FComputeShaderUtils::AddPass(
                         GraphBuilder,
                         RDG_EVENT_NAME("DWC Apply Absorption %d", DispatchIndex),
@@ -1271,6 +1275,7 @@ void FDWCGPUBackend::DispatchSimulation(
                     TransferScaleParameters->TriangleMetric = MetricSRV;
                     TransferScaleParameters->Profiles = ProfileSRV;
                     TransferScaleParameters->TriangleProfileIndices = TriangleProfileIndexSRV;
+                    FDWCWorkloadStats::RecordGPUBackendDispatch();
                     FComputeShaderUtils::AddPass(
                         GraphBuilder,
                         RDG_EVENT_NAME("DWC Transfer Scale 8 Slot %d", StaticSlot.MaterialSlotIndex),
@@ -1293,6 +1298,7 @@ void FDWCGPUBackend::DispatchSimulation(
                     DiffuseParameters->TriangleMetric = MetricSRV;
                     DiffuseParameters->Profiles = ProfileSRV;
                     DiffuseParameters->TriangleProfileIndices = TriangleProfileIndexSRV;
+                    FDWCWorkloadStats::RecordGPUBackendDispatch();
                     FComputeShaderUtils::AddPass(
                         GraphBuilder,
                         RDG_EVENT_NAME("DWC Diffuse Gravity Dry 8 Slot %d", StaticSlot.MaterialSlotIndex),
@@ -1316,6 +1322,7 @@ void FDWCGPUBackend::DispatchSimulation(
                     DiffuseParameters->TriangleMetric = MetricSRV;
                     DiffuseParameters->Profiles = ProfileSRV;
                     DiffuseParameters->TriangleProfileIndices = TriangleProfileIndexSRV;
+                    FDWCWorkloadStats::RecordGPUBackendDispatch();
                     FComputeShaderUtils::AddPass(
                         GraphBuilder,
                         RDG_EVENT_NAME("DWC Diffuse Gravity Dry 4 Slot %d", StaticSlot.MaterialSlotIndex),
@@ -1352,6 +1359,7 @@ void FDWCGPUBackend::DispatchSimulation(
                         SeamParameters->TriangleFlow = FlowSRV;
                         SeamParameters->Profiles = ProfileSRV;
                         SeamParameters->TriangleProfileIndices = TriangleProfileIndexSRV;
+                        FDWCWorkloadStats::RecordGPUBackendDispatch();
                         FComputeShaderUtils::AddPass(
                             GraphBuilder,
                             RDG_EVENT_NAME("DWC Seam Destination Gather Slot %d", StaticSlot.MaterialSlotIndex),
@@ -1368,6 +1376,71 @@ void FDWCGPUBackend::DispatchSimulation(
 
 }
 
+
+FDWCGPUBackendStats FDWCGPUBackend::GetStats() const
+{
+    FDWCGPUBackendStats Stats;
+    Stats.ActiveMaterialCount = static_cast<uint32>(MaterialSlots.Num());
+    Stats.CPUBytes = sizeof(*this) +
+                     MaterialSlots.GetAllocatedSize() +
+                     PendingContacts.GetAllocatedSize() +
+                     DebugVertexDataUVs.GetAllocatedSize() +
+                     DebugVertexMaterialSlots.GetAllocatedSize();
+
+    for (const FMaterialSlotRuntime& Slot : MaterialSlots)
+    {
+        Stats.CPUBytes += Slot.WetnessMaps.GetAllocatedSize();
+        if (Slot.Resolution > 0)
+        {
+            // Two persistent R16F wetness maps are normally owned per active slot.
+            Stats.GPUBytes += static_cast<uint64>(Slot.Resolution) * Slot.Resolution *
+                              sizeof(uint16) * Slot.WetnessMaps.Num();
+        }
+    }
+
+    if (StaticSimulationData.IsValid())
+    {
+        const FStaticSimulationData& Data = *StaticSimulationData;
+        Stats.CPUBytes += sizeof(Data) +
+                          Data.Sections.GetAllocatedSize() +
+                          Data.Profiles.GetAllocatedSize() +
+                          Data.TriangleProfileIndices.GetAllocatedSize() +
+                          Data.Slots.GetAllocatedSize();
+
+        Stats.GPUBytes += static_cast<uint64>(Data.Profiles.Num()) * sizeof(FVector4f);
+        Stats.GPUBytes += static_cast<uint64>(Data.TriangleProfileIndices.Num()) * sizeof(uint32);
+        Stats.GPUBytes += static_cast<uint64>(Data.TriangleCount) * sizeof(FVector4f) * 2ull;
+
+        for (const FStaticSimulationData::FSectionData& Section : Data.Sections)
+        {
+            Stats.CPUBytes += Section.TriangleIndices.GetAllocatedSize() +
+                              Section.TriangleUV01.GetAllocatedSize() +
+                              Section.TriangleUV2RestArea.GetAllocatedSize();
+            Stats.GPUBytes += static_cast<uint64>(Section.TriangleIndices.Num()) * sizeof(FUint4GPU);
+            Stats.GPUBytes += static_cast<uint64>(Section.TriangleUV01.Num()) * sizeof(FVector4f);
+            Stats.GPUBytes += static_cast<uint64>(Section.TriangleUV2RestArea.Num()) * sizeof(FVector4f);
+        }
+
+        for (const FStaticSimulationData::FSlotData& Slot : Data.Slots)
+        {
+            Stats.CPUBytes += Slot.TexelLookup.GetAllocatedSize() +
+                              Slot.SeamDestinations.GetAllocatedSize() +
+                              Slot.SeamIncoming.GetAllocatedSize();
+            Stats.GPUBytes += static_cast<uint64>(Slot.TexelLookup.Num()) * sizeof(FUint4GPU);
+            Stats.GPUBytes += static_cast<uint64>(Slot.SeamDestinations.Num()) * sizeof(FUint4GPU);
+            Stats.GPUBytes += static_cast<uint64>(Slot.SeamIncoming.Num()) * sizeof(FVector4f);
+        }
+    }
+
+    if (RenderState.IsValid())
+    {
+        Stats.CPUBytes += sizeof(FRenderState) +
+                          RenderState->Sections.GetAllocatedSize() +
+                          RenderState->Slots.GetAllocatedSize();
+    }
+
+    return Stats;
+}
 
 void FDWCGPUBackend::Shutdown()
 {

@@ -20,14 +20,11 @@ struct FWetVertexNeighborRange
     }
 };
 
-struct FWetVertexNeighborList
-{
-    TArray<int32> Neighbors;
-};
-
 class DWC_API FWetClothingRuntimeData
 {
   public:
+    static constexpr uint16 InvalidWetnessProfileIndex = 0xFFFFu;
+
     // Identity of this immutable shared payload.
     int32 LODIndex = INDEX_NONE;
     int32 VertexCount = 0;
@@ -40,18 +37,31 @@ class DWC_API FWetClothingRuntimeData
     void ResetBoneOptimizationCache();
     uint64 GetAllocatedMemoryBytes() const;
 
-    TArray<int32>                     VertexWetPartIDs; // What Part(included in Material Slot) this vertex stands for 
-    TArray<bool>                      VertexWettableFlags;// Is this Vertex Wettable?
-    TArray<bool>                      VertexAbsorbedWetnessFlags; // Can This Vertex absorb water?
-    TArray<bool>                      VertexSurfaceWaterFlags; // Can This Vertex get Surface Water?
-    TArray<FWetnessProfileParameters> VertexWetnessProfileParameters; // What Settings does this Vertex Get? TODO : Maybe this can be compacted... just one pointer or index for ProfileParameter can be effective 
-    TArray<FWetVertexNeighborRange>   NeighborRanges; // ??
-    TArray<int32>                     FlatNeighborIndices; // ?? 
-    TArray<FWetVertexNeighborList>    NeighborGraph; // why does this get still alive?
-    TArray<FVector2f>                 SurfaceWaterUVs; // What surface uv does this Vertex use
-    TArray<bool>                      SurfaceWaterUVValidFlags; // is UV valid for this?
-    TArray<int32>                     SurfaceWaterMaterialSlotIndices; //??
-    bool                              bHasNeighborGraph = false; //??
+    const FWetnessProfileParameters* GetWetnessProfileParameters(int32 VertexIndex) const
+    {
+        if (!VertexWetnessProfileIndices.IsValidIndex(VertexIndex))
+        {
+            return nullptr;
+        }
+
+        const uint16 ProfileIndex = VertexWetnessProfileIndices[VertexIndex];
+        return ProfileIndex != InvalidWetnessProfileIndex && WetnessProfileTable.IsValidIndex(ProfileIndex)
+                   ? &WetnessProfileTable[ProfileIndex]
+                   : nullptr;
+    }
+
+    TArray<int32>                     VertexWetPartIDs;
+    TArray<bool>                      VertexWettableFlags;
+    TArray<bool>                      VertexAbsorbedWetnessFlags;
+    TArray<bool>                      VertexSurfaceWaterFlags;
+    TArray<FWetnessProfileParameters> WetnessProfileTable;
+    TArray<uint16>                    VertexWetnessProfileIndices;
+    TArray<FWetVertexNeighborRange>   NeighborRanges;
+    TArray<int32>                     FlatNeighborIndices;
+    TArray<FVector2f>                 SurfaceWaterUVs;
+    TArray<bool>                      SurfaceWaterUVValidFlags;
+    TArray<int32>                     SurfaceWaterMaterialSlotIndices;
+    bool                              bHasNeighborGraph = false;
 
     FWetBoneOptimizationCache BoneOptimizationCache;
     bool                      bHasBoneOptimizationCache = false;

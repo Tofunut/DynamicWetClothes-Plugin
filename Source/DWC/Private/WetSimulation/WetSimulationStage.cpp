@@ -43,7 +43,7 @@ namespace
             return nullptr;
         }
 
-        for (const FWetnessProfileParameters& Parameters : RuntimeData->VertexWetnessProfileParameters)
+        for (const FWetnessProfileParameters& Parameters : RuntimeData->WetnessProfileTable)
         {
             return &Parameters;
         }
@@ -72,22 +72,31 @@ float FWetSimulationStageArgs::GetGravityFlowStrength() const
 
 float FWetSimulationStageArgs::GetDryRatePerSecondForVertex(const int32 VertexIndex) const
 {
-    return RuntimeData && RuntimeData->VertexWetnessProfileParameters.IsValidIndex(VertexIndex)
-               ? RuntimeData->VertexWetnessProfileParameters[VertexIndex].GetDryRatePerSecond()
+    const FWetnessProfileParameters* Parameters = RuntimeData != nullptr
+                                                     ? RuntimeData->GetWetnessProfileParameters(VertexIndex)
+                                                     : nullptr;
+    return Parameters != nullptr
+               ? Parameters->GetDryRatePerSecond()
                : GetDryRatePerSecond();
 }
 
 float FWetSimulationStageArgs::GetSpreadRatePerSecondForVertex(const int32 VertexIndex) const
 {
-    return RuntimeData && RuntimeData->VertexWetnessProfileParameters.IsValidIndex(VertexIndex)
-               ? RuntimeData->VertexWetnessProfileParameters[VertexIndex].GetSpreadRatePerSecond()
+    const FWetnessProfileParameters* Parameters = RuntimeData != nullptr
+                                                     ? RuntimeData->GetWetnessProfileParameters(VertexIndex)
+                                                     : nullptr;
+    return Parameters != nullptr
+               ? Parameters->GetSpreadRatePerSecond()
                : GetSpreadRatePerSecond();
 }
 
 float FWetSimulationStageArgs::GetGravityFlowStrengthForVertex(const int32 VertexIndex) const
 {
-    return RuntimeData && RuntimeData->VertexWetnessProfileParameters.IsValidIndex(VertexIndex)
-               ? RuntimeData->VertexWetnessProfileParameters[VertexIndex].GetGravityFlowStrength()
+    const FWetnessProfileParameters* Parameters = RuntimeData != nullptr
+                                                     ? RuntimeData->GetWetnessProfileParameters(VertexIndex)
+                                                     : nullptr;
+    return Parameters != nullptr
+               ? Parameters->GetGravityFlowStrength()
                : GetGravityFlowStrength();
 }
 
@@ -278,7 +287,7 @@ void FWetSimulationStage::DryOutWetness(FWetSimulationStageArgs& Receiver, bool&
         float& Wetness = Receiver.SimulationState->AbsorbedWetnessPerVertex[VertexIndex];
         if (Wetness > 0.0f)
         {
-            const float VertexDryRate = Receiver.RuntimeData->VertexWetnessProfileParameters.IsValidIndex(VertexIndex)
+            const float VertexDryRate = Receiver.RuntimeData->GetWetnessProfileParameters(VertexIndex) != nullptr
                                             ? Receiver.GetDryRatePerSecondForVertex(VertexIndex)
                                             : EffectiveDryRatePerSecond;
             const float DryMultiplier = FMath::Exp(

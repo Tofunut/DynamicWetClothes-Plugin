@@ -431,10 +431,13 @@ void SWetnessProfileViewport::RebuildPreviewWetnessRuntime()
 
     PreviewRuntimeData->VertexWettableFlags.Init(true, VertexCount);
     PreviewRuntimeData->VertexWetPartIDs.Init(0, VertexCount);
-    PreviewRuntimeData->VertexWetnessProfileParameters.SetNum(VertexCount);
+    PreviewRuntimeData->WetnessProfileTable.Reset();
+    PreviewRuntimeData->WetnessProfileTable.AddDefaulted();
+    PreviewRuntimeData->VertexWetnessProfileIndices.Init(0, VertexCount);
     RefreshPreviewWetnessProfileParameters();
-    PreviewRuntimeData->NeighborGraph.Reset();
-    PreviewRuntimeData->NeighborGraph.SetNum(VertexCount);
+    PreviewRuntimeData->NeighborRanges.SetNum(VertexCount);
+    PreviewRuntimeData->FlatNeighborIndices.Reset();
+    PreviewRuntimeData->FlatNeighborIndices.Reserve(VertexCount * 4);
     PreviewRuntimeData->bHasNeighborGraph = true;
 
     for (int32 LatIndex = 0; LatIndex <= PreviewLatSegments; ++LatIndex)
@@ -442,18 +445,35 @@ void SWetnessProfileViewport::RebuildPreviewWetnessRuntime()
         for (int32 LonIndex = 0; LonIndex < PreviewLonSegments; ++LonIndex)
         {
             const int32 VertexIndex = GetWetnessSampleIndex(LatIndex, LonIndex);
-            TArray<int32>& Neighbors = PreviewRuntimeData->NeighborGraph[VertexIndex].Neighbors;
-            Neighbors.Reset();
+            FWetVertexNeighborRange& NeighborRange = PreviewRuntimeData->NeighborRanges[VertexIndex];
+            NeighborRange.StartOffset = PreviewRuntimeData->FlatNeighborIndices.Num();
+            NeighborRange.Count = 0;
 
-            Neighbors.AddUnique(GetWetnessSampleIndex(LatIndex, LonIndex - 1));
-            Neighbors.AddUnique(GetWetnessSampleIndex(LatIndex, LonIndex + 1));
+            auto AddNeighbor = [this, &NeighborRange](const int32 NeighborIndex)
+            {
+                for (int32 Offset = NeighborRange.StartOffset;
+                     Offset < PreviewRuntimeData->FlatNeighborIndices.Num();
+                     ++Offset)
+                {
+                    if (PreviewRuntimeData->FlatNeighborIndices[Offset] == NeighborIndex)
+                    {
+                        return;
+                    }
+                }
+
+                PreviewRuntimeData->FlatNeighborIndices.Add(NeighborIndex);
+                ++NeighborRange.Count;
+            };
+
+            AddNeighbor(GetWetnessSampleIndex(LatIndex, LonIndex - 1));
+            AddNeighbor(GetWetnessSampleIndex(LatIndex, LonIndex + 1));
             if (LatIndex > 0)
             {
-                Neighbors.AddUnique(GetWetnessSampleIndex(LatIndex - 1, LonIndex));
+                AddNeighbor(GetWetnessSampleIndex(LatIndex - 1, LonIndex));
             }
             if (LatIndex < PreviewLatSegments)
             {
-                Neighbors.AddUnique(GetWetnessSampleIndex(LatIndex + 1, LonIndex));
+                AddNeighbor(GetWetnessSampleIndex(LatIndex + 1, LonIndex));
             }
         }
     }
@@ -482,9 +502,13 @@ void SWetnessProfileViewport::RefreshPreviewWetnessProfileParameters()
     const FWetnessProfileParameters ProfileParameters = Profile != nullptr
                                                             ? Profile->GetParameters()
                                                             : FWetnessProfileParameters();
-    for (FWetnessProfileParameters& Parameters : PreviewRuntimeData->VertexWetnessProfileParameters)
+    if (PreviewRuntimeData->WetnessProfileTable.IsEmpty())
     {
-        Parameters = ProfileParameters;
+        PreviewRuntimeData->WetnessProfileTable.Add(ProfileParameters);
+    }
+    else
+    {
+        PreviewRuntimeData->WetnessProfileTable[0] = ProfileParameters;
     }
 }
 

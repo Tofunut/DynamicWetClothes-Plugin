@@ -64,15 +64,13 @@ bool FWetRuntimeDataBuilder::InitializeWetPartVertexData(FWetRuntimeDataBuildArg
     Receiver.MutableRuntimeData->VertexWettableFlags.Init(false, VertexCount);
     Receiver.MutableRuntimeData->VertexAbsorbedWetnessFlags.Init(false, VertexCount);
     Receiver.MutableRuntimeData->VertexSurfaceWaterFlags.Init(false, VertexCount);
-    Receiver.MutableRuntimeData->VertexWetnessProfileParameters.SetNum(VertexCount);
+    Receiver.MutableRuntimeData->WetnessProfileTable.Reset();
+    Receiver.MutableRuntimeData->VertexWetnessProfileIndices.Init(
+        FWetClothingRuntimeData::InvalidWetnessProfileIndex,
+        VertexCount);
     Receiver.MutableRuntimeData->SurfaceWaterUVs.SetNum(VertexCount);
     Receiver.MutableRuntimeData->SurfaceWaterUVValidFlags.Init(false,VertexCount);
     Receiver.MutableRuntimeData->SurfaceWaterMaterialSlotIndices.Init(INDEX_NONE, VertexCount);
-
-    for (FWetnessProfileParameters& VertexParameters : Receiver.MutableRuntimeData->VertexWetnessProfileParameters)
-    {
-        VertexParameters = FWetnessProfileParameters();
-    }
 
     if (!Receiver.WetClothingAsset || !Receiver.TargetSkeletalMesh)
     {
@@ -191,6 +189,7 @@ bool FWetRuntimeDataBuilder::InitializeWetPartVertexDataFromPrecomputedData(
 
     int32 PrecomputedWettableVertexCount = 0;
     int32 RuntimeWettableVertexCount = 0;
+    TMap<int32, int32> ProfileIndexByWetPartEntryIndex;
 
     for (int32 VertexIndex = 0; VertexIndex < PrecomputedData.Vertices.Num(); ++VertexIndex)
     {
@@ -199,7 +198,7 @@ bool FWetRuntimeDataBuilder::InitializeWetPartVertexDataFromPrecomputedData(
             !Receiver.MutableRuntimeData->VertexWettableFlags.IsValidIndex(VertexIndex) ||
             !Receiver.MutableRuntimeData->VertexAbsorbedWetnessFlags.IsValidIndex(VertexIndex) ||
             !Receiver.MutableRuntimeData->VertexSurfaceWaterFlags.IsValidIndex(VertexIndex) ||
-            !Receiver.MutableRuntimeData->VertexWetnessProfileParameters.IsValidIndex(VertexIndex))
+            !Receiver.MutableRuntimeData->VertexWetnessProfileIndices.IsValidIndex(VertexIndex))
         {
             continue;
         }
@@ -213,12 +212,34 @@ bool FWetRuntimeDataBuilder::InitializeWetPartVertexDataFromPrecomputedData(
             Receiver.WetClothingAsset->Authored.PartData.EditableWetPartData.WetPartEntries.IsValidIndex(PrecomputedVertex.WetPartEntryIndex) &&
             ResolvedWetPartParametersByEntryIndex.Contains(PrecomputedVertex.WetPartEntryIndex))
         {
+            int32 ProfileIndex = INDEX_NONE;
+            if (const int32* ExistingProfileIndex = ProfileIndexByWetPartEntryIndex.Find(PrecomputedVertex.WetPartEntryIndex))
+            {
+                ProfileIndex = *ExistingProfileIndex;
+            }
+            else
+            {
+                ProfileIndex = Receiver.MutableRuntimeData->WetnessProfileTable.Add(
+                    ResolvedWetPartParametersByEntryIndex[PrecomputedVertex.WetPartEntryIndex]);
+                ProfileIndexByWetPartEntryIndex.Add(PrecomputedVertex.WetPartEntryIndex, ProfileIndex);
+            }
+
+            if (ProfileIndex >= static_cast<int32>(FWetClothingRuntimeData::InvalidWetnessProfileIndex))
+            {
+                UE_LOG(
+                    LogTemp,
+                    Error,
+                    TEXT("DynamicWetClothesComponent: Too many unique wetness profiles for uint16 vertex mapping on %s."),
+                    *GetNameSafe(Receiver.OwnerForLogs));
+                continue;
+            }
+
             Receiver.MutableRuntimeData->VertexWettableFlags[VertexIndex] = true;
             Receiver.MutableRuntimeData->VertexWetPartIDs[VertexIndex] = PrecomputedVertex.WetPartID;
-            Receiver.MutableRuntimeData->VertexWetnessProfileParameters[VertexIndex] =
-                ResolvedWetPartParametersByEntryIndex[PrecomputedVertex.WetPartEntryIndex];
+            Receiver.MutableRuntimeData->VertexWetnessProfileIndices[VertexIndex] = static_cast<uint16>(ProfileIndex);
+            const FWetnessProfileParameters* Profile = Receiver.MutableRuntimeData->GetWetnessProfileParameters(VertexIndex);
             Receiver.MutableRuntimeData->VertexAbsorbedWetnessFlags[VertexIndex] =
-                Receiver.MutableRuntimeData->VertexWetnessProfileParameters[VertexIndex].SupportsAbsorbedWetness();
+                Profile != nullptr && Profile->SupportsAbsorbedWetness();
             ++RuntimeWettableVertexCount;
         }
         if (PrecomputedVertex.bHasSurfaceWaterUV && PrecomputedVertex.SurfaceWaterUV.ContainsNaN() == false)
@@ -227,8 +248,8 @@ bool FWetRuntimeDataBuilder::InitializeWetPartVertexDataFromPrecomputedData(
             Receiver.MutableRuntimeData->SurfaceWaterUVValidFlags[VertexIndex] = true;
             Receiver.MutableRuntimeData->SurfaceWaterMaterialSlotIndices[VertexIndex] = PrecomputedVertex.MaterialSlotIndex;
             Receiver.MutableRuntimeData->VertexSurfaceWaterFlags[VertexIndex] =
-                Receiver.MutableRuntimeData->VertexWetnessProfileParameters.IsValidIndex(VertexIndex) &&
-                Receiver.MutableRuntimeData->VertexWetnessProfileParameters[VertexIndex].SupportsSurfaceWater();
+                Receiver.MutableRuntimeData->GetWetnessProfileParameters(VertexIndex) != nullptr &&
+                Receiver.MutableRuntimeData->GetWetnessProfileParameters(VertexIndex)->SupportsSurfaceWater();
         }
     }
 

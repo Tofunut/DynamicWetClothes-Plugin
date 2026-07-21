@@ -329,9 +329,7 @@ namespace
     {
         OutSample.VertexIndex = VertexIndex;
         OutSample.Influence = Influence;
-        OutSample.Profile = Receiver.RuntimeData->VertexWetnessProfileParameters.IsValidIndex(VertexIndex)
-            ? &Receiver.RuntimeData->VertexWetnessProfileParameters[VertexIndex]
-            : nullptr;
+        OutSample.Profile = Receiver.RuntimeData->GetWetnessProfileParameters(VertexIndex);
         if (Receiver.RuntimeData->SupportsSurfaceWater(VertexIndex))
         {
             Receiver.RuntimeData->TryGetSurfaceWaterBinding(
@@ -523,7 +521,7 @@ namespace
 
             ApplyWetContactNormalExposure(Receiver, Evaluation, WorldNormalPtr, Influence);
             if (Influence <= KINDA_SMALL_NUMBER ||
-                !Receiver.RuntimeData->VertexWetnessProfileParameters.IsValidIndex(VertexIndex))
+                Receiver.RuntimeData->GetWetnessProfileParameters(VertexIndex) == nullptr)
             {
                 return;
             }
@@ -617,7 +615,7 @@ namespace
 
             ApplyWetContactNormalExposure(Receiver, Evaluation, WorldNormalPtr, Influence);
             if (Influence <= KINDA_SMALL_NUMBER ||
-                !Receiver.RuntimeData->VertexWetnessProfileParameters.IsValidIndex(VertexIndex))
+                Receiver.RuntimeData->GetWetnessProfileParameters(VertexIndex) == nullptr)
             {
                 continue;
             }

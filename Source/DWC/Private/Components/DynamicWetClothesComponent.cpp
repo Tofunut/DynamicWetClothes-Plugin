@@ -164,18 +164,18 @@ namespace
             }
 
             const int32 ProfileVertexIndex = GetDominantTriangleVertexIndex(Triangle, Contact.Barycentric);
-            if (!Receiver.SharedRuntimeData->VertexWetnessProfileParameters.IsValidIndex(ProfileVertexIndex) ||
+            const FWetnessProfileParameters* WetnessProfile =
+                Receiver.SharedRuntimeData->GetWetnessProfileParameters(ProfileVertexIndex);
+            if (WetnessProfile == nullptr ||
                 !Receiver.SharedRuntimeData->SupportsSurfaceWater(ProfileVertexIndex))
             {
                 continue;
             }
 
-            const FWetnessProfileParameters& WetnessProfile =
-                Receiver.SharedRuntimeData->VertexWetnessProfileParameters[ProfileVertexIndex];
-            const FSurfaceWaterProfileParameters& SurfaceProfile = WetnessProfile.SurfaceWater;
+            const FSurfaceWaterProfileParameters& SurfaceProfile = WetnessProfile->SurfaceWater;
             const float SurfaceAmount = Contact.Amount *
                 FMath::Clamp(Contact.TriangleInfluence, 0.0f, 1.0f) *
-                WetnessProfile.GetRejectedWaterFraction() *
+                WetnessProfile->GetRejectedWaterFraction() *
                 FMath::Clamp(SurfaceProfile.SurfaceRepresentationFraction, 0.0f, 1.0f);
             if (SurfaceAmount <= 0.0f)
             {
@@ -810,10 +810,11 @@ bool UDynamicWetClothesComponent::InitializeWetMeshReceiverRuntime(FDWCWetMeshRe
             if (MaterialSlotIndex == INDEX_NONE) continue;
             SurfaceEnabledMaterialSlots.Add(MaterialSlotIndex);
 
-            if (Receiver.SharedRuntimeData->VertexWetnessProfileParameters.IsValidIndex(VertexIndex))
+            if (const FWetnessProfileParameters* Profile =
+                    Receiver.SharedRuntimeData->GetWetnessProfileParameters(VertexIndex))
             {
                 const FSurfaceWaterProfileParameters& Candidate =
-                    Receiver.SharedRuntimeData->VertexWetnessProfileParameters[VertexIndex].SurfaceWater;
+                    Profile->SurfaceWater;
                 FSurfaceWaterProfileParameters* Existing =
                     Receiver.SurfaceWaterProfilesByMaterialSlot.Find(MaterialSlotIndex);
                 if (!Existing)

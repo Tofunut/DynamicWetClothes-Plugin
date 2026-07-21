@@ -9,19 +9,14 @@ uint64 FWetClothingRuntimeData::GetAllocatedMemoryBytes() const
     Bytes += VertexWettableFlags.GetAllocatedSize();
     Bytes += VertexAbsorbedWetnessFlags.GetAllocatedSize();
     Bytes += VertexSurfaceWaterFlags.GetAllocatedSize();
-    Bytes += VertexWetnessProfileParameters.GetAllocatedSize();
+    Bytes += WetnessProfileTable.GetAllocatedSize();
+    Bytes += VertexWetnessProfileIndices.GetAllocatedSize();
     Bytes += NeighborRanges.GetAllocatedSize();
     Bytes += FlatNeighborIndices.GetAllocatedSize();
-    Bytes += NeighborGraph.GetAllocatedSize();
     Bytes += SurfaceWaterUVs.GetAllocatedSize();
     Bytes += SurfaceWaterUVValidFlags.GetAllocatedSize();
     Bytes += SurfaceWaterMaterialSlotIndices.GetAllocatedSize();
     Bytes += BoneOptimizationCacheFallbackReason.GetAllocatedSize();
-
-    for (const FWetVertexNeighborList& NeighborList : NeighborGraph)
-    {
-        Bytes += NeighborList.Neighbors.GetAllocatedSize();
-    }
 
     Bytes += BoneOptimizationCache.PrimaryVertexCache.BoneStartOffsets.GetAllocatedSize();
     Bytes += BoneOptimizationCache.PrimaryVertexCache.FlatVertexIndices.GetAllocatedSize();
@@ -40,7 +35,8 @@ void FWetClothingRuntimeData::ResetWetPartData()
     VertexWettableFlags.Reset();
     VertexAbsorbedWetnessFlags.Reset();
     VertexSurfaceWaterFlags.Reset();
-    VertexWetnessProfileParameters.Reset();
+    WetnessProfileTable.Reset();
+    VertexWetnessProfileIndices.Reset();
     SurfaceWaterUVs.Reset();
     SurfaceWaterUVValidFlags.Reset();
     SurfaceWaterMaterialSlotIndices.Reset();
@@ -50,7 +46,6 @@ void FWetClothingRuntimeData::ResetNeighborGraph()
 {
     NeighborRanges.Reset();
     FlatNeighborIndices.Reset();
-    NeighborGraph.Reset();
     bHasNeighborGraph = false;
 }
 

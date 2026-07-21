@@ -993,6 +993,7 @@ bool UDynamicWetClothesComponent::FindRenderLODLevel(const float ScreenSize, int
 void UDynamicWetClothesComponent::ResetRenderLODState()
 {
     RenderLODState = FDWCQualityLODScreenSizeRuntimeState();
+    CurrentRenderLODScreenSize = 0.0f;
 }
 
 void UDynamicWetClothesComponent::UpdateRenderLOD()
@@ -1002,9 +1003,11 @@ void UDynamicWetClothesComponent::UpdateRenderLOD()
     //Calculate Merged Sphere Bound of Actor
     if (!CalculateRenderLODScreenSize(ScreenSize, MergedBounds))
     {
+        CurrentRenderLODScreenSize = 0.0f;
         return;
     }
 
+    CurrentRenderLODScreenSize = ScreenSize;
     RenderLODState.ScreenSize = ScreenSize;
     RenderLODState.MergedBounds = MergedBounds;
     RenderLODState.bHasValidScreenSize = true;

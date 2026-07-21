@@ -2,6 +2,9 @@
 
 #include <atomic>
 
+#include "Engine/Engine.h"
+#include "HAL/IConsoleManager.h"
+
 #if STATS
 namespace
 {
@@ -150,6 +153,11 @@ DEFINE_STAT(STAT_DWC_WrinkleMaterialBindingCount);
 DEFINE_STAT(STAT_DWC_WrinkleTextureCount);
 DEFINE_STAT(STAT_DWC_TransparencyMaterialBindingCount);
 DEFINE_STAT(STAT_DWC_TransparencyTextureCount);
+DEFINE_STAT(STAT_DWC_LODTotalReceivers);
+DEFINE_STAT(STAT_DWC_LODSurfaceWaterEnabledReceivers);
+DEFINE_STAT(STAT_DWC_LODWetRenderingEnabledReceivers);
+DEFINE_STAT(STAT_DWC_LODWrinkleEnabledReceivers);
+DEFINE_STAT(STAT_DWC_LODTransparencyEnabledReceivers);
 
 DEFINE_STAT(STAT_DWC_SharedRuntimeDataCPU);
 DEFINE_STAT(STAT_DWC_SharedSkinningDataCPU);
@@ -192,3 +200,46 @@ DEFINE_STAT(STAT_DWC_RenderUpdatesRate);
 DEFINE_STAT(STAT_DWC_MaterialsUpdatedRate);
 DEFINE_STAT(STAT_DWC_GPUBackendUpdatesSubmittedRate);
 DEFINE_STAT(STAT_DWC_GPUBackendDispatchesRate);
+
+namespace
+{
+    void ExecuteDWCStatAlias(UWorld* World, const TCHAR* GroupName)
+    {
+        if (World == nullptr || GEngine == nullptr)
+        {
+            return;
+        }
+
+        GEngine->Exec(World, *FString::Printf(TEXT("stat %s"), GroupName));
+    }
+
+    FAutoConsoleCommandWithWorld GDWCMemoryStatAlias(
+        TEXT("stat dwc mem"),
+        TEXT("Toggle DWC memory statistics."),
+        FConsoleCommandWithWorldDelegate::CreateLambda(
+            [](UWorld* World)
+            {
+                ExecuteDWCStatAlias(World, TEXT("DWC"));
+            }),
+        ECVF_Default);
+
+    FAutoConsoleCommandWithWorld GDWCWorkloadStatAlias(
+        TEXT("stat dwc workload"),
+        TEXT("Toggle DWC workload statistics."),
+        FConsoleCommandWithWorldDelegate::CreateLambda(
+            [](UWorld* World)
+            {
+                ExecuteDWCStatAlias(World, TEXT("DWCWorkload"));
+            }),
+        ECVF_Default);
+
+    FAutoConsoleCommandWithWorld GDWCLodStatAlias(
+        TEXT("stat dwc lod"),
+        TEXT("Toggle DWC LOD feature statistics."),
+        FConsoleCommandWithWorldDelegate::CreateLambda(
+            [](UWorld* World)
+            {
+                ExecuteDWCStatAlias(World, TEXT("DWCLOD"));
+            }),
+        ECVF_Default);
+}

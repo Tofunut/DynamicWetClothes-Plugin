@@ -299,6 +299,26 @@ void UDWCStatsSubsystem::CollectStats(FDWCStatsSnapshot& OutSnapshot)
 
             bHasActiveReceiver = true;
             ++ModeStats.RuntimeReceiverCount;
+            ++OutSnapshot.LODTotalReceiverCount;
+
+            const FDWCQualityLODPolicy& LODPolicy = Receiver->QualityLODState.ResolvedPolicy;
+            if (LODPolicy.bUpdateSurfaceWater)
+            {
+                ++OutSnapshot.LODSurfaceWaterEnabledReceiverCount;
+            }
+            if (LODPolicy.bUpdateWetRendering)
+            {
+                ++OutSnapshot.LODWetRenderingEnabledReceiverCount;
+            }
+            if (LODPolicy.bUpdateWrinkle)
+            {
+                ++OutSnapshot.LODWrinkleEnabledReceiverCount;
+            }
+            if (LODPolicy.bUpdateTransparency)
+            {
+                ++OutSnapshot.LODTransparencyEnabledReceiverCount;
+            }
+
             OutSnapshot.ReceiverMetadataCPUBytes += sizeof(*Receiver);
             OutSnapshot.ReceiverMetadataCPUBytes += Receiver->SurfaceWaterProfilesByMaterialSlot.GetAllocatedSize();
             OutSnapshot.ReceiverMetadataCPUBytes += Receiver->WetMaterialInstances.GetAllocatedSize();
@@ -484,6 +504,11 @@ void UDWCStatsSubsystem::PublishStats(const FDWCStatsSnapshot& Snapshot) const
     SET_DWORD_STAT(STAT_DWC_WrinkleTextureCount, Snapshot.WrinkleTextureCount);
     SET_DWORD_STAT(STAT_DWC_TransparencyMaterialBindingCount, Snapshot.TransparencyMaterialBindingCount);
     SET_DWORD_STAT(STAT_DWC_TransparencyTextureCount, Snapshot.TransparencyTextureCount);
+    SET_DWORD_STAT(STAT_DWC_LODTotalReceivers, Snapshot.LODTotalReceiverCount);
+    SET_DWORD_STAT(STAT_DWC_LODSurfaceWaterEnabledReceivers, Snapshot.LODSurfaceWaterEnabledReceiverCount);
+    SET_DWORD_STAT(STAT_DWC_LODWetRenderingEnabledReceivers, Snapshot.LODWetRenderingEnabledReceiverCount);
+    SET_DWORD_STAT(STAT_DWC_LODWrinkleEnabledReceivers, Snapshot.LODWrinkleEnabledReceiverCount);
+    SET_DWORD_STAT(STAT_DWC_LODTransparencyEnabledReceivers, Snapshot.LODTransparencyEnabledReceiverCount);
 
     SET_MEMORY_STAT(STAT_DWC_SharedRuntimeDataCPU, Snapshot.SharedRuntimeDataCPUBytes);
     SET_MEMORY_STAT(STAT_DWC_SharedSkinningDataCPU, Snapshot.SharedSkinningStaticDataCPUBytes);

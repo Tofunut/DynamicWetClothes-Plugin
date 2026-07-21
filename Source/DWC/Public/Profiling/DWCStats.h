@@ -26,6 +26,12 @@ struct DWC_API FDWCStatsSnapshot
     uint32 TransparencyMaterialBindingCount = 0;
     uint32 TransparencyTextureCount = 0;
 
+    uint32 LODTotalReceiverCount = 0;
+    uint32 LODSurfaceWaterEnabledReceiverCount = 0;
+    uint32 LODWetRenderingEnabledReceiverCount = 0;
+    uint32 LODWrinkleEnabledReceiverCount = 0;
+    uint32 LODTransparencyEnabledReceiverCount = 0;
+
     uint64 SharedRuntimeDataCPUBytes = 0;
     uint64 SharedSkinningStaticDataCPUBytes = 0;
     uint64 SharedLODVertexStaticDataCPUBytes = 0;
@@ -160,13 +166,15 @@ public:
 #endif
 };
 
-// `stat dwc mem` toggles this controller group. The second token is ignored by
-// Unreal's built-in stat parser; the subsystem mirrors its state to both memory groups.
-DECLARE_STATS_GROUP_SORTBYNAME(TEXT("DWC Memory"), STATGROUP_DWC, STATCAT_Advanced);
-DECLARE_STATS_GROUP_SORTBYNAME(TEXT("DWC Instances"), STATGROUP_DWCInstances, STATCAT_Advanced);
-DECLARE_STATS_GROUP_SORTBYNAME(TEXT("Memory Counters (CPU)"), STATGROUP_DWCCPUMemory, STATCAT_Advanced);
-DECLARE_STATS_GROUP_SORTBYNAME(TEXT("Memory Counters (GPU)"), STATGROUP_DWCGPUMemory, STATCAT_Advanced);
-DECLARE_STATS_GROUP_SORTBYNAME(TEXT("DWC Workload (Recent 1s)"), STATGROUP_DWCWorkload, STATCAT_Advanced);
+// The subsystem mirrors the `stat dwc` controller state to both memory groups.
+// Convenience aliases for `stat dwc mem`, `stat dwc workload`, and `stat dwc lod`
+// are registered in DWCStats.cpp so they also appear in console autocomplete.
+DECLARE_STATS_GROUP(TEXT("DWC Memory"), STATGROUP_DWC, STATCAT_Advanced);
+DECLARE_STATS_GROUP(TEXT("DWC Instances"), STATGROUP_DWCInstances, STATCAT_Advanced);
+DECLARE_STATS_GROUP(TEXT("DWC LOD"), STATGROUP_DWCLOD, STATCAT_Advanced);
+DECLARE_STATS_GROUP(TEXT("Memory Counters (CPU)"), STATGROUP_DWCCPUMemory, STATCAT_Advanced);
+DECLARE_STATS_GROUP(TEXT("Memory Counters (GPU)"), STATGROUP_DWCGPUMemory, STATCAT_Advanced);
+DECLARE_STATS_GROUP(TEXT("DWC Workload (Recent 1s)"), STATGROUP_DWCWorkload, STATCAT_Advanced);
 
 DECLARE_DWORD_ACCUMULATOR_STAT_EXTERN(TEXT("Tracked Receivers"), STAT_DWC_MemoryTrackedReceivers, STATGROUP_DWC, DWC_API);
 
@@ -186,6 +194,12 @@ DECLARE_DWORD_ACCUMULATOR_STAT_EXTERN(TEXT("Wrinkle Material Bindings"), STAT_DW
 DECLARE_DWORD_ACCUMULATOR_STAT_EXTERN(TEXT("Unique Wrinkle Textures"), STAT_DWC_WrinkleTextureCount, STATGROUP_DWCInstances, DWC_API);
 DECLARE_DWORD_ACCUMULATOR_STAT_EXTERN(TEXT("Transparency Material Bindings"), STAT_DWC_TransparencyMaterialBindingCount, STATGROUP_DWCInstances, DWC_API);
 DECLARE_DWORD_ACCUMULATOR_STAT_EXTERN(TEXT("Unique Transparency Textures"), STAT_DWC_TransparencyTextureCount, STATGROUP_DWCInstances, DWC_API);
+
+DECLARE_DWORD_ACCUMULATOR_STAT_EXTERN(TEXT("Total Receivers"), STAT_DWC_LODTotalReceivers, STATGROUP_DWCLOD, DWC_API);
+DECLARE_DWORD_ACCUMULATOR_STAT_EXTERN(TEXT("Surface Water Enabled Receivers"), STAT_DWC_LODSurfaceWaterEnabledReceivers, STATGROUP_DWCLOD, DWC_API);
+DECLARE_DWORD_ACCUMULATOR_STAT_EXTERN(TEXT("Wet Rendering Enabled Receivers"), STAT_DWC_LODWetRenderingEnabledReceivers, STATGROUP_DWCLOD, DWC_API);
+DECLARE_DWORD_ACCUMULATOR_STAT_EXTERN(TEXT("Wrinkle Enabled Receivers"), STAT_DWC_LODWrinkleEnabledReceivers, STATGROUP_DWCLOD, DWC_API);
+DECLARE_DWORD_ACCUMULATOR_STAT_EXTERN(TEXT("Transparency Enabled Receivers"), STAT_DWC_LODTransparencyEnabledReceivers, STATGROUP_DWCLOD, DWC_API);
 
 DECLARE_MEMORY_STAT_POOL_EXTERN(TEXT("Shared Runtime Data"), STAT_DWC_SharedRuntimeDataCPU, STATGROUP_DWCCPUMemory, FPlatformMemory::MCR_Physical, DWC_API);
 DECLARE_MEMORY_STAT_POOL_EXTERN(TEXT("Shared Skinning Data"), STAT_DWC_SharedSkinningDataCPU, STATGROUP_DWCCPUMemory, FPlatformMemory::MCR_Physical, DWC_API);

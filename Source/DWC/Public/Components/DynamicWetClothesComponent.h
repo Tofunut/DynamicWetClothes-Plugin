@@ -300,8 +300,11 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
     UPROPERTY(Transient)
     bool bSimulationModeLocked = false;
 
-    UPROPERTY(Transient)
+    UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Wetness|LOD", meta = (DisplayName = "Current Quality LOD", AllowPrivateAccess = "true"))
     int32 CurrentQualityLOD = 0;
+
+    UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Wetness|LOD", meta = (DisplayName = "Current Screen Size", AllowPrivateAccess = "true"))
+    float CurrentRenderLODScreenSize = 0.0f;
 
     TUniquePtr<FDWCTaskQueue> AsyncTaskQueue;
     TUniquePtr<FDWCQualityLODController> QualityLODController;

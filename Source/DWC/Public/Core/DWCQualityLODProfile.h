@@ -56,6 +56,27 @@ struct DWC_API FDWCQualityLODRuntimeState
     float SurfaceWaterUpdateAccumulator = 0.0f;
 };
 
+USTRUCT(BlueprintType)
+struct DWC_API FDWCQualityLODScreenSizeThreshold
+{
+    GENERATED_BODY()
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Wetness|LOD")
+    int32 LODLevel = 0;
+
+    /** This LOD becomes active when the merged receiver bounds screen size is at or above this value. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|LOD", meta = (ClampMin = "0.0", ClampMax = "1.0", DisplayName = "Screen Size"))
+    float ScreenSize = 0.0f;
+};
+
+struct DWC_API FDWCQualityLODScreenSizeRuntimeState
+{
+    FBoxSphereBounds MergedBounds;
+    float ScreenSize = 0.0f;
+    bool bHasValidScreenSize = false;
+    int32 ActiveLODLevel = INDEX_NONE;
+};
+
 UCLASS(BlueprintType)
 class DWC_API UDWCQualityLODProfile : public UDataAsset
 {

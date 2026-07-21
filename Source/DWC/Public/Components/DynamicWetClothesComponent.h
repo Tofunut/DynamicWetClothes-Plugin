@@ -35,6 +35,7 @@ class USkeletalMeshComponent;
 class USkeletalMesh;
 class UMaterialInstanceDynamic;
 class FDWCQualityLODController;
+class FDWCQualityLODEvaluator;
 class FDWCTaskQueue;
 class UDWCStatsSubsystem;
 struct FDWCSkinningTaskResult;
@@ -107,29 +108,6 @@ struct FDWCWetMeshReceiverRuntime
     bool bCpuSkinningTaskNeedsNormals = false;
     bool bLODVertexColorTransferPending = false;
     bool bLODVertexColorTransferRequestedAgain = false;
-};
-
-/** One component-wide LOD threshold for the merged DWC receiver bounds. */
-USTRUCT(BlueprintType)
-struct DWC_API FDWCRenderLODRatioLevel
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|LOD", meta = (ClampMin = "0"))
-    int32 LODLevel = 0;
-
-    /** This LOD becomes active when the merged receiver bounds occupy at least this screen-size ratio. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|LOD", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float MinScreenSize = 0.0f;
-};
-
-/** Component-wide rendering LOD state derived from the merged bounds of all receivers. */
-struct FDWCRenderLODRuntimeState
-{
-    FBoxSphereBounds MergedBounds;
-    float ScreenSize = 0.0f;
-    bool bHasValidScreenSize = false;
-    int32 ActiveLODLevel = INDEX_NONE;
 };
 
 UCLASS(ClassGroup = (Wetness), DisplayName = "Dynamic Wet Clothes", meta = (BlueprintSpawnableComponent))
@@ -285,9 +263,9 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
     UPROPERTY(EditAnywhere, Category = "Wetness|Visual", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float WetUnderColorBlendStrength = 0.3f;
 
-    /** Component-wide LOD number and merged-bounds screen-size ratio pairs. */
+    /** Component-wide quality LOD thresholds. The array index is the LOD level. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|LOD", meta = (TitleProperty = "LODLevel"))
-    TArray<FDWCRenderLODRatioLevel> RenderLODRatioLevels;
+    TArray<FDWCQualityLODScreenSizeThreshold> QualityLODScreenSizeThresholds;
 
     /** How often the merged receiver bounds are evaluated for component rendering LOD selection. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|LOD", meta = (ClampMin = "0.01", AdvancedDisplay))
@@ -327,8 +305,9 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
 
     TUniquePtr<FDWCTaskQueue> AsyncTaskQueue;
     TUniquePtr<FDWCQualityLODController> QualityLODController;
+    TUniquePtr<FDWCQualityLODEvaluator> QualityLODEvaluator;
     TArray<TUniquePtr<FDWCWetMeshReceiverRuntime>> Receivers;
-    FDWCRenderLODRuntimeState RenderLODState;
+    FDWCQualityLODScreenSizeRuntimeState RenderLODState;
 
     FTimerHandle           WetnessSimulationTimer;
     FTimerHandle           SurfaceWaterSimulationTimer;

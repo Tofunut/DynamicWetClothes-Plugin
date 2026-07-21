@@ -6,6 +6,7 @@
 #include "Async/DWCSkinningTasks.h"
 #include "Async/DWCTaskQueue.h"
 #include "Core/DWCQualityLODController.h"
+#include "Core/DWCQualityLODEvaluator.h"
 #include "Runtime/Engine/Classes/Components/SkeletalMeshComponent.h"
 #include "WetInputSystem/WetInputStage.h"
 #include "WetInputSystem/Sampling/WetClothingMeshSampler.h"
@@ -346,6 +347,8 @@ UDynamicWetClothesComponent::UDynamicWetClothesComponent()
     PrimaryComponentTick.bStartWithTickEnabled = false;
     AsyncTaskQueue = MakeUnique<FDWCTaskQueue>();
     QualityLODController = MakeUnique<FDWCQualityLODController>();
+    QualityLODEvaluator = MakeUnique<FDWCQualityLODEvaluator>();
+    QualityLODEvaluator->NormalizeScreenSizeThresholds(QualityLODScreenSizeThresholds);
 }
 
 UDynamicWetClothesComponent::~UDynamicWetClothesComponent() = default;
@@ -920,7 +923,7 @@ void UDynamicWetClothesComponent::StartWetnessTimers()
 
 bool UDynamicWetClothesComponent::HasAnyRenderLODSettings() const
 {
-    return !RenderLODRatioLevels.IsEmpty();
+    return !QualityLODScreenSizeThresholds.IsEmpty();
 }
 
 bool UDynamicWetClothesComponent::CalculateRenderLODScreenSize(
@@ -980,43 +983,16 @@ bool UDynamicWetClothesComponent::CalculateRenderLODScreenSize(
 
 bool UDynamicWetClothesComponent::FindRenderLODLevel(const float ScreenSize, int32& OutLODLevel) const
 {
-    OutLODLevel = INDEX_NONE;
-
-    const float ClampedScreenSize = FMath::Clamp(ScreenSize, 0.0f, 1.0f);
-    const FDWCRenderLODRatioLevel* BestLevel = nullptr;
-    float BestMinScreenSize = -1.0f;
-    const FDWCRenderLODRatioLevel* LowestLevel = nullptr;
-    float LowestMinScreenSize = 1.0f + KINDA_SMALL_NUMBER;
-
-    for (const FDWCRenderLODRatioLevel& Candidate : RenderLODRatioLevels)
-    {
-        const float CandidateMinScreenSize = FMath::Clamp(Candidate.MinScreenSize, 0.0f, 1.0f);
-        if (CandidateMinScreenSize < LowestMinScreenSize)
-        {
-            LowestLevel = &Candidate;
-            LowestMinScreenSize = CandidateMinScreenSize;
-        }
-
-        if (ClampedScreenSize >= CandidateMinScreenSize && CandidateMinScreenSize > BestMinScreenSize)
-        {
-            BestLevel = &Candidate;
-            BestMinScreenSize = CandidateMinScreenSize;
-        }
-    }
-
-    const FDWCRenderLODRatioLevel* SelectedLevel = BestLevel != nullptr ? BestLevel : LowestLevel;
-    if (SelectedLevel == nullptr)
-    {
-        return false;
-    }
-
-    OutLODLevel = FMath::Max(0, SelectedLevel->LODLevel);
-    return true;
+    return QualityLODEvaluator.IsValid() &&
+           QualityLODEvaluator->ResolveLODFromScreenSize(
+        QualityLODScreenSizeThresholds,
+        ScreenSize,
+        OutLODLevel);
 }
 
 void UDynamicWetClothesComponent::ResetRenderLODState()
 {
-    RenderLODState = FDWCRenderLODRuntimeState();
+    RenderLODState = FDWCQualityLODScreenSizeRuntimeState();
 }
 
 void UDynamicWetClothesComponent::UpdateRenderLOD()
@@ -2393,6 +2369,10 @@ void UDynamicWetClothesComponent::TickComponent(float DeltaTime, ELevelTick Tick
 void UDynamicWetClothesComponent::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
 {
     Super::PostEditChangeProperty(PropertyChangedEvent);
+    if (QualityLODEvaluator.IsValid())
+    {
+        QualityLODEvaluator->NormalizeScreenSizeThresholds(QualityLODScreenSizeThresholds);
+    }
 
     const FName PropertyName = PropertyChangedEvent.GetPropertyName();
     const bool bRequiresRuntimeRebuild =

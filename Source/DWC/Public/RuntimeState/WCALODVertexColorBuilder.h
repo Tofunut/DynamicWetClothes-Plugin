@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Async/DWCLODVertexColorTypes.h"
 #include "CoreMinimal.h"
 #include "DataAssets/WetClothingAsset.h"
 
@@ -13,5 +14,6 @@ public:
         int32 FirstMappedLODIndex,
         int32 LastMappedLODIndex,
         TArray<FWCALODVertexColorRuntimeData>& OutRuntimeData,
-        FString* OutErrorMessage = nullptr);
+        FString* OutErrorMessage = nullptr,
+        const FDWCLODVertexColorTransferSettings& Settings = FDWCLODVertexColorTransferSettings());
 };

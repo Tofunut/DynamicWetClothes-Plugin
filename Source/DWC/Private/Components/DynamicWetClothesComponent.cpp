@@ -15,6 +15,7 @@
 #include "WetRendering/WetVertexColorBuffer.h"
 #include "RuntimeState/WetClothingRuntimeData.h"
 #include "RuntimeState/DWCRuntimeDataSubsystem.h"
+#include "RuntimeState/DWCLODVertexColorTransferMapBuilder.h"
 #include "WetSimulation/WetSimulationStage.h"
 #include "WetSimulation/AbsorbedWetness/AbsorbedWetnessSimulationState.h"
 #include "WetSimulation/SurfaceWater/SurfaceWaterSimulationState.h"
@@ -724,11 +725,6 @@ bool UDynamicWetClothesComponent::InitializeWetMeshReceiverRuntime(FDWCWetMeshRe
     Receiver.RuntimeDataBuilder->EnsureWetnessBufferSize(RuntimeDataBuildArgs, LODData->GetNumVertices());
     Receiver.SimulationState->MarkAllWetVertexColorsDirty();
 
-    Receiver.LODVertexStaticDataByLOD.Reset();
-    Receiver.LODVertexColorTransferMapsByLOD.Reset();
-    Receiver.LODVertexColorCachesByLOD.Reset();
-    Receiver.PendingLODVertexColorDirtySourceVertices.Reset();
-
     if (!IsGPUWetnessMode(GetActiveSimulationMode()))
     {
         if (!Receiver.SharedRuntimeData->bHasNeighborGraph)
@@ -741,46 +737,9 @@ bool UDynamicWetClothesComponent::InitializeWetMeshReceiverRuntime(FDWCWetMeshRe
             return false;
         }
 
-        USkeletalMeshComponent* Mesh = Receiver.MeshComponent.Get();
-        const USkeletalMesh* SkeletalMesh = Mesh != nullptr ? Mesh->GetSkeletalMeshAsset() : nullptr;
-        FSkeletalMeshRenderData* RenderData = SkeletalMesh != nullptr ? SkeletalMesh->GetResourceForRendering() : nullptr;
-        if (RenderData != nullptr)
+        if (!InitializeLODVertexColorTransfer(Receiver, *RuntimeDataSubsystem, RuntimeLODIndex))
         {
-            for (int32 LODIndex = 0; LODIndex < RenderData->LODRenderData.Num(); ++LODIndex)
-            {
-                TSharedPtr<const FDWCLODVertexStaticData, ESPMode::ThreadSafe> LODVertexData =
-                    RuntimeDataSubsystem->AcquireLODVertexStaticData(
-                        *Mesh,
-                        LODIndex,
-                        Receiver.SharedRuntimeData->MeshSignature);
-                if (LODVertexData.IsValid())
-                {
-                    Receiver.LODVertexStaticDataByLOD.Add(LODIndex, LODVertexData);
-                }
-            }
-        }
-
-        if (Receiver.WetClothingAsset.IsValid() && Receiver.SharedRuntimeData.IsValid())
-        {
-            const FString& MeshSignature = Receiver.SharedRuntimeData->MeshSignature;
-            for (const FWCALODVertexColorRuntimeData& RuntimeData :
-                 Receiver.WetClothingAsset->Derived.Bulk.LODVertexColorRuntimeData)
-            {
-                const TSharedPtr<const FDWCLODVertexStaticData, ESPMode::ThreadSafe> TargetLODData =
-                    Receiver.LODVertexStaticDataByLOD.FindRef(RuntimeData.TargetLODIndex);
-                if (!RuntimeData.IsValid() ||
-                    RuntimeData.SourceLODIndex != RuntimeLODIndex ||
-                    RuntimeData.MeshSignature != MeshSignature ||
-                    !TargetLODData.IsValid() ||
-                    TargetLODData->Geometry.VertexCount != RuntimeData.TargetVertexCount)
-                {
-                    continue;
-                }
-
-                Receiver.LODVertexColorTransferMapsByLOD.Add(
-                    RuntimeData.TargetLODIndex,
-                    MakeShared<TArray<int32>, ESPMode::ThreadSafe>(RuntimeData.TargetToSourceVertex));
-            }
+            return false;
         }
 
         const FWetClothingPrecomputedSimulationData& PrecomputedData =
@@ -1882,6 +1841,135 @@ bool UDynamicWetClothesComponent::SetReceiverDWCQualityLOD(const FName ReceiverI
     }
 
     return false;
+}
+
+bool UDynamicWetClothesComponent::InitializeLODVertexColorTransfer(
+    FDWCWetMeshReceiverRuntime& Receiver,
+    UDWCRuntimeDataSubsystem& RuntimeDataSubsystem,
+    const int32 RuntimeLODIndex)
+{
+    Receiver.LODVertexStaticDataByLOD.Reset();
+    Receiver.LODVertexColorTransferMapsByLOD.Reset();
+    Receiver.LODVertexColorCachesByLOD.Reset();
+    Receiver.PendingLODVertexColorDirtySourceVertices.Reset();
+
+    if (!Receiver.WetClothingAsset.IsValid() || !Receiver.SharedRuntimeData.IsValid())
+    {
+        return false;
+    }
+
+    USkeletalMeshComponent* Mesh = Receiver.MeshComponent.Get();
+    const USkeletalMesh* SkeletalMesh = Mesh != nullptr ? Mesh->GetSkeletalMeshAsset() : nullptr;
+    FSkeletalMeshRenderData* RenderData = SkeletalMesh != nullptr ? SkeletalMesh->GetResourceForRendering() : nullptr;
+    if (Mesh == nullptr || RenderData == nullptr)
+    {
+        return false;
+    }
+
+    const FString& MeshSignature = Receiver.SharedRuntimeData->MeshSignature;
+    for (int32 LODIndex = 0; LODIndex < RenderData->LODRenderData.Num(); ++LODIndex)
+    {
+        TSharedPtr<const FDWCLODVertexStaticData, ESPMode::ThreadSafe> LODVertexData =
+            RuntimeDataSubsystem.AcquireLODVertexStaticData(
+                *Mesh,
+                LODIndex,
+                MeshSignature);
+        if (LODVertexData.IsValid())
+        {
+            Receiver.LODVertexStaticDataByLOD.Add(LODIndex, LODVertexData);
+        }
+    }
+
+    const TSharedPtr<const FDWCLODVertexStaticData, ESPMode::ThreadSafe> SourceLODData =
+        Receiver.LODVertexStaticDataByLOD.FindRef(RuntimeLODIndex);
+    if (!SourceLODData.IsValid())
+    {
+        return false;
+    }
+
+    const FDWCLODVertexColorTransferSettings TransferSettings;
+    for (const FWCALODVertexColorRuntimeData& RuntimeData :
+         Receiver.WetClothingAsset->Derived.Bulk.LODVertexColorRuntimeData)
+    {
+        const TSharedPtr<const FDWCLODVertexStaticData, ESPMode::ThreadSafe> TargetLODData =
+            Receiver.LODVertexStaticDataByLOD.FindRef(RuntimeData.TargetLODIndex);
+        if (!RuntimeData.IsValid() ||
+            RuntimeData.SourceLODIndex != RuntimeLODIndex ||
+            RuntimeData.MeshSignature != MeshSignature ||
+            !TargetLODData.IsValid() ||
+            TargetLODData->Geometry.VertexCount != RuntimeData.TargetVertexCount)
+        {
+            continue;
+        }
+
+        TSharedPtr<const TArray<int32>, ESPMode::ThreadSafe> SharedTransferMap =
+            RuntimeDataSubsystem.FindLODVertexColorTransferMap(
+                *Mesh,
+                *SourceLODData,
+                *TargetLODData,
+                MeshSignature,
+                TransferSettings);
+        if (!SharedTransferMap.IsValid())
+        {
+            TArray<int32> TransferMapCopy(RuntimeData.TargetToSourceVertex);
+            SharedTransferMap = RuntimeDataSubsystem.CacheLODVertexColorTransferMap(
+                *Mesh,
+                *SourceLODData,
+                *TargetLODData,
+                MeshSignature,
+                TransferSettings,
+                MoveTemp(TransferMapCopy));
+        }
+
+        if (SharedTransferMap.IsValid())
+        {
+            Receiver.LODVertexColorTransferMapsByLOD.Add(RuntimeData.TargetLODIndex, SharedTransferMap);
+        }
+    }
+
+    for (const TPair<int32, TSharedPtr<const FDWCLODVertexStaticData, ESPMode::ThreadSafe>>& Pair :
+         Receiver.LODVertexStaticDataByLOD)
+    {
+        if (Pair.Key == RuntimeLODIndex ||
+            !Pair.Value.IsValid() ||
+            Receiver.LODVertexColorTransferMapsByLOD.Contains(Pair.Key))
+        {
+            continue;
+        }
+
+        TSharedPtr<const TArray<int32>, ESPMode::ThreadSafe> SharedTransferMap =
+            RuntimeDataSubsystem.FindLODVertexColorTransferMap(
+                *Mesh,
+                *SourceLODData,
+                *Pair.Value,
+                MeshSignature,
+                TransferSettings);
+        if (!SharedTransferMap.IsValid())
+        {
+            TArray<int32> BuiltTransferMap;
+            if (BuildDWCLODVertexColorTransferMap(
+                    *SourceLODData,
+                    *Pair.Value,
+                    TransferSettings,
+                    BuiltTransferMap))
+            {
+                SharedTransferMap = RuntimeDataSubsystem.CacheLODVertexColorTransferMap(
+                    *Mesh,
+                    *SourceLODData,
+                    *Pair.Value,
+                    MeshSignature,
+                    TransferSettings,
+                    MoveTemp(BuiltTransferMap));
+            }
+        }
+
+        if (SharedTransferMap.IsValid())
+        {
+            Receiver.LODVertexColorTransferMapsByLOD.Add(Pair.Key, SharedTransferMap);
+        }
+    }
+
+    return true;
 }
 
 bool UDynamicWetClothesComponent::RequestCpuSkinningTask(

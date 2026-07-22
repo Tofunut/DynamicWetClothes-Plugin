@@ -3,9 +3,9 @@
 #include "Components/DynamicWetClothesComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Engine/SkeletalMesh.h"
-#include "Math/GenericOctree.h"
 #include "Rendering/SkeletalMeshLODRenderData.h"
 #include "Rendering/SkeletalMeshRenderData.h"
+#include "RuntimeState/DWCLODVertexColorTransferMapBuilder.h"
 #include "Utility/DWCProfiling.h"
 
 namespace
@@ -34,101 +34,6 @@ namespace
         return true;
     }
 
-    struct FDWCLODVertexOctreeElement
-    {
-        int32 VertexIndex = INDEX_NONE;
-        FBoxCenterAndExtent Bounds;
-    };
-
-    struct FDWCLODVertexOctreeSemantics
-    {
-        enum { MaxElementsPerLeaf = 16 };
-        enum { MinInclusiveElementsPerNode = 7 };
-        enum { MaxNodeDepth = 12 };
-
-        typedef TInlineAllocator<MaxElementsPerLeaf> ElementAllocator;
-
-        static const FBoxCenterAndExtent& GetBoundingBox(const FDWCLODVertexOctreeElement& Element)
-        {
-            return Element.Bounds;
-        }
-
-        static bool AreElementsEqual(const FDWCLODVertexOctreeElement& A, const FDWCLODVertexOctreeElement& B)
-        {
-            return A.VertexIndex == B.VertexIndex;
-        }
-
-        static void SetElementId(const FDWCLODVertexOctreeElement& Element, FOctreeElementId2 Id)
-        {
-        }
-
-        static void ApplyOffset(FDWCLODVertexOctreeElement& Element, FVector Offset)
-        {
-            Element.Bounds.Center += Offset;
-        }
-    };
-
-    using FDWCLODVertexOctree = TOctree2<FDWCLODVertexOctreeElement, FDWCLODVertexOctreeSemantics>;
-}
-
-static int32 FindBestSourceVertex(
-    const FDWCLODVertexStaticData&            Source,
-    const TArray<FColor>&                     SourceColors,
-    const FDWCLODVertexOctree&                SourceOctree,
-    const FVector3f&                          TargetPos,
-    const FVector3f&                          TargetNormal,
-    const FDWCLODVertexColorTransferSettings& Settings)
-{
-    int32 BestIndex = INDEX_NONE;
-    float BestDistSq = TNumericLimits<float>::Max();
-    float BestNormalDot = -1.0f;
-
-    auto ConsiderSourceVertex = [&Source, &SourceColors, &TargetPos, &TargetNormal, &Settings, &BestIndex, &BestDistSq, &BestNormalDot](const int32 SourceIndex)
-    {
-        if (!SourceColors.IsValidIndex(SourceIndex) || !Source.Geometry.LocalPositions.IsValidIndex(SourceIndex))
-        {
-            return;
-        }
-
-        float NormalDot = 1.0f;
-        if (Source.Geometry.LocalNormals.IsValidIndex(SourceIndex))
-        {
-            NormalDot = FVector3f::DotProduct(Source.Geometry.LocalNormals[SourceIndex], TargetNormal);
-            if (NormalDot < Settings.MaxNormalAngleDot)
-            {
-                return;
-            }
-        }
-
-        const float DistSq = FVector3f::DistSquared(Source.Geometry.LocalPositions[SourceIndex], TargetPos);
-        const float TieToleranceSq = FMath::Square(FMath::Max(Settings.DistanceTieTolerance, 0.0f));
-
-        if (BestIndex == INDEX_NONE ||
-            DistSq < BestDistSq - TieToleranceSq ||
-            (FMath::Abs(DistSq - BestDistSq) <= TieToleranceSq && NormalDot > BestNormalDot))
-        {
-            BestIndex = SourceIndex;
-            BestDistSq = DistSq;
-            BestNormalDot = NormalDot;
-        }
-    };
-
-    const float InitialRadius = FMath::Max(Settings.InitialSearchRadius, Settings.DistanceTieTolerance);
-    const float MaxRadius = FMath::Max(Settings.MaxSearchRadius, InitialRadius);
-
-    for (float SearchRadius = InitialRadius; SearchRadius <= MaxRadius && BestIndex == INDEX_NONE; SearchRadius *= 2.0f)
-    {
-        const FVector QueryCenter(TargetPos);
-        const FVector QueryExtent(SearchRadius, SearchRadius, SearchRadius);
-        SourceOctree.FindElementsWithBoundsTest(
-            FBoxCenterAndExtent(QueryCenter, QueryExtent),
-            [&ConsiderSourceVertex](const FDWCLODVertexOctreeElement& Element)
-            {
-                ConsiderSourceVertex(Element.VertexIndex);
-            });
-    }
-
-    return BestIndex;
 }
 
 TSharedPtr<const FDWCLODVertexStaticData, ESPMode::ThreadSafe> BuildDWCLODVertexStaticData(
@@ -189,7 +94,7 @@ TSharedPtr<const FDWCLODVertexStaticData, ESPMode::ThreadSafe> BuildDWCLODVertex
     return StaticData;
 }
 
-static void ApplyTransferMap(
+static void TransferLODVertexColors(
     const TArray<FColor>& SourceColors,
     const TArray<int32>&  TargetToSourceVertex,
     TArray<FColor>&       OutTargetColors)
@@ -205,7 +110,7 @@ static void ApplyTransferMap(
     }
 }
 
-static void ApplyDirtyTransferMap(
+static void TransferDirtyLODVertexColors(
     const TArray<FColor>& SourceColors,
     const TArray<int32>&  DirtySourceVertices,
     const TArray<int32>&  TargetToSourceVertex,
@@ -267,53 +172,6 @@ void FDWCLODVertexColorTransferTask::ExecuteWorker()
         return;
     }
 
-    bool bNeedsTransferMapBuild = false;
-    for (const TSharedPtr<const FDWCLODVertexStaticData, ESPMode::ThreadSafe>& TargetLODData : Snapshot.TargetLODData)
-    {
-        if (!TargetLODData.IsValid())
-        {
-            continue;
-        }
-
-        const TSharedPtr<const TArray<int32>, ESPMode::ThreadSafe>* CachedMap =
-            Snapshot.CachedTargetToSourceVertexByLOD.Find(TargetLODData->LODIndex);
-        if (CachedMap == nullptr || !CachedMap->IsValid() || (*CachedMap)->Num() != TargetLODData->Geometry.LocalPositions.Num())
-        {
-            bNeedsTransferMapBuild = true;
-            break;
-        }
-    }
-
-    TUniquePtr<FDWCLODVertexOctree> SourceOctree;
-    if (bNeedsTransferMapBuild)
-    {
-        FBox SourceBounds(ForceInit);
-        for (const FVector3f& SourcePosition : Snapshot.SourceLODData->Geometry.LocalPositions)
-        {
-            SourceBounds += FVector(SourcePosition);
-        }
-
-        if (!SourceBounds.IsValid)
-        {
-            SetStatus(EDWCTaskStatus::Failed);
-            return;
-        }
-
-        const FVector SourceExtent = SourceBounds.GetExtent();
-        const double OctreeExtent = FMath::Max3(SourceExtent.X, SourceExtent.Y, SourceExtent.Z) + FMath::Max(1.0f, Snapshot.Settings.MaxSearchRadius);
-        SourceOctree = MakeUnique<FDWCLODVertexOctree>(SourceBounds.GetCenter(), OctreeExtent);
-
-        {
-            DWC_PROFILE_SCOPE(DWC_LODVertexColorTransferTask_BuildVertexOctree);
-
-            for (int32 SourceIndex = 0; SourceIndex < Snapshot.SourceLODData->Geometry.LocalPositions.Num(); ++SourceIndex)
-            {
-                const FVector SourcePosition(Snapshot.SourceLODData->Geometry.LocalPositions[SourceIndex]);
-                SourceOctree->AddElement({SourceIndex, FBoxCenterAndExtent(SourcePosition, FVector::ZeroVector)});
-            }
-        }
-    }
-
     for (const TSharedPtr<const FDWCLODVertexStaticData, ESPMode::ThreadSafe>& TargetLODData : Snapshot.TargetLODData)
     {
         DWC_PROFILE_SCOPE(DWC_LODVertexColorTransferTask_TransferTargetLOD);
@@ -328,49 +186,52 @@ void FDWCLODVertexColorTransferTask::ExecuteWorker()
 
         const TSharedPtr<const TArray<int32>, ESPMode::ThreadSafe>* CachedMap =
             Snapshot.CachedTargetToSourceVertexByLOD.Find(LODResult.LODIndex);
-        if (CachedMap != nullptr && CachedMap->IsValid() && (*CachedMap)->Num() == TargetLODData->Geometry.LocalPositions.Num())
+        const TArray<int32>* TransferMap = nullptr;
+        const bool bHasCachedMap =
+            CachedMap != nullptr &&
+            CachedMap->IsValid() &&
+            (*CachedMap)->Num() == TargetLODData->Geometry.LocalPositions.Num();
+        if (bHasCachedMap)
         {
-            const TSharedPtr<const TArray<FColor>, ESPMode::ThreadSafe>* CachedColors =
-                Snapshot.CachedTargetColorsByLOD.Find(LODResult.LODIndex);
-            if (CachedColors != nullptr &&
-                CachedColors->IsValid() &&
-                (*CachedColors)->Num() == TargetLODData->Geometry.LocalPositions.Num() &&
-                !Snapshot.DirtySourceVertices.IsEmpty())
-            {
-                ApplyDirtyTransferMap(
-                    Snapshot.SourceColors,
-                    Snapshot.DirtySourceVertices,
-                    **CachedMap,
-                    **CachedColors,
-                    LODResult.Colors);
-            }
-            else
-            {
-                ApplyTransferMap(Snapshot.SourceColors, **CachedMap, LODResult.Colors);
-            }
+            TransferMap = CachedMap->Get();
         }
         else
         {
-            if (!SourceOctree.IsValid())
+            if (!BuildDWCLODVertexColorTransferMap(
+                    *Snapshot.SourceLODData,
+                    *TargetLODData,
+                    Snapshot.Settings,
+                    LODResult.TargetToSourceVertex))
             {
                 continue;
             }
 
-            LODResult.TargetToSourceVertex.SetNumUninitialized(TargetLODData->Geometry.LocalPositions.Num());
-            for (int32 VertexIndex = 0; VertexIndex < TargetLODData->Geometry.LocalPositions.Num(); ++VertexIndex)
-            {
-                const FVector3f Normal = TargetLODData->Geometry.LocalNormals.IsValidIndex(VertexIndex) ? TargetLODData->Geometry.LocalNormals[VertexIndex] : FVector3f::UpVector;
+            TransferMap = &LODResult.TargetToSourceVertex;
+        }
 
-                LODResult.TargetToSourceVertex[VertexIndex] = FindBestSourceVertex(
-                    *Snapshot.SourceLODData,
-                    Snapshot.SourceColors,
-                    *SourceOctree,
-                    TargetLODData->Geometry.LocalPositions[VertexIndex],
-                    Normal,
-                    Snapshot.Settings);
-            }
+        if (TransferMap == nullptr)
+        {
+            continue;
+        }
 
-            ApplyTransferMap(Snapshot.SourceColors, LODResult.TargetToSourceVertex, LODResult.Colors);
+        const TSharedPtr<const TArray<FColor>, ESPMode::ThreadSafe>* CachedColors =
+            Snapshot.CachedTargetColorsByLOD.Find(LODResult.LODIndex);
+        if (bHasCachedMap &&
+            CachedColors != nullptr &&
+            CachedColors->IsValid() &&
+            (*CachedColors)->Num() == TargetLODData->Geometry.LocalPositions.Num() &&
+            !Snapshot.DirtySourceVertices.IsEmpty())
+        {
+            TransferDirtyLODVertexColors(
+                Snapshot.SourceColors,
+                Snapshot.DirtySourceVertices,
+                *TransferMap,
+                **CachedColors,
+                LODResult.Colors);
+        }
+        else
+        {
+            TransferLODVertexColors(Snapshot.SourceColors, *TransferMap, LODResult.Colors);
         }
 
         Result.LODResults.Add(MoveTemp(LODResult));

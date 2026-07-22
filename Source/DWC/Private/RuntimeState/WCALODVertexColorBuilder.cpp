@@ -4,7 +4,9 @@
 #include "Engine/SkeletalMesh.h"
 #include "Rendering/SkeletalMeshLODRenderData.h"
 #include "Rendering/SkeletalMeshRenderData.h"
+#include "RuntimeState/DWCLODVertexColorTransferMapBuilder.h"
 #include "Utility/DWCError.h"
+#include "Utility/DWCProfiling.h"
 
 namespace
 {
@@ -59,34 +61,6 @@ namespace
 
         return true;
     }
-
-    int32 FindBestSourceVertex(
-        const FLODVertexGeometry& Source,
-        const FVector3f& TargetPosition,
-        const FVector3f& TargetNormal)
-    {
-        int32 BestIndex = INDEX_NONE;
-        float BestDistanceSq = TNumericLimits<float>::Max();
-        float BestNormalDot = -1.0f;
-
-        for (int32 SourceIndex = 0; SourceIndex < Source.Positions.Num(); ++SourceIndex)
-        {
-            const float NormalDot = Source.Normals.IsValidIndex(SourceIndex)
-                                        ? FVector3f::DotProduct(Source.Normals[SourceIndex], TargetNormal)
-                                        : 1.0f;
-            const float DistanceSq = FVector3f::DistSquared(Source.Positions[SourceIndex], TargetPosition);
-            if (BestIndex == INDEX_NONE ||
-                DistanceSq < BestDistanceSq ||
-                (FMath::IsNearlyEqual(DistanceSq, BestDistanceSq) && NormalDot > BestNormalDot))
-            {
-                BestIndex = SourceIndex;
-                BestDistanceSq = DistanceSq;
-                BestNormalDot = NormalDot;
-            }
-        }
-
-        return BestIndex;
-    }
 }
 
 bool FWCALODVertexColorBuilder::Build(
@@ -94,8 +68,11 @@ bool FWCALODVertexColorBuilder::Build(
     const int32 FirstMappedLODIndex,
     const int32 LastMappedLODIndex,
     TArray<FWCALODVertexColorRuntimeData>& OutRuntimeData,
-    FString* OutErrorMessage)
+    FString* OutErrorMessage,
+    const FDWCLODVertexColorTransferSettings& Settings)
 {
+    DWC_PROFILE_SCOPE(DWC_WCA_BuildLODVertexColorRuntimeData);
+
     OutRuntimeData.Reset();
     if (Mesh == nullptr)
     {
@@ -140,20 +117,18 @@ bool FWCALODVertexColorBuilder::Build(
             continue;
         }
 
-        FWCALODVertexColorRuntimeData& RuntimeData = OutRuntimeData.AddDefaulted_GetRef();
+        FWCALODVertexColorRuntimeData RuntimeData;
         RuntimeData.SourceLODIndex = SourceLODIndex;
         RuntimeData.TargetLODIndex = TargetLODIndex;
         RuntimeData.TargetVertexCount = TargetGeometry.Positions.Num();
         RuntimeData.MeshSignature = MeshSignature;
-        RuntimeData.TargetToSourceVertex.SetNumUninitialized(TargetGeometry.Positions.Num());
-
-        for (int32 TargetVertexIndex = 0; TargetVertexIndex < TargetGeometry.Positions.Num(); ++TargetVertexIndex)
+        if (BuildDWCLODVertexColorTransferMap(
+                FDWCLODVertexColorTransferGeometryView{SourceGeometry.Positions, SourceGeometry.Normals},
+                FDWCLODVertexColorTransferGeometryView{TargetGeometry.Positions, TargetGeometry.Normals},
+                Settings,
+                RuntimeData.TargetToSourceVertex))
         {
-            const FVector3f TargetNormal = TargetGeometry.Normals.IsValidIndex(TargetVertexIndex)
-                                               ? TargetGeometry.Normals[TargetVertexIndex]
-                                               : FVector3f::UpVector;
-            RuntimeData.TargetToSourceVertex[TargetVertexIndex] =
-                FindBestSourceVertex(SourceGeometry, TargetGeometry.Positions[TargetVertexIndex], TargetNormal);
+            OutRuntimeData.Add(MoveTemp(RuntimeData));
         }
     }
 

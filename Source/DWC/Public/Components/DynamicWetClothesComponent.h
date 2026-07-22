@@ -37,6 +37,7 @@ class UMaterialInstanceDynamic;
 class FDWCQualityLODController;
 class FDWCQualityLODEvaluator;
 class FDWCTaskQueue;
+class UDWCRuntimeDataSubsystem;
 class UDWCStatsSubsystem;
 struct FDWCSkinningTaskResult;
 struct FDWCSkinningStaticData;
@@ -198,6 +199,7 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
     bool                     ShouldUpdateCPUWetness(FDWCWetMeshReceiverRuntime& Receiver) const;
     bool                     ShouldUpdateSurfaceWater(FDWCWetMeshReceiverRuntime& Receiver) const;
     bool                     ShouldUpdateWetRendering(FDWCWetMeshReceiverRuntime& Receiver) const;
+    bool                     InitializeLODVertexColorTransfer(FDWCWetMeshReceiverRuntime& Receiver, UDWCRuntimeDataSubsystem& RuntimeDataSubsystem, int32 RuntimeLODIndex);
     bool                     RequestCpuSkinningTask(FDWCWetMeshReceiverRuntime& Receiver, bool bComputePositions, bool bComputeNormals);
     void                     RequestContinuousCpuSkinningTasks();
     bool                     HasPendingCpuSkinningTasks() const;

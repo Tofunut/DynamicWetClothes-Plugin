@@ -13,10 +13,8 @@ class FDWCQualityLODController
     void SetLOD(FDWCQualityLODRuntimeState& State, int32 InQualityLOD) const;
     void RefreshPolicy(FDWCQualityLODRuntimeState& State) const;
 
-    bool ShouldRunWetness(FDWCQualityLODRuntimeState& State, float BaseInterval) const;
     bool ShouldRunSurfaceWater(FDWCQualityLODRuntimeState& State, float BaseInterval) const;
     bool ShouldRunRendering(FDWCQualityLODRuntimeState& State, float BaseInterval) const;
-    bool ShouldUpdateWetnessSimulation(const FDWCQualityLODRuntimeState& State) const;
     bool ShouldUpdateWrinkle(const FDWCQualityLODRuntimeState& State) const;
     bool ShouldUpdateTransparency(const FDWCQualityLODRuntimeState& State) const;
 

@@ -11,9 +11,6 @@ struct DWC_API FDWCQualityLODPolicy
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD|Feature")
-    bool bUpdateWetnessSimulation = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD|Feature")
     bool bUpdateSurfaceWater = true;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD|Feature")
@@ -24,9 +21,6 @@ struct DWC_API FDWCQualityLODPolicy
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD|Feature")
     bool bUpdateTransparency = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD|Performance", meta = (ClampMin = "0.0", Units = "s"))
-    float WetnessUpdateInterval = 0.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD|Performance", meta = (ClampMin = "0.0", Units = "s"))
     float RenderUpdateInterval = 0.0f;
@@ -51,7 +45,6 @@ struct DWC_API FDWCQualityLODRuntimeState
 {
     int32 CurrentQualityLOD = 0;
     FDWCQualityLODPolicy ResolvedPolicy;
-    float WetnessUpdateAccumulator = 0.0f;
     float RenderUpdateAccumulator = 0.0f;
     float SurfaceWaterUpdateAccumulator = 0.0f;
 };

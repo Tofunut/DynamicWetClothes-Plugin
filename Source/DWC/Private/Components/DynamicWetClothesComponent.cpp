@@ -1776,8 +1776,7 @@ bool UDynamicWetClothesComponent::ShouldUpdateGPUWetness(FDWCWetMeshReceiverRunt
         return false;
     }
 
-    return !QualityLODController.IsValid() ||
-           QualityLODController->ShouldRunWetness(Receiver.QualityLODState, WetnessSettings.WetnessUpdateInterval);
+    return true;
 }
 
 bool UDynamicWetClothesComponent::ShouldUpdateCPUWetness(FDWCWetMeshReceiverRuntime& Receiver) const
@@ -1787,8 +1786,7 @@ bool UDynamicWetClothesComponent::ShouldUpdateCPUWetness(FDWCWetMeshReceiverRunt
         return false;
     }
 
-    return !QualityLODController.IsValid() ||
-           QualityLODController->ShouldRunWetness(Receiver.QualityLODState, WetnessSettings.WetnessUpdateInterval);
+    return true;
 }
 
 bool UDynamicWetClothesComponent::ShouldUpdateSurfaceWater(FDWCWetMeshReceiverRuntime& Receiver) const
@@ -2127,9 +2125,7 @@ void UDynamicWetClothesComponent::RequestContinuousCpuSkinningTasks()
     for (const TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver : Receivers)
     {
         if (!Receiver.IsValid() ||
-            Receiver->bCpuSkinningTaskPending ||
-            (QualityLODController.IsValid() &&
-             !QualityLODController->ShouldUpdateWetnessSimulation(Receiver->QualityLODState)))
+            Receiver->bCpuSkinningTaskPending)
         {
             continue;
         }

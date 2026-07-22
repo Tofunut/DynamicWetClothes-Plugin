@@ -34,7 +34,6 @@ void FDWCQualityLODController::SetLOD(FDWCQualityLODRuntimeState& State, const i
     State.ResolvedPolicy = ResolvePolicy(SafeLOD);
     if (bLODChanged)
     {
-        State.WetnessUpdateAccumulator = 0.0f;
         State.RenderUpdateAccumulator = 0.0f;
         State.SurfaceWaterUpdateAccumulator = 0.0f;
     }
@@ -43,16 +42,6 @@ void FDWCQualityLODController::SetLOD(FDWCQualityLODRuntimeState& State, const i
 void FDWCQualityLODController::RefreshPolicy(FDWCQualityLODRuntimeState& State) const
 {
     State.ResolvedPolicy = ResolvePolicy(State.CurrentQualityLOD);
-}
-
-bool FDWCQualityLODController::ShouldRunWetness(FDWCQualityLODRuntimeState& State, const float BaseInterval) const
-{
-    if (bEnabled && !State.ResolvedPolicy.bUpdateWetnessSimulation)
-    {
-        return false;
-    }
-
-    return ShouldRunInterval(State.WetnessUpdateAccumulator, BaseInterval, State.ResolvedPolicy.WetnessUpdateInterval);
 }
 
 bool FDWCQualityLODController::ShouldRunSurfaceWater(FDWCQualityLODRuntimeState& State, const float BaseInterval) const
@@ -73,11 +62,6 @@ bool FDWCQualityLODController::ShouldRunRendering(FDWCQualityLODRuntimeState& St
     }
 
     return ShouldRunInterval(State.RenderUpdateAccumulator, BaseInterval, State.ResolvedPolicy.RenderUpdateInterval);
-}
-
-bool FDWCQualityLODController::ShouldUpdateWetnessSimulation(const FDWCQualityLODRuntimeState& State) const
-{
-    return !bEnabled || State.ResolvedPolicy.bUpdateWetnessSimulation;
 }
 
 bool FDWCQualityLODController::ShouldUpdateWrinkle(const FDWCQualityLODRuntimeState& State) const

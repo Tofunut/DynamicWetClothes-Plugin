@@ -3,6 +3,7 @@
 #include "RuntimeState/WetGPUMapBakeBuilder.h"
 #include "Utility/DWCDataUVBufferView.h"
 
+#include "Algo/Sort.h"
 #include "Async/ParallelFor.h"
 #include "DataAssets/WetClothingGPUData.h"
 #include "DataAssets/WetClothingAsset.h"
@@ -17,6 +18,7 @@ namespace DWCWetGPUMapBakePrivate
 constexpr double PositionQuantizeScale = 1000.0;
 constexpr double UVEdgeEpsilon = 1.0e-6;
 constexpr int32 GPUWetMapPaddingPixels = 2;
+constexpr int32 CanonicalWetPartLODIndex = 0;
 
 void SetGPUMapBakeError(FString* OutErrorMessage, const FString& Message)
 {
@@ -366,6 +368,35 @@ struct FTrianglePartMetadata
     int32 WetPartEntryIndex = INDEX_NONE;
 };
 
+struct FRenderSurfaceTriangle
+{
+    int32 RenderTriangleID = INDEX_NONE;
+    int32 MaterialSlotIndex = INDEX_NONE;
+    FVector Positions[3];
+    FBox Bounds = FBox(ForceInit);
+    FVector Centroid = FVector::ZeroVector;
+};
+
+struct FRenderSurfaceBVHNode
+{
+    FBox Bounds = FBox(ForceInit);
+    int32 LeftChildIndex = INDEX_NONE;
+    int32 RightChildIndex = INDEX_NONE;
+    int32 FirstTriangleIndex = 0;
+    int32 TriangleCount = 0;
+
+    bool IsLeaf() const
+    {
+        return LeftChildIndex == INDEX_NONE;
+    }
+};
+
+struct FRenderSurfaceBVH
+{
+    TArray<int32> TriangleIndices;
+    TArray<FRenderSurfaceBVHNode> Nodes;
+};
+
 FWetnessProfileParameters ResolveProfileParametersForEntry(
     const UWetClothingAsset& Asset,
     const int32 EntryIndex)
@@ -412,7 +443,7 @@ bool IsWettableMaterialSlot(const UWetClothingAsset& Asset, const int32 Material
     return Asset.IsMaterialSlotWettable(MaterialSlotIndex);
 }
 
-bool BuildTrianglePartLookup(
+bool BuildOriginalUVTrianglePartLookupForLOD(
     const UWetClothingAsset& Asset,
     const int32 LODIndex,
     TMap<int32, FTrianglePartMetadata>& OutLookup,
@@ -533,6 +564,532 @@ bool BuildTrianglePartLookup(
     SetGPUMapBakeError(OutErrorMessage, TEXT("GPU bake is editor-only."));
     return false;
 #endif
+}
+
+bool ComputeBarycentric3D(
+    const FVector& Point,
+    const FVector& A,
+    const FVector& B,
+    const FVector& C,
+    FVector3d& OutBarycentric)
+{
+    const FVector V0 = B - A;
+    const FVector V1 = C - A;
+    const FVector V2 = Point - A;
+    const double D00 = FVector::DotProduct(V0, V0);
+    const double D01 = FVector::DotProduct(V0, V1);
+    const double D11 = FVector::DotProduct(V1, V1);
+    const double D20 = FVector::DotProduct(V2, V0);
+    const double D21 = FVector::DotProduct(V2, V1);
+    const double Denominator = D00 * D11 - D01 * D01;
+    if (FMath::Abs(Denominator) <= SMALL_NUMBER)
+    {
+        return false;
+    }
+
+    const double WeightB = (D11 * D20 - D01 * D21) / Denominator;
+    const double WeightC = (D00 * D21 - D01 * D20) / Denominator;
+    const double WeightA = 1.0 - WeightB - WeightC;
+    OutBarycentric = FVector3d(
+        FMath::Clamp(WeightA, 0.0, 1.0),
+        FMath::Clamp(WeightB, 0.0, 1.0),
+        FMath::Clamp(WeightC, 0.0, 1.0));
+
+    const double Sum = OutBarycentric.X + OutBarycentric.Y + OutBarycentric.Z;
+    if (Sum > SMALL_NUMBER)
+    {
+        OutBarycentric /= Sum;
+    }
+    return true;
+}
+
+bool BuildRenderSurfaceTriangles(
+    const USkeletalMesh& Mesh,
+    const int32 LODIndex,
+    TArray<FRenderSurfaceTriangle>& OutTriangles,
+    FString* OutErrorMessage)
+{
+    OutTriangles.Reset();
+    const FSkeletalMeshRenderData* RenderData = Mesh.GetResourceForRendering();
+    if (RenderData == nullptr || !RenderData->LODRenderData.IsValidIndex(LODIndex))
+    {
+        SetGPUMapBakeError(OutErrorMessage, FString::Printf(TEXT("LOD%d render data is unavailable."), LODIndex));
+        return false;
+    }
+
+    const FSkeletalMeshLODRenderData& LODData = RenderData->LODRenderData[LODIndex];
+    const int32 VertexCount = static_cast<int32>(LODData.GetNumVertices());
+    TArray<uint32> IndexBuffer;
+    LODData.MultiSizeIndexContainer.GetIndexBuffer(IndexBuffer);
+    if (VertexCount <= 0 || IndexBuffer.IsEmpty())
+    {
+        SetGPUMapBakeError(OutErrorMessage, FString::Printf(TEXT("LOD%d render data is empty."), LODIndex));
+        return false;
+    }
+
+    OutTriangles.Reserve(IndexBuffer.Num() / 3);
+    for (const FSkelMeshRenderSection& Section : LODData.RenderSections)
+    {
+        if (!Section.IsValid())
+        {
+            continue;
+        }
+
+        const int32 FirstIndex = static_cast<int32>(Section.BaseIndex);
+        const int32 LastIndex = FMath::Min(
+            FirstIndex + static_cast<int32>(Section.NumTriangles * 3),
+            IndexBuffer.Num());
+        for (int32 IndexOffset = FirstIndex; IndexOffset + 2 < LastIndex; IndexOffset += 3)
+        {
+            const int32 V0 = static_cast<int32>(IndexBuffer[IndexOffset]);
+            const int32 V1 = static_cast<int32>(IndexBuffer[IndexOffset + 1]);
+            const int32 V2 = static_cast<int32>(IndexBuffer[IndexOffset + 2]);
+            if (V0 < 0 || V0 >= VertexCount || V1 < 0 || V1 >= VertexCount || V2 < 0 || V2 >= VertexCount)
+            {
+                continue;
+            }
+
+            const FVector P0(LODData.StaticVertexBuffers.PositionVertexBuffer.VertexPosition(V0));
+            const FVector P1(LODData.StaticVertexBuffers.PositionVertexBuffer.VertexPosition(V1));
+            const FVector P2(LODData.StaticVertexBuffers.PositionVertexBuffer.VertexPosition(V2));
+            if (FVector::CrossProduct(P1 - P0, P2 - P0).SizeSquared() <= SMALL_NUMBER)
+            {
+                continue;
+            }
+
+            FRenderSurfaceTriangle& Triangle = OutTriangles.AddDefaulted_GetRef();
+            Triangle.RenderTriangleID = IndexOffset / 3;
+            Triangle.MaterialSlotIndex = Section.MaterialIndex;
+            Triangle.Positions[0] = P0;
+            Triangle.Positions[1] = P1;
+            Triangle.Positions[2] = P2;
+            Triangle.Bounds += P0;
+            Triangle.Bounds += P1;
+            Triangle.Bounds += P2;
+            Triangle.Centroid = (P0 + P1 + P2) / 3.0;
+        }
+    }
+
+    if (OutTriangles.IsEmpty())
+    {
+        SetGPUMapBakeError(OutErrorMessage, FString::Printf(TEXT("LOD%d has no valid render triangles."), LODIndex));
+        return false;
+    }
+
+    SetGPUMapBakeError(OutErrorMessage, TEXT(""));
+    return true;
+}
+
+double GetRenderSurfaceBoxArea(const FBox& Bounds)
+{
+    if (!Bounds.IsValid)
+    {
+        return 0.0;
+    }
+
+    const FVector Size = Bounds.GetSize();
+    return 2.0 * (Size.X * Size.Y + Size.Y * Size.Z + Size.Z * Size.X);
+}
+
+double GetSquaredDistanceToRenderSurfaceBox(const FVector& Point, const FBox& Bounds)
+{
+    if (!Bounds.IsValid)
+    {
+        return TNumericLimits<double>::Max();
+    }
+
+    double DistanceSquared = 0.0;
+    for (int32 Axis = 0; Axis < 3; ++Axis)
+    {
+        const double Value = Point[Axis];
+        if (Value < Bounds.Min[Axis])
+        {
+            DistanceSquared += FMath::Square(Bounds.Min[Axis] - Value);
+        }
+        else if (Value > Bounds.Max[Axis])
+        {
+            DistanceSquared += FMath::Square(Value - Bounds.Max[Axis]);
+        }
+    }
+    return DistanceSquared;
+}
+
+int32 GetRenderSurfaceLongestAxis(const FBox& Bounds)
+{
+    const FVector Size = Bounds.GetSize();
+    if (Size.Y > Size.X && Size.Y >= Size.Z)
+    {
+        return 1;
+    }
+    return Size.Z > Size.X && Size.Z > Size.Y ? 2 : 0;
+}
+
+int32 BuildRenderSurfaceBVHRecursive(
+    const TArray<FRenderSurfaceTriangle>& Triangles,
+    FRenderSurfaceBVH& BVH,
+    const int32 FirstTriangleIndex,
+    const int32 TriangleCount)
+{
+    static constexpr int32 LeafTriangleCount = 8;
+    static constexpr int32 BinCount = 16;
+
+    FRenderSurfaceBVHNode Node;
+    Node.FirstTriangleIndex = FirstTriangleIndex;
+    Node.TriangleCount = TriangleCount;
+    FBox CentroidBounds(ForceInit);
+    for (int32 Offset = 0; Offset < TriangleCount; ++Offset)
+    {
+        const FRenderSurfaceTriangle& Triangle = Triangles[BVH.TriangleIndices[FirstTriangleIndex + Offset]];
+        Node.Bounds += Triangle.Bounds;
+        CentroidBounds += Triangle.Centroid;
+    }
+
+    const int32 NodeIndex = BVH.Nodes.Add(Node);
+    if (TriangleCount <= LeafTriangleCount || !CentroidBounds.IsValid)
+    {
+        return NodeIndex;
+    }
+
+    int32 BestAxis = INDEX_NONE;
+    int32 BestSplitBin = INDEX_NONE;
+    double BestCost = TNumericLimits<double>::Max();
+    const double ParentArea = FMath::Max(GetRenderSurfaceBoxArea(Node.Bounds), SMALL_NUMBER);
+
+    for (int32 Axis = 0; Axis < 3; ++Axis)
+    {
+        const double AxisMin = CentroidBounds.Min[Axis];
+        const double AxisMax = CentroidBounds.Max[Axis];
+        const double AxisExtent = AxisMax - AxisMin;
+        if (AxisExtent <= KINDA_SMALL_NUMBER)
+        {
+            continue;
+        }
+
+        FBox BinBounds[BinCount];
+        int32 BinTriangleCounts[BinCount] = {};
+        for (int32 BinIndex = 0; BinIndex < BinCount; ++BinIndex)
+        {
+            BinBounds[BinIndex] = FBox(ForceInit);
+        }
+
+        for (int32 Offset = 0; Offset < TriangleCount; ++Offset)
+        {
+            const FRenderSurfaceTriangle& Triangle = Triangles[BVH.TriangleIndices[FirstTriangleIndex + Offset]];
+            const int32 BinIndex = FMath::Clamp(
+                FMath::FloorToInt(((Triangle.Centroid[Axis] - AxisMin) / AxisExtent) * static_cast<double>(BinCount)),
+                0,
+                BinCount - 1);
+            BinBounds[BinIndex] += Triangle.Bounds;
+            ++BinTriangleCounts[BinIndex];
+        }
+
+        FBox LeftBounds[BinCount - 1];
+        FBox RightBounds[BinCount - 1];
+        int32 LeftCounts[BinCount - 1] = {};
+        int32 RightCounts[BinCount - 1] = {};
+        FBox RunningBounds(ForceInit);
+        int32 RunningCount = 0;
+        for (int32 BinIndex = 0; BinIndex < BinCount - 1; ++BinIndex)
+        {
+            RunningBounds += BinBounds[BinIndex];
+            RunningCount += BinTriangleCounts[BinIndex];
+            LeftBounds[BinIndex] = RunningBounds;
+            LeftCounts[BinIndex] = RunningCount;
+        }
+
+        RunningBounds = FBox(ForceInit);
+        RunningCount = 0;
+        for (int32 BinIndex = BinCount - 1; BinIndex > 0; --BinIndex)
+        {
+            RunningBounds += BinBounds[BinIndex];
+            RunningCount += BinTriangleCounts[BinIndex];
+            RightBounds[BinIndex - 1] = RunningBounds;
+            RightCounts[BinIndex - 1] = RunningCount;
+        }
+
+        for (int32 SplitBin = 0; SplitBin < BinCount - 1; ++SplitBin)
+        {
+            if (LeftCounts[SplitBin] <= 0 || RightCounts[SplitBin] <= 0)
+            {
+                continue;
+            }
+
+            const double Cost =
+                (GetRenderSurfaceBoxArea(LeftBounds[SplitBin]) / ParentArea) * static_cast<double>(LeftCounts[SplitBin]) +
+                (GetRenderSurfaceBoxArea(RightBounds[SplitBin]) / ParentArea) * static_cast<double>(RightCounts[SplitBin]);
+            if (Cost < BestCost)
+            {
+                BestCost = Cost;
+                BestAxis = Axis;
+                BestSplitBin = SplitBin;
+            }
+        }
+    }
+
+    int32 SplitOffset = INDEX_NONE;
+    if (BestAxis != INDEX_NONE)
+    {
+        const double AxisMin = CentroidBounds.Min[BestAxis];
+        const double AxisExtent = CentroidBounds.Max[BestAxis] - AxisMin;
+        int32 Left = FirstTriangleIndex;
+        int32 Right = FirstTriangleIndex + TriangleCount - 1;
+        while (Left <= Right)
+        {
+            const FRenderSurfaceTriangle& Triangle = Triangles[BVH.TriangleIndices[Left]];
+            const int32 BinIndex = FMath::Clamp(
+                FMath::FloorToInt(((Triangle.Centroid[BestAxis] - AxisMin) / AxisExtent) * static_cast<double>(BinCount)),
+                0,
+                BinCount - 1);
+            if (BinIndex <= BestSplitBin)
+            {
+                ++Left;
+            }
+            else
+            {
+                Swap(BVH.TriangleIndices[Left], BVH.TriangleIndices[Right]);
+                --Right;
+            }
+        }
+        SplitOffset = Left - FirstTriangleIndex;
+    }
+
+    if (SplitOffset <= 0 || SplitOffset >= TriangleCount)
+    {
+        const int32 Axis = GetRenderSurfaceLongestAxis(CentroidBounds);
+        Algo::Sort(
+            MakeArrayView(BVH.TriangleIndices.GetData() + FirstTriangleIndex, TriangleCount),
+            [&Triangles, Axis](const int32 A, const int32 B)
+            {
+                return Triangles[A].Centroid[Axis] < Triangles[B].Centroid[Axis];
+            });
+        SplitOffset = TriangleCount / 2;
+    }
+
+    const int32 LeftChildIndex = BuildRenderSurfaceBVHRecursive(Triangles, BVH, FirstTriangleIndex, SplitOffset);
+    const int32 RightChildIndex = BuildRenderSurfaceBVHRecursive(Triangles, BVH, FirstTriangleIndex + SplitOffset, TriangleCount - SplitOffset);
+    BVH.Nodes[NodeIndex].LeftChildIndex = LeftChildIndex;
+    BVH.Nodes[NodeIndex].RightChildIndex = RightChildIndex;
+    BVH.Nodes[NodeIndex].TriangleCount = 0;
+    return NodeIndex;
+}
+
+FRenderSurfaceBVH BuildRenderSurfaceBVH(const TArray<FRenderSurfaceTriangle>& Triangles)
+{
+    FRenderSurfaceBVH BVH;
+    BVH.TriangleIndices.Reserve(Triangles.Num());
+    for (int32 TriangleIndex = 0; TriangleIndex < Triangles.Num(); ++TriangleIndex)
+    {
+        BVH.TriangleIndices.Add(TriangleIndex);
+    }
+    BVH.Nodes.Reserve(FMath::Max(1, Triangles.Num() * 2));
+    if (!Triangles.IsEmpty())
+    {
+        BuildRenderSurfaceBVHRecursive(Triangles, BVH, 0, Triangles.Num());
+    }
+    return BVH;
+}
+
+const FRenderSurfaceTriangle* FindClosestRenderSurfaceTriangle(
+    const TArray<FRenderSurfaceTriangle>& SourceTriangles,
+    const FRenderSurfaceBVH& SourceBVH,
+    const FVector& TargetPosition,
+    const int32 TargetMaterialSlotIndex,
+    const bool bAllowCrossMaterialFallback = true,
+    FVector3d* OutBarycentric = nullptr)
+{
+    const FRenderSurfaceTriangle* BestTriangle = nullptr;
+    FVector BestClosestPoint = FVector::ZeroVector;
+    double BestDistanceSquared = TNumericLimits<double>::Max();
+
+    auto Search = [&](const bool bRequireMaterialMatch)
+    {
+        TArray<int32, TInlineAllocator<64>> NodeStack;
+        if (!SourceBVH.Nodes.IsEmpty())
+        {
+            NodeStack.Push(0);
+        }
+
+        while (!NodeStack.IsEmpty())
+        {
+            const FRenderSurfaceBVHNode& Node = SourceBVH.Nodes[NodeStack.Pop(EAllowShrinking::No)];
+            if (GetSquaredDistanceToRenderSurfaceBox(TargetPosition, Node.Bounds) > BestDistanceSquared)
+            {
+                continue;
+            }
+
+            if (Node.IsLeaf())
+            {
+                for (int32 Offset = 0; Offset < Node.TriangleCount; ++Offset)
+                {
+                    const FRenderSurfaceTriangle& SourceTriangle =
+                        SourceTriangles[SourceBVH.TriangleIndices[Node.FirstTriangleIndex + Offset]];
+                    if (bRequireMaterialMatch && SourceTriangle.MaterialSlotIndex != TargetMaterialSlotIndex)
+                    {
+                        continue;
+                    }
+
+                    const FVector ClosestPoint = FMath::ClosestPointOnTriangleToPoint(
+                        TargetPosition,
+                        SourceTriangle.Positions[0],
+                        SourceTriangle.Positions[1],
+                        SourceTriangle.Positions[2]);
+                    const double DistanceSquared = FVector::DistSquared(TargetPosition, ClosestPoint);
+                    if (DistanceSquared < BestDistanceSquared)
+                    {
+                        BestDistanceSquared = DistanceSquared;
+                        BestClosestPoint = ClosestPoint;
+                        BestTriangle = &SourceTriangle;
+                    }
+                }
+                continue;
+            }
+
+            const double LeftDistance = SourceBVH.Nodes.IsValidIndex(Node.LeftChildIndex)
+                ? GetSquaredDistanceToRenderSurfaceBox(TargetPosition, SourceBVH.Nodes[Node.LeftChildIndex].Bounds)
+                : TNumericLimits<double>::Max();
+            const double RightDistance = SourceBVH.Nodes.IsValidIndex(Node.RightChildIndex)
+                ? GetSquaredDistanceToRenderSurfaceBox(TargetPosition, SourceBVH.Nodes[Node.RightChildIndex].Bounds)
+                : TNumericLimits<double>::Max();
+            if (LeftDistance < RightDistance)
+            {
+                if (RightDistance <= BestDistanceSquared)
+                {
+                    NodeStack.Push(Node.RightChildIndex);
+                }
+                if (LeftDistance <= BestDistanceSquared)
+                {
+                    NodeStack.Push(Node.LeftChildIndex);
+                }
+            }
+            else
+            {
+                if (LeftDistance <= BestDistanceSquared)
+                {
+                    NodeStack.Push(Node.LeftChildIndex);
+                }
+                if (RightDistance <= BestDistanceSquared)
+                {
+                    NodeStack.Push(Node.RightChildIndex);
+                }
+            }
+        }
+    };
+
+    Search(true);
+    if (BestTriangle == nullptr && bAllowCrossMaterialFallback)
+    {
+        Search(false);
+    }
+
+    if (BestTriangle != nullptr && OutBarycentric != nullptr)
+    {
+        ComputeBarycentric3D(
+            BestClosestPoint,
+            BestTriangle->Positions[0],
+            BestTriangle->Positions[1],
+            BestTriangle->Positions[2],
+            *OutBarycentric);
+    }
+    return BestTriangle;
+}
+
+bool BuildTransferredTrianglePartLookup(
+    const UWetClothingAsset& Asset,
+    const int32 LODIndex,
+    TMap<int32, FTrianglePartMetadata>& OutLookup,
+    TMap<int32, int32>& OutDefaultEntryByMaterial,
+    FString* OutErrorMessage)
+{
+    OutLookup.Reset();
+    OutDefaultEntryByMaterial.Reset();
+
+    USkeletalMesh* RuntimeMesh = Asset.GetRuntimeSkeletalMesh();
+    if (RuntimeMesh == nullptr)
+    {
+        SetGPUMapBakeError(OutErrorMessage, TEXT("No DWC Prepared Skeletal Mesh is available."));
+        return false;
+    }
+
+    TMap<int32, FTrianglePartMetadata> CanonicalLookup;
+    if (!BuildOriginalUVTrianglePartLookupForLOD(
+            Asset,
+            CanonicalWetPartLODIndex,
+            CanonicalLookup,
+            OutDefaultEntryByMaterial,
+            OutErrorMessage))
+    {
+        return false;
+    }
+
+    TArray<FRenderSurfaceTriangle> SourceTriangles;
+    if (!BuildRenderSurfaceTriangles(*RuntimeMesh, CanonicalWetPartLODIndex, SourceTriangles, OutErrorMessage))
+    {
+        return false;
+    }
+    const FRenderSurfaceBVH SourceBVH = BuildRenderSurfaceBVH(SourceTriangles);
+
+    TArray<FRenderSurfaceTriangle> TargetTriangles;
+    if (!BuildRenderSurfaceTriangles(*RuntimeMesh, LODIndex, TargetTriangles, OutErrorMessage))
+    {
+        return false;
+    }
+
+    for (const FRenderSurfaceTriangle& TargetTriangle : TargetTriangles)
+    {
+        if (!Asset.IsMaterialSlotWettable(TargetTriangle.MaterialSlotIndex))
+        {
+            continue;
+        }
+
+        const FVector TargetCentroid =
+            (TargetTriangle.Positions[0] + TargetTriangle.Positions[1] + TargetTriangle.Positions[2]) / 3.0;
+        const FRenderSurfaceTriangle* SourceTriangle = FindClosestRenderSurfaceTriangle(
+            SourceTriangles,
+            SourceBVH,
+            TargetCentroid,
+            TargetTriangle.MaterialSlotIndex,
+            false);
+        if (SourceTriangle == nullptr)
+        {
+            continue;
+        }
+
+        if (const FTrianglePartMetadata* PartMetadata = CanonicalLookup.Find(SourceTriangle->RenderTriangleID))
+        {
+            OutLookup.Add(TargetTriangle.RenderTriangleID, *PartMetadata);
+        }
+    }
+
+    if (OutLookup.IsEmpty())
+    {
+        SetGPUMapBakeError(OutErrorMessage, TEXT("No lower-LOD triangles could be mapped to LOD0 wet parts."));
+        return false;
+    }
+
+    SetGPUMapBakeError(OutErrorMessage, TEXT(""));
+    return true;
+}
+
+bool BuildTrianglePartLookup(
+    const UWetClothingAsset& Asset,
+    const int32 LODIndex,
+    TMap<int32, FTrianglePartMetadata>& OutLookup,
+    TMap<int32, int32>& OutDefaultEntryByMaterial,
+    FString* OutErrorMessage)
+{
+    return LODIndex == CanonicalWetPartLODIndex
+        ? BuildOriginalUVTrianglePartLookupForLOD(
+            Asset,
+            CanonicalWetPartLODIndex,
+            OutLookup,
+            OutDefaultEntryByMaterial,
+            OutErrorMessage)
+        : BuildTransferredTrianglePartLookup(
+            Asset,
+            LODIndex,
+            OutLookup,
+            OutDefaultEntryByMaterial,
+            OutErrorMessage);
 }
 
 class FGPUWetMapSignatureBuilder
@@ -662,7 +1219,7 @@ FString BuildRuntimeSignatureCacheKey(
     Builder.AddValue(DataUVMetadata.RenderVertexCount);
     Builder.AddValue(DataUVMetadata.UVChannelIndex);
 
-    const FDWCEditorUVTopologyData* OriginalUVTopology = Asset.FindOriginalUVTopologyForLOD(LODIndex);
+    const FDWCEditorUVTopologyData* OriginalUVTopology = Asset.FindOriginalUVTopologyForLOD(CanonicalWetPartLODIndex);
     Builder.AddValue(OriginalUVTopology != nullptr ? OriginalUVTopology->GeneratorVersion : 0);
     Builder.AddString(OriginalUVTopology != nullptr ? OriginalUVTopology->BuildSignature : FString());
 
@@ -802,19 +1359,20 @@ bool FWetGPUMapBakeBuilder::BuildLODRuntimeSignature(
         return false;
     }
 
-    const FDWCEditorUVTopologyData* OriginalUVTopology = Asset.FindOriginalUVTopologyForLOD(LODIndex);
+    const FDWCEditorUVTopologyData* OriginalUVTopology = Asset.FindOriginalUVTopologyForLOD(CanonicalWetPartLODIndex);
     const FString CurrentOriginalUVSignature = UWetClothingAsset::BuildMeshContentSignature(
         RuntimeMesh,
-        LODIndex,
+        CanonicalWetPartLODIndex,
         Asset.GetOriginalUVChannelIndex());
     if (OriginalUVTopology == nullptr ||
         !OriginalUVTopology->bIsValid ||
+        OriginalUVTopology->LODIndex != CanonicalWetPartLODIndex ||
         OriginalUVTopology->GeneratorVersion != DWCGeneratedDataVersion::OriginalUVTopology ||
         OriginalUVTopology->UVChannelIndex != Asset.GetOriginalUVChannelIndex() ||
         CurrentOriginalUVSignature.IsEmpty() ||
         OriginalUVTopology->BuildSignature != CurrentOriginalUVSignature)
     {
-        SetGPUMapBakeError(OutErrorMessage, FString::Printf(TEXT("LOD%d Original UV topology is missing or stale for the DWC Prepared Skeletal Mesh."), LODIndex));
+        SetGPUMapBakeError(OutErrorMessage, TEXT("LOD0 Original UV topology is missing or stale for the DWC Prepared Skeletal Mesh."));
         return false;
     }
 
@@ -1135,6 +1693,7 @@ static bool BuildLODInternal(
     const int32 Resolution = Asset.GetSetupSettings().GetGPUSimulationMapResolution();
     const int32 TexelCount = Resolution * Resolution;
     const int32 TriangleCapacity = IndexBuffer.Num() / 3;
+    const bool bAllowProjectedLODDataUVOverlap = LODIndex != CanonicalWetPartLODIndex;
 
     TMap<int32, FTrianglePartMetadata> TrianglePartLookup;
     TMap<int32, int32> DefaultEntryByMaterial;
@@ -1361,6 +1920,11 @@ static bool BuildLODInternal(
 
                         if (ExistingMinWeight > 0.0002f && NewMinWeight > 0.0002f)
                         {
+                            if (bAllowProjectedLODDataUVOverlap)
+                            {
+                                continue;
+                            }
+
                             SetGPUMapBakeError(
                                 OutErrorMessage,
                                 FString::Printf(
@@ -1730,6 +2294,7 @@ static bool BuildLODMapsOnly(
 
     const FSkeletalMeshLODRenderData& LODData = RenderData->LODRenderData[LODIndex];
     const int32 VertexCount = static_cast<int32>(LODData.GetNumVertices());
+    const bool bAllowProjectedLODDataUVOverlap = LODIndex != CanonicalWetPartLODIndex;
     TArray<int32> CoveredTexelCountByTriangle;
     CoveredTexelCountByTriangle.Init(0, RuntimeData.Triangles.Num());
     TArray<TArray<int32>> TouchedTexelsBySlot;
@@ -1858,6 +2423,11 @@ static bool BuildLODMapsOnly(
 
                     if (ExistingMinWeight > 0.0002f && NewMinWeight > 0.0002f)
                     {
+                        if (bAllowProjectedLODDataUVOverlap)
+                        {
+                            continue;
+                        }
+
                         SetGPUMapBakeError(
                             OutErrorMessage,
                             FString::Printf(

@@ -27,7 +27,7 @@ public:
     int32 FirstGeneratedLODIndex = 0;
 
     UPROPERTY(EditAnywhere, Category = "Mesh|LOD Mapping Range", meta = (DisplayName = "Last Mapped LOD", ClampMin = "0"))
-    int32 LastGeneratedLODIndex = 0;
+    int32 LastGeneratedLODIndex = MAX_int32;
 
 #if WITH_EDITOR
     virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
@@ -84,7 +84,7 @@ public:
     int32 FirstGeneratedLODIndex = 0;
 
     UPROPERTY(EditAnywhere, Category = "Mesh|LOD Mapping Range", meta = (DisplayName = "Last Mapped LOD", ClampMin = "0"))
-    int32 LastGeneratedLODIndex = 0;
+    int32 LastGeneratedLODIndex = MAX_int32;
 
     UPROPERTY(EditAnywhere, Category = "Simulation Data", meta = (DisplayName = "CPU Vertex Simulation Data"))
     bool bBuildCPUVertexSimulationData = true;

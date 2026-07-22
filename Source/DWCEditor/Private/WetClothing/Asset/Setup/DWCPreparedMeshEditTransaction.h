@@ -24,6 +24,7 @@ private:
     {
         int32 LODIndex = INDEX_NONE;
         FMeshDescription MeshDescription;
+        bool bHadMeshDescriptionBeforeCapture = false;
     };
 
     USkeletalMesh* Mesh = nullptr;

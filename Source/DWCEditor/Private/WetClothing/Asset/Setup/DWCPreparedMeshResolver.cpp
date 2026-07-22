@@ -9,6 +9,7 @@
 #include "Misc/PackageName.h"
 #include "Modules/ModuleManager.h"
 #include "ObjectTools.h"
+#include "UObject/UObjectIterator.h"
 
 namespace DWCPreparedMeshResolverPrivate
 {
@@ -17,6 +18,36 @@ namespace DWCPreparedMeshResolverPrivate
         FDWCPreparedMeshResolveResult Result;
         Result.ErrorMessage = Message;
         return Result;
+    }
+
+    bool DeleteExistingGeneratedMesh(UWetClothingAsset& Asset, USkeletalMesh* ExistingMesh)
+    {
+        if (ExistingMesh == nullptr)
+        {
+            return false;
+        }
+
+        TArray<UObject*> ObjectsToReplace;
+        ObjectsToReplace.Add(ExistingMesh);
+
+        TSet<UObject*> ObjectsToReplaceWithin;
+        ObjectsToReplaceWithin.Add(&Asset);
+
+        UPackage* TransientPackage = GetTransientPackage();
+        for (TObjectIterator<UObject> It; It; ++It)
+        {
+            UObject* Object = *It;
+            if (Object != nullptr && Object->GetOutermost() == TransientPackage)
+            {
+                ObjectsToReplaceWithin.Add(Object);
+            }
+        }
+
+        ObjectTools::ForceReplaceReferences(nullptr, ObjectsToReplace, ObjectsToReplaceWithin);
+
+        TArray<UObject*> ObjectsToDelete;
+        ObjectsToDelete.Add(ExistingMesh);
+        return ObjectTools::DeleteObjects(ObjectsToDelete, false) > 0;
     }
 }
 
@@ -58,13 +89,6 @@ FDWCPreparedMeshResolveResult FDWCPreparedMeshResolver::Resolve(
 
     if (USkeletalMesh* ExistingMesh = LoadObject<USkeletalMesh>(nullptr, *TargetObjectPath))
     {
-        if (!bForceNewAsset && ExistingMesh == Asset.GetDWCSkeletalMesh())
-        {
-            FDWCPreparedMeshResolveResult Result;
-            Result.Mesh = ExistingMesh;
-            return Result;
-        }
-
         const FText Warning = FText::FromString(FString::Printf(
             TEXT("A Skeletal Mesh already exists at the deterministic DWC output path:\n\n%s\n\nReplacing it will permanently delete that asset before creating a new DWC mesh copy. Continue?"),
             *TargetObjectPath));
@@ -73,7 +97,7 @@ FDWCPreparedMeshResolveResult FDWCPreparedMeshResolver::Resolve(
             return Failure(TEXT("DWC Skeletal Mesh creation was cancelled because the target path is occupied."));
         }
 
-        if (!ObjectTools::DeleteSingleObject(ExistingMesh, false))
+        if (!DeleteExistingGeneratedMesh(Asset, ExistingMesh))
         {
             return Failure(TEXT("Failed to remove the existing asset at the DWC Skeletal Mesh output path."));
         }

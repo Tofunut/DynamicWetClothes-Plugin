@@ -418,7 +418,27 @@ bool FWetMeshReceiverInitializer::InitializeReceiver(
         LODData->GetNumVertices());
     Receiver.SimulationState->MarkAllWetVertexColorsDirty();
 
-    if (!IsReceiverInitializerGPUWetnessMode(Context.SimulationMode))
+    const bool bIsGPUWetnessMode = IsReceiverInitializerGPUWetnessMode(Context.SimulationMode);
+    const bool bLODVertexColorTransferReady =
+        Context.LODVertexColorTransferCoordinator != nullptr &&
+        Context.LODVertexColorTransferCoordinator->InitializeReceiver(
+            Receiver,
+            *RuntimeDataSubsystem,
+            RuntimeLODIndex);
+    if (!bLODVertexColorTransferReady && !bIsGPUWetnessMode)
+    {
+        return false;
+    }
+    if (!bLODVertexColorTransferReady)
+    {
+        UE_LOG(
+            LogDWC,
+            Warning,
+            TEXT("DynamicWetClothesComponent: GPU Wet Part debug colors cannot be transferred to render LODs for WCA '%s'. GPU wetness simulation will continue."),
+            *GetNameSafe(Receiver.WetClothingAsset.Get()));
+    }
+
+    if (!bIsGPUWetnessMode)
     {
         if (!Receiver.SharedRuntimeData->bHasNeighborGraph)
         {
@@ -427,15 +447,6 @@ bool FWetMeshReceiverInitializer::InitializeReceiver(
                 Error,
                 TEXT("DynamicWetClothesComponent: CPU simulation requires a valid shared neighbor graph for WCA '%s'. Save the WCA to rebuild precomputed data."),
                 *GetNameSafe(Receiver.WetClothingAsset.Get()));
-            return false;
-        }
-
-        if (Context.LODVertexColorTransferCoordinator == nullptr ||
-            !Context.LODVertexColorTransferCoordinator->InitializeReceiver(
-                Receiver,
-                *RuntimeDataSubsystem,
-                RuntimeLODIndex))
-        {
             return false;
         }
 

@@ -119,7 +119,7 @@ struct DWC_API FDWCWetClothingAssetSetupSettings
     int32 FirstGeneratedLODIndex = 0;
 
     UPROPERTY(EditAnywhere, Category = "Mesh|LOD Mapping Range", meta = (DisplayName = "Last Mapped LOD", ClampMin = "0"))
-    int32 LastGeneratedLODIndex = 0;
+    int32 LastGeneratedLODIndex = MAX_int32;
 
     /** Render LOD used by CPU/GPU simulation runtime data. */
     UPROPERTY(VisibleAnywhere, Category = "Mesh")

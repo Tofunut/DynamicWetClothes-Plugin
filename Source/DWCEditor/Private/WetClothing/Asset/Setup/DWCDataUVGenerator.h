@@ -49,4 +49,12 @@ public:
         int32 PreferredUVChannelIndex,
         bool bAllowOverwriteExistingChannel = false,
         int32 TargetMaterialSlotIndex = INDEX_NONE);
+
+    static FDWCDataUVGenerationResult TransferFromSourceLOD(
+        USkeletalMesh* SkeletalMesh,
+        int32 SourceLODIndex,
+        int32 TargetLODIndex,
+        int32 DataUVChannelIndex,
+        bool bAllowOverwriteExistingChannel = true,
+        int32 TargetMaterialSlotIndex = INDEX_NONE);
 };

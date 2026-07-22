@@ -1,6 +1,8 @@
 #include "DWCPreparedMeshEditTransaction.h"
 
 #include "Engine/SkeletalMesh.h"
+#include "Rendering/SkeletalMeshLODModel.h"
+#include "Rendering/SkeletalMeshModel.h"
 #include "Rendering/SkeletalMeshRenderData.h"
 
 FDWCPreparedMeshEditTransaction::FDWCPreparedMeshEditTransaction(USkeletalMesh* InMesh)
@@ -18,7 +20,6 @@ FDWCPreparedMeshEditTransaction::~FDWCPreparedMeshEditTransaction()
 
 bool FDWCPreparedMeshEditTransaction::CaptureEditableLOD(const int32 LODIndex, FString* OutErrorMessage)
 {
-    Backups.Reset();
     bCommitted = false;
     bRolledBack = false;
 
@@ -29,20 +30,48 @@ bool FDWCPreparedMeshEditTransaction::CaptureEditableLOD(const int32 LODIndex, F
     }
 
     FMeshDescription* MeshDescription = Mesh->GetMeshDescription(LODIndex);
+    const bool bHadMeshDescriptionBeforeCapture = MeshDescription != nullptr;
     if (MeshDescription == nullptr)
     {
-        if (OutErrorMessage)
+        const FSkeletalMeshModel* ImportedModel = Mesh->GetImportedModel();
+        if (ImportedModel != nullptr && ImportedModel->LODModels.IsValidIndex(LODIndex))
         {
-            *OutErrorMessage = FString::Printf(
-                TEXT("LOD%d does not expose editable MeshDescription data."),
-                LODIndex);
+            FMeshDescription RecoveredMeshDescription;
+            ImportedModel->LODModels[LODIndex].GetMeshDescription(Mesh, LODIndex, RecoveredMeshDescription);
+            if (!RecoveredMeshDescription.IsEmpty())
+            {
+                MeshDescription = Mesh->CreateMeshDescription(LODIndex, MoveTemp(RecoveredMeshDescription));
+                Mesh->CommitMeshDescription(LODIndex);
+                MeshDescription = Mesh->GetMeshDescription(LODIndex);
+            }
         }
-        return false;
+
+        if (MeshDescription == nullptr)
+        {
+            if (OutErrorMessage)
+            {
+                *OutErrorMessage = FString::Printf(
+                    TEXT("LOD%d does not expose editable MeshDescription data, and DWC could not recover one from the skeletal mesh LOD model."),
+                    LODIndex);
+            }
+            return false;
+        }
+    }
+
+    if (Backups.ContainsByPredicate(
+            [LODIndex](const FLODBackup& Existing)
+            {
+                return Existing.LODIndex == LODIndex;
+            }))
+    {
+        if (OutErrorMessage) OutErrorMessage->Reset();
+        return true;
     }
 
     FLODBackup& Backup = Backups.AddDefaulted_GetRef();
     Backup.LODIndex = LODIndex;
     Backup.MeshDescription = *MeshDescription;
+    Backup.bHadMeshDescriptionBeforeCapture = bHadMeshDescriptionBeforeCapture;
 
     if (OutErrorMessage) OutErrorMessage->Reset();
     return true;
@@ -66,6 +95,12 @@ void FDWCPreparedMeshEditTransaction::Rollback()
     for (const FLODBackup& Backup : Backups)
     {
         FMeshDescription* MeshDescription = Mesh->GetMeshDescription(Backup.LODIndex);
+        if (!Backup.bHadMeshDescriptionBeforeCapture)
+        {
+            Mesh->ClearMeshDescriptionAndBulkData(Backup.LODIndex);
+            continue;
+        }
+
         if (MeshDescription == nullptr)
         {
             continue;

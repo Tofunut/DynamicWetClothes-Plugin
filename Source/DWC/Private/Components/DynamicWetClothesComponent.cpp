@@ -968,9 +968,7 @@ void UDynamicWetClothesComponent::UpdateWetness()
     {
         FlushPendingWetContacts();
 
-        const float DeltaSeconds = GetWorld()
-            ? FMath::Max(KINDA_SMALL_NUMBER, GetWorld()->GetDeltaSeconds())
-            : FMath::Max(KINDA_SMALL_NUMBER, WetnessSettings.WetnessUpdateInterval);
+        const float DeltaSeconds = FMath::Max(KINDA_SMALL_NUMBER, WetnessSettings.WetnessUpdateInterval);
         for (const TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver : Receivers)
         {
             if (!Receiver.IsValid() || !Receiver->GPUBackend.IsValid())
@@ -1087,6 +1085,10 @@ void UDynamicWetClothesComponent::UpdateWetRendering()
             if (RenderArgs.bShowWetPartDebugColors && Receiver->SimulationState->DirtyWetVertexIndices.Num() > 0)
             {
                 Receiver->RenderStage->ApplyWetnessToMaterial(RenderArgs);
+                if (bHadDirtyWetVertexColors)
+                {
+                    RequestLODVertexColorTransferTask(*Receiver);
+                }
             }
         }
         else

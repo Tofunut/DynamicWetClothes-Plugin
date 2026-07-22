@@ -281,6 +281,8 @@ void UWetClothingAssetCreationSettings::PostEditChangeProperty(FPropertyChangedE
     if (PropertyName == GET_MEMBER_NAME_CHECKED(UWetClothingAssetCreationSettings, SourceSkeletalMesh))
     {
         PreferredDWCDataUVChannelIndex = GetDefaultDWCDataUVChannelIndex(SourceSkeletalMesh, OriginalUVChannelIndex);
+        FirstGeneratedLODIndex = 0;
+        LastGeneratedLODIndex = FMath::Max(0, GetSkeletalMeshLODCount(SourceSkeletalMesh) - 1);
     }
     OriginalUVChannelIndex = FMath::Clamp(OriginalUVChannelIndex, 0, 7);
     PreferredDWCDataUVChannelIndex = FMath::Clamp(PreferredDWCDataUVChannelIndex, 0, 7);

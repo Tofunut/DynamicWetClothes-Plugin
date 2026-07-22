@@ -80,6 +80,51 @@ namespace
             LastAvailableLODIndex);
     }
 
+    bool ResolveSetupLODRangeForMesh(
+        const USkeletalMesh* Mesh,
+        const FDWCWetClothingAssetSetupSettings& Settings,
+        int32& OutFirstLODIndex,
+        int32& OutLastLODIndex,
+        FString* OutErrorMessage = nullptr)
+    {
+        const int32 LODCount = GetLODCount(Mesh);
+        if (LODCount <= 0)
+        {
+            DWC::Error::SetMessage(OutErrorMessage, TEXT("The DWC Prepared Skeletal Mesh has no render LOD data."));
+            OutFirstLODIndex = 0;
+            OutLastLODIndex = 0;
+            return false;
+        }
+
+        const int32 LastAvailableLODIndex = LODCount - 1;
+        OutFirstLODIndex = FMath::Clamp(Settings.FirstGeneratedLODIndex, 0, LastAvailableLODIndex);
+        OutLastLODIndex = FMath::Clamp(Settings.LastGeneratedLODIndex, OutFirstLODIndex, LastAvailableLODIndex);
+        DWC::Error::SetMessage(OutErrorMessage, TEXT(""));
+        return true;
+    }
+
+    bool DoesMappedLODRangeHavePayload(
+        const USkeletalMesh* Mesh,
+        const FDWCWetClothingAssetSetupSettings& Settings,
+        TFunctionRef<bool(int32)> Predicate)
+    {
+        int32 FirstLODIndex = 0;
+        int32 LastLODIndex = 0;
+        if (!ResolveSetupLODRangeForMesh(Mesh, Settings, FirstLODIndex, LastLODIndex))
+        {
+            return false;
+        }
+
+        for (int32 LODIndex = FirstLODIndex; LODIndex <= LastLODIndex; ++LODIndex)
+        {
+            if (!Predicate(LODIndex))
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
     bool IsWettableMaterialSlot(
         const FWetClothingEditableWetPartData& WetPartData,
         const int32 MaterialSlotIndex)
@@ -926,10 +971,10 @@ const FWetClothingPrecomputedSimulationData& UWetClothingAsset::GetPrecomputedSi
     return Derived.Bulk.NeighborRuntimeData;
 }
 
-const FDWCGPULODBakeData& UWetClothingAsset::GetGPUWetMapRuntimeData(int32 /*LODIndex*/) const
+const FDWCGPULODBakeData& UWetClothingAsset::GetGPUWetMapRuntimeData(const int32 LODIndex) const
 {
     EnsureRuntimeBulkDataLoaded();
-    if (const FDWCGPULODBakeData* Data = FindGPULODData(Derived.Bulk.GPURuntimeData, RuntimeSimulationLODIndex))
+    if (const FDWCGPULODBakeData* Data = FindGPULODData(Derived.Bulk.GPURuntimeData, LODIndex))
     {
         return *Data;
     }
@@ -1151,16 +1196,21 @@ void UWetClothingAsset::PostLoad()
     }
     else
     {
-        const FDWCDataUVLODMetadata* DataUVMetadata = FindDataUVMetadataForLOD(RuntimeSimulationLODIndex);
-        const bool bMetadataMatchesReferences =
-            DataUVMetadata != nullptr &&
-            DataUVMetadata->bIsValid &&
-            Metadata.DWCSkeletalMesh != nullptr &&
-            Metadata.DWCDataUVChannelIndex != INDEX_NONE &&
-            DataUVMetadata->UVChannelIndex == Metadata.DWCDataUVChannelIndex &&
-            DataUVMetadata->RenderVertexCount > 0 &&
-            !DataUVMetadata->MeshInputSignature.IsEmpty() &&
-            !DataUVMetadata->DataUVOutputSignature.IsEmpty();
+        const bool bMetadataMatchesReferences = DoesMappedLODRangeHavePayload(
+            Metadata.DWCSkeletalMesh.Get(),
+            Metadata.SetupSettings,
+            [this](const int32 LODIndex)
+            {
+                const FDWCDataUVLODMetadata* DataUVMetadata = FindDataUVMetadataForLOD(LODIndex);
+                return DataUVMetadata != nullptr &&
+                       DataUVMetadata->bIsValid &&
+                       Metadata.DWCSkeletalMesh != nullptr &&
+                       Metadata.DWCDataUVChannelIndex != INDEX_NONE &&
+                       DataUVMetadata->UVChannelIndex == Metadata.DWCDataUVChannelIndex &&
+                       DataUVMetadata->RenderVertexCount > 0 &&
+                       !DataUVMetadata->MeshInputSignature.IsEmpty() &&
+                       !DataUVMetadata->DataUVOutputSignature.IsEmpty();
+            });
         Derived.Inline.BakeState.GeneratedDataUV = bMetadataMatchesReferences
                                          ? EDWCBakeStatus::Valid
                                          : EDWCBakeStatus::OutOfDate;
@@ -1989,51 +2039,67 @@ void UWetClothingAsset::RefreshBakeStateInternal(const bool bRunDeepValidation)
     }
 
     USkeletalMesh* RuntimeMesh = GetRuntimeSkeletalMesh();
-    const int32 RuntimeLODIndex = GetSimulationLODIndex();
-
-    const FDWCDataUVLODMetadata* DataUVMetadata = FindDataUVMetadataForLOD(RuntimeLODIndex);
-    bool bDataUVMetadataValid =
-        DataUVMetadata != nullptr && DataUVMetadata->bIsValid &&
-        DataUVMetadata->UVChannelIndex == Metadata.DWCDataUVChannelIndex &&
-        DataUVMetadata->GeneratorVersion == DWCGeneratedDataVersion::DataUV;
-    if (bDataUVMetadataValid && bRunDeepValidation)
-    {
-        const FString CurrentOriginalUVSignature = BuildMeshContentSignature(
-            RuntimeMesh, RuntimeLODIndex, Metadata.OriginalUVChannelIndex);
-        const FString CurrentDataUVSignature = BuildMeshContentSignature(
-            RuntimeMesh, RuntimeLODIndex, Metadata.DWCDataUVChannelIndex);
-        bDataUVMetadataValid =
-            !CurrentOriginalUVSignature.IsEmpty() &&
-            !CurrentDataUVSignature.IsEmpty() &&
-            DataUVMetadata->MeshInputSignature == CurrentOriginalUVSignature &&
-            DataUVMetadata->DataUVOutputSignature == CurrentDataUVSignature;
-    }
+    const bool bDataUVMetadataValid = DoesMappedLODRangeHavePayload(
+        RuntimeMesh,
+        Metadata.SetupSettings,
+        [this, RuntimeMesh, bRunDeepValidation](const int32 LODIndex)
+        {
+            const FDWCDataUVLODMetadata* DataUVMetadata = FindDataUVMetadataForLOD(LODIndex);
+            bool bCurrent =
+                DataUVMetadata != nullptr && DataUVMetadata->bIsValid &&
+                DataUVMetadata->UVChannelIndex == Metadata.DWCDataUVChannelIndex &&
+                DataUVMetadata->GeneratorVersion == DWCGeneratedDataVersion::DataUV;
+            if (bCurrent && bRunDeepValidation)
+            {
+                const FString CurrentOriginalUVSignature = BuildMeshContentSignature(
+                    RuntimeMesh, LODIndex, Metadata.OriginalUVChannelIndex);
+                const FString CurrentDataUVSignature = BuildMeshContentSignature(
+                    RuntimeMesh, LODIndex, Metadata.DWCDataUVChannelIndex);
+                bCurrent =
+                    !CurrentOriginalUVSignature.IsEmpty() &&
+                    !CurrentDataUVSignature.IsEmpty() &&
+                    DataUVMetadata->MeshInputSignature == CurrentOriginalUVSignature &&
+                    DataUVMetadata->DataUVOutputSignature == CurrentDataUVSignature;
+            }
+            return bCurrent;
+        });
     Derived.Inline.BakeState.GeneratedDataUV = bDataUVMetadataValid
                                      ? EDWCBakeStatus::Valid
-                                     : (DataUVMetadata != nullptr ? EDWCBakeStatus::OutOfDate : EDWCBakeStatus::Required);
+                                     : (!Derived.Inline.DataUVMetadata.IsEmpty() ? EDWCBakeStatus::OutOfDate : EDWCBakeStatus::Required);
 
-    const FDWCEditorUVTopologyData* Topology = FindOriginalUVTopologyForLOD(RuntimeLODIndex);
-    bool bTopologyValid =
-        Topology != nullptr && Topology->bIsValid &&
-        Topology->LODIndex == RuntimeLODIndex &&
-        Topology->UVChannelIndex == Metadata.OriginalUVChannelIndex &&
-        Topology->GeneratorVersion == DWCGeneratedDataVersion::OriginalUVTopology;
-    if (bTopologyValid && bRunDeepValidation)
+    const int32 CanonicalTopologyLODIndex = RuntimeSimulationLODIndex;
+    bool bTopologyValid = false;
+    if (RuntimeMesh != nullptr && GetLODCount(RuntimeMesh) > CanonicalTopologyLODIndex)
     {
-        const FString CurrentTopologySignature = BuildMeshContentSignature(
-            RuntimeMesh, RuntimeLODIndex, Metadata.OriginalUVChannelIndex);
-        bTopologyValid = !CurrentTopologySignature.IsEmpty() && Topology->BuildSignature == CurrentTopologySignature;
+        const FDWCEditorUVTopologyData* Topology = FindOriginalUVTopologyForLOD(CanonicalTopologyLODIndex);
+        bTopologyValid =
+            Topology != nullptr && Topology->bIsValid &&
+            Topology->LODIndex == CanonicalTopologyLODIndex &&
+            Topology->UVChannelIndex == Metadata.OriginalUVChannelIndex &&
+            Topology->GeneratorVersion == DWCGeneratedDataVersion::OriginalUVTopology;
+        if (bTopologyValid && bRunDeepValidation)
+        {
+            const FString CurrentTopologySignature = BuildMeshContentSignature(
+                RuntimeMesh, CanonicalTopologyLODIndex, Metadata.OriginalUVChannelIndex);
+            bTopologyValid = !CurrentTopologySignature.IsEmpty() && Topology->BuildSignature == CurrentTopologySignature;
+        }
     }
     Derived.Inline.BakeState.OriginalUVTopology = bTopologyValid
                                        ? EDWCBakeStatus::Valid
-                                       : (Topology != nullptr ? EDWCBakeStatus::OutOfDate : EDWCBakeStatus::Required);
+                                       : (!Derived.Inline.OriginalUVTopologies.IsEmpty() ? EDWCBakeStatus::OutOfDate : EDWCBakeStatus::Required);
 
     const bool bCPUDataValid = bRunDeepValidation
                                    ? IsPrecomputedSimulationDataValidForMesh(RuntimeMesh)
                                    : IsPrecomputedSimulationDataMetadataValidForMesh(RuntimeMesh);
-    const bool bGPUDataValid = bRunDeepValidation
-                                   ? IsGPURuntimeDataValidForMesh(RuntimeMesh, RuntimeLODIndex)
-                                   : IsGPURuntimeDataMetadataValidForMesh(RuntimeMesh, RuntimeLODIndex);
+    const bool bGPUDataValid = DoesMappedLODRangeHavePayload(
+        RuntimeMesh,
+        Metadata.SetupSettings,
+        [this, RuntimeMesh, bRunDeepValidation](const int32 LODIndex)
+        {
+            return bRunDeepValidation
+                ? IsGPURuntimeDataValidForMesh(RuntimeMesh, LODIndex)
+                : IsGPURuntimeDataMetadataValidForMesh(RuntimeMesh, LODIndex);
+        });
     const EDWCBakeStatus NewCPUStatus = Metadata.SetupSettings.bBuildCPUVertexSimulationData
                                             ? (bCPUDataValid
                                                    ? EDWCBakeStatus::Valid
@@ -2050,9 +2116,15 @@ void UWetClothingAsset::RefreshBakeStateInternal(const bool bRunDeepValidation)
                                             : EDWCBakeStatus::Disabled;
     Derived.Inline.BakeState.CPURuntimeData = PreserveFailureStatus(PreviousCPUStatus, NewCPUStatus);
     Derived.Inline.BakeState.GPURuntimeData = PreserveFailureStatus(PreviousGPUStatus, NewGPUStatus);
-    const bool bGPUMapDataValid = bRunDeepValidation
-                                      ? IsGPUWetMapDataValidForMesh(RuntimeMesh, RuntimeLODIndex)
-                                      : IsGPUWetMapDataMetadataValidForMesh(RuntimeMesh, RuntimeLODIndex);
+    const bool bGPUMapDataValid = DoesMappedLODRangeHavePayload(
+        RuntimeMesh,
+        Metadata.SetupSettings,
+        [this, RuntimeMesh, bRunDeepValidation](const int32 LODIndex)
+        {
+            return bRunDeepValidation
+                ? IsGPUWetMapDataValidForMesh(RuntimeMesh, LODIndex)
+                : IsGPUWetMapDataMetadataValidForMesh(RuntimeMesh, LODIndex);
+        });
     const EDWCBakeStatus NewGPUMapStatus = Metadata.SetupSettings.bBuildGPUWetnessMapSimulationData
                                                ? (bGPUMapDataValid
                                                       ? EDWCBakeStatus::Valid
@@ -2100,31 +2172,45 @@ bool UWetClothingAsset::RebuildGPURuntimeData(FString* OutErrorMessage)
         Authored.PartData.EditableWetPartData,
         Derived.Inline.ResolvedWetnessProfileParameters);
 
-    const int32 RuntimeLODIndex = GetSimulationLODIndex();
-    FScopedSlowTask SlowTask(
-        6.0f,
-        FText::FromString(FString::Printf(TEXT("Rebuilding DWC GPU runtime data for LOD%d..."), RuntimeLODIndex)));
-    SlowTask.MakeDialog(false);
-    SlowTask.EnterProgressFrame(
-        0.5f,
-        NSLOCTEXT("WetClothingAsset", "CheckGPUDataUVForRuntime", "Checking generated DWC Data UV before GPU runtime rebuild..."));
-
-    if (!HasValidDataUVForLOD(RuntimeLODIndex))
+    USkeletalMesh* RuntimeMesh = GetRuntimeSkeletalMesh();
+    int32 FirstLODIndex = 0;
+    int32 LastLODIndex = 0;
+    if (!ResolveSetupLODRangeForMesh(RuntimeMesh, Metadata.SetupSettings, FirstLODIndex, LastLODIndex, OutErrorMessage))
     {
-        DWC::Error::SetMessage(OutErrorMessage, TEXT("Generate valid DWC Data UV payloads before rebuilding GPU runtime data."));
         return false;
     }
 
-    const bool bSucceeded = FWetGPUMapBakeBuilder::BuildRuntimeLOD(*this, RuntimeLODIndex, OutErrorMessage, &SlowTask);
-    SlowTask.EnterProgressFrame(
-        0.5f,
-        NSLOCTEXT("WetClothingAsset", "FinalizeGPURuntimeLOD", "Finalizing GPU runtime triangles and vertex incident tables..."));
-    if (bSucceeded)
+    FScopedSlowTask SlowTask(
+        6.0f * FMath::Max(1, LastLODIndex - FirstLODIndex + 1),
+        FText::FromString(FString::Printf(TEXT("Rebuilding DWC GPU runtime data for LOD%d-LOD%d..."), FirstLODIndex, LastLODIndex)));
+    SlowTask.MakeDialog(false);
+
+    for (int32 LODIndex = FirstLODIndex; LODIndex <= LastLODIndex; ++LODIndex)
     {
-        MarkBakeOutputGenerated(DWCBakeOutput::GPURuntimeData);
-        MarkRuntimeBulkDataDirty(DWCBakeOutput::GPURuntimeData);
+        SlowTask.EnterProgressFrame(
+            0.5f,
+            FText::FromString(FString::Printf(TEXT("Checking generated DWC Data UV for LOD%d before GPU runtime rebuild..."), LODIndex)));
+
+        if (!HasValidDataUVForLOD(LODIndex))
+        {
+            DWC::Error::SetMessage(OutErrorMessage, FString::Printf(TEXT("Generate valid DWC Data UV payloads for LOD%d before rebuilding GPU runtime data."), LODIndex));
+            return false;
+        }
+
+        if (!FWetGPUMapBakeBuilder::BuildRuntimeLOD(*this, LODIndex, OutErrorMessage, &SlowTask))
+        {
+            return false;
+        }
+
+        SlowTask.EnterProgressFrame(
+            0.5f,
+            FText::FromString(FString::Printf(TEXT("Finalizing LOD%d GPU runtime triangles and vertex incident tables..."), LODIndex)));
     }
-    return bSucceeded;
+
+    MarkBakeOutputGenerated(DWCBakeOutput::GPURuntimeData);
+    MarkRuntimeBulkDataDirty(DWCBakeOutput::GPURuntimeData);
+    DWC::Error::SetMessage(OutErrorMessage, TEXT(""));
+    return true;
 }
 
 bool UWetClothingAsset::BakeGPUWetnessMaps(FString* OutErrorMessage)
@@ -2137,32 +2223,43 @@ bool UWetClothingAsset::BakeGPUWetnessMaps(FString* OutErrorMessage)
         return true;
     }
 
-    const int32 RuntimeLODIndex = GetSimulationLODIndex();
-    FScopedSlowTask SlowTask(
-        7.25f,
-        FText::FromString(FString::Printf(TEXT("Baking DWC GPU simulation maps for LOD%d..."), RuntimeLODIndex)));
-    SlowTask.MakeDialog(false);
-    SlowTask.EnterProgressFrame(
-        0.5f,
-        NSLOCTEXT("WetClothingAsset", "BakeGPUWetnessMapsBuild", "Preparing GPU simulation map bake inputs..."));
+    USkeletalMesh* RuntimeMesh = GetRuntimeSkeletalMesh();
+    int32 FirstLODIndex = 0;
+    int32 LastLODIndex = 0;
+    if (!ResolveSetupLODRangeForMesh(RuntimeMesh, Metadata.SetupSettings, FirstLODIndex, LastLODIndex, OutErrorMessage))
+    {
+        return false;
+    }
 
-    const bool bSucceeded = FWetGPUMapBakeBuilder::BuildLODMaps(*this, RuntimeLODIndex, OutErrorMessage, &SlowTask);
-    SlowTask.EnterProgressFrame(
-        0.5f,
-        NSLOCTEXT("WetClothingAsset", "BakeGPUWetnessMapsStore", "Saving GPU simulation map data into the WCA runtime payload..."));
-    if (bSucceeded)
+    FScopedSlowTask SlowTask(
+        7.25f * FMath::Max(1, LastLODIndex - FirstLODIndex + 1),
+        FText::FromString(FString::Printf(TEXT("Baking DWC GPU simulation maps for LOD%d-LOD%d..."), FirstLODIndex, LastLODIndex)));
+    SlowTask.MakeDialog(false);
+
+    for (int32 LODIndex = FirstLODIndex; LODIndex <= LastLODIndex; ++LODIndex)
     {
-        Derived.Inline.BakeState.GPUMaps = EDWCBakeStatus::Valid;
-        Derived.Inline.BakeState.LastFailure.Reset();
-        MarkBakeOutputGenerated(DWCBakeOutput::GPUMaps);
-        MarkRuntimeBulkDataDirty(DWCBakeOutput::GPUMaps);
+        SlowTask.EnterProgressFrame(
+            0.5f,
+            FText::FromString(FString::Printf(TEXT("Preparing LOD%d GPU simulation map bake inputs..."), LODIndex)));
+
+        if (!FWetGPUMapBakeBuilder::BuildLODMaps(*this, LODIndex, OutErrorMessage, &SlowTask))
+        {
+            Derived.Inline.BakeState.GPUMaps = EDWCBakeStatus::Failed;
+            Derived.Inline.BakeState.LastFailure = OutErrorMessage != nullptr ? *OutErrorMessage : FString();
+            return false;
+        }
+
+        SlowTask.EnterProgressFrame(
+            0.5f,
+            FText::FromString(FString::Printf(TEXT("Saving LOD%d GPU simulation map data into the WCA runtime payload..."), LODIndex)));
     }
-    else
-    {
-        Derived.Inline.BakeState.GPUMaps = EDWCBakeStatus::Failed;
-        Derived.Inline.BakeState.LastFailure = OutErrorMessage != nullptr ? *OutErrorMessage : FString();
-    }
-    return bSucceeded;
+
+    Derived.Inline.BakeState.GPUMaps = EDWCBakeStatus::Valid;
+    Derived.Inline.BakeState.LastFailure.Reset();
+    MarkBakeOutputGenerated(DWCBakeOutput::GPUMaps);
+    MarkRuntimeBulkDataDirty(DWCBakeOutput::GPUMaps);
+    DWC::Error::SetMessage(OutErrorMessage, TEXT(""));
+    return true;
 }
 
 bool UWetClothingAsset::RebuildRuntimeDataForSave(FString* OutErrorMessage)
@@ -2213,6 +2310,9 @@ bool UWetClothingAsset::RebuildRuntimeDataForSave(FString* OutErrorMessage)
     bool bCPUSucceeded = true;
     bool bGPUSucceeded = true;
     const int32 RuntimeLODIndex = GetSimulationLODIndex();
+    int32 FirstMappedLODIndex = RuntimeLODIndex;
+    int32 LastMappedLODIndex = RuntimeLODIndex;
+    ResolveSetupLODRangeForMesh(RuntimeMesh, Metadata.SetupSettings, FirstMappedLODIndex, LastMappedLODIndex);
 
     if (!HasAnyWettableMaterialSlot())
     {
@@ -2317,13 +2417,21 @@ bool UWetClothingAsset::RebuildRuntimeDataForSave(FString* OutErrorMessage)
 
     if (Metadata.SetupSettings.bBuildGPUWetnessMapSimulationData)
     {
-        if (IsGPURuntimeDataValidForMesh(RuntimeMesh, RuntimeLODIndex))
+        const bool bMappedGPUDataValid = DoesMappedLODRangeHavePayload(
+            RuntimeMesh,
+            Metadata.SetupSettings,
+            [this, RuntimeMesh](const int32 LODIndex)
+            {
+                return IsGPURuntimeDataValidForMesh(RuntimeMesh, LODIndex);
+            });
+        if (bMappedGPUDataValid)
         {
             SlowTask.EnterProgressFrame(
                 1.5f,
                 FText::FromString(FString::Printf(
-                    TEXT("GPU wetness-map runtime data for LOD%d is already current..."),
-                    RuntimeLODIndex)));
+                    TEXT("GPU wetness-map runtime data for LOD%d-LOD%d is already current..."),
+                    FirstMappedLODIndex,
+                    LastMappedLODIndex)));
             Derived.Inline.BakeState.GPURuntimeData = EDWCBakeStatus::Valid;
             MarkBakeOutputGenerated(DWCBakeOutput::GPURuntimeData);
         }
@@ -2336,8 +2444,9 @@ bool UWetClothingAsset::RebuildRuntimeDataForSave(FString* OutErrorMessage)
             SlowTask.EnterProgressFrame(
                 1.5f,
                 FText::FromString(FString::Printf(
-                    TEXT("Building GPU wetness-map runtime data for LOD%d..."),
-                    RuntimeLODIndex)));
+                    TEXT("Building GPU wetness-map runtime data for LOD%d-LOD%d..."),
+                    FirstMappedLODIndex,
+                    LastMappedLODIndex)));
             FString GPUError;
             bGPUSucceeded = RebuildGPURuntimeData(&GPUError);
             Derived.Inline.BakeState.GPURuntimeData = bGPUSucceeded ? EDWCBakeStatus::Valid : EDWCBakeStatus::Failed;
@@ -2405,9 +2514,16 @@ bool UWetClothingAsset::CanPrepareRuntimeDataForEditorSave(FString* OutSkipReaso
         (Metadata.SetupSettings.bBuildGPUWetnessMapSimulationData || Authored.SurfaceWaterSettings.bEnabled);
     if (bRequiresDWCDataUV)
     {
-        if (!HasValidDataUVForLOD(GetSimulationLODIndex()))
+        const bool bHasMappedDataUV = DoesMappedLODRangeHavePayload(
+            GetRuntimeSkeletalMesh(),
+            Metadata.SetupSettings,
+            [this](const int32 LODIndex)
+            {
+                return HasValidDataUVForLOD(LODIndex);
+            });
+        if (!bHasMappedDataUV)
         {
-            DWC::Error::SetMessage(OutSkipReason, TEXT("DWC Data UV has not been generated yet."));
+            DWC::Error::SetMessage(OutSkipReason, TEXT("DWC Data UV has not been generated for every mapped LOD yet."));
             return false;
         }
     }
@@ -2647,9 +2763,8 @@ FString UWetClothingAsset::GetPrecomputedSimulationDataValidationSummary(const U
 
 bool UWetClothingAsset::IsGPURuntimeDataMetadataValidForMesh(
     const USkeletalMesh* SkeletalMesh,
-    const int32 /*LODIndex*/) const
+    const int32 LODIndex) const
 {
-    const int32 LODIndex = RuntimeSimulationLODIndex;
     const FDWCGPULODBakeData* Data = FindGPULODData(Derived.Bulk.GPURuntimeData, LODIndex);
     if (Data == nullptr || !Data->bRuntimeDataValid || SkeletalMesh == nullptr || SkeletalMesh != GetRuntimeSkeletalMesh())
     {
@@ -2669,9 +2784,8 @@ bool UWetClothingAsset::IsGPURuntimeDataMetadataValidForMesh(
            HasGPURuntimeDataPayload();
 }
 
-bool UWetClothingAsset::IsGPURuntimeDataValidForMesh(const USkeletalMesh* SkeletalMesh, const int32 /*LODIndex*/) const
+bool UWetClothingAsset::IsGPURuntimeDataValidForMesh(const USkeletalMesh* SkeletalMesh, const int32 LODIndex) const
 {
-    const int32 LODIndex = RuntimeSimulationLODIndex;
     const FDWCGPULODBakeData* Data = FindGPULODData(Derived.Bulk.GPURuntimeData, LODIndex);
     if (Data == nullptr || !Data->bRuntimeDataValid || SkeletalMesh == nullptr)
     {
@@ -2716,9 +2830,8 @@ bool UWetClothingAsset::IsGPURuntimeDataValidForMesh(const USkeletalMesh* Skelet
 
 bool UWetClothingAsset::IsGPUWetMapDataMetadataValidForMesh(
     const USkeletalMesh* SkeletalMesh,
-    const int32 /*LODIndex*/) const
+    const int32 LODIndex) const
 {
-    const int32 LODIndex = RuntimeSimulationLODIndex;
     const FDWCGPULODBakeData* Data = FindGPULODData(Derived.Bulk.GPURuntimeData, LODIndex);
     return Data != nullptr &&
            Data->bMapDataValid &&
@@ -2729,9 +2842,8 @@ bool UWetClothingAsset::IsGPUWetMapDataMetadataValidForMesh(
            HasGPUMapDataPayload();
 }
 
-bool UWetClothingAsset::IsGPUWetMapDataValidForMesh(const USkeletalMesh* SkeletalMesh, const int32 /*LODIndex*/) const
+bool UWetClothingAsset::IsGPUWetMapDataValidForMesh(const USkeletalMesh* SkeletalMesh, const int32 LODIndex) const
 {
-    const int32 LODIndex = RuntimeSimulationLODIndex;
     const FDWCGPULODBakeData* Data = FindGPULODData(Derived.Bulk.GPURuntimeData, LODIndex);
     if (Data == nullptr || !Data->bMapDataValid || !IsGPURuntimeDataValidForMesh(SkeletalMesh, LODIndex))
     {

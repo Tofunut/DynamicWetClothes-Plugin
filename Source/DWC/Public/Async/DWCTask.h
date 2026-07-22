@@ -2,17 +2,6 @@
 
 #include "CoreMinimal.h"
 
-enum class EDWCTaskKind : uint8
-{
-    Unknown,
-    CpuSkinning,
-    WetSurfaceInput,
-    WetAreaInput,
-    WetContactInput,
-    VertexColorBuild,
-    WetPropagation
-};
-
 enum class EDWCTaskStatus : uint8
 {
     Created,
@@ -20,13 +9,6 @@ enum class EDWCTaskStatus : uint8
     Completed,
     Failed,
     Canceled
-};
-
-struct DWC_API FDWCVertexTaskSnapshot
-{
-    FName ReceiverId = NAME_None;
-    int32 LODIndex = 0;
-    int32 VertexCount = 0;
 };
 
 struct DWC_API FDWCVertexGeometryStaticData
@@ -39,8 +21,12 @@ struct DWC_API FDWCVertexGeometryStaticData
 
     uint64 GetAllocatedMemoryBytes() const
     {
-        return sizeof(*this) +
-               LocalPositions.GetAllocatedSize() +
+        return sizeof(*this) + GetAllocatedArrayMemoryBytes();
+    }
+
+    uint64 GetAllocatedArrayMemoryBytes() const
+    {
+        return LocalPositions.GetAllocatedSize() +
                LocalNormals.GetAllocatedSize();
     }
 
@@ -58,9 +44,6 @@ class DWC_API IDWCTaskRequest
 {
   public:
     virtual ~IDWCTaskRequest() = default;
-
-    virtual EDWCTaskKind GetKind() const = 0;
-    virtual FName        GetDebugName() const = 0;
 
     virtual void ExecuteWorker() = 0;
     virtual void CommitGameThread() = 0;

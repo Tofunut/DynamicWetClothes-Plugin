@@ -45,16 +45,6 @@ FDWCCpuSkinningTask::FDWCCpuSkinningTask(
 {
 }
 
-EDWCTaskKind FDWCCpuSkinningTask::GetKind() const
-{
-    return EDWCTaskKind::CpuSkinning;
-}
-
-FName FDWCCpuSkinningTask::GetDebugName() const
-{
-    return TEXT("DWC.CpuSkinning");
-}
-
 void FDWCCpuSkinningTask::ExecuteWorker()
 {
     DWC_PROFILE_SCOPE(DWC_CpuSkinningTask_ExecuteWorker);

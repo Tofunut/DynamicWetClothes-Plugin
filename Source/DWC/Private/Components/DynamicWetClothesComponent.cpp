@@ -1588,8 +1588,6 @@ void UDynamicWetClothesComponent::CommitCpuSkinningTaskResult(FDWCSkinningTaskRe
         }
 
         Receiver->bCpuSkinningTaskPending = false;
-        Receiver->bCpuSkinningTaskRequestedAgain = false;
-        Receiver->bCpuSkinningTaskNeedsNormals = false;
 
         SetComponentTickEnabled(true);
         return;
@@ -1963,8 +1961,6 @@ bool UDynamicWetClothesComponent::RequestCpuSkinningTask(
 
     if (Receiver.bCpuSkinningTaskPending)
     {
-        Receiver.bCpuSkinningTaskRequestedAgain = true;
-        Receiver.bCpuSkinningTaskNeedsNormals |= bComputeNormals;
         SetComponentTickEnabled(true);
         return true;
     }
@@ -1988,8 +1984,6 @@ bool UDynamicWetClothesComponent::RequestCpuSkinningTask(
     }
 
     Receiver.bCpuSkinningTaskPending = true;
-    Receiver.bCpuSkinningTaskRequestedAgain = false;
-    Receiver.bCpuSkinningTaskNeedsNormals = bComputeNormals;
 
     AsyncTaskQueue->Enqueue(MakeShared<FDWCCpuSkinningTask, ESPMode::ThreadSafe>(this, MoveTemp(Snapshot)));
     SetComponentTickEnabled(true);

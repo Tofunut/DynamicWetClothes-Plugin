@@ -98,8 +98,6 @@ struct FDWCWetMeshReceiverRuntime
 
     bool bWetRenderDirty = false;
     bool bCpuSkinningTaskPending = false;
-    bool bCpuSkinningTaskRequestedAgain = false;
-    bool bCpuSkinningTaskNeedsNormals = false;
     bool bLODVertexColorTransferPending = false;
     bool bLODVertexColorTransferRequestedAgain = false;
 };

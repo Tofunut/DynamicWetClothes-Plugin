@@ -14,8 +14,7 @@ struct DWC_API FDWCLODVertexStaticData
     uint64 GetAllocatedMemoryBytes() const
     {
         return sizeof(*this) +
-               Geometry.LocalPositions.GetAllocatedSize() +
-               Geometry.LocalNormals.GetAllocatedSize();
+               Geometry.GetAllocatedArrayMemoryBytes();
     }
 
     bool IsValid() const
@@ -62,9 +61,6 @@ class DWC_API FDWCLODVertexColorTransferTask final : public IDWCTaskRequest
     FDWCLODVertexColorTransferTask(
         TWeakObjectPtr<UDynamicWetClothesComponent> InOwner,
         FDWCLODVertexColorTransferSnapshot&&        InSnapshot);
-
-    virtual EDWCTaskKind GetKind() const override { return EDWCTaskKind::VertexColorBuild; }
-    virtual FName        GetDebugName() const override { return TEXT("LODVertexColorTransfer"); }
 
     virtual void ExecuteWorker() override;
     virtual void CommitGameThread() override;

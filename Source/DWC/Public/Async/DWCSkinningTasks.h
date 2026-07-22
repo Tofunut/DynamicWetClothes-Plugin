@@ -41,8 +41,7 @@ struct DWC_API FDWCSkinningStaticData
     uint64 GetAllocatedMemoryBytes() const
     {
         return sizeof(*this) +
-               Geometry.LocalPositions.GetAllocatedSize() +
-               Geometry.LocalNormals.GetAllocatedSize() +
+               Geometry.GetAllocatedArrayMemoryBytes() +
                Vertices.GetAllocatedSize() +
                Influences.GetAllocatedSize();
     }
@@ -79,8 +78,6 @@ class DWC_API FDWCCpuSkinningTask final : public IDWCTaskRequest
         TWeakObjectPtr<UDynamicWetClothesComponent> InOwner,
         FDWCSkinningTaskSnapshot&&                  InSnapshot);
 
-    virtual EDWCTaskKind GetKind() const override;
-    virtual FName        GetDebugName() const override;
     virtual void         ExecuteWorker() override;
     virtual void         CommitGameThread() override;
 

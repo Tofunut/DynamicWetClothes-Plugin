@@ -1,18 +1,19 @@
 #include "RuntimeState/DWCLODVertexColorTransferMapBuilder.h"
 
-#include "Async/DWCLODVertexColorTasks.h"
 #include "Math/GenericOctree.h"
 #include "Utility/DWCProfiling.h"
 
 namespace
 {
-    struct FDWCTransferMapOctreeElement
+    constexpr float DistanceTieToleranceSquared = KINDA_SMALL_NUMBER;
+
+    struct FDWCLODVertexOctreeElement
     {
         int32 VertexIndex = INDEX_NONE;
         FBoxCenterAndExtent Bounds;
     };
 
-    struct FDWCTransferMapOctreeSemantics
+    struct FDWCLODVertexOctreeSemantics
     {
         enum { MaxElementsPerLeaf = 16 };
         enum { MinInclusiveElementsPerNode = 7 };
@@ -20,40 +21,39 @@ namespace
 
         typedef TInlineAllocator<MaxElementsPerLeaf> ElementAllocator;
 
-        static const FBoxCenterAndExtent& GetBoundingBox(const FDWCTransferMapOctreeElement& Element)
+        static const FBoxCenterAndExtent& GetBoundingBox(const FDWCLODVertexOctreeElement& Element)
         {
             return Element.Bounds;
         }
 
-        static bool AreElementsEqual(const FDWCTransferMapOctreeElement& A, const FDWCTransferMapOctreeElement& B)
+        static bool AreElementsEqual(const FDWCLODVertexOctreeElement& A, const FDWCLODVertexOctreeElement& B)
         {
             return A.VertexIndex == B.VertexIndex;
         }
 
-        static void SetElementId(const FDWCTransferMapOctreeElement& Element, FOctreeElementId2 Id)
+        static void SetElementId(const FDWCLODVertexOctreeElement& Element, FOctreeElementId2 Id)
         {
         }
 
-        static void ApplyOffset(FDWCTransferMapOctreeElement& Element, FVector Offset)
+        static void ApplyOffset(FDWCLODVertexOctreeElement& Element, FVector Offset)
         {
             Element.Bounds.Center += Offset;
         }
     };
 
-    using FDWCTransferMapOctree = TOctree2<FDWCTransferMapOctreeElement, FDWCTransferMapOctreeSemantics>;
+    using FDWCLODVertexOctree = TOctree2<FDWCLODVertexOctreeElement, FDWCLODVertexOctreeSemantics>;
 
     int32 FindBestSourceVertex(
         const FDWCLODVertexColorTransferGeometryView& Source,
-        const FDWCTransferMapOctree&                  SourceOctree,
+        const FDWCLODVertexOctree&                    SourceOctree,
         const FVector3f&                              TargetPos,
-        const FVector3f&                              TargetNormal,
-        const FDWCLODVertexColorTransferSettings&     Settings)
+        const FVector3f&                              TargetNormal)
     {
         int32 BestIndex = INDEX_NONE;
         float BestDistSq = TNumericLimits<float>::Max();
         float BestNormalDot = -1.0f;
 
-        auto ConsiderSourceVertex = [&Source, &TargetPos, &TargetNormal, &Settings, &BestIndex, &BestDistSq, &BestNormalDot](const int32 SourceIndex)
+        auto ConsiderSourceVertex = [&Source, &TargetPos, &TargetNormal, &BestIndex, &BestDistSq, &BestNormalDot](const int32 SourceIndex)
         {
             if (!Source.Positions.IsValidIndex(SourceIndex))
             {
@@ -64,18 +64,12 @@ namespace
             if (Source.Normals.IsValidIndex(SourceIndex))
             {
                 NormalDot = FVector3f::DotProduct(Source.Normals[SourceIndex], TargetNormal);
-                if (NormalDot < Settings.MaxNormalAngleDot)
-                {
-                    return;
-                }
             }
 
             const float DistSq = FVector3f::DistSquared(Source.Positions[SourceIndex], TargetPos);
-            const float TieToleranceSq = FMath::Square(FMath::Max(Settings.DistanceTieTolerance, 0.0f));
-
             if (BestIndex == INDEX_NONE ||
-                DistSq < BestDistSq - TieToleranceSq ||
-                (FMath::Abs(DistSq - BestDistSq) <= TieToleranceSq && NormalDot > BestNormalDot))
+                DistSq < BestDistSq - DistanceTieToleranceSquared ||
+                (FMath::Abs(DistSq - BestDistSq) <= DistanceTieToleranceSquared && NormalDot > BestNormalDot))
             {
                 BestIndex = SourceIndex;
                 BestDistSq = DistSq;
@@ -83,35 +77,26 @@ namespace
             }
         };
 
-        const float InitialRadius = FMath::Max(Settings.InitialSearchRadius, Settings.DistanceTieTolerance);
-        const float MaxRadius = FMath::Max(Settings.MaxSearchRadius, InitialRadius);
-
-        for (float SearchRadius = InitialRadius; SearchRadius <= MaxRadius && BestIndex == INDEX_NONE; SearchRadius *= 2.0f)
-        {
-            const FVector QueryCenter(TargetPos);
-            const FVector QueryExtent(SearchRadius, SearchRadius, SearchRadius);
-            SourceOctree.FindElementsWithBoundsTest(
-                FBoxCenterAndExtent(QueryCenter, QueryExtent),
-                [&ConsiderSourceVertex](const FDWCTransferMapOctreeElement& Element)
-                {
-                    ConsiderSourceVertex(Element.VertexIndex);
-                });
-        }
+        SourceOctree.FindNearbyElements(
+            FVector(TargetPos),
+            [&ConsiderSourceVertex](const FDWCLODVertexOctreeElement& Element)
+            {
+                ConsiderSourceVertex(Element.VertexIndex);
+            });
 
         return BestIndex;
     }
 }
 
-bool BuildDWCLODVertexColorTransferMap(
+bool BuildDWCLODVertexColorTransferMaps(
     const FDWCLODVertexColorTransferGeometryView& SourceGeometry,
-    const FDWCLODVertexColorTransferGeometryView& TargetGeometry,
-    const FDWCLODVertexColorTransferSettings&     Settings,
-    TArray<int32>&                                OutTargetToSourceVertex)
+    TConstArrayView<FDWCLODVertexColorTransferTargetGeometryView> TargetGeometries,
+    TArray<FDWCLODVertexColorTransferMapBuildResult>& OutResults)
 {
     DWC_PROFILE_SCOPE(DWC_BuildLODVertexColorTransferMap);
 
-    OutTargetToSourceVertex.Reset();
-    if (!SourceGeometry.IsValid() || !TargetGeometry.IsValid())
+    OutResults.Reset();
+    if (!SourceGeometry.IsValid() || TargetGeometries.IsEmpty())
     {
         return false;
     }
@@ -121,9 +106,17 @@ bool BuildDWCLODVertexColorTransferMap(
     {
         CompleteBounds += FVector(SourcePosition);
     }
-    for (const FVector3f& TargetPosition : TargetGeometry.Positions)
+    for (const FDWCLODVertexColorTransferTargetGeometryView& TargetGeometry : TargetGeometries)
     {
-        CompleteBounds += FVector(TargetPosition);
+        if (!TargetGeometry.Geometry.IsValid())
+        {
+            continue;
+        }
+
+        for (const FVector3f& TargetPosition : TargetGeometry.Geometry.Positions)
+        {
+            CompleteBounds += FVector(TargetPosition);
+        }
     }
 
     if (!CompleteBounds.IsValid)
@@ -131,9 +124,8 @@ bool BuildDWCLODVertexColorTransferMap(
         return false;
     }
 
-    const FVector CompleteExtent = CompleteBounds.GetExtent();
-    const double OctreeExtent = CompleteExtent.GetMax() + FMath::Max(1.0f, Settings.MaxSearchRadius);
-    FDWCTransferMapOctree SourceOctree(CompleteBounds.GetCenter(), OctreeExtent);
+    const double OctreeExtent = CompleteBounds.GetExtent().GetMax();
+    FDWCLODVertexOctree SourceOctree(CompleteBounds.GetCenter(), OctreeExtent);
 
     {
         DWC_PROFILE_SCOPE(DWC_BuildLODVertexColorTransferMap_Octree);
@@ -145,43 +137,29 @@ bool BuildDWCLODVertexColorTransferMap(
         }
     }
 
-    OutTargetToSourceVertex.SetNumUninitialized(TargetGeometry.Positions.Num());
-    for (int32 VertexIndex = 0; VertexIndex < TargetGeometry.Positions.Num(); ++VertexIndex)
+    for (const FDWCLODVertexColorTransferTargetGeometryView& TargetGeometry : TargetGeometries)
     {
-        const FVector3f Normal = TargetGeometry.Normals.IsValidIndex(VertexIndex)
-                                     ? TargetGeometry.Normals[VertexIndex]
-                                     : FVector3f::UpVector;
+        if (!TargetGeometry.Geometry.IsValid())
+        {
+            continue;
+        }
 
-        OutTargetToSourceVertex[VertexIndex] = FindBestSourceVertex(
-            SourceGeometry,
-            SourceOctree,
-            TargetGeometry.Positions[VertexIndex],
-            Normal,
-            Settings);
+        FDWCLODVertexColorTransferMapBuildResult& Result = OutResults.AddDefaulted_GetRef();
+        Result.LODIndex = TargetGeometry.LODIndex;
+        Result.TargetToSourceVertex.SetNumUninitialized(TargetGeometry.Geometry.Positions.Num());
+        for (int32 VertexIndex = 0; VertexIndex < TargetGeometry.Geometry.Positions.Num(); ++VertexIndex)
+        {
+            const FVector3f Normal = TargetGeometry.Geometry.Normals.IsValidIndex(VertexIndex)
+                                         ? TargetGeometry.Geometry.Normals[VertexIndex]
+                                         : FVector3f::UpVector;
+
+            Result.TargetToSourceVertex[VertexIndex] = FindBestSourceVertex(
+                SourceGeometry,
+                SourceOctree,
+                TargetGeometry.Geometry.Positions[VertexIndex],
+                Normal);
+        }
     }
 
-    return true;
-}
-
-bool BuildDWCLODVertexColorTransferMap(
-    const FDWCLODVertexStaticData&            SourceLODData,
-    const FDWCLODVertexStaticData&            TargetLODData,
-    const FDWCLODVertexColorTransferSettings& Settings,
-    TArray<int32>&                            OutTargetToSourceVertex)
-{
-    if (!SourceLODData.IsValid() || !TargetLODData.IsValid())
-    {
-        OutTargetToSourceVertex.Reset();
-        return false;
-    }
-
-    const FDWCLODVertexColorTransferGeometryView SourceGeometry{
-        SourceLODData.Geometry.LocalPositions,
-        SourceLODData.Geometry.LocalNormals
-    };
-    const FDWCLODVertexColorTransferGeometryView TargetGeometry{
-        TargetLODData.Geometry.LocalPositions,
-        TargetLODData.Geometry.LocalNormals
-    };
-    return BuildDWCLODVertexColorTransferMap(SourceGeometry, TargetGeometry, Settings, OutTargetToSourceVertex);
+    return !OutResults.IsEmpty();
 }

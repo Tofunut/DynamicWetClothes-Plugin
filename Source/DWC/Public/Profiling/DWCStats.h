@@ -28,7 +28,7 @@ struct DWC_API FDWCStatsSnapshot
 
     uint32 LODTotalReceiverCount = 0;
     uint32 LODSurfaceWaterEnabledReceiverCount = 0;
-    uint32 LODWetRenderingEnabledReceiverCount = 0;
+    uint32 LODCPUWetnessRenderingEnabledReceiverCount = 0;
     uint32 LODWrinkleEnabledReceiverCount = 0;
     uint32 LODTransparencyEnabledReceiverCount = 0;
 
@@ -197,7 +197,7 @@ DECLARE_DWORD_ACCUMULATOR_STAT_EXTERN(TEXT("Unique Transparency Textures"), STAT
 
 DECLARE_DWORD_ACCUMULATOR_STAT_EXTERN(TEXT("Total Receivers"), STAT_DWC_LODTotalReceivers, STATGROUP_DWCLOD, DWC_API);
 DECLARE_DWORD_ACCUMULATOR_STAT_EXTERN(TEXT("Surface Water Enabled Receivers"), STAT_DWC_LODSurfaceWaterEnabledReceivers, STATGROUP_DWCLOD, DWC_API);
-DECLARE_DWORD_ACCUMULATOR_STAT_EXTERN(TEXT("Wet Rendering Enabled Receivers"), STAT_DWC_LODWetRenderingEnabledReceivers, STATGROUP_DWCLOD, DWC_API);
+DECLARE_DWORD_ACCUMULATOR_STAT_EXTERN(TEXT("CPU Wetness Rendering Enabled Receivers"), STAT_DWC_LODCPUWetnessRenderingEnabledReceivers, STATGROUP_DWCLOD, DWC_API);
 DECLARE_DWORD_ACCUMULATOR_STAT_EXTERN(TEXT("Wrinkle Enabled Receivers"), STAT_DWC_LODWrinkleEnabledReceivers, STATGROUP_DWCLOD, DWC_API);
 DECLARE_DWORD_ACCUMULATOR_STAT_EXTERN(TEXT("Transparency Enabled Receivers"), STAT_DWC_LODTransparencyEnabledReceivers, STATGROUP_DWCLOD, DWC_API);
 

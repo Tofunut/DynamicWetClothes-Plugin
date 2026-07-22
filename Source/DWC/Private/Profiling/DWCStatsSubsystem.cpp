@@ -308,7 +308,7 @@ void UDWCStatsSubsystem::CollectStats(FDWCStatsSnapshot& OutSnapshot)
             }
             if (LODPolicy.bUpdateWetRendering)
             {
-                ++OutSnapshot.LODWetRenderingEnabledReceiverCount;
+                ++OutSnapshot.LODCPUWetnessRenderingEnabledReceiverCount;
             }
             if (LODPolicy.bUpdateWrinkle)
             {
@@ -500,7 +500,7 @@ void UDWCStatsSubsystem::PublishStats(const FDWCStatsSnapshot& Snapshot) const
     SET_DWORD_STAT(STAT_DWC_TransparencyTextureCount, Snapshot.TransparencyTextureCount);
     SET_DWORD_STAT(STAT_DWC_LODTotalReceivers, Snapshot.LODTotalReceiverCount);
     SET_DWORD_STAT(STAT_DWC_LODSurfaceWaterEnabledReceivers, Snapshot.LODSurfaceWaterEnabledReceiverCount);
-    SET_DWORD_STAT(STAT_DWC_LODWetRenderingEnabledReceivers, Snapshot.LODWetRenderingEnabledReceiverCount);
+    SET_DWORD_STAT(STAT_DWC_LODCPUWetnessRenderingEnabledReceivers, Snapshot.LODCPUWetnessRenderingEnabledReceiverCount);
     SET_DWORD_STAT(STAT_DWC_LODWrinkleEnabledReceivers, Snapshot.LODWrinkleEnabledReceiverCount);
     SET_DWORD_STAT(STAT_DWC_LODTransparencyEnabledReceivers, Snapshot.LODTransparencyEnabledReceiverCount);
 

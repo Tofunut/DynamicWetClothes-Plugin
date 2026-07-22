@@ -70,12 +70,19 @@ bool FDWCLodCoordinator::ShouldRunSurfaceWater(
            QualityLODController->ShouldRunSurfaceWater(State, BaseInterval);
 }
 
-bool FDWCLodCoordinator::ShouldRunRendering(
+bool FDWCLodCoordinator::ShouldRunCPUWetnessRendering(
     FDWCQualityLODRuntimeState& State,
     const float BaseInterval)
 {
     return !QualityLODController.IsValid() ||
-           QualityLODController->ShouldRunRendering(State, BaseInterval);
+           QualityLODController->ShouldRunCPUWetnessRendering(State, BaseInterval);
+}
+
+bool FDWCLodCoordinator::ShouldEnableCPUWetnessRendering(
+    const FDWCQualityLODRuntimeState& State) const
+{
+    return !QualityLODController.IsValid() ||
+           QualityLODController->ShouldEnableCPUWetnessRendering(State);
 }
 
 bool FDWCLodCoordinator::ShouldUpdateWrinkle(

@@ -172,6 +172,50 @@ void FDWCLODVertexColorTransferTask::ExecuteWorker()
         return;
     }
 
+    TArray<FDWCLODVertexColorTransferTargetGeometryView> MissingTargetGeometries;
+    for (const TSharedPtr<const FDWCLODVertexStaticData, ESPMode::ThreadSafe>& TargetLODData : Snapshot.TargetLODData)
+    {
+        if (!TargetLODData.IsValid())
+        {
+            continue;
+        }
+
+        const TSharedPtr<const TArray<int32>, ESPMode::ThreadSafe>* CachedMap =
+            Snapshot.CachedTargetToSourceVertexByLOD.Find(TargetLODData->LODIndex);
+        if (CachedMap != nullptr &&
+            CachedMap->IsValid() &&
+            (*CachedMap)->Num() == TargetLODData->Geometry.LocalPositions.Num())
+        {
+            continue;
+        }
+
+        MissingTargetGeometries.Add({
+            TargetLODData->LODIndex,
+            FDWCLODVertexColorTransferGeometryView{
+                TargetLODData->Geometry.LocalPositions,
+                TargetLODData->Geometry.LocalNormals
+            }
+        });
+    }
+
+    TMap<int32, TArray<int32>> BuiltTargetToSourceByLOD;
+    TArray<FDWCLODVertexColorTransferMapBuildResult> BuiltTransferMaps;
+    if (BuildDWCLODVertexColorTransferMaps(
+            FDWCLODVertexColorTransferGeometryView{
+                Snapshot.SourceLODData->Geometry.LocalPositions,
+                Snapshot.SourceLODData->Geometry.LocalNormals
+            },
+            MissingTargetGeometries,
+            BuiltTransferMaps))
+    {
+        for (FDWCLODVertexColorTransferMapBuildResult& BuiltTransferMap : BuiltTransferMaps)
+        {
+            BuiltTargetToSourceByLOD.Add(
+                BuiltTransferMap.LODIndex,
+                MoveTemp(BuiltTransferMap.TargetToSourceVertex));
+        }
+    }
+
     for (const TSharedPtr<const FDWCLODVertexStaticData, ESPMode::ThreadSafe>& TargetLODData : Snapshot.TargetLODData)
     {
         DWC_PROFILE_SCOPE(DWC_LODVertexColorTransferTask_TransferTargetLOD);
@@ -197,15 +241,13 @@ void FDWCLODVertexColorTransferTask::ExecuteWorker()
         }
         else
         {
-            if (!BuildDWCLODVertexColorTransferMap(
-                    *Snapshot.SourceLODData,
-                    *TargetLODData,
-                    Snapshot.Settings,
-                    LODResult.TargetToSourceVertex))
+            TArray<int32>* BuiltTransferMap = BuiltTargetToSourceByLOD.Find(LODResult.LODIndex);
+            if (BuiltTransferMap == nullptr)
             {
                 continue;
             }
 
+            LODResult.TargetToSourceVertex = MoveTemp(*BuiltTransferMap);
             TransferMap = &LODResult.TargetToSourceVertex;
         }
 

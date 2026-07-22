@@ -1,6 +1,5 @@
 #pragma once
 
-#include "Async/DWCLODVertexColorTypes.h"
 #include "CoreMinimal.h"
 #include "Misc/Crc.h"
 #include "Subsystems/WorldSubsystem.h"
@@ -93,7 +92,6 @@ struct DWC_API FDWCLODVertexColorTransferMapKey
     int32 SourceLODIndex = INDEX_NONE;
     int32 TargetLODIndex = INDEX_NONE;
     FString MeshSignature;
-    FDWCLODVertexColorTransferSettings Settings;
 
     bool operator==(const FDWCLODVertexColorTransferMapKey& Other) const
     {
@@ -102,11 +100,7 @@ struct DWC_API FDWCLODVertexColorTransferMapKey
                TargetLODRenderDataIdentity == Other.TargetLODRenderDataIdentity &&
                SourceLODIndex == Other.SourceLODIndex &&
                TargetLODIndex == Other.TargetLODIndex &&
-               MeshSignature == Other.MeshSignature &&
-               Settings.MaxNormalAngleDot == Other.Settings.MaxNormalAngleDot &&
-               Settings.DistanceTieTolerance == Other.Settings.DistanceTieTolerance &&
-               Settings.InitialSearchRadius == Other.Settings.InitialSearchRadius &&
-               Settings.MaxSearchRadius == Other.Settings.MaxSearchRadius;
+               MeshSignature == Other.MeshSignature;
     }
 
     friend uint32 GetTypeHash(const FDWCLODVertexColorTransferMapKey& Key)
@@ -116,11 +110,7 @@ struct DWC_API FDWCLODVertexColorTransferMapKey
         Hash = HashCombine(Hash, GetTypeHash(static_cast<uint64>(Key.TargetLODRenderDataIdentity)));
         Hash = HashCombine(Hash, GetTypeHash(Key.SourceLODIndex));
         Hash = HashCombine(Hash, GetTypeHash(Key.TargetLODIndex));
-        Hash = HashCombine(Hash, FCrc::StrCrc32(*Key.MeshSignature));
-        Hash = HashCombine(Hash, GetTypeHash(Key.Settings.MaxNormalAngleDot));
-        Hash = HashCombine(Hash, GetTypeHash(Key.Settings.DistanceTieTolerance));
-        Hash = HashCombine(Hash, GetTypeHash(Key.Settings.InitialSearchRadius));
-        return HashCombine(Hash, GetTypeHash(Key.Settings.MaxSearchRadius));
+        return HashCombine(Hash, FCrc::StrCrc32(*Key.MeshSignature));
     }
 };
 
@@ -153,15 +143,13 @@ public:
         const USkeletalMeshComponent& TargetSkeletalMesh,
         const FDWCLODVertexStaticData& SourceLODData,
         const FDWCLODVertexStaticData& TargetLODData,
-        const FString& MeshSignature,
-        const FDWCLODVertexColorTransferSettings& Settings);
+        const FString& MeshSignature);
 
     TSharedPtr<const TArray<int32>, ESPMode::ThreadSafe> CacheLODVertexColorTransferMap(
         const USkeletalMeshComponent& TargetSkeletalMesh,
         const FDWCLODVertexStaticData& SourceLODData,
         const FDWCLODVertexStaticData& TargetLODData,
         const FString& MeshSignature,
-        const FDWCLODVertexColorTransferSettings& Settings,
         TArray<int32>&& TargetToSourceVertex);
 
     void PruneExpiredEntries();
@@ -176,8 +164,7 @@ private:
         const USkeletalMeshComponent& TargetSkeletalMesh,
         const FDWCLODVertexStaticData& SourceLODData,
         const FDWCLODVertexStaticData& TargetLODData,
-        const FString& MeshSignature,
-        const FDWCLODVertexColorTransferSettings& Settings) const;
+        const FString& MeshSignature) const;
 
     TMap<FDWCSharedRuntimeDataKey, TWeakPtr<const FWetClothingRuntimeData, ESPMode::ThreadSafe>> SharedRuntimeDataCache;
     TMap<FDWCSkinningStaticDataKey, TWeakPtr<const FDWCSkinningStaticData, ESPMode::ThreadSafe>> SkinningStaticDataCache;

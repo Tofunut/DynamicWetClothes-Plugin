@@ -473,7 +473,9 @@ FWetRenderStageArgs UDynamicWetClothesComponent::MakeWetRenderStageArgs(FDWCWetM
     Args.bEnableTransparency = !LODCoordinator.IsValid() || LODCoordinator->ShouldUpdateTransparency(Receiver.QualityLODState);
     Args.UnderColor = FallbackUnderColor;
     Args.UnderColorBlendStrength = WetUnderColorBlendStrength;
-    Args.bShowWetPartDebugColors = bShowWetPartDebugColors;
+    Args.bShowWetPartDebugColors =
+        bShowWetPartDebugColors &&
+        (IsGPUWetnessMode(GetActiveSimulationMode()) || ShouldEnableCPUWetnessRendering(Receiver));
     Args.bGPUWetnessMode = IsGPUWetnessMode(GetActiveSimulationMode());
     Args.LODIndex = UWetClothingAsset::RuntimeSimulationLODIndex;
     return Args;
@@ -749,6 +751,16 @@ void UDynamicWetClothesComponent::ApplyQualityLODMaterialParameters(FDWCWetMeshR
     Receiver.RenderStage->ApplyWetMaterialParameters(RenderArgs);
 }
 
+void UDynamicWetClothesComponent::MarkCPUWetnessRenderingDirty(FDWCWetMeshReceiverRuntime& Receiver)
+{
+    if (Receiver.SimulationState.IsValid())
+    {
+        Receiver.SimulationState->MarkAllWetVertexColorsDirty();
+    }
+    Receiver.bWetRenderDirty = true;
+    bWetRenderDirty = true;
+}
+
 void UDynamicWetClothesComponent::RefreshResolvedQualityLODPolicies()
 {
     if (!LODCoordinator.IsValid())
@@ -763,6 +775,7 @@ void UDynamicWetClothesComponent::RefreshResolvedQualityLODPolicies()
         if (Receiver.IsValid())
         {
             LODCoordinator->RefreshReceiverQualityLODPolicy(*Receiver);
+            MarkCPUWetnessRenderingDirty(*Receiver);
             ApplyQualityLODMaterialParameters(*Receiver);
         }
     }
@@ -779,7 +792,7 @@ bool UDynamicWetClothesComponent::ShouldUpdateSurfaceWater(FDWCWetMeshReceiverRu
            LODCoordinator->ShouldRunSurfaceWater(Receiver.QualityLODState, SurfaceWaterTimerInterval);
 }
 
-bool UDynamicWetClothesComponent::ShouldUpdateWetRendering(FDWCWetMeshReceiverRuntime& Receiver) const
+bool UDynamicWetClothesComponent::ShouldUpdateCPUWetnessRendering(FDWCWetMeshReceiverRuntime& Receiver) const
 {
     if (!Receiver.RenderStage.IsValid() || !Receiver.SimulationState.IsValid())
     {
@@ -787,7 +800,13 @@ bool UDynamicWetClothesComponent::ShouldUpdateWetRendering(FDWCWetMeshReceiverRu
     }
 
     return !LODCoordinator.IsValid() ||
-           LODCoordinator->ShouldRunRendering(Receiver.QualityLODState, WetnessSettings.WetnessRenderUpdateInterval);
+           LODCoordinator->ShouldRunCPUWetnessRendering(Receiver.QualityLODState, WetnessSettings.WetnessRenderUpdateInterval);
+}
+
+bool UDynamicWetClothesComponent::ShouldEnableCPUWetnessRendering(const FDWCWetMeshReceiverRuntime& Receiver) const
+{
+    return !LODCoordinator.IsValid() ||
+           LODCoordinator->ShouldEnableCPUWetnessRendering(Receiver.QualityLODState);
 }
 
 void UDynamicWetClothesComponent::SetDWCQualityLOD(const int32 InQualityLOD)
@@ -805,6 +824,7 @@ void UDynamicWetClothesComponent::SetDWCQualityLOD(const int32 InQualityLOD)
             {
                 LODCoordinator->SetReceiverQualityLOD(*Receiver, CurrentQualityLOD);
             }
+            MarkCPUWetnessRenderingDirty(*Receiver);
             ApplyQualityLODMaterialParameters(*Receiver);
         }
     }
@@ -824,6 +844,7 @@ bool UDynamicWetClothesComponent::SetReceiverDWCQualityLOD(const FName ReceiverI
             {
                 LODCoordinator->SetReceiverQualityLOD(*Receiver, InQualityLOD);
             }
+            MarkCPUWetnessRenderingDirty(*Receiver);
             ApplyQualityLODMaterialParameters(*Receiver);
             return true;
         }
@@ -1029,29 +1050,41 @@ void UDynamicWetClothesComponent::UpdateWetRendering()
 
     for (const TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver : Receivers)
     {
-        if (!Receiver.IsValid() || !ShouldUpdateWetRendering(*Receiver))
-        {
-            continue;
-        }
-
-        if (!Receiver->bWetRenderDirty && Receiver->SimulationState->DirtyWetVertexIndices.Num() == 0)
+        if (!Receiver.IsValid() ||
+            !Receiver->RenderStage.IsValid() ||
+            !Receiver->SimulationState.IsValid())
         {
             continue;
         }
 
         const bool bHadDirtyWetVertexColors = Receiver->SimulationState->DirtyWetVertexIndices.Num() > 0;
+        if (!Receiver->bWetRenderDirty && Receiver->SimulationState->DirtyWetVertexIndices.Num() == 0)
+        {
+            continue;
+        }
+
+        FWetRenderStageArgs RenderArgs = MakeWetRenderStageArgs(*Receiver);
+        if (Receiver->bWetRenderDirty)
+        {
+            Receiver->RenderStage->ApplyWetMaterialParameters(RenderArgs);
+        }
+
+        if (!IsGPUWetnessMode(GetActiveSimulationMode()) && !ShouldUpdateCPUWetnessRendering(*Receiver))
+        {
+            Receiver->bWetRenderDirty = false;
+            continue;
+        }
+
         if (bHadDirtyWetVertexColors)
         {
             Receiver->PendingLODVertexColorDirtySourceVertices = Receiver->SimulationState->DirtyWetVertexIndices;
         }
 
-        FWetRenderStageArgs RenderArgs = MakeWetRenderStageArgs(*Receiver);
         if (IsGPUWetnessMode(GetActiveSimulationMode()))
         {
             // GPU wetness remains in the existing texture path. Vertex colors only carry
             // the static Wet Part debug color and are rebuilt when the debug view is toggled.
-            Receiver->RenderStage->ApplyWetMaterialParameters(RenderArgs);
-            if (bShowWetPartDebugColors && Receiver->SimulationState->DirtyWetVertexIndices.Num() > 0)
+            if (RenderArgs.bShowWetPartDebugColors && Receiver->SimulationState->DirtyWetVertexIndices.Num() > 0)
             {
                 Receiver->RenderStage->ApplyWetnessToMaterial(RenderArgs);
             }
@@ -1086,8 +1119,7 @@ void UDynamicWetClothesComponent::SetWetPartDebugColorsEnabled(const bool bEnabl
             continue;
         }
 
-        Receiver->SimulationState->MarkAllWetVertexColorsDirty();
-        Receiver->bWetRenderDirty = true;
+        MarkCPUWetnessRenderingDirty(*Receiver);
 
         FWetRenderStageArgs RenderArgs = MakeWetRenderStageArgs(*Receiver);
         Receiver->RenderStage->ApplyWetMaterialParameters(RenderArgs);
@@ -1151,11 +1183,9 @@ void UDynamicWetClothesComponent::PostEditChangeProperty(FPropertyChangedEvent& 
         {
             if (Receiver.IsValid() && Receiver->SimulationState.IsValid())
             {
-                Receiver->SimulationState->MarkAllWetVertexColorsDirty();
-                Receiver->bWetRenderDirty = true;
+                MarkCPUWetnessRenderingDirty(*Receiver);
             }
         }
-        bWetRenderDirty = true;
     }
 
     for (const TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver : Receivers)

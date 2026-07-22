@@ -54,14 +54,19 @@ bool FDWCQualityLODController::ShouldRunSurfaceWater(FDWCQualityLODRuntimeState&
     return ShouldRunInterval(State.SurfaceWaterUpdateAccumulator, BaseInterval, State.ResolvedPolicy.SurfaceWaterUpdateInterval);
 }
 
-bool FDWCQualityLODController::ShouldRunRendering(FDWCQualityLODRuntimeState& State, const float BaseInterval) const
+bool FDWCQualityLODController::ShouldRunCPUWetnessRendering(FDWCQualityLODRuntimeState& State, const float BaseInterval) const
 {
-    if (bEnabled && !State.ResolvedPolicy.bUpdateWetRendering)
+    if (!ShouldEnableCPUWetnessRendering(State))
     {
         return false;
     }
 
     return ShouldRunInterval(State.RenderUpdateAccumulator, BaseInterval, State.ResolvedPolicy.RenderUpdateInterval);
+}
+
+bool FDWCQualityLODController::ShouldEnableCPUWetnessRendering(const FDWCQualityLODRuntimeState& State) const
+{
+    return !bEnabled || State.ResolvedPolicy.bUpdateWetRendering;
 }
 
 bool FDWCQualityLODController::ShouldUpdateWrinkle(const FDWCQualityLODRuntimeState& State) const

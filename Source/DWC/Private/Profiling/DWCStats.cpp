@@ -155,7 +155,7 @@ DEFINE_STAT(STAT_DWC_TransparencyMaterialBindingCount);
 DEFINE_STAT(STAT_DWC_TransparencyTextureCount);
 DEFINE_STAT(STAT_DWC_LODTotalReceivers);
 DEFINE_STAT(STAT_DWC_LODSurfaceWaterEnabledReceivers);
-DEFINE_STAT(STAT_DWC_LODWetRenderingEnabledReceivers);
+DEFINE_STAT(STAT_DWC_LODCPUWetnessRenderingEnabledReceivers);
 DEFINE_STAT(STAT_DWC_LODWrinkleEnabledReceivers);
 DEFINE_STAT(STAT_DWC_LODTransparencyEnabledReceivers);
 

@@ -54,7 +54,6 @@ bool FDWCLODVertexColorTransferCoordinator::InitializeReceiver(
         return false;
     }
 
-    const FDWCLODVertexColorTransferSettings TransferSettings;
     for (const FWCALODVertexColorRuntimeData& RuntimeData :
          Receiver.WetClothingAsset->Derived.Bulk.LODVertexColorRuntimeData)
     {
@@ -74,8 +73,7 @@ bool FDWCLODVertexColorTransferCoordinator::InitializeReceiver(
                 *Mesh,
                 *SourceLODData,
                 *TargetLODData,
-                MeshSignature,
-                TransferSettings);
+                MeshSignature);
         if (!SharedTransferMap.IsValid())
         {
             TArray<int32> TransferMapCopy(RuntimeData.TargetToSourceVertex);
@@ -84,7 +82,6 @@ bool FDWCLODVertexColorTransferCoordinator::InitializeReceiver(
                 *SourceLODData,
                 *TargetLODData,
                 MeshSignature,
-                TransferSettings,
                 MoveTemp(TransferMapCopy));
         }
 
@@ -94,6 +91,7 @@ bool FDWCLODVertexColorTransferCoordinator::InitializeReceiver(
         }
     }
 
+    TArray<FDWCLODVertexColorTransferTargetGeometryView> MissingTargetGeometries;
     for (const TPair<int32, TSharedPtr<const FDWCLODVertexStaticData, ESPMode::ThreadSafe>>& Pair :
          Receiver.LODVertexStaticDataByLOD)
     {
@@ -109,30 +107,51 @@ bool FDWCLODVertexColorTransferCoordinator::InitializeReceiver(
                 *Mesh,
                 *SourceLODData,
                 *Pair.Value,
-                MeshSignature,
-                TransferSettings);
+                MeshSignature);
         if (!SharedTransferMap.IsValid())
         {
-            TArray<int32> BuiltTransferMap;
-            if (BuildDWCLODVertexColorTransferMap(
-                    *SourceLODData,
-                    *Pair.Value,
-                    TransferSettings,
-                    BuiltTransferMap))
-            {
-                SharedTransferMap = RuntimeDataSubsystem.CacheLODVertexColorTransferMap(
-                    *Mesh,
-                    *SourceLODData,
-                    *Pair.Value,
-                    MeshSignature,
-                    TransferSettings,
-                    MoveTemp(BuiltTransferMap));
-            }
+            MissingTargetGeometries.Add({
+                Pair.Key,
+                FDWCLODVertexColorTransferGeometryView{
+                    Pair.Value->Geometry.LocalPositions,
+                    Pair.Value->Geometry.LocalNormals
+                }
+            });
+            continue;
         }
 
-        if (SharedTransferMap.IsValid())
+        Receiver.LODVertexColorTransferMapsByLOD.Add(Pair.Key, SharedTransferMap);
+    }
+
+    TArray<FDWCLODVertexColorTransferMapBuildResult> BuiltTransferMaps;
+    if (BuildDWCLODVertexColorTransferMaps(
+            FDWCLODVertexColorTransferGeometryView{
+                SourceLODData->Geometry.LocalPositions,
+                SourceLODData->Geometry.LocalNormals
+            },
+            MissingTargetGeometries,
+            BuiltTransferMaps))
+    {
+        for (FDWCLODVertexColorTransferMapBuildResult& BuiltTransferMap : BuiltTransferMaps)
         {
-            Receiver.LODVertexColorTransferMapsByLOD.Add(Pair.Key, SharedTransferMap);
+            const TSharedPtr<const FDWCLODVertexStaticData, ESPMode::ThreadSafe> TargetLODData =
+                Receiver.LODVertexStaticDataByLOD.FindRef(BuiltTransferMap.LODIndex);
+            if (!TargetLODData.IsValid())
+            {
+                continue;
+            }
+
+            TSharedPtr<const TArray<int32>, ESPMode::ThreadSafe> SharedTransferMap =
+                RuntimeDataSubsystem.CacheLODVertexColorTransferMap(
+                    *Mesh,
+                    *SourceLODData,
+                    *TargetLODData,
+                    MeshSignature,
+                    MoveTemp(BuiltTransferMap.TargetToSourceVertex));
+            if (SharedTransferMap.IsValid())
+            {
+                Receiver.LODVertexColorTransferMapsByLOD.Add(BuiltTransferMap.LODIndex, SharedTransferMap);
+            }
         }
     }
 
@@ -208,8 +227,7 @@ bool FDWCLODVertexColorTransferCoordinator::RequestTask(
                 *Mesh,
                 *SourceLODData,
                 *Pair.Value,
-                MeshSignature,
-                Snapshot.Settings);
+                MeshSignature);
             if (CachedTransferMap.IsValid())
             {
                 Receiver.LODVertexColorTransferMapsByLOD.Add(Pair.Key, CachedTransferMap);
@@ -299,7 +317,6 @@ void FDWCLODVertexColorTransferCoordinator::CommitTaskResult(
                         *SourceLODData,
                         *TargetLODData,
                         MeshSignature,
-                        FDWCLODVertexColorTransferSettings(),
                         MoveTemp(LODResult.TargetToSourceVertex));
                 }
 

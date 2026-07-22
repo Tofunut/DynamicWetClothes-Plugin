@@ -1,6 +1,5 @@
 #pragma once
 
-#include "Async/DWCLODVertexColorTypes.h"
 #include "Async/DWCTask.h"
 
 class UDynamicWetClothesComponent;
@@ -35,8 +34,6 @@ struct DWC_API FDWCLODVertexColorTransferSnapshot
     TMap<int32, TSharedPtr<const TArray<FColor>, ESPMode::ThreadSafe>> CachedTargetColorsByLOD;
     TArray<FColor> SourceColors;
     TArray<int32> DirtySourceVertices;
-
-    FDWCLODVertexColorTransferSettings Settings;
 };
 
 struct DWC_API FDWCLODVertexColorTransferResult

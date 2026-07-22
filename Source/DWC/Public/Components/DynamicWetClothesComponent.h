@@ -184,7 +184,8 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
     void                     UpdateWetRendering();
     bool                     FlushPendingWetContacts();
     bool                     ShouldUpdateSurfaceWater(FDWCWetMeshReceiverRuntime& Receiver) const;
-    bool                     ShouldUpdateWetRendering(FDWCWetMeshReceiverRuntime& Receiver) const;
+    bool                     ShouldUpdateCPUWetnessRendering(FDWCWetMeshReceiverRuntime& Receiver) const;
+    bool                     ShouldEnableCPUWetnessRendering(const FDWCWetMeshReceiverRuntime& Receiver) const;
 
     // Wetness input render invalidation.
     void                     RequestWetRenderingUpdate();
@@ -194,6 +195,7 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
     bool                     InitializeGPUBackend(FDWCWetMeshReceiverRuntime& Receiver);
     void                     ApplyGeneratedWetMaterialOverrides();
     void                     ApplyQualityLODMaterialParameters(FDWCWetMeshReceiverRuntime& Receiver);
+    void                     MarkCPUWetnessRenderingDirty(FDWCWetMeshReceiverRuntime& Receiver);
 
     // Quality LOD and render LOD.
     void                     RefreshResolvedQualityLODPolicies();

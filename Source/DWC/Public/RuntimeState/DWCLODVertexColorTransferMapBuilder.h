@@ -1,6 +1,5 @@
 #pragma once
 
-#include "Async/DWCLODVertexColorTypes.h"
 #include "CoreMinimal.h"
 
 struct FDWCLODVertexStaticData;
@@ -16,14 +15,19 @@ struct FDWCLODVertexColorTransferGeometryView
     }
 };
 
-bool BuildDWCLODVertexColorTransferMap(
-    const FDWCLODVertexColorTransferGeometryView& SourceGeometry,
-    const FDWCLODVertexColorTransferGeometryView& TargetGeometry,
-    const FDWCLODVertexColorTransferSettings&     Settings,
-    TArray<int32>&                                OutTargetToSourceVertex);
+struct FDWCLODVertexColorTransferTargetGeometryView
+{
+    int32 LODIndex = INDEX_NONE;
+    FDWCLODVertexColorTransferGeometryView Geometry;
+};
 
-bool BuildDWCLODVertexColorTransferMap(
-    const FDWCLODVertexStaticData&            SourceLODData,
-    const FDWCLODVertexStaticData&            TargetLODData,
-    const FDWCLODVertexColorTransferSettings& Settings,
-    TArray<int32>&                            OutTargetToSourceVertex);
+struct FDWCLODVertexColorTransferMapBuildResult
+{
+    int32 LODIndex = INDEX_NONE;
+    TArray<int32> TargetToSourceVertex;
+};
+
+bool BuildDWCLODVertexColorTransferMaps(
+    const FDWCLODVertexColorTransferGeometryView& SourceGeometry,
+    TConstArrayView<FDWCLODVertexColorTransferTargetGeometryView> TargetGeometries,
+    TArray<FDWCLODVertexColorTransferMapBuildResult>& OutResults);

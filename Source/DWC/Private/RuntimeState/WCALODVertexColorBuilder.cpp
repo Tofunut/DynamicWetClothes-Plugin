@@ -138,8 +138,7 @@ bool FWCALODVertexColorBuilder::Build(
     const int32 FirstMappedLODIndex,
     const int32 LastMappedLODIndex,
     TArray<FWCALODVertexColorRuntimeData>& OutRuntimeData,
-    FString* OutErrorMessage,
-    const FDWCLODVertexColorTransferSettings& Settings)
+    FString* OutErrorMessage)
 {
     DWC_PROFILE_SCOPE(DWC_WCA_BuildLODVertexColorRuntimeData);
 
@@ -178,26 +177,41 @@ bool FWCALODVertexColorBuilder::Build(
         return true;
     }
 
+    TArray<FLODVertexGeometry> TargetGeometries;
+    TArray<FDWCLODVertexColorTransferTargetGeometryView> TargetGeometryViews;
+    TargetGeometries.Reserve(LastTargetLODIndex - FirstTargetLODIndex + 1);
+    TargetGeometryViews.Reserve(LastTargetLODIndex - FirstTargetLODIndex + 1);
+
     for (int32 TargetLODIndex = FirstTargetLODIndex; TargetLODIndex <= LastTargetLODIndex; ++TargetLODIndex)
     {
-
-        FLODVertexGeometry TargetGeometry;
+        FLODVertexGeometry& TargetGeometry = TargetGeometries.AddDefaulted_GetRef();
         if (!ReadLODGeometry(Mesh, TargetLODIndex, TargetGeometry))
         {
+            TargetGeometries.Pop(EAllowShrinking::No);
             continue;
         }
 
-        FWCALODVertexColorRuntimeData RuntimeData;
-        RuntimeData.SourceLODIndex = SourceLODIndex;
-        RuntimeData.TargetLODIndex = TargetLODIndex;
-        RuntimeData.TargetVertexCount = TargetGeometry.Positions.Num();
-        RuntimeData.MeshSignature = MeshSignature;
-        if (BuildDWCLODVertexColorTransferMap(
-                FDWCLODVertexColorTransferGeometryView{SourceGeometry.Positions, SourceGeometry.Normals},
-                FDWCLODVertexColorTransferGeometryView{TargetGeometry.Positions, TargetGeometry.Normals},
-                Settings,
-                RuntimeData.TargetToSourceVertex))
+        TargetGeometryViews.Add({
+            TargetLODIndex,
+            FDWCLODVertexColorTransferGeometryView{TargetGeometry.Positions, TargetGeometry.Normals}
+        });
+    }
+
+    TArray<FDWCLODVertexColorTransferMapBuildResult> TransferMapResults;
+    if (BuildDWCLODVertexColorTransferMaps(
+            FDWCLODVertexColorTransferGeometryView{SourceGeometry.Positions, SourceGeometry.Normals},
+            TargetGeometryViews,
+            TransferMapResults))
+    {
+        OutRuntimeData.Reserve(TransferMapResults.Num());
+        for (FDWCLODVertexColorTransferMapBuildResult& TransferMapResult : TransferMapResults)
         {
+            FWCALODVertexColorRuntimeData RuntimeData;
+            RuntimeData.SourceLODIndex = SourceLODIndex;
+            RuntimeData.TargetLODIndex = TransferMapResult.LODIndex;
+            RuntimeData.TargetVertexCount = TransferMapResult.TargetToSourceVertex.Num();
+            RuntimeData.MeshSignature = MeshSignature;
+            RuntimeData.TargetToSourceVertex = MoveTemp(TransferMapResult.TargetToSourceVertex);
             OutRuntimeData.Add(MoveTemp(RuntimeData));
         }
     }

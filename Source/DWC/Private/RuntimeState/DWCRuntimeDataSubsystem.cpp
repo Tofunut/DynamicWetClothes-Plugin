@@ -127,8 +127,7 @@ FDWCLODVertexColorTransferMapKey UDWCRuntimeDataSubsystem::MakeLODVertexColorTra
     const USkeletalMeshComponent& TargetSkeletalMesh,
     const FDWCLODVertexStaticData& SourceLODData,
     const FDWCLODVertexStaticData& TargetLODData,
-    const FString& MeshSignature,
-    const FDWCLODVertexColorTransferSettings& Settings) const
+    const FString& MeshSignature) const
 {
     FDWCLODVertexColorTransferMapKey Key;
     Key.SkeletalMesh = FObjectKey(TargetSkeletalMesh.GetSkeletalMeshAsset());
@@ -137,7 +136,6 @@ FDWCLODVertexColorTransferMapKey UDWCRuntimeDataSubsystem::MakeLODVertexColorTra
     Key.SourceLODIndex = SourceLODData.LODIndex;
     Key.TargetLODIndex = TargetLODData.LODIndex;
     Key.MeshSignature = MeshSignature;
-    Key.Settings = Settings;
     return Key;
 }
 
@@ -227,8 +225,7 @@ UDWCRuntimeDataSubsystem::FindLODVertexColorTransferMap(
     const USkeletalMeshComponent& TargetSkeletalMesh,
     const FDWCLODVertexStaticData& SourceLODData,
     const FDWCLODVertexStaticData& TargetLODData,
-    const FString& MeshSignature,
-    const FDWCLODVertexColorTransferSettings& Settings)
+    const FString& MeshSignature)
 {
     if (TargetSkeletalMesh.GetSkeletalMeshAsset() == nullptr ||
         MeshSignature.IsEmpty() ||
@@ -239,7 +236,7 @@ UDWCRuntimeDataSubsystem::FindLODVertexColorTransferMap(
     }
 
     FDWCLODVertexColorTransferMapKey Key =
-        MakeLODVertexColorTransferMapKey(TargetSkeletalMesh, SourceLODData, TargetLODData, MeshSignature, Settings);
+        MakeLODVertexColorTransferMapKey(TargetSkeletalMesh, SourceLODData, TargetLODData, MeshSignature);
     if (Key.SourceLODRenderDataIdentity == 0 || Key.TargetLODRenderDataIdentity == 0)
     {
         return nullptr;
@@ -264,7 +261,6 @@ UDWCRuntimeDataSubsystem::CacheLODVertexColorTransferMap(
     const FDWCLODVertexStaticData& SourceLODData,
     const FDWCLODVertexStaticData& TargetLODData,
     const FString& MeshSignature,
-    const FDWCLODVertexColorTransferSettings& Settings,
     TArray<int32>&& TargetToSourceVertex)
 {
     if (TargetSkeletalMesh.GetSkeletalMeshAsset() == nullptr ||
@@ -277,7 +273,7 @@ UDWCRuntimeDataSubsystem::CacheLODVertexColorTransferMap(
     }
 
     FDWCLODVertexColorTransferMapKey Key =
-        MakeLODVertexColorTransferMapKey(TargetSkeletalMesh, SourceLODData, TargetLODData, MeshSignature, Settings);
+        MakeLODVertexColorTransferMapKey(TargetSkeletalMesh, SourceLODData, TargetLODData, MeshSignature);
     if (Key.SourceLODRenderDataIdentity == 0 || Key.TargetLODRenderDataIdentity == 0)
     {
         return nullptr;

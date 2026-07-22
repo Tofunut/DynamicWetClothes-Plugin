@@ -22,7 +22,8 @@ class FDWCLodCoordinator
     void RefreshReceiverQualityLODPolicy(FDWCWetMeshReceiverRuntime& Receiver) const;
 
     bool ShouldRunSurfaceWater(FDWCQualityLODRuntimeState& State, float BaseInterval);
-    bool ShouldRunRendering(FDWCQualityLODRuntimeState& State, float BaseInterval);
+    bool ShouldRunCPUWetnessRendering(FDWCQualityLODRuntimeState& State, float BaseInterval);
+    bool ShouldEnableCPUWetnessRendering(const FDWCQualityLODRuntimeState& State) const;
     bool ShouldUpdateWrinkle(const FDWCQualityLODRuntimeState& State) const;
     bool ShouldUpdateTransparency(const FDWCQualityLODRuntimeState& State) const;
 

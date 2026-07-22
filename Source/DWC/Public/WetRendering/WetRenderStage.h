@@ -70,7 +70,11 @@ class DWC_API FWetRenderStage
     void         ApplyWetnessToMaterial(FWetRenderStageArgs& Args);
     FLinearColor MakeWetVertexColor(const FWetRenderStageArgs& Args, int32 VertexIndex, float Wetness) const;
 
-    TArray<FColor> CachedWetVertexColors;
-    TMap<int32, FLinearColor> CachedWetPartDebugColorsByID;
-    TWeakObjectPtr<UWetClothingAsset> CachedWetPartDebugColorAsset;
+    // Per-receiver dynamic material instances. RenderStage owns the handles
+    // because all material parameter updates are performed through this stage.
+    TArray<TObjectPtr<UMaterialInstanceDynamic>> WetMaterialInstances;
+
+    TArray<FColor> CachedWetVertexColors; // VertexColor 
+    TMap<int32, FLinearColor> CachedWetPartDebugColorsByID; // ID is at FWetClothingRuntimeData.
+    TWeakObjectPtr<UWetClothingAsset> CachedWetPartDebugColorAsset; // What Asset is Debug Color based on 
 };

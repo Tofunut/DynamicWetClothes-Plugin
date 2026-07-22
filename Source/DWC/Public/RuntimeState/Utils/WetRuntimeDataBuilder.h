@@ -36,36 +36,38 @@ struct DWC_API FWetRuntimeDataBuildArgs
 class DWC_API FWetRuntimeDataBuilder
 {
   public:
-    void InitializeAbsorbedWetnessData(FWetRuntimeDataBuildArgs& Args);
-    bool InitializeWetPartVertexData(FWetRuntimeDataBuildArgs& Args);
-    bool InitializeWetPartVertexDataFromPrecomputedData(
+    FWetRuntimeDataBuilder() = delete;
+
+    static void InitializeAbsorbedWetnessData(FWetRuntimeDataBuildArgs& Args);
+    static bool InitializeWetPartVertexData(FWetRuntimeDataBuildArgs& Args);
+    static bool InitializeWetPartVertexDataFromPrecomputedData(
         FWetRuntimeDataBuildArgs& Args,
         int32 VertexCount);
-    bool InitializeNeighborGraphFromPrecomputedData(FWetRuntimeDataBuildArgs& Args);
-    void EnsureWetnessBufferSize(FWetRuntimeDataBuildArgs& Args, int32 VertexCount);
-    void EnsureWetnessBufferSize(FWetInputStageArgs& Args, int32 VertexCount);
-    bool GetLODRenderData(
+    static bool InitializeNeighborGraphFromPrecomputedData(FWetRuntimeDataBuildArgs& Args);
+    static void EnsureWetnessBufferSize(FWetRuntimeDataBuildArgs& Args, int32 VertexCount);
+    static void EnsureWetnessBufferSize(FWetInputStageArgs& Args, int32 VertexCount);
+    static bool GetLODRenderData(
         const USkeletalMeshComponent* TargetSkeletalMesh,
         int32                         LODIndex,
-        FSkeletalMeshLODRenderData*&  OutLODData) const;
+        FSkeletalMeshLODRenderData*&  OutLODData);
 
     /*
     Failure does not disable the receiver. It records why the runtime must use
     full-vertex traversal when a wet contact is processed.
     */
-    bool InitializeBoneOptimizationCacheFromPrecomputedData(FWetRuntimeDataBuildArgs& Args);
+    static bool InitializeBoneOptimizationCacheFromPrecomputedData(FWetRuntimeDataBuildArgs& Args);
 
     /*
     Resolves HitResult::BoneName to the target bone plus the pre-flattened
     collisionless parent/child include bones. No runtime recursion is performed.
     */
-    bool ResolveSpecificBonesToLoopThrough(
+    static bool ResolveSpecificBonesToLoopThrough(
         const FWetClothingRuntimeData& RuntimeData,
         const USkeletalMeshComponent*  TargetSkeletalMesh,
         FName                          HitBoneName,
         TArray<int32>&                 OutBoneIndices,
         FString*                       OutFallbackReason = nullptr,
-        bool                           bRequireFullVertexTraversal = false) const;
+        bool                           bRequireFullVertexTraversal = false);
 
     /*
     Returns cached candidate vertices for the resolved bones. False means the
@@ -73,11 +75,11 @@ class DWC_API FWetRuntimeDataBuilder
     Once this returns true, a geometric search miss must not trigger a second
     full-vertex pass.
     */
-    bool GetBoneCandidateVertexIndices(
+    static bool GetBoneCandidateVertexIndices(
         const FWetClothingRuntimeData& RuntimeData,
         const USkeletalMeshComponent*  TargetSkeletalMesh,
         FName                          HitBoneName,
         TArray<int32>&                 OutVertexIndices,
         FString*                       OutFallbackReason = nullptr,
-        bool                           bRequireFullVertexTraversal = false) const;
+        bool                           bRequireFullVertexTraversal = false);
 };

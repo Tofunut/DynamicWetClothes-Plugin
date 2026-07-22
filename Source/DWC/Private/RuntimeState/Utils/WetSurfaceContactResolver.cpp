@@ -1,4 +1,4 @@
-#include "WetInputSystem/WetSurfaceContactResolver.h"
+#include "RuntimeState/Utils/WetSurfaceContactResolver.h"
 
 #include "Components/SkeletalMeshComponent.h"
 #include "Core/WetClothingSettings.h"
@@ -6,9 +6,9 @@
 #include "Rendering/SkeletalMeshLODRenderData.h"
 #include "Rendering/SkinWeightVertexBuffer.h"
 #include "RuntimeState/WetClothingRuntimeData.h"
-#include "RuntimeState/WetRuntimeDataBuilder.h"
+#include "RuntimeState/Utils/WetRuntimeDataBuilder.h"
 #include "WetInputSystem/Sampling/WetClothingMeshSampler.h"
-#include "WetInputSystem/WetInputStage.h"
+#include "RuntimeState/Utils/WetInputStage.h"
 
 namespace DWCWetSurfaceContactResolverPrivate
 {
@@ -237,12 +237,12 @@ using namespace DWCWetSurfaceContactResolverPrivate;
 bool FWetSurfaceContactResolver::ResolveContact(
     FWetSurfaceContactResolverArgs& Args,
     const FDWCWetContact& Contact,
-    TArray<FDWCResolvedSurfaceContact>& OutContacts) const
+    TArray<FDWCResolvedSurfaceContact>& OutContacts)
 {
     OutContacts.Reset();
 
     if (!Args.TargetSkeletalMesh || !Args.WetnessSettings || !Args.WetClothingAsset ||
-        !Args.RuntimeData || !Args.RuntimeDataBuilder || !Args.MeshSampler ||
+        !Args.RuntimeData || !Args.MeshSampler ||
         FMath::IsNearlyZero(Contact.Amount))
     {
         return false;
@@ -257,7 +257,7 @@ bool FWetSurfaceContactResolver::ResolveContact(
     FSkeletalMeshLODRenderData* LODData = nullptr;
     const FSkinWeightVertexBuffer* SkinWeightBuffer = Args.TargetSkeletalMesh->GetSkinWeightBuffer(Args.LODIndex);
     if (!SkinWeightBuffer ||
-        !Args.RuntimeDataBuilder->GetLODRenderData(Args.TargetSkeletalMesh, Args.LODIndex, LODData) ||
+        !FWetRuntimeDataBuilder::GetLODRenderData(Args.TargetSkeletalMesh, Args.LODIndex, LODData) ||
         !LODData || !Args.MeshSampler->UpdateSkinningMatrices(Args.TargetSkeletalMesh))
     {
         return false;
@@ -313,7 +313,7 @@ bool FWetSurfaceContactResolver::ResolveContact(
     TArray<FNearestVertex> NearestVertices;
     TArray<int32> CandidateVertices;
     FString FallbackReason;
-    const bool bCacheResolved = Args.RuntimeDataBuilder->GetBoneCandidateVertexIndices(
+    const bool bCacheResolved = FWetRuntimeDataBuilder::GetBoneCandidateVertexIndices(
         *Args.RuntimeData,
         Args.TargetSkeletalMesh,
         Contact.BoneName,
@@ -452,7 +452,7 @@ bool FWetSurfaceContactResolver::ResolveContact(
 bool FWetSurfaceContactResolver::ResolveContacts(
     FWetSurfaceContactResolverArgs& Args,
     const TArray<FDWCWetContact>& Contacts,
-    TArray<FDWCResolvedSurfaceContact>& OutContacts) const
+    TArray<FDWCResolvedSurfaceContact>& OutContacts)
 {
     OutContacts.Reset();
     TArray<FDWCResolvedSurfaceContact> Resolved;
@@ -469,12 +469,12 @@ bool FWetSurfaceContactResolver::ResolveContacts(
 bool FWetSurfaceContactResolver::ResolveWetArea(
     FWetSurfaceContactResolverArgs& Args,
     const FDWCWetAreaData& AreaData,
-    TArray<FDWCResolvedSurfaceContact>& OutContacts) const
+    TArray<FDWCResolvedSurfaceContact>& OutContacts)
 {
     OutContacts.Reset();
 
     if (!Args.TargetSkeletalMesh || !Args.WetnessSettings || !Args.WetClothingAsset ||
-        !Args.RuntimeDataBuilder || !Args.MeshSampler ||
+        !Args.MeshSampler ||
         FMath::IsNearlyZero(AreaData.Amount) || AreaData.SampleCount <= 0)
     {
         return false;
@@ -489,7 +489,7 @@ bool FWetSurfaceContactResolver::ResolveWetArea(
     FSkeletalMeshLODRenderData* LODData = nullptr;
     const FSkinWeightVertexBuffer* SkinWeightBuffer = Args.TargetSkeletalMesh->GetSkinWeightBuffer(Args.LODIndex);
     if (!SkinWeightBuffer ||
-        !Args.RuntimeDataBuilder->GetLODRenderData(Args.TargetSkeletalMesh, Args.LODIndex, LODData) ||
+        !FWetRuntimeDataBuilder::GetLODRenderData(Args.TargetSkeletalMesh, Args.LODIndex, LODData) ||
         !LODData || !Args.MeshSampler->UpdateSkinningMatrices(Args.TargetSkeletalMesh))
     {
         return false;
@@ -698,12 +698,12 @@ bool FWetSurfaceContactResolver::ResolveWaterSurface(
     FWetSurfaceContactResolverArgs& Args,
     const FDWCWaterSurfaceData& WaterSurfaceData,
     const float Amount,
-    TArray<FDWCResolvedSurfaceContact>& OutContacts) const
+    TArray<FDWCResolvedSurfaceContact>& OutContacts)
 {
     OutContacts.Reset();
 
     if (!Args.TargetSkeletalMesh || !Args.WetClothingAsset ||
-        !Args.RuntimeDataBuilder || !Args.MeshSampler ||
+        !Args.MeshSampler ||
         FMath::IsNearlyZero(Amount) ||
         WaterSurfaceData.SizeX < 2 || WaterSurfaceData.SizeY < 2 ||
         !WaterSurfaceData.Bounds.IsValid)
@@ -727,7 +727,7 @@ bool FWetSurfaceContactResolver::ResolveWaterSurface(
     FSkeletalMeshLODRenderData* LODData = nullptr;
     const FSkinWeightVertexBuffer* SkinWeightBuffer = Args.TargetSkeletalMesh->GetSkinWeightBuffer(Args.LODIndex);
     if (!SkinWeightBuffer ||
-        !Args.RuntimeDataBuilder->GetLODRenderData(Args.TargetSkeletalMesh, Args.LODIndex, LODData) ||
+        !FWetRuntimeDataBuilder::GetLODRenderData(Args.TargetSkeletalMesh, Args.LODIndex, LODData) ||
         !LODData || !Args.MeshSampler->UpdateSkinningMatrices(Args.TargetSkeletalMesh))
     {
         return false;

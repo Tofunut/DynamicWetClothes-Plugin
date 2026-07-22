@@ -7,9 +7,7 @@
 
 class USkeletalMeshComponent;
 class FWetClothingRuntimeData;
-class FWetRuntimeDataBuilder;
 class FWetClothingMeshSampler;
-class FWetSimulationStage;
 class FAbsorbedWetnessSimulationState;
 class FSurfaceWaterSimulationState;
 struct FSurfaceWaterSimulationSettings;
@@ -37,9 +35,7 @@ struct DWC_API FWetInputStageArgs
     const FSurfaceWaterSimulationSettings* SurfaceWaterSettings = nullptr;
     FRandomStream* SurfaceWaterRandomStream = nullptr;
 
-    FWetRuntimeDataBuilder*  RuntimeDataBuilder = nullptr;
     FWetClothingMeshSampler* MeshSampler = nullptr;
-    FWetSimulationStage*     SimulationStage = nullptr;
 
     // Set by callers that need complete per-vertex callback/output data.
     // Such requests intentionally bypass the bone cache.
@@ -54,35 +50,33 @@ struct DWC_API FWetInputStageArgs
 class DWC_API FWetInputStage
 {
   public:
+    FWetInputStage() = delete;
+
     static float CalculateContactExposure(
         const FVector&              WorldNormal,
         const FVector&              Direction,
         const FVector&              Normal,
         const FWetClothingSettings& Settings);
 
-    void ApplyWetAll(FWetInputStageArgs& Args, float Amount);
-    bool ApplyWetSurface(
+    static void ApplyWetAll(FWetInputStageArgs& Args, float Amount);
+    static bool ApplyWetSurface(
         FWetInputStageArgs&         Args,
         const FDWCWaterSurfaceData& WaterSurfaceData,
         float                       Amount,
         bool                        bApplyMaterial);
-    bool ApplyWetArea(
+    static bool ApplyWetArea(
         FWetInputStageArgs&    Args,
         const FDWCWetAreaData& AreaData,
         bool                   bApplyMaterial);
-    bool ApplyWetContact(FWetInputStageArgs& Args, const FDWCWetContact& Contact, bool bApplyMaterial);
-    bool ApplyWetContacts(
+    static bool ApplyWetContact(FWetInputStageArgs& Args, const FDWCWetContact& Contact, bool bApplyMaterial);
+    static bool ApplyWetContacts(
         FWetInputStageArgs&           Args,
         const TArray<FDWCWetContact>& Contacts,
         bool                          bApplyMaterial);
-    bool        GetWetnessWorldBounds(const FWetInputStageArgs& Args, FBox& OutBounds);
+    static bool GetWetnessWorldBounds(const FWetInputStageArgs& Args, FBox& OutBounds);
     static bool QueryWaterSurfaceData(
         const FDWCWaterSurfaceData& WaterSurfaceData,
         const FVector&              WorldPosition,
         float&                      OutSurfaceZ);
 
-    FRandomStream& GetSurfaceWaterRandomStream() { return SurfaceWaterRandomStream; }
-
-  private:
-    FRandomStream SurfaceWaterRandomStream = FRandomStream(0x445743);
 };

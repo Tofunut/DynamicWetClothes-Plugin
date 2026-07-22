@@ -5,7 +5,6 @@
 
 class USkeletalMeshComponent;
 class FWetClothingRuntimeData;
-class FWetRuntimeDataBuilder;
 class FWetClothingMeshSampler;
 class UWetClothingAsset;
 struct FWetClothingSettings;
@@ -40,7 +39,6 @@ struct DWC_API FWetSurfaceContactResolverArgs
     const FWetClothingSettings* WetnessSettings = nullptr;
     const UWetClothingAsset* WetClothingAsset = nullptr;
     const FWetClothingRuntimeData* RuntimeData = nullptr;
-    FWetRuntimeDataBuilder* RuntimeDataBuilder = nullptr;
     FWetClothingMeshSampler* MeshSampler = nullptr;
     int32 LODIndex = 0;
     int32 MaxNearestSeedVertices = 12;
@@ -53,24 +51,26 @@ struct DWC_API FWetSurfaceContactResolverArgs
 class DWC_API FWetSurfaceContactResolver
 {
 public:
-    bool ResolveContact(
+    FWetSurfaceContactResolver() = delete;
+
+    static bool ResolveContact(
         FWetSurfaceContactResolverArgs& Args,
         const FDWCWetContact& Contact,
-        TArray<FDWCResolvedSurfaceContact>& OutContacts) const;
+        TArray<FDWCResolvedSurfaceContact>& OutContacts);
 
-    bool ResolveContacts(
+    static bool ResolveContacts(
         FWetSurfaceContactResolverArgs& Args,
         const TArray<FDWCWetContact>& Contacts,
-        TArray<FDWCResolvedSurfaceContact>& OutContacts) const;
+        TArray<FDWCResolvedSurfaceContact>& OutContacts);
 
-    bool ResolveWetArea(
+    static bool ResolveWetArea(
         FWetSurfaceContactResolverArgs& Args,
         const FDWCWetAreaData& AreaData,
-        TArray<FDWCResolvedSurfaceContact>& OutContacts) const;
+        TArray<FDWCResolvedSurfaceContact>& OutContacts);
 
-    bool ResolveWaterSurface(
+    static bool ResolveWaterSurface(
         FWetSurfaceContactResolverArgs& Args,
         const FDWCWaterSurfaceData& WaterSurfaceData,
         float Amount,
-        TArray<FDWCResolvedSurfaceContact>& OutContacts) const;
+        TArray<FDWCResolvedSurfaceContact>& OutContacts);
 };

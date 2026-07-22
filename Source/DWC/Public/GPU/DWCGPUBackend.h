@@ -3,7 +3,7 @@
 #include "CoreMinimal.h"
 #include "Modules/ModuleInterface.h"
 #include "Templates/UniquePtr.h"
-#include "WetInputSystem/WetSurfaceContactResolver.h"
+#include "RuntimeState/Utils/WetSurfaceContactResolver.h"
 
 class UDynamicWetClothesComponent;
 class USkeletalMeshComponent;

@@ -19,7 +19,7 @@
 #include "RuntimeState/WetClothingRuntimeData.h"
 #include "WetInputSystem/Sampling/WetClothingMeshSampler.h"
 #include "WetSimulation/AbsorbedWetness/AbsorbedWetnessSimulationState.h"
-#include "WetSimulation/WetSimulationStage.h"
+#include "RuntimeState/Utils/WetSimulationStage.h"
 #include "WetnessProfileViewportClient.h"
 
 #define LOCTEXT_NAMESPACE "WetnessProfileViewport"
@@ -413,10 +413,6 @@ void SWetnessProfileViewport::RebuildPreviewWetnessRuntime()
     {
         PreviewSimulationState = MakeUnique<FAbsorbedWetnessSimulationState>();
     }
-    if (!PreviewSimulationStage.IsValid())
-    {
-        PreviewSimulationStage = MakeUnique<FWetSimulationStage>();
-    }
     if (!PreviewMeshSampler.IsValid())
     {
         PreviewMeshSampler = MakeUnique<FWetClothingMeshSampler>();
@@ -566,8 +562,7 @@ void SWetnessProfileViewport::UpdateRainParticles(float DeltaSeconds)
 
 void SWetnessProfileViewport::UpdateWetnessSimulation(float DeltaSeconds)
 {
-    if (!PreviewSimulationStage.IsValid() ||
-        !PreviewSimulationState.IsValid() ||
+    if (!PreviewSimulationState.IsValid() ||
         !PreviewRuntimeData.IsValid() ||
         !PreviewMeshSampler.IsValid() ||
         DeltaSeconds <= 0.0f)
@@ -581,7 +576,7 @@ void SWetnessProfileViewport::UpdateWetnessSimulation(float DeltaSeconds)
            StepCount < PreviewMaxWetnessStageStepsPerTick)
     {
         FWetSimulationStageArgs Args = MakePreviewWetSimulationArgs();
-        if (PreviewSimulationStage->UpdateWetness(Args))
+        if (FWetSimulationStage::UpdateWetness(Args))
         {
             bWetnessOverlayDirty = true;
         }
@@ -600,7 +595,6 @@ void SWetnessProfileViewport::AddWetnessAtWorldPoint(const FVector& WorldPoint, 
 {
     const FVector Normal = WorldPoint.GetSafeNormal();
     if (Normal.IsNearlyZero() ||
-        !PreviewSimulationStage.IsValid() ||
         !PreviewSimulationState.IsValid() ||
         !PreviewRuntimeData.IsValid())
     {
@@ -629,7 +623,7 @@ void SWetnessProfileViewport::AddWetnessAtWorldPoint(const FVector& WorldPoint, 
 
             const int32 SampleIndex = GetWetnessSampleIndex(FMath::Clamp(CenterLat + LatOffset, 0, PreviewLatSegments), CenterLon + LonOffset);
             const float Falloff = 1.0f - FMath::Clamp(Distance / 2.25f, 0.0f, 1.0f);
-            PreviewSimulationStage->QueuePendingWetness(Args, SampleIndex, Amount * Falloff);
+            FWetSimulationStage::QueuePendingWetness(Args, SampleIndex, Amount * Falloff);
         }
     }
 

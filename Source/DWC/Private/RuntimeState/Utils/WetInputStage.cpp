@@ -1,15 +1,15 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
-#include "WetInputSystem/WetInputStage.h"
+#include "RuntimeState/Utils/WetInputStage.h"
 
 #include "Runtime/Engine/Classes/Components/SkeletalMeshComponent.h"
 
 #include "WetInputSystem/WetContactTypes.h"
-#include "WetSimulation/WetSimulationStage.h"
+#include "RuntimeState/Utils/WetSimulationStage.h"
 #include "WetInputSystem/Sampling/WetClothingMeshSampler.h"
 #include "Async/ParallelFor.h"
 #include "RuntimeState/WetClothingRuntimeData.h"
-#include "RuntimeState/WetRuntimeDataBuilder.h"
+#include "RuntimeState/Utils/WetRuntimeDataBuilder.h"
 #include "WetSimulation/AbsorbedWetness/AbsorbedWetnessSimulationState.h"
 #include "WetSimulation/SurfaceWater/SurfaceWaterSimulationState.h"
 #include "WetSimulation/SurfaceWater/SurfaceWaterSimulationSettings.h"
@@ -28,7 +28,7 @@ namespace
     {
         if (Amount > 0.0f)
         {
-            Receiver.SimulationStage->QueuePendingWetness(Receiver, VertexIndex, Amount);
+            FWetSimulationStage::QueuePendingWetness(Receiver, VertexIndex, Amount);
         }
     }
     struct FPreparedWetContactData
@@ -190,15 +190,15 @@ namespace
         OutResolvedContact = FResolvedBoneCandidateContact();
         OutResolvedContact.Contact = &Contact;
 
-        if (!Receiver.RuntimeData || !Receiver.RuntimeDataBuilder)
+        if (!Receiver.RuntimeData)
         {
             OutResolvedContact.bUseFullVertexFallback = true;
-            OutResolvedContact.FallbackReason = TEXT("RuntimeData or RuntimeDataBuilder is unavailable.");
+            OutResolvedContact.FallbackReason = TEXT("RuntimeData is unavailable.");
             return true;
         }
 
         OutResolvedContact.bUseFullVertexFallback =
-            !Receiver.RuntimeDataBuilder->GetBoneCandidateVertexIndices(
+            !FWetRuntimeDataBuilder::GetBoneCandidateVertexIndices(
                 *Receiver.RuntimeData,
                 Receiver.TargetSkeletalMesh,
                 Contact.BoneName,
@@ -359,7 +359,7 @@ namespace
                 {
                     continue;
                 }
-                const float RemovedAmount = Receiver.SimulationStage->AbsorbWetnessAtVertex(
+                const float RemovedAmount = FWetSimulationStage::AbsorbWetnessAtVertex(
                     Receiver, Sample.VertexIndex, InputAmount * Sample.Influence, bDirty);
                 bApplied |= !FMath::IsNearlyZero(RemovedAmount);
             }
@@ -715,7 +715,7 @@ bool FWetInputStage::ApplyWetSurface(FWetInputStageArgs& Receiver, const FDWCWat
 
     if (Receiver.SimulationState->AbsorbedWetnessPerVertex.Num() != Receiver.MeshSampler->CachedSkinnedPositions.Num())
     {
-        Receiver.RuntimeDataBuilder->EnsureWetnessBufferSize(Receiver, Receiver.MeshSampler->CachedSkinnedPositions.Num());
+        FWetRuntimeDataBuilder::EnsureWetnessBufferSize(Receiver, Receiver.MeshSampler->CachedSkinnedPositions.Num());
     }
 
     bool             bDirty = false;
@@ -792,7 +792,7 @@ bool FWetInputStage::ApplyWetArea(FWetInputStageArgs&    Receiver,
 
     FSkeletalMeshLODRenderData* LODData = nullptr;
     constexpr int32 RuntimeLODIndex = UWetClothingAsset::RuntimeSimulationLODIndex;
-    if (!Receiver.RuntimeDataBuilder->GetLODRenderData(Receiver.TargetSkeletalMesh, RuntimeLODIndex, LODData) || !LODData)
+    if (!FWetRuntimeDataBuilder::GetLODRenderData(Receiver.TargetSkeletalMesh, RuntimeLODIndex, LODData) || !LODData)
     {
         return false;
     }
@@ -805,7 +805,7 @@ bool FWetInputStage::ApplyWetArea(FWetInputStageArgs&    Receiver,
 
     if (Receiver.SimulationState->AbsorbedWetnessPerVertex.Num() != VertexCount)
     {
-        Receiver.RuntimeDataBuilder->EnsureWetnessBufferSize(Receiver, VertexCount);
+        FWetRuntimeDataBuilder::EnsureWetnessBufferSize(Receiver, VertexCount);
     }
 
     const bool bWantsNormalExposure = AreaData.bUseNormalExposure && !AreaData.Direction.IsNearlyZero();
@@ -941,14 +941,14 @@ bool FWetInputStage::ApplyWetContact(
         constexpr int32 RuntimeLODIndex = UWetClothingAsset::RuntimeSimulationLODIndex;
         const FSkinWeightVertexBuffer* SkinWeightBuffer = Receiver.TargetSkeletalMesh->GetSkinWeightBuffer(RuntimeLODIndex);
         if (SkinWeightBuffer &&
-            Receiver.RuntimeDataBuilder->GetLODRenderData(Receiver.TargetSkeletalMesh, RuntimeLODIndex, LODData) &&
+            FWetRuntimeDataBuilder::GetLODRenderData(Receiver.TargetSkeletalMesh, RuntimeLODIndex, LODData) &&
             LODData &&
             Receiver.MeshSampler->UpdateSkinningMatrices(Receiver.TargetSkeletalMesh))
         {
             const int32 VertexCount = LODData->GetNumVertices();
             if (Receiver.SimulationState->AbsorbedWetnessPerVertex.Num() != VertexCount)
             {
-                Receiver.RuntimeDataBuilder->EnsureWetnessBufferSize(Receiver, VertexCount);
+                FWetRuntimeDataBuilder::EnsureWetnessBufferSize(Receiver, VertexCount);
             }
 
             FDirectSkinnedWetContactData PreparedData;
@@ -985,7 +985,7 @@ bool FWetInputStage::ApplyWetContact(
 
     if (Receiver.SimulationState->AbsorbedWetnessPerVertex.Num() != Receiver.MeshSampler->CachedSkinnedPositions.Num())
     {
-        Receiver.RuntimeDataBuilder->EnsureWetnessBufferSize(Receiver, Receiver.MeshSampler->CachedSkinnedPositions.Num());
+        FWetRuntimeDataBuilder::EnsureWetnessBufferSize(Receiver, Receiver.MeshSampler->CachedSkinnedPositions.Num());
     }
 
     FPreparedWetContactData PreparedData;
@@ -1025,14 +1025,14 @@ bool FWetInputStage::ApplyWetContacts(FWetInputStageArgs& Receiver, const TArray
         constexpr int32 RuntimeLODIndex = UWetClothingAsset::RuntimeSimulationLODIndex;
         const FSkinWeightVertexBuffer* SkinWeightBuffer = Receiver.TargetSkeletalMesh->GetSkinWeightBuffer(RuntimeLODIndex);
         if (SkinWeightBuffer &&
-            Receiver.RuntimeDataBuilder->GetLODRenderData(Receiver.TargetSkeletalMesh, RuntimeLODIndex, LODData) &&
+            FWetRuntimeDataBuilder::GetLODRenderData(Receiver.TargetSkeletalMesh, RuntimeLODIndex, LODData) &&
             LODData &&
             Receiver.MeshSampler->UpdateSkinningMatrices(Receiver.TargetSkeletalMesh))
         {
             const int32 VertexCount = LODData->GetNumVertices();
             if (Receiver.SimulationState->AbsorbedWetnessPerVertex.Num() != VertexCount)
             {
-                Receiver.RuntimeDataBuilder->EnsureWetnessBufferSize(Receiver, VertexCount);
+                FWetRuntimeDataBuilder::EnsureWetnessBufferSize(Receiver, VertexCount);
             }
 
             FDirectSkinnedWetContactData PreparedData;
@@ -1073,7 +1073,7 @@ bool FWetInputStage::ApplyWetContacts(FWetInputStageArgs& Receiver, const TArray
 
     if (Receiver.SimulationState->AbsorbedWetnessPerVertex.Num() != Receiver.MeshSampler->CachedSkinnedPositions.Num())
     {
-        Receiver.RuntimeDataBuilder->EnsureWetnessBufferSize(Receiver, Receiver.MeshSampler->CachedSkinnedPositions.Num());
+        FWetRuntimeDataBuilder::EnsureWetnessBufferSize(Receiver, Receiver.MeshSampler->CachedSkinnedPositions.Num());
     }
 
     FPreparedWetContactData PreparedData;

@@ -93,6 +93,7 @@ namespace
 uint64 FWetRenderStage::GetAllocatedMemoryBytes() const
 {
     return sizeof(*this) +
+           WetMaterialInstances.GetAllocatedSize() +
            CachedWetVertexColors.GetAllocatedSize() +
            CachedWetPartDebugColorsByID.GetAllocatedSize();
 }

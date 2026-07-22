@@ -8,7 +8,7 @@
 #include "UObject/GCObject.h"
 #include "WetInputSystem/Sampling/WetClothingMeshSampler.h"
 #include "WetSimulation/AbsorbedWetness/AbsorbedWetnessSimulationState.h"
-#include "WetSimulation/WetSimulationStage.h"
+#include "RuntimeState/Utils/WetSimulationStage.h"
 
 class FAdvancedPreviewScene;
 class FWetnessProfileViewportClient;
@@ -92,7 +92,6 @@ class SWetnessProfileViewport : public SEditorViewport, public FGCObject
     TSharedPtr<SRichTextBlock>                OverlayText;
     TUniquePtr<FWetClothingRuntimeData>       PreviewRuntimeData;
     TUniquePtr<FAbsorbedWetnessSimulationState> PreviewSimulationState;
-    TUniquePtr<FWetSimulationStage>           PreviewSimulationStage;
     TUniquePtr<FWetClothingMeshSampler>       PreviewMeshSampler;
     FWetClothingSettings                      PreviewWetnessSettings;
     EDWCSimulationMode                        PreviewSimulationMode = EDWCSimulationMode::VertexCPU;

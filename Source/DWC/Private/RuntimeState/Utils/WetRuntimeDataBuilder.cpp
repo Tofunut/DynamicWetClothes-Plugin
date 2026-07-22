@@ -1,6 +1,6 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
-#include "RuntimeState/WetRuntimeDataBuilder.h"
+#include "RuntimeState/Utils/WetRuntimeDataBuilder.h"
 
 #include "RuntimeState/WetPrecomputedSimulationDataBridge.h"
 #include "RuntimeState/WetClothingRuntimeData.h"
@@ -8,7 +8,7 @@
 #include "Runtime/Engine/Classes/Components/SkeletalMeshComponent.h"
 
 #include "WetInputSystem/Sampling/WetClothingMeshSampler.h"
-#include "WetInputSystem/WetInputStage.h"
+#include "RuntimeState/Utils/WetInputStage.h"
 #include "WetRendering/WetRenderStage.h"
 #include "WetRendering/WetVertexColorBuffer.h"
 #include "WetSimulation/AbsorbedWetness/AbsorbedWetnessSimulationState.h"
@@ -453,7 +453,7 @@ void FWetRuntimeDataBuilder::EnsureWetnessBufferSize(FWetInputStageArgs& Receive
 bool FWetRuntimeDataBuilder::GetLODRenderData(
     const USkeletalMeshComponent* TargetSkeletalMesh,
     int32                         LODIndex,
-    FSkeletalMeshLODRenderData*&  OutLODData) const
+    FSkeletalMeshLODRenderData*&  OutLODData)
 {
     OutLODData = nullptr;
 
@@ -562,7 +562,7 @@ bool FWetRuntimeDataBuilder::ResolveSpecificBonesToLoopThrough(
     const FName                    HitBoneName,
     TArray<int32>&                 OutBoneIndices,
     FString*                       OutFallbackReason,
-    const bool                     bRequireFullVertexTraversal) const
+    const bool                     bRequireFullVertexTraversal)
 {
     OutBoneIndices.Reset();
 
@@ -675,7 +675,7 @@ bool FWetRuntimeDataBuilder::GetBoneCandidateVertexIndices(
     const FName                    HitBoneName,
     TArray<int32>&                 OutVertexIndices,
     FString*                       OutFallbackReason,
-    const bool                     bRequireFullVertexTraversal) const
+    const bool                     bRequireFullVertexTraversal)
 {
     OutVertexIndices.Reset();
 

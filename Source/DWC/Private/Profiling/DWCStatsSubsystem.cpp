@@ -321,14 +321,8 @@ void UDWCStatsSubsystem::CollectStats(FDWCStatsSnapshot& OutSnapshot)
 
             OutSnapshot.ReceiverMetadataCPUBytes += sizeof(*Receiver);
             OutSnapshot.ReceiverMetadataCPUBytes += Receiver->SurfaceWaterProfilesByMaterialSlot.GetAllocatedSize();
-            OutSnapshot.ReceiverMetadataCPUBytes += Receiver->WetMaterialInstances.GetAllocatedSize();
             OutSnapshot.ReceiverMetadataCPUBytes += Receiver->LODVertexStaticDataByLOD.GetAllocatedSize();
             OutSnapshot.ReceiverMetadataCPUBytes += Receiver->LODVertexColorTransferMapsByLOD.GetAllocatedSize();
-
-            if (Receiver->RuntimeDataBuilder.IsValid()) OutSnapshot.ReceiverMetadataCPUBytes += sizeof(*Receiver->RuntimeDataBuilder);
-            if (Receiver->SimulationStage.IsValid()) OutSnapshot.ReceiverMetadataCPUBytes += sizeof(*Receiver->SimulationStage);
-            if (Receiver->SurfaceContactResolver.IsValid()) OutSnapshot.ReceiverMetadataCPUBytes += sizeof(*Receiver->SurfaceContactResolver);
-            if (Receiver->InputStage.IsValid()) OutSnapshot.ReceiverMetadataCPUBytes += sizeof(*Receiver->InputStage);
 
             AddUniqueSharedPayload(
                 Receiver->SharedRuntimeData,
@@ -406,25 +400,25 @@ void UDWCStatsSubsystem::CollectStats(FDWCStatsSnapshot& OutSnapshot)
                 OutSnapshot.GPUBackendCPUBytes += BackendStats.CPUBytes;
                 OutSnapshot.GPUBackendGPUBytes += BackendStats.GPUBytes;
             }
-            else
+            else if (Receiver->RenderStage.IsValid())
             {
-                for (const TObjectPtr<UMaterialInstanceDynamic>& Material : Receiver->WetMaterialInstances)
+                for (const TObjectPtr<UMaterialInstanceDynamic>& Material : Receiver->RenderStage->WetMaterialInstances)
                 {
                     ModeStats.ActiveMaterialCount += Material != nullptr ? 1u : 0u;
                 }
             }
 
             const UWetClothingAsset* WetClothingAsset = Receiver->WetClothingAsset.Get();
-            if (WetClothingAsset != nullptr)
+            if (WetClothingAsset != nullptr && Receiver->RenderStage.IsValid())
             {
                 const int32 PreferredWrinkleUVChannel =
                     WetClothingAsset->Authored.WrinkleData.WrinkleUVChannelIndex != INDEX_NONE
                         ? WetClothingAsset->Authored.WrinkleData.WrinkleUVChannelIndex
                         : 0;
 
-                for (int32 MaterialSlotIndex = 0; MaterialSlotIndex < Receiver->WetMaterialInstances.Num(); ++MaterialSlotIndex)
+                for (int32 MaterialSlotIndex = 0; MaterialSlotIndex < Receiver->RenderStage->WetMaterialInstances.Num(); ++MaterialSlotIndex)
                 {
-                    if (Receiver->WetMaterialInstances[MaterialSlotIndex] == nullptr ||
+                    if (Receiver->RenderStage->WetMaterialInstances[MaterialSlotIndex] == nullptr ||
                         !WetClothingAsset->IsMaterialSlotWettable(MaterialSlotIndex))
                     {
                         continue;

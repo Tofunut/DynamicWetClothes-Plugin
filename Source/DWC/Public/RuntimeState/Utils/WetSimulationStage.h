@@ -6,7 +6,6 @@
 
 class USkeletalMeshComponent;
 class FWetClothingRuntimeData;
-class FWetRuntimeDataBuilder;
 class FWetClothingMeshSampler;
 class FAbsorbedWetnessSimulationState;
 struct FWetInputStageArgs;
@@ -26,7 +25,6 @@ struct DWC_API FWetSimulationStageArgs
     const FWetClothingRuntimeData*   RuntimeData = nullptr;
     FAbsorbedWetnessSimulationState* SimulationState = nullptr;
 
-    FWetRuntimeDataBuilder*  RuntimeDataBuilder = nullptr;
     FWetClothingMeshSampler* MeshSampler = nullptr;
 
     bool  bAsyncSkinningRequested = false;
@@ -44,15 +42,17 @@ struct DWC_API FWetSimulationStageArgs
 class DWC_API FWetSimulationStage
 {
   public:
-    float AbsorbWetnessAtVertex(FWetInputStageArgs& Args, int32 VertexIndex, float Amount, bool& bDirty);
-    void  QueuePendingWetness(FWetInputStageArgs& Args, int32 VertexIndex, float Amount);
+    FWetSimulationStage() = delete;
 
-    float AbsorbWetnessAtVertex(FWetSimulationStageArgs& Args, int32 VertexIndex, float Amount, bool& bDirty);
-    void  QueuePendingWetness(FWetSimulationStageArgs& Args, int32 VertexIndex, float Amount);
-    void  RefreshWetnessDryHold(FWetSimulationStageArgs& Args, int32 VertexIndex);
-    void  ClearPendingWetness(FWetSimulationStageArgs& Args);
-    void  DryOutWetness(FWetSimulationStageArgs& Args, bool& bDirty, float EffectiveDryRatePerSecond);
-    bool  PreparePendingWetnessProcessing(
+    static float AbsorbWetnessAtVertex(FWetInputStageArgs& Args, int32 VertexIndex, float Amount, bool& bDirty);
+    static void  QueuePendingWetness(FWetInputStageArgs& Args, int32 VertexIndex, float Amount);
+
+    static float AbsorbWetnessAtVertex(FWetSimulationStageArgs& Args, int32 VertexIndex, float Amount, bool& bDirty);
+    static void  QueuePendingWetness(FWetSimulationStageArgs& Args, int32 VertexIndex, float Amount);
+    static void  RefreshWetnessDryHold(FWetSimulationStageArgs& Args, int32 VertexIndex);
+    static void  ClearPendingWetness(FWetSimulationStageArgs& Args);
+    static void  DryOutWetness(FWetSimulationStageArgs& Args, bool& bDirty, float EffectiveDryRatePerSecond);
+    static bool  PreparePendingWetnessProcessing(
          FWetSimulationStageArgs& Args,
          float                    EffectiveSpreadRatePerSecond,
          float&                   OutSpreadAlpha,
@@ -60,8 +60,8 @@ class DWC_API FWetSimulationStage
          FVector&                 OutLocalGravityDirection,
          bool&                    bOutUseGravityBias,
          bool&                    bOutCanSpread);
-    void  SnapshotPendingWetnessForCurrentUpdate(FWetSimulationStageArgs& Args);
-    int32 ProcessCurrentPendingWetness(
+    static void  SnapshotPendingWetnessForCurrentUpdate(FWetSimulationStageArgs& Args);
+    static int32 ProcessCurrentPendingWetness(
         FWetSimulationStageArgs& Args,
         bool&                    bDirty,
         float                    SpreadAlpha,
@@ -69,7 +69,7 @@ class DWC_API FWetSimulationStage
         const FVector&           LocalGravityDirection,
         bool                     bUseGravityBias,
         bool                     bCanSpread);
-    void SpreadPendingWetnessToNeighbors(
+    static void SpreadPendingWetnessToNeighbors(
         FWetSimulationStageArgs& Args,
         int32                    VertexIndex,
         float                    SpreadableWetness,
@@ -77,17 +77,17 @@ class DWC_API FWetSimulationStage
         float                    GravityFlowStrength,
         const FVector&           LocalGravityDirection,
         bool                     bUseGravityBias);
-    float CalculateNeighborGravityBias(
+    static float CalculateNeighborGravityBias(
         const FWetSimulationStageArgs& Args,
         const FVector&                 SourceLocalPosition,
         int32                          NeighborIndex,
         float                          GravityFlowStrength,
         const FVector&                 LocalGravityDirection);
-    void ProcessPendingWetness(
+    static void ProcessPendingWetness(
         FWetSimulationStageArgs& Args,
         bool&                    bDirty,
         float                    EffectiveSpreadRatePerSecond);
-    bool UpdateWetness(FWetSimulationStageArgs& Args);
+    static bool UpdateWetness(FWetSimulationStageArgs& Args);
 
     static float ClampWetness(float Wetness, const FWetClothingSettings& Settings);
     static float CalculateDryMultiplier(float DryRatePerSecond, float DeltaSeconds);

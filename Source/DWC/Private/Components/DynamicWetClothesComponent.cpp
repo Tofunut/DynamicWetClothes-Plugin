@@ -8,7 +8,7 @@
 #include "Core/DWCQualityLODController.h"
 #include "Core/DWCQualityLODEvaluator.h"
 #include "Runtime/Engine/Classes/Components/SkeletalMeshComponent.h"
-#include "WetInputSystem/WetInputStage.h"
+#include "RuntimeState/Utils/WetInputStage.h"
 #include "WetInputSystem/Sampling/WetClothingMeshSampler.h"
 #include "WetRendering/WetRenderStage.h"
 #include "WetRendering/WetMaterialParameters.h"
@@ -16,7 +16,7 @@
 #include "RuntimeState/WetClothingRuntimeData.h"
 #include "RuntimeState/DWCRuntimeDataSubsystem.h"
 #include "RuntimeState/DWCLODVertexColorTransferMapBuilder.h"
-#include "WetSimulation/WetSimulationStage.h"
+#include "RuntimeState/Utils/WetSimulationStage.h"
 #include "WetSimulation/AbsorbedWetness/AbsorbedWetnessSimulationState.h"
 #include "WetSimulation/SurfaceWater/SurfaceWaterSimulationState.h"
 #include "Engine/SkeletalMesh.h"
@@ -138,7 +138,7 @@ namespace
         const TArray<FDWCResolvedSurfaceContact>& Contacts)
     {
         const UWetClothingAsset* Asset = Receiver.WetClothingAsset.Get();
-        if (Asset == nullptr || !Receiver.SharedRuntimeData.IsValid() || !Receiver.InputStage.IsValid() ||
+        if (Asset == nullptr || !Receiver.SharedRuntimeData.IsValid() ||
             !Asset->Authored.SurfaceWaterSettings.bEnabled || Receiver.SurfaceWaterStatesByMaterialSlot.IsEmpty() ||
             Contacts.IsEmpty())
         {
@@ -194,7 +194,7 @@ namespace
             }
         }
 
-        FRandomStream& RandomStream = Receiver.InputStage->GetSurfaceWaterRandomStream();
+        FRandomStream& RandomStream = Receiver.SurfaceWaterRandomStream;
         bool bAnyQueued = false;
         for (const TPair<int32, FGPUSurfaceWaterAccumulator>& Pair : Accumulators)
         {
@@ -646,11 +646,7 @@ bool UDynamicWetClothesComponent::RebuildWetMeshReceivers()
         Receiver->ReceiverId = FName(*FString::Printf(TEXT("%s__%s"), *Mesh->GetFName().ToString(), *Asset->GetFName().ToString()));
         Receiver->MeshComponent = Mesh;
         Receiver->WetClothingAsset = Asset;
-        Receiver->RuntimeDataBuilder = MakeUnique<FWetRuntimeDataBuilder>();
         Receiver->SimulationState = MakeUnique<FAbsorbedWetnessSimulationState>();
-        Receiver->SimulationStage = MakeUnique<FWetSimulationStage>();
-        Receiver->InputStage = MakeUnique<FWetInputStage>();
-        Receiver->SurfaceContactResolver = MakeUnique<FWetSurfaceContactResolver>();
         Receiver->MeshSampler = MakeUnique<FWetClothingMeshSampler>();
         Receiver->RenderStage = MakeUnique<FWetRenderStage>();
         Receivers.Add(MoveTemp(Receiver));
@@ -710,10 +706,10 @@ bool UDynamicWetClothesComponent::InitializeWetMeshReceiverRuntime(FDWCWetMeshRe
     }
 
     RuntimeDataBuildArgs.RuntimeData = Receiver.SharedRuntimeData.Get();
-    Receiver.RuntimeDataBuilder->InitializeAbsorbedWetnessData(RuntimeDataBuildArgs);
+    FWetRuntimeDataBuilder::InitializeAbsorbedWetnessData(RuntimeDataBuildArgs);
 
     FSkeletalMeshLODRenderData* LODData = nullptr;
-    if (!Receiver.RuntimeDataBuilder->GetLODRenderData(
+    if (!FWetRuntimeDataBuilder::GetLODRenderData(
             Receiver.MeshComponent.Get(),
             RuntimeLODIndex,
             LODData) ||
@@ -722,7 +718,7 @@ bool UDynamicWetClothesComponent::InitializeWetMeshReceiverRuntime(FDWCWetMeshRe
         return false;
     }
 
-    Receiver.RuntimeDataBuilder->EnsureWetnessBufferSize(RuntimeDataBuildArgs, LODData->GetNumVertices());
+    FWetRuntimeDataBuilder::EnsureWetnessBufferSize(RuntimeDataBuildArgs, LODData->GetNumVertices());
     Receiver.SimulationState->MarkAllWetVertexColorsDirty();
 
     if (!IsGPUWetnessMode(GetActiveSimulationMode()))
@@ -1020,9 +1016,7 @@ FWetRuntimeDataBuildArgs UDynamicWetClothesComponent::MakeRuntimeDataBuildArgs(F
 FWetInputStageArgs UDynamicWetClothesComponent::MakeWetInputStageArgs(FDWCWetMeshReceiverRuntime& Receiver)
 {
     check(Receiver.SharedRuntimeData.IsValid());
-    check(Receiver.RuntimeDataBuilder.IsValid());
     check(Receiver.SimulationState.IsValid());
-    check(Receiver.SimulationStage.IsValid());
     check(Receiver.MeshSampler.IsValid());
 
     FWetInputStageArgs Args;
@@ -1033,17 +1027,14 @@ FWetInputStageArgs UDynamicWetClothesComponent::MakeWetInputStageArgs(FDWCWetMes
     Args.SimulationState = Receiver.SimulationState.Get();
     Args.SurfaceWaterStatesByMaterialSlot = &Receiver.SurfaceWaterStatesByMaterialSlot;
     Args.SurfaceWaterSettings = Receiver.WetClothingAsset.IsValid() ? &Receiver.WetClothingAsset->Authored.SurfaceWaterSettings : nullptr;
-    Args.SurfaceWaterRandomStream = &Receiver.InputStage->GetSurfaceWaterRandomStream();
-    Args.RuntimeDataBuilder = Receiver.RuntimeDataBuilder.Get();
+    Args.SurfaceWaterRandomStream = &Receiver.SurfaceWaterRandomStream;
     Args.MeshSampler = Receiver.MeshSampler.Get();
-    Args.SimulationStage = Receiver.SimulationStage.Get();
     return Args;
 }
 
 FWetSurfaceContactResolverArgs UDynamicWetClothesComponent::MakeWetSurfaceContactResolverArgs(FDWCWetMeshReceiverRuntime& Receiver)
 {
     check(Receiver.SharedRuntimeData.IsValid());
-    check(Receiver.RuntimeDataBuilder.IsValid());
     check(Receiver.MeshSampler.IsValid());
 
     FWetSurfaceContactResolverArgs Args;
@@ -1052,7 +1043,6 @@ FWetSurfaceContactResolverArgs UDynamicWetClothesComponent::MakeWetSurfaceContac
     Args.WetnessSettings = &WetnessSettings;
     Args.WetClothingAsset = Receiver.WetClothingAsset.Get();
     Args.RuntimeData = Receiver.SharedRuntimeData.Get();
-    Args.RuntimeDataBuilder = Receiver.RuntimeDataBuilder.Get();
     Args.MeshSampler = Receiver.MeshSampler.Get();
     Args.LODIndex = UWetClothingAsset::RuntimeSimulationLODIndex;
     Args.MaxNearestSeedVertices = GPUContactNearestSeedVertexCount;
@@ -1062,7 +1052,6 @@ FWetSurfaceContactResolverArgs UDynamicWetClothesComponent::MakeWetSurfaceContac
 FWetSimulationStageArgs UDynamicWetClothesComponent::MakeWetSimulationStageArgs(FDWCWetMeshReceiverRuntime& Receiver)
 {
     check(Receiver.SharedRuntimeData.IsValid());
-    check(Receiver.RuntimeDataBuilder.IsValid());
     check(Receiver.SimulationState.IsValid());
     check(Receiver.MeshSampler.IsValid());
 
@@ -1071,7 +1060,6 @@ FWetSimulationStageArgs UDynamicWetClothesComponent::MakeWetSimulationStageArgs(
     Args.WetnessSettings = &WetnessSettings;
     Args.RuntimeData = Receiver.SharedRuntimeData.Get();
     Args.SimulationState = Receiver.SimulationState.Get();
-    Args.RuntimeDataBuilder = Receiver.RuntimeDataBuilder.Get();
     Args.MeshSampler = Receiver.MeshSampler.Get();
     return Args;
 }
@@ -1090,7 +1078,7 @@ FWetRenderStageArgs UDynamicWetClothesComponent::MakeWetRenderStageArgs(FDWCWetM
     Args.SimulationState = Receiver.SimulationState.Get();
     Args.SurfaceWaterStatesByMaterialSlot = &Receiver.SurfaceWaterStatesByMaterialSlot;
     Args.SurfaceWaterProfilesByMaterialSlot = &Receiver.SurfaceWaterProfilesByMaterialSlot;
-    Args.WetMaterialInstances = &Receiver.WetMaterialInstances;
+    Args.WetMaterialInstances = &Receiver.RenderStage->WetMaterialInstances;
     Args.SurfaceWaterTimeSeconds = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
     Args.WrinkleStrength = WrinkleStrength;
     Args.WrinkleWetnessMin = WrinkleWetnessMin;
@@ -1137,7 +1125,7 @@ bool UDynamicWetClothesComponent::InitializeGPUBackend(FDWCWetMeshReceiverRuntim
     InitArgs.TargetSkeletalMesh = Mesh;
     InitArgs.WetClothingAsset = Asset;
     InitArgs.WetnessSettings = &WetnessSettings;
-    InitArgs.WetMaterialInstances = &Receiver.WetMaterialInstances;
+    InitArgs.WetMaterialInstances = &Receiver.RenderStage->WetMaterialInstances;
     InitArgs.LODIndex = UWetClothingAsset::RuntimeSimulationLODIndex;
     InitArgs.SpreadRateScale = GPUSpreadRateScale;
     InitArgs.DryRateScale = GPUDryRateScale;
@@ -1273,13 +1261,13 @@ void UDynamicWetClothesComponent::ApplyWetAll(const float Amount)
 
     for (const TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver : Receivers)
     {
-        if (!Receiver.IsValid() || !Receiver->InputStage.IsValid())
+        if (!Receiver.IsValid())
         {
             continue;
         }
 
         FWetInputStageArgs InputArgs = MakeWetInputStageArgs(*Receiver);
-        Receiver->InputStage->ApplyWetAll(InputArgs, Amount);
+        FWetInputStage::ApplyWetAll(InputArgs, Amount);
         RequestWetRenderingUpdate(*Receiver);
     }
 }
@@ -1313,7 +1301,6 @@ bool UDynamicWetClothesComponent::ApplyWetContact(const FDWCWetContact& Contact,
         for (const TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver : Receivers)
         {
             if (!Receiver.IsValid() ||
-                !Receiver->SurfaceContactResolver.IsValid() ||
                 !Receiver->GPUBackend.IsValid() ||
                 !ShouldReceiverConsiderContact(*Receiver, Contact))
             {
@@ -1322,7 +1309,7 @@ bool UDynamicWetClothesComponent::ApplyWetContact(const FDWCWetContact& Contact,
 
             TArray<FDWCResolvedSurfaceContact> ResolvedContacts;
             FWetSurfaceContactResolverArgs ResolverArgs = MakeWetSurfaceContactResolverArgs(*Receiver);
-            if (Receiver->SurfaceContactResolver->ResolveContact(ResolverArgs, Contact, ResolvedContacts) &&
+            if (FWetSurfaceContactResolver::ResolveContact(ResolverArgs, Contact, ResolvedContacts) &&
                 Receiver->GPUBackend->EnqueueResolvedContacts(ResolvedContacts))
             {
                 QueueGPUSurfaceWaterStamps(*Receiver, ResolvedContacts);
@@ -1336,14 +1323,13 @@ bool UDynamicWetClothesComponent::ApplyWetContact(const FDWCWetContact& Contact,
     for (const TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver : Receivers)
     {
         if (!Receiver.IsValid() ||
-            !Receiver->InputStage.IsValid() ||
             !ShouldReceiverConsiderContact(*Receiver, Contact))
         {
             continue;
         }
 
         FWetInputStageArgs InputArgs = MakeWetInputStageArgs(*Receiver);
-        const bool bChanged = Receiver->InputStage->ApplyWetContact(InputArgs, Contact, bApplyMaterial);
+        const bool bChanged = FWetInputStage::ApplyWetContact(InputArgs, Contact, bApplyMaterial);
         if (bChanged)
         {
             bAnyChanged = true;
@@ -1374,7 +1360,6 @@ bool UDynamicWetClothesComponent::ApplyWetContacts(const TArray<FDWCWetContact>&
         for (const TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver : Receivers)
         {
             if (!Receiver.IsValid() ||
-                !Receiver->SurfaceContactResolver.IsValid() ||
                 !Receiver->GPUBackend.IsValid())
             {
                 continue;
@@ -1396,7 +1381,7 @@ bool UDynamicWetClothesComponent::ApplyWetContacts(const TArray<FDWCWetContact>&
             }
             TArray<FDWCResolvedSurfaceContact> ResolvedContacts;
             FWetSurfaceContactResolverArgs ResolverArgs = MakeWetSurfaceContactResolverArgs(*Receiver);
-            if (Receiver->SurfaceContactResolver->ResolveContacts(ResolverArgs, ReceiverContacts, ResolvedContacts) &&
+            if (FWetSurfaceContactResolver::ResolveContacts(ResolverArgs, ReceiverContacts, ResolvedContacts) &&
                 Receiver->GPUBackend->EnqueueResolvedContacts(ResolvedContacts))
             {
                 QueueGPUSurfaceWaterStamps(*Receiver, ResolvedContacts);
@@ -1409,7 +1394,7 @@ bool UDynamicWetClothesComponent::ApplyWetContacts(const TArray<FDWCWetContact>&
     bool bAnyChanged = false;
     for (const TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver : Receivers)
     {
-        if (!Receiver.IsValid() || !Receiver->InputStage.IsValid())
+        if (!Receiver.IsValid())
         {
             continue;
         }
@@ -1429,7 +1414,7 @@ bool UDynamicWetClothesComponent::ApplyWetContacts(const TArray<FDWCWetContact>&
             continue;
         }
         FWetInputStageArgs InputArgs = MakeWetInputStageArgs(*Receiver);
-        const bool bChanged = Receiver->InputStage->ApplyWetContacts(InputArgs, ReceiverContacts, bApplyMaterial);
+        const bool bChanged = FWetInputStage::ApplyWetContacts(InputArgs, ReceiverContacts, bApplyMaterial);
         if (bChanged)
         {
             bAnyChanged = true;
@@ -1450,7 +1435,6 @@ bool UDynamicWetClothesComponent::ApplyWetArea(const FDWCWetAreaData& AreaData, 
         for (const TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver : Receivers)
         {
             if (!Receiver.IsValid() ||
-                !Receiver->SurfaceContactResolver.IsValid() ||
                 !Receiver->GPUBackend.IsValid())
             {
                 continue;
@@ -1458,7 +1442,7 @@ bool UDynamicWetClothesComponent::ApplyWetArea(const FDWCWetAreaData& AreaData, 
 
             TArray<FDWCResolvedSurfaceContact> ResolvedContacts;
             FWetSurfaceContactResolverArgs ResolverArgs = MakeWetSurfaceContactResolverArgs(*Receiver);
-            if (Receiver->SurfaceContactResolver->ResolveWetArea(ResolverArgs, AreaData, ResolvedContacts) &&
+            if (FWetSurfaceContactResolver::ResolveWetArea(ResolverArgs, AreaData, ResolvedContacts) &&
                 Receiver->GPUBackend->EnqueueResolvedContacts(ResolvedContacts))
             {
                 QueueGPUSurfaceWaterStamps(*Receiver, ResolvedContacts);
@@ -1471,13 +1455,13 @@ bool UDynamicWetClothesComponent::ApplyWetArea(const FDWCWetAreaData& AreaData, 
     bool bAnyChanged = false;
     for (const TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver : Receivers)
     {
-        if (!Receiver.IsValid() || !Receiver->InputStage.IsValid())
+        if (!Receiver.IsValid())
         {
             continue;
         }
 
         FWetInputStageArgs InputArgs = MakeWetInputStageArgs(*Receiver);
-        const bool bChanged = Receiver->InputStage->ApplyWetArea(InputArgs, AreaData, bApplyMaterial);
+        const bool bChanged = FWetInputStage::ApplyWetArea(InputArgs, AreaData, bApplyMaterial);
         if (bChanged)
         {
             bAnyChanged = true;
@@ -1501,7 +1485,6 @@ bool UDynamicWetClothesComponent::ApplyWetSurface(
         for (const TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver : Receivers)
         {
             if (!Receiver.IsValid() ||
-                !Receiver->SurfaceContactResolver.IsValid() ||
                 !Receiver->GPUBackend.IsValid() ||
                 !ShouldReceiverConsiderSurface(*Receiver, WaterSurfaceData))
             {
@@ -1510,7 +1493,7 @@ bool UDynamicWetClothesComponent::ApplyWetSurface(
 
             TArray<FDWCResolvedSurfaceContact> ResolvedContacts;
             FWetSurfaceContactResolverArgs ResolverArgs = MakeWetSurfaceContactResolverArgs(*Receiver);
-            if (Receiver->SurfaceContactResolver->ResolveWaterSurface(ResolverArgs, WaterSurfaceData, Amount, ResolvedContacts) &&
+            if (FWetSurfaceContactResolver::ResolveWaterSurface(ResolverArgs, WaterSurfaceData, Amount, ResolvedContacts) &&
                 Receiver->GPUBackend->EnqueueResolvedContacts(ResolvedContacts))
             {
                 QueueGPUSurfaceWaterStamps(*Receiver, ResolvedContacts);
@@ -1524,14 +1507,13 @@ bool UDynamicWetClothesComponent::ApplyWetSurface(
     for (const TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver : Receivers)
     {
         if (!Receiver.IsValid() ||
-            !Receiver->InputStage.IsValid() ||
             !ShouldReceiverConsiderSurface(*Receiver, WaterSurfaceData))
         {
             continue;
         }
 
         FWetInputStageArgs InputArgs = MakeWetInputStageArgs(*Receiver);
-        const bool bChanged = Receiver->InputStage->ApplyWetSurface(InputArgs, WaterSurfaceData, Amount, bApplyMaterial);
+        const bool bChanged = FWetInputStage::ApplyWetSurface(InputArgs, WaterSurfaceData, Amount, bApplyMaterial);
         if (bChanged)
         {
             bAnyChanged = true;
@@ -1781,11 +1763,6 @@ bool UDynamicWetClothesComponent::ShouldUpdateGPUWetness(FDWCWetMeshReceiverRunt
 
 bool UDynamicWetClothesComponent::ShouldUpdateCPUWetness(FDWCWetMeshReceiverRuntime& Receiver) const
 {
-    if (!Receiver.SimulationStage.IsValid())
-    {
-        return false;
-    }
-
     return true;
 }
 
@@ -2196,7 +2173,6 @@ bool UDynamicWetClothesComponent::FlushPendingWetContacts()
         for (const TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver : Receivers)
         {
             if (!Receiver.IsValid() ||
-                !Receiver->SurfaceContactResolver.IsValid() ||
                 !Receiver->GPUBackend.IsValid())
             {
                 continue;
@@ -2219,7 +2195,7 @@ bool UDynamicWetClothesComponent::FlushPendingWetContacts()
 
             TArray<FDWCResolvedSurfaceContact> ResolvedContacts;
             FWetSurfaceContactResolverArgs ResolverArgs = MakeWetSurfaceContactResolverArgs(*Receiver);
-            if (Receiver->SurfaceContactResolver->ResolveContacts(ResolverArgs, ReceiverContacts, ResolvedContacts) &&
+            if (FWetSurfaceContactResolver::ResolveContacts(ResolverArgs, ReceiverContacts, ResolvedContacts) &&
                 Receiver->GPUBackend->EnqueueResolvedContacts(ResolvedContacts))
             {
                 QueueGPUSurfaceWaterStamps(*Receiver, ResolvedContacts);
@@ -2236,7 +2212,7 @@ bool UDynamicWetClothesComponent::FlushPendingWetContacts()
     bool bWaitingForSkinningCache = false;
     for (const TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver : Receivers)
     {
-        if (!Receiver.IsValid() || !Receiver->InputStage.IsValid())
+        if (!Receiver.IsValid())
         {
             continue;
         }
@@ -2265,7 +2241,7 @@ bool UDynamicWetClothesComponent::FlushPendingWetContacts()
         }
 
         FWetInputStageArgs InputArgs = MakeWetInputStageArgs(*Receiver);
-        const bool bChanged = Receiver->InputStage->ApplyWetContacts(InputArgs, ReceiverContacts, bApplyMaterial);
+        const bool bChanged = FWetInputStage::ApplyWetContacts(InputArgs, ReceiverContacts, bApplyMaterial);
         if (bChanged)
         {
             bAnyChanged = true;
@@ -2326,7 +2302,7 @@ void UDynamicWetClothesComponent::UpdateWetness()
         const int32 DirtyVertexCountBeforeUpdate = Receiver->SimulationState.IsValid()
             ? Receiver->SimulationState->DirtyWetVertexIndices.Num()
             : 0;
-        const bool bChanged = Receiver->SimulationStage->UpdateWetness(SimulationArgs);
+        const bool bChanged = FWetSimulationStage::UpdateWetness(SimulationArgs);
         FDWCWorkloadStats::RecordWetnessSimulationUpdate(bChanged);
         if (Receiver->SimulationState.IsValid())
         {

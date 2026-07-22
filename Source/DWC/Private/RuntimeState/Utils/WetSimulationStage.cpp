@@ -1,11 +1,11 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
-#include "WetSimulation/WetSimulationStage.h"
+#include "RuntimeState/Utils/WetSimulationStage.h"
 
 #include "Runtime/Engine/Classes/Components/SkeletalMeshComponent.h"
 
 #include "WetInputSystem/Sampling/WetClothingMeshSampler.h"
-#include "WetInputSystem/WetInputStage.h"
+#include "RuntimeState/Utils/WetInputStage.h"
 #include "RuntimeState/WetClothingRuntimeData.h"
 #include "WetSimulation/AbsorbedWetness/AbsorbedWetnessSimulationState.h"
 #include "Utility/DWCProfiling.h"

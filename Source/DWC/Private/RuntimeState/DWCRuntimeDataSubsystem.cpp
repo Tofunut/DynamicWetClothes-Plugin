@@ -9,7 +9,7 @@
 #include "Rendering/SkeletalMeshRenderData.h"
 #include "Rendering/SkinWeightVertexBuffer.h"
 #include "RuntimeState/WetClothingRuntimeData.h"
-#include "RuntimeState/WetRuntimeDataBuilder.h"
+#include "RuntimeState/Utils/WetRuntimeDataBuilder.h"
 #include "Utility/DWCLog.h"
 
 #include "DataAssets/WetClothingAsset.h"
@@ -65,7 +65,6 @@ UDWCRuntimeDataSubsystem::AcquireSharedRuntimeData(
     MutableData->MeshSignature = PrecomputedData.MeshSignature;
     MutableData->SourceDataSignature = PrecomputedData.SourceDataSignature;
 
-    FWetRuntimeDataBuilder Builder;
     FWetRuntimeDataBuildArgs Args;
     Args.OwnerForLogs = OwnerForLogs;
     Args.TargetSkeletalMesh = &TargetSkeletalMesh;
@@ -76,18 +75,18 @@ UDWCRuntimeDataSubsystem::AcquireSharedRuntimeData(
     Args.bUsePrecomputedBoneOptimizationCache = true;
     Args.bPrecomputedDataAlreadyValidated = true;
 
-    if (!Builder.InitializeWetPartVertexData(Args))
+    if (!FWetRuntimeDataBuilder::InitializeWetPartVertexData(Args))
     {
         return nullptr;
     }
 
     // The bone cache is a broad-phase optimization. Its absence is non-fatal;
     // contact resolution will use its existing full-vertex fallback.
-    Builder.InitializeBoneOptimizationCacheFromPrecomputedData(Args);
+    FWetRuntimeDataBuilder::InitializeBoneOptimizationCacheFromPrecomputedData(Args);
 
     // Neighbor data is required only by the CPU spread simulation. Build it
     // once when available, but keep common data usable by GPU-only receivers.
-    if (!Builder.InitializeNeighborGraphFromPrecomputedData(Args))
+    if (!FWetRuntimeDataBuilder::InitializeNeighborGraphFromPrecomputedData(Args))
     {
         MutableData->ResetNeighborGraph();
         UE_LOG(

@@ -5,9 +5,9 @@
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "WetInputSystem/WetContactTypes.h"
-#include "WetInputSystem/WetInputStage.h"
+#include "RuntimeState/Utils/WetInputStage.h"
 #include "WetInputSystem/Sampling/WetClothingMeshSampler.h"
-#include "RuntimeState/WetRuntimeDataBuilder.h"
+#include "RuntimeState/Utils/WetRuntimeDataBuilder.h"
 #include "RuntimeState/WetClothingRuntimeData.h"
 #include "Core/DWCQualityLODProfile.h"
 #include "Core/WetClothingSettings.h"
@@ -15,9 +15,9 @@
 #include "GPU/DWCGPUBackend.h"
 #include "Async/DWCTaskQueue.h"
 #include "DataAssets/WetClothingAsset.h"
-#include "WetInputSystem/WetSurfaceContactResolver.h"
+#include "RuntimeState/Utils/WetSurfaceContactResolver.h"
 #include "WetRendering/WetRenderStage.h"
-#include "WetSimulation/WetSimulationStage.h"
+#include "RuntimeState/Utils/WetSimulationStage.h"
 #include "WetSimulation/AbsorbedWetness/AbsorbedWetnessSimulationState.h"
 #include "WetSimulation/SurfaceWater/SurfaceWaterSimulationState.h"
 #include "Templates/UniquePtr.h"
@@ -56,46 +56,39 @@ struct FDWCWetMeshReceiverRuntime
     TSharedPtr<const FWetClothingRuntimeData, ESPMode::ThreadSafe> SharedRuntimeData;
     TSharedPtr<const FDWCSkinningStaticData, ESPMode::ThreadSafe> SkinningStaticData;
 
-    // Per-receiver CPU simulation/render data. These are the main CPU-memory
-    // consumers and generally scale with the active vertex count.
+    // Per-receiver CPU simulation/render data. These are the main CPU-memory Consumers
     TUniquePtr<FAbsorbedWetnessSimulationState> SimulationState;
     TUniquePtr<FWetClothingMeshSampler> MeshSampler;
-    TUniquePtr<FWetRenderStage> RenderStage;
+    TUniquePtr<FWetRenderStage> RenderStage; //Owns VertexColor
 
-    // Per-receiver CPU/GPU surface-water state. The CPU side owns pending
-    // stamps and container overhead; each valid state also owns two GPU
-    // render targets, so GPU memory is estimated through the state API.
+    // Per-receiver CPU/GPU.
+    // CPU : owns pending stamp Container
+    // GPU : RenderTarget : VRAM Resource
     TMap<int32, TUniquePtr<FSurfaceWaterSimulationState>> SurfaceWaterStatesByMaterialSlot;
 
-    // Per-receiver GPU simulation backend. The interface object is small, but
-    // its implementation may own GPU render targets and CPU staging data;
-    // query it through a backend stats API instead of sizeof(pointer).
+    // Per-receiver CPU/GPU simulation backend. 
     TUniquePtr<IDWCGPUBackend> GPUBackend;
 
     // Small per-slot settings/handles. Count material bindings if needed, but
     // do not treat the UObject memory behind the material pointers as owned
     // receiver memory.
     TMap<int32, FSurfaceWaterProfileParameters> SurfaceWaterProfilesByMaterialSlot;
-    TArray<TObjectPtr<UMaterialInstanceDynamic>> WetMaterialInstances;
 
-    // Lightweight helper/state objects. Their pointees currently contain no
-    // large persistent arrays, so they are normally negligible in memory
-    // stats (apart from their own object size).
-    TUniquePtr<FWetRuntimeDataBuilder> RuntimeDataBuilder;
-    TUniquePtr<FWetSimulationStage> SimulationStage;
-    TUniquePtr<FWetSurfaceContactResolver> SurfaceContactResolver;
-    TUniquePtr<FWetInputStage> InputStage;
+    // Per-receiver randomness. Keep this state local to the receiver so that
+    // adding/reordering other receivers does not change this receiver's
+    // deterministic surface-water sequence.
+    FRandomStream SurfaceWaterRandomStream = FRandomStream(0x445743);
 
     // Shared/cache-backed CPU data for LOD vertex-color transfer. Static LOD
     // data and transfer maps can be shared by multiple receivers, so dedupe
     // them by pointed-to object when aggregating globally.
-    TMap<int32, TSharedPtr<const FDWCLODVertexStaticData, ESPMode::ThreadSafe>> LODVertexStaticDataByLOD;
-    TMap<int32, TSharedPtr<const TArray<int32>, ESPMode::ThreadSafe>> LODVertexColorTransferMapsByLOD;
+    TMap<int32, TSharedPtr<const FDWCLODVertexStaticData, ESPMode::ThreadSafe>> LODVertexStaticDataByLOD;// LOD Data (Position...)
+    TMap<int32, TSharedPtr<const TArray<int32>, ESPMode::ThreadSafe>> LODVertexColorTransferMapsByLOD; // What low LOD Vertex will match in high LOD 
 
     // Per-receiver LOD color cache. The shared pointer provides lifetime and
     // task hand-off safety; the color array itself is generally receiver-owned
     // and may scale with the target LOD vertex count.
-    TMap<int32, TSharedPtr<const TArray<FColor>, ESPMode::ThreadSafe>> LODVertexColorCachesByLOD;
+    TMap<int32, TSharedPtr<const TArray<FColor>, ESPMode::ThreadSafe>> LODVertexColorCachesByLOD; // LOD n Vertex 1 -> Color R/G/B 
 
     // Per-receiver transient CPU work data for LOD vertex-color updates.
     // Usually small, but capacity can grow with the dirty source-vertex count.
@@ -216,13 +209,13 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
     bool                    ShouldReceiverConsiderContact(const FDWCWetMeshReceiverRuntime& Receiver, const FDWCWetContact& Contact) const;
     bool                    ShouldReceiverConsiderSurface(const FDWCWetMeshReceiverRuntime& Receiver, const FDWCWaterSurfaceData& WaterSurfaceData) const;
 
-  public:
+  public:  //Detail Fields
     /** WCA assets handled by this component. Every matching SkeletalMeshComponent becomes a receiver. */
     UPROPERTY(EditAnywhere, Category = "Wetness")
     TArray<TObjectPtr<UWetClothingAsset>> WetClothingAssets;
 
     /** Selected per component instance and locked when BeginPlay starts. */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Wetness|Simulation")
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Wetness|Simulation")
     EDWCSimulationMode SimulationMode = EDWCSimulationMode::VertexCPU;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Simulation|GPU", meta = (EditCondition = "SimulationMode == EDWCSimulationMode::WetnessMapGPU", ClampMin = "3", ClampMax = "64", AdvancedDisplay))
@@ -295,6 +288,7 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Debug")
     bool bShowWetPartDebugColors = false;
 
+//Runtime    
   private:
     UPROPERTY(Transient)
     EDWCSimulationMode ActiveSimulationMode = EDWCSimulationMode::VertexCPU;
@@ -302,16 +296,12 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
     UPROPERTY(Transient)
     bool bSimulationModeLocked = false;
 
-    UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Wetness|LOD", meta = (DisplayName = "Current Quality LOD", AllowPrivateAccess = "true"))
-    int32 CurrentQualityLOD = 0;
-
-    UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Wetness|LOD", meta = (DisplayName = "Current Screen Size", AllowPrivateAccess = "true"))
-    float CurrentRenderLODScreenSize = 0.0f;
+    //Receivers
+    TArray<TUniquePtr<FDWCWetMeshReceiverRuntime>> Receivers;
 
     TUniquePtr<FDWCTaskQueue> AsyncTaskQueue;
     TUniquePtr<FDWCQualityLODController> QualityLODController;
     TUniquePtr<FDWCQualityLODEvaluator> QualityLODEvaluator;
-    TArray<TUniquePtr<FDWCWetMeshReceiverRuntime>> Receivers;
     FDWCQualityLODScreenSizeRuntimeState RenderLODState;
 
     FTimerHandle           WetnessSimulationTimer;
@@ -322,4 +312,11 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
     TArray<FDWCWetContact> PendingWetContacts;
     bool                   bPendingWetContactsApplyMaterial = false;
     bool                   bWetRenderDirty = false;
+    
+private: //For Debug
+    UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Wetness|LOD", meta = (DisplayName = "Current Quality LOD", AllowPrivateAccess = "true"))
+    int32 CurrentQualityLOD = 0;
+
+    UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Wetness|LOD", meta = (DisplayName = "Current Screen Size", AllowPrivateAccess = "true"))
+    float CurrentRenderLODScreenSize = 0.0f;
 };

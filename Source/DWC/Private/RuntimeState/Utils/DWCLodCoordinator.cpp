@@ -9,6 +9,7 @@
 #include "Engine/SkeletalMesh.h"
 #include "Engine/World.h"
 #include "Runtime/Engine/Classes/Components/SkeletalMeshComponent.h"
+#include "ConvexVolume.h"
 #include "SceneManagement.h"
 #include "Slate/SceneViewport.h"
 #include "Utility/DWCLog.h"
@@ -109,10 +110,12 @@ bool FDWCLodCoordinator::CalculateRenderLODScreenSize(
     UWorld* World,
     const TArray<TUniquePtr<FDWCWetMeshReceiverRuntime>>& Receivers,
     float& OutScreenSize,
-    FBoxSphereBounds& OutBounds) const
+    FBoxSphereBounds& OutBounds,
+    bool& bOutInViewFrustum) const
 {
     OutScreenSize = 0.0f;
     OutBounds = FBoxSphereBounds();
+    bOutInViewFrustum = false;
 
     UGameViewportClient* GameViewport = World != nullptr ? World->GetGameViewport() : nullptr;
     UGameInstance* GameInstance = World != nullptr ? World->GetGameInstance() : nullptr;
@@ -150,6 +153,14 @@ bool FDWCLodCoordinator::CalculateRenderLODScreenSize(
         return false;
     }
 
+    FConvexVolume ViewFrustum;
+    GetViewFrustumBounds(ViewFrustum, ProjectionData.ComputeViewProjectionMatrix(), true, true);
+    bOutInViewFrustum = ViewFrustum.IntersectBox(MergedBox.GetCenter(), MergedBox.GetExtent());
+    if (!bOutInViewFrustum)
+    {
+        return true;
+    }
+
     OutScreenSize = FMath::Clamp(
         ComputeBoundsScreenSize(
             FVector4(OutBounds.Origin, 1.0f),
@@ -181,7 +192,8 @@ bool FDWCLodCoordinator::UpdateRenderLOD(
 
     float ScreenSize = 0.0f;
     FBoxSphereBounds MergedBounds;
-    if (!CalculateRenderLODScreenSize(World, Receivers, ScreenSize, MergedBounds))
+    bool bInViewFrustum = false;
+    if (!CalculateRenderLODScreenSize(World, Receivers, ScreenSize, MergedBounds, bInViewFrustum))
     {
         return false;
     }
@@ -190,7 +202,13 @@ bool FDWCLodCoordinator::UpdateRenderLOD(
     RenderLODState.MergedBounds = MergedBounds;
     RenderLODState.bHasValidScreenSize = true;
 
-    if (!FindRenderLODLevel(Thresholds, ScreenSize, OutLODLevel))
+    if (!bInViewFrustum)
+    {
+        // A frustum-culled receiver should use the lowest-quality entry even when
+        // its distance-based projected screen size is still non-zero.
+        OutLODLevel = Thresholds.Num() - 1;
+    }
+    else if (!FindRenderLODLevel(Thresholds, ScreenSize, OutLODLevel))
     {
         return true;
     }

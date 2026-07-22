@@ -44,7 +44,8 @@ class FDWCLodCoordinator
         UWorld* World,
         const TArray<TUniquePtr<FDWCWetMeshReceiverRuntime>>& Receivers,
         float& OutScreenSize,
-        FBoxSphereBounds& OutBounds) const;
+        FBoxSphereBounds& OutBounds,
+        bool& bOutInViewFrustum) const;
     bool FindRenderLODLevel(
         const TArray<FDWCQualityLODScreenSizeThreshold>& Thresholds,
         float ScreenSize,

@@ -63,6 +63,76 @@ namespace
     }
 }
 
+bool FWCALODVertexColorBuilder::IsCurrent(
+    const USkeletalMesh* Mesh,
+    const int32 FirstMappedLODIndex,
+    const int32 LastMappedLODIndex,
+    const TArray<FWCALODVertexColorRuntimeData>& RuntimeData)
+{
+    const FSkeletalMeshRenderData* RenderData = Mesh != nullptr ? Mesh->GetResourceForRendering() : nullptr;
+    if (RenderData == nullptr)
+    {
+        return false;
+    }
+
+    constexpr int32 SourceLODIndex = UWetClothingAsset::RuntimeSimulationLODIndex;
+    if (!RenderData->LODRenderData.IsValidIndex(SourceLODIndex))
+    {
+        return RuntimeData.IsEmpty();
+    }
+
+    const int32 LastAvailableLODIndex = RenderData->LODRenderData.Num() - 1;
+    if (LastAvailableLODIndex <= SourceLODIndex ||
+        LastMappedLODIndex < SourceLODIndex + 1 ||
+        FirstMappedLODIndex > LastAvailableLODIndex)
+    {
+        return RuntimeData.IsEmpty();
+    }
+
+    const int32 FirstTargetLODIndex = FMath::Clamp(FirstMappedLODIndex, SourceLODIndex + 1, LastAvailableLODIndex);
+    const int32 LastTargetLODIndex = FMath::Clamp(LastMappedLODIndex, FirstTargetLODIndex, LastAvailableLODIndex);
+    if (RuntimeData.Num() != LastTargetLODIndex - FirstTargetLODIndex + 1)
+    {
+        return false;
+    }
+
+    const FSkeletalMeshLODRenderData& SourceLODData = RenderData->LODRenderData[SourceLODIndex];
+    const int32 SourceVertexCount = SourceLODData.GetNumVertices();
+    const FString MeshSignature = FDWCMeshContentSignature::BuildStructure(Mesh, SourceLODData, SourceLODIndex);
+    if (SourceVertexCount <= 0 || MeshSignature.IsEmpty())
+    {
+        return false;
+    }
+
+    for (int32 TargetLODIndex = FirstTargetLODIndex; TargetLODIndex <= LastTargetLODIndex; ++TargetLODIndex)
+    {
+        const FWCALODVertexColorRuntimeData* Entry = RuntimeData.FindByPredicate(
+            [TargetLODIndex](const FWCALODVertexColorRuntimeData& Candidate)
+            {
+                return Candidate.TargetLODIndex == TargetLODIndex;
+            });
+        if (Entry == nullptr ||
+            Entry->SourceLODIndex != SourceLODIndex ||
+            Entry->TargetVertexCount != RenderData->LODRenderData[TargetLODIndex].GetNumVertices() ||
+            Entry->MeshSignature != MeshSignature ||
+            !Entry->IsValid())
+        {
+            return false;
+        }
+
+        if (Entry->TargetToSourceVertex.ContainsByPredicate(
+                [SourceVertexCount](const int32 SourceVertexIndex)
+                {
+                    return SourceVertexIndex < 0 || SourceVertexIndex >= SourceVertexCount;
+                }))
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 bool FWCALODVertexColorBuilder::Build(
     const USkeletalMesh* Mesh,
     const int32 FirstMappedLODIndex,

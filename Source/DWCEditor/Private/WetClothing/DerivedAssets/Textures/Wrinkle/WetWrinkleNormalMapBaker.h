@@ -10,7 +10,7 @@ struct FWetWrinkleNormalMapBakeSettings
 {
     int32 Resolution = 1024;
     int32 PaddingPixels = 8;
-    bool bIncludeDisabledPatchStrokes = false;
+    bool bIncludeDisabledPatches = false;
     bool bBakeNormalMap = true;
     bool bBakeMask = false;
 };

@@ -55,16 +55,18 @@ class FWCAEditor : public FAssetEditorToolkit
     FReply               HandleBakeGPUWetnessMapDataClicked();
     FReply               HandleBakeTransparencyRevealMapsClicked();
     FReply               HandleBakeWrinkleNormalMapClicked();
-    FReply               HandleBakeWrinkleMaskClicked();
     FReply               HandleGenerateMaterialsClicked();
     FReply               GenerateWetMaterials();
     bool                 CanBakeAnyMaps() const;
+    bool                 CanBakeCurrentModeMaps() const;
     bool                 CanBakeGPUMaps() const;
     bool                 CanBakeWetnessProfileMaps() const;
     bool                 CanBakeWrinkleMaps() const;
     bool                 CanBakeTransparencyMaps() const;
     bool                 ResolveIssuesAndSave(FString& OutFailure);
-    void                 RefreshAssetStateAndEditor(bool bRunDeepValidation = false);
+    void                 RefreshAssetStateAndEditor(
+        bool bRunDeepValidation = false,
+        bool bRebuildActiveModePreview = true);
     TSharedRef<SWidget>  BuildModeToolbarWidget();
     TSharedRef<SWidget>  BuildModeToggleButton(EWCAEditorMode Mode, FName IconName, const FText& ToolTipText);
     void                 SetEditorMode(EWCAEditorMode NewMode);
@@ -73,6 +75,13 @@ class FWCAEditor : public FAssetEditorToolkit
     FSlateColor          GetModeIconColor(EWCAEditorMode Mode) const;
 
   private:
+    enum class ECloseConfirmationState : uint8
+    {
+        Idle,
+        PromptOpen,
+        Confirmed
+    };
+
     static const FName EditorAppDisplayName;
     static const FName MainTabId;
 
@@ -83,5 +92,6 @@ class FWCAEditor : public FAssetEditorToolkit
     FDelegateHandle                          ObjectPropertyChangedHandle;
     FDelegateHandle                          AssetSavedHandle;
     TSharedPtr<FExtender>                    ToolbarExtender;
-    EWCAEditorMode                   CurrentMode = EWCAEditorMode::PartEdit;
+    EWCAEditorMode                           CurrentMode = EWCAEditorMode::PartEdit;
+    ECloseConfirmationState                  CloseConfirmationState = ECloseConfirmationState::Idle;
 };

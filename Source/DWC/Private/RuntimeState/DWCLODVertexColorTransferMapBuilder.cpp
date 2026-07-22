@@ -6,13 +6,13 @@
 
 namespace
 {
-    struct FDWCLODVertexOctreeElement
+    struct FDWCTransferMapOctreeElement
     {
         int32 VertexIndex = INDEX_NONE;
         FBoxCenterAndExtent Bounds;
     };
 
-    struct FDWCLODVertexOctreeSemantics
+    struct FDWCTransferMapOctreeSemantics
     {
         enum { MaxElementsPerLeaf = 16 };
         enum { MinInclusiveElementsPerNode = 7 };
@@ -20,31 +20,31 @@ namespace
 
         typedef TInlineAllocator<MaxElementsPerLeaf> ElementAllocator;
 
-        static const FBoxCenterAndExtent& GetBoundingBox(const FDWCLODVertexOctreeElement& Element)
+        static const FBoxCenterAndExtent& GetBoundingBox(const FDWCTransferMapOctreeElement& Element)
         {
             return Element.Bounds;
         }
 
-        static bool AreElementsEqual(const FDWCLODVertexOctreeElement& A, const FDWCLODVertexOctreeElement& B)
+        static bool AreElementsEqual(const FDWCTransferMapOctreeElement& A, const FDWCTransferMapOctreeElement& B)
         {
             return A.VertexIndex == B.VertexIndex;
         }
 
-        static void SetElementId(const FDWCLODVertexOctreeElement& Element, FOctreeElementId2 Id)
+        static void SetElementId(const FDWCTransferMapOctreeElement& Element, FOctreeElementId2 Id)
         {
         }
 
-        static void ApplyOffset(FDWCLODVertexOctreeElement& Element, FVector Offset)
+        static void ApplyOffset(FDWCTransferMapOctreeElement& Element, FVector Offset)
         {
             Element.Bounds.Center += Offset;
         }
     };
 
-    using FDWCLODVertexOctree = TOctree2<FDWCLODVertexOctreeElement, FDWCLODVertexOctreeSemantics>;
+    using FDWCTransferMapOctree = TOctree2<FDWCTransferMapOctreeElement, FDWCTransferMapOctreeSemantics>;
 
     int32 FindBestSourceVertex(
         const FDWCLODVertexColorTransferGeometryView& Source,
-        const FDWCLODVertexOctree&                    SourceOctree,
+        const FDWCTransferMapOctree&                  SourceOctree,
         const FVector3f&                              TargetPos,
         const FVector3f&                              TargetNormal,
         const FDWCLODVertexColorTransferSettings&     Settings)
@@ -92,7 +92,7 @@ namespace
             const FVector QueryExtent(SearchRadius, SearchRadius, SearchRadius);
             SourceOctree.FindElementsWithBoundsTest(
                 FBoxCenterAndExtent(QueryCenter, QueryExtent),
-                [&ConsiderSourceVertex](const FDWCLODVertexOctreeElement& Element)
+                [&ConsiderSourceVertex](const FDWCTransferMapOctreeElement& Element)
                 {
                     ConsiderSourceVertex(Element.VertexIndex);
                 });
@@ -133,7 +133,7 @@ bool BuildDWCLODVertexColorTransferMap(
 
     const FVector CompleteExtent = CompleteBounds.GetExtent();
     const double OctreeExtent = CompleteExtent.GetMax() + FMath::Max(1.0f, Settings.MaxSearchRadius);
-    FDWCLODVertexOctree SourceOctree(CompleteBounds.GetCenter(), OctreeExtent);
+    FDWCTransferMapOctree SourceOctree(CompleteBounds.GetCenter(), OctreeExtent);
 
     {
         DWC_PROFILE_SCOPE(DWC_BuildLODVertexColorTransferMap_Octree);

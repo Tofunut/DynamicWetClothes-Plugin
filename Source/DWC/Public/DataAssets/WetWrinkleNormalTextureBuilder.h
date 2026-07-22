@@ -15,7 +15,8 @@ class DWC_API FWetWrinkleNormalTextureBuilder
         const FWetWrinkleNormalCorrectionSettings& CorrectionSettings,
         const FWetWrinkleCoverageExtractionSettings& CoverageSettings,
         FWetWrinkleNormalBuildOutput& OutOutput,
-        FString& OutError);
+        FString& OutError,
+        int32 MaxOutputDimension = 0);
 
     static bool BuildConvexSeparationBuffer(
         UTexture2D* CorrectedNormalTexture,

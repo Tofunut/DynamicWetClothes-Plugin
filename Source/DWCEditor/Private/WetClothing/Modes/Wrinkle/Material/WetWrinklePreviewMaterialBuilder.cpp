@@ -6,23 +6,24 @@
 #include "Materials/MaterialExpressionConstant3Vector.h"
 #include "Materials/MaterialExpressionCustom.h"
 #include "Materials/MaterialExpressionGetMaterialAttributes.h"
+#include "Materials/MaterialExpressionMaterialFunctionCall.h"
 #include "Materials/MaterialExpressionScalarParameter.h"
 #include "Materials/MaterialExpressionSetMaterialAttributes.h"
 #include "Materials/MaterialExpressionTextureCoordinate.h"
 #include "Materials/MaterialExpressionTextureObjectParameter.h"
 #include "Materials/MaterialExpressionVectorParameter.h"
-#include "Materials/MaterialExpressionVertexColor.h"
+#include "Materials/MaterialFunctionInterface.h"
 #include "Materials/MaterialInstance.h"
 #include "Materials/MaterialInstanceConstant.h"
 #include "Materials/MaterialInstanceDynamic.h"
+#include "Engine/Engine.h"
 #include "Engine/Texture.h"
-#include "UObject/Package.h"
+#include "Interfaces/IPluginManager.h"
 #include "UObject/UObjectGlobals.h"
 
 namespace WetWrinklePreviewMaterialParameters
 {
-    const FName UVChannel(TEXT("DWC_WrinklePreview_UVChannel"));
-    const FName PreviewWetness(TEXT("DWC_WrinklePreview_Wetness"));
+    const FName PreviewWetness(TEXT("DWC_PreviewWetness"));
     const FName AccumulatedNormal(TEXT("DWC_WrinklePreview_AccumulatedNormal"));
     const FName AccumulatedEnabled(TEXT("DWC_WrinklePreview_AccumulatedEnabled"));
     const FName AccumulatedStrength(TEXT("DWC_WrinklePreview_AccumulatedStrength"));
@@ -40,8 +41,11 @@ namespace WetWrinklePreviewMaterialParameters
 
 namespace
 {
+    constexpr int32 MaxGpuSkinUVChannelCount = 4;
     constexpr const TCHAR* PreviewBlendDescription = TEXT("DWC Wrinkle Preview Normal Blend");
     constexpr const TCHAR* LegacyPreviewBlendDescription = TEXT("DWC Preview Brush Normal Blend");
+    constexpr const TCHAR* DynamicWetClothesPluginName = TEXT("DynamicWetClothes");
+    constexpr const TCHAR* DwcApplyWetnessCpuFunctionName = TEXT("MF_DWC_ApplyWetness_CPU");
 
     UTexture* LoadWetWrinkleDefaultNormalTexture()
     {
@@ -51,6 +55,76 @@ namespace
         }
 
         return LoadObject<UTexture>(nullptr, TEXT("/Engine/EngineMaterials/T_Default_Normal.T_Default_Normal"));
+    }
+
+    UMaterialFunctionInterface* LoadDwcApplyWetnessCpuFunction()
+    {
+        const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(DynamicWetClothesPluginName);
+        if (!Plugin.IsValid())
+        {
+            return nullptr;
+        }
+
+        FString MountedAssetPath = Plugin->GetMountedAssetPath();
+        MountedAssetPath.RemoveFromEnd(TEXT("/"));
+        const FString ObjectPath = FString::Printf(
+            TEXT("%s/Materials/Functions/%s.%s"),
+            *MountedAssetPath,
+            DwcApplyWetnessCpuFunctionName,
+            DwcApplyWetnessCpuFunctionName);
+        return LoadObject<UMaterialFunctionInterface>(nullptr, *ObjectPath);
+    }
+
+    bool IsExpectedFunctionCall(
+        const UMaterialExpressionMaterialFunctionCall* FunctionCall,
+        const UMaterialFunctionInterface* Function,
+        const TCHAR* ExpectedFunctionName)
+    {
+        return FunctionCall != nullptr &&
+               FunctionCall->MaterialFunction != nullptr &&
+               (FunctionCall->MaterialFunction == Function ||
+                FunctionCall->MaterialFunction->GetName().Equals(ExpectedFunctionName, ESearchCase::CaseSensitive));
+    }
+
+    UMaterialExpressionMaterialFunctionCall* FindFunctionCall(
+        UMaterial* Material,
+        const UMaterialFunctionInterface* Function,
+        const TCHAR* ExpectedFunctionName)
+    {
+        if (Material == nullptr)
+        {
+            return nullptr;
+        }
+
+        for (UMaterialExpression* Expression : Material->GetExpressions())
+        {
+            UMaterialExpressionMaterialFunctionCall* FunctionCall = Cast<UMaterialExpressionMaterialFunctionCall>(Expression);
+            if (IsExpectedFunctionCall(FunctionCall, Function, ExpectedFunctionName))
+            {
+                return FunctionCall;
+            }
+        }
+
+        return nullptr;
+    }
+
+    FString DescribeMaterialFunctionCalls(const UMaterial* Material)
+    {
+        if (Material == nullptr)
+        {
+            return TEXT("<none>");
+        }
+
+        TArray<FString> FunctionNames;
+        for (UMaterialExpression* Expression : Material->GetExpressions())
+        {
+            if (const UMaterialExpressionMaterialFunctionCall* FunctionCall = Cast<UMaterialExpressionMaterialFunctionCall>(Expression))
+            {
+                FunctionNames.Add(GetNameSafe(FunctionCall->MaterialFunction));
+            }
+        }
+
+        return FunctionNames.IsEmpty() ? TEXT("<none>") : FString::Join(FunctionNames, TEXT(", "));
     }
 
     bool ConnectExpression(
@@ -221,9 +295,7 @@ namespace
 
         static const FName InputNames[] = {
             TEXT("BaseNormal"),
-            TEXT("UV0"), TEXT("UV1"), TEXT("UV2"), TEXT("UV3"),
-            TEXT("UV4"), TEXT("UV5"), TEXT("UV6"), TEXT("UV7"),
-            TEXT("UVChannel"),
+            TEXT("SelectedUV"),
             TEXT("PreviewWetness"),
             TEXT("AccumulatedEnabled"),
             TEXT("AccumulatedStrength"),
@@ -250,15 +322,6 @@ namespace
         Custom->Code = TEXT(R"(
 float3 BaseTS = normalize(BaseNormal);
 float PreviewWetnessScale = saturate(PreviewWetness);
-int UVIndex = (int)round(clamp(UVChannel, 0.0, 7.0));
-float2 SelectedUV = UV0;
-if (UVIndex == 1) { SelectedUV = UV1; }
-else if (UVIndex == 2) { SelectedUV = UV2; }
-else if (UVIndex == 3) { SelectedUV = UV3; }
-else if (UVIndex == 4) { SelectedUV = UV4; }
-else if (UVIndex == 5) { SelectedUV = UV5; }
-else if (UVIndex == 6) { SelectedUV = UV6; }
-else if (UVIndex == 7) { SelectedUV = UV7; }
 
 float3 CombinedTS = BaseTS;
 if (AccumulatedEnabled > 0.5)
@@ -311,122 +374,40 @@ return CombinedTS;
         return Custom;
     }
 
-    UMaterialExpressionCustom* CreatePreviewWetnessVertexColorOverride(
+    bool OverrideCpuApplyWetnessInput(
         UMaterial* Material,
-        const int32 NodeX,
-        const int32 NodeY)
+        UMaterialFunctionInterface* CpuApplyFunction,
+        UMaterialExpressionScalarParameter* PreviewWetness,
+        FString& OutError)
     {
-        UMaterialExpressionCustom* Custom = Cast<UMaterialExpressionCustom>(
-            UMaterialEditingLibrary::CreateMaterialExpression(Material, UMaterialExpressionCustom::StaticClass(), NodeX, NodeY));
-        if (Custom == nullptr)
+        if (Material == nullptr || CpuApplyFunction == nullptr || PreviewWetness == nullptr)
         {
-            return nullptr;
-        }
-
-        FCustomInput& WetnessInput = Custom->Inputs.AddDefaulted_GetRef();
-        WetnessInput.InputName = TEXT("PreviewWetness");
-
-        FCustomOutput& RedOutput = Custom->AdditionalOutputs.AddDefaulted_GetRef();
-        RedOutput.OutputName = TEXT("R");
-        RedOutput.OutputType = CMOT_Float1;
-
-        FCustomOutput& GreenOutput = Custom->AdditionalOutputs.AddDefaulted_GetRef();
-        GreenOutput.OutputName = TEXT("G");
-        GreenOutput.OutputType = CMOT_Float1;
-
-        FCustomOutput& BlueOutput = Custom->AdditionalOutputs.AddDefaulted_GetRef();
-        BlueOutput.OutputName = TEXT("B");
-        BlueOutput.OutputType = CMOT_Float1;
-
-        FCustomOutput& AlphaOutput = Custom->AdditionalOutputs.AddDefaulted_GetRef();
-        AlphaOutput.OutputName = TEXT("A");
-        AlphaOutput.OutputType = CMOT_Float1;
-
-        Custom->Code = TEXT(R"(
-float Wetness = saturate(PreviewWetness);
-float4 PreviewVertexColor = float4(Wetness, 0.0, 0.0, 1.0);
-R = PreviewVertexColor.r;
-G = PreviewVertexColor.g;
-B = PreviewVertexColor.b;
-A = PreviewVertexColor.a;
-return PreviewVertexColor;
-)");
-        Custom->OutputType = CMOT_Float4;
-        Custom->Description = TEXT("DWC Wrinkle Preview Wetness VertexColor Override");
-        Custom->RebuildOutputs();
-        return Custom;
-    }
-
-    bool InjectPreviewWetnessVertexColorOverride(UMaterial* Material, FString& OutError)
-    {
-        if (Material == nullptr)
-        {
-            OutError = TEXT("Cannot inject preview wetness override into a null material.");
+            OutError = TEXT("Cannot override the preview wetness input without a CPU function call and scalar parameter.");
             return false;
         }
 
-        TArray<UMaterialExpressionVertexColor*> VertexColorExpressions;
-        for (UMaterialExpression* Expression : Material->GetExpressions())
-        {
-            if (UMaterialExpressionVertexColor* VertexColor = Cast<UMaterialExpressionVertexColor>(Expression))
-            {
-                VertexColorExpressions.Add(VertexColor);
-            }
-        }
-
-        if (VertexColorExpressions.Num() == 0)
-        {
-            return true;
-        }
-
-        UMaterialExpressionScalarParameter* PreviewWetness = CreateWetWrinkleScalarParameter(
+        UMaterialExpressionMaterialFunctionCall* CpuApply = FindFunctionCall(
             Material,
-            WetWrinklePreviewMaterialParameters::PreviewWetness,
-            1.0f,
-            -1150,
-            1100);
-        UMaterialExpressionCustom* OverrideVertexColor = CreatePreviewWetnessVertexColorOverride(Material, -900, 1100);
-        if (PreviewWetness == nullptr || OverrideVertexColor == nullptr)
+            CpuApplyFunction,
+            DwcApplyWetnessCpuFunctionName);
+        if (CpuApply == nullptr)
         {
-            OutError = TEXT("Failed to create preview wetness override material expressions.");
+            OutError = FString::Printf(
+                TEXT("The duplicated CPU preview graph does not contain MF_DWC_ApplyWetness_CPU. Function calls found: %s."),
+                *DescribeMaterialFunctionCalls(Material));
             return false;
         }
 
-        if (!ConnectExpression(PreviewWetness, FString(), OverrideVertexColor, TEXT("PreviewWetness"), OutError))
-        {
-            return false;
-        }
-
-        for (UMaterialExpression* Expression : Material->GetExpressions())
-        {
-            if (Expression == nullptr || Expression == OverrideVertexColor)
-            {
-                continue;
-            }
-
-            for (FExpressionInputIterator It{Expression}; It; ++It)
-            {
-                for (UMaterialExpressionVertexColor* VertexColorExpression : VertexColorExpressions)
-                {
-                    if (It->Expression == VertexColorExpression)
-                    {
-                        It->Expression = OverrideVertexColor;
-                        break;
-                    }
-                }
-            }
-        }
-
-        return true;
+        return ConnectExpression(PreviewWetness, FString(), CpuApply, TEXT("Wetness"), OutError);
     }
 
-    bool ConnectPreviewGraph(UMaterial* Material, FString& OutError)
+    bool ConnectPreviewGraph(
+        UMaterial* Material,
+        const int32 UVChannelIndex,
+        UMaterialExpressionScalarParameter* PreviewWetness,
+        FString& OutError)
     {
         UMaterialExpressionCustom* Blend = CreatePreviewBlendExpression(Material, -100, 1300);
-        UMaterialExpressionScalarParameter* UVChannel = CreateWetWrinkleScalarParameter(
-            Material, WetWrinklePreviewMaterialParameters::UVChannel, 0.0f, -650, 1250);
-        UMaterialExpressionScalarParameter* PreviewWetness = CreateWetWrinkleScalarParameter(
-            Material, WetWrinklePreviewMaterialParameters::PreviewWetness, 1.0f, -650, 1300);
         UMaterialExpressionTextureObjectParameter* AccumulatedNormal = CreateNormalTextureParameter(
             Material, WetWrinklePreviewMaterialParameters::AccumulatedNormal, -650, 1350);
         UMaterialExpressionScalarParameter* AccumulatedEnabled = CreateWetWrinkleScalarParameter(
@@ -454,7 +435,7 @@ return PreviewVertexColor;
         UMaterialExpressionScalarParameter* HoverFalloff = CreateWetWrinkleScalarParameter(
             Material, WetWrinklePreviewMaterialParameters::HoverFalloff, 0.5f, -650, 2550);
 
-        if (Blend == nullptr || UVChannel == nullptr || PreviewWetness == nullptr || AccumulatedNormal == nullptr || AccumulatedEnabled == nullptr ||
+        if (Blend == nullptr || PreviewWetness == nullptr || AccumulatedNormal == nullptr || AccumulatedEnabled == nullptr ||
             AccumulatedStrength == nullptr || TransientRidgeNormal == nullptr || TransientRidgeEnabled == nullptr ||
             HoverNormal == nullptr || HoverEnabled == nullptr || HoverCenterUV == nullptr ||
             HoverRadiusUV == nullptr || HoverRotation == nullptr || HoverScale == nullptr || HoverStrength == nullptr ||
@@ -464,24 +445,19 @@ return PreviewVertexColor;
             return false;
         }
 
-        TArray<UMaterialExpressionTextureCoordinate*> UVCoordinates;
-        UVCoordinates.SetNum(8);
-        for (int32 UVIndex = 0; UVIndex < UVCoordinates.Num(); ++UVIndex)
+        UMaterialExpressionTextureCoordinate* UVCoordinate = Cast<UMaterialExpressionTextureCoordinate>(
+            UMaterialEditingLibrary::CreateMaterialExpression(
+                Material,
+                UMaterialExpressionTextureCoordinate::StaticClass(),
+                -900,
+                1250));
+        if (UVCoordinate == nullptr)
         {
-            UVCoordinates[UVIndex] = Cast<UMaterialExpressionTextureCoordinate>(
-                UMaterialEditingLibrary::CreateMaterialExpression(
-                    Material,
-                    UMaterialExpressionTextureCoordinate::StaticClass(),
-                    -900,
-                    1250 + UVIndex * 90));
-            if (UVCoordinates[UVIndex] == nullptr)
-            {
-                OutError = FString::Printf(TEXT("Failed to create preview UV coordinate %d."), UVIndex);
-                return false;
-            }
-            UVCoordinates[UVIndex]->CoordinateIndex = UVIndex;
-            UVCoordinates[UVIndex]->Desc = FString::Printf(TEXT("DWC Wrinkle Preview UV%d"), UVIndex);
+            OutError = FString::Printf(TEXT("Failed to create preview UV coordinate %d."), UVChannelIndex);
+            return false;
         }
+        UVCoordinate->CoordinateIndex = UVChannelIndex;
+        UVCoordinate->Desc = FString::Printf(TEXT("DWC Wrinkle Preview UV%d"), UVChannelIndex);
 
         UMaterialExpression* BaseNormal = nullptr;
         FString BaseNormalOutput;
@@ -535,11 +511,7 @@ return PreviewVertexColor;
         }
 
         bool bConnected = ConnectExpression(BaseNormal, BaseNormalOutput, Blend, TEXT("BaseNormal"), OutError);
-        for (int32 UVIndex = 0; bConnected && UVIndex < UVCoordinates.Num(); ++UVIndex)
-        {
-            bConnected &= ConnectExpression(UVCoordinates[UVIndex], FString(), Blend, FString::Printf(TEXT("UV%d"), UVIndex), OutError);
-        }
-        bConnected &= ConnectExpression(UVChannel, FString(), Blend, TEXT("UVChannel"), OutError);
+        bConnected &= ConnectExpression(UVCoordinate, FString(), Blend, TEXT("SelectedUV"), OutError);
         bConnected &= ConnectExpression(PreviewWetness, FString(), Blend, TEXT("PreviewWetness"), OutError);
         bConnected &= ConnectExpression(AccumulatedEnabled, FString(), Blend, TEXT("AccumulatedEnabled"), OutError);
         bConnected &= ConnectExpression(AccumulatedStrength, FString(), Blend, TEXT("AccumulatedStrength"), OutError);
@@ -604,6 +576,13 @@ return PreviewVertexColor;
 
         TransientInstance->SetParentEditorOnly(TransientBaseMaterial, false);
         TransientInstance->CopyMaterialUniformParametersEditorOnly(SourceMaterial, true);
+        if (const UMaterialInstance* SourceInstance = Cast<UMaterialInstance>(SourceMaterial))
+        {
+            FMaterialInstanceBasePropertyOverrides BasePropertyOverrides = SourceInstance->BasePropertyOverrides;
+            TransientInstance->UpdateStaticPermutation(
+                SourceInstance->GetStaticParameters(),
+                BasePropertyOverrides);
+        }
         TransientInstance->PostEditChange();
         return TransientInstance;
     }
@@ -618,6 +597,21 @@ return PreviewVertexColor;
         Material->SetMaterialUsage(MATUSAGE_SkeletalMesh);
         Material->UpdateCachedExpressionData();
 
+        UTexture* const DefaultNormalTexture = LoadWetWrinkleDefaultNormalTexture();
+        if (DefaultNormalTexture == nullptr)
+        {
+            return { TEXT("Could not load the engine default normal texture used by wrinkle preview parameters.") };
+        }
+
+        if (!Material->ContainsDefaultTexture(DefaultNormalTexture))
+        {
+            return {
+                FString::Printf(
+                    TEXT("The transient wrinkle preview material did not rebuild its default texture cache for '%s'."),
+                    *DefaultNormalTexture->GetPathName())
+            };
+        }
+
         {
             FMaterialUpdateContext UpdateContext(FMaterialUpdateContext::EOptions::SyncWithRenderingThread);
             UpdateContext.AddMaterial(Material);
@@ -625,13 +619,19 @@ return PreviewVertexColor;
             Material->PostEditChange();
         }
 
-        if (const FMaterialResource* Resource = Material->GetMaterialResource(GMaxRHIShaderPlatform))
+        if (FMaterialResource* Resource = Material->GetMaterialResource(GMaxRHIShaderPlatform))
         {
+            if (!Resource->IsGameThreadShaderMapComplete())
+            {
+                Resource->SubmitCompileJobs_GameThread(EShaderCompileJobPriority::High);
+            }
+            Resource->FinishCompilation();
             return Resource->GetCompileErrors();
         }
 
-        return {};
+        return { TEXT("The transient wrinkle preview material has no material resource after compilation.") };
     }
+
 }
 
 FWetWrinklePreviewMaterialBuildResult FWetWrinklePreviewMaterialBuilder::Build(const FWetWrinklePreviewMaterialBuildArgs& Args)
@@ -651,6 +651,26 @@ FWetWrinklePreviewMaterialBuildResult FWetWrinklePreviewMaterialBuilder::Build(c
         return Result;
     }
 
+    if (Args.UVChannelIndex < 0 || Args.UVChannelIndex >= MaxGpuSkinUVChannelCount)
+    {
+        Result.ErrorMessage = FString::Printf(
+            TEXT("Wrinkle preview UV channel %d is not supported by the skeletal GPUSkin path. Valid channels are 0 through %d."),
+            Args.UVChannelIndex,
+            MaxGpuSkinUVChannelCount - 1);
+        return Result;
+    }
+
+    UMaterialFunctionInterface* CpuApplyFunction = nullptr;
+    if (Args.bOverrideCpuWetnessInput)
+    {
+        CpuApplyFunction = LoadDwcApplyWetnessCpuFunction();
+        if (CpuApplyFunction == nullptr)
+        {
+            Result.ErrorMessage = TEXT("Could not load MF_DWC_ApplyWetness_CPU for the DWC CPU preview path.");
+            return Result;
+        }
+    }
+
     const bool bSourcePackageWasDirty = SourceMaterial->GetOutermost()->IsDirty();
     UMaterial* TransientMaterial = DuplicateObject<UMaterial>(
         SourceBaseMaterial,
@@ -658,20 +678,35 @@ FWetWrinklePreviewMaterialBuildResult FWetWrinklePreviewMaterialBuilder::Build(c
         MakeUniqueObjectName(GetTransientPackage(), UMaterial::StaticClass(), TEXT("DWC_WrinklePreviewMaterial")));
     if (TransientMaterial == nullptr)
     {
-        Result.ErrorMessage = FString::Printf(TEXT("Failed to duplicate '%s' for wrinkle preview."), *SourceBaseMaterial->GetName());
+        Result.ErrorMessage = FString::Printf(TEXT("Failed to create a transient copy of '%s' for wrinkle preview."), *SourceBaseMaterial->GetName());
         return Result;
     }
 
-    TransientMaterial->SetFlags(RF_Transient);
+    // A graph-aware duplication preserves the function-call expressions and their input names.
+    // The preview compilation path below rebuilds cached expression data after adding preview nodes.
     TransientMaterial->ClearFlags(RF_Standalone | RF_Transactional);
+    TransientMaterial->SetFlags(RF_Transient);
     RemoveLegacyPreviewGraph(TransientMaterial);
 
-    if (Args.bInjectPreviewWetness && !InjectPreviewWetnessVertexColorOverride(TransientMaterial, Result.ErrorMessage))
+    UMaterialExpressionScalarParameter* PreviewWetness = CreateWetWrinkleScalarParameter(
+        TransientMaterial,
+        WetWrinklePreviewMaterialParameters::PreviewWetness,
+        1.0f,
+        -650,
+        1300);
+    if (PreviewWetness == nullptr)
+    {
+        Result.ErrorMessage = TEXT("Failed to create the preview wetness scalar parameter.");
+        return Result;
+    }
+
+    if (Args.bOverrideCpuWetnessInput &&
+        !OverrideCpuApplyWetnessInput(TransientMaterial, CpuApplyFunction, PreviewWetness, Result.ErrorMessage))
     {
         return Result;
     }
 
-    if (!ConnectPreviewGraph(TransientMaterial, Result.ErrorMessage))
+    if (!ConnectPreviewGraph(TransientMaterial, Args.UVChannelIndex, PreviewWetness, Result.ErrorMessage))
     {
         return Result;
     }

@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Framework/Commands/UIAction.h"
+#include "WetClothing/WCAEditor/WCAEditorMode.h"
 #include "WetClothing/WCAEditor/WCAEditorTypes.h"
 #include "Widgets/Input/SComboBox.h"
 
@@ -25,24 +26,23 @@ struct FWCAMaterialSlotRowArgs
     USkeletalMesh* GeneratedDataUV = nullptr;
     TSharedPtr<FAssetThumbnailPool> ThumbnailPool;
     TArray<TSharedPtr<FAssetThumbnail>>* ThumbnailSink = nullptr;
+    FText AllSlotsTitle;
+    bool bShowWettableToggle = true;
     FOnWettableMaterialSlotClicked OnWettableSlotClicked;
     TFunction<FText(int32)> GetMaterialSlotStatusText;
 };
 
 struct FWCABakeMapsMenuArgs
 {
-    FSimpleDelegate OnBakeAllMaps;
+    EWCAEditorMode EditorMode = EWCAEditorMode::PartEdit;
     FSimpleDelegate OnBakeWetnessProfileMaps;
     FSimpleDelegate OnBakeGPUWetnessMapData;
     FSimpleDelegate OnBakeTransparencyRevealMaps;
     FSimpleDelegate OnBakeWrinkleNormalMap;
-    FSimpleDelegate OnBakeWrinkleMask;
-    FCanExecuteAction CanBakeAllMaps;
     FCanExecuteAction CanBakeWetnessProfileMaps;
     FCanExecuteAction CanBakeGPUWetnessMapData;
     FCanExecuteAction CanBakeTransparencyRevealMaps;
     FCanExecuteAction CanBakeWrinkleNormalMap;
-    FCanExecuteAction CanBakeWrinkleMask;
 };
 
 struct FWCAGenerateMaterialsMenuArgs

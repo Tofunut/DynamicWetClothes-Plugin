@@ -8,7 +8,6 @@ class UMaterialInstanceDynamic;
 
 namespace WetWrinklePreviewMaterialParameters
 {
-    extern const FName UVChannel;
     extern const FName PreviewWetness;
     extern const FName AccumulatedNormal;
     extern const FName AccumulatedEnabled;
@@ -28,7 +27,8 @@ namespace WetWrinklePreviewMaterialParameters
 struct FWetWrinklePreviewMaterialBuildArgs
 {
     UMaterialInterface* SourceMaterial = nullptr;
-    bool bInjectPreviewWetness = false;
+    int32 UVChannelIndex = INDEX_NONE;
+    bool bOverrideCpuWetnessInput = false;
 };
 
 struct FWetWrinklePreviewMaterialBuildResult

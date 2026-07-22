@@ -53,15 +53,15 @@ public:
     virtual ~SWCAEditorPanel() override;
     void Construct(const FArguments& InArgs);
 
-    void RefreshFromAsset();
-    void RequestRefreshFromAsset();
+    void RefreshFromAsset(bool bRebuildActiveModePreview = true);
+    void RefreshStatusFromAsset();
+    void RequestRefreshFromAsset(bool bRebuildActiveModePreview = true);
     FWCAEditorIssueStatus CollectIssueStatus(bool bRefreshAssetState = true, bool bRunDeepValidation = false) const;
     bool HasPendingVisualBakeTasks(FString* OutSummary = nullptr) const;
     bool BakeWetVisualAssets(FString& OutSummary, bool* OutHadWarnings = nullptr);
     bool BakePendingVisualAssets(FString& OutSummary, bool* OutHadWarnings = nullptr);
     bool BakeTransparencyRevealAssets(FString& OutSummary, bool* OutHadWarnings = nullptr);
     FReply BakeSelectedWrinkleNormalMap();
-    FReply BakeSelectedWrinkleMask();
     bool BakeAllWrinkleMaps(FString& OutSummary, bool* OutHadWarnings = nullptr);
     bool SaveBakedVisualAssets() const;
     bool SaveTransparencySetupAssets() const;
@@ -70,7 +70,7 @@ public:
 private:
     TSharedRef<SWidget> EnsureModeWidget(EWCAEditorMode Mode);
     EActiveTimerReturnType HandleDeferredRefresh(double CurrentTime, float DeltaTime);
-    void UpdateCachedStatus();
+    void UpdateCachedStatus(bool bRefreshAssetState = true);
     EVisibility GetRuntimeReadyWarningVisibility() const;
     FText GetRuntimeReadyWarningText() const;
     FSlateColor GetRuntimeReadyStatusTextColor() const;
@@ -85,6 +85,7 @@ private:
     TSharedPtr<SWetClothingTransparencyBakePanel> TransparencyBakePanel;
     EWCAEditorMode ActiveMode = EWCAEditorMode::PartEdit;
     bool bRefreshPending = false;
+    bool bPendingFullModeRefresh = false;
     bool bStatusWarningVisible = false;
     FText CachedStatusText;
     EWCAEditorStatusSeverity CachedStatusSeverity = EWCAEditorStatusSeverity::Info;

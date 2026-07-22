@@ -26,20 +26,19 @@ class UTexture2D;
 struct FAssetData;
 struct FWetClothingWetPartEntry;
 struct FWetWrinklePatchPlacement;
-struct FWetWrinklePatchStroke;
 struct FWetProceduralRidgeStroke;
 struct FWetProceduralRidgeStrokePoint;
 
 enum class EWetWrinkleElementType : uint8
 {
-    PatchStroke,
+    Patch,
     ProceduralRidgeStroke
 };
 
-struct FWetWrinklePatchStrokeListItem
+struct FWetWrinkleElementListItem
 {
     FGuid StrokeGuid;
-    EWetWrinkleElementType ElementType = EWetWrinkleElementType::PatchStroke;
+    EWetWrinkleElementType ElementType = EWetWrinkleElementType::Patch;
 };
 
 struct FWetWrinkleBrushPresetOption
@@ -53,7 +52,8 @@ struct FWetWrinkleTexturePaletteItem
     FText DisplayName;
     FSoftObjectPath TexturePath;
     TWeakObjectPtr<UTexture2D> Texture;
-    FSlateBrush ThumbnailBrush;
+    TSharedPtr<FAssetThumbnail> AssetThumbnail;
+    bool bAssetAvailable = true;
     bool bRemoved = false;
     bool bHidden = false;
 };
@@ -71,15 +71,15 @@ class SWetWrinkleEditorPanel : public SCompoundWidget, public FEditorUndoClient
     virtual void PostUndo(bool bSuccess) override;
     virtual void PostRedo(bool bSuccess) override;
     void RefreshFromAsset();
+    void RefreshFromAssetLightweight();
     FReply BakeSelectedWrinkleNormalMap();
     FReply ExecuteBakeWrinkleNormalMap();
     FReply ExecuteBakeAllWrinkleNormalMaps();
-    FReply BakeSelectedWrinkleMask();
 
   private:
-    using FStrokeListItemPtr = TSharedPtr<FWetWrinklePatchStrokeListItem>;
+    void RefreshFromAssetInternal(bool bForcePreviewMaterialRebuild, bool bRebuildAccumulatedPreview);
+    using FStrokeListItemPtr = TSharedPtr<FWetWrinkleElementListItem>;
     using FMaterialSlotItemPtr = TSharedPtr<FWCAMaterialSlotItem>;
-    using FTextureItemPtr = TSharedPtr<FWCATextureItem>;
     using FWetPartEntryPtr = TSharedPtr<FWetClothingWetPartEntry>;
     using FUVDisplayModeItemPtr = TSharedPtr<EWCAUVDisplayMode>;
 
@@ -95,6 +95,8 @@ class SWetWrinkleEditorPanel : public SCompoundWidget, public FEditorUndoClient
     TSharedRef<SWidget> BuildPatchListSection();
     void PushBrushSettingsToViewport();
     void RefreshStrokeList();
+    bool IsPatchVisibleForCurrentMaterialSlot(const FWetWrinklePatchPlacement& Patch) const;
+    bool IsProceduralRidgeStrokeVisibleForCurrentMaterialSlot(const FWetProceduralRidgeStroke& Stroke) const;
     void RefreshStrokeOverlay(bool bRebuildAccumulatedPreview = true);
     void RefreshMaterialSlotOptions();
     void RefreshBrushPresetOptions();
@@ -106,8 +108,6 @@ class SWetWrinkleEditorPanel : public SCompoundWidget, public FEditorUndoClient
     void HandleWrinkleTextureAssetRemoved(const FAssetData& AssetData);
     void HandleWrinkleTextureAssetUpdated(const FAssetData& AssetData);
     void RefreshPartMapItems();
-    void RefreshMaterialTextures();
-    void RefreshTextureToggleWidgets();
     bool HasUsableWrinkleUVChannel() const;
     bool EnsureWrinkleUVChannelForMaterialSlot(int32 MaterialSlotIndex, bool bShowFailureDialog);
     void InvalidateWrinkleUVViewCache();
@@ -122,10 +122,8 @@ class SWetWrinkleEditorPanel : public SCompoundWidget, public FEditorUndoClient
     TSharedRef<SWidget> GenerateUVDisplayModeComboItem(FUVDisplayModeItemPtr Item) const;
     void HandleUVDisplayModeSelectionChanged(FUVDisplayModeItemPtr Item, ESelectInfo::Type SelectInfo);
     FText GetSelectedUVDisplayModeText() const;
-    float GetUVViewBackgroundTextureOpacity() const;
     float GetUVViewIslandLineOpacity() const;
     float GetUVViewIslandLineThicknessScale() const;
-    void HandleUVViewBackgroundTextureOpacityChanged(float NewValue);
     void HandleUVViewIslandLineOpacityChanged(float NewValue);
     void HandleUVViewIslandLineThicknessScaleChanged(float NewValue);
     FReply HandleAutoGenerateClicked();
@@ -155,13 +153,7 @@ class SWetWrinkleEditorPanel : public SCompoundWidget, public FEditorUndoClient
     void HandleMaterialSlotComboChanged(TSharedPtr<int32> Item, ESelectInfo::Type SelectInfo);
     TSharedRef<ITableRow> GenerateMaterialSlotRow(FMaterialSlotItemPtr Item, const TSharedRef<STableViewBase>& OwnerTable);
     void HandleMaterialSlotSelectionChanged(FMaterialSlotItemPtr Item, ESelectInfo::Type SelectInfo);
-    FReply HandleWettableMaterialSlotClicked(int32 MaterialSlotIndex);
     TSharedRef<ITableRow> GeneratePartMapRow(FWetPartEntryPtr Item, const TSharedRef<STableViewBase>& OwnerTable);
-    TSharedRef<SWidget> GenerateTextureComboItem(FTextureItemPtr Item);
-    void HandleTextureSelectionChanged(FTextureItemPtr Item, ESelectInfo::Type SelectInfo);
-    UTexture* ResolveSelectedMaterialTexture() const;
-    UTexture* ResolveTextureAddressTexture() const;
-    void SaveSelectedTexture();
 
     FString GetWrinkleNormalTextureObjectPath() const;
     void HandleWrinkleNormalTextureChanged(const FAssetData& AssetData);
@@ -251,8 +243,8 @@ class SWetWrinkleEditorPanel : public SCompoundWidget, public FEditorUndoClient
     FSlateColor GetSelectedRidgeEndpointStatusColor(bool bStartEndpoint) const;
     void HandlePreviewToggleChanged(ECheckBoxState NewState);
     ECheckBoxState GetPreviewToggleState() const;
-    FWetWrinklePatchStroke* FindMutableStroke(const FGuid& StrokeGuid) const;
-    const FWetWrinklePatchStroke* FindStroke(const FGuid& StrokeGuid) const;
+    FWetWrinklePatchPlacement* FindMutablePatch(const FGuid& PatchGuid) const;
+    const FWetWrinklePatchPlacement* FindPatch(const FGuid& PatchGuid) const;
     FWetProceduralRidgeStroke* FindMutableProceduralRidgeStroke(const FGuid& StrokeGuid) const;
     const FWetProceduralRidgeStroke* FindProceduralRidgeStroke(const FGuid& StrokeGuid) const;
     FWetWrinklePatchPlacement MakeStampFromHit(const FWetWrinkleSurfaceHit& SurfaceHit) const;
@@ -275,6 +267,11 @@ class SWetWrinkleEditorPanel : public SCompoundWidget, public FEditorUndoClient
     void ClearConnectionsToStroke(const FGuid& DeletedStrokeGuid);
     bool ShouldAddProceduralRidgePoint(const FWetWrinkleSurfaceHit& SurfaceHit) const;
     TArray<FWetWrinkleSurfaceHit> BuildSmoothedProceduralRidgeHits() const;
+    bool TrySmoothProceduralRidgeInteriorHit(
+        const FWetWrinkleSurfaceHit& Previous,
+        const FWetWrinkleSurfaceHit& Current,
+        const FWetWrinkleSurfaceHit& Next,
+        FWetWrinkleSurfaceHit& OutSmoothedHit) const;
     UTexture* ResolveSourceTextureForStamp(int32 MaterialSlotIndex, int32 UVChannelIndex) const;
     bool IsCurrentWrinkleNormalUsable(FString* OutReason = nullptr) const;
     FText GetMaterialSlotDisplayText(int32 MaterialSlotIndex) const;
@@ -286,9 +283,9 @@ class SWetWrinkleEditorPanel : public SCompoundWidget, public FEditorUndoClient
     void HandleTexturePaintStampRequested(const FVector2D& UV);
     void HandleTexturePaintStrokeEnded();
     bool TryBuildTextureSurfaceHit(const FVector2D& UV, FWetWrinkleSurfaceHit& OutSurfaceHit) const;
-    bool ShouldAddStampForHit(const FWetWrinkleSurfaceHit& SurfaceHit) const;
-    FString MakeDefaultStrokeName() const;
+    FString MakeDefaultPatchName() const;
     void MarkAssetEdited();
+    void MarkWrinkleAuthoringEdited();
 
   private:
     TWeakObjectPtr<UWetClothingAsset> WetClothingAsset;
@@ -317,40 +314,27 @@ class SWetWrinkleEditorPanel : public SCompoundWidget, public FEditorUndoClient
     FButtonStyle WrinkleTexturePaletteButtonStyle;
     TSharedPtr<FAssetThumbnailPool> MaterialThumbnailPool;
     TArray<TSharedPtr<FAssetThumbnail>> MaterialSlotThumbnails;
-    TArray<FTextureItemPtr> TextureItems;
-    TArray<TSharedPtr<FAssetThumbnail>> TextureThumbnails;
-    FTextureItemPtr SelectedTextureItem;
-    TSharedPtr<class SComboBox<FTextureItemPtr>> TextureComboBox;
-    TSharedPtr<class SBox> SelectedTextureComboContentBox;
-    TSharedPtr<class SBox> TextureSelectionContainer;
     FSlateBrush SelectedWrinkleNormalThumbnailBrush;
     TSharedPtr<class SEditableTextBox> WrinkleTextureSearchPathTextBox;
-    bool bShowMaterialTextureInUVView = true;
     TSharedPtr<class SListView<FWetPartEntryPtr>> PartMapListView;
     FWetWrinkleBrushSettings BrushSettings;
     float SizeCm = 8.0f;
     float SizeUV = 0.0677f;
     FWetWrinkleSurfaceHit CurrentHit;
-    FGuid ActiveStrokeGuid;
     FGuid SelectedStrokeGuid;
-    EWetWrinkleElementType SelectedElementType = EWetWrinkleElementType::PatchStroke;
-    FVector2D LastStampUV = FVector2D::ZeroVector;
-    int32 LastStampMaterialSlotIndex = INDEX_NONE;
-    int32 LastStampUVChannelIndex = INDEX_NONE;
+    EWetWrinkleElementType SelectedElementType = EWetWrinkleElementType::Patch;
     FUVDisplayModeItemPtr SelectedUVDisplayModeItem;
     EWCAUVDisplayMode CurrentUVDisplayMode = EWCAUVDisplayMode::Normal;
-    float UVViewBackgroundTextureOpacity = 0.70f;
     float UVViewIslandLineOpacity = 1.0f;
     float UVViewIslandLineThicknessScale = 1.0f;
-    bool bHasLastStamp = false;
-    bool bAllowImmediateNextStrokeStamp = false;
     int32 ActiveProceduralRidgeMaterialSlotIndex = INDEX_NONE;
     int32 ActiveProceduralRidgeUVChannelIndex = INDEX_NONE;
     int32 ActiveProceduralRidgeUVIslandID = INDEX_NONE;
     bool bCapturingProceduralRidgeStroke = false;
     bool bProceduralRidgeCaptureBlocked = false;
     TArray<FWetWrinkleSurfaceHit> CapturedProceduralRidgeHits;
-    TUniquePtr<FScopedTransaction> ActivePaintTransaction;
+    TArray<FWetWrinkleSurfaceHit> SmoothedProceduralRidgeHits;
+    FWetWrinkleSurfaceHit LiveProceduralRidgeHit;
     TUniquePtr<FScopedTransaction> ActiveRidgeEditTransaction;
     TUniquePtr<FScopedTransaction> ActiveRidgePropertyTransaction;
     int32 SelectedProceduralRidgePointIndex = INDEX_NONE;

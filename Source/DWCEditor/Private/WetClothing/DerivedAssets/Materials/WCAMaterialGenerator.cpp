@@ -35,6 +35,7 @@
 #include "Misc/PackageName.h"
 #include "ScopedTransaction.h"
 #include "UObject/Package.h"
+#include "UObject/UObjectIterator.h"
 
 namespace
 {
@@ -634,6 +635,69 @@ namespace
             return Resource->GetCompileErrors();
         }
         return {};
+    }
+
+    /**
+     * A rebuilt generated base material can invalidate the expression GUID cached by its
+     * generated CPU/GPU children. MaterialEditingLibrary recompiles the base and traverses
+     * those children, which makes UE dereference the stale static-switch expression before
+     * this generator gets the chance to recreate the backend permutations.
+     */
+    void DetachGeneratedBackendInstancesForBaseRebuild(
+        UMaterial*                                GeneratedMaterial,
+        TArray<TObjectPtr<UMaterialInstanceConstant>>& OutDetachedInstances)
+    {
+        OutDetachedInstances.Reset();
+        if (GeneratedMaterial == nullptr)
+        {
+            return;
+        }
+
+        for (TObjectIterator<UMaterialInstanceConstant> It; It; ++It)
+        {
+            UMaterialInstanceConstant* Instance = *It;
+            if (Instance == nullptr || Instance->HasAnyFlags(RF_ClassDefaultObject) ||
+                Instance->Parent != GeneratedMaterial)
+            {
+                continue;
+            }
+
+            const FString InstanceName = Instance->GetName();
+            if (!InstanceName.EndsWith(GeneratedDwcUnifiedCpuInstanceSuffix) &&
+                !InstanceName.EndsWith(GeneratedDwcUnifiedGpuInstanceSuffix))
+            {
+                continue;
+            }
+
+            Instance->Modify();
+            // Do not recache shaders while the parent graph is being replaced. The backend
+            // instance is immediately reparented and rebuilt by CreateOrUpdateUnifiedMaterialSet.
+            Instance->SetParentEditorOnly(nullptr, false);
+            Instance->MarkPackageDirty();
+            OutDetachedInstances.Add(Instance);
+        }
+    }
+
+    void RestoreDetachedGeneratedBackendInstances(
+        UMaterial*                                          GeneratedMaterial,
+        const TArray<TObjectPtr<UMaterialInstanceConstant>>& DetachedInstances)
+    {
+        if (GeneratedMaterial == nullptr)
+        {
+            return;
+        }
+
+        for (UMaterialInstanceConstant* Instance : DetachedInstances)
+        {
+            if (Instance == nullptr || Instance->Parent != nullptr)
+            {
+                continue;
+            }
+
+            Instance->Modify();
+            Instance->SetParentEditorOnly(GeneratedMaterial, false);
+            Instance->MarkPackageDirty();
+        }
     }
 
     bool ConnectChecked(UMaterialExpression* FromExpression, const FString& FromOutputName, UMaterialExpression* ToExpression, const FString& ToInputName, TArray<FString>& FailureReasons)
@@ -1507,6 +1571,8 @@ namespace
 
             bOutReusedExisting = true;
             GeneratedMaterial->Modify();
+            TArray<TObjectPtr<UMaterialInstanceConstant>> DetachedBackendInstances;
+            DetachGeneratedBackendInstancesForBaseRebuild(GeneratedMaterial, DetachedBackendInstances);
 
             auto RebuildUnifiedGraphFromSource = [&]() -> bool
             {
@@ -1527,6 +1593,7 @@ namespace
             {
                 if (!RebuildUnifiedGraphFromSource())
                 {
+                    RestoreDetachedGeneratedBackendInstances(GeneratedMaterial, DetachedBackendInstances);
                     return nullptr;
                 }
             }
@@ -1544,6 +1611,7 @@ namespace
                 // Perform one full source-based rebuild before reporting a failure.
                 if (!RebuildUnifiedGraphFromSource())
                 {
+                    RestoreDetachedGeneratedBackendInstances(GeneratedMaterial, DetachedBackendInstances);
                     return nullptr;
                 }
                 CompileErrors = RecompileMaterialAndCollectErrors(GeneratedMaterial);
@@ -1554,6 +1622,7 @@ namespace
                 OutErrorMessage = BuildCompileErrorMessage(
                     FString::Printf(TEXT("Unified generated material '%s' failed to compile after full rebuild."), *GetNameSafe(GeneratedMaterial)),
                     CompileErrors);
+                RestoreDetachedGeneratedBackendInstances(GeneratedMaterial, DetachedBackendInstances);
                 return nullptr;
             }
             return GeneratedMaterial;

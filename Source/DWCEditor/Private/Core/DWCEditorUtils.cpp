@@ -47,6 +47,8 @@ bool DWCEditorUtils::SaveAsset(UObject* Asset)
         return false;
     }
 
+    const double SaveStartTime = FPlatformTime::Seconds();
+
     UWetClothingAsset* WetClothingAsset = Cast<UWetClothingAsset>(Asset);
     if (WetClothingAsset != nullptr)
     {
@@ -68,6 +70,7 @@ bool DWCEditorUtils::SaveAsset(UObject* Asset)
             }
         }
     }
+    const double RuntimePreparationEndTime = FPlatformTime::Seconds();
 
     TUniquePtr<FScopedSlowTask> SaveSlowTask;
     if (WetClothingAsset != nullptr)
@@ -151,6 +154,7 @@ bool DWCEditorUtils::SaveAsset(UObject* Asset)
             AddDirtyGeneratedPackage(RevealLayer.RevealMaterial.Get());
         }
     }
+    const double PackageCollectionEndTime = FPlatformTime::Seconds();
 
     if (SaveSlowTask.IsValid())
     {
@@ -160,6 +164,7 @@ bool DWCEditorUtils::SaveAsset(UObject* Asset)
     }
 
     const bool bSaved = FEditorFileUtils::PromptForCheckoutAndSave(PackagesToSave, false, false) == FEditorFileUtils::PR_Success;
+    const double PackageSaveEndTime = FPlatformTime::Seconds();
     if (WetClothingAsset != nullptr)
     {
         WetClothingAsset->CompleteRuntimeDataEditorSaveAttempt(bSaved);
@@ -176,5 +181,19 @@ bool DWCEditorUtils::SaveAsset(UObject* Asset)
         GDWCEditorAssetSaved.Broadcast(Asset);
     }
     GDWCEditorAssetSaveAttemptFinished.Broadcast(Asset, bSaved);
+    const double SaveEndTime = FPlatformTime::Seconds();
+    UE_LOG(
+        LogTemp,
+        Display,
+        TEXT("DWC editor save for '%s' %s in %.1f ms across %d package(s) "
+             "(runtime preparation %.1f, package collection %.1f, package save %.1f, completion callbacks %.1f)."),
+        *GetNameSafe(Asset),
+        bSaved ? TEXT("completed") : TEXT("failed"),
+        (SaveEndTime - SaveStartTime) * 1000.0,
+        PackagesToSave.Num(),
+        (RuntimePreparationEndTime - SaveStartTime) * 1000.0,
+        (PackageCollectionEndTime - RuntimePreparationEndTime) * 1000.0,
+        (PackageSaveEndTime - PackageCollectionEndTime) * 1000.0,
+        (SaveEndTime - PackageSaveEndTime) * 1000.0);
     return bSaved;
 }

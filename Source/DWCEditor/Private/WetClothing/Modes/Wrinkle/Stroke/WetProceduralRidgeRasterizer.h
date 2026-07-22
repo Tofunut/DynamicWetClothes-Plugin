@@ -27,7 +27,7 @@ class FWetProceduralRidgeRasterizer
     static FWetProceduralRidgeRasterResult RasterizeToNormalCoverageBuffers(
         const FWetProceduralRidgeStroke& Stroke,
         FIntPoint TextureSize,
-        TArray<FVector>& InOutNormalBuffer,
+        TArray<FVector3f>& InOutNormalBuffer,
         TArray<float>& InOutCoverageBuffer,
         const FIntRect* ClipRect = nullptr);
 };

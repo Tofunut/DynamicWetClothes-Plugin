@@ -5,6 +5,7 @@
 #include "DataAssets/WetWrinkleNormalTextureBuilder.h"
 #include "WetClothing/Foundation/MeshAnalysis/WetClothingAssetMeshAnalyzer.h"
 #include "WetClothing/Foundation/TextureAccess/WetClothingMaterialTextureResolver.h"
+#include "WetClothing/Foundation/TextureAccess/WetWrinkleTextureRasterUtils.h"
 #include "WetClothing/Modes/Wrinkle/Stroke/WetProceduralRidgeRasterizer.h"
 #include "Engine/Texture.h"
 #include "Engine/Texture2D.h"
@@ -12,6 +13,8 @@
 #include "Misc/SecureHash.h"
 #include "ObjectTools.h"
 #include "UObject/Package.h"
+
+DEFINE_LOG_CATEGORY_STATIC(LogDWCWrinkleBake, Log, All);
 
 namespace
 {
@@ -261,7 +264,7 @@ namespace
 
 
     void DilateNormalCoverageIntoIslandPadding(
-        TArray<FVector>& InOutNormalBuffer,
+        TArray<FVector3f>& InOutNormalBuffer,
         TArray<float>& InOutCoverageBuffer,
         const TArray<uint8>& IslandMask,
         const int32 Width,
@@ -277,80 +280,108 @@ namespace
             return;
         }
 
-        TArray<uint8> CurrentMask = IslandMask;
-        for (int32 Iteration = 0; Iteration < ClampedPadding; ++Iteration)
+        constexpr uint8 UnvisitedDistance = MAX_uint8;
+        TArray<uint8> DistanceFromIsland;
+        DistanceFromIsland.Init(UnvisitedDistance, Width * Height);
+
+        TArray<int32> CurrentFrontier;
+        CurrentFrontier.Reserve(Width + Height);
+        for (int32 PixelY = 0; PixelY < Height; ++PixelY)
         {
-            TArray<FVector> NextNormalBuffer = InOutNormalBuffer;
-            TArray<float> NextCoverageBuffer = InOutCoverageBuffer;
-            TArray<uint8> NextMask = CurrentMask;
-            bool bChanged = false;
-
-            for (int32 PixelY = 0; PixelY < Height; ++PixelY)
+            for (int32 PixelX = 0; PixelX < Width; ++PixelX)
             {
-                for (int32 PixelX = 0; PixelX < Width; ++PixelX)
+                const int32 PixelIndex = PixelY * Width + PixelX;
+                if (IslandMask[PixelIndex] == 0)
                 {
-                    const int32 PixelIndex = PixelY * Width + PixelX;
-                    if (CurrentMask[PixelIndex] != 0)
-                    {
-                        continue;
-                    }
+                    continue;
+                }
 
-                    int32 BestNeighborIndex = INDEX_NONE;
-                    float BestNeighborCoverage = -1.0f;
-                    for (int32 OffsetY = -1; OffsetY <= 1; ++OffsetY)
+                DistanceFromIsland[PixelIndex] = 0;
+                bool bIsBoundaryPixel = false;
+                for (int32 OffsetY = -1; OffsetY <= 1 && !bIsBoundaryPixel; ++OffsetY)
+                {
+                    for (int32 OffsetX = -1; OffsetX <= 1; ++OffsetX)
                     {
-                        for (int32 OffsetX = -1; OffsetX <= 1; ++OffsetX)
+                        if (OffsetX == 0 && OffsetY == 0)
                         {
-                            if (OffsetX == 0 && OffsetY == 0)
-                            {
-                                continue;
-                            }
+                            continue;
+                        }
 
-                            const int32 NeighborX = PixelX + OffsetX;
-                            const int32 NeighborY = PixelY + OffsetY;
-                            if (NeighborX < 0 || NeighborX >= Width || NeighborY < 0 || NeighborY >= Height)
-                            {
-                                continue;
-                            }
-
-                            const int32 NeighborIndex = NeighborY * Width + NeighborX;
-                            if (CurrentMask[NeighborIndex] == 0)
-                            {
-                                continue;
-                            }
-
-                            const float NeighborCoverage = InOutCoverageBuffer[NeighborIndex];
-                            if (NeighborCoverage > BestNeighborCoverage)
-                            {
-                                BestNeighborCoverage = NeighborCoverage;
-                                BestNeighborIndex = NeighborIndex;
-                            }
+                        const int32 NeighborX = PixelX + OffsetX;
+                        const int32 NeighborY = PixelY + OffsetY;
+                        bIsBoundaryPixel = NeighborX >= 0 && NeighborX < Width &&
+                            NeighborY >= 0 && NeighborY < Height &&
+                            IslandMask[NeighborY * Width + NeighborX] == 0;
+                        if (bIsBoundaryPixel)
+                        {
+                            break;
                         }
                     }
+                }
 
-                    if (BestNeighborIndex != INDEX_NONE)
+                if (bIsBoundaryPixel)
+                {
+                    CurrentFrontier.Add(PixelIndex);
+                }
+            }
+        }
+
+        TArray<int32> NextFrontier;
+        NextFrontier.Reserve(CurrentFrontier.Num());
+        for (int32 Iteration = 1; Iteration <= ClampedPadding && CurrentFrontier.Num() > 0; ++Iteration)
+        {
+            NextFrontier.Reset();
+            const uint8 NextDistance = static_cast<uint8>(Iteration);
+
+            for (const int32 SourceIndex : CurrentFrontier)
+            {
+                const int32 SourceX = SourceIndex % Width;
+                const int32 SourceY = SourceIndex / Width;
+                for (int32 OffsetY = -1; OffsetY <= 1; ++OffsetY)
+                {
+                    for (int32 OffsetX = -1; OffsetX <= 1; ++OffsetX)
                     {
-                        NextNormalBuffer[PixelIndex] = InOutNormalBuffer[BestNeighborIndex];
-                        NextCoverageBuffer[PixelIndex] = InOutCoverageBuffer[BestNeighborIndex];
-                        NextMask[PixelIndex] = 1;
-                        bChanged = true;
+                        if (OffsetX == 0 && OffsetY == 0)
+                        {
+                            continue;
+                        }
+
+                        const int32 NeighborX = SourceX + OffsetX;
+                        const int32 NeighborY = SourceY + OffsetY;
+                        if (NeighborX < 0 || NeighborX >= Width || NeighborY < 0 || NeighborY >= Height)
+                        {
+                            continue;
+                        }
+
+                        const int32 NeighborIndex = NeighborY * Width + NeighborX;
+                        if (IslandMask[NeighborIndex] != 0 || DistanceFromIsland[NeighborIndex] < NextDistance)
+                        {
+                            continue;
+                        }
+
+                        if (DistanceFromIsland[NeighborIndex] == UnvisitedDistance)
+                        {
+                            DistanceFromIsland[NeighborIndex] = NextDistance;
+                            InOutNormalBuffer[NeighborIndex] = InOutNormalBuffer[SourceIndex];
+                            InOutCoverageBuffer[NeighborIndex] = InOutCoverageBuffer[SourceIndex];
+                            NextFrontier.Add(NeighborIndex);
+                        }
+                        else if (DistanceFromIsland[NeighborIndex] == NextDistance &&
+                                 InOutCoverageBuffer[SourceIndex] > InOutCoverageBuffer[NeighborIndex])
+                        {
+                            InOutNormalBuffer[NeighborIndex] = InOutNormalBuffer[SourceIndex];
+                            InOutCoverageBuffer[NeighborIndex] = InOutCoverageBuffer[SourceIndex];
+                        }
                     }
                 }
             }
 
-            if (!bChanged)
-            {
-                break;
-            }
-
-            InOutNormalBuffer = MoveTemp(NextNormalBuffer);
-            InOutCoverageBuffer = MoveTemp(NextCoverageBuffer);
-            CurrentMask = MoveTemp(NextMask);
+            Swap(CurrentFrontier, NextFrontier);
         }
     }
 
     void EncodeNormalCoveragePixels(
-        const TArray<FVector>& NormalBuffer,
+        const TArray<FVector3f>& NormalBuffer,
         const TArray<float>& CoverageBuffer,
         TArray<FColor>& OutNormalPixels)
     {
@@ -359,7 +390,7 @@ namespace
         for (int32 PixelIndex = 0; PixelIndex < PixelCount; ++PixelIndex)
         {
             const float Coverage = CoverageBuffer.IsValidIndex(PixelIndex) ? CoverageBuffer[PixelIndex] : 0.0f;
-            OutNormalPixels[PixelIndex] = EncodeNormalWithCoverage(NormalBuffer[PixelIndex], Coverage);
+            OutNormalPixels[PixelIndex] = EncodeNormalWithCoverage(FVector(NormalBuffer[PixelIndex]), Coverage);
         }
     }
 
@@ -430,50 +461,47 @@ bool FWetWrinkleNormalMapBaker::BakeMaterialSlot(
         Group.MaterialSlotIndex = MaterialSlotIndex;
         Group.UVChannelIndex = WrinkleUVChannelIndex;
 
-        for (const FWetWrinklePatchStroke& Stroke : WetClothingAsset->Authored.WrinkleData.EditablePatchStrokes)
+        for (const FWetWrinklePatchPlacement& Stamp : WetClothingAsset->Authored.WrinkleData.EditablePatches)
         {
-            if (!Stroke.bEnabled && !Settings.bIncludeDisabledPatchStrokes)
+            if (!Stamp.bEnabled && !Settings.bIncludeDisabledPatches)
             {
                 continue;
             }
 
-            for (const FWetWrinklePatchPlacement& Stamp : Stroke.PatchPlacements)
+            if (Stamp.MaterialSlotIndex != MaterialSlotIndex ||
+                Stamp.UVChannelIndex != Group.UVChannelIndex)
             {
-                if (Stamp.MaterialSlotIndex != MaterialSlotIndex ||
-                    Stamp.UVChannelIndex != Group.UVChannelIndex)
-                {
-                    continue;
-                }
+                continue;
+            }
 
-                ++MatchingSlotUVStampCount;
+            ++MatchingSlotUVStampCount;
 
-                if (Stamp.WrinkleNormalTexture == nullptr)
-                {
-                    ++MissingNormalTextureStampCount;
-                    continue;
-                }
+            if (Stamp.WrinkleNormalTexture == nullptr)
+            {
+                ++MissingNormalTextureStampCount;
+                continue;
+            }
 
-                if (Stamp.SourceTexture == nullptr)
-                {
-                    ++MissingSourceTextureStampCount;
-                    continue;
-                }
+            if (Stamp.SourceTexture == nullptr)
+            {
+                ++MissingSourceTextureStampCount;
+                continue;
+            }
 
-                if (Group.SourceTexture == nullptr)
-                {
-                    Group.SourceTexture = Stamp.SourceTexture;
-                }
+            if (Group.SourceTexture == nullptr)
+            {
+                Group.SourceTexture = Stamp.SourceTexture;
+            }
 
-                if (Group.SourceTexture == Stamp.SourceTexture)
-                {
-                    Group.Stamps.Add(&Stamp);
-                }
+            if (Group.SourceTexture == Stamp.SourceTexture)
+            {
+                Group.Stamps.Add(&Stamp);
             }
         }
 
         for (const FWetProceduralRidgeStroke& Stroke : WetClothingAsset->Authored.WrinkleData.EditableProceduralRidgeStrokes)
         {
-            if ((!Stroke.bEnabled && !Settings.bIncludeDisabledPatchStrokes) ||
+            if ((!Stroke.bEnabled && !Settings.bIncludeDisabledPatches) ||
                 Stroke.MaterialSlotIndex != MaterialSlotIndex ||
                 Stroke.UVChannelIndex != Group.UVChannelIndex ||
                 Stroke.LODIndex != Group.LODIndex)
@@ -565,16 +593,15 @@ bool FWetWrinkleNormalMapBaker::BakeGroup(
         return true;
     }
 
-    const int32 MaxResolution = FMath::Clamp(Settings.Resolution, 16, 8192);
-    const int32 SourceWidth = FMath::Max(Group.SourceTexture->GetSurfaceWidth(), 1);
-    const int32 SourceHeight = FMath::Max(Group.SourceTexture->GetSurfaceHeight(), 1);
-    const double ResolutionScale = static_cast<double>(MaxResolution) / FMath::Max(SourceWidth, SourceHeight);
-    const int32 Width = FMath::Clamp(FMath::RoundToInt(SourceWidth * ResolutionScale), 1, 8192);
-    const int32 Height = FMath::Clamp(FMath::RoundToInt(SourceHeight * ResolutionScale), 1, 8192);
+    const double BakeStartTime = FPlatformTime::Seconds();
+    const FIntPoint FinalTextureSize = WetWrinkleTextureRaster::ResolveFinalTextureSize(Settings.Resolution);
+    const FIntPoint WorkingTextureSize = WetWrinkleTextureRaster::ResolveWorkingTextureSize(FinalTextureSize);
+    const int32 Width = WorkingTextureSize.X;
+    const int32 Height = WorkingTextureSize.Y;
 
-    TArray<FVector> NormalBuffer;
+    TArray<FVector3f> NormalBuffer;
     TArray<float> CoverageBuffer;
-    NormalBuffer.Init(FVector(0.0f, 0.0f, 1.0f), Width * Height);
+    NormalBuffer.Init(FVector3f(0.0f, 0.0f, 1.0f), Width * Height);
     CoverageBuffer.Init(0.0f, Width * Height);
 
     int32 BakedStampCount = 0;
@@ -683,14 +710,14 @@ bool FWetWrinkleNormalMapBaker::BakeGroup(
                                 .GetSafeNormal(UE_SMALL_NUMBER, FVector(0.0f, 0.0f, 1.0f));
 
                         const int32 PixelIndex = PixelY * Width + PixelX;
-                        const FVector ExistingNormalTS = NormalBuffer[PixelIndex];
+                        const FVector ExistingNormalTS(NormalBuffer[PixelIndex]);
                         const FVector BlendedNormalTS =
                             FVector(
                                 ExistingNormalTS.X + StampNormalTS.X,
                                 ExistingNormalTS.Y + StampNormalTS.Y,
                                 ExistingNormalTS.Z * StampNormalTS.Z)
                                 .GetSafeNormal(UE_SMALL_NUMBER, FVector(0.0f, 0.0f, 1.0f));
-                        NormalBuffer[PixelIndex] = BlendedNormalTS;
+                        NormalBuffer[PixelIndex] = FVector3f(BlendedNormalTS);
 
                         const float Coverage = FMath::Max(CoverageBuffer[PixelIndex], EdgeFade * SeparationCoverage);
                         CoverageBuffer[PixelIndex] = Coverage;
@@ -724,33 +751,63 @@ bool FWetWrinkleNormalMapBaker::BakeGroup(
     {
         return true;
     }
+    const double RasterEndTime = FPlatformTime::Seconds();
 
-    // Keep the extracted convex core narrow. Bilinear preset sampling supplies the
-    // short antialiased transition; no semantic radius or feather is added around it.
-    // Padding below only copies edge texels outside UV islands for seam-safe sampling.
+    TArray<FVector3f> FinalNormalBuffer;
+    TArray<float> FinalCoverageBuffer;
+    if (WorkingTextureSize == FinalTextureSize)
+    {
+        FinalNormalBuffer = MoveTemp(NormalBuffer);
+        FinalCoverageBuffer = MoveTemp(CoverageBuffer);
+    }
+    else
+    {
+        WetWrinkleTextureRaster::DownsampleNormalCoverage(
+            NormalBuffer,
+            CoverageBuffer,
+            WorkingTextureSize,
+            FinalTextureSize,
+            FinalNormalBuffer,
+            FinalCoverageBuffer);
+    }
+    if (FinalNormalBuffer.Num() != FinalTextureSize.X * FinalTextureSize.Y ||
+        FinalCoverageBuffer.Num() != FinalNormalBuffer.Num())
+    {
+        OutErrorMessage = TEXT("Failed to downsample the wrinkle normal bake buffer.");
+        return false;
+    }
+    const double ResampleEndTime = FPlatformTime::Seconds();
+
+    // Keep the extracted convex core narrow. Apply the configured padding after
+    // downsampling so eight pixels always means eight pixels in the saved texture.
     TArray<uint8> IslandMask;
     if (BuildIslandMask(
             WetClothingAsset,
             Group.LODIndex,
             Group.MaterialSlotIndex,
             Group.UVChannelIndex,
-            Width,
-            Height,
+            FinalTextureSize.X,
+            FinalTextureSize.Y,
             IslandMask))
     {
         DilateNormalCoverageIntoIslandPadding(
-            NormalBuffer,
-            CoverageBuffer,
+            FinalNormalBuffer,
+            FinalCoverageBuffer,
             IslandMask,
-            Width,
-            Height,
+            FinalTextureSize.X,
+            FinalTextureSize.Y,
             Settings.PaddingPixels);
     }
+    const double PaddingEndTime = FPlatformTime::Seconds();
 
     TArray<FColor> NormalPixels;
     TArray<FColor> MaskPixels;
-    EncodeNormalCoveragePixels(NormalBuffer, CoverageBuffer, NormalPixels);
-    EncodeCoverageMaskPixels(CoverageBuffer, MaskPixels);
+    EncodeNormalCoveragePixels(FinalNormalBuffer, FinalCoverageBuffer, NormalPixels);
+    if (Settings.bBakeMask)
+    {
+        EncodeCoverageMaskPixels(FinalCoverageBuffer, MaskPixels);
+    }
+    const double EncodeEndTime = FPlatformTime::Seconds();
 
     const FString BaseSuffix = FString::Printf(
         TEXT("Slot%d_UV%d_LOD%d"),
@@ -764,8 +821,8 @@ bool FWetWrinkleNormalMapBaker::BakeGroup(
         NormalTexture = CreateOrUpdateTextureAsset(
             WetClothingAsset,
             BaseSuffix + TEXT("_WrinkleNormalMap"),
-            Width,
-            Height,
+            FinalTextureSize.X,
+            FinalTextureSize.Y,
             NormalPixels,
             true,
             OutErrorMessage);
@@ -781,8 +838,8 @@ bool FWetWrinkleNormalMapBaker::BakeGroup(
         MaskTexture = CreateOrUpdateTextureAsset(
             WetClothingAsset,
             BaseSuffix + TEXT("_WrinkleMask"),
-            Width,
-            Height,
+            FinalTextureSize.X,
+            FinalTextureSize.Y,
             MaskPixels,
             false,
             OutErrorMessage);
@@ -791,6 +848,7 @@ bool FWetWrinkleNormalMapBaker::BakeGroup(
             return false;
         }
     }
+    const double TextureEndTime = FPlatformTime::Seconds();
 
     WetClothingAsset.Modify();
     FWetWrinkleBakedMapSet* BakedMap = WetClothingAsset.Authored.WrinkleData.BakedWrinkleMaps.FindByPredicate(
@@ -816,14 +874,19 @@ bool FWetWrinkleNormalMapBaker::BakeGroup(
     {
         BakedMap->BakedWrinkleMask = MaskTexture;
     }
-    BakedMap->Resolution = MaxResolution;
+    BakedMap->Resolution = FinalTextureSize.X;
     BakedMap->PaddingPixels = FMath::Clamp(Settings.PaddingPixels, 0, 64);
     BakedMap->bHasCoverageAlpha = Settings.bBakeNormalMap && NormalTexture != nullptr;
     BakedMap->AlphaSemantic = NormalTexture != nullptr
         ? EDWCWrinkleAlphaSemantic::ConvexSeparation
         : EDWCWrinkleAlphaSemantic::None;
     BakedMap->AlphaBuildVersion = NormalTexture != nullptr ? 4 : 0;
-    BakedMap->BuildSignature = MakeBuildSignature(WetClothingAsset, Group, Width, Height, Settings);
+    BakedMap->BuildSignature = MakeBuildSignature(
+        WetClothingAsset,
+        Group,
+        FinalTextureSize.X,
+        FinalTextureSize.Y,
+        Settings);
     BakedMap->BakeGuid = FGuid::NewGuid();
     WetClothingAsset.MarkPackageDirty();
 
@@ -841,6 +904,24 @@ bool FWetWrinkleNormalMapBaker::BakeGroup(
     }
 
     OutErrorMessage.Reset();
+    const double BakeEndTime = FPlatformTime::Seconds();
+    UE_LOG(
+        LogDWCWrinkleBake,
+        Log,
+        TEXT("Wrinkle map bake completed for slot %d UV %d LOD %d at %dx%d in %.1f ms "
+             "(raster %.1f, resample %.1f, island+padding %.1f, encode %.1f, texture update %.1f, metadata %.1f)."),
+        Group.MaterialSlotIndex,
+        Group.UVChannelIndex,
+        Group.LODIndex,
+        FinalTextureSize.X,
+        FinalTextureSize.Y,
+        (BakeEndTime - BakeStartTime) * 1000.0,
+        (RasterEndTime - BakeStartTime) * 1000.0,
+        (ResampleEndTime - RasterEndTime) * 1000.0,
+        (PaddingEndTime - ResampleEndTime) * 1000.0,
+        (EncodeEndTime - PaddingEndTime) * 1000.0,
+        (TextureEndTime - EncodeEndTime) * 1000.0,
+        (BakeEndTime - TextureEndTime) * 1000.0);
     return true;
 }
 
@@ -853,15 +934,16 @@ FString FWetWrinkleNormalMapBaker::MakeBuildSignature(
 {
     FString Canonical;
     Canonical.Reserve(4096);
-    Canonical += TEXT("DWC.WrinkleNormalMap.v16.Texture2DCoverage|");
+    Canonical += TEXT("DWC.WrinkleNormalMap.v17.Square2048Supersample|");
     Canonical += WetClothingAsset.GetPathName();
     Canonical += FString::Printf(
-        TEXT("|Slot=%d|UV=%d|LOD=%d|Size=%dx%d|Padding=%d|Source=%s"),
+        TEXT("|Slot=%d|UV=%d|LOD=%d|Size=%dx%d|Internal=%d|Padding=%d|Source=%s"),
         Group.MaterialSlotIndex,
         Group.UVChannelIndex,
         Group.LODIndex,
         Width,
         Height,
+        FMath::Max(WetWrinkleTextureRaster::InternalBakeResolution, FMath::Max(Width, Height)),
         FMath::Clamp(Settings.PaddingPixels, 0, 64),
         *GetPathNameSafe(Group.SourceTexture));
     const FWetWrinkleCoverageExtractionSettings& CoverageSettings =
@@ -1002,8 +1084,9 @@ UTexture2D* FWetWrinkleNormalMapBaker::CreateOrUpdateTextureAsset(
     Texture->Filter = TF_Bilinear;
     Texture->AddressX = TA_Clamp;
     Texture->AddressY = TA_Clamp;
+    // UTexture::PostEditChangeProperty already calls UpdateResource. Calling it again
+    // queues redundant texture resource work and can force an extra compile wait after PIE.
     Texture->PostEditChange();
-    Texture->UpdateResource();
     Texture->MarkPackageDirty();
 
     OutErrorMessage.Reset();

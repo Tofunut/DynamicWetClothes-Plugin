@@ -15,6 +15,12 @@ struct DWC_API FWetWrinklePatchPlacement
     FGuid PatchGuid;
 
     UPROPERTY(EditAnywhere, Category = "Wet Wrinkle Patch")
+    FString DisplayName;
+
+    UPROPERTY(EditAnywhere, Category = "Wet Wrinkle Patch")
+    bool bEnabled = true;
+
+    UPROPERTY(EditAnywhere, Category = "Wet Wrinkle Patch")
     int32 MaterialSlotIndex = INDEX_NONE;
 
     // The wrinkle UV channel is stored on FWetClothingWrinkleData. This field is kept for editor paint tools.
@@ -71,33 +77,6 @@ struct DWC_API FWetWrinklePatchPlacement
     UPROPERTY(VisibleAnywhere, Category = "Wet Wrinkle Patch|Editor Preview")
     FVector EditorSurfaceLocalBitangent = FVector::RightVector;
 #endif
-};
-
-USTRUCT(BlueprintType)
-struct DWC_API FWetWrinklePatchStroke
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, Category = "Wet Wrinkle Patch Stroke")
-    FGuid StrokeGuid;
-
-    UPROPERTY(EditAnywhere, Category = "Wet Wrinkle Patch Stroke")
-    FString DisplayName;
-
-    UPROPERTY(EditAnywhere, Category = "Wet Wrinkle Patch Stroke")
-    bool bEnabled = true;
-
-    UPROPERTY(EditAnywhere, Category = "Wet Wrinkle Patch Stroke")
-    bool bLocked = false;
-
-    UPROPERTY(EditAnywhere, Category = "Wet Wrinkle Patch Stroke", meta = (ClampMin = "0.0"))
-    float StrengthMultiplier = 1.0f;
-
-    UPROPERTY(EditAnywhere, Category = "Wet Wrinkle Patch Stroke", meta = (ClampMin = "0.0"))
-    float ScaleMultiplier = 1.0f;
-
-    UPROPERTY(EditAnywhere, Category = "Wet Wrinkle Patch Stroke")
-    TArray<FWetWrinklePatchPlacement> PatchPlacements;
 };
 
 USTRUCT(BlueprintType)
@@ -280,7 +259,7 @@ struct DWC_API FWetWrinkleBakeSettings
     bool bBakeMask = true;
 
     UPROPERTY(EditAnywhere, Category = "Wet Wrinkle Bake")
-    bool bIncludeDisabledPatchStrokes = false;
+    bool bIncludeDisabledPatches = false;
 };
 
 UENUM(BlueprintType)
@@ -400,7 +379,7 @@ struct DWC_API FWetClothingWrinkleData
     TArray<FWetWrinkleGeneratedUVSlot> GeneratedWrinkleUVSlots;
 
     UPROPERTY(EditAnywhere, Category = "Editable")
-    TArray<FWetWrinklePatchStroke> EditablePatchStrokes;
+    TArray<FWetWrinklePatchPlacement> EditablePatches;
 
     UPROPERTY(EditAnywhere, Category = "Editable")
     TArray<FWetProceduralRidgeStroke> EditableProceduralRidgeStrokes;

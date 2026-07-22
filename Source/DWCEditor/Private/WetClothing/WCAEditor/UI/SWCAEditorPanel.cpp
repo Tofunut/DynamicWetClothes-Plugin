@@ -187,14 +187,8 @@ namespace
         {
             return true;
         }
-        for (const FWetWrinklePatchStroke& Stroke : Asset.Authored.WrinkleData.EditablePatchStrokes)
-        {
-            if (!Stroke.PatchPlacements.IsEmpty())
-            {
-                return true;
-            }
-        }
-        return false;
+        return !Asset.Authored.WrinkleData.EditablePatches.IsEmpty() ||
+               !Asset.Authored.WrinkleData.EditableProceduralRidgeStrokes.IsEmpty();
     }
 
     void AppendIssueSection(TArray<FString>& Sections, const TCHAR* Heading, const TArray<FString>& Messages)
@@ -295,9 +289,10 @@ TSharedRef<SWidget> SWCAEditorPanel::EnsureModeWidget(const EWCAEditorMode Mode)
     }
 }
 
-void SWCAEditorPanel::RefreshFromAsset()
+void SWCAEditorPanel::RefreshFromAsset(const bool bRebuildActiveModePreview)
 {
     bRefreshPending = false;
+    bPendingFullModeRefresh = false;
     UpdateCachedStatus();
 
     switch (ActiveMode)
@@ -306,7 +301,17 @@ void SWCAEditorPanel::RefreshFromAsset()
         if (PartEditorPanel.IsValid()) PartEditorPanel->RefreshFromAsset();
         break;
     case EWCAEditorMode::WrinkleEdit:
-        if (WrinkleEditorPanel.IsValid()) WrinkleEditorPanel->RefreshFromAsset();
+        if (WrinkleEditorPanel.IsValid())
+        {
+            if (bRebuildActiveModePreview)
+            {
+                WrinkleEditorPanel->RefreshFromAsset();
+            }
+            else
+            {
+                WrinkleEditorPanel->RefreshFromAssetLightweight();
+            }
+        }
         break;
     case EWCAEditorMode::TransparencyBake:
         if (TransparencyBakePanel.IsValid()) TransparencyBakePanel->RefreshFromAsset();
@@ -316,8 +321,16 @@ void SWCAEditorPanel::RefreshFromAsset()
     }
 }
 
-void SWCAEditorPanel::RequestRefreshFromAsset()
+void SWCAEditorPanel::RefreshStatusFromAsset()
 {
+    // DWCEditorUtils::SaveAsset has already refreshed the asset bake state before
+    // broadcasting save completion. Reuse that state instead of validating twice.
+    UpdateCachedStatus(false);
+}
+
+void SWCAEditorPanel::RequestRefreshFromAsset(const bool bRebuildActiveModePreview)
+{
+    bPendingFullModeRefresh |= bRebuildActiveModePreview;
     if (bRefreshPending)
     {
         return;
@@ -328,7 +341,8 @@ void SWCAEditorPanel::RequestRefreshFromAsset()
 
 EActiveTimerReturnType SWCAEditorPanel::HandleDeferredRefresh(double CurrentTime, float DeltaTime)
 {
-    RefreshFromAsset();
+    const bool bRebuildActiveModePreview = bPendingFullModeRefresh;
+    RefreshFromAsset(bRebuildActiveModePreview);
     return EActiveTimerReturnType::Stop;
 }
 
@@ -514,9 +528,9 @@ FWCAEditorIssueStatus SWCAEditorPanel::CollectIssueStatus(
     return Result;
 }
 
-void SWCAEditorPanel::UpdateCachedStatus()
+void SWCAEditorPanel::UpdateCachedStatus(const bool bRefreshAssetState)
 {
-    const FWCAEditorIssueStatus Status = CollectIssueStatus(true, false);
+    const FWCAEditorIssueStatus Status = CollectIssueStatus(bRefreshAssetState, false);
     bStatusWarningVisible = Status.HasIssues();
     CachedStatusSeverity = NormalizeIssueSeverity(Status);
     CachedStatusText = bStatusWarningVisible
@@ -636,14 +650,6 @@ FReply SWCAEditorPanel::BakeSelectedWrinkleNormalMap()
                : FReply::Handled();
 }
 
-FReply SWCAEditorPanel::BakeSelectedWrinkleMask()
-{
-    EnsureModeWidget(EWCAEditorMode::WrinkleEdit);
-    return WrinkleEditorPanel.IsValid()
-               ? WrinkleEditorPanel->BakeSelectedWrinkleMask()
-               : FReply::Handled();
-}
-
 bool SWCAEditorPanel::SaveTransparencySetupAssets() const
 {
     return FDWCTransparencyAssetBakeService::SaveTransparencySetupAssets(WetClothingAsset.Get());
@@ -710,7 +716,7 @@ void SWCAEditorPanel::SetEditorMode(const EWCAEditorMode NewMode)
 
     if (bHadModeWidget)
     {
-        RefreshFromAsset();
+        RefreshFromAsset(false);
     }
     else
     {

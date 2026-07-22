@@ -183,6 +183,7 @@ void FWetWrinkleViewportClient::Draw(const FSceneView* View, FPrimitiveDrawInter
 
     if (const TSharedPtr<SWetWrinkleViewport> PinnedViewport = ViewportWidget.Pin())
     {
+        PinnedViewport->DrawBrushCursor(PDI);
         PinnedViewport->DrawProceduralStrokeGuides(PDI);
     }
 }

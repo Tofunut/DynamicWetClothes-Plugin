@@ -303,7 +303,8 @@ void SWetWrinkleNormalCorrectionDialog::RebuildPreview()
             CorrectionSettings,
             CoverageSettings,
             LastBuildOutput,
-            Error))
+            Error,
+            768))
     {
         StatusText = FText::FromString(Error);
         StatusColor = FSlateColor(FLinearColor(1.0f, 0.35f, 0.30f));
@@ -406,9 +407,23 @@ FReply SWetWrinkleNormalCorrectionDialog::HandleCreateClicked()
 
     UTexture2D* CorrectedTexture = nullptr;
     FString Error;
+    FWetWrinkleNormalBuildOutput FullResolutionOutput;
+    if (!FWetWrinkleNormalTextureBuilder::BuildTextureBuffers(
+            Source,
+            bUseCorrection,
+            CorrectionSettings,
+            CoverageSettings,
+            FullResolutionOutput,
+            Error))
+    {
+        StatusText = FText::FromString(Error);
+        StatusColor = FSlateColor(FLinearColor(1.0f, 0.35f, 0.30f));
+        return FReply::Handled();
+    }
+
     if (!FWetWrinkleNormalCorrectionService::CreateOrUpdateCorrectedTexture(
             *Source,
-            LastBuildOutput.CorrectedNormal,
+            FullResolutionOutput.CorrectedNormal,
             CorrectedTexture,
             Error))
     {

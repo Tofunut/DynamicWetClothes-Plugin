@@ -538,20 +538,17 @@ FWetWrinkleUVChannelGenerationResult FWetWrinkleUVChannelGenerator::DeleteUVChan
     }
 
     int32 RemovedPatchCount = 0;
-    for (FWetWrinklePatchStroke& Stroke : Asset->Authored.WrinkleData.EditablePatchStrokes)
+    for (int32 PatchIndex = Asset->Authored.WrinkleData.EditablePatches.Num() - 1; PatchIndex >= 0; --PatchIndex)
     {
-        for (int32 PatchIndex = Stroke.PatchPlacements.Num() - 1; PatchIndex >= 0; --PatchIndex)
+        FWetWrinklePatchPlacement& Patch = Asset->Authored.WrinkleData.EditablePatches[PatchIndex];
+        if (Patch.UVChannelIndex == UVChannelIndex)
         {
-            FWetWrinklePatchPlacement& Patch = Stroke.PatchPlacements[PatchIndex];
-            if (Patch.UVChannelIndex == UVChannelIndex)
-            {
-                Stroke.PatchPlacements.RemoveAt(PatchIndex);
-                ++RemovedPatchCount;
-            }
-            else if (Patch.UVChannelIndex > UVChannelIndex)
-            {
-                --Patch.UVChannelIndex;
-            }
+            Asset->Authored.WrinkleData.EditablePatches.RemoveAt(PatchIndex);
+            ++RemovedPatchCount;
+        }
+        else if (Patch.UVChannelIndex > UVChannelIndex)
+        {
+            --Patch.UVChannelIndex;
         }
     }
 

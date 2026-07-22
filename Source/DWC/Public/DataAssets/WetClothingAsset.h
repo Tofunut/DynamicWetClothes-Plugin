@@ -178,6 +178,7 @@ class DWC_API UWetClothingAsset : public UDataAsset
     void SetOriginalUVTopologies(TArray<FDWCEditorUVTopologyData>&& InTopologies);
     void MarkGeneratedDataUVOutOfDate();
     void MarkSimulationBakeOutOfDate();
+    void MarkWrinkleBakeOutOfDate();
     void MarkVisualBakeOutOfDate();
     void SetLastBakeFailure(const FString& InFailure);
     void SetCPURuntimeDataStatus(EDWCBakeStatus InStatus, const FString& InFailure = FString());

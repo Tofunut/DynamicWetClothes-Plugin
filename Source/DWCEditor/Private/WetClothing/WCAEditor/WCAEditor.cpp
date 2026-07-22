@@ -290,14 +290,8 @@ namespace
         {
             return true;
         }
-        for (const FWetWrinklePatchStroke& Stroke : Asset.Authored.WrinkleData.EditablePatchStrokes)
-        {
-            if (!Stroke.PatchPlacements.IsEmpty())
-            {
-                return true;
-            }
-        }
-        return false;
+        return !Asset.Authored.WrinkleData.EditablePatches.IsEmpty() ||
+               !Asset.Authored.WrinkleData.EditableProceduralRidgeStrokes.IsEmpty();
     }
 
     FString BakeStatusToValidationString(const EDWCBakeStatus Status)
@@ -1580,12 +1574,26 @@ FLinearColor FWCAEditor::GetWorldCentricTabColorScale() const
 
 bool FWCAEditor::OnRequestClose(EAssetEditorCloseReason InCloseReason)
 {
+    if (CloseConfirmationState == ECloseConfirmationState::Confirmed)
+    {
+        return true;
+    }
+
+    // A docked asset tab can re-enter OnRequestClose while its modal DWC confirmation is open.
+    if (CloseConfirmationState == ECloseConfirmationState::PromptOpen)
+    {
+        return false;
+    }
+
     if (EditorPanel.IsValid())
     {
         const FWCAEditorIssueStatus Status = EditorPanel->CollectIssueStatus();
         if (Status.HasIssues())
         {
+            CloseConfirmationState = ECloseConfirmationState::PromptOpen;
             const EWCAPendingCloseChoice Choice = ShowDWCResolveCloseDialog(Status.BuildSummary());
+            CloseConfirmationState = ECloseConfirmationState::Idle;
+
             if (Choice == EWCAPendingCloseChoice::Cancel)
             {
                 return false;
@@ -1605,10 +1613,20 @@ bool FWCAEditor::OnRequestClose(EAssetEditorCloseReason InCloseReason)
                     return false;
                 }
             }
+
+            if (Choice == EWCAPendingCloseChoice::CloseAnyway)
+            {
+                // The DWC close dialog already received an explicit discard confirmation.
+                CloseConfirmationState = ECloseConfirmationState::Confirmed;
+                return true;
+            }
+
+            // ResolveIssuesAndSave completed successfully, so no additional close prompt is needed.
+            CloseConfirmationState = ECloseConfirmationState::Confirmed;
+            return true;
         }
     }
 
-    // Close Anyway deliberately falls through to the normal Unreal unsaved-asset prompt.
     return FAssetEditorToolkit::OnRequestClose(InCloseReason);
 }
 
@@ -1652,10 +1670,22 @@ void FWCAEditor::HandleDWCEditorAssetSaveAttemptFinished(UObject* SavedAsset, co
         return;
     }
 
-    RefreshAssetStateAndEditor(false);
+    // Saving does not change the authoring inputs shown by the active mode. Update the
+    // cached validation state only; rebuilding the mode here reloads the wrinkle texture
+    // palette and preview resources after every save.
+    if (EditorPanel.IsValid())
+    {
+        EditorPanel->RefreshStatusFromAsset();
+    }
+    else if (UWetClothingAsset* Asset = WetClothingAsset.Get())
+    {
+        Asset->RefreshBakeState(false);
+    }
 }
 
-void FWCAEditor::RefreshAssetStateAndEditor(const bool bRunDeepValidation)
+void FWCAEditor::RefreshAssetStateAndEditor(
+    const bool bRunDeepValidation,
+    const bool bRebuildActiveModePreview)
 {
     if (UWetClothingAsset* Asset = WetClothingAsset.Get())
     {
@@ -1667,7 +1697,7 @@ void FWCAEditor::RefreshAssetStateAndEditor(const bool bRunDeepValidation)
     }
     if (EditorPanel.IsValid())
     {
-        EditorPanel->RequestRefreshFromAsset();
+        EditorPanel->RequestRefreshFromAsset(bRebuildActiveModePreview);
     }
     RegenerateMenusAndToolbars();
 }
@@ -1701,19 +1731,22 @@ void FWCAEditor::FillAssetToolbar(FToolBarBuilder& ToolbarBuilder)
     ToolbarBuilder.AddComboButton(
         FUIAction(
             FExecuteAction(),
-            FCanExecuteAction::CreateSP(this, &FWCAEditor::CanBakeAnyMaps)),
+            FCanExecuteAction::CreateSP(this, &FWCAEditor::CanBakeCurrentModeMaps)),
         FOnGetContent::CreateSP(this, &FWCAEditor::BuildBakeMapsMenu),
         LOCTEXT("BakeMapsToolbarLabel", "Bake Maps"),
         LOCTEXT("BakeMapsToolbarTooltip", "Bake pending texture and simulation maps. Disabled when no map output requires work."),
         FSlateIcon(FDWCEditorStyle::GetStyleSetName(), TEXT("DWCEditor.Bake")),
         false);
-    ToolbarBuilder.AddComboButton(
-        FUIAction(),
-        FOnGetContent::CreateSP(this, &FWCAEditor::BuildGenerateMaterialsMenu),
-        LOCTEXT("GenerateMaterialsToolbarLabel", "Generate Materials"),
-        LOCTEXT("GenerateMaterialsToolbarTooltip", "Generate or refresh wet material assets for this Wet Clothing Asset."),
-        FSlateIcon(FAppStyle::GetAppStyleSetName(), "ClassIcon.Material"),
-        false);
+    if (CurrentMode == EWCAEditorMode::PartEdit)
+    {
+        ToolbarBuilder.AddComboButton(
+            FUIAction(),
+            FOnGetContent::CreateSP(this, &FWCAEditor::BuildGenerateMaterialsMenu),
+            LOCTEXT("GenerateMaterialsToolbarLabel", "Generate Materials"),
+            LOCTEXT("GenerateMaterialsToolbarTooltip", "Generate or refresh wet material assets for this Wet Clothing Asset."),
+            FSlateIcon(FAppStyle::GetAppStyleSetName(), "ClassIcon.Material"),
+            false);
+    }
     FText ValidationLabel = LOCTEXT("ValidationToolbarLabel", "Validation");
     FText ValidationTooltip = LOCTEXT("ValidationToolbarTooltip", "Validation passed. Click to view the latest validation results.");
     FName ValidationIconName(TEXT("Icons.SuccessWithColor"));
@@ -2003,6 +2036,24 @@ bool FWCAEditor::CanBakeAnyMaps() const
     return CanBakeGPUMaps() || CanBakeWetnessProfileMaps() || CanBakeWrinkleMaps() || CanBakeTransparencyMaps();
 }
 
+bool FWCAEditor::CanBakeCurrentModeMaps() const
+{
+    switch (CurrentMode)
+    {
+    case EWCAEditorMode::PartEdit:
+        return CanBakeWetnessProfileMaps() || CanBakeGPUMaps();
+
+    case EWCAEditorMode::WrinkleEdit:
+        return CanBakeWrinkleMaps();
+
+    case EWCAEditorMode::TransparencyBake:
+        return CanBakeTransparencyMaps();
+
+    default:
+        return false;
+    }
+}
+
 TSharedRef<SWidget> FWCAEditor::BuildBakeMapsMenu()
 {
     if (UWetClothingAsset* Asset = WetClothingAsset.Get())
@@ -2010,18 +2061,15 @@ TSharedRef<SWidget> FWCAEditor::BuildBakeMapsMenu()
         Asset->RefreshBakeState(false);
     }
     FWCABakeMapsMenuArgs Args;
-    Args.OnBakeAllMaps = FSimpleDelegate::CreateLambda([this]() { HandleBakeAllMapsClicked(); });
+    Args.EditorMode = CurrentMode;
     Args.OnBakeWetnessProfileMaps = FSimpleDelegate::CreateLambda([this]() { HandleBakeWetnessProfileMapsClicked(); });
     Args.OnBakeGPUWetnessMapData = FSimpleDelegate::CreateLambda([this]() { HandleBakeGPUWetnessMapDataClicked(); });
     Args.OnBakeTransparencyRevealMaps = FSimpleDelegate::CreateLambda([this]() { HandleBakeTransparencyRevealMapsClicked(); });
     Args.OnBakeWrinkleNormalMap = FSimpleDelegate::CreateLambda([this]() { HandleBakeWrinkleNormalMapClicked(); });
-    Args.OnBakeWrinkleMask = FSimpleDelegate::CreateLambda([this]() { HandleBakeWrinkleMaskClicked(); });
-    Args.CanBakeAllMaps = FCanExecuteAction::CreateSP(this, &FWCAEditor::CanBakeAnyMaps);
     Args.CanBakeWetnessProfileMaps = FCanExecuteAction::CreateSP(this, &FWCAEditor::CanBakeWetnessProfileMaps);
     Args.CanBakeGPUWetnessMapData = FCanExecuteAction::CreateSP(this, &FWCAEditor::CanBakeGPUMaps);
     Args.CanBakeTransparencyRevealMaps = FCanExecuteAction::CreateSP(this, &FWCAEditor::CanBakeTransparencyMaps);
     Args.CanBakeWrinkleNormalMap = FCanExecuteAction::CreateSP(this, &FWCAEditor::CanBakeWrinkleMaps);
-    Args.CanBakeWrinkleMask = FCanExecuteAction::CreateSP(this, &FWCAEditor::CanBakeWrinkleMaps);
     return FWCAEditorWidgets::BuildBakeMapsMenu(Args);
 }
 
@@ -2390,25 +2438,9 @@ FReply FWCAEditor::HandleBakeWrinkleNormalMapClicked()
         return FReply::Handled();
     }
 
-    const FReply Result = EditorPanel->BakeSelectedWrinkleNormalMap();
-    RefreshAssetStateAndEditor();
-    return Result;
-}
-
-FReply FWCAEditor::HandleBakeWrinkleMaskClicked()
-{
-    if (!CanBakeWrinkleMaps())
-    {
-        return FReply::Handled();
-    }
-    if (!EditorPanel.IsValid())
-    {
-        return FReply::Handled();
-    }
-
-    const FReply Result = EditorPanel->BakeSelectedWrinkleMask();
-    RefreshAssetStateAndEditor();
-    return Result;
+    // The bake path saves the WCA and its generated texture. The save-completion
+    // callback refreshes status/details without rebuilding the active wrinkle mode.
+    return EditorPanel->BakeSelectedWrinkleNormalMap();
 }
 
 FReply FWCAEditor::HandleGenerateMaterialsClicked()
@@ -2676,11 +2708,9 @@ bool FWCAEditor::ResolveIssuesAndSave(FString& OutFailure)
         EditorPanel->SaveBakedVisualAssets();
     }
 
-    bool bHasWrinkleContent = !Asset->Authored.WrinkleData.BakedWrinkleMaps.IsEmpty();
-    for (const FWetWrinklePatchStroke& Stroke : Asset->Authored.WrinkleData.EditablePatchStrokes)
-    {
-        bHasWrinkleContent |= !Stroke.PatchPlacements.IsEmpty();
-    }
+    const bool bHasWrinkleContent = !Asset->Authored.WrinkleData.BakedWrinkleMaps.IsEmpty() ||
+                                    !Asset->Authored.WrinkleData.EditablePatches.IsEmpty() ||
+                                    !Asset->Authored.WrinkleData.EditableProceduralRidgeStrokes.IsEmpty();
     if (bHasWrinkleContent && !DWCBuildStatus::IsUsable(Asset->GetBakeState().WrinkleMaps))
     {
         SlowTask.EnterProgressFrame(
@@ -2800,6 +2830,8 @@ void FWCAEditor::SetEditorMode(EWCAEditorMode NewMode)
     {
         EditorPanel->SetEditorMode(NewMode);
     }
+
+    RegenerateMenusAndToolbars();
 }
 
 ECheckBoxState FWCAEditor::IsModeChecked(EWCAEditorMode Mode) const

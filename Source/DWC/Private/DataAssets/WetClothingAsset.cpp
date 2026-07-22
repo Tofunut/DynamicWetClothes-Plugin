@@ -985,17 +985,27 @@ bool UWetClothingAsset::HasAnyWettableMaterialSlot() const
 
 bool UWetClothingAsset::HasWrinkleBakeContent() const
 {
-    for (const FWetWrinklePatchStroke& Stroke : Authored.WrinkleData.EditablePatchStrokes)
+    for (const FWetWrinklePatchPlacement& Patch : Authored.WrinkleData.EditablePatches)
     {
-        if (!Stroke.bEnabled && !Authored.WrinkleData.BakeSettings.bIncludeDisabledPatchStrokes)
+        if (!Patch.bEnabled && !Authored.WrinkleData.BakeSettings.bIncludeDisabledPatches)
         {
             continue;
         }
-        if (Stroke.PatchPlacements.ContainsByPredicate(
-                [this](const FWetWrinklePatchPlacement& Patch)
-                {
-                    return Patch.MaterialSlotIndex != INDEX_NONE && IsMaterialSlotWettable(Patch.MaterialSlotIndex);
-                }))
+        if (Patch.MaterialSlotIndex != INDEX_NONE && IsMaterialSlotWettable(Patch.MaterialSlotIndex))
+        {
+            return true;
+        }
+    }
+
+    for (const FWetProceduralRidgeStroke& Stroke : Authored.WrinkleData.EditableProceduralRidgeStrokes)
+    {
+        if (!Stroke.bEnabled && !Authored.WrinkleData.BakeSettings.bIncludeDisabledPatches)
+        {
+            continue;
+        }
+        if (Stroke.MaterialSlotIndex != INDEX_NONE &&
+            Stroke.Points.Num() >= 2 &&
+            IsMaterialSlotWettable(Stroke.MaterialSlotIndex))
         {
             return true;
         }
@@ -1679,6 +1689,7 @@ bool UWetClothingAsset::ApplySetupSettings(
     const bool bSimulationStructureChanged =
         bOriginalUVChanged ||
         bDataUVTargetChanged ||
+        bLODRangeChanged ||
         bCPUSimulationSettingChanged ||
         bGPUSimulationSettingChanged;
 
@@ -1840,13 +1851,18 @@ void UWetClothingAsset::MarkSimulationBakeOutOfDate()
                             : EDWCBakeStatus::Disabled;
 }
 
-void UWetClothingAsset::MarkVisualBakeOutOfDate()
+void UWetClothingAsset::MarkWrinkleBakeOutOfDate()
 {
     Derived.Inline.BakeState.WrinkleMaps = HasWrinkleBakeContent()
                                 ? (HasSavedBakeOutput(DWCBakeOutput::WrinkleMaps)
                                        ? EDWCBakeStatus::OutOfDate
                                        : EDWCBakeStatus::Required)
                                 : EDWCBakeStatus::Disabled;
+}
+
+void UWetClothingAsset::MarkVisualBakeOutOfDate()
+{
+    MarkWrinkleBakeOutOfDate();
     Derived.Inline.BakeState.TransparencyMaps = HasTransparencyBakeContent()
                                      ? (HasSavedBakeOutput(DWCBakeOutput::TransparencyMaps)
                                             ? EDWCBakeStatus::OutOfDate
@@ -2157,6 +2173,34 @@ bool UWetClothingAsset::RebuildRuntimeDataForSave(FString* OutErrorMessage)
         return true;
     }
 
+    USkeletalMesh* RuntimeMesh = GetRuntimeSkeletalMesh();
+    constexpr int32 RuntimeOutputMask =
+        DWCBakeOutput::CPURuntimeData |
+        DWCBakeOutput::GPURuntimeData |
+        DWCBakeOutput::GPUMaps;
+    const bool bCPUDataCurrent =
+        !Metadata.SetupSettings.bBuildCPUVertexSimulationData ||
+        DWCBuildStatus::IsUsable(Derived.Inline.BakeState.CPURuntimeData);
+    const bool bGPUDataCurrent =
+        !Metadata.SetupSettings.bBuildGPUWetnessMapSimulationData ||
+        DWCBuildStatus::IsUsable(Derived.Inline.BakeState.GPURuntimeData);
+    const bool bLODVertexColorDataCurrent = FWCALODVertexColorBuilder::IsCurrent(
+        RuntimeMesh,
+        Metadata.SetupSettings.FirstGeneratedLODIndex,
+        Metadata.SetupSettings.LastGeneratedLODIndex,
+        Derived.Bulk.LODVertexColorRuntimeData);
+    const bool bHasPendingRuntimeOutput = (PendingRuntimeSaveOutputMask & RuntimeOutputMask) != 0;
+    if (HasAnyWettableMaterialSlot() &&
+        !bRuntimeBulkDataDirty &&
+        !bHasPendingRuntimeOutput &&
+        bCPUDataCurrent &&
+        bGPUDataCurrent &&
+        bLODVertexColorDataCurrent)
+    {
+        DWC::Error::SetMessage(OutErrorMessage, TEXT(""));
+        return true;
+    }
+
     TGuardValue<bool> RebuildGuard(bRuntimeDataRebuildInProgress, true);
     FScopedSlowTask SlowTask(
         5.0f,
@@ -2204,23 +2248,30 @@ bool UWetClothingAsset::RebuildRuntimeDataForSave(FString* OutErrorMessage)
         Authored.PartData.EditableWetPartData,
         Derived.Inline.ResolvedWetnessProfileParameters);
 
-    USkeletalMesh* RuntimeMesh = GetRuntimeSkeletalMesh();
     TArray<FString> FailureMessages;
 
-    FString LODVertexColorError;
-    if (!FWCALODVertexColorBuilder::Build(
-            RuntimeMesh,
-            Metadata.SetupSettings.FirstGeneratedLODIndex,
-            Metadata.SetupSettings.LastGeneratedLODIndex,
-            Derived.Bulk.LODVertexColorRuntimeData,
-            &LODVertexColorError))
+    if (!bLODVertexColorDataCurrent)
     {
-        UE_LOG(
-            LogDWC,
-            Warning,
-            TEXT("WetClothingAsset: Failed to build LOD vertex color runtime data for %s. %s"),
-            *GetNameSafe(this),
-            *LODVertexColorError);
+        TArray<FWCALODVertexColorRuntimeData> RebuiltLODVertexColorRuntimeData;
+        FString LODVertexColorError;
+        if (FWCALODVertexColorBuilder::Build(
+                RuntimeMesh,
+                Metadata.SetupSettings.FirstGeneratedLODIndex,
+                Metadata.SetupSettings.LastGeneratedLODIndex,
+                RebuiltLODVertexColorRuntimeData,
+                &LODVertexColorError))
+        {
+            Derived.Bulk.LODVertexColorRuntimeData = MoveTemp(RebuiltLODVertexColorRuntimeData);
+        }
+        else
+        {
+            UE_LOG(
+                LogDWC,
+                Warning,
+                TEXT("WetClothingAsset: Failed to build LOD vertex color runtime data for %s. %s"),
+                *GetNameSafe(this),
+                *LODVertexColorError);
+        }
     }
 
     if (Metadata.SetupSettings.bBuildCPUVertexSimulationData)

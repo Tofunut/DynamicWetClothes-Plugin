@@ -3,6 +3,98 @@
 #include "DataAssets/WetClothingAsset.h"
 #include "WetClothing/DerivedAssets/Textures/Wrinkle/WetWrinkleNormalMapBaker.h"
 
+namespace
+{
+    void CollectAuthoredWrinkleMaterialSlots(const UWetClothingAsset& Asset, TSet<int32>& OutMaterialSlots)
+    {
+        OutMaterialSlots.Reset();
+
+        const FWetClothingWrinkleData& WrinkleData = Asset.Authored.WrinkleData;
+        for (const FWetWrinklePatchPlacement& Patch : WrinkleData.EditablePatches)
+        {
+            if ((!Patch.bEnabled && !WrinkleData.BakeSettings.bIncludeDisabledPatches) ||
+                Patch.MaterialSlotIndex == INDEX_NONE ||
+                !Asset.IsMaterialSlotWettable(Patch.MaterialSlotIndex))
+            {
+                continue;
+            }
+
+            OutMaterialSlots.Add(Patch.MaterialSlotIndex);
+        }
+
+        for (const FWetProceduralRidgeStroke& Stroke : WrinkleData.EditableProceduralRidgeStrokes)
+        {
+            if ((!Stroke.bEnabled && !WrinkleData.BakeSettings.bIncludeDisabledPatches) ||
+                Stroke.MaterialSlotIndex == INDEX_NONE ||
+                Stroke.Points.Num() < 2 ||
+                !Asset.IsMaterialSlotWettable(Stroke.MaterialSlotIndex))
+            {
+                continue;
+            }
+
+            OutMaterialSlots.Add(Stroke.MaterialSlotIndex);
+        }
+    }
+
+    bool HasExactBakedWrinkleMap(const UWetClothingAsset& Asset, const int32 MaterialSlotIndex)
+    {
+        const int32 DataUVChannelIndex = Asset.GetDWCDataUVChannelIndex();
+        return Asset.Authored.WrinkleData.BakedWrinkleMaps.ContainsByPredicate(
+            [MaterialSlotIndex, DataUVChannelIndex](const FWetWrinkleBakedMapSet& Candidate)
+            {
+                return Candidate.MaterialSlotIndex == MaterialSlotIndex &&
+                       Candidate.UVChannelIndex == DataUVChannelIndex &&
+                       Candidate.LODIndex == 0 &&
+                       Candidate.BakedWrinkleNormalMap != nullptr;
+            });
+    }
+}
+
+void FWetWrinkleBakeService::RefreshBakeStatusFromCurrentOutputs(
+    UWetClothingAsset* WetClothingAsset,
+    const FString& Failure)
+{
+    if (WetClothingAsset == nullptr)
+    {
+        return;
+    }
+
+    if (!Failure.IsEmpty())
+    {
+        WetClothingAsset->SetWrinkleBakeStatus(EDWCBakeStatus::Failed, Failure);
+        return;
+    }
+
+    TSet<int32> AuthoredMaterialSlots;
+    CollectAuthoredWrinkleMaterialSlots(*WetClothingAsset, AuthoredMaterialSlots);
+    if (AuthoredMaterialSlots.IsEmpty())
+    {
+        WetClothingAsset->SetWrinkleBakeStatus(EDWCBakeStatus::Disabled);
+        return;
+    }
+
+    int32 CompletedSlotCount = 0;
+    for (const int32 MaterialSlotIndex : AuthoredMaterialSlots)
+    {
+        CompletedSlotCount += HasExactBakedWrinkleMap(*WetClothingAsset, MaterialSlotIndex) ? 1 : 0;
+    }
+
+    if (CompletedSlotCount == AuthoredMaterialSlots.Num())
+    {
+        WetClothingAsset->SetWrinkleBakeStatus(EDWCBakeStatus::Valid);
+        return;
+    }
+
+    if (CompletedSlotCount > 0 || !WetClothingAsset->Authored.WrinkleData.BakedWrinkleMaps.IsEmpty())
+    {
+        WetClothingAsset->SetWrinkleBakeStatus(EDWCBakeStatus::OutOfDate);
+        WetClothingAsset->MarkBakeOutputGenerated(DWCBakeOutput::WrinkleMaps);
+        return;
+    }
+
+    WetClothingAsset->SetWrinkleBakeStatus(EDWCBakeStatus::Required);
+}
+
 bool FWetWrinkleBakeService::BakeAllWrinkleMaps(UWetClothingAsset* WetClothingAsset, FString& OutSummary, bool* OutHadWarnings)
 {
     if (OutHadWarnings != nullptr)
@@ -17,38 +109,25 @@ bool FWetWrinkleBakeService::BakeAllWrinkleMaps(UWetClothingAsset* WetClothingAs
     }
 
     TSet<int32> AuthoredMaterialSlots;
-    for (const FWetWrinklePatchStroke& Stroke : WetClothingAsset->Authored.WrinkleData.EditablePatchStrokes)
-    {
-        if (!Stroke.bEnabled && !WetClothingAsset->Authored.WrinkleData.BakeSettings.bIncludeDisabledPatchStrokes)
-        {
-            continue;
-        }
-
-        for (const FWetWrinklePatchPlacement& Patch : Stroke.PatchPlacements)
-        {
-            if (Patch.MaterialSlotIndex != INDEX_NONE && WetClothingAsset->IsMaterialSlotWettable(Patch.MaterialSlotIndex))
-            {
-                AuthoredMaterialSlots.Add(Patch.MaterialSlotIndex);
-            }
-        }
-    }
+    CollectAuthoredWrinkleMaterialSlots(*WetClothingAsset, AuthoredMaterialSlots);
 
     if (AuthoredMaterialSlots.IsEmpty())
     {
         WetClothingAsset->SetWrinkleBakeStatus(EDWCBakeStatus::Disabled);
-        OutSummary = TEXT("No authored wrinkle patches require baking.");
+        OutSummary = TEXT("No authored wrinkle patches or procedural ridge strokes require baking.");
         return true;
     }
 
     FWetWrinkleNormalMapBakeSettings Settings;
     Settings.Resolution = WetClothingAsset->Authored.WrinkleData.BakeSettings.DefaultResolution;
     Settings.PaddingPixels = WetClothingAsset->Authored.WrinkleData.BakeSettings.PaddingPixels;
-    Settings.bIncludeDisabledPatchStrokes = WetClothingAsset->Authored.WrinkleData.BakeSettings.bIncludeDisabledPatchStrokes;
+    Settings.bIncludeDisabledPatches = WetClothingAsset->Authored.WrinkleData.BakeSettings.bIncludeDisabledPatches;
     Settings.bBakeNormalMap = WetClothingAsset->Authored.WrinkleData.BakeSettings.bBakeNormalMap;
     Settings.bBakeMask = WetClothingAsset->Authored.WrinkleData.BakeSettings.bBakeMask;
 
     int32 TotalMapCount = 0;
     int32 TotalStampCount = 0;
+    int32 TotalProceduralStrokeCount = 0;
     TArray<FString> Failures;
     TArray<int32> SortedSlots = AuthoredMaterialSlots.Array();
     SortedSlots.Sort();
@@ -64,6 +143,7 @@ bool FWetWrinkleBakeService::BakeAllWrinkleMaps(UWetClothingAsset* WetClothingAs
         }
         TotalMapCount += Result.BakedMapCount;
         TotalStampCount += Result.BakedStampCount;
+        TotalProceduralStrokeCount += Result.BakedProceduralStrokeCount;
     }
 
     if (!Failures.IsEmpty())
@@ -73,7 +153,7 @@ bool FWetWrinkleBakeService::BakeAllWrinkleMaps(UWetClothingAsset* WetClothingAs
             TotalMapCount,
             TotalStampCount,
             *FString::Join(Failures, TEXT("\n")));
-        WetClothingAsset->SetWrinkleBakeStatus(EDWCBakeStatus::Failed, OutSummary);
+        RefreshBakeStatusFromCurrentOutputs(WetClothingAsset, OutSummary);
         if (OutHadWarnings != nullptr)
         {
             *OutHadWarnings = true;
@@ -82,11 +162,12 @@ bool FWetWrinkleBakeService::BakeAllWrinkleMaps(UWetClothingAsset* WetClothingAs
     }
 
     WetClothingAsset->Modify();
-    WetClothingAsset->SetWrinkleBakeStatus(EDWCBakeStatus::Valid);
+    RefreshBakeStatusFromCurrentOutputs(WetClothingAsset);
     OutSummary = FString::Printf(
-        TEXT("Baked %d wrinkle map set(s) from %d patch(es) across %d material slot(s)."),
+        TEXT("Baked %d wrinkle map set(s) from %d patch(es) and %d procedural ridge stroke(s) across %d material slot(s)."),
         TotalMapCount,
         TotalStampCount,
+        TotalProceduralStrokeCount,
         SortedSlots.Num());
     return true;
 }

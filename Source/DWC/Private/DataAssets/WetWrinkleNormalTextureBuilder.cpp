@@ -4,6 +4,38 @@
 
 namespace
 {
+    void ResizeNormalSourcePixels(
+        const TArray<FColor>& SourcePixels,
+        const FIntPoint& SourceSize,
+        const FIntPoint& TargetSize,
+        TArray<FColor>& OutPixels)
+    {
+        OutPixels.SetNumUninitialized(TargetSize.X * TargetSize.Y);
+        for (int32 TargetY = 0; TargetY < TargetSize.Y; ++TargetY)
+        {
+            const float SourceY = ((static_cast<float>(TargetY) + 0.5f) * SourceSize.Y / TargetSize.Y) - 0.5f;
+            const int32 Y0 = FMath::Clamp(FMath::FloorToInt(SourceY), 0, SourceSize.Y - 1);
+            const int32 Y1 = FMath::Min(Y0 + 1, SourceSize.Y - 1);
+            const float FracY = FMath::Clamp(SourceY - FMath::Floor(SourceY), 0.0f, 1.0f);
+            for (int32 TargetX = 0; TargetX < TargetSize.X; ++TargetX)
+            {
+                const float SourceX = ((static_cast<float>(TargetX) + 0.5f) * SourceSize.X / TargetSize.X) - 0.5f;
+                const int32 X0 = FMath::Clamp(FMath::FloorToInt(SourceX), 0, SourceSize.X - 1);
+                const int32 X1 = FMath::Min(X0 + 1, SourceSize.X - 1);
+                const float FracX = FMath::Clamp(SourceX - FMath::Floor(SourceX), 0.0f, 1.0f);
+                const FLinearColor Top = FMath::Lerp(
+                    SourcePixels[Y0 * SourceSize.X + X0].ReinterpretAsLinear(),
+                    SourcePixels[Y0 * SourceSize.X + X1].ReinterpretAsLinear(),
+                    FracX);
+                const FLinearColor Bottom = FMath::Lerp(
+                    SourcePixels[Y1 * SourceSize.X + X0].ReinterpretAsLinear(),
+                    SourcePixels[Y1 * SourceSize.X + X1].ReinterpretAsLinear(),
+                    FracX);
+                OutPixels[TargetY * TargetSize.X + TargetX] = FMath::Lerp(Top, Bottom, FracY).ToFColor(false);
+            }
+        }
+    }
+
     uint8 FloatToByte(float Value)
     {
         return static_cast<uint8>(FMath::Clamp(FMath::RoundToInt(Value * 255.0f), 0, 255));
@@ -586,7 +618,8 @@ bool FWetWrinkleNormalTextureBuilder::BuildTextureBuffers(
     const FWetWrinkleNormalCorrectionSettings& Settings,
     const FWetWrinkleCoverageExtractionSettings& CoverageSettings,
     FWetWrinkleNormalBuildOutput& OutOutput,
-    FString& OutError)
+    FString& OutError,
+    const int32 MaxOutputDimension)
 {
     OutOutput = FWetWrinkleNormalBuildOutput();
     OutError.Reset();
@@ -596,6 +629,18 @@ bool FWetWrinkleNormalTextureBuilder::BuildTextureBuffers(
     if (!ReadTextureSourcePixels(SourceNormalTexture, SourcePixels, SourceSize, OutError))
     {
         return false;
+    }
+
+    if (MaxOutputDimension > 0 && FMath::Max(SourceSize.X, SourceSize.Y) > MaxOutputDimension)
+    {
+        const float Scale = static_cast<float>(MaxOutputDimension) / static_cast<float>(FMath::Max(SourceSize.X, SourceSize.Y));
+        const FIntPoint PreviewSize(
+            FMath::Max(1, FMath::RoundToInt(SourceSize.X * Scale)),
+            FMath::Max(1, FMath::RoundToInt(SourceSize.Y * Scale)));
+        TArray<FColor> PreviewPixels;
+        ResizeNormalSourcePixels(SourcePixels, SourceSize, PreviewSize, PreviewPixels);
+        SourcePixels = MoveTemp(PreviewPixels);
+        SourceSize = PreviewSize;
     }
 
     const bool bApplyGreenFlip = bUseCorrection && Settings.bFlipGreen;

@@ -617,66 +617,52 @@ TSharedRef<SWidget> FWCAEditorWidgets::BuildBakeMapsMenu(const FWCABakeMapsMenuA
     FMenuBuilder MenuBuilder(true, nullptr);
 
     MenuBuilder.BeginSection(TEXT("BakeMaps"), NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeMapsMenuSection", "BAKE MAPS"));
-    MenuBuilder.AddMenuEntry(
-        NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeAllMapsMenuItem", "Bake All Maps"),
-        NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeAllMapsMenuItemTooltip", "Bake only configured map outputs that are missing, stale, or failed. Runtime precomputed data is rebuilt automatically when the asset is saved."),
-        FSlateIcon(),
-        FUIAction(
-            FExecuteAction::CreateLambda([OnBakeAllMaps = Args.OnBakeAllMaps]()
-            {
-                if (OnBakeAllMaps.IsBound()) OnBakeAllMaps.Execute();
-            }),
-            Args.CanBakeAllMaps));
-    MenuBuilder.AddMenuEntry(
-        NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeWetnessProfileMapsMenuItem", "Bake Wetness Profile Maps"),
-        NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeWetnessProfileMapsMenuItemTooltip", "Bake wetness profile texture maps and update wet materials."),
-        FSlateIcon(),
-        FUIAction(
-            FExecuteAction::CreateLambda([OnBakeWetnessProfileMaps = Args.OnBakeWetnessProfileMaps]()
+    switch (Args.EditorMode)
+    {
+    case EWCAEditorMode::PartEdit:
+        MenuBuilder.AddMenuEntry(
+            NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeWetnessProfileMapsMenuItem", "Bake Wetness Profile Maps"),
+            NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeWetnessProfileMapsMenuItemTooltip", "Bake wetness profile texture maps and update wet materials."),
+            FSlateIcon(),
+            FUIAction(FExecuteAction::CreateLambda([OnBakeWetnessProfileMaps = Args.OnBakeWetnessProfileMaps]()
             {
                 if (OnBakeWetnessProfileMaps.IsBound()) OnBakeWetnessProfileMaps.Execute();
-            }),
-            Args.CanBakeWetnessProfileMaps));
-    MenuBuilder.AddMenuEntry(
-        NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeGPUWetnessMapDataMenuItem", "Bake GPU Simulation Maps"),
-        NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeGPUWetnessMapDataMenuItemTooltip", "Bake resolution-dependent simulation-LOD triangle-ID, barycentric, area, validity and same-material seam maps."),
-        FSlateIcon(),
-        FUIAction(
-            FExecuteAction::CreateLambda([OnBakeGPUWetnessMapData = Args.OnBakeGPUWetnessMapData]()
+            }), Args.CanBakeWetnessProfileMaps));
+        MenuBuilder.AddMenuEntry(
+            NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeGPUWetnessMapDataMenuItem", "Bake GPU Simulation Maps"),
+            NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeGPUWetnessMapDataMenuItemTooltip", "Bake resolution-dependent simulation-LOD triangle-ID, barycentric, area, validity and same-material seam maps."),
+            FSlateIcon(),
+            FUIAction(FExecuteAction::CreateLambda([OnBakeGPUWetnessMapData = Args.OnBakeGPUWetnessMapData]()
             {
                 if (OnBakeGPUWetnessMapData.IsBound()) OnBakeGPUWetnessMapData.Execute();
-            }),
-            Args.CanBakeGPUWetnessMapData));
-    MenuBuilder.AddMenuEntry(
-        NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeWrinkleNormalMapMenuItem", "Bake Wrinkle Normal Map"),
-        NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeWrinkleNormalMapMenuItemTooltip", "Bake a wrinkle normal map."),
-        FSlateIcon(),
-        FUIAction(
-            FExecuteAction::CreateLambda([OnBakeWrinkleNormalMap = Args.OnBakeWrinkleNormalMap]()
+            }), Args.CanBakeGPUWetnessMapData));
+        break;
+
+    case EWCAEditorMode::WrinkleEdit:
+        MenuBuilder.AddMenuEntry(
+            NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeWrinkleNormalMapMenuItem", "Bake Wrinkle Normal Map"),
+            NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeWrinkleNormalMapMenuItemTooltip", "Bake a wrinkle normal map for the selected material slot."),
+            FSlateIcon(),
+            FUIAction(FExecuteAction::CreateLambda([OnBakeWrinkleNormalMap = Args.OnBakeWrinkleNormalMap]()
             {
                 if (OnBakeWrinkleNormalMap.IsBound()) OnBakeWrinkleNormalMap.Execute();
-            }),
-            Args.CanBakeWrinkleNormalMap));
-    MenuBuilder.AddMenuEntry(
-        NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeWrinkleMaskMenuItem", "Bake Wrinkle Mask"),
-        NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeWrinkleMaskMenuItemTooltip", "Bake a wrinkle mask."),
-        FSlateIcon(),
-        FUIAction(
-            FExecuteAction::CreateLambda([OnBakeWrinkleMask = Args.OnBakeWrinkleMask]()
-            {
-                if (OnBakeWrinkleMask.IsBound()) OnBakeWrinkleMask.Execute();
-            }),
-            Args.CanBakeWrinkleMask));
-    MenuBuilder.AddMenuEntry(
-        NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeTransparencyRevealMapsMenuItem", "Bake Transparency Reveal Maps"),
-        NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeTransparencyRevealMapsMenuItemTooltip", "Bake reveal textures/materials for Transparency mode and save the generated assets."),
-        FSlateIcon(),
-        FUIAction(
-            FExecuteAction::CreateLambda([OnBakeTransparencyRevealMaps = Args.OnBakeTransparencyRevealMaps]()
+            }), Args.CanBakeWrinkleNormalMap));
+        break;
+
+    case EWCAEditorMode::TransparencyBake:
+        MenuBuilder.AddMenuEntry(
+            NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeTransparencyMapMenuItem", "Bake Transparency Map"),
+            NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeTransparencyMapMenuItemTooltip", "Bake transparency textures/materials and save the generated assets."),
+            FSlateIcon(),
+            FUIAction(FExecuteAction::CreateLambda([OnBakeTransparencyRevealMaps = Args.OnBakeTransparencyRevealMaps]()
             {
                 if (OnBakeTransparencyRevealMaps.IsBound()) OnBakeTransparencyRevealMaps.Execute();
-            }),
-            Args.CanBakeTransparencyRevealMaps));
+            }), Args.CanBakeTransparencyRevealMaps));
+        break;
+
+    default:
+        break;
+    }
     MenuBuilder.EndSection();
 
     return MenuBuilder.MakeWidget();
@@ -719,7 +705,9 @@ TSharedRef<ITableRow> FWCAEditorWidgets::GenerateMaterialSlotRow(
     const bool  bIsAllSlotsRow = Item.IsValid() && MaterialSlotIndex == INDEX_NONE;
     UMaterialInterface* MaterialObject = !bIsAllSlotsRow && Item.IsValid() ? Item->Material.Get() : nullptr;
     const FText SlotTitle = bIsAllSlotsRow
-                                ? NSLOCTEXT("WetClothingEditorCommonWidgets", "AllMaterialSlotsTitle", "All Slots")
+                                ? (Args.AllSlotsTitle.IsEmpty()
+                                       ? NSLOCTEXT("WetClothingEditorCommonWidgets", "AllMaterialSlotsTitle", "All Slots")
+                                       : Args.AllSlotsTitle)
                                 : Item.IsValid()
                                 ? FText::Format(
                                       NSLOCTEXT("WetClothingEditorCommonWidgets", "MaterialSlotThumbnailTitle", "[{0}] {1}"),
@@ -832,38 +820,41 @@ TSharedRef<ITableRow> FWCAEditorWidgets::GenerateMaterialSlotRow(
                      .Font(FAppStyle::GetFontStyle(TEXT("SmallFont")))
                      .ColorAndOpacity(FSlateColor(FLinearColor(0.58f, 0.58f, 0.58f, 1.0f)))];
 
-        RowContent->AddSlot()
-            .AutoWidth()
-            .VAlign(VAlign_Center)
-            .Padding(0.0f, 0.0f, 2.0f, 0.0f)
-                [SNew(SButton)
-                     .ButtonStyle(FAppStyle::Get(), TEXT("NoBorder"))
-                     .ContentPadding(FMargin(4.0f, 2.0f))
-                     .ToolTipText(NSLOCTEXT("WetClothingEditorCommonWidgets", "WettableSlotTooltip", "Toggle whether this material slot can be wetted."))
-                     .OnClicked_Lambda([OnClicked = Args.OnWettableSlotClicked, MaterialSlotIndex]()
-                     {
-                         return OnClicked.IsBound() ? OnClicked.Execute(MaterialSlotIndex) : FReply::Handled();
-                     })
-                         [SNew(SBox)
-                              .WidthOverride(30.0f)
-                              .HeightOverride(30.0f)
-                              .HAlign(HAlign_Center)
-                              .VAlign(VAlign_Center)
-                                  [SNew(SImage)
-                                       .DesiredSizeOverride(FVector2D(30.0f, 30.0f))
-                                       .Image_Lambda([Item]()
-                                       {
-                                           const bool bWettable = Item.IsValid() && Item->bIsWettableSlot;
-                                           return FDWCEditorStyle::GetBrush(
-                                               bWettable ? TEXT("DWCEditor.Part.IsWettable.True") : TEXT("DWCEditor.Part.IsWettable.False"));
-                                       })
-                                       .ColorAndOpacity_Lambda([Item]()
-                                       {
-                                           const bool bWettable = Item.IsValid() && Item->bIsWettableSlot;
-                                           return bWettable
-                                                      ? FSlateColor(FLinearColor(0.35f, 0.85f, 1.0f, 1.0f))
-                                                      : FSlateColor(FLinearColor(1.0f, 0.36f, 0.36f, 1.0f));
-                                       })]]];
+        if (Args.bShowWettableToggle)
+        {
+            RowContent->AddSlot()
+                .AutoWidth()
+                .VAlign(VAlign_Center)
+                .Padding(0.0f, 0.0f, 2.0f, 0.0f)
+                    [SNew(SButton)
+                         .ButtonStyle(FAppStyle::Get(), TEXT("NoBorder"))
+                         .ContentPadding(FMargin(4.0f, 2.0f))
+                         .ToolTipText(NSLOCTEXT("WetClothingEditorCommonWidgets", "WettableSlotTooltip", "Toggle whether this material slot can be wetted."))
+                         .OnClicked_Lambda([OnClicked = Args.OnWettableSlotClicked, MaterialSlotIndex]()
+                         {
+                             return OnClicked.IsBound() ? OnClicked.Execute(MaterialSlotIndex) : FReply::Handled();
+                         })
+                             [SNew(SBox)
+                                  .WidthOverride(30.0f)
+                                  .HeightOverride(30.0f)
+                                  .HAlign(HAlign_Center)
+                                  .VAlign(VAlign_Center)
+                                      [SNew(SImage)
+                                           .DesiredSizeOverride(FVector2D(30.0f, 30.0f))
+                                           .Image_Lambda([Item]()
+                                           {
+                                               const bool bWettable = Item.IsValid() && Item->bIsWettableSlot;
+                                               return FDWCEditorStyle::GetBrush(
+                                                   bWettable ? TEXT("DWCEditor.Part.IsWettable.True") : TEXT("DWCEditor.Part.IsWettable.False"));
+                                           })
+                                           .ColorAndOpacity_Lambda([Item]()
+                                           {
+                                               const bool bWettable = Item.IsValid() && Item->bIsWettableSlot;
+                                               return bWettable
+                                                          ? FSlateColor(FLinearColor(0.35f, 0.85f, 1.0f, 1.0f))
+                                                          : FSlateColor(FLinearColor(1.0f, 0.36f, 0.36f, 1.0f));
+                                           })]]];
+        }
     }
 
     return SNew(STableRow<TSharedPtr<FWCAMaterialSlotItem>>, OwnerTable)

@@ -254,6 +254,7 @@ class SWetWrinkleViewport : public SEditorViewport, public FGCObject
     TObjectPtr<UTexture2D> GeneratedNormalPreviewTexture = nullptr;
     int32 GeneratedNormalPreviewMaterialSlotIndex = INDEX_NONE;
     int32 GeneratedNormalPreviewUVChannelIndex = INDEX_NONE;
+    bool bGeneratedNormalPreviewOverrideActive = false;
     TArray<FWetWrinklePreviewMaterialSlotState> PreviewMaterialSlots;
     TArray<FWetWrinkleAccumulatedPreviewState> AccumulatedPreviewStates;
     FWetProceduralRidgeTransientPreviewState TransientProceduralPreviewState;

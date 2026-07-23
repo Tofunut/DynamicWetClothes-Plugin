@@ -32,6 +32,7 @@
 #include "WetClothing/Modes/Wrinkle/Correction/SWetWrinkleNormalCorrectionDialog.h"
 #include "WetClothing/Modes/Wrinkle/Generate/WetWrinkleTextureGenerator.h"
 #include "WetClothing/Modes/Wrinkle/Editor/WetWrinkleEditorSettings.h"
+#include "WetClothing/Modes/Wrinkle/Editor/SWetWrinkleCustomNormalPanel.h"
 #include "WetClothing/Modes/Wrinkle/Viewport/WetWrinkleViewport.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SCheckBox.h"
@@ -49,6 +50,7 @@
 #include "Widgets/Layout/SSeparator.h"
 #include "Widgets/Layout/SSplitter.h"
 #include "Widgets/Layout/SUniformGridPanel.h"
+#include "Widgets/Layout/SWidgetSwitcher.h"
 #include "Widgets/Layout/SWrapBox.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/Text/SInlineEditableTextBlock.h"
@@ -862,6 +864,28 @@ void SWetWrinkleEditorPanel::Construct(const FArguments& InArgs)
 
                                                               + SVerticalBox::Slot()
                                                                     .AutoHeight()
+                                                                    .Padding(6.0f, 0.0f, 6.0f, 4.0f)
+                                                                        [SNew(SHorizontalBox)
+
+                                                                         + SHorizontalBox::Slot()
+                                                                               .FillWidth(1.0f)
+                                                                               .VAlign(VAlign_Center)
+                                                                                   [SNew(STextBlock)
+                                                                                        .Text(LOCTEXT("MaterialSlotColumn", "Material Slot"))
+                                                                                        .Font(FAppStyle::GetFontStyle(TEXT("SmallFontBold")))]
+
+                                                                         + SHorizontalBox::Slot()
+                                                                               .AutoWidth()
+                                                                               .VAlign(VAlign_Center)
+                                                                                   [SNew(SBox)
+                                                                                        .WidthOverride(140.0f)
+                                                                                        .HAlign(HAlign_Center)
+                                                                                            [SNew(STextBlock)
+                                                                                                 .Text(LOCTEXT("CustomWrinkleMapColumn", "Custom Wrinkle Map"))
+                                                                                                 .Font(FAppStyle::GetFontStyle(TEXT("SmallFontBold")))]]]
+
+                                                              + SVerticalBox::Slot()
+                                                                    .AutoHeight()
                                                                     .Padding(0.0f, 0.0f, 0.0f, FWCAEditorWidgets::MaterialSlotListSeparatorBottomPadding)
                                                                         [SNew(SSeparator)
                                                                              .Orientation(Orient_Horizontal)]
@@ -897,26 +921,7 @@ void SWetWrinkleEditorPanel::Construct(const FArguments& InArgs)
 
                                                    + SSplitter::Slot()
                                                          .Value(0.48f)
-                                                             [SNew(SVerticalBox)
-
-                                                              + SVerticalBox::Slot()
-                                                                    .AutoHeight()
-                                                                    .Padding(0.0f, 8.0f, 0.0f, 4.0f)
-                                                                        [FWCAEditorWidgets::BuildSectionHeader(
-                                                                            TAttribute<FText>::Create(TAttribute<FText>::FGetter::CreateSP(this, &SWetWrinkleEditorPanel::GetPartMapSectionText)))]
-
-                                                              + SVerticalBox::Slot()
-                                                                    .AutoHeight()
-                                                                    .Padding(0.0f, 0.0f, 0.0f, 10.0f)
-                                                                        [SNew(SSeparator)
-                                                                             .Orientation(Orient_Horizontal)]
-
-                                                              + SVerticalBox::Slot()
-                                                                    .FillHeight(1.0f)
-                                                                        [SAssignNew(PartMapListView, SListView<FWetPartEntryPtr>)
-                                                                             .ListItemsSource(&PartMapItems)
-                                                                             .OnGenerateRow(this, &SWetWrinkleEditorPanel::GeneratePartMapRow)
-                                                                             .SelectionMode(ESelectionMode::None)]]]]]
+                                                             [BuildRuntimeWrinkleNormalStatusSection()]]]]
 
                     + SSplitter::Slot()
                           .Value(0.44f)
@@ -943,18 +948,108 @@ void SWetWrinkleEditorPanel::Construct(const FArguments& InArgs)
 
                     + SSplitter::Slot()
                           .Value(0.28f)
-                              [SNew(SSplitter)
-                                   .Orientation(Orient_Vertical)
+                              [SAssignNew(RightPanelSwitcher, SWidgetSwitcher)
 
-                               + SSplitter::Slot()
-                                     .Value(0.58f)
-                                         [BuildPatchBrushSection()]
+                               + SWidgetSwitcher::Slot()
+                                     [BuildAuthoringRightPanel()]
 
-                               + SSplitter::Slot()
-                                     .Value(0.42f)
-                                         [BuildPatchListSection()]]]];
+                               + SWidgetSwitcher::Slot()
+                                     [BuildCustomNormalRightPanel()]]]];
     PushBrushSettingsToViewport();
     RefreshFromAsset();
+}
+
+TSharedRef<SWidget> SWetWrinkleEditorPanel::BuildRuntimeWrinkleNormalStatusSection()
+{
+    auto BuildStatusRow = [](const FText& Label, const TAttribute<FText>& Value)
+    {
+        return SNew(SHorizontalBox)
+            + SHorizontalBox::Slot()
+                  .AutoWidth()
+                  .VAlign(VAlign_Top)
+                  .Padding(0.0f, 0.0f, 8.0f, 4.0f)
+                      [SNew(STextBlock)
+                           .Text(Label)
+                           .ColorAndOpacity(FSlateColor::UseSubduedForeground())]
+            + SHorizontalBox::Slot()
+                  .FillWidth(1.0f)
+                  .VAlign(VAlign_Top)
+                      [SNew(STextBlock)
+                           .Text(Value)
+                           .AutoWrapText(true)];
+    };
+
+    return SNew(SBorder)
+        .Padding(FMargin(0.0f, 8.0f, 0.0f, 0.0f))
+        .BorderImage(FAppStyle::GetBrush(TEXT("NoBorder")))
+            [SNew(SVerticalBox)
+
+             + SVerticalBox::Slot()
+                   .AutoHeight()
+                   .Padding(0.0f, 0.0f, 0.0f, 4.0f)
+                       [FWCAEditorWidgets::BuildSectionHeader(LOCTEXT("RuntimeWrinkleNormalHeading", "Runtime Wrinkle Normal"))]
+
+             + SVerticalBox::Slot()
+                   .AutoHeight()
+                   .Padding(0.0f, 0.0f, 0.0f, 10.0f)
+                       [SNew(SSeparator)]
+
+             + SVerticalBox::Slot()
+                   .AutoHeight()
+                       [BuildStatusRow(
+                           LOCTEXT("RuntimeWrinkleSourceLabel", "Source"),
+                           TAttribute<FText>::Create(TAttribute<FText>::FGetter::CreateSP(this, &SWetWrinkleEditorPanel::GetRuntimeNormalSourceText)))]
+
+             + SVerticalBox::Slot()
+                   .AutoHeight()
+                       [BuildStatusRow(
+                           LOCTEXT("RuntimeWrinkleTextureLabel", "Texture"),
+                           TAttribute<FText>::Create(TAttribute<FText>::FGetter::CreateSP(this, &SWetWrinkleEditorPanel::GetRuntimeNormalTextureText)))]
+
+             + SVerticalBox::Slot()
+                   .AutoHeight()
+                       [BuildStatusRow(
+                           LOCTEXT("RuntimeWrinkleUVLabel", "UV"),
+                           TAttribute<FText>::Create(TAttribute<FText>::FGetter::CreateSP(this, &SWetWrinkleEditorPanel::GetRuntimeNormalUVText)))]
+
+             + SVerticalBox::Slot()
+                   .AutoHeight()
+                       [BuildStatusRow(
+                           LOCTEXT("RuntimeWrinkleCoverageLabel", "Separation Mask"),
+                           TAttribute<FText>::Create(TAttribute<FText>::FGetter::CreateSP(this, &SWetWrinkleEditorPanel::GetRuntimeNormalCoverageText)))]
+
+             + SVerticalBox::Slot()
+                   .AutoHeight()
+                   .Padding(0.0f, 8.0f, 0.0f, 0.0f)
+                       [SNew(STextBlock)
+                            .Text(this, &SWetWrinkleEditorPanel::GetRuntimeNormalStatusText)
+                            .ColorAndOpacity(this, &SWetWrinkleEditorPanel::GetRuntimeNormalStatusColor)
+                            .AutoWrapText(true)]];
+}
+
+TSharedRef<SWidget> SWetWrinkleEditorPanel::BuildAuthoringRightPanel()
+{
+    return SNew(SSplitter)
+        .Orientation(Orient_Vertical)
+
+        + SSplitter::Slot()
+              .Value(0.58f)
+                  [BuildPatchBrushSection()]
+
+        + SSplitter::Slot()
+              .Value(0.42f)
+                  [BuildPatchListSection()];
+}
+
+TSharedRef<SWidget> SWetWrinkleEditorPanel::BuildCustomNormalRightPanel()
+{
+    return SAssignNew(CustomNormalPanel, SWetWrinkleCustomNormalPanel)
+        .WetClothingAsset(WetClothingAsset.Get())
+        .MaterialSlotIndex_Lambda([this]()
+        {
+            return BrushSettings.MaterialSlotIndex;
+        })
+        .OnSettingsChanged(FSimpleDelegate::CreateSP(this, &SWetWrinkleEditorPanel::HandleCustomNormalSettingsChanged));
 }
 
 TSharedRef<SWidget> SWetWrinkleEditorPanel::BuildPatchBrushSection()
@@ -1742,7 +1837,7 @@ void SWetWrinkleEditorPanel::RefreshFromAssetInternal(
         RefreshBrushPresetOptions();
         RefreshWrinkleTexturePalette();
     }
-    RefreshPartMapItems();
+    RefreshRuntimeNormalUI();
     RefreshStrokeList();
     RefreshWrinkleNormalThumbnail();
     InvalidateWrinkleUVViewCache();
@@ -1751,7 +1846,14 @@ void SWetWrinkleEditorPanel::RefreshFromAssetInternal(
     {
         PreviewViewport->RefreshPreviewMesh(bForcePreviewMaterialRebuild);
         PushBrushSettingsToViewport();
-        RefreshStrokeOverlay(bRebuildAccumulatedPreview);
+        if (IsUsingCustomWrinkleMap())
+        {
+            RefreshRuntimeNormalUI();
+        }
+        else
+        {
+            RefreshStrokeOverlay(bRebuildAccumulatedPreview);
+        }
     }
 
     RefreshWrinkleUVView();
@@ -1771,7 +1873,17 @@ FReply SWetWrinkleEditorPanel::BakeSelectedWrinkleNormalMap()
         return FReply::Handled();
     }
 
-    return BakeWrinkleNormalMapsForSlots({BrushSettings.MaterialSlotIndex}, true, false);
+    if (IsUsingCustomWrinkleMap())
+    {
+        FMessageDialog::Open(
+            EAppMsgType::Ok,
+            LOCTEXT(
+                "BakeWrinkleCustomSourceActive",
+                "This slot uses a Custom Wrinkle Map. Disable Custom Wrinkle Map before baking authored wrinkle elements."));
+        return FReply::Handled();
+    }
+
+    return BakeWrinkleNormalMapsForSlots({BrushSettings.MaterialSlotIndex});
 }
 
 FReply SWetWrinkleEditorPanel::ExecuteBakeWrinkleNormalMap()
@@ -1856,10 +1968,10 @@ FReply SWetWrinkleEditorPanel::ExecuteBakeAllWrinkleNormalMaps()
         return FReply::Handled();
     }
 
-    return BakeWrinkleNormalMapsForSlots(MaterialSlotIndices, true, false);
+    return BakeWrinkleNormalMapsForSlots(MaterialSlotIndices);
 }
 
-FReply SWetWrinkleEditorPanel::BakeWrinkleNormalMapsForSlots(const TArray<int32>& MaterialSlotIndices, const bool bBakeNormalMap, const bool bBakeMask)
+FReply SWetWrinkleEditorPanel::BakeWrinkleNormalMapsForSlots(const TArray<int32>& MaterialSlotIndices)
 {
     UWetClothingAsset* Asset = WetClothingAsset.Get();
     if (Asset == nullptr)
@@ -1874,20 +1986,18 @@ FReply SWetWrinkleEditorPanel::BakeWrinkleNormalMapsForSlots(const TArray<int32>
         return FReply::Handled();
     }
 
-    const FString BakeLabel = bBakeNormalMap && bBakeMask
-                                  ? TEXT("wrinkle maps")
-                                  : (bBakeMask ? TEXT("wrinkle masks") : TEXT("wrinkle normal maps"));
+    const FString BakeLabel = TEXT("wrinkle map sets");
 
     FWetWrinkleNormalMapBakeSettings Settings;
     Settings.Resolution = Asset->Authored.WrinkleData.BakeSettings.DefaultResolution;
     Settings.PaddingPixels = Asset->Authored.WrinkleData.BakeSettings.PaddingPixels;
     Settings.bIncludeDisabledPatches = Asset->Authored.WrinkleData.BakeSettings.bIncludeDisabledPatches;
-    Settings.bBakeNormalMap = bBakeNormalMap;
-    Settings.bBakeMask = bBakeMask;
 
     int32 BakedMapCount = 0;
     int32 BakedPatchCount = 0;
     int32 BakedProceduralStrokeCount = 0;
+    TArray<FString> BakedNormalTextureNames;
+    TArray<FString> BakedMaskTextureNames;
     TArray<FString> FailedSlots;
     for (const int32 MaterialSlotIndex : MaterialSlotIndices)
     {
@@ -1902,6 +2012,14 @@ FReply SWetWrinkleEditorPanel::BakeWrinkleNormalMapsForSlots(const TArray<int32>
         BakedMapCount += Result.BakedMapCount;
         BakedPatchCount += Result.BakedStampCount;
         BakedProceduralStrokeCount += Result.BakedProceduralStrokeCount;
+        for (const UTexture2D* Texture : Result.BakedNormalMaps)
+        {
+            BakedNormalTextureNames.Add(GetPathNameSafe(Texture));
+        }
+        for (const UTexture2D* Texture : Result.BakedMasks)
+        {
+            BakedMaskTextureNames.Add(GetPathNameSafe(Texture));
+        }
     }
 
     if (BakedMapCount == 0)
@@ -1927,14 +2045,27 @@ FReply SWetWrinkleEditorPanel::BakeWrinkleNormalMapsForSlots(const TArray<int32>
         ? EAppMsgCategory::Warning
         : EAppMsgCategory::Success;
     FString Summary = FString::Printf(
-        TEXT("Baked %d %s from %d patch(es) and %d procedural ridge stroke(s)."),
+        TEXT("Baked %d %s from %d patch(es) and %d procedural ridge stroke(s).\n"
+             "UV Channel: %d\nResolution: %d x %d\nPadding: %d px"),
         BakedMapCount,
         *BakeLabel,
         BakedPatchCount,
-        BakedProceduralStrokeCount);
-    if (bBakeNormalMap)
+        BakedProceduralStrokeCount,
+        Asset->GetDWCDataUVChannelIndex(),
+        Settings.Resolution,
+        Settings.Resolution,
+        Settings.PaddingPixels);
+    if (!BakedNormalTextureNames.IsEmpty())
     {
-        Summary += TEXT("\nConvex wrinkle coverage alpha was packed into the baked normal map.");
+        Summary += FString::Printf(
+            TEXT("\n\nNormal textures:\n- %s"),
+            *FString::Join(BakedNormalTextureNames, TEXT("\n- ")));
+    }
+    if (!BakedMaskTextureNames.IsEmpty())
+    {
+        Summary += FString::Printf(
+            TEXT("\n\nSeparation masks:\n- %s"),
+            *FString::Join(BakedMaskTextureNames, TEXT("\n- ")));
     }
     if (FailedSlots.Num() > 0)
     {
@@ -1977,6 +2108,11 @@ void SWetWrinkleEditorPanel::HandleSurfaceHitChanged(const FWetWrinkleSurfaceHit
 
 void SWetWrinkleEditorPanel::HandlePaintStrokeStarted(const FWetWrinkleSurfaceHit& SurfaceHit)
 {
+    if (IsUsingCustomWrinkleMap())
+    {
+        return;
+    }
+
     if (BrushSettings.ToolMode == EWetWrinkleToolMode::ProceduralRidgeStroke)
     {
         if (BrushSettings.RidgeEditMode == EWetProceduralRidgeEditMode::Edit)
@@ -2027,6 +2163,11 @@ void SWetWrinkleEditorPanel::HandlePaintStrokeStarted(const FWetWrinkleSurfaceHi
 
 void SWetWrinkleEditorPanel::HandlePaintStampRequested(const FWetWrinkleSurfaceHit& SurfaceHit)
 {
+    if (IsUsingCustomWrinkleMap())
+    {
+        return;
+    }
+
     if (BrushSettings.ToolMode == EWetWrinkleToolMode::ProceduralRidgeStroke)
     {
         if (bEditingProceduralRidgePoint)
@@ -2079,7 +2220,12 @@ void SWetWrinkleEditorPanel::PushBrushSettingsToViewport()
 {
     if (PreviewViewport.IsValid())
     {
-        PreviewViewport->SetBrushSettings(BrushSettings);
+        FWetWrinkleBrushSettings PreviewSettings = BrushSettings;
+        if (IsUsingCustomWrinkleMap())
+        {
+            PreviewSettings.bShowPreview = false;
+        }
+        PreviewViewport->SetBrushSettings(PreviewSettings);
     }
 
 }
@@ -2243,44 +2389,6 @@ void SWetWrinkleEditorPanel::RefreshMaterialSlotOptions()
         MaterialSlotListView->SetSelection(FindMaterialSlotItem(BrushSettings.MaterialSlotIndex), ESelectInfo::Direct);
     }
 }
-
-void SWetWrinkleEditorPanel::RefreshPartMapItems()
-{
-    PartMapItems.Reset();
-
-    const UWetClothingAsset* Asset = WetClothingAsset.Get();
-    if (Asset != nullptr && BrushSettings.MaterialSlotIndex != INDEX_NONE)
-    {
-        for (const FWetClothingWetPartEntry& Entry : Asset->Authored.PartData.EditableWetPartData.WetPartEntries)
-        {
-            if (Entry.MaterialSlotIndex == BrushSettings.MaterialSlotIndex)
-            {
-                PartMapItems.Add(MakeShared<FWetClothingWetPartEntry>(Entry));
-            }
-        }
-
-        PartMapItems.Sort([](const FWetPartEntryPtr& A, const FWetPartEntryPtr& B)
-        {
-            if (!A.IsValid() || !B.IsValid())
-            {
-                return A.IsValid();
-            }
-
-            if (A->UVChannelIndex != B->UVChannelIndex)
-            {
-                return A->UVChannelIndex < B->UVChannelIndex;
-            }
-
-            return A->WetPartID < B->WetPartID;
-        });
-    }
-
-    if (PartMapListView.IsValid())
-    {
-        PartMapListView->RequestListRefresh();
-    }
-}
-
 
 bool SWetWrinkleEditorPanel::HasUsableWrinkleUVChannel() const
 {
@@ -2554,7 +2662,7 @@ void SWetWrinkleEditorPanel::RebuildWrinkleUVViewPatchMarkerCache()
     CachedWrinkleUVViewPatchMarkerMaterialSlotIndex = MaterialSlotIndex;
     CachedWrinkleUVViewPatchMarkerChannelIndex = UVChannelIndex;
 
-    if (Asset == nullptr || MaterialSlotIndex == INDEX_NONE || UVChannelIndex == INDEX_NONE)
+    if (Asset == nullptr || MaterialSlotIndex == INDEX_NONE || UVChannelIndex == INDEX_NONE || IsUsingCustomWrinkleMap(MaterialSlotIndex))
     {
         return;
     }
@@ -2599,7 +2707,8 @@ void SWetWrinkleEditorPanel::RefreshWrinkleUVViewMarkersOnly()
     }
 
     TArray<FWCAUVViewCircleMarker> CircleMarkers = CachedWrinkleUVViewPatchMarkers;
-    if (BrushSettings.bShowPreview &&
+    if (!IsUsingCustomWrinkleMap(MaterialSlotIndex) &&
+        BrushSettings.bShowPreview &&
         CurrentHit.bHit &&
         CurrentHit.MaterialSlotIndex == MaterialSlotIndex &&
         CurrentHit.UVChannelIndex == UVChannelIndex)
@@ -3338,19 +3447,6 @@ FText SWetWrinkleEditorPanel::GetMaterialSlotCountText() const
     return FText::Format(LOCTEXT("MaterialSlotCount", "{0} Slots"), FText::AsNumber(SlotCount));
 }
 
-FText SWetWrinkleEditorPanel::GetPartMapSectionText() const
-{
-    if (BrushSettings.MaterialSlotIndex == INDEX_NONE)
-    {
-        return LOCTEXT("PartMapSectionNoSlot", "Part Map: No slot");
-    }
-
-    return FText::Format(
-        LOCTEXT("PartMapSection", "Part Map / Slot {0} / {1}"),
-        FText::AsNumber(BrushSettings.MaterialSlotIndex),
-        FText::Format(LOCTEXT("PartMapCount", "{0} Parts"), FText::AsNumber(PartMapItems.Num())));
-}
-
 TSharedRef<SWidget> SWetWrinkleEditorPanel::GenerateMaterialSlotComboRow(TSharedPtr<int32> Item) const
 {
     const int32 MaterialSlotIndex = Item.IsValid() ? *Item : INDEX_NONE;
@@ -3372,36 +3468,8 @@ void SWetWrinkleEditorPanel::HandleMaterialSlotComboChanged(TSharedPtr<int32> It
     PushBrushSettingsToViewport();
     RefreshStrokeList();
     RefreshStrokeOverlay();
-    RefreshPartMapItems();
+    RefreshRuntimeNormalUI();
     RefreshWrinkleUVView();
-}
-
-
-FText SWetWrinkleEditorPanel::GetMaterialSlotStatusText(const int32 MaterialSlotIndex) const
-{
-    const UWetClothingAsset* Asset = WetClothingAsset.Get();
-    if (Asset == nullptr || MaterialSlotIndex == INDEX_NONE)
-    {
-        return FText::GetEmpty();
-    }
-
-    int32 PatchCount = 0;
-    for (const FWetWrinklePatchPlacement& Patch : Asset->Authored.WrinkleData.EditablePatches)
-    {
-        if (Patch.MaterialSlotIndex == MaterialSlotIndex)
-        {
-            ++PatchCount;
-        }
-    }
-
-    if (PatchCount <= 0)
-    {
-        return NSLOCTEXT("SWetWrinkleEditorPanel", "MaterialSlotStatusNoPatches", "No Patches");
-    }
-
-    return PatchCount == 1
-        ? NSLOCTEXT("SWetWrinkleEditorPanel", "MaterialSlotStatusOnePatch", "1 Patch")
-        : FText::Format(NSLOCTEXT("SWetWrinkleEditorPanel", "MaterialSlotStatusManyPatches", "{0} Patches"), FText::AsNumber(PatchCount));
 }
 
 TSharedRef<ITableRow> SWetWrinkleEditorPanel::GenerateMaterialSlotRow(FMaterialSlotItemPtr Item, const TSharedRef<STableViewBase>& OwnerTable)
@@ -3413,9 +3481,9 @@ TSharedRef<ITableRow> SWetWrinkleEditorPanel::GenerateMaterialSlotRow(FMaterialS
     Args.ThumbnailSink = &MaterialSlotThumbnails;
     Args.AllSlotsTitle = LOCTEXT("AllDwcReadyMaterialSlotsRow", "All DWC-Ready Slots");
     Args.bShowWettableToggle = false;
-    Args.GetMaterialSlotStatusText = [this](const int32 MaterialSlotIndex)
+    Args.BuildTrailingWidget = [this](const int32 MaterialSlotIndex)
     {
-        return GetMaterialSlotStatusText(MaterialSlotIndex);
+        return BuildCustomWrinkleMapToggle(MaterialSlotIndex);
     };
 
     return FWCAEditorWidgets::GenerateMaterialSlotRow(Item, OwnerTable, Args);
@@ -3434,13 +3502,247 @@ void SWetWrinkleEditorPanel::HandleMaterialSlotSelectionChanged(FMaterialSlotIte
     PushBrushSettingsToViewport();
     RefreshStrokeList();
     RefreshStrokeOverlay();
-    RefreshPartMapItems();
+    RefreshRuntimeNormalUI();
     RefreshWrinkleUVView();
 }
 
-TSharedRef<ITableRow> SWetWrinkleEditorPanel::GeneratePartMapRow(FWetPartEntryPtr Item, const TSharedRef<STableViewBase>& OwnerTable)
+TSharedRef<SWidget> SWetWrinkleEditorPanel::BuildCustomWrinkleMapToggle(const int32 MaterialSlotIndex)
 {
-    return FWCAEditorWidgets::GeneratePartMapRow(Item, OwnerTable);
+    return SNew(SBox)
+        .WidthOverride(140.0f)
+        .HAlign(HAlign_Center)
+        .VAlign(VAlign_Center)
+            [SNew(SCheckBox)
+                 .ToolTipText(LOCTEXT(
+                     "CustomWrinkleMapToggleTooltip",
+                     "Use a user-provided packed wrinkle normal map for this material slot instead of the baked wrinkle map."))
+                 .IsChecked_Lambda([this, MaterialSlotIndex]()
+                 {
+                     return GetCustomWrinkleMapCheckState(MaterialSlotIndex);
+                 })
+                 .OnCheckStateChanged_Lambda([this, MaterialSlotIndex](const ECheckBoxState NewState)
+                 {
+                     HandleCustomWrinkleMapCheckStateChanged(NewState, MaterialSlotIndex);
+                 })];
+}
+
+ECheckBoxState SWetWrinkleEditorPanel::GetCustomWrinkleMapCheckState(const int32 MaterialSlotIndex) const
+{
+    return IsUsingCustomWrinkleMap(MaterialSlotIndex)
+               ? ECheckBoxState::Checked
+               : ECheckBoxState::Unchecked;
+}
+
+void SWetWrinkleEditorPanel::HandleCustomWrinkleMapCheckStateChanged(
+    const ECheckBoxState NewState,
+    const int32 MaterialSlotIndex)
+{
+    UWetClothingAsset* Asset = WetClothingAsset.Get();
+    if (Asset == nullptr || MaterialSlotIndex == INDEX_NONE)
+    {
+        return;
+    }
+
+    const int32 UVChannelIndex = ResolveWetWrinkleUVChannel(Asset);
+    FWetWrinkleRuntimeNormalSource* Source = Asset->Authored.WrinkleData.RuntimeNormalSources.FindByPredicate(
+        [MaterialSlotIndex, UVChannelIndex](const FWetWrinkleRuntimeNormalSource& Candidate)
+        {
+            return Candidate.MaterialSlotIndex == MaterialSlotIndex &&
+                   Candidate.UVChannelIndex == UVChannelIndex &&
+                   Candidate.LODIndex == UWetClothingAsset::RuntimeSimulationLODIndex;
+        });
+
+    const FScopedTransaction Transaction(LOCTEXT("SetRuntimeWrinkleNormalSource", "Set Runtime Wrinkle Normal Source"));
+    Asset->Modify();
+    if (Source == nullptr)
+    {
+        Source = &Asset->Authored.WrinkleData.RuntimeNormalSources.AddDefaulted_GetRef();
+        Source->MaterialSlotIndex = MaterialSlotIndex;
+        Source->UVChannelIndex = UVChannelIndex;
+        Source->LODIndex = UWetClothingAsset::RuntimeSimulationLODIndex;
+    }
+    Source->Source = NewState == ECheckBoxState::Checked
+                         ? EDWCWrinkleNormalSource::CustomTexture
+                         : EDWCWrinkleNormalSource::Baked;
+    Asset->MarkPackageDirty();
+
+    BrushSettings.MaterialSlotIndex = MaterialSlotIndex;
+    EnsureWrinkleUVChannelForMaterialSlot(MaterialSlotIndex, false);
+    if (MaterialSlotListView.IsValid())
+    {
+        MaterialSlotListView->SetSelection(FindMaterialSlotItem(MaterialSlotIndex), ESelectInfo::Direct);
+        MaterialSlotListView->RequestListRefresh();
+    }
+    RefreshStrokeList();
+    RefreshRuntimeNormalUI();
+    RefreshWrinkleUVView();
+}
+
+bool SWetWrinkleEditorPanel::IsUsingCustomWrinkleMap(int32 MaterialSlotIndex) const
+{
+    if (MaterialSlotIndex == INDEX_NONE)
+    {
+        MaterialSlotIndex = BrushSettings.MaterialSlotIndex;
+    }
+    const UWetClothingAsset* Asset = WetClothingAsset.Get();
+    return Asset != nullptr &&
+           MaterialSlotIndex != INDEX_NONE &&
+           Asset->Authored.WrinkleData.IsUsingCustomWrinkleNormalMap(
+               MaterialSlotIndex,
+               ResolveWetWrinkleUVChannel(Asset),
+               UWetClothingAsset::RuntimeSimulationLODIndex);
+}
+
+void SWetWrinkleEditorPanel::HandleCustomNormalSettingsChanged()
+{
+    if (UWetClothingAsset* Asset = WetClothingAsset.Get())
+    {
+        Asset->MarkPackageDirty();
+    }
+    RefreshRuntimeNormalUI();
+}
+
+void SWetWrinkleEditorPanel::RefreshRuntimeNormalUI()
+{
+    if (RightPanelSwitcher.IsValid())
+    {
+        RightPanelSwitcher->SetActiveWidgetIndex(IsUsingCustomWrinkleMap() ? 1 : 0);
+    }
+    if (CustomNormalPanel.IsValid())
+    {
+        CustomNormalPanel->Refresh();
+    }
+
+    if (PreviewViewport.IsValid())
+    {
+        if (IsUsingCustomWrinkleMap())
+        {
+            const UWetClothingAsset* Asset = WetClothingAsset.Get();
+            const int32 UVChannelIndex = Asset != nullptr ? ResolveWetWrinkleUVChannel(Asset) : INDEX_NONE;
+            const FWetWrinkleResolvedNormalMap Resolved = Asset != nullptr
+                                                              ? Asset->Authored.WrinkleData.ResolveRuntimeWrinkleNormalMap(
+                                                                    BrushSettings.MaterialSlotIndex,
+                                                                    UVChannelIndex,
+                                                                    UWetClothingAsset::RuntimeSimulationLODIndex)
+                                                              : FWetWrinkleResolvedNormalMap();
+            PreviewViewport->SetGeneratedNormalPreviewTexture(
+                BrushSettings.MaterialSlotIndex,
+                UVChannelIndex,
+                Resolved.Texture);
+            PreviewViewport->ClearTransientProceduralStroke();
+            PreviewViewport->SetEditingProceduralStrokeGuid(FGuid());
+        }
+        else
+        {
+            PreviewViewport->ClearGeneratedNormalPreviewTexture();
+            RefreshStrokeOverlay(true);
+        }
+        PushBrushSettingsToViewport();
+    }
+
+    RebuildWrinkleUVViewPatchMarkerCache();
+    RefreshWrinkleUVViewMarkersOnly();
+}
+
+FText SWetWrinkleEditorPanel::GetRuntimeNormalSourceText() const
+{
+    if (BrushSettings.MaterialSlotIndex == INDEX_NONE)
+    {
+        return LOCTEXT("RuntimeNormalSourceAllSlots", "Select a material slot");
+    }
+    return IsUsingCustomWrinkleMap()
+               ? LOCTEXT("RuntimeNormalSourceCustom", "Custom texture")
+               : LOCTEXT("RuntimeNormalSourceBaked", "Baked map");
+}
+
+FText SWetWrinkleEditorPanel::GetRuntimeNormalTextureText() const
+{
+    const UWetClothingAsset* Asset = WetClothingAsset.Get();
+    if (Asset == nullptr || BrushSettings.MaterialSlotIndex == INDEX_NONE)
+    {
+        return LOCTEXT("RuntimeNormalTextureNone", "None");
+    }
+    const FWetWrinkleResolvedNormalMap Resolved = Asset->Authored.WrinkleData.ResolveRuntimeWrinkleNormalMap(
+        BrushSettings.MaterialSlotIndex,
+        ResolveWetWrinkleUVChannel(Asset),
+        UWetClothingAsset::RuntimeSimulationLODIndex);
+    return Resolved.Texture != nullptr
+               ? FText::FromString(Resolved.Texture->GetName())
+               : LOCTEXT("RuntimeNormalTextureMissing", "None");
+}
+
+FText SWetWrinkleEditorPanel::GetRuntimeNormalUVText() const
+{
+    const UWetClothingAsset* Asset = WetClothingAsset.Get();
+    return Asset != nullptr && BrushSettings.MaterialSlotIndex != INDEX_NONE
+               ? FText::Format(LOCTEXT("RuntimeNormalUVValue", "UV {0}"), FText::AsNumber(ResolveWetWrinkleUVChannel(Asset)))
+               : LOCTEXT("RuntimeNormalUVNone", "-");
+}
+
+FText SWetWrinkleEditorPanel::GetRuntimeNormalCoverageText() const
+{
+    const UWetClothingAsset* Asset = WetClothingAsset.Get();
+    if (Asset == nullptr || BrushSettings.MaterialSlotIndex == INDEX_NONE)
+    {
+        return LOCTEXT("RuntimeNormalCoverageNone", "-");
+    }
+    const int32 UVChannelIndex = ResolveWetWrinkleUVChannel(Asset);
+    const FWetWrinkleBakedMapSet* BakedMap = Asset->Authored.WrinkleData.BakedWrinkleMaps.FindByPredicate(
+        [this, UVChannelIndex](const FWetWrinkleBakedMapSet& Candidate)
+        {
+            return Candidate.MaterialSlotIndex == BrushSettings.MaterialSlotIndex &&
+                   Candidate.UVChannelIndex == UVChannelIndex &&
+                   Candidate.LODIndex == UWetClothingAsset::RuntimeSimulationLODIndex;
+        });
+    return BakedMap != nullptr && BakedMap->BakedWrinkleMask != nullptr
+               ? LOCTEXT("RuntimeNormalCoverageSeparateMask", "Separate baked mask")
+               : LOCTEXT("RuntimeNormalCoverageUnused", "None");
+}
+
+FText SWetWrinkleEditorPanel::GetRuntimeNormalStatusText() const
+{
+    if (BrushSettings.MaterialSlotIndex == INDEX_NONE)
+    {
+        return LOCTEXT("RuntimeNormalStatusSelectSlot", "Select a single material slot to inspect its runtime wrinkle normal source.");
+    }
+    const UWetClothingAsset* Asset = WetClothingAsset.Get();
+    if (Asset == nullptr)
+    {
+        return LOCTEXT("RuntimeNormalStatusNoAsset", "Wet Clothing Asset is unavailable.");
+    }
+    const FWetWrinkleResolvedNormalMap Resolved = Asset->Authored.WrinkleData.ResolveRuntimeWrinkleNormalMap(
+        BrushSettings.MaterialSlotIndex,
+        ResolveWetWrinkleUVChannel(Asset),
+        UWetClothingAsset::RuntimeSimulationLODIndex);
+    if (Resolved.IsValid())
+    {
+        return IsUsingCustomWrinkleMap()
+                   ? LOCTEXT("RuntimeNormalStatusCustomReady", "Runtime will use the selected custom wrinkle normal map.")
+                   : LOCTEXT("RuntimeNormalStatusBakedReady", "Runtime will use the current baked wrinkle normal map.");
+    }
+    return IsUsingCustomWrinkleMap()
+               ? LOCTEXT("RuntimeNormalStatusCustomMissing", "Custom Wrinkle Map is enabled, but no texture is assigned. Runtime wrinkle normal is disabled for this slot.")
+               : LOCTEXT("RuntimeNormalStatusBakedMissing", "No baked wrinkle normal map is available for this slot.");
+}
+
+FSlateColor SWetWrinkleEditorPanel::GetRuntimeNormalStatusColor() const
+{
+    const UWetClothingAsset* Asset = WetClothingAsset.Get();
+    if (Asset == nullptr || BrushSettings.MaterialSlotIndex == INDEX_NONE)
+    {
+        return FSlateColor::UseSubduedForeground();
+    }
+    const FWetWrinkleResolvedNormalMap Resolved = Asset->Authored.WrinkleData.ResolveRuntimeWrinkleNormalMap(
+        BrushSettings.MaterialSlotIndex,
+        ResolveWetWrinkleUVChannel(Asset),
+        UWetClothingAsset::RuntimeSimulationLODIndex);
+    if (Resolved.IsValid())
+    {
+        return FSlateColor(FLinearColor(0.25f, 0.9f, 0.35f));
+    }
+    return IsUsingCustomWrinkleMap()
+               ? FSlateColor(FLinearColor(1.0f, 0.25f, 0.2f))
+               : FSlateColor(FLinearColor(1.0f, 0.75f, 0.15f));
 }
 
 FString SWetWrinkleEditorPanel::GetWrinkleNormalTextureObjectPath() const
@@ -3995,7 +4297,7 @@ void SWetWrinkleEditorPanel::HandleMaterialSlotChanged(int32 NewValue)
     }
     PushBrushSettingsToViewport();
     RefreshStrokeOverlay();
-    RefreshPartMapItems();
+    RefreshRuntimeNormalUI();
     RefreshWrinkleUVView();
 }
 

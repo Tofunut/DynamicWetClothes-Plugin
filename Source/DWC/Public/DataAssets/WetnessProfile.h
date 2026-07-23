@@ -34,9 +34,6 @@ struct DWC_API FAbsorbedWetnessProfileParameters
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Absorbed Wetness|Rendering", meta = (ClampMin = "0.0"))
     float WetVisualStrength = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Absorbed Wetness|Rendering", meta = (ClampMin = "0.0"))
-    float TransparencyStrength = 0.0f;
-
     float GetDryRatePerSecond() const
     {
         const float DryPercentPerSecond = FMath::Clamp(DryRate, 0.0f, 100.0f);
@@ -179,7 +176,9 @@ struct DWC_API FWetnessProfileParameters
     UPROPERTY()
     float WetVisualStrength = -1.0f;
 
-    UPROPERTY()
+    // Serialized compatibility only. Transparency strength now comes from the
+    // packed Transparency Map alpha authored per WCA material slot.
+    UPROPERTY(meta = (DeprecatedProperty, DeprecationMessage = "Wetness Profile transparency strength is no longer used."))
     float TransparencyStrength = -1.0f;
 
     bool MigrateLegacyAbsorbedWetness();
@@ -235,12 +234,6 @@ struct DWC_API FWetnessProfileParameters
         return AbsorbedWetness.bEnabled ? FMath::Max(0.0f, Strength) : 0.0f;
     }
 
-    float GetTransparencyStrength() const
-    {
-        const float Strength = TransparencyStrength >= 0.0f ? TransparencyStrength : AbsorbedWetness.TransparencyStrength;
-        return AbsorbedWetness.bEnabled ? FMath::Max(0.0f, Strength) : 0.0f;
-    }
-
     /** Legacy material-map compatibility. Surface visibility itself comes from the independent RTs. */
     float GetSurfaceWaterStrength() const { return SurfaceWater.bEnabled ? 1.0f : 0.0f; }
     float GetRunoffStrength() const { return SurfaceWater.bEnabled ? FMath::Max(0.0f, SurfaceWater.FlowIntensityMultiplier) : 0.0f; }
@@ -273,9 +266,6 @@ class DWC_API UWetnessProfile : public UDataAsset
     float GetRunoffStrength() const { return Parameters.GetRunoffStrength(); }
     UFUNCTION(BlueprintPure, Category = "Wetness Profile")
     float GetWetVisualStrength() const { return Parameters.GetWetVisualStrength(); }
-    UFUNCTION(BlueprintPure, Category = "Wetness Profile")
-    float GetTransparencyStrength() const { return Parameters.GetTransparencyStrength(); }
-
 #if WITH_EDITORONLY_DATA
     UPROPERTY(EditAnywhere, Category = "Wetness Profile")
     FString PreferredSaveDirectory = TEXT("/Game/WetnessProfiles");

@@ -1036,6 +1036,13 @@ bool UWetClothingAsset::HasWrinkleBakeContent() const
         {
             continue;
         }
+        if (Authored.WrinkleData.IsUsingCustomWrinkleNormalMap(
+                Patch.MaterialSlotIndex,
+                Authored.WrinkleData.WrinkleUVChannelIndex,
+                RuntimeSimulationLODIndex))
+        {
+            continue;
+        }
         if (Patch.MaterialSlotIndex != INDEX_NONE && IsMaterialSlotWettable(Patch.MaterialSlotIndex))
         {
             return true;
@@ -1045,6 +1052,13 @@ bool UWetClothingAsset::HasWrinkleBakeContent() const
     for (const FWetProceduralRidgeStroke& Stroke : Authored.WrinkleData.EditableProceduralRidgeStrokes)
     {
         if (!Stroke.bEnabled && !Authored.WrinkleData.BakeSettings.bIncludeDisabledPatches)
+        {
+            continue;
+        }
+        if (Authored.WrinkleData.IsUsingCustomWrinkleNormalMap(
+                Stroke.MaterialSlotIndex,
+                Authored.WrinkleData.WrinkleUVChannelIndex,
+                RuntimeSimulationLODIndex))
         {
             continue;
         }
@@ -1063,11 +1077,6 @@ bool UWetClothingAsset::HasTransparencyBakeContent() const
     if (!HasAnyWettableMaterialSlot())
     {
         return false;
-    }
-
-    if (!Authored.TransparencyData.SourceBlueprintClass.IsNull())
-    {
-        return true;
     }
 
     return Authored.TransparencyData.TransparencyLayers.ContainsByPredicate(
@@ -1631,7 +1640,6 @@ bool UWetClothingAsset::InitializeNewAsset(
     Metadata.DWCSkeletalMesh = nullptr;
     Authored.WrinkleData.BakeSettings.DefaultResolution = Metadata.SetupSettings.GetWrinkleMapResolution();
     Authored.TransparencyData.TransparencyBakeResolution = Metadata.SetupSettings.GetTransparencyMapResolution();
-    Authored.TransparencyData.RevealBakeResolution = Metadata.SetupSettings.GetTransparencyMapResolution();
     Authored.SurfaceWaterSettings.RenderTargetResolution = Metadata.SetupSettings.GetSurfaceWaterRTResolution();
     Metadata.OriginalUVChannelIndex = Metadata.SetupSettings.OriginalUVChannelIndex;
     Metadata.SetupSettings.SimulationLODIndex = RuntimeSimulationLODIndex;
@@ -1704,7 +1712,6 @@ bool UWetClothingAsset::ApplySetupSettings(
     Metadata.SimulationLODIndex = RuntimeSimulationLODIndex;
     Authored.WrinkleData.BakeSettings.DefaultResolution = Metadata.SetupSettings.GetWrinkleMapResolution();
     Authored.TransparencyData.TransparencyBakeResolution = Metadata.SetupSettings.GetTransparencyMapResolution();
-    Authored.TransparencyData.RevealBakeResolution = Metadata.SetupSettings.GetTransparencyMapResolution();
     Authored.SurfaceWaterSettings.RenderTargetResolution = Metadata.SetupSettings.GetSurfaceWaterRTResolution();
 
     if (bOriginalUVChanged)
@@ -2323,7 +2330,6 @@ bool UWetClothingAsset::RebuildRuntimeDataForSave(FString* OutErrorMessage)
         Derived.Inline.GeneratedWetMaterialOverrides.Reset();
         Derived.Inline.BakedWetnessProfileMaps.Reset();
         Authored.WrinkleData.BakedWrinkleMaps.Reset();
-        Authored.TransparencyData.BakedRevealLayers.Reset();
         for (FWetClothingTransparencyLayerData& Layer : Authored.TransparencyData.TransparencyLayers)
         {
             Layer.BakedMaps.Reset();
@@ -2798,7 +2804,7 @@ bool UWetClothingAsset::IsGPURuntimeDataValidForMesh(const USkeletalMesh* Skelet
         return false;
     }
 
-    const FString ExpectedDataUVMeshSignature = BuildMeshContentSignature(
+    const FString ExpectedDataUVMeshSignature = FDWCMeshContentSignature::BuildUVContent(
         SkeletalMesh,
         LODIndex,
         GetDWCDataUVChannelIndex());

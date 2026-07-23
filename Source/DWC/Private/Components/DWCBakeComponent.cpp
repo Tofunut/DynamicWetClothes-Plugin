@@ -2,7 +2,6 @@
 
 #include "Runtime/Engine/Classes/Components/SkeletalMeshComponent.h"
 #include "Runtime/Engine/Classes/GameFramework/Actor.h"
-#include "Runtime/Engine/Public/Materials/MaterialInstanceDynamic.h"
 #include "Runtime/Engine/Public/Materials/MaterialInterface.h"
 
 UDWCBakeComponent::UDWCBakeComponent()
@@ -45,49 +44,6 @@ bool UDWCBakeComponent::BuildBakeSnapshot(FDWCBakeSnapshot& OutSnapshot) const
     OutSnapshot.Layers = MoveTemp(ResolvedLayers);
     return true;
 }
-
-void UDWCBakeComponent::ApplyRevealPreviewBlend()
-{
-    for (const FDWCBakeLayer& Layer : Layers)
-    {
-        if (Layer.bCanBeWetOuterLayer)
-        {
-            ApplyRevealPreviewBlendToLayer(Layer, true);
-        }
-    }
-}
-
-void UDWCBakeComponent::ClearRevealPreviewBlend()
-{
-    for (const FDWCBakeLayer& Layer : Layers)
-    {
-        if (Layer.bCanBeWetOuterLayer)
-        {
-            ApplyRevealPreviewBlendToLayer(Layer, false);
-        }
-    }
-}
-
-#if WITH_EDITOR
-void UDWCBakeComponent::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
-{
-    Super::PostEditChangeProperty(PropertyChangedEvent);
-
-    const FName PropertyName = PropertyChangedEvent.GetPropertyName();
-    if (PropertyName == GET_MEMBER_NAME_CHECKED(UDWCBakeComponent, RevealPreviewBlendPercent) ||
-        PropertyName == GET_MEMBER_NAME_CHECKED(UDWCBakeComponent, RevealMaskMultiplier) ||
-        PropertyName == GET_MEMBER_NAME_CHECKED(UDWCBakeComponent, RevealConfidenceMultiplier) ||
-        PropertyName == GET_MEMBER_NAME_CHECKED(UDWCBakeComponent, RevealPreviewUnderColor) ||
-        PropertyName == GET_MEMBER_NAME_CHECKED(UDWCBakeComponent, RevealPreviewBlendParameterName) ||
-        PropertyName == GET_MEMBER_NAME_CHECKED(UDWCBakeComponent, UseRevealPreviewParameterName) ||
-        PropertyName == GET_MEMBER_NAME_CHECKED(UDWCBakeComponent, RevealMaskMultiplierParameterName) ||
-        PropertyName == GET_MEMBER_NAME_CHECKED(UDWCBakeComponent, RevealConfidenceMultiplierParameterName) ||
-        PropertyName == GET_MEMBER_NAME_CHECKED(UDWCBakeComponent, RevealPreviewUnderColorParameterName))
-    {
-        ApplyRevealPreviewBlend();
-    }
-}
-#endif
 
 bool UDWCBakeComponent::ResolveLayer(const FDWCBakeLayer& Layer, FDWCBakeResolvedLayer& OutResolvedLayer) const
 {
@@ -137,57 +93,6 @@ USkeletalMeshComponent* UDWCBakeComponent::ResolveLayerComponent(const FDWCBakeL
     }
 
     return Cast<USkeletalMeshComponent>(Layer.ComponentReference.GetComponent(Owner));
-}
-
-void UDWCBakeComponent::ApplyRevealPreviewBlendToLayer(const FDWCBakeLayer& Layer, const bool bEnabled) const
-{
-    USkeletalMeshComponent* SkeletalMeshComponent = ResolveLayerComponent(Layer);
-    if (SkeletalMeshComponent == nullptr)
-    {
-        return;
-    }
-
-    const float Blend = bEnabled ? FMath::Clamp(RevealPreviewBlendPercent / 100.0f, 0.0f, 1.0f) : 0.0f;
-    const float UsePreview = bEnabled && Blend > 0.0f ? 1.0f : 0.0f;
-    const float MaskMultiplier = bEnabled ? FMath::Max(0.0f, RevealMaskMultiplier) : 0.0f;
-    const float ConfidenceMultiplier = bEnabled ? FMath::Max(0.0f, RevealConfidenceMultiplier) : 0.0f;
-
-    const int32 MaterialCount = SkeletalMeshComponent->GetNumMaterials();
-    for (int32 MaterialIndex = 0; MaterialIndex < MaterialCount; ++MaterialIndex)
-    {
-        UMaterialInstanceDynamic* MID = SkeletalMeshComponent->CreateAndSetMaterialInstanceDynamic(MaterialIndex);
-        if (MID == nullptr)
-        {
-            continue;
-        }
-
-        if (!RevealPreviewBlendParameterName.IsNone())
-        {
-            MID->SetScalarParameterValue(RevealPreviewBlendParameterName, Blend);
-        }
-
-        if (!UseRevealPreviewParameterName.IsNone())
-        {
-            MID->SetScalarParameterValue(UseRevealPreviewParameterName, UsePreview);
-        }
-
-        if (!RevealMaskMultiplierParameterName.IsNone())
-        {
-            MID->SetScalarParameterValue(RevealMaskMultiplierParameterName, MaskMultiplier);
-        }
-
-        if (!RevealConfidenceMultiplierParameterName.IsNone())
-        {
-            MID->SetScalarParameterValue(RevealConfidenceMultiplierParameterName, ConfidenceMultiplier);
-        }
-
-        if (!RevealPreviewUnderColorParameterName.IsNone())
-        {
-            MID->SetVectorParameterValue(RevealPreviewUnderColorParameterName, RevealPreviewUnderColor);
-        }
-    }
-
-    SkeletalMeshComponent->MarkRenderStateDirty();
 }
 
 FTransform UDWCBakeComponent::MakeBakeTransform(const USceneComponent& SceneComponent) const

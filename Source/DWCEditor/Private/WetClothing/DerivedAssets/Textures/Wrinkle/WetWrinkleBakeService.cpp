@@ -19,6 +19,14 @@ namespace
                 continue;
             }
 
+            if (WrinkleData.IsUsingCustomWrinkleNormalMap(
+                    Patch.MaterialSlotIndex,
+                    WrinkleData.WrinkleUVChannelIndex,
+                    UWetClothingAsset::RuntimeSimulationLODIndex))
+            {
+                continue;
+            }
+
             OutMaterialSlots.Add(Patch.MaterialSlotIndex);
         }
 
@@ -32,21 +40,23 @@ namespace
                 continue;
             }
 
+            if (WrinkleData.IsUsingCustomWrinkleNormalMap(
+                    Stroke.MaterialSlotIndex,
+                    WrinkleData.WrinkleUVChannelIndex,
+                    UWetClothingAsset::RuntimeSimulationLODIndex))
+            {
+                continue;
+            }
+
             OutMaterialSlots.Add(Stroke.MaterialSlotIndex);
         }
     }
 
     bool HasExactBakedWrinkleMap(const UWetClothingAsset& Asset, const int32 MaterialSlotIndex)
     {
-        const int32 DataUVChannelIndex = Asset.GetDWCDataUVChannelIndex();
-        return Asset.Authored.WrinkleData.BakedWrinkleMaps.ContainsByPredicate(
-            [MaterialSlotIndex, DataUVChannelIndex](const FWetWrinkleBakedMapSet& Candidate)
-            {
-                return Candidate.MaterialSlotIndex == MaterialSlotIndex &&
-                       Candidate.UVChannelIndex == DataUVChannelIndex &&
-                       Candidate.LODIndex == 0 &&
-                       Candidate.BakedWrinkleNormalMap != nullptr;
-            });
+        return FWetWrinkleNormalMapBaker::IsMaterialSlotBakeCurrent(
+            &Asset,
+            MaterialSlotIndex);
     }
 }
 
@@ -122,8 +132,6 @@ bool FWetWrinkleBakeService::BakeAllWrinkleMaps(UWetClothingAsset* WetClothingAs
     Settings.Resolution = WetClothingAsset->Authored.WrinkleData.BakeSettings.DefaultResolution;
     Settings.PaddingPixels = WetClothingAsset->Authored.WrinkleData.BakeSettings.PaddingPixels;
     Settings.bIncludeDisabledPatches = WetClothingAsset->Authored.WrinkleData.BakeSettings.bIncludeDisabledPatches;
-    Settings.bBakeNormalMap = WetClothingAsset->Authored.WrinkleData.BakeSettings.bBakeNormalMap;
-    Settings.bBakeMask = WetClothingAsset->Authored.WrinkleData.BakeSettings.bBakeMask;
 
     int32 TotalMapCount = 0;
     int32 TotalStampCount = 0;
@@ -164,7 +172,8 @@ bool FWetWrinkleBakeService::BakeAllWrinkleMaps(UWetClothingAsset* WetClothingAs
     WetClothingAsset->Modify();
     RefreshBakeStatusFromCurrentOutputs(WetClothingAsset);
     OutSummary = FString::Printf(
-        TEXT("Baked %d wrinkle map set(s) from %d patch(es) and %d procedural ridge stroke(s) across %d material slot(s)."),
+        TEXT("Baked %d wrinkle map set(s) from %d patch(es) and %d procedural ridge stroke(s) across %d material slot(s).\n"
+             "Each set contains a tangent-space normal texture and a separate grayscale separation mask."),
         TotalMapCount,
         TotalStampCount,
         TotalProceduralStrokeCount,

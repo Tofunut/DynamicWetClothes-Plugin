@@ -16,7 +16,7 @@ namespace
         const int32 PixelIndex)
     {
         const float AutoAlpha = AutoResult.AutoAlphaBuffer.IsValidIndex(PixelIndex)
-            ? FMath::Clamp(AutoResult.AutoAlphaBuffer[PixelIndex], 0.0f, 1.0f)
+            ? AutoResult.AutoAlphaBuffer[PixelIndex] / 255.0f
             : 0.0f;
         const float ManualPremultiplied = ManualPremultipliedBuffer.IsValidIndex(PixelIndex)
             ? ManualPremultipliedBuffer[PixelIndex] / 255.0f

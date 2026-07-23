@@ -3,9 +3,6 @@
 #include "Materials/MaterialInterface.h"
 #include "Runtime/Engine/Classes/Engine/Texture.h"
 #include "Runtime/Engine/Classes/Engine/Texture2D.h"
-#include "WetClothing/Modes/Transparency/RevealBake/DWCRevealBakeLog.h"
-#include "WetClothing/DerivedAssets/Textures/Transparency/DWCRevealBakeTextureWriter.h"
-#include "WetClothing/Foundation/TextureAccess/WetClothingMaterialTextureResolver.h"
 
 FString FDWCRevealBakeSourceResolver::NormalizeTextureSearchText(const FString& InText)
 {
@@ -29,34 +26,6 @@ bool FDWCRevealBakeSourceResolver::ContainsAnyTextureKeyword(
     }
 
     return false;
-}
-
-TArray<FName> FDWCRevealBakeSourceResolver::BuildRevealSourceLayerIds(const TArray<FDWCRevealBakeSurface>& SourceSurfaces)
-{
-    TArray<FName> SourceLayerIds;
-    for (const FDWCRevealBakeSurface& SourceSurface : SourceSurfaces)
-    {
-        if (SourceSurface.bCanBeRevealSource)
-        {
-            SourceLayerIds.AddUnique(SourceSurface.LayerId);
-        }
-    }
-    return SourceLayerIds;
-}
-
-const FDWCBakeResolvedLayer* FDWCRevealBakeSourceResolver::FindResolvedLayerById(
-    const FDWCBakeSnapshot& Snapshot,
-    const FName             LayerId)
-{
-    for (const FDWCBakeResolvedLayer& Layer : Snapshot.Layers)
-    {
-        if (Layer.LayerId == LayerId)
-        {
-            return &Layer;
-        }
-    }
-
-    return nullptr;
 }
 
 UTexture2D* FDWCRevealBakeSourceResolver::ResolveRevealSourceBaseColorTexture(const FDWCBakeResolvedLayer& SourceLayer)
@@ -120,50 +89,6 @@ UTexture2D* FDWCRevealBakeSourceResolver::ResolveRevealSourceBaseColorTexture(UM
     FDWCBakeResolvedLayer TemporaryLayer;
     TemporaryLayer.Materials.Add(SourceMaterial);
     return ResolveRevealSourceBaseColorTexture(TemporaryLayer);
-}
-
-UTexture* FDWCRevealBakeSourceResolver::ResolvePreviewSourceTexture(const FDWCBakeResolvedLayer& SourceLayer)
-{
-    for (UMaterialInterface* Material : SourceLayer.Materials)
-    {
-        if (UTexture* Texture = FWetClothingMaterialTextureResolver::ResolveBestMaterialTexture(Material))
-        {
-            return Texture;
-        }
-    }
-
-    return nullptr;
-}
-
-void FDWCRevealBakeSourceResolver::PopulateSourceLayerTextures(
-    const FDWCBakeSnapshot&             Snapshot,
-    const TArray<FName>&                SourceLayerIds,
-    FDWCRevealBakeTextureWriteSettings& InOutTextureSettings)
-{
-    InOutTextureSettings.SourceLayerTextures.Reset();
-
-    for (const FName SourceLayerId : SourceLayerIds)
-    {
-        const FDWCBakeResolvedLayer* SourceLayer = FindResolvedLayerById(Snapshot, SourceLayerId);
-        if (UTexture2D* SourceTexture2D = SourceLayer != nullptr ? ResolveRevealSourceBaseColorTexture(*SourceLayer) : nullptr)
-        {
-            InOutTextureSettings.SourceLayerTextures.Add(SourceLayerId, SourceTexture2D);
-            UE_LOG(
-                LogDWCRevealBake,
-                Log,
-                TEXT("DWC Reveal Bake: Source base color texture selected. SourceLayer='%s', Texture='%s'."),
-                *SourceLayerId.ToString(),
-                *SourceTexture2D->GetPathName());
-        }
-        else
-        {
-            UE_LOG(
-                LogDWCRevealBake,
-                Warning,
-                TEXT("DWC Reveal Bake: No readable base color texture found for source layer '%s'. Reveal color map pixels for this layer will be black."),
-                *SourceLayerId.ToString());
-        }
-    }
 }
 
 int32 FDWCRevealBakeSourceResolver::ScoreRevealBaseColorTexture(UTexture* Texture, const FString& ParameterName)

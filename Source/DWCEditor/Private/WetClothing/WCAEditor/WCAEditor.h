@@ -53,7 +53,6 @@ class FWCAEditor : public FAssetEditorToolkit
     FReply               HandleBakeAllMapsClicked();
     FReply               HandleBakeWetnessProfileMapsClicked();
     FReply               HandleBakeGPUWetnessMapDataClicked();
-    FReply               HandleBakeTransparencyRevealMapsClicked();
     FReply               HandleBakeWrinkleNormalMapClicked();
     FReply               HandleGenerateMaterialsClicked();
     FReply               GenerateWetMaterials();
@@ -62,7 +61,6 @@ class FWCAEditor : public FAssetEditorToolkit
     bool                 CanBakeGPUMaps() const;
     bool                 CanBakeWetnessProfileMaps() const;
     bool                 CanBakeWrinkleMaps() const;
-    bool                 CanBakeTransparencyMaps() const;
     bool                 ResolveIssuesAndSave(FString& OutFailure);
     void                 RefreshAssetStateAndEditor(
         bool bRunDeepValidation = false,

@@ -43,7 +43,6 @@ bool FWetnessProfileParameters::MigrateLegacyAbsorbedWetness()
 
     if (TransparencyStrength >= 0.0f)
     {
-        AbsorbedWetness.TransparencyStrength = TransparencyStrength;
         TransparencyStrength = -1.0f;
         bMigrated = true;
     }

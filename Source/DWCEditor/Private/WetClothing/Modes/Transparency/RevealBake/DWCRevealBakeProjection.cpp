@@ -470,7 +470,9 @@ bool FDWCRevealBakeRayProjector::ProjectSamplesToSources(
         const FVector RayDirection = -Sample.Normal.GetSafeNormal();
         const FVector RayOrigin = Sample.Position + RayDirection * Settings.RayStartOffset;
 
-        TArray<FCandidateHit> CandidateHits;
+        // Most rays resolve to only a handful of BVH candidates. Keeping this inline avoids
+        // millions of transient heap allocations for a high-resolution transparency map.
+        TArray<FCandidateHit, TInlineAllocator<32>> CandidateHits;
         ProjectionBvh.QueryRay(RayOrigin, RayDirection, MaxRevealDistance, CandidateTriangleRefIndices);
         for (const int32 TriangleRefIndex : CandidateTriangleRefIndices)
         {

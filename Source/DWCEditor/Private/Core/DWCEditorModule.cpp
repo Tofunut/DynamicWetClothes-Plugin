@@ -1,11 +1,8 @@
 #include "Core/DWCEditorStyle.h"
 #include "Components/DynamicWetClothesComponentCustomization.h"
-#include "Editor.h"
 #include "HAL/IConsoleManager.h"
-#include "Misc/MessageDialog.h"
 #include "Modules/ModuleManager.h"
 #include "PropertyEditorModule.h"
-#include "Subsystems/EditorAssetSubsystem.h"
 #include "WetClothing/DerivedAssets/Materials/WCAMaterialGenerator.h"
 
 class FDWCEditorModule : public IModuleInterface
@@ -21,11 +18,6 @@ class FDWCEditorModule : public IModuleInterface
             FOnGetDetailCustomizationInstance::CreateStatic(&FDynamicWetClothesComponentCustomization::MakeInstance));
         PropertyEditorModule.NotifyCustomizationModuleChanged();
 
-        RepairApplyWetnessFunctionCommand = IConsoleManager::Get().RegisterConsoleCommand(
-            TEXT("DWC.RepairApplyWetnessFunction"),
-            TEXT("Validates and saves MF_DWC_ApplyWetness_CPU/GPU for the current DWCEditor contract."),
-            FConsoleCommandDelegate::CreateRaw(this, &FDWCEditorModule::RepairApplyWetnessFunction),
-            ECVF_Default);
         ValidateApplyWetnessFunctionCommand = IConsoleManager::Get().RegisterConsoleCommand(
             TEXT("DWC.ValidateApplyWetnessFunction"),
             TEXT("Validates the fixed MF_DWC_ApplyWetness_CPU/GPU assets without modifying them."),
@@ -35,11 +27,6 @@ class FDWCEditorModule : public IModuleInterface
 
     virtual void ShutdownModule() override
     {
-        if (RepairApplyWetnessFunctionCommand != nullptr)
-        {
-            IConsoleManager::Get().UnregisterConsoleObject(RepairApplyWetnessFunctionCommand);
-            RepairApplyWetnessFunctionCommand = nullptr;
-        }
         if (ValidateApplyWetnessFunctionCommand != nullptr)
         {
             IConsoleManager::Get().UnregisterConsoleObject(ValidateApplyWetnessFunctionCommand);
@@ -69,57 +56,6 @@ class FDWCEditorModule : public IModuleInterface
         UE_LOG(LogTemp, Display, TEXT("MF_DWC_ApplyWetness_CPU/GPU satisfy the fixed DWC material-function contract."));
     }
 
-    void RepairApplyWetnessFunction()
-    {
-        static const FString ApplyWetnessCPUAssetPath = TEXT("/DynamicWetClothes/Materials/Functions/MF_DWC_ApplyWetness_CPU");
-        static const FString ApplyWetnessGPUAssetPath = TEXT("/DynamicWetClothes/Materials/Functions/MF_DWC_ApplyWetness_GPU");
-
-        UE_LOG(LogTemp, Display, TEXT("DWC material function repair started."));
-
-        FString ErrorMessage;
-        if (!FWCAMaterialGenerator::RepairOrUpgradeSharedApplyWetnessFunction(ErrorMessage))
-        {
-            UE_LOG(LogTemp, Error, TEXT("MF_DWC_ApplyWetness_CPU/GPU repair/upgrade failed:\n%s"), *ErrorMessage);
-            if (!FApp::IsUnattended())
-            {
-                FMessageDialog::Open(
-                    EAppMsgCategory::Error,
-                    EAppMsgType::Ok,
-                    FText::FromString(TEXT("MF_DWC_ApplyWetness_CPU/GPU repair/upgrade failed.\n\n") + ErrorMessage));
-            }
-            return;
-        }
-
-        UEditorAssetSubsystem* AssetSubsystem = GEditor != nullptr
-                                                    ? GEditor->GetEditorSubsystem<UEditorAssetSubsystem>()
-                                                    : nullptr;
-        if (AssetSubsystem == nullptr ||
-            !AssetSubsystem->SaveAsset(ApplyWetnessCPUAssetPath, false) ||
-            !AssetSubsystem->SaveAsset(ApplyWetnessGPUAssetPath, false))
-        {
-            ErrorMessage = FString::Printf(
-                TEXT("DWC material functions validated but one or more assets could not be saved. Check source-control checkout and file permissions. CPU='%s' GPU='%s'."),
-                *ApplyWetnessCPUAssetPath,
-                *ApplyWetnessGPUAssetPath);
-            UE_LOG(LogTemp, Error, TEXT("%s"), *ErrorMessage);
-            if (!FApp::IsUnattended())
-            {
-                FMessageDialog::Open(EAppMsgCategory::Error, EAppMsgType::Ok, FText::FromString(ErrorMessage));
-            }
-            return;
-        }
-
-        UE_LOG(LogTemp, Display, TEXT("MF_DWC_ApplyWetness_CPU/GPU were validated and saved as the fixed material functions."));
-        if (!FApp::IsUnattended())
-        {
-            FMessageDialog::Open(
-                EAppMsgCategory::Success,
-                EAppMsgType::Ok,
-                FText::FromString(TEXT("MF_DWC_ApplyWetness_CPU/GPU were validated and saved.")));
-        }
-    }
-
-    IConsoleObject*               RepairApplyWetnessFunctionCommand = nullptr;
     IConsoleObject*               ValidateApplyWetnessFunctionCommand = nullptr;
 };
 

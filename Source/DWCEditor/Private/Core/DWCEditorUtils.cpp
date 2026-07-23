@@ -144,15 +144,6 @@ bool DWCEditorUtils::SaveAsset(UObject* Asset)
             }
         }
 
-        for (const FWetClothingBakedTransparencyRevealLayer& RevealLayer :
-             WetClothingAsset->Authored.TransparencyData.BakedRevealLayers)
-        {
-            AddDirtyGeneratedPackage(RevealLayer.LookupMap.Get());
-            AddDirtyGeneratedPackage(RevealLayer.ColorMap.Get());
-            AddDirtyGeneratedPackage(RevealLayer.MaskMap.Get());
-            AddDirtyGeneratedPackage(RevealLayer.ConfidenceMap.Get());
-            AddDirtyGeneratedPackage(RevealLayer.RevealMaterial.Get());
-        }
     }
     const double PackageCollectionEndTime = FPlatformTime::Seconds();
 

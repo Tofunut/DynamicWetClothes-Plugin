@@ -14,6 +14,7 @@
 #include "WetClothing/Modes/Transparency/AutoMap/DWCTransparencyAutoMapGenerator.h"
 #include "WetClothing/DerivedAssets/Textures/Transparency/DWCTransparencyEditedMapBaker.h"
 #include "WetClothing/DerivedAssets/Textures/Transparency/DWCTransparencyAssetBakeService.h"
+#include "WetClothing/Modes/DWCEditorPreviewSlotUtils.h"
 #include "WetClothing/Modes/Transparency/Viewport/SWetClothingTransparencyPreviewViewport.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SCheckBox.h"
@@ -35,6 +36,32 @@
 
 namespace
 {
+int32 ResolveTransparencyDataUVChannel(const UWetClothingAsset* Asset)
+{
+    return Asset != nullptr && Asset->HasValidDataUVForLOD(0)
+        ? Asset->GetDWCDataUVChannelIndex()
+        : INDEX_NONE;
+}
+
+const FWetClothingBakedTransparencyMap* FindExactBakedTransparencyMap(
+    const UWetClothingAsset* Asset,
+    const FWetClothingTransparencyLayerData* Layer)
+{
+    if (Asset == nullptr || Layer == nullptr)
+    {
+        return nullptr;
+    }
+    const int32 LODIndex = Asset->GetSimulationLODIndex();
+    return Layer->BakedMaps.FindByPredicate(
+        [Layer, LODIndex](const FWetClothingBakedTransparencyMap& Candidate)
+        {
+            return Candidate.MaterialSlotIndex == Layer->TargetSurface.OuterMaterialSlotIndex &&
+                   Candidate.UVChannelIndex == Layer->TargetSurface.OuterUVChannel &&
+                   Candidate.LODIndex == LODIndex &&
+                   Candidate.TransparencyMap != nullptr;
+        });
+}
+
 TSharedRef<SWidget> BuildLabeledControl(const FText& Label, const TSharedRef<SWidget>& Control)
 {
     return SNew(SVerticalBox)
@@ -128,8 +155,20 @@ bool SWetClothingTransparencyBakePanel::RefreshOptionItems()
     }
 
     const int32 MaterialSlotCount = Mesh != nullptr ? Mesh->GetMaterials().Num() : 0;
+    uint32 DWCReadySignature = 0;
+    if (Asset != nullptr && Mesh != nullptr)
+    {
+        for (int32 SlotIndex = 0; SlotIndex < MaterialSlotCount; ++SlotIndex)
+        {
+            // Refresh target choices when Generate/Refresh DWC Materials replaces a CPU preview instance.
+            DWCReadySignature = HashCombine(
+                DWCReadySignature,
+                GetTypeHash(DWCEditorPreviewSlotUtils::ResolveCpuPreviewMaterial(Asset, SlotIndex)));
+        }
+    }
     const bool bMeshOptionsChanged = OptionItemsTargetMesh.Get() != Mesh ||
-        OptionItemsMaterialSlotCount != MaterialSlotCount || OptionItemsUVChannelCount != NumUVChannels;
+        OptionItemsMaterialSlotCount != MaterialSlotCount || OptionItemsUVChannelCount != NumUVChannels ||
+        OptionItemsDWCReadySignature != DWCReadySignature;
     if (!bMeshOptionsChanged)
     {
         return false;
@@ -138,7 +177,9 @@ bool SWetClothingTransparencyBakePanel::RefreshOptionItems()
     OptionItemsTargetMesh = const_cast<USkeletalMesh*>(Mesh);
     OptionItemsMaterialSlotCount = MaterialSlotCount;
     OptionItemsUVChannelCount = NumUVChannels;
+    OptionItemsDWCReadySignature = DWCReadySignature;
     MaterialSlotItems.Reset();
+    TargetMaterialSlotItems.Reset();
     UVChannelItems.Reset();
     if (Mesh != nullptr)
     {
@@ -149,6 +190,10 @@ bool SWetClothingTransparencyBakePanel::RefreshOptionItems()
             Item->SlotIndex = SlotIndex;
             Item->SlotName = Materials[SlotIndex].MaterialSlotName;
             MaterialSlotItems.Add(Item);
+            if (DWCEditorPreviewSlotUtils::IsCpuPreviewReady(Asset, SlotIndex))
+            {
+                TargetMaterialSlotItems.Add(Item);
+            }
         }
     }
     for (int32 UVChannelIndex = 0; UVChannelIndex < NumUVChannels; ++UVChannelIndex)
@@ -162,8 +207,32 @@ void SWetClothingTransparencyBakePanel::RefreshLayerItems()
 {
     UWetClothingAsset* Asset = WetClothingAsset.Get();
     bool bMigratedLayerIdentity = false;
+    bool bMigratedDataUV = false;
+    bool bMigratedDataVersion = false;
+    bool bInvalidatedAutoBakeForDataVersion = false;
     if (Asset != nullptr)
     {
+        if (Asset->Authored.TransparencyData.DataVersion != FWetClothingTransparencyData::CurrentDataVersion)
+        {
+            const int32 PreviousDataVersion = Asset->Authored.TransparencyData.DataVersion;
+            Asset->Authored.TransparencyData.DataVersion = FWetClothingTransparencyData::CurrentDataVersion;
+            for (FWetClothingTransparencyLayerData& Layer : Asset->Authored.TransparencyData.TransparencyLayers)
+            {
+                if (PreviousDataVersion == 5)
+                {
+                    // Version 6 only changes how the existing wrinkle mask is
+                    // composited into final alpha. Preserve the expensive ray bake.
+                    Layer.MarkFinalBakeStale();
+                }
+                else
+                {
+                    Layer.MarkAutoBakeStale();
+                    bInvalidatedAutoBakeForDataVersion = true;
+                }
+            }
+            bMigratedDataVersion = true;
+        }
+        const int32 DataUVChannel = ResolveTransparencyDataUVChannel(Asset);
         for (FWetClothingTransparencyLayerData& Layer : Asset->Authored.TransparencyData.TransparencyLayers)
         {
             if (!Layer.LayerGuid.IsValid())
@@ -171,11 +240,26 @@ void SWetClothingTransparencyBakePanel::RefreshLayerItems()
                 Layer.LayerGuid = FGuid::NewGuid();
                 bMigratedLayerIdentity = true;
             }
+            if (DataUVChannel != INDEX_NONE && Layer.TargetSurface.OuterUVChannel != DataUVChannel)
+            {
+                Layer.TargetSurface.OuterUVChannel = DataUVChannel;
+                for (FDWCTransparencyBrushStroke& Stroke : Layer.EditableStrokes)
+                {
+                    Stroke.UVChannelIndex = DataUVChannel;
+                }
+                Layer.MarkAutoBakeStale();
+                bMigratedDataUV = true;
+            }
         }
-        if (bMigratedLayerIdentity)
+        if (bMigratedLayerIdentity || bMigratedDataUV || bMigratedDataVersion)
         {
             Asset->Authored.TransparencyData.DataVersion = FWetClothingTransparencyData::CurrentDataVersion;
             Asset->MarkPackageDirty();
+            if (bMigratedDataUV || bInvalidatedAutoBakeForDataVersion)
+            {
+                // The old intermediate buffer belongs to a different texture-space key.
+                AutoBakeResults.Reset();
+            }
         }
     }
 
@@ -242,6 +326,17 @@ void SWetClothingTransparencyBakePanel::RefreshFromAsset()
         StatusMessage = TEXT("Add a Transparency Target Part for a target material slot.");
         PanelStatus = EDWCTransparencyPanelStatus::Info;
     }
+    else if (!HasUsableTransparencyDataUV())
+    {
+        StatusMessage = TEXT("Generate the DWC Data UV before configuring Transparency Target Parts.");
+        PanelStatus = EDWCTransparencyPanelStatus::Warning;
+    }
+    else if (Layer->SourceType == EDWCTransparencySourceType::SameMeshMaterialSlots &&
+        !DWCEditorPreviewSlotUtils::IsCpuPreviewReady(Asset, Layer->TargetSurface.OuterMaterialSlotIndex))
+    {
+        StatusMessage = TEXT("The selected Transparency Target Part is not DWC-ready. Enable the slot and run Generate Materials before editing or baking transparency.");
+        PanelStatus = EDWCTransparencyPanelStatus::Warning;
+    }
     else if (Layer->SourceType == EDWCTransparencySourceType::SameMeshMaterialSlots)
     {
         TArray<FString> Errors;
@@ -258,6 +353,22 @@ void SWetClothingTransparencyBakePanel::RefreshFromAsset()
                 Result.OuterSampleCount, Result.ValidHitCount, Result.NoHitCount, Result.OverlappedUVPixelCount);
             PanelStatus = Result.OverlappedUVPixelCount > 0 ? EDWCTransparencyPanelStatus::Warning : EDWCTransparencyPanelStatus::Ready;
         }
+        else if (const FWetClothingBakedTransparencyMap* BakedMap =
+                     FindExactBakedTransparencyMap(Asset, Layer))
+        {
+            const bool bFinalBakeCurrent =
+                BakedMap->BakeGuid.IsValid() && !BakedMap->BuildSignature.IsEmpty();
+            StatusMessage = bFinalBakeCurrent
+                ? FString::Printf(
+                    TEXT("Baked map ready for inspection: %s. Generate Transparency Map to resume brush editing."),
+                    *GetNameSafe(BakedMap->TransparencyMap))
+                : FString::Printf(
+                    TEXT("A stale baked map is available for inspection: %s. Generate Transparency Map and rebake to update it."),
+                    *GetNameSafe(BakedMap->TransparencyMap));
+            PanelStatus = bFinalBakeCurrent
+                ? EDWCTransparencyPanelStatus::Ready
+                : EDWCTransparencyPanelStatus::Warning;
+        }
         else
         {
             StatusMessage = TEXT("Ready for automatic transparency generation.");
@@ -268,9 +379,8 @@ void SWetClothingTransparencyBakePanel::RefreshFromAsset()
     {
         StatusMessage = Asset->Authored.TransparencyData.SourceBlueprintClass.IsNull()
             ? TEXT("Assign a Source Blueprint containing a DWC Bake Component.")
-            : TEXT("Ready to generate from other Skeletal Mesh Components.");
-        PanelStatus = Asset->Authored.TransparencyData.SourceBlueprintClass.IsNull()
-            ? EDWCTransparencyPanelStatus::Warning : EDWCTransparencyPanelStatus::Ready;
+            : TEXT("Packed Transparency Map generation for Other Skeletal Mesh Components is not implemented yet.");
+        PanelStatus = EDWCTransparencyPanelStatus::Warning;
     }
     else
     {
@@ -283,39 +393,6 @@ void SWetClothingTransparencyBakePanel::RefreshFromAsset()
     {
         RebuildEditorLayout();
     }
-}
-
-bool SWetClothingTransparencyBakePanel::HasPendingTransparencySetup(FString* OutSummary) const
-{
-    const FWetClothingTransparencyLayerData* Layer = GetSelectedLayer();
-    if (Layer == nullptr || Layer->SourceType != EDWCTransparencySourceType::OtherSkeletalMeshComponents)
-    {
-        return false;
-    }
-    return FDWCTransparencyAssetBakeService::HasPendingTransparencySetup(WetClothingAsset.Get(), OutSummary);
-}
-
-bool SWetClothingTransparencyBakePanel::BakeTransparencyRevealAssets(FString& OutSummary, bool* OutHadWarnings)
-{
-    const FWetClothingTransparencyLayerData* Layer = GetSelectedLayer();
-    if (Layer == nullptr || Layer->SourceType != EDWCTransparencySourceType::OtherSkeletalMeshComponents)
-    {
-        OutSummary = TEXT("Automatic generation for this Inner Source Type is not implemented yet.");
-        return false;
-    }
-    const bool bSucceeded = FDWCTransparencyAssetBakeService::BakeTransparencyRevealAssets(WetClothingAsset.Get(), OutSummary, OutHadWarnings);
-    StatusMessage = OutSummary;
-    if (DetailsView.IsValid())
-    {
-        DetailsView->ForceRefresh();
-    }
-    RefreshFromAsset();
-    RebuildEditorLayout();
-    if (PreviewViewport.IsValid())
-    {
-        PreviewViewport->RefreshPreview();
-    }
-    return bSucceeded;
 }
 
 bool SWetClothingTransparencyBakePanel::SaveTransparencySetupAssets() const
@@ -363,6 +440,23 @@ FReply SWetClothingTransparencyBakePanel::HandleGenerateTransparencyMapClicked()
     FWetClothingTransparencyLayerData* Layer = GetSelectedLayer();
     if (Asset != nullptr && Layer != nullptr && Layer->SourceType == EDWCTransparencySourceType::SameMeshMaterialSlots)
     {
+        if (!HasUsableTransparencyDataUV())
+        {
+            const FString Message = TEXT("Generate the DWC Data UV before generating a Transparency Map.");
+            StatusMessage = Message;
+            PanelStatus = EDWCTransparencyPanelStatus::Warning;
+            FMessageDialog::Open(EAppMsgType::Ok, FText::FromString(Message));
+            return FReply::Handled();
+        }
+        if (!DWCEditorPreviewSlotUtils::IsCpuPreviewReady(Asset, Layer->TargetSurface.OuterMaterialSlotIndex))
+        {
+            const FString Message = TEXT("The selected Transparency Target Part is not DWC-ready. Enable the slot and run Generate Materials before generating a Transparency Map.");
+            StatusMessage = Message;
+            PanelStatus = EDWCTransparencyPanelStatus::Warning;
+            FMessageDialog::Open(EAppMsgType::Ok, FText::FromString(Message));
+            return FReply::Handled();
+        }
+
         TSharedPtr<FDWCTransparencyAutoBakeResult> Result = MakeShared<FDWCTransparencyAutoBakeResult>();
         FString Summary;
         TArray<FString> Warnings;
@@ -389,22 +483,6 @@ FReply SWetClothingTransparencyBakePanel::HandleGenerateTransparencyMapClicked()
         AutoBakeResults.Reset();
         AutoBakeResults.Add(Layer->LayerGuid, Result);
 
-        if (Layer->TargetSurface.OuterUVChannel != 0)
-        {
-            Warnings.Add(TEXT("The current 3D transparency preview material samples UV channel 0. The generated result was kept, but it will not be applied to the mesh preview until the shared Transparency UV selector is implemented."));
-        }
-        const FWetClothingGeneratedWetMaterialOverride* WetOverride =
-            Asset->Derived.Inline.GeneratedWetMaterialOverrides.FindByPredicate(
-                [Layer](const FWetClothingGeneratedWetMaterialOverride& Candidate)
-                {
-                    return Candidate.MaterialSlotIndex == Layer->TargetSurface.OuterMaterialSlotIndex &&
-                           Candidate.CPUMaterialInstance != nullptr;
-                });
-        if (WetOverride == nullptr)
-        {
-            Warnings.Add(TEXT("The selected Target Part has no generated DWC wet material override. Generate or refresh wet materials before expecting the Final mesh preview."));
-        }
-
         for (const FDWCTransparencySourceHitStats& Stats : Result->SourceStats)
         {
             Summary += FString::Printf(TEXT("\n- Priority %d: %s (Slot %d) -> %d hit(s)"), Stats.PriorityIndex,
@@ -420,15 +498,12 @@ FReply SWetClothingTransparencyBakePanel::HandleGenerateTransparencyMapClicked()
         return FReply::Handled();
     }
 
-    FString Summary;
-    bool bHadWarnings = false;
-    if (!BakeTransparencyRevealAssets(Summary, &bHadWarnings))
-    {
-        FMessageDialog::Open(EAppMsgType::Ok, FText::FromString(Summary));
-        return FReply::Handled();
-    }
-    SaveTransparencySetupAssets();
-    FMessageDialog::Open(bHadWarnings ? EAppMsgCategory::Warning : EAppMsgCategory::Success, EAppMsgType::Ok, FText::FromString(Summary));
+    const FString Message =
+        TEXT("Packed Transparency Map generation for Other Skeletal Mesh Components is not implemented yet. "
+             "The legacy reveal-map/material fallback has been removed.");
+    StatusMessage = Message;
+    PanelStatus = EDWCTransparencyPanelStatus::Warning;
+    FMessageDialog::Open(EAppMsgCategory::Warning, EAppMsgType::Ok, FText::FromString(Message));
     return FReply::Handled();
 }
 
@@ -481,13 +556,22 @@ FReply SWetClothingTransparencyBakePanel::HandleBakeEditedTransparencyMapClicked
         StoredResult->Get()->Resolution.X,
         BakeResult.AppliedStrokeCount,
         BakeResult.AppliedSampleCount,
-        *GetNameSafe(BakeResult.TransparencyMap));
+        *GetPathNameSafe(BakeResult.TransparencyMap));
     bool bHadWarnings = BakeResult.IgnoredNoHitOverridePixelCount > 0;
-    if (bHadWarnings)
+    if (BakeResult.IgnoredNoHitOverridePixelCount > 0)
     {
         Summary += FString::Printf(
             TEXT("\n\nWarning:\n%d manually edited pixel(s) had no valid inner-surface color and were kept at Alpha 0."),
             BakeResult.IgnoredNoHitOverridePixelCount);
+    }
+    if (!BakeResult.WarningMessage.IsEmpty())
+    {
+        bHadWarnings = true;
+        Summary += TEXT("\n\nWarning:\n") + BakeResult.WarningMessage;
+    }
+    else if (BakeResult.bAppliedWrinkleSuppression)
+    {
+        Summary += TEXT("\nWrinkle suppression was baked into the Transparency Map alpha.");
     }
 
     if (!SaveTransparencySetupAssets())
@@ -584,6 +668,10 @@ void SWetClothingTransparencyBakePanel::HandleTransparencyPreviewStrengthCommitt
         const FScopedTransaction Transaction(LOCTEXT("SetTransparencyPreviewStrength", "Set Transparency Preview Strength"));
         Asset->Modify();
         Asset->Authored.TransparencyData.TransparencyPreviewStrength = TransparencyPreviewStrength;
+        for (FWetClothingTransparencyLayerData& Layer : Asset->Authored.TransparencyData.TransparencyLayers)
+        {
+            Layer.MarkFinalBakeStale();
+        }
         Asset->MarkPackageDirty();
     }
     if (PreviewViewport.IsValid())
@@ -608,6 +696,10 @@ void SWetClothingTransparencyBakePanel::HandleWrinkleSuppressionStrengthCommitte
         const FScopedTransaction Transaction(LOCTEXT("SetWrinkleSuppressionStrength", "Set Wrinkle Suppression Strength"));
         Asset->Modify();
         Asset->Authored.TransparencyData.WrinkleSuppressionStrength = WrinkleSuppressionStrength;
+        for (FWetClothingTransparencyLayerData& Layer : Asset->Authored.TransparencyData.TransparencyLayers)
+        {
+            Layer.MarkFinalBakeStale();
+        }
         Asset->MarkPackageDirty();
     }
     if (PreviewViewport.IsValid())
@@ -825,32 +917,28 @@ void SWetClothingTransparencyBakePanel::HandlePreviewModeChanged(ECheckBoxState 
 {
     if (State == ECheckBoxState::Checked && PreviewViewport.IsValid()) PreviewViewport->SetPreviewMode(Mode);
 }
-ECheckBoxState SWetClothingTransparencyBakePanel::IsRevealMapTypeChecked(EDWCTransparencyRevealMapType Type) const
-{
-    return SelectedRevealMapType == Type ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
-}
-void SWetClothingTransparencyBakePanel::HandleRevealMapTypeChanged(ECheckBoxState State, EDWCTransparencyRevealMapType Type)
-{
-    if (State == ECheckBoxState::Checked) { SelectedRevealMapType = Type; RebuildEditorLayout(); }
-}
 
 bool SWetClothingTransparencyBakePanel::IsGenerateEnabled() const
 {
     const UWetClothingAsset* Asset = WetClothingAsset.Get();
     const FWetClothingTransparencyLayerData* Layer = GetSelectedLayer();
-    if (Asset == nullptr || Asset->GetDWCSkeletalMesh() == nullptr || Layer == nullptr) return false;
+    if (Asset == nullptr || Asset->GetDWCSkeletalMesh() == nullptr || Layer == nullptr || !HasUsableTransparencyDataUV()) return false;
     if (Layer->SourceType == EDWCTransparencySourceType::SameMeshMaterialSlots)
     {
         TArray<FString> Errors;
-        return FWetClothingTransparencyDataHelpers::ValidateTransparencyLayer(Asset->GetDWCSkeletalMesh(), *Layer, Errors);
+        return Layer->TargetSurface.OuterUVChannel == GetTransparencyDataUVChannel() &&
+            DWCEditorPreviewSlotUtils::IsCpuPreviewReady(Asset, Layer->TargetSurface.OuterMaterialSlotIndex) &&
+            FWetClothingTransparencyDataHelpers::ValidateTransparencyLayer(Asset->GetDWCSkeletalMesh(), *Layer, Errors);
     }
-    return Layer->SourceType == EDWCTransparencySourceType::OtherSkeletalMeshComponents &&
-        !Asset->Authored.TransparencyData.SourceBlueprintClass.IsNull();
+    return false;
 }
 bool SWetClothingTransparencyBakePanel::IsBakeEditedEnabled() const
 {
+    const UWetClothingAsset* Asset = WetClothingAsset.Get();
     const FWetClothingTransparencyLayerData* Layer = GetSelectedLayer();
-    if (Layer == nullptr || Layer->SourceType != EDWCTransparencySourceType::SameMeshMaterialSlots)
+    if (Asset == nullptr || Layer == nullptr || Layer->SourceType != EDWCTransparencySourceType::SameMeshMaterialSlots ||
+        !HasUsableTransparencyDataUV() || Layer->TargetSurface.OuterUVChannel != GetTransparencyDataUVChannel() ||
+        !DWCEditorPreviewSlotUtils::IsCpuPreviewReady(Asset, Layer->TargetSurface.OuterMaterialSlotIndex))
     {
         return false;
     }
@@ -918,6 +1006,21 @@ SWetClothingTransparencyBakePanel::FMaterialSlotItemPtr SWetClothingTransparency
     const FMaterialSlotItemPtr* Match = MaterialSlotItems.FindByPredicate([SlotIndex](const FMaterialSlotItemPtr& Item) { return Item.IsValid() && Item->SlotIndex == SlotIndex; });
     return Match != nullptr ? *Match : nullptr;
 }
+SWetClothingTransparencyBakePanel::FMaterialSlotItemPtr SWetClothingTransparencyBakePanel::FindTargetMaterialSlotItem(int32 SlotIndex) const
+{
+    const FMaterialSlotItemPtr* Match = TargetMaterialSlotItems.FindByPredicate(
+        [SlotIndex](const FMaterialSlotItemPtr& Item) { return Item.IsValid() && Item->SlotIndex == SlotIndex; });
+    return Match != nullptr ? *Match : nullptr;
+}
+int32 SWetClothingTransparencyBakePanel::GetTransparencyDataUVChannel() const
+{
+    return ResolveTransparencyDataUVChannel(WetClothingAsset.Get());
+}
+
+bool SWetClothingTransparencyBakePanel::HasUsableTransparencyDataUV() const
+{
+    return GetTransparencyDataUVChannel() != INDEX_NONE;
+}
 TSharedPtr<int32> SWetClothingTransparencyBakePanel::FindUVChannelItem(int32 Index) const
 {
     const TSharedPtr<int32>* Match = UVChannelItems.FindByPredicate([Index](const TSharedPtr<int32>& Item) { return Item.IsValid() && *Item == Index; });
@@ -970,6 +1073,38 @@ void SWetClothingTransparencyBakePanel::EditGlobalSettings(const FText& Text, TF
     RefreshFromAsset();
 }
 
+void SWetClothingTransparencyBakePanel::EditFinalBakeSettings(
+    const FText& Text,
+    TFunctionRef<void(FWetClothingTransparencyData&)> Edit,
+    const bool bRefreshSuppression)
+{
+    UWetClothingAsset* Asset = WetClothingAsset.Get();
+    if (Asset == nullptr)
+    {
+        return;
+    }
+    const FScopedTransaction Transaction(Text);
+    Asset->Modify();
+    Edit(Asset->Authored.TransparencyData);
+    for (FWetClothingTransparencyLayerData& Layer : Asset->Authored.TransparencyData.TransparencyLayers)
+    {
+        Layer.MarkFinalBakeStale();
+    }
+    Asset->MarkPackageDirty();
+    if (PreviewViewport.IsValid())
+    {
+        if (bRefreshSuppression)
+        {
+            PreviewViewport->RefreshWrinkleSuppressionPreview();
+        }
+        else
+        {
+            PreviewViewport->RefreshManualPreviewFromStrokes();
+        }
+    }
+    RefreshFromAsset();
+}
+
 TSharedRef<ITableRow> SWetClothingTransparencyBakePanel::GenerateLayerRow(FLayerItemPtr Item, const TSharedRef<STableViewBase>& Owner)
 {
     return SNew(STableRow<FLayerItemPtr>, Owner)
@@ -1005,12 +1140,26 @@ FReply SWetClothingTransparencyBakePanel::HandleAddLayerClicked()
 {
     UWetClothingAsset* Asset = WetClothingAsset.Get();
     if (Asset == nullptr || Asset->GetDWCSkeletalMesh() == nullptr) return FReply::Handled();
-    int32 NewSlot = INDEX_NONE;
-    for (const FMaterialSlotItemPtr& Item : MaterialSlotItems)
+    const int32 DataUVChannel = GetTransparencyDataUVChannel();
+    if (DataUVChannel == INDEX_NONE)
     {
-        if (Item.IsValid() && Asset->Authored.TransparencyData.FindTransparencyLayer(Item->SlotIndex, 0) == nullptr) { NewSlot = Item->SlotIndex; break; }
+        StatusMessage = TEXT("Generate the DWC Data UV before adding a Transparency Target Part.");
+        PanelStatus = EDWCTransparencyPanelStatus::Warning;
+        return FReply::Handled();
     }
-    if (NewSlot == INDEX_NONE) { StatusMessage = TEXT("Every Material Slot already has a UV 0 Transparency Target Part."); return FReply::Handled(); }
+    int32 NewSlot = INDEX_NONE;
+    for (const FMaterialSlotItemPtr& Item : TargetMaterialSlotItems)
+    {
+        if (Item.IsValid() && Asset->Authored.TransparencyData.FindTransparencyLayer(Item->SlotIndex, DataUVChannel) == nullptr) { NewSlot = Item->SlotIndex; break; }
+    }
+    if (NewSlot == INDEX_NONE)
+    {
+        StatusMessage = TargetMaterialSlotItems.IsEmpty()
+            ? TEXT("No DWC-ready material slots are available. Enable a wettable slot and run Generate Materials first.")
+            : TEXT("Every DWC-ready Material Slot already has a UV 0 Transparency Target Part.");
+        PanelStatus = EDWCTransparencyPanelStatus::Warning;
+        return FReply::Handled();
+    }
     const FScopedTransaction Transaction(LOCTEXT("AddTransparencyLayer", "Add Transparency Target Part"));
     Asset->Modify();
     FWetClothingTransparencyLayerData& Layer = Asset->Authored.TransparencyData.TransparencyLayers.AddDefaulted_GetRef();
@@ -1018,6 +1167,7 @@ FReply SWetClothingTransparencyBakePanel::HandleAddLayerClicked()
     Layer.LayerGuid = FGuid::NewGuid();
     Layer.TargetSurface.OuterMaterialSlotIndex = NewSlot;
     Layer.TargetSurface.OuterMaterialSlotName = Asset->GetDWCSkeletalMesh()->GetMaterials()[NewSlot].MaterialSlotName;
+    Layer.TargetSurface.OuterUVChannel = DataUVChannel;
     SelectedLayerGuid = Layer.LayerGuid;
     Asset->MarkPackageDirty();
     RefreshFromAsset();
@@ -1063,23 +1213,11 @@ void SWetClothingTransparencyBakePanel::HandleOuterMaterialSlotChanged(FMaterial
 {
     if (!Item.IsValid()) return;
     const UWetClothingAsset* Asset = WetClothingAsset.Get();
-    const FWetClothingTransparencyLayerData* Duplicate = Asset != nullptr ? Asset->Authored.TransparencyData.FindTransparencyLayer(Item->SlotIndex, GetSelectedLayer() ? GetSelectedLayer()->TargetSurface.OuterUVChannel : 0) : nullptr;
+    const FWetClothingTransparencyLayerData* Duplicate = Asset != nullptr
+        ? Asset->Authored.TransparencyData.FindTransparencyLayer(Item->SlotIndex, GetTransparencyDataUVChannel())
+        : nullptr;
     if (Duplicate != nullptr && Duplicate->LayerGuid != SelectedLayerGuid) { StatusMessage = TEXT("A Transparency Target Part already uses this Material Slot and UV Channel."); return; }
     EditSelectedLayer(LOCTEXT("SetTransparencyOuterSlot", "Set Transparency Outer Material Slot"), [Item](auto& Layer) { Layer.TargetSurface.OuterMaterialSlotIndex = Item->SlotIndex; Layer.TargetSurface.OuterMaterialSlotName = Item->SlotName; }, false);
-}
-void SWetClothingTransparencyBakePanel::HandleOuterUVChannelChanged(TSharedPtr<int32> Item, ESelectInfo::Type)
-{
-    if (!Item.IsValid()) return;
-    const UWetClothingAsset* Asset = WetClothingAsset.Get();
-    const FWetClothingTransparencyLayerData* SelectedLayer = GetSelectedLayer();
-    const FWetClothingTransparencyLayerData* Duplicate = Asset != nullptr && SelectedLayer != nullptr
-        ? Asset->Authored.TransparencyData.FindTransparencyLayer(SelectedLayer->TargetSurface.OuterMaterialSlotIndex, *Item) : nullptr;
-    if (Duplicate != nullptr && Duplicate->LayerGuid != SelectedLayerGuid)
-    {
-        StatusMessage = TEXT("A Transparency Target Part already uses this Material Slot and UV Channel.");
-        return;
-    }
-    EditSelectedLayer(LOCTEXT("SetTransparencyUV", "Set Transparency UV Channel"), [Item](auto& Layer) { Layer.TargetSurface.OuterUVChannel = *Item; for (auto& Stroke : Layer.EditableStrokes) Stroke.UVChannelIndex = *Item; }, false);
 }
 void SWetClothingTransparencyBakePanel::HandleSourceTypeChanged(TSharedPtr<EDWCTransparencySourceType> Item, ESelectInfo::Type)
 {
@@ -1193,9 +1331,17 @@ TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildTargetSurfaceSection
     TSharedRef<SVerticalBox> Box = SNew(SVerticalBox) + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,6)[FWCAEditorWidgets::BuildSectionHeader(LOCTEXT("TargetSurface", "Target Surface"))];
     if (Layer == nullptr) { Box->AddSlot().AutoHeight()[BuildEmptyAssetRow(LOCTEXT("NoSelectedLayer", "Select a Transparency Target Part."))]; return Box; }
     Box->AddSlot().AutoHeight().Padding(0,0,0,8)[BuildLabeledControl(LOCTEXT("OuterMaterialSlot", "Outer Material Slot"),
-        SNew(SComboBox<FMaterialSlotItemPtr>).OptionsSource(&MaterialSlotItems).InitiallySelectedItem(FindMaterialSlotItem(Layer->TargetSurface.OuterMaterialSlotIndex)).OnGenerateWidget(this, &SWetClothingTransparencyBakePanel::GenerateMaterialSlotComboItem).OnSelectionChanged(this, &SWetClothingTransparencyBakePanel::HandleOuterMaterialSlotChanged)[SNew(STextBlock).Text_Lambda([this](){ const auto* Selected = GetSelectedLayer(); return GetMaterialSlotLabel(Selected ? Selected->TargetSurface.OuterMaterialSlotIndex : INDEX_NONE); })])];
-    Box->AddSlot().AutoHeight().Padding(0,0,0,8)[BuildLabeledControl(LOCTEXT("TransparencyUV", "Transparency UV Channel"),
-        SNew(SComboBox<TSharedPtr<int32>>).OptionsSource(&UVChannelItems).InitiallySelectedItem(FindUVChannelItem(Layer->TargetSurface.OuterUVChannel)).OnGenerateWidget(this, &SWetClothingTransparencyBakePanel::GenerateUVChannelComboItem).OnSelectionChanged(this, &SWetClothingTransparencyBakePanel::HandleOuterUVChannelChanged)[SNew(STextBlock).Text_Lambda([this](){ const auto* Selected = GetSelectedLayer(); return FText::Format(LOCTEXT("SelectedUV", "UV {0}"), FText::AsNumber(Selected ? Selected->TargetSurface.OuterUVChannel : 0)); })])];
+        SNew(SComboBox<FMaterialSlotItemPtr>).OptionsSource(&TargetMaterialSlotItems).InitiallySelectedItem(FindTargetMaterialSlotItem(Layer->TargetSurface.OuterMaterialSlotIndex)).OnGenerateWidget(this, &SWetClothingTransparencyBakePanel::GenerateMaterialSlotComboItem).OnSelectionChanged(this, &SWetClothingTransparencyBakePanel::HandleOuterMaterialSlotChanged)[SNew(STextBlock).Text_Lambda([this](){ const auto* Selected = GetSelectedLayer(); return GetMaterialSlotLabel(Selected ? Selected->TargetSurface.OuterMaterialSlotIndex : INDEX_NONE); })])];
+    Box->AddSlot().AutoHeight().Padding(0,0,0,8)[BuildLabeledControl(LOCTEXT("TransparencyUV", "DWC Data UV"),
+        SNew(STextBlock)
+            .Text_Lambda([this]()
+            {
+                const int32 DataUVChannel = GetTransparencyDataUVChannel();
+                return DataUVChannel != INDEX_NONE
+                    ? FText::Format(LOCTEXT("SelectedDataUV", "UV {0}"), FText::AsNumber(DataUVChannel))
+                    : LOCTEXT("MissingDataUV", "Not Generated");
+            })
+            .ToolTipText(LOCTEXT("TransparencyDataUVReadOnlyTooltip", "Transparency editing, generation, baking, and runtime metadata are permanently bound to the generated DWC Data UV channel.")))];
     Box->AddSlot().AutoHeight()[BuildLabeledControl(LOCTEXT("UVAddressMode", "UV Address Mode"),
         SNew(SComboBox<TSharedPtr<EDWCTransparencyUVAddressMode>>).OptionsSource(&AddressModeItems).InitiallySelectedItem(FindAddressModeItem(Layer->TargetSurface.UVAddressMode)).OnGenerateWidget(this, &SWetClothingTransparencyBakePanel::GenerateAddressModeComboItem).OnSelectionChanged(this, &SWetClothingTransparencyBakePanel::HandleAddressModeChanged)[SNew(STextBlock).Text_Lambda([this](){ const auto* Selected = GetSelectedLayer(); return GetAddressModeLabel(Selected ? Selected->TargetSurface.UVAddressMode : EDWCTransparencyUVAddressMode::Clamp); })])];
     return Box;
@@ -1345,8 +1491,8 @@ TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildBakeSettingsSection(
     TSharedRef<SVerticalBox> Box = SNew(SVerticalBox) + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,6)[FWCAEditorWidgets::BuildSectionHeader(LOCTEXT("BakeSettings", "Bake Settings"))];
     if (Asset == nullptr) return Box;
     Box->AddSlot().AutoHeight().Padding(0,0,0,6)[BuildLabeledControl(LOCTEXT("BakeResolution", "Resolution"), SNew(SNumericEntryBox<int32>).MinValue(16).MaxValue(4096).Value(Asset->Authored.TransparencyData.TransparencyBakeResolution).OnValueCommitted_Lambda([this](int32 V, ETextCommit::Type){ EditGlobalSettings(LOCTEXT("SetTransparencyResolution", "Set Transparency Resolution"), [V](auto& D){ D.TransparencyBakeResolution = FMath::Clamp(V,16,4096); }); }))];
-    Box->AddSlot().AutoHeight().Padding(0,0,0,6)[BuildLabeledControl(LOCTEXT("PaddingPixels", "Padding Pixels"), SNew(SNumericEntryBox<int32>).MinValue(0).MaxValue(64).Value(Asset->Authored.TransparencyData.TransparencyPaddingPixels).OnValueCommitted_Lambda([this](int32 V, ETextCommit::Type){ EditGlobalSettings(LOCTEXT("SetTransparencyPadding", "Set Transparency Padding"), [V](auto& D){ D.TransparencyPaddingPixels = FMath::Clamp(V,0,64); }); }))];
-    Box->AddSlot().AutoHeight()[BuildLabeledControl(LOCTEXT("EdgeFeather", "Edge Feather Pixels"), SNew(SNumericEntryBox<float>).MinValue(0.0f).MaxValue(32.0f).Value(Asset->Authored.TransparencyData.TransparencyEdgeFeatherPixels).OnValueCommitted_Lambda([this](float V, ETextCommit::Type){ EditGlobalSettings(LOCTEXT("SetTransparencyFeather", "Set Transparency Edge Feather"), [V](auto& D){ D.TransparencyEdgeFeatherPixels = FMath::Clamp(V,0.0f,32.0f); }); }))];
+    Box->AddSlot().AutoHeight().Padding(0,0,0,6)[BuildLabeledControl(LOCTEXT("PaddingPixels", "Padding Pixels"), SNew(SNumericEntryBox<int32>).MinValue(0).MaxValue(64).Value(Asset->Authored.TransparencyData.TransparencyPaddingPixels).OnValueCommitted_Lambda([this](int32 V, ETextCommit::Type){ EditFinalBakeSettings(LOCTEXT("SetTransparencyPadding", "Set Transparency Padding"), [V](auto& D){ D.TransparencyPaddingPixels = FMath::Clamp(V,0,64); }, false); }))];
+    Box->AddSlot().AutoHeight()[BuildLabeledControl(LOCTEXT("EdgeFeather", "Edge Feather Pixels"), SNew(SNumericEntryBox<float>).MinValue(0.0f).MaxValue(32.0f).Value(Asset->Authored.TransparencyData.TransparencyEdgeFeatherPixels).OnValueCommitted_Lambda([this](float V, ETextCommit::Type){ EditFinalBakeSettings(LOCTEXT("SetTransparencyFeather", "Set Transparency Edge Feather"), [V](auto& D){ D.TransparencyEdgeFeatherPixels = FMath::Clamp(V,0.0f,32.0f); }, true); }))];
     return Box;
 }
 
@@ -1422,13 +1568,10 @@ TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildTransparencyBrushSec
 
 TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildGeneratedOutputsSection()
 {
-    const FWetClothingTransparencyLayerData* Layer = GetSelectedLayer();
     return SNew(SVerticalBox) + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,6)[FWCAEditorWidgets::BuildSectionHeader(LOCTEXT("GeneratedOutputs", "Generated Output"))]
         + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,8)[SNew(SBorder).Padding(FMargin(8,6)).BorderImage(FAppStyle::GetBrush(TEXT("Brushes.Recessed")))
             [SNew(STextBlock).AutoWrapText(true).Text(this, &SWetClothingTransparencyBakePanel::GetStatusText).ColorAndOpacity(this, &SWetClothingTransparencyBakePanel::GetStatusColor)]]
-        + SVerticalBox::Slot().AutoHeight()[Layer != nullptr && Layer->SourceType == EDWCTransparencySourceType::OtherSkeletalMeshComponents
-            ? SNew(SVerticalBox) + SVerticalBox::Slot().AutoHeight()[BuildRevealMaterialSection()] + SVerticalBox::Slot().AutoHeight()[BuildRevealTextureSection()]
-            : BuildPackedTransparencyMapSection()];
+        + SVerticalBox::Slot().AutoHeight()[BuildPackedTransparencyMapSection()];
 }
 
 TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildPackedTransparencyMapSection()
@@ -1469,10 +1612,20 @@ TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildPreviewSettingsSecti
       + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,6)[SNew(STextBlock).Text(LOCTEXT("PreviewSettings", "Preview Settings")).Font(FAppStyle::GetFontStyle(TEXT("PropertyWindow.BoldFont")))]
       + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,3)[SNew(STextBlock).Text(LOCTEXT("PreviewWetnessLabel", "Preview Wetness"))]
       + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,6)[SNew(SSlider).MinValue(0).MaxValue(100).Value(this, &SWetClothingTransparencyBakePanel::GetWetnessPreviewPercent).OnValueChanged(this, &SWetClothingTransparencyBakePanel::HandleWetnessPreviewChanged)]
-      + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,6)[BuildLabeledControl(LOCTEXT("TransparencyPreviewStrengthLabel", "Transparency Preview Strength"),
+      + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,6)[BuildLabeledControl(LOCTEXT("TransparencyPreviewStrengthLabel", "Transparency Strength"),
           SNew(SNumericEntryBox<float>).MinValue(0.0f).MaxValue(8.0f).Value(this, &SWetClothingTransparencyBakePanel::GetTransparencyPreviewStrength).OnValueCommitted(this, &SWetClothingTransparencyBakePanel::HandleTransparencyPreviewStrengthCommitted))]
       + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,6)[BuildLabeledControl(LOCTEXT("WrinkleSuppressionStrengthLabel", "Wrinkle Suppression Strength"),
           SNew(SNumericEntryBox<float>).MinValue(0.0f).MaxValue(5.0f).Value(this, &SWetClothingTransparencyBakePanel::GetWrinkleSuppressionStrength).OnValueCommitted(this, &SWetClothingTransparencyBakePanel::HandleWrinkleSuppressionStrengthCommitted))]
+      + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,6)[BuildLabeledControl(LOCTEXT("WrinkleSuppressionThresholdLabel", "Wrinkle Mask Threshold"),
+          SNew(SNumericEntryBox<float>)
+              .MinValue(0.0f).MaxValue(1.0f)
+              .Value_Lambda([this]() -> TOptional<float> { const UWetClothingAsset* A = WetClothingAsset.Get(); return A != nullptr ? TOptional<float>(A->Authored.TransparencyData.WrinkleSuppressionCoverageThreshold) : TOptional<float>(); })
+              .OnValueCommitted_Lambda([this](float V, ETextCommit::Type){ EditFinalBakeSettings(LOCTEXT("SetWrinkleSuppressionThreshold", "Set Wrinkle Coverage Threshold"), [V](auto& D){ D.WrinkleSuppressionCoverageThreshold = FMath::Clamp(V, 0.0f, 1.0f); }, true); }))]
+      + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,6)[BuildLabeledControl(LOCTEXT("WrinkleSuppressionSoftnessLabel", "Wrinkle Mask Softness"),
+          SNew(SNumericEntryBox<float>)
+              .MinValue(0.0f).MaxValue(1.0f)
+              .Value_Lambda([this]() -> TOptional<float> { const UWetClothingAsset* A = WetClothingAsset.Get(); return A != nullptr ? TOptional<float>(A->Authored.TransparencyData.WrinkleSuppressionMaskSoftness) : TOptional<float>(); })
+              .OnValueCommitted_Lambda([this](float V, ETextCommit::Type){ EditFinalBakeSettings(LOCTEXT("SetWrinkleSuppressionSoftness", "Set Wrinkle Mask Softness"), [V](auto& D){ D.WrinkleSuppressionMaskSoftness = FMath::Clamp(V, 0.0f, 1.0f); }, true); }))]
       + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,6)[BuildLabeledControl(LOCTEXT("TransparencyVisualizationLabel", "Visualization"),
           SNew(SComboBox<TSharedPtr<EDWCTransparencyVisualizationMode>>)
               .OptionsSource(&VisualizationModeItems)
@@ -1505,39 +1658,6 @@ TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildPreviewModeButton(EW
     return SNew(SCheckBox).Style(FAppStyle::Get(), TEXT("DetailsView.SectionButton")).Type(ESlateCheckBoxType::ToggleButton)
         .IsEnabled_Lambda([this, Mode](){ return Mode != EWetClothingTransparencyPreviewMode::FullBlueprint || CanUseFullBlueprintPreview(); })
         .IsChecked(this, &SWetClothingTransparencyBakePanel::IsPreviewModeChecked, Mode).OnCheckStateChanged(this, &SWetClothingTransparencyBakePanel::HandlePreviewModeChanged, Mode)[SNew(STextBlock).Text(Label)];
-}
-TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildRevealMapTypeButton(EDWCTransparencyRevealMapType Type, const FText& Label)
-{
-    return SNew(SCheckBox).Style(FAppStyle::Get(), TEXT("DetailsView.SectionButton")).Type(ESlateCheckBoxType::ToggleButton).IsChecked(this, &SWetClothingTransparencyBakePanel::IsRevealMapTypeChecked, Type).OnCheckStateChanged(this, &SWetClothingTransparencyBakePanel::HandleRevealMapTypeChanged, Type)[SNew(STextBlock).Text(Label)];
-}
-
-TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildRevealMaterialSection()
-{
-    const UWetClothingAsset* Asset = WetClothingAsset.Get(); TSharedRef<SVerticalBox> Box = SNew(SVerticalBox);
-    if (Asset == nullptr || Asset->Authored.TransparencyData.BakedRevealLayers.Num() == 0) { Box->AddSlot().AutoHeight()[BuildEmptyAssetRow(LOCTEXT("NoLegacyMaterials", "No generated reveal materials."))]; return Box; }
-    for (const auto& Layer : Asset->Authored.TransparencyData.BakedRevealLayers) Box->AddSlot().AutoHeight().Padding(0,0,0,4)[BuildAssetSummaryRow(Layer.RevealMaterial, FText::FromString(GetNameSafe(Layer.RevealMaterial)), FText::Format(LOCTEXT("LegacyMaterialDetail", "Slot {0}"), FText::AsNumber(Layer.MaterialSlotIndex)))];
-    return Box;
-}
-TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildRevealTextureSection()
-{
-    const UWetClothingAsset* Asset = WetClothingAsset.Get(); TSharedRef<SVerticalBox> Box = SNew(SVerticalBox);
-    if (Asset == nullptr || Asset->Authored.TransparencyData.BakedRevealLayers.Num() == 0) { Box->AddSlot().AutoHeight()[BuildEmptyAssetRow(LOCTEXT("NoLegacyMaps", "No generated reveal maps."))]; return Box; }
-    Box->AddSlot().AutoHeight().Padding(0,4,0,6)[SNew(SHorizontalBox)
-      + SHorizontalBox::Slot().AutoWidth().Padding(0,0,3,0)[BuildRevealMapTypeButton(EDWCTransparencyRevealMapType::Color, LOCTEXT("ColorMap", "Color"))]
-      + SHorizontalBox::Slot().AutoWidth().Padding(0,0,3,0)[BuildRevealMapTypeButton(EDWCTransparencyRevealMapType::Mask, LOCTEXT("MaskMap", "Mask"))]
-      + SHorizontalBox::Slot().AutoWidth().Padding(0,0,3,0)[BuildRevealMapTypeButton(EDWCTransparencyRevealMapType::Confidence, LOCTEXT("ConfidenceMap", "Confidence"))]
-      + SHorizontalBox::Slot().AutoWidth()[BuildRevealMapTypeButton(EDWCTransparencyRevealMapType::Lookup, LOCTEXT("LookupMap", "Lookup"))]];
-    for (const auto& Layer : Asset->Authored.TransparencyData.BakedRevealLayers)
-    {
-        UObject* Texture = SelectedRevealMapType == EDWCTransparencyRevealMapType::Mask ? Layer.MaskMap.Get() : SelectedRevealMapType == EDWCTransparencyRevealMapType::Confidence ? Layer.ConfidenceMap.Get() : SelectedRevealMapType == EDWCTransparencyRevealMapType::Lookup ? Layer.LookupMap.Get() : Layer.ColorMap.Get();
-        Box->AddSlot().AutoHeight().Padding(0,0,0,4)[BuildSelectedRevealMapPreview(Texture, LOCTEXT("LegacyMap", "Legacy Reveal Map"), FText::Format(LOCTEXT("LegacyMapSlot", "Slot {0}"), FText::AsNumber(Layer.MaterialSlotIndex)))];
-    }
-    return Box;
-}
-
-TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildSelectedRevealMapPreview(UObject* Asset, const FText& Label, const FText& Detail)
-{
-    return BuildAssetSummaryRow(Asset, FText::Format(LOCTEXT("RevealAssetLabel", "{0} / {1}"), Label, FText::FromString(GetNameSafe(Asset))), Detail);
 }
 TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildAssetSummaryRow(UObject* Asset, const FText& Label, const FText& Detail)
 {

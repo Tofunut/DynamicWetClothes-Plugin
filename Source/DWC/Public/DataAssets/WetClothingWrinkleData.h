@@ -252,10 +252,12 @@ struct DWC_API FWetWrinkleBakeSettings
     UPROPERTY(EditAnywhere, Category = "Wet Wrinkle Bake")
     TArray<int32> TargetLODIndices;
 
-    UPROPERTY(EditAnywhere, Category = "Wet Wrinkle Bake")
+    // Legacy serialized switches. A wrinkle bake now always produces both the
+    // runtime normal texture and the authoring-only separation mask.
+    UPROPERTY(meta = (DeprecatedProperty))
     bool bBakeNormalMap = true;
 
-    UPROPERTY(EditAnywhere, Category = "Wet Wrinkle Bake")
+    UPROPERTY(meta = (DeprecatedProperty))
     bool bBakeMask = true;
 
     UPROPERTY(EditAnywhere, Category = "Wet Wrinkle Bake")
@@ -268,6 +270,13 @@ enum class EDWCWrinkleAlphaSemantic : uint8
     None,
     NormalDeviationCoverage_DEPRECATED UMETA(Hidden),
     ConvexSeparation
+};
+
+UENUM(BlueprintType)
+enum class EDWCWrinkleNormalSource : uint8
+{
+    Baked,
+    CustomTexture
 };
 
 USTRUCT(BlueprintType)
@@ -287,16 +296,22 @@ struct DWC_API FWetWrinkleBakedMapSet
     UPROPERTY(VisibleAnywhere, Category = "Wet Wrinkle Baked")
     TObjectPtr<UTexture2D> BakedWrinkleNormalMap = nullptr;
 
+#if WITH_EDITORONLY_DATA
+    // Authoring-only source consumed while baking the final transparency map.
+    // It is intentionally stripped from cooked/runtime WCA data.
     UPROPERTY(VisibleAnywhere, Category = "Wet Wrinkle Baked")
     TObjectPtr<UTexture2D> BakedWrinkleMask = nullptr;
+#endif
 
-    UPROPERTY(VisibleAnywhere, Category = "Wet Wrinkle Baked")
+    // Legacy normal-alpha metadata. New bakes store separation only in
+    // BakedWrinkleMask and keep the normal texture alpha unused.
+    UPROPERTY(VisibleAnywhere, Category = "Wet Wrinkle Baked", meta = (DeprecatedProperty))
     bool bHasCoverageAlpha = false;
 
-    UPROPERTY(VisibleAnywhere, Category = "Wet Wrinkle Baked")
+    UPROPERTY(VisibleAnywhere, Category = "Wet Wrinkle Baked", meta = (DeprecatedProperty))
     EDWCWrinkleAlphaSemantic AlphaSemantic = EDWCWrinkleAlphaSemantic::None;
 
-    UPROPERTY(VisibleAnywhere, Category = "Wet Wrinkle Baked")
+    UPROPERTY(VisibleAnywhere, Category = "Wet Wrinkle Baked", meta = (DeprecatedProperty))
     int32 AlphaBuildVersion = 0;
 
     UPROPERTY(VisibleAnywhere, Category = "Wet Wrinkle Baked")
@@ -310,6 +325,46 @@ struct DWC_API FWetWrinkleBakedMapSet
 
     UPROPERTY(VisibleAnywhere, Category = "Wet Wrinkle Baked")
     FGuid BakeGuid;
+};
+
+USTRUCT(BlueprintType)
+struct DWC_API FWetWrinkleRuntimeNormalSource
+{
+    GENERATED_BODY()
+
+    UPROPERTY(VisibleAnywhere, Category = "Runtime Wrinkle Normal")
+    int32 MaterialSlotIndex = INDEX_NONE;
+
+    UPROPERTY(VisibleAnywhere, Category = "Runtime Wrinkle Normal")
+    int32 UVChannelIndex = INDEX_NONE;
+
+    UPROPERTY(VisibleAnywhere, Category = "Runtime Wrinkle Normal")
+    int32 LODIndex = 0;
+
+    UPROPERTY(EditAnywhere, Category = "Runtime Wrinkle Normal")
+    EDWCWrinkleNormalSource Source = EDWCWrinkleNormalSource::Baked;
+
+    UPROPERTY(EditAnywhere, Category = "Runtime Wrinkle Normal")
+    TObjectPtr<UTexture2D> CustomWrinkleNormalMap = nullptr;
+
+    UPROPERTY(EditAnywhere, Category = "Runtime Wrinkle Normal")
+    bool bUseAlphaAsConvexSeparation = false;
+};
+
+struct DWC_API FWetWrinkleResolvedNormalMap
+{
+    UTexture2D* Texture = nullptr;
+    EDWCWrinkleNormalSource Source = EDWCWrinkleNormalSource::Baked;
+    int32 MaterialSlotIndex = INDEX_NONE;
+    int32 UVChannelIndex = INDEX_NONE;
+    int32 LODIndex = INDEX_NONE;
+    bool bHasCoverageAlpha = false;
+    EDWCWrinkleAlphaSemantic AlphaSemantic = EDWCWrinkleAlphaSemantic::None;
+
+    bool IsValid() const
+    {
+        return Texture != nullptr && MaterialSlotIndex != INDEX_NONE && UVChannelIndex != INDEX_NONE;
+    }
 };
 
 USTRUCT(BlueprintType)
@@ -390,8 +445,108 @@ struct DWC_API FWetClothingWrinkleData
     UPROPERTY(EditAnywhere, Category = "Bake|Coverage")
     FWetWrinkleCoverageExtractionSettings CoverageExtractionSettings;
 
+    // Authored slot-level selection of the normal map used by editor preview and runtime rendering.
+    UPROPERTY(EditAnywhere, Category = "Runtime")
+    TArray<FWetWrinkleRuntimeNormalSource> RuntimeNormalSources;
+
     UPROPERTY(VisibleAnywhere, Category = "Baked")
     TArray<FWetWrinkleBakedMapSet> BakedWrinkleMaps;
+
+    const FWetWrinkleRuntimeNormalSource* FindRuntimeNormalSource(
+        int32 MaterialSlotIndex,
+        int32 PreferredUVChannelIndex = INDEX_NONE,
+        int32 PreferredLODIndex = INDEX_NONE) const
+    {
+        if (PreferredUVChannelIndex != INDEX_NONE && PreferredLODIndex != INDEX_NONE)
+        {
+            if (const FWetWrinkleRuntimeNormalSource* ExactMatch = RuntimeNormalSources.FindByPredicate(
+                    [MaterialSlotIndex, PreferredUVChannelIndex, PreferredLODIndex](const FWetWrinkleRuntimeNormalSource& Candidate)
+                    {
+                        return Candidate.MaterialSlotIndex == MaterialSlotIndex &&
+                               Candidate.UVChannelIndex == PreferredUVChannelIndex &&
+                               Candidate.LODIndex == PreferredLODIndex;
+                    }))
+            {
+                return ExactMatch;
+            }
+        }
+
+        if (PreferredUVChannelIndex != INDEX_NONE)
+        {
+            if (const FWetWrinkleRuntimeNormalSource* UVMatch = RuntimeNormalSources.FindByPredicate(
+                    [MaterialSlotIndex, PreferredUVChannelIndex](const FWetWrinkleRuntimeNormalSource& Candidate)
+                    {
+                        return Candidate.MaterialSlotIndex == MaterialSlotIndex &&
+                               Candidate.UVChannelIndex == PreferredUVChannelIndex;
+                    }))
+            {
+                return UVMatch;
+            }
+        }
+
+        return RuntimeNormalSources.FindByPredicate(
+            [MaterialSlotIndex](const FWetWrinkleRuntimeNormalSource& Candidate)
+            {
+                return Candidate.MaterialSlotIndex == MaterialSlotIndex;
+            });
+    }
+
+    FWetWrinkleRuntimeNormalSource* FindRuntimeNormalSource(
+        int32 MaterialSlotIndex,
+        int32 PreferredUVChannelIndex = INDEX_NONE,
+        int32 PreferredLODIndex = INDEX_NONE)
+    {
+        return const_cast<FWetWrinkleRuntimeNormalSource*>(
+            static_cast<const FWetClothingWrinkleData*>(this)->FindRuntimeNormalSource(
+                MaterialSlotIndex,
+                PreferredUVChannelIndex,
+                PreferredLODIndex));
+    }
+
+    bool IsUsingCustomWrinkleNormalMap(
+        int32 MaterialSlotIndex,
+        int32 PreferredUVChannelIndex = INDEX_NONE,
+        int32 PreferredLODIndex = INDEX_NONE) const
+    {
+        const FWetWrinkleRuntimeNormalSource* Entry =
+            FindRuntimeNormalSource(MaterialSlotIndex, PreferredUVChannelIndex, PreferredLODIndex);
+        return Entry != nullptr && Entry->Source == EDWCWrinkleNormalSource::CustomTexture;
+    }
+
+    FWetWrinkleResolvedNormalMap ResolveRuntimeWrinkleNormalMap(
+        int32 MaterialSlotIndex,
+        int32 PreferredUVChannelIndex = INDEX_NONE,
+        int32 PreferredLODIndex = INDEX_NONE) const
+    {
+        FWetWrinkleResolvedNormalMap Result;
+        Result.MaterialSlotIndex = MaterialSlotIndex;
+
+        const FWetWrinkleRuntimeNormalSource* RuntimeSource =
+            FindRuntimeNormalSource(MaterialSlotIndex, PreferredUVChannelIndex, PreferredLODIndex);
+        if (RuntimeSource != nullptr && RuntimeSource->Source == EDWCWrinkleNormalSource::CustomTexture)
+        {
+            Result.Source = EDWCWrinkleNormalSource::CustomTexture;
+            Result.Texture = RuntimeSource->CustomWrinkleNormalMap.Get();
+            Result.UVChannelIndex = RuntimeSource->UVChannelIndex;
+            Result.LODIndex = RuntimeSource->LODIndex;
+            Result.bHasCoverageAlpha = RuntimeSource->bUseAlphaAsConvexSeparation && Result.Texture != nullptr;
+            Result.AlphaSemantic = Result.bHasCoverageAlpha
+                                       ? EDWCWrinkleAlphaSemantic::ConvexSeparation
+                                       : EDWCWrinkleAlphaSemantic::None;
+            return Result;
+        }
+
+        if (const FWetWrinkleBakedMapSet* BakedMap =
+                FindBakedWrinkleMap(MaterialSlotIndex, PreferredUVChannelIndex, PreferredLODIndex))
+        {
+            Result.Texture = BakedMap->BakedWrinkleNormalMap.Get();
+            Result.UVChannelIndex = BakedMap->UVChannelIndex;
+            Result.LODIndex = BakedMap->LODIndex;
+            Result.bHasCoverageAlpha = BakedMap->bHasCoverageAlpha;
+            Result.AlphaSemantic = BakedMap->AlphaSemantic;
+        }
+        return Result;
+    }
 
     const FWetWrinkleBakedMapSet* FindBakedWrinkleMap(
         int32 MaterialSlotIndex,

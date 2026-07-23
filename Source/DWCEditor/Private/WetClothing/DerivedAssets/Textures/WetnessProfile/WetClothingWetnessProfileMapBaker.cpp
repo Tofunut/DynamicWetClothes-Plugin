@@ -40,7 +40,7 @@ FColor FWetClothingWetnessProfileMapBaker::EncodeProfileParameters(const FWetnes
 {
     return FColor(
         PackUnitFloat(Parameters.GetWetVisualStrength()),
-        PackUnitFloat(Parameters.GetTransparencyStrength()),
+        0,
         PackUnitFloat(Parameters.GetSurfaceWaterStrength()),
         255);
 }
@@ -102,13 +102,12 @@ void FWetClothingWetnessProfileMapBaker::AppendProfileParametersSignature(
     const FWetnessProfileParameters& Parameters)
 {
     Signature += FString::Printf(
-        TEXT("A=%.9g;S=%.9g;D=%.9g;G=%.9g;WV=%.9g;T=%.9g;SW=%.9g;R=%.9g;"),
+        TEXT("ProfileMap=v2;A=%.9g;S=%.9g;D=%.9g;G=%.9g;WV=%.9g;SW=%.9g;R=%.9g;"),
         Parameters.GetAbsorptionRate(),
         Parameters.GetSpreadRatePerSecond(),
         Parameters.GetDryRatePerSecond(),
         Parameters.GetGravityFlowStrength(),
         Parameters.GetWetVisualStrength(),
-        Parameters.GetTransparencyStrength(),
         Parameters.GetSurfaceWaterStrength(),
         Parameters.GetRunoffStrength());
 }

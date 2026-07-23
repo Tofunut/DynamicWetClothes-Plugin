@@ -77,4 +77,35 @@ class DWC_API FWetRenderStage
     TArray<FColor> CachedWetVertexColors; // VertexColor 
     TMap<int32, FLinearColor> CachedWetPartDebugColorsByID; // ID is at FWetClothingRuntimeData.
     TWeakObjectPtr<UWetClothingAsset> CachedWetPartDebugColorAsset; // What Asset is Debug Color based on 
+
+    // Keep runtime transparency diagnostics useful without emitting once per material update.
+    TMap<int32, FString> LastTransparencyBindingLogKeys;
+
+  private:
+    struct FTransparencyRuntimeBinding
+    {
+        int32 MaterialSlotIndex = INDEX_NONE;
+        int32 UVChannelIndex = INDEX_NONE;
+        int32 LODIndex = INDEX_NONE;
+        TWeakObjectPtr<UMaterialInstanceDynamic> MaterialInstance;
+        TWeakObjectPtr<UTexture2D> TransparencyMap;
+        FGuid BakeGuid;
+        bool bUsable = false;
+        bool bAppliedEnabled = false;
+    };
+
+    void InvalidateTransparencyBindingCache();
+    bool IsTransparencyBindingCacheCurrent(const FWetRenderStageArgs& Args) const;
+    void RebuildTransparencyBindingCache(
+        FWetRenderStageArgs& Args,
+        float WetnessMin,
+        float WetnessMax);
+
+    TArray<FTransparencyRuntimeBinding> TransparencyRuntimeBindings;
+    TWeakObjectPtr<UWetClothingAsset> CachedTransparencyAsset;
+    int32 CachedTransparencyLODIndex = INDEX_NONE;
+    int32 CachedTransparencyUVChannelIndex = INDEX_NONE;
+    float CachedTransparencyWetnessMin = -1.0f;
+    float CachedTransparencyWetnessMax = -1.0f;
+    bool bTransparencyBindingCacheValid = false;
 };

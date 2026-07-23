@@ -25,8 +25,6 @@ class FWCAMaterialGenerator
     {
         EDWCSimulationMode SimulationMode = EDWCSimulationMode::VertexCPU;
         int32 DWCDataUVChannelIndex = INDEX_NONE;
-        bool bEnableDWCDataUVSampling = false;
-        bool bConnectWetnessMapPath = false;
 
         /** Optional owner used to place generated assets in a WCA-specific deterministic folder. */
         const UWetClothingAsset* OwningWetClothingAsset = nullptr;
@@ -52,6 +50,4 @@ class FWCAMaterialGenerator
     // Routine material setup treats the shared functions as fixed, read-only assets.
     static bool ValidateSharedApplyWetnessFunction(FString& OutErrorMessage);
 
-    // CPU/GPU split functions are plugin assets in this branch, so repair currently validates availability.
-    static bool RepairOrUpgradeSharedApplyWetnessFunction(FString& OutErrorMessage);
 };

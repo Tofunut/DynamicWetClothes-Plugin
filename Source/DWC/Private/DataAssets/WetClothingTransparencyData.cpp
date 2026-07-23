@@ -144,6 +144,37 @@ const FWetClothingBakedTransparencyMap* FWetClothingTransparencyData::FindBakedT
     return nullptr;
 }
 
+const FWetClothingBakedTransparencyMap* FWetClothingTransparencyData::FindRuntimeBakedTransparencyMap(
+    const int32 MaterialSlotIndex,
+    const int32 DWCDataUVChannelIndex,
+    const int32 LODIndex) const
+{
+    if (MaterialSlotIndex == INDEX_NONE ||
+        DWCDataUVChannelIndex < 0 ||
+        DWCDataUVChannelIndex > 7 ||
+        LODIndex < 0)
+    {
+        return nullptr;
+    }
+
+    const FWetClothingTransparencyLayerData* Layer =
+        FindTransparencyLayer(MaterialSlotIndex, DWCDataUVChannelIndex);
+    if (Layer == nullptr)
+    {
+        return nullptr;
+    }
+
+    return Layer->BakedMaps.FindByPredicate(
+        [MaterialSlotIndex, DWCDataUVChannelIndex, LODIndex](
+            const FWetClothingBakedTransparencyMap& Candidate)
+        {
+            return Candidate.MaterialSlotIndex == MaterialSlotIndex &&
+                   Candidate.UVChannelIndex == DWCDataUVChannelIndex &&
+                   Candidate.LODIndex == LODIndex &&
+                   Candidate.IsRuntimeUsable();
+        });
+}
+
 UTexture2D* FWetClothingTransparencyData::ResolveBakedTransparencyMap(
     int32 MaterialSlotIndex,
     int32 PreferredUVChannelIndex,

@@ -650,14 +650,8 @@ TSharedRef<SWidget> FWCAEditorWidgets::BuildBakeMapsMenu(const FWCABakeMapsMenuA
         break;
 
     case EWCAEditorMode::TransparencyBake:
-        MenuBuilder.AddMenuEntry(
-            NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeTransparencyMapMenuItem", "Bake Transparency Map"),
-            NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeTransparencyMapMenuItemTooltip", "Bake transparency textures/materials and save the generated assets."),
-            FSlateIcon(),
-            FUIAction(FExecuteAction::CreateLambda([OnBakeTransparencyRevealMaps = Args.OnBakeTransparencyRevealMaps]()
-            {
-                if (OnBakeTransparencyRevealMaps.IsBound()) OnBakeTransparencyRevealMaps.Execute();
-            }), Args.CanBakeTransparencyRevealMaps));
+        // Transparency generation and edited-map baking are explicit actions in
+        // the Transparency mode panel.
         break;
 
     default:
@@ -811,14 +805,17 @@ TSharedRef<ITableRow> FWCAEditorWidgets::GenerateMaterialSlotRow(
     if (!bIsAllSlotsRow)
     {
         const FText StatusText = Args.GetMaterialSlotStatusText ? Args.GetMaterialSlotStatusText(MaterialSlotIndex) : FText::GetEmpty();
-        RowContent->AddSlot()
-            .AutoWidth()
-            .VAlign(VAlign_Center)
-            .Padding(0.0f, 0.0f, 10.0f, 0.0f)
-                [SNew(STextBlock)
-                     .Text(StatusText)
-                     .Font(FAppStyle::GetFontStyle(TEXT("SmallFont")))
-                     .ColorAndOpacity(FSlateColor(FLinearColor(0.58f, 0.58f, 0.58f, 1.0f)))];
+        if (!StatusText.IsEmpty())
+        {
+            RowContent->AddSlot()
+                .AutoWidth()
+                .VAlign(VAlign_Center)
+                .Padding(0.0f, 0.0f, 10.0f, 0.0f)
+                    [SNew(STextBlock)
+                         .Text(StatusText)
+                         .Font(FAppStyle::GetFontStyle(TEXT("SmallFont")))
+                         .ColorAndOpacity(FSlateColor(FLinearColor(0.58f, 0.58f, 0.58f, 1.0f)))];
+        }
 
         if (Args.bShowWettableToggle)
         {
@@ -854,6 +851,15 @@ TSharedRef<ITableRow> FWCAEditorWidgets::GenerateMaterialSlotRow(
                                                           ? FSlateColor(FLinearColor(0.35f, 0.85f, 1.0f, 1.0f))
                                                           : FSlateColor(FLinearColor(1.0f, 0.36f, 0.36f, 1.0f));
                                            })]]];
+        }
+
+        if (Args.BuildTrailingWidget)
+        {
+            RowContent->AddSlot()
+                .AutoWidth()
+                .VAlign(VAlign_Center)
+                .Padding(0.0f, 0.0f, 2.0f, 0.0f)
+                    [Args.BuildTrailingWidget(MaterialSlotIndex)];
         }
     }
 

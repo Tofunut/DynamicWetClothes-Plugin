@@ -13,6 +13,8 @@ struct FDWCTransparencyEditedMapBakeResult
     int32 AppliedStrokeCount = 0;
     int32 AppliedSampleCount = 0;
     int32 IgnoredNoHitOverridePixelCount = 0;
+    bool bAppliedWrinkleSuppression = false;
+    FString WarningMessage;
 };
 
 class FDWCTransparencyEditedMapBaker

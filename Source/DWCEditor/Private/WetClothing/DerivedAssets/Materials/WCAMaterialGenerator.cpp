@@ -3,6 +3,7 @@
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetToolsModule.h"
 #include "DataAssets/WetClothingAsset.h"
+#include "WetRendering/WetMaterialParameters.h"
 #include "IAssetTools.h"
 #include "MaterialEditingLibrary.h"
 #include "Interfaces/IPluginManager.h"
@@ -14,9 +15,12 @@
 #include "Materials/MaterialExpressionComponentMask.h"
 #include "Materials/MaterialExpressionAppendVector.h"
 #include "Materials/MaterialExpressionFunctionInput.h"
+#include "Materials/MaterialExpressionFunctionOutput.h"
+#include "Materials/MaterialExpressionGetMaterialAttributes.h"
 #include "Materials/MaterialExpressionMaterialFunctionCall.h"
 #include "Materials/MaterialExpressionLinearInterpolate.h"
 #include "Materials/MaterialExpressionScalarParameter.h"
+#include "Materials/MaterialExpressionSetMaterialAttributes.h"
 #include "Materials/MaterialExpressionStaticSwitchParameter.h"
 #include "StaticParameterSet.h"
 #include "Materials/MaterialExpressionTextureCoordinate.h"
@@ -164,27 +168,6 @@ namespace
         }
 
         return InputNames.Contains(InputName);
-    }
-
-    bool IsFunctionInputConnected(
-        const UMaterialExpressionMaterialFunctionCall* FunctionCall,
-        const FName                                    InputName)
-    {
-        if (FunctionCall == nullptr)
-        {
-            return false;
-        }
-
-        for (const FFunctionExpressionInput& FunctionInput : FunctionCall->FunctionInputs)
-        {
-            if (FunctionInput.ExpressionInput != nullptr &&
-                FunctionInput.ExpressionInput->InputName == InputName)
-            {
-                return FunctionInput.Input.Expression != nullptr;
-            }
-        }
-
-        return false;
     }
 
     FString JoinPinNames(const TArray<FString>& PinNames)
@@ -513,12 +496,46 @@ namespace
         return CreateTextureSampleParameter(Material, ParameterName, NodePosX, NodePosY);
     }
 
+    UMaterialExpressionTextureSampleParameter2D* FindOrCreateColorTextureSampleParameter(
+        UMaterial*  Material,
+        const FName ParameterName,
+        const TCHAR* Description,
+        int32       NodePosX,
+        int32       NodePosY)
+    {
+        if (UMaterialExpressionTextureSampleParameter2D* ExistingParameter = FindTextureSampleParameter(Material, ParameterName))
+        {
+            ExistingParameter->SamplerType = SAMPLERTYPE_Color;
+            ExistingParameter->Desc = Description;
+            if (ExistingParameter->Texture == nullptr)
+            {
+                ExistingParameter->Texture = LoadDefaultBlackTexture();
+            }
+            return ExistingParameter;
+        }
+
+        UMaterialExpressionTextureSampleParameter2D* Parameter = Cast<UMaterialExpressionTextureSampleParameter2D>(
+            UMaterialEditingLibrary::CreateMaterialExpression(
+                Material,
+                UMaterialExpressionTextureSampleParameter2D::StaticClass(),
+                NodePosX,
+                NodePosY));
+        if (Parameter != nullptr)
+        {
+            Parameter->ParameterName = ParameterName;
+            Parameter->SamplerType = SAMPLERTYPE_Color;
+            Parameter->Texture = LoadDefaultBlackTexture();
+            Parameter->Desc = Description;
+        }
+        return Parameter;
+    }
+
     UMaterialExpressionTextureSampleParameter2D* FindOrCreateGPUWetnessMapParameter(
         UMaterial* Material,
         int32      NodePosX,
         int32      NodePosY)
     {
-        static const FName ParameterName(TEXT("DWC_WetnessMap"));
+        const FName& ParameterName = DWCWetMaterialParameters::WetnessMap();
         if (UMaterialExpressionTextureSampleParameter2D* ExistingParameter = FindTextureSampleParameter(Material, ParameterName))
         {
             ExistingParameter->SamplerType = SAMPLERTYPE_Color;
@@ -788,171 +805,242 @@ namespace
         return nullptr;
     }
 
-    UMaterialExpressionFunctionInput* FindOrCreateScalarFunctionInput(
-        UMaterialFunction* MaterialFunction,
-        const FName        InputName,
-        const FString&     Description,
-        const float        PreviewValue,
-        const int32        SortPriority,
-        const int32        NodePosX,
-        const int32        NodePosY)
+    UMaterialExpressionFunctionOutput* FindFunctionOutputExpression(UMaterialFunction* MaterialFunction, const FName OutputName)
     {
-        if (UMaterialExpressionFunctionInput* ExistingInput = FindFunctionInputExpression(MaterialFunction, InputName))
-        {
-            ExistingInput->InputType = FunctionInput_Scalar;
-            ExistingInput->Description = Description;
-            ExistingInput->PreviewValue = FVector4f(PreviewValue, PreviewValue, PreviewValue, PreviewValue);
-            ExistingInput->bUsePreviewValueAsDefault = true;
-            ExistingInput->SortPriority = SortPriority;
-            return ExistingInput;
-        }
-
-        UMaterialExpressionFunctionInput* FunctionInput = Cast<UMaterialExpressionFunctionInput>(
-            UMaterialEditingLibrary::CreateMaterialExpressionInFunction(
-                MaterialFunction,
-                UMaterialExpressionFunctionInput::StaticClass(),
-                NodePosX,
-                NodePosY));
-        if (FunctionInput != nullptr)
-        {
-            FunctionInput->InputName = InputName;
-            FunctionInput->Description = Description;
-            FunctionInput->InputType = FunctionInput_Scalar;
-            FunctionInput->PreviewValue = FVector4f(PreviewValue, PreviewValue, PreviewValue, PreviewValue);
-            FunctionInput->bUsePreviewValueAsDefault = true;
-            FunctionInput->SortPriority = SortPriority;
-            FunctionInput->ConditionallyGenerateId(true);
-            FunctionInput->ValidateName();
-        }
-
-        return FunctionInput;
-    }
-
-    UMaterialExpressionVertexColor* FindBestVertexColorWetnessSource(
-        UMaterialFunction*         MaterialFunction,
-        int32&                     OutRedOutputIndex,
-        TArray<FExpressionInput*>& OutWetnessInputs)
-    {
-        OutRedOutputIndex = INDEX_NONE;
-        OutWetnessInputs.Reset();
-
-        UMaterialExpressionVertexColor* BestVertexColor = nullptr;
-        int32                           BestRedOutputIndex = INDEX_NONE;
-        TArray<FExpressionInput*>       BestWetnessInputs;
-
         if (MaterialFunction == nullptr)
         {
             return nullptr;
         }
-
         for (UMaterialExpression* Expression : MaterialFunction->GetExpressions())
         {
-            UMaterialExpressionVertexColor* VertexColor = Cast<UMaterialExpressionVertexColor>(Expression);
-            if (VertexColor == nullptr)
+            if (UMaterialExpressionFunctionOutput* Output = Cast<UMaterialExpressionFunctionOutput>(Expression);
+                Output != nullptr && Output->OutputName == OutputName)
             {
-                continue;
-            }
-
-            const int32 RedOutputIndex = ResolveExpressionOutputIndex(VertexColor, TEXT("R"), 1);
-            if (RedOutputIndex == INDEX_NONE)
-            {
-                continue;
-            }
-
-            TArray<FExpressionInput*> CandidateWetnessInputs;
-            for (UMaterialExpression* CandidateExpression : MaterialFunction->GetExpressions())
-            {
-                if (CandidateExpression == nullptr || CandidateExpression == VertexColor)
-                {
-                    continue;
-                }
-
-                for (FExpressionInputIterator InputIt{ CandidateExpression }; InputIt; ++InputIt)
-                {
-                    FExpressionInput* Input = InputIt.operator->();
-                    if (Input != nullptr &&
-                        Input->Expression == VertexColor &&
-                        Input->OutputIndex == RedOutputIndex)
-                    {
-                        CandidateWetnessInputs.Add(Input);
-                    }
-                }
-            }
-
-            if (CandidateWetnessInputs.Num() > BestWetnessInputs.Num())
-            {
-                BestVertexColor = VertexColor;
-                BestRedOutputIndex = RedOutputIndex;
-                BestWetnessInputs = MoveTemp(CandidateWetnessInputs);
+                return Output;
             }
         }
-
-        OutRedOutputIndex = BestRedOutputIndex;
-        OutWetnessInputs = MoveTemp(BestWetnessInputs);
-        return BestVertexColor;
+        return nullptr;
     }
 
-    bool EnsureCPUApplyWetnessFunctionUsesExplicitWetnessInput(
+    struct FDwcFunctionInputContract
+    {
+        FName Name;
+        EFunctionInputType Type;
+    };
+
+    const TCHAR* GetFunctionInputTypeName(const EFunctionInputType InputType)
+    {
+        switch (InputType)
+        {
+        case FunctionInput_Scalar:
+            return TEXT("Scalar");
+        case FunctionInput_Vector2:
+            return TEXT("Vector2");
+        case FunctionInput_Vector3:
+            return TEXT("Vector3");
+        case FunctionInput_Vector4:
+            return TEXT("Vector4");
+        case FunctionInput_Texture2D:
+            return TEXT("Texture2D");
+        case FunctionInput_TextureCube:
+            return TEXT("TextureCube");
+        case FunctionInput_Texture2DArray:
+            return TEXT("Texture2DArray");
+        case FunctionInput_VolumeTexture:
+            return TEXT("VolumeTexture");
+        case FunctionInput_StaticBool:
+            return TEXT("StaticBool");
+        case FunctionInput_MaterialAttributes:
+            return TEXT("MaterialAttributes");
+        default:
+            return TEXT("Unknown");
+        }
+    }
+
+    bool ValidateFunctionInput(
+        UMaterialFunction* MaterialFunction,
+        const TCHAR* FunctionLabel,
+        const FDwcFunctionInputContract& Contract,
+        TArray<FString>& FailureReasons)
+    {
+        UMaterialExpressionFunctionInput* Input = FindFunctionInputExpression(MaterialFunction, Contract.Name);
+        if (Input == nullptr)
+        {
+            FailureReasons.Add(FString::Printf(
+                TEXT("%s is missing required %s input '%s'. The fixed material function was not modified."),
+                FunctionLabel,
+                GetFunctionInputTypeName(Contract.Type),
+                *Contract.Name.ToString()));
+            return false;
+        }
+
+        if (Input->InputType != Contract.Type)
+        {
+            FailureReasons.Add(FString::Printf(
+                TEXT("%s input '%s' has type %s; expected %s. The fixed material function was not modified."),
+                FunctionLabel,
+                *Contract.Name.ToString(),
+                GetFunctionInputTypeName(Input->InputType),
+                GetFunctionInputTypeName(Contract.Type)));
+            return false;
+        }
+
+        return true;
+    }
+
+    bool ValidateFunctionOutput(
+        UMaterialFunction* MaterialFunction,
+        const TCHAR* FunctionLabel,
+        const FName OutputName,
+        TArray<FString>& FailureReasons)
+    {
+        UMaterialExpressionFunctionOutput* Output = FindFunctionOutputExpression(MaterialFunction, OutputName);
+        if (Output == nullptr)
+        {
+            FailureReasons.Add(FString::Printf(
+                TEXT("%s is missing required output '%s'. The fixed material function was not modified."),
+                FunctionLabel,
+                *OutputName.ToString()));
+            return false;
+        }
+
+        if (Output->A.Expression == nullptr)
+        {
+            FailureReasons.Add(FString::Printf(
+                TEXT("%s output '%s' is not connected. The fixed material function was not modified."),
+                FunctionLabel,
+                *OutputName.ToString()));
+            return false;
+        }
+
+        return true;
+    }
+
+    bool ValidateNoFunctionOwnedRuntimeParameters(
+        UMaterialFunction* MaterialFunction,
+        const TCHAR* FunctionLabel,
+        TArray<FString>& FailureReasons)
+    {
+        static const TSet<FName> ForbiddenParameterNames = {
+            TEXT("DWC_TransparencyMap"),
+            TEXT("DWC_UseTransparencyMap"),
+            TEXT("DWC_TransparencyStrength"),
+            TEXT("DWC_TransparencyUVChannel"),
+            TEXT("DWC_TransparencyWetnessMin"),
+            TEXT("DWC_TransparencyWetnessMax"),
+            TEXT("DWC_WrinkleNormalMap"),
+            TEXT("DWC_UseWrinkleNormalMap"),
+            TEXT("DWC_WrinkleStrength"),
+            TEXT("DWC_WrinkleWetnessMin"),
+            TEXT("DWC_WrinkleWetnessMax"),
+            TEXT("DWC_WrinkleSuppressionStrength")
+        };
+        static const TSet<FName> ForbiddenInputNames = {
+            TEXT("DWCDataUV"),
+            TEXT("TransparencyWetness"),
+            TEXT("WrinkleCoverage"),
+            TEXT("WrinkleSuppressionStrength")
+        };
+
+        bool bValid = true;
+        for (UMaterialExpression* Expression : MaterialFunction->GetExpressions())
+        {
+            if (const UMaterialExpressionFunctionInput* Input = Cast<UMaterialExpressionFunctionInput>(Expression);
+                Input != nullptr && ForbiddenInputNames.Contains(Input->InputName))
+            {
+                FailureReasons.Add(FString::Printf(
+                    TEXT("%s exposes deprecated input '%s'. Backend wetness and texture sampling belong to the generated _DWC material."),
+                    FunctionLabel,
+                    *Input->InputName.ToString()));
+                bValid = false;
+                continue;
+            }
+
+            FName ParameterName = NAME_None;
+            if (const UMaterialExpressionScalarParameter* ScalarParameter = Cast<UMaterialExpressionScalarParameter>(Expression))
+            {
+                ParameterName = ScalarParameter->ParameterName;
+            }
+            else if (const UMaterialExpressionTextureSampleParameter2D* TextureParameter =
+                         Cast<UMaterialExpressionTextureSampleParameter2D>(Expression))
+            {
+                ParameterName = TextureParameter->ParameterName;
+            }
+
+            if (!ParameterName.IsNone() && ForbiddenParameterNames.Contains(ParameterName))
+            {
+                FailureReasons.Add(FString::Printf(
+                    TEXT("%s owns runtime parameter '%s'. Move this parameter/sample to the generated _DWC material and pass its sampled value through a function input."),
+                    FunctionLabel,
+                    *ParameterName.ToString()));
+                bValid = false;
+            }
+        }
+        return bValid;
+    }
+
+    bool ValidateFixedApplyWetnessFunction(
         UMaterialFunctionInterface* ApplyFunction,
-        TArray<FString>&            FailureReasons)
+        const TCHAR* FunctionLabel,
+        const bool bGpuFunction,
+        TArray<FString>& FailureReasons)
     {
         UMaterialFunction* MaterialFunction = Cast<UMaterialFunction>(ApplyFunction);
         if (MaterialFunction == nullptr)
         {
-            FailureReasons.Add(TEXT("MF_DWC_ApplyWetness_CPU is not an editable material function."));
+            FailureReasons.Add(FString::Printf(
+                TEXT("%s is not a fixed UMaterialFunction asset."),
+                FunctionLabel));
             return false;
         }
 
-        UMaterialExpressionFunctionInput* WetnessInput = FindOrCreateScalarFunctionInput(
-            MaterialFunction,
-            TEXT("Wetness"),
-            TEXT("CPU vertex wetness from VertexColor.R"),
-            0.0f,
-            0,
-            -1300,
-            -220);
-        if (WetnessInput == nullptr)
+        static const FDwcFunctionInputContract CommonInputs[] = {
+            { TEXT("BaseColor"), FunctionInput_Vector3 },
+            { TEXT("WetDarkeningStrength"), FunctionInput_Scalar },
+            { TEXT("BaseRoughness"), FunctionInput_Scalar },
+            { TEXT("WetRoughness"), FunctionInput_Scalar },
+            { TEXT("SurfaceWaterStrength"), FunctionInput_Scalar },
+            { TEXT("SurfaceWaterUV"), FunctionInput_Vector2 },
+            { TEXT("BaseNormal"), FunctionInput_Vector3 },
+            { TEXT("WrinkleNormal"), FunctionInput_Vector3 },
+            { TEXT("UseWrinkleNormalMap"), FunctionInput_Scalar },
+            { TEXT("WrinkleStrength"), FunctionInput_Scalar },
+            { TEXT("WrinkleWetnessMin"), FunctionInput_Scalar },
+            { TEXT("WrinkleWetnessMax"), FunctionInput_Scalar },
+            { TEXT("TransparencyColor"), FunctionInput_Vector3 },
+            { TEXT("TransparencyAlpha"), FunctionInput_Scalar },
+            { TEXT("UseTransparencyMap"), FunctionInput_Scalar },
+            { TEXT("TransparencyWetnessMin"), FunctionInput_Scalar },
+            { TEXT("TransparencyWetnessMax"), FunctionInput_Scalar }
+        };
+        const FDwcFunctionInputContract BackendWetnessInput = {
+            bGpuFunction ? FName(TEXT("WetnessMap")) : FName(TEXT("Wetness")),
+            FunctionInput_Scalar
+        };
+
+        bool bValid = true;
+        for (const FDwcFunctionInputContract& InputContract : CommonInputs)
         {
-            FailureReasons.Add(TEXT("Could not create Wetness input on MF_DWC_ApplyWetness_CPU."));
-            return false;
+            bValid &= ValidateFunctionInput(MaterialFunction, FunctionLabel, InputContract, FailureReasons);
         }
-
-        int32                           RedOutputIndex = INDEX_NONE;
-        TArray<FExpressionInput*>       WetnessInputs;
-        UMaterialExpressionVertexColor* VertexColor =
-            FindBestVertexColorWetnessSource(MaterialFunction, RedOutputIndex, WetnessInputs);
-
-        if (VertexColor != nullptr && RedOutputIndex != INDEX_NONE)
-        {
-            for (FExpressionInput* WetnessConsumerInput : WetnessInputs)
-            {
-                if (WetnessConsumerInput == nullptr)
-                {
-                    continue;
-                }
-
-                WetnessConsumerInput->Expression = WetnessInput;
-                WetnessConsumerInput->OutputIndex = 0;
-                WetnessConsumerInput->InputName = NAME_None;
-            }
-        }
-
-        MaterialFunction->MarkPackageDirty();
-        MaterialFunction->PostEditChange();
-        return true;
+        bValid &= ValidateFunctionInput(MaterialFunction, FunctionLabel, BackendWetnessInput, FailureReasons);
+        bValid &= ValidateFunctionOutput(MaterialFunction, FunctionLabel, TEXT("BaseColor"), FailureReasons);
+        bValid &= ValidateFunctionOutput(MaterialFunction, FunctionLabel, TEXT("Roughness"), FailureReasons);
+        bValid &= ValidateFunctionOutput(MaterialFunction, FunctionLabel, TEXT("Normal"), FailureReasons);
+        bValid &= ValidateNoFunctionOwnedRuntimeParameters(MaterialFunction, FunctionLabel, FailureReasons);
+        return bValid;
     }
 
-    bool PrepareDwcApplyWetnessFunction(
-        UMaterialFunctionInterface*                ApplyFunction,
-        const FWCAMaterialGenerator::FOptions& Options,
-        TArray<FString>&                           FailureReasons)
+    bool ValidateFixedApplyWetnessFunctions(
+        UMaterialFunctionInterface* CPUFunction,
+        UMaterialFunctionInterface* GPUFunction,
+        TArray<FString>& FailureReasons)
     {
-        if (Options.SimulationMode != EDWCSimulationMode::VertexCPU)
-        {
-            return true;
-        }
-
-        return EnsureCPUApplyWetnessFunctionUsesExplicitWetnessInput(ApplyFunction, FailureReasons);
+        const bool bCpuValid =
+            ValidateFixedApplyWetnessFunction(CPUFunction, TEXT("MF_DWC_ApplyWetness_CPU"), false, FailureReasons);
+        const bool bGpuValid =
+            ValidateFixedApplyWetnessFunction(GPUFunction, TEXT("MF_DWC_ApplyWetness_GPU"), true, FailureReasons);
+        return bCpuValid && bGpuValid;
     }
 
 } // namespace
@@ -960,6 +1048,7 @@ namespace
 namespace
 {
     const FName            DwcUseGpuBackendParameterName(TEXT("DWC_UseGPUBackend"));
+    constexpr const TCHAR* DwcMaterialAttributesOutputDescription = TEXT("DWC Unified Material Attributes Output");
 
     FString GetDwcGeneratedAssetStem(const FString& InAssetName)
     {
@@ -1146,6 +1235,19 @@ namespace
                    FName(TEXT("DWC_WetPartDebugStrength"))) != nullptr;
     }
 
+    bool IsDwcMaterialAttributesOutputConnected(const UMaterial* Material)
+    {
+        if (Material == nullptr || !Material->bUseMaterialAttributes)
+        {
+            return false;
+        }
+
+        const UMaterialExpressionSetMaterialAttributes* SetAttributes = Cast<UMaterialExpressionSetMaterialAttributes>(
+            UMaterialEditingLibrary::GetMaterialPropertyInputNode(
+                const_cast<UMaterial*>(Material), MP_MaterialAttributes));
+        return SetAttributes != nullptr && SetAttributes->Desc == DwcMaterialAttributesOutputDescription;
+    }
+
     bool HasDwcBackendStaticSwitchParameter(const UMaterial* Material)
     {
         if (Material == nullptr)
@@ -1168,7 +1270,245 @@ namespace
         return false;
     }
 
-    bool IsUnifiedDwcMaterial(const UMaterial* Material)
+    UMaterialExpressionTextureCoordinate* FindDwcDataTextureCoordinate(const UMaterial* Material)
+    {
+        if (Material == nullptr)
+        {
+            return nullptr;
+        }
+
+        UMaterialExpressionTextureCoordinate* Match = nullptr;
+        for (UMaterialExpression* Expression : Material->GetExpressions())
+        {
+            UMaterialExpressionTextureCoordinate* TextureCoordinate =
+                Cast<UMaterialExpressionTextureCoordinate>(Expression);
+            if (TextureCoordinate == nullptr || TextureCoordinate->Desc != TEXT("DWC Data UV"))
+            {
+                continue;
+            }
+
+            if (Match != nullptr)
+            {
+                return nullptr;
+            }
+            Match = TextureCoordinate;
+        }
+        return Match;
+    }
+
+    const FExpressionInput* FindFunctionInputConnection(
+        const UMaterialExpressionMaterialFunctionCall* FunctionCall,
+        const FName InputName)
+    {
+        if (FunctionCall == nullptr)
+        {
+            return nullptr;
+        }
+
+        for (const FFunctionExpressionInput& FunctionInput : FunctionCall->FunctionInputs)
+        {
+            if (FunctionInput.ExpressionInput != nullptr &&
+                FunctionInput.ExpressionInput->InputName == InputName)
+            {
+                return &FunctionInput.Input;
+            }
+        }
+        return nullptr;
+    }
+
+    bool IsFunctionInputConnectedTo(
+        const UMaterialExpressionMaterialFunctionCall* FunctionCall,
+        const FName InputName,
+        UMaterialExpression* ExpectedExpression,
+        const FString& ExpectedOutputName = FString(),
+        const int32 FallbackOutputIndex = INDEX_NONE)
+    {
+        const FExpressionInput* Connection = FindFunctionInputConnection(FunctionCall, InputName);
+        if (Connection == nullptr || ExpectedExpression == nullptr ||
+            Connection->Expression != ExpectedExpression)
+        {
+            return false;
+        }
+
+        const int32 ExpectedOutputIndex = ExpectedOutputName.IsEmpty()
+            ? (FallbackOutputIndex != INDEX_NONE ? FallbackOutputIndex : 0)
+            : ResolveExpressionOutputIndex(ExpectedExpression, ExpectedOutputName, FallbackOutputIndex);
+        return ExpectedOutputIndex != INDEX_NONE && Connection->OutputIndex == ExpectedOutputIndex;
+    }
+
+    bool AreFunctionInputsConnectedToSameSource(
+        const UMaterialExpressionMaterialFunctionCall* CPUApply,
+        const UMaterialExpressionMaterialFunctionCall* GPUApply,
+        const FName InputName)
+    {
+        const FExpressionInput* CPUConnection = FindFunctionInputConnection(CPUApply, InputName);
+        const FExpressionInput* GPUConnection = FindFunctionInputConnection(GPUApply, InputName);
+        return CPUConnection != nullptr &&
+               GPUConnection != nullptr &&
+               CPUConnection->Expression != nullptr &&
+               CPUConnection->Expression == GPUConnection->Expression &&
+               CPUConnection->OutputIndex == GPUConnection->OutputIndex;
+    }
+
+    bool HasForbiddenGeneratedMaterialParameters(UMaterial* Material)
+    {
+        static const TSet<FName> ForbiddenNames = {
+            TEXT("DWC_TransparencyStrength"),
+            TEXT("DWC_TransparencyUVChannel"),
+            TEXT("DWC_WrinkleSuppressionStrength"),
+            TEXT("DWC_WrinkleMask")
+        };
+
+        if (Material == nullptr)
+        {
+            return true;
+        }
+
+        for (UMaterialExpression* Expression : Material->GetExpressions())
+        {
+            FName ParameterName = NAME_None;
+            if (const UMaterialExpressionScalarParameter* Scalar = Cast<UMaterialExpressionScalarParameter>(Expression))
+            {
+                ParameterName = Scalar->ParameterName;
+            }
+            else if (const UMaterialExpressionTextureSampleParameter2D* Texture =
+                         Cast<UMaterialExpressionTextureSampleParameter2D>(Expression))
+            {
+                ParameterName = Texture->ParameterName;
+            }
+
+            if (!ParameterName.IsNone() && ForbiddenNames.Contains(ParameterName))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    bool IsDwcRuntimeInputGraphValid(
+        UMaterial* Material,
+        UMaterialExpressionMaterialFunctionCall* CPUApply,
+        UMaterialExpressionMaterialFunctionCall* GPUApply,
+        const int32 ExpectedDWCDataUVChannelIndex)
+    {
+        if (Material == nullptr || CPUApply == nullptr || GPUApply == nullptr)
+        {
+            return false;
+        }
+
+        UMaterialExpressionTextureCoordinate* DWCDataUV = FindDwcDataTextureCoordinate(Material);
+        if (DWCDataUV == nullptr ||
+            DWCDataUV->CoordinateIndex < 0 ||
+            DWCDataUV->CoordinateIndex > 7 ||
+            (ExpectedDWCDataUVChannelIndex != INDEX_NONE &&
+             DWCDataUV->CoordinateIndex != ExpectedDWCDataUVChannelIndex))
+        {
+            return false;
+        }
+
+        UMaterialExpressionTextureSampleParameter2D* WetnessMap =
+            FindTextureSampleParameter(Material, DWCWetMaterialParameters::WetnessMap());
+        UMaterialExpressionTextureSampleParameter2D* WrinkleNormalMap =
+            FindTextureSampleParameter(Material, DWCWetMaterialParameters::WrinkleNormalMap());
+        UMaterialExpressionTextureSampleParameter2D* TransparencyMap =
+            FindTextureSampleParameter(Material, DWCWetMaterialParameters::TransparencyMap());
+        if (WetnessMap == nullptr ||
+            WrinkleNormalMap == nullptr ||
+            TransparencyMap == nullptr ||
+            WetnessMap->SamplerType != SAMPLERTYPE_Color ||
+            WrinkleNormalMap->SamplerType != SAMPLERTYPE_Normal ||
+            TransparencyMap->SamplerType != SAMPLERTYPE_Color ||
+            WetnessMap->Coordinates.Expression != DWCDataUV ||
+            WrinkleNormalMap->Coordinates.Expression != DWCDataUV ||
+            TransparencyMap->Coordinates.Expression != DWCDataUV)
+        {
+            return false;
+        }
+
+        UMaterialExpressionScalarParameter* UseWrinkleNormalMap =
+            FindScalarParameter(Material, DWCWetMaterialParameters::UseWrinkleNormalMap());
+        UMaterialExpressionScalarParameter* WetDarkeningStrength =
+            FindScalarParameter(Material, TEXT("DWC_WetDarkeningStrength"));
+        UMaterialExpressionScalarParameter* WetRoughness =
+            FindScalarParameter(Material, TEXT("DWC_WetRoughness"));
+        UMaterialExpressionScalarParameter* SurfaceWaterStrength =
+            FindScalarParameter(Material, TEXT("DWC_SurfaceWaterStrength"));
+        UMaterialExpressionScalarParameter* WrinkleStrength =
+            FindScalarParameter(Material, DWCWetMaterialParameters::WrinkleStrength());
+        UMaterialExpressionScalarParameter* WrinkleWetnessMin =
+            FindScalarParameter(Material, DWCWetMaterialParameters::WrinkleWetnessMin());
+        UMaterialExpressionScalarParameter* WrinkleWetnessMax =
+            FindScalarParameter(Material, DWCWetMaterialParameters::WrinkleWetnessMax());
+        UMaterialExpressionScalarParameter* UseTransparencyMap =
+            FindScalarParameter(Material, DWCWetMaterialParameters::UseTransparencyMap());
+        UMaterialExpressionScalarParameter* TransparencyWetnessMin =
+            FindScalarParameter(Material, DWCWetMaterialParameters::TransparencyWetnessMin());
+        UMaterialExpressionScalarParameter* TransparencyWetnessMax =
+            FindScalarParameter(Material, DWCWetMaterialParameters::TransparencyWetnessMax());
+        if (WetDarkeningStrength == nullptr ||
+            WetRoughness == nullptr ||
+            SurfaceWaterStrength == nullptr ||
+            UseWrinkleNormalMap == nullptr ||
+            WrinkleStrength == nullptr ||
+            WrinkleWetnessMin == nullptr ||
+            WrinkleWetnessMax == nullptr ||
+            UseTransparencyMap == nullptr ||
+            TransparencyWetnessMin == nullptr ||
+            TransparencyWetnessMax == nullptr ||
+            HasForbiddenGeneratedMaterialParameters(Material))
+        {
+            return false;
+        }
+
+        UMaterialExpressionVertexColor* VertexColor = nullptr;
+        for (UMaterialExpression* Expression : Material->GetExpressions())
+        {
+            if (UMaterialExpressionVertexColor* Candidate = Cast<UMaterialExpressionVertexColor>(Expression))
+            {
+                VertexColor = Candidate;
+                break;
+            }
+        }
+
+        return VertexColor != nullptr &&
+               IsFunctionInputConnectedTo(CPUApply, TEXT("Wetness"), VertexColor, TEXT("R"), 1) &&
+               IsFunctionInputConnectedTo(GPUApply, TEXT("WetnessMap"), WetnessMap, TEXT("R"), 1) &&
+               IsFunctionInputConnectedTo(CPUApply, TEXT("SurfaceWaterUV"), DWCDataUV) &&
+               IsFunctionInputConnectedTo(GPUApply, TEXT("SurfaceWaterUV"), DWCDataUV) &&
+               IsFunctionInputConnectedTo(CPUApply, TEXT("WetDarkeningStrength"), WetDarkeningStrength) &&
+               IsFunctionInputConnectedTo(GPUApply, TEXT("WetDarkeningStrength"), WetDarkeningStrength) &&
+               IsFunctionInputConnectedTo(CPUApply, TEXT("WetRoughness"), WetRoughness) &&
+               IsFunctionInputConnectedTo(GPUApply, TEXT("WetRoughness"), WetRoughness) &&
+               IsFunctionInputConnectedTo(CPUApply, TEXT("SurfaceWaterStrength"), SurfaceWaterStrength) &&
+               IsFunctionInputConnectedTo(GPUApply, TEXT("SurfaceWaterStrength"), SurfaceWaterStrength) &&
+               IsFunctionInputConnectedTo(CPUApply, TEXT("WrinkleNormal"), WrinkleNormalMap, TEXT("RGB"), 0) &&
+               IsFunctionInputConnectedTo(GPUApply, TEXT("WrinkleNormal"), WrinkleNormalMap, TEXT("RGB"), 0) &&
+               IsFunctionInputConnectedTo(CPUApply, TEXT("UseWrinkleNormalMap"), UseWrinkleNormalMap) &&
+               IsFunctionInputConnectedTo(GPUApply, TEXT("UseWrinkleNormalMap"), UseWrinkleNormalMap) &&
+               IsFunctionInputConnectedTo(CPUApply, TEXT("WrinkleStrength"), WrinkleStrength) &&
+               IsFunctionInputConnectedTo(GPUApply, TEXT("WrinkleStrength"), WrinkleStrength) &&
+               IsFunctionInputConnectedTo(CPUApply, TEXT("WrinkleWetnessMin"), WrinkleWetnessMin) &&
+               IsFunctionInputConnectedTo(GPUApply, TEXT("WrinkleWetnessMin"), WrinkleWetnessMin) &&
+               IsFunctionInputConnectedTo(CPUApply, TEXT("WrinkleWetnessMax"), WrinkleWetnessMax) &&
+               IsFunctionInputConnectedTo(GPUApply, TEXT("WrinkleWetnessMax"), WrinkleWetnessMax) &&
+               IsFunctionInputConnectedTo(CPUApply, TEXT("TransparencyColor"), TransparencyMap, TEXT("RGB"), 0) &&
+               IsFunctionInputConnectedTo(GPUApply, TEXT("TransparencyColor"), TransparencyMap, TEXT("RGB"), 0) &&
+               IsFunctionInputConnectedTo(CPUApply, TEXT("TransparencyAlpha"), TransparencyMap, TEXT("A"), 4) &&
+               IsFunctionInputConnectedTo(GPUApply, TEXT("TransparencyAlpha"), TransparencyMap, TEXT("A"), 4) &&
+               IsFunctionInputConnectedTo(CPUApply, TEXT("UseTransparencyMap"), UseTransparencyMap) &&
+               IsFunctionInputConnectedTo(GPUApply, TEXT("UseTransparencyMap"), UseTransparencyMap) &&
+               IsFunctionInputConnectedTo(CPUApply, TEXT("TransparencyWetnessMin"), TransparencyWetnessMin) &&
+               IsFunctionInputConnectedTo(GPUApply, TEXT("TransparencyWetnessMin"), TransparencyWetnessMin) &&
+               IsFunctionInputConnectedTo(CPUApply, TEXT("TransparencyWetnessMax"), TransparencyWetnessMax) &&
+               IsFunctionInputConnectedTo(GPUApply, TEXT("TransparencyWetnessMax"), TransparencyWetnessMax) &&
+               AreFunctionInputsConnectedToSameSource(CPUApply, GPUApply, TEXT("BaseColor")) &&
+               AreFunctionInputsConnectedToSameSource(CPUApply, GPUApply, TEXT("BaseRoughness")) &&
+               AreFunctionInputsConnectedToSameSource(CPUApply, GPUApply, TEXT("BaseNormal"));
+    }
+
+    bool IsUnifiedDwcMaterial(
+        const UMaterial* Material,
+        const int32 ExpectedDWCDataUVChannelIndex = INDEX_NONE)
     {
         if (Material == nullptr)
         {
@@ -1186,10 +1526,20 @@ namespace
             return false;
         }
 
+        const bool bOutputConnected = Material->bUseMaterialAttributes
+                                          ? IsDwcMaterialAttributesOutputConnected(Material)
+                                          : IsWetnessDebugBaseColorConnected(Material, CPUApply, GPUApply);
+        const bool bSurfaceOutputsConnected = Material->bUseMaterialAttributes ||
+                                              (IsBackendSwitchConnectedForProperty(Material, MP_Roughness, CPUApply, GPUApply, TEXT("Roughness")) &&
+                                               IsBackendSwitchConnectedForProperty(Material, MP_Normal, CPUApply, GPUApply, TEXT("Normal")));
         return HasDwcBackendStaticSwitchParameter(Material) &&
-               IsWetnessDebugBaseColorConnected(Material, CPUApply, GPUApply) &&
-               IsBackendSwitchConnectedForProperty(Material, MP_Roughness, CPUApply, GPUApply, TEXT("Roughness")) &&
-               IsBackendSwitchConnectedForProperty(Material, MP_Normal, CPUApply, GPUApply, TEXT("Normal"));
+               bOutputConnected &&
+               IsDwcRuntimeInputGraphValid(
+                   const_cast<UMaterial*>(Material),
+                   CPUApply,
+                   GPUApply,
+                   ExpectedDWCDataUVChannelIndex) &&
+               bSurfaceOutputsConnected;
     }
 
     void DiscardNewGeneratedAsset(UObject* Asset)
@@ -1218,88 +1568,124 @@ namespace
         return bConnected;
     }
 
-    bool ConnectUnifiedNormalInputs(
-        UMaterial*                                 Material,
-        UMaterialExpressionMaterialFunctionCall*   CPUApply,
-        UMaterialExpressionMaterialFunctionCall*   GPUApply,
-        const FWCAMaterialGenerator::FOptions& Options,
-        TArray<FString>&                           FailureReasons)
+    struct FDwcRuntimeMaterialInputs
     {
-        if (Material == nullptr || CPUApply == nullptr || GPUApply == nullptr)
+        UMaterialExpressionTextureCoordinate* DWCDataUV = nullptr;
+        UMaterialExpressionTextureSampleParameter2D* WetnessMap = nullptr;
+        UMaterialExpressionTextureSampleParameter2D* WrinkleNormalMap = nullptr;
+        UMaterialExpressionTextureSampleParameter2D* TransparencyMap = nullptr;
+        UMaterialExpressionScalarParameter* UseWrinkleNormalMap = nullptr;
+        UMaterialExpressionScalarParameter* WrinkleStrength = nullptr;
+        UMaterialExpressionScalarParameter* WrinkleWetnessMin = nullptr;
+        UMaterialExpressionScalarParameter* WrinkleWetnessMax = nullptr;
+        UMaterialExpressionScalarParameter* UseTransparencyMap = nullptr;
+        UMaterialExpressionScalarParameter* TransparencyWetnessMin = nullptr;
+        UMaterialExpressionScalarParameter* TransparencyWetnessMax = nullptr;
+
+        bool IsComplete() const
         {
-            FailureReasons.Add(TEXT("Unified normal setup requires a material and both DWC apply calls."));
+            return DWCDataUV != nullptr &&
+                   WetnessMap != nullptr &&
+                   WrinkleNormalMap != nullptr &&
+                   TransparencyMap != nullptr &&
+                   UseWrinkleNormalMap != nullptr &&
+                   WrinkleStrength != nullptr &&
+                   WrinkleWetnessMin != nullptr &&
+                   WrinkleWetnessMax != nullptr &&
+                   UseTransparencyMap != nullptr &&
+                   TransparencyWetnessMin != nullptr &&
+                   TransparencyWetnessMax != nullptr;
+        }
+    };
+
+    bool CreateDwcRuntimeMaterialInputs(
+        UMaterial* Material,
+        const int32 DWCDataUVChannelIndex,
+        FDwcRuntimeMaterialInputs& OutInputs,
+        TArray<FString>& FailureReasons)
+    {
+        OutInputs = FDwcRuntimeMaterialInputs();
+        if (Material == nullptr || DWCDataUVChannelIndex < 0 || DWCDataUVChannelIndex > 7)
+        {
+            FailureReasons.Add(TEXT("DWC runtime inputs require a material and a valid DWC Data UV channel."));
             return false;
         }
 
-        FString              BaseNormalOutputName;
-        UMaterialExpression* BaseNormalInput = ResolveMaterialPropertyInputOrFallback(
+        OutInputs.DWCDataUV = FindOrCreateDWCDataTextureCoordinate(
+            Material, DWCDataUVChannelIndex, -1180, 1270);
+        OutInputs.WetnessMap = FindOrCreateGPUWetnessMapParameter(Material, -930, 1270);
+        OutInputs.WrinkleNormalMap = FindOrCreateTextureSampleParameter(
+            Material, DWCWetMaterialParameters::WrinkleNormalMap(), -930, 450);
+        OutInputs.TransparencyMap = FindOrCreateColorTextureSampleParameter(
             Material,
-            MP_Normal,
-            FVector2D(-1120.0f, 520.0f),
-            BaseNormalOutputName);
+            DWCWetMaterialParameters::TransparencyMap(),
+            TEXT("DWC baked transparency map. RGB is the inner color; A is transparency coverage."),
+            -930,
+            610);
+        OutInputs.UseWrinkleNormalMap = FindOrCreateScalarParameter(
+            Material, DWCWetMaterialParameters::UseWrinkleNormalMap(), 0.0f, -680, 450);
+        OutInputs.WrinkleStrength = FindOrCreateScalarParameter(
+            Material, DWCWetMaterialParameters::WrinkleStrength(), DWCWetMaterialParameters::DefaultWrinkleStrength(), -680, 500);
+        OutInputs.WrinkleWetnessMin = FindOrCreateScalarParameter(
+            Material, DWCWetMaterialParameters::WrinkleWetnessMin(), DWCWetMaterialParameters::DefaultWrinkleWetnessMin(), -680, 550);
+        OutInputs.WrinkleWetnessMax = FindOrCreateScalarParameter(
+            Material, DWCWetMaterialParameters::WrinkleWetnessMax(), DWCWetMaterialParameters::DefaultWrinkleWetnessMax(), -680, 600);
+        OutInputs.UseTransparencyMap = FindOrCreateScalarParameter(
+            Material, DWCWetMaterialParameters::UseTransparencyMap(), 0.0f, -680, 680);
+        OutInputs.TransparencyWetnessMin = FindOrCreateScalarParameter(
+            Material, DWCWetMaterialParameters::TransparencyWetnessMin(), DWCWetMaterialParameters::DefaultTransparencyWetnessMin(), -680, 730);
+        OutInputs.TransparencyWetnessMax = FindOrCreateScalarParameter(
+            Material, DWCWetMaterialParameters::TransparencyWetnessMax(), DWCWetMaterialParameters::DefaultTransparencyWetnessMax(), -680, 780);
 
-        if (!Options.bEnableDWCDataUVSampling)
+        if (!OutInputs.IsComplete())
         {
-            return ConnectExpressionToBothApplyCalls(
-                BaseNormalInput,
-                BaseNormalOutputName,
-                CPUApply,
-                GPUApply,
-                TEXT("BaseNormal"),
-                FailureReasons);
+            FailureReasons.Add(TEXT("Could not create the complete DWC runtime texture and scalar input graph."));
+            return false;
         }
 
-        UMaterialExpressionTextureSampleParameter2D* WrinkleNormalMap = FindOrCreateTextureSampleParameter(
-            Material,
-            TEXT("DWC_WrinkleNormalMap"),
-            -900,
-            670);
-        UMaterialExpressionTextureCoordinate* DWCDataUV = FindOrCreateDWCDataTextureCoordinate(
-            Material,
-            Options.DWCDataUVChannelIndex,
-            -1150,
-            670);
-        UMaterialExpressionScalarParameter* UseWrinkleNormalMap = FindOrCreateScalarParameter(
-            Material,
-            TEXT("DWC_UseWrinkleNormalMap"),
-            0.0f,
-            -900,
-            840);
-        UMaterialExpressionScalarParameter* WrinkleStrength = FindOrCreateScalarParameter(
-            Material,
-            TEXT("DWC_WrinkleStrength"),
-            1.0f,
-            -900,
-            930);
-        UMaterialExpressionScalarParameter* WrinkleWetnessMin = FindOrCreateScalarParameter(
-            Material,
-            TEXT("DWC_WrinkleWetnessMin"),
-            0.25f,
-            -900,
-            1020);
-        UMaterialExpressionScalarParameter* WrinkleWetnessMax = FindOrCreateScalarParameter(
-            Material,
-            TEXT("DWC_WrinkleWetnessMax"),
-            1.0f,
-            -900,
-            1110);
+        bool bConnected = ConnectTextureCoordinateChecked(OutInputs.DWCDataUV, OutInputs.WetnessMap, FailureReasons);
+        bConnected &= ConnectTextureCoordinateChecked(OutInputs.DWCDataUV, OutInputs.WrinkleNormalMap, FailureReasons);
+        bConnected &= ConnectTextureCoordinateChecked(OutInputs.DWCDataUV, OutInputs.TransparencyMap, FailureReasons);
+        return bConnected;
+    }
 
-        if (BaseNormalInput == nullptr || WrinkleNormalMap == nullptr || DWCDataUV == nullptr ||
-            UseWrinkleNormalMap == nullptr || WrinkleStrength == nullptr ||
-            WrinkleWetnessMin == nullptr || WrinkleWetnessMax == nullptr)
+    bool ConnectDwcRuntimeMaterialInputs(
+        const FDwcRuntimeMaterialInputs& Inputs,
+        UMaterialExpression* BaseNormalInput,
+        const FString& BaseNormalOutputName,
+        UMaterialExpressionMaterialFunctionCall* CPUApply,
+        UMaterialExpressionMaterialFunctionCall* GPUApply,
+        TArray<FString>& FailureReasons)
+    {
+        if (!Inputs.IsComplete() || BaseNormalInput == nullptr || CPUApply == nullptr || GPUApply == nullptr)
         {
-            FailureReasons.Add(TEXT("Could not create one or more shared wrinkle-normal nodes."));
+            FailureReasons.Add(TEXT("DWC runtime input connection requires complete inputs, BaseNormal, and both apply calls."));
             return false;
         }
 
         bool bConnected = true;
-        bConnected &= ConnectTextureCoordinateChecked(DWCDataUV, WrinkleNormalMap, FailureReasons);
-        bConnected &= ConnectExpressionToBothApplyCalls(BaseNormalInput, BaseNormalOutputName, CPUApply, GPUApply, TEXT("BaseNormal"), FailureReasons);
-        bConnected &= ConnectExpressionToBothApplyCalls(WrinkleNormalMap, TEXT("RGB"), CPUApply, GPUApply, TEXT("WrinkleNormal"), FailureReasons);
-        bConnected &= ConnectExpressionToBothApplyCalls(UseWrinkleNormalMap, FString(), CPUApply, GPUApply, TEXT("UseWrinkleNormalMap"), FailureReasons);
-        bConnected &= ConnectExpressionToBothApplyCalls(WrinkleStrength, FString(), CPUApply, GPUApply, TEXT("WrinkleStrength"), FailureReasons);
-        bConnected &= ConnectExpressionToBothApplyCalls(WrinkleWetnessMin, FString(), CPUApply, GPUApply, TEXT("WrinkleWetnessMin"), FailureReasons);
-        bConnected &= ConnectExpressionToBothApplyCalls(WrinkleWetnessMax, FString(), CPUApply, GPUApply, TEXT("WrinkleWetnessMax"), FailureReasons);
+        bConnected &= ConnectExpressionToBothApplyCalls(
+            BaseNormalInput, BaseNormalOutputName, CPUApply, GPUApply, TEXT("BaseNormal"), FailureReasons);
+        bConnected &= ConnectExpressionToBothApplyCalls(
+            Inputs.WrinkleNormalMap, TEXT("RGB"), CPUApply, GPUApply, TEXT("WrinkleNormal"), FailureReasons);
+        bConnected &= ConnectExpressionToBothApplyCalls(
+            Inputs.UseWrinkleNormalMap, FString(), CPUApply, GPUApply, TEXT("UseWrinkleNormalMap"), FailureReasons);
+        bConnected &= ConnectExpressionToBothApplyCalls(
+            Inputs.WrinkleStrength, FString(), CPUApply, GPUApply, TEXT("WrinkleStrength"), FailureReasons);
+        bConnected &= ConnectExpressionToBothApplyCalls(
+            Inputs.WrinkleWetnessMin, FString(), CPUApply, GPUApply, TEXT("WrinkleWetnessMin"), FailureReasons);
+        bConnected &= ConnectExpressionToBothApplyCalls(
+            Inputs.WrinkleWetnessMax, FString(), CPUApply, GPUApply, TEXT("WrinkleWetnessMax"), FailureReasons);
+        bConnected &= ConnectExpressionToBothApplyCalls(
+            Inputs.TransparencyMap, TEXT("RGB"), CPUApply, GPUApply, TEXT("TransparencyColor"), FailureReasons);
+        bConnected &= ConnectExpressionToBothApplyCalls(
+            Inputs.TransparencyMap, TEXT("A"), CPUApply, GPUApply, TEXT("TransparencyAlpha"), FailureReasons);
+        bConnected &= ConnectExpressionToBothApplyCalls(
+            Inputs.UseTransparencyMap, FString(), CPUApply, GPUApply, TEXT("UseTransparencyMap"), FailureReasons);
+        bConnected &= ConnectExpressionToBothApplyCalls(
+            Inputs.TransparencyWetnessMin, FString(), CPUApply, GPUApply, TEXT("TransparencyWetnessMin"), FailureReasons);
+        bConnected &= ConnectExpressionToBothApplyCalls(
+            Inputs.TransparencyWetnessMax, FString(), CPUApply, GPUApply, TEXT("TransparencyWetnessMax"), FailureReasons);
         return bConnected;
     }
 
@@ -1322,20 +1708,78 @@ namespace
             return false;
         }
 
-        FWCAMaterialGenerator::FOptions CPUOptions = Options;
-        CPUOptions.SimulationMode = EDWCSimulationMode::VertexCPU;
-        CPUOptions.bConnectWetnessMapPath = false;
-        if (!PrepareDwcApplyWetnessFunction(CPUFunction, CPUOptions, FailureReasons))
+        if (!ValidateFixedApplyWetnessFunctions(CPUFunction, GPUFunction, FailureReasons))
         {
             return false;
         }
 
+        const bool bUsesMaterialAttributes = Material->bUseMaterialAttributes;
+        UMaterialExpression* MaterialAttributesInput = nullptr;
+        FString              MaterialAttributesOutputName;
+        UMaterialExpressionGetMaterialAttributes* GetAttributes = nullptr;
+        UMaterialExpressionSetMaterialAttributes* SetAttributes = nullptr;
         FString              BaseColorOutputName;
-        UMaterialExpression* BaseColorInput = ResolveMaterialPropertyInputOrFallback(
-            Material, MP_BaseColor, FVector2D(-1180.0f, -160.0f), BaseColorOutputName);
         FString              RoughnessOutputName;
-        UMaterialExpression* RoughnessInput = ResolveMaterialPropertyInputOrFallback(
-            Material, MP_Roughness, FVector2D(-1180.0f, 140.0f), RoughnessOutputName);
+        FString              BaseNormalOutputName;
+        UMaterialExpression* BaseColorInput = nullptr;
+        UMaterialExpression* RoughnessInput = nullptr;
+        UMaterialExpression* BaseNormalInput = nullptr;
+
+        if (bUsesMaterialAttributes)
+        {
+            MaterialAttributesInput = UMaterialEditingLibrary::GetMaterialPropertyInputNode(Material, MP_MaterialAttributes);
+            MaterialAttributesOutputName = UMaterialEditingLibrary::GetMaterialPropertyInputNodeOutputName(Material, MP_MaterialAttributes);
+            if (MaterialAttributesInput == nullptr)
+            {
+                FailureReasons.Add(TEXT("The source material uses Material Attributes, but its Material Attributes output is not connected."));
+                return false;
+            }
+
+            GetAttributes = Cast<UMaterialExpressionGetMaterialAttributes>(
+                UMaterialEditingLibrary::CreateMaterialExpression(
+                    Material, UMaterialExpressionGetMaterialAttributes::StaticClass(), -1180, -300));
+            SetAttributes = Cast<UMaterialExpressionSetMaterialAttributes>(
+                UMaterialEditingLibrary::CreateMaterialExpression(
+                    Material, UMaterialExpressionSetMaterialAttributes::StaticClass(), 980, -100));
+            if (GetAttributes == nullptr || SetAttributes == nullptr)
+            {
+                FailureReasons.Add(TEXT("Could not create Material Attributes nodes for the unified DWC material."));
+                return false;
+            }
+
+            SetAttributes->Desc = DwcMaterialAttributesOutputDescription;
+
+            GetAttributes->CreateOrGetOutputAttribute(MP_BaseColor);
+            GetAttributes->CreateOrGetOutputAttribute(MP_Roughness);
+            GetAttributes->CreateOrGetOutputAttribute(MP_Normal);
+            SetAttributes->CreateOrGetInputAttribute(MP_BaseColor);
+            SetAttributes->CreateOrGetInputAttribute(MP_Roughness);
+            SetAttributes->CreateOrGetInputAttribute(MP_Normal);
+
+            BaseColorInput = GetAttributes;
+            BaseColorOutputName = TEXT("BaseColor");
+            RoughnessInput = GetAttributes;
+            RoughnessOutputName = TEXT("Roughness");
+            BaseNormalInput = GetAttributes;
+            BaseNormalOutputName = TEXT("Normal");
+        }
+        else
+        {
+            // BaseColor is not optional for an opaque DWC material. Do not silently replace a
+            // missing source connection with white; that hides a bad generated-material graph.
+            BaseColorInput = UMaterialEditingLibrary::GetMaterialPropertyInputNode(Material, MP_BaseColor);
+            BaseColorOutputName = UMaterialEditingLibrary::GetMaterialPropertyInputNodeOutputName(Material, MP_BaseColor);
+            if (BaseColorInput == nullptr)
+            {
+                FailureReasons.Add(TEXT("Could not resolve the source BaseColor connection. The unified DWC material was not generated with a white fallback."));
+                return false;
+            }
+
+            RoughnessInput = ResolveMaterialPropertyInputOrFallback(
+                Material, MP_Roughness, FVector2D(-1180.0f, 140.0f), RoughnessOutputName);
+            BaseNormalInput = ResolveMaterialPropertyInputOrFallback(
+                Material, MP_Normal, FVector2D(-1120.0f, 520.0f), BaseNormalOutputName);
+        }
 
         UMaterialExpressionMaterialFunctionCall* CPUApply = CreateFunctionCall(Material, CPUFunction, -430, -240);
         UMaterialExpressionMaterialFunctionCall* GPUApply = CreateFunctionCall(Material, GPUFunction, -430, 250);
@@ -1353,34 +1797,57 @@ namespace
         }
 
         bool bConnected = true;
+        if (bUsesMaterialAttributes)
+        {
+            bConnected &= ConnectChecked(
+                MaterialAttributesInput,
+                MaterialAttributesOutputName,
+                GetAttributes,
+                TEXT("MaterialAttributes"),
+                FailureReasons);
+            bConnected &= ConnectChecked(
+                MaterialAttributesInput,
+                MaterialAttributesOutputName,
+                SetAttributes,
+                TEXT("MaterialAttributes"),
+                FailureReasons);
+        }
         bConnected &= ConnectExpressionToBothApplyCalls(BaseColorInput, BaseColorOutputName, CPUApply, GPUApply, TEXT("BaseColor"), FailureReasons);
         bConnected &= ConnectExpressionToBothApplyCalls(WetDarkeningStrength, FString(), CPUApply, GPUApply, TEXT("WetDarkeningStrength"), FailureReasons);
         bConnected &= ConnectExpressionToBothApplyCalls(RoughnessInput, RoughnessOutputName, CPUApply, GPUApply, TEXT("BaseRoughness"), FailureReasons);
         bConnected &= ConnectExpressionToBothApplyCalls(WetRoughness, FString(), CPUApply, GPUApply, TEXT("WetRoughness"), FailureReasons);
         bConnected &= ConnectExpressionToBothApplyCalls(SurfaceWaterStrength, FString(), CPUApply, GPUApply, TEXT("SurfaceWaterStrength"), FailureReasons);
         bConnected &= ConnectChecked(VertexColor, TEXT("R"), CPUApply, TEXT("Wetness"), FailureReasons);
-        bConnected &= ConnectUnifiedNormalInputs(Material, CPUApply, GPUApply, Options, FailureReasons);
 
-        UMaterialExpressionTextureSampleParameter2D* WetnessMap = FindOrCreateGPUWetnessMapParameter(Material, -930, 1270);
-        UMaterialExpressionTextureCoordinate*        DWCDataUV = FindOrCreateDWCDataTextureCoordinate(
-            Material,
-            Options.DWCDataUVChannelIndex,
-            -1180,
-            1270);
-        if (WetnessMap == nullptr || DWCDataUV == nullptr)
+        FDwcRuntimeMaterialInputs RuntimeInputs;
+        if (!CreateDwcRuntimeMaterialInputs(
+                Material,
+                Options.DWCDataUVChannelIndex,
+                RuntimeInputs,
+                FailureReasons))
         {
-            FailureReasons.Add(TEXT("Could not create the shared GPU wetness-map input nodes."));
             return false;
         }
-        bConnected &= ConnectTextureCoordinateChecked(DWCDataUV, WetnessMap, FailureReasons);
         bConnected &= ConnectExpressionToBothApplyCalls(
-            DWCDataUV,
+            RuntimeInputs.DWCDataUV,
             FString(),
             CPUApply,
             GPUApply,
             TEXT("SurfaceWaterUV"),
             FailureReasons);
-        bConnected &= ConnectChecked(WetnessMap, TEXT("R"), GPUApply, TEXT("WetnessMap"), FailureReasons);
+        bConnected &= ConnectChecked(
+            RuntimeInputs.WetnessMap,
+            TEXT("R"),
+            GPUApply,
+            TEXT("WetnessMap"),
+            FailureReasons);
+        bConnected &= ConnectDwcRuntimeMaterialInputs(
+            RuntimeInputs,
+            BaseNormalInput,
+            BaseNormalOutputName,
+            CPUApply,
+            GPUApply,
+            FailureReasons);
 
         FString CPUBaseColorOutput;
         FString GPUBaseColorOutput;
@@ -1468,7 +1935,7 @@ namespace
             const int32 VertexColorAlphaOutputIndex =
                 ResolveExpressionOutputIndex(VertexColor, TEXT("A"), 4);
             const int32 WetnessMapRedOutputIndex =
-                ResolveExpressionOutputIndex(WetnessMap, TEXT("R"), INDEX_NONE);
+                ResolveExpressionOutputIndex(RuntimeInputs.WetnessMap, TEXT("R"), INDEX_NONE);
 
             if (VertexColorRGBOutputIndex == INDEX_NONE ||
                 VertexColorRedOutputIndex == INDEX_NONE ||
@@ -1478,7 +1945,7 @@ namespace
                 FailureReasons.Add(FString::Printf(
                     TEXT("Could not resolve the material outputs required by the Wet Part debug graph. VertexColor outputs: %s. Wetness map outputs: %s"),
                     *JoinPinNames(GetMaterialExpressionOutputNames(VertexColor)),
-                    *JoinPinNames(GetMaterialExpressionOutputNames(WetnessMap))));
+                    *JoinPinNames(GetMaterialExpressionOutputNames(RuntimeInputs.WetnessMap))));
                 bConnected = false;
             }
             else
@@ -1487,7 +1954,7 @@ namespace
                 // editor pin-name lookup across engine versions.
                 PartColorGB->Input.Connect(VertexColorRGBOutputIndex, VertexColor);
                 CPUDebugAlpha->A.Connect(VertexColorRedOutputIndex, VertexColor);
-                GPUDebugAlpha->A.Connect(WetnessMapRedOutputIndex, WetnessMap);
+                GPUDebugAlpha->A.Connect(WetnessMapRedOutputIndex, RuntimeInputs.WetnessMap);
 
                 // PartColorGB outputs VertexColor.GB (float2). Append VertexColor.A as the
                 // third component so the final debug color is reconstructed from GBA.
@@ -1510,20 +1977,34 @@ namespace
             bConnected &= ConnectChecked(CPUBaseColorDebugLerp, FString(), BaseColorSwitch, TEXT("False"), FailureReasons);
         }
 
-        if (!UMaterialEditingLibrary::ConnectMaterialProperty(BaseColorSwitch, FString(), MP_BaseColor))
+        if (bUsesMaterialAttributes)
         {
-            FailureReasons.Add(TEXT("Failed to connect the unified DWC BaseColor/debug output."));
-            bConnected = false;
+            bConnected &= ConnectChecked(BaseColorSwitch, FString(), SetAttributes, TEXT("BaseColor"), FailureReasons);
+            bConnected &= ConnectChecked(RoughnessSwitch, FString(), SetAttributes, TEXT("Roughness"), FailureReasons);
+            bConnected &= ConnectChecked(NormalSwitch, FString(), SetAttributes, TEXT("Normal"), FailureReasons);
+            if (!UMaterialEditingLibrary::ConnectMaterialProperty(SetAttributes, FString(), MP_MaterialAttributes))
+            {
+                FailureReasons.Add(TEXT("Failed to connect the unified DWC Material Attributes output."));
+                bConnected = false;
+            }
         }
-        if (!UMaterialEditingLibrary::ConnectMaterialProperty(RoughnessSwitch, FString(), MP_Roughness))
+        else
         {
-            FailureReasons.Add(TEXT("Failed to connect the unified DWC Roughness output."));
-            bConnected = false;
-        }
-        if (!UMaterialEditingLibrary::ConnectMaterialProperty(NormalSwitch, FString(), MP_Normal))
-        {
-            FailureReasons.Add(TEXT("Failed to connect the unified DWC Normal output."));
-            bConnected = false;
+            if (!UMaterialEditingLibrary::ConnectMaterialProperty(BaseColorSwitch, FString(), MP_BaseColor))
+            {
+                FailureReasons.Add(TEXT("Failed to connect the unified DWC BaseColor/debug output."));
+                bConnected = false;
+            }
+            if (!UMaterialEditingLibrary::ConnectMaterialProperty(RoughnessSwitch, FString(), MP_Roughness))
+            {
+                FailureReasons.Add(TEXT("Failed to connect the unified DWC Roughness output."));
+                bConnected = false;
+            }
+            if (!UMaterialEditingLibrary::ConnectMaterialProperty(NormalSwitch, FString(), MP_Normal))
+            {
+                FailureReasons.Add(TEXT("Failed to connect the unified DWC Normal output."));
+                bConnected = false;
+            }
         }
 
         if (bConnected)
@@ -1543,6 +2024,17 @@ namespace
         if (SourceBaseMaterial == nullptr)
         {
             OutErrorMessage = TEXT("The source material interface has no editable base material.");
+            return nullptr;
+        }
+
+        UMaterialFunctionInterface* CPUFunction = LoadDwcMaterialFunction(DwcApplyWetnessFunctionCPU);
+        UMaterialFunctionInterface* GPUFunction = LoadDwcMaterialFunction(DwcApplyWetnessFunctionGPU);
+        TArray<FString> FunctionSetupFailures;
+        if (CPUFunction == nullptr || GPUFunction == nullptr ||
+            !ValidateFixedApplyWetnessFunctions(CPUFunction, GPUFunction, FunctionSetupFailures))
+        {
+            OutErrorMessage = TEXT("The fixed DWC apply wetness functions are not ready for runtime transparency.\n") +
+                FString::Join(FunctionSetupFailures, TEXT("\n"));
             return nullptr;
         }
 
@@ -1571,14 +2063,80 @@ namespace
 
             bOutReusedExisting = true;
             GeneratedMaterial->Modify();
+            UMaterial* OriginalGeneratedMaterial = GeneratedMaterial;
+            UPackage* OriginalGeneratedPackage = GeneratedMaterial->GetOutermost();
+            const FName OriginalGeneratedObjectName = GeneratedMaterial->GetFName();
+            bool bRebuiltFromSource = false;
             TArray<TObjectPtr<UMaterialInstanceConstant>> DetachedBackendInstances;
             DetachGeneratedBackendInstancesForBaseRebuild(GeneratedMaterial, DetachedBackendInstances);
 
+            auto RestoreOriginalGeneratedMaterial = [&]()
+            {
+                if (!bRebuiltFromSource || OriginalGeneratedMaterial == nullptr)
+                {
+                    RestoreDetachedGeneratedBackendInstances(GeneratedMaterial, DetachedBackendInstances);
+                    return;
+                }
+
+                if (GeneratedMaterial != nullptr && GeneratedMaterial != OriginalGeneratedMaterial)
+                {
+                    FAssetRegistryModule::AssetDeleted(GeneratedMaterial);
+                    GeneratedMaterial->Rename(
+                        nullptr,
+                        GetTransientPackage(),
+                        REN_DontCreateRedirectors | REN_NonTransactional);
+                    GeneratedMaterial->ClearFlags(RF_Public | RF_Standalone);
+                }
+
+                OriginalGeneratedMaterial->Rename(
+                    *OriginalGeneratedObjectName.ToString(),
+                    OriginalGeneratedPackage,
+                    REN_DontCreateRedirectors | REN_NonTransactional);
+                OriginalGeneratedMaterial->SetFlags(RF_Public | RF_Standalone | RF_Transactional);
+                FAssetRegistryModule::AssetCreated(OriginalGeneratedMaterial);
+                GeneratedMaterial = OriginalGeneratedMaterial;
+                RestoreDetachedGeneratedBackendInstances(GeneratedMaterial, DetachedBackendInstances);
+            };
+
             auto RebuildUnifiedGraphFromSource = [&]() -> bool
             {
-                // Generated DWC materials are fully owned outputs. Reset the object from the
-                // current source graph, then recreate all DWC nodes and connections in one pass.
-                UEngine::CopyPropertiesForUnrelatedObjects(SourceBaseMaterial, GeneratedMaterial);
+                if (bRebuiltFromSource)
+                {
+                    OutErrorMessage = TEXT("The generated DWC material already received one full source-based rebuild during this operation.");
+                    return false;
+                }
+
+                // Material expression graphs are composed of editor-only subobjects. Copying
+                // properties onto an existing UMaterial does not recreate that subobject graph
+                // correctly in UE 5.8 and can lose the source BaseColor link. Replace the owned
+                // generated output with a real duplicate of the current source material instead.
+                bRebuiltFromSource = true;
+                FAssetRegistryModule::AssetDeleted(OriginalGeneratedMaterial);
+                OriginalGeneratedMaterial->Rename(
+                    nullptr,
+                    GetTransientPackage(),
+                    REN_DontCreateRedirectors | REN_NonTransactional);
+
+                // Use the editor asset duplication path here, just as the first-time generation
+                // path below does. UMaterial owns its expression graph through editor-only
+                // subobjects; DuplicateObject can leave those connections incomplete when it
+                // replaces an existing package asset in UE 5.8.
+                FAssetToolsModule& AssetToolsModule = FModuleManager::LoadModuleChecked<FAssetToolsModule>(TEXT("AssetTools"));
+                UMaterial* RebuiltMaterial = Cast<UMaterial>(AssetToolsModule.Get().DuplicateAsset(
+                    OriginalGeneratedObjectName.ToString(),
+                    FPackageName::GetLongPackagePath(OriginalGeneratedPackage->GetName()),
+                    SourceBaseMaterial));
+                if (RebuiltMaterial == nullptr)
+                {
+                    OutErrorMessage = FString::Printf(
+                        TEXT("Could not duplicate source material '%s' through AssetTools while rebuilding generated DWC material '%s'."),
+                        *GetPathNameSafe(SourceBaseMaterial),
+                        *OriginalGeneratedObjectName.ToString());
+                    return false;
+                }
+
+                RebuiltMaterial->SetFlags(RF_Public | RF_Standalone | RF_Transactional);
+                GeneratedMaterial = RebuiltMaterial;
                 ReplaceMissingTextureSamplesWithFallbacks(GeneratedMaterial);
                 TArray<FString> FailureReasons;
                 if (!CreateUnifiedDwcMaterialGraph(GeneratedMaterial, Options, FailureReasons))
@@ -1589,11 +2147,11 @@ namespace
                 return true;
             };
 
-            if (!IsUnifiedDwcMaterial(GeneratedMaterial))
+            if (!IsUnifiedDwcMaterial(GeneratedMaterial, Options.DWCDataUVChannelIndex))
             {
                 if (!RebuildUnifiedGraphFromSource())
                 {
-                    RestoreDetachedGeneratedBackendInstances(GeneratedMaterial, DetachedBackendInstances);
+                    RestoreOriginalGeneratedMaterial();
                     return nullptr;
                 }
             }
@@ -1605,15 +2163,17 @@ namespace
             GeneratedMaterial->UpdateCachedExpressionData();
             GeneratedMaterial->PostEditChange();
             TArray<FString> CompileErrors = RecompileMaterialAndCollectErrors(GeneratedMaterial);
-            if (!CompileErrors.IsEmpty())
+            if (!CompileErrors.IsEmpty() && !bRebuiltFromSource)
             {
                 // A graph may look structurally complete while containing stale broken links.
                 // Perform one full source-based rebuild before reporting a failure.
                 if (!RebuildUnifiedGraphFromSource())
                 {
-                    RestoreDetachedGeneratedBackendInstances(GeneratedMaterial, DetachedBackendInstances);
+                    RestoreOriginalGeneratedMaterial();
                     return nullptr;
                 }
+                GeneratedMaterial->UpdateCachedExpressionData();
+                GeneratedMaterial->PostEditChange();
                 CompileErrors = RecompileMaterialAndCollectErrors(GeneratedMaterial);
             }
             GeneratedMaterial->MarkPackageDirty();
@@ -1622,8 +2182,13 @@ namespace
                 OutErrorMessage = BuildCompileErrorMessage(
                     FString::Printf(TEXT("Unified generated material '%s' failed to compile after full rebuild."), *GetNameSafe(GeneratedMaterial)),
                     CompileErrors);
-                RestoreDetachedGeneratedBackendInstances(GeneratedMaterial, DetachedBackendInstances);
+                RestoreOriginalGeneratedMaterial();
                 return nullptr;
+            }
+            RestoreDetachedGeneratedBackendInstances(GeneratedMaterial, DetachedBackendInstances);
+            if (bRebuiltFromSource && OriginalGeneratedMaterial != nullptr)
+            {
+                OriginalGeneratedMaterial->ClearFlags(RF_Public | RF_Standalone);
             }
             return GeneratedMaterial;
         }
@@ -1843,10 +2408,6 @@ FWCAMaterialGenerator::FOptions FWCAMaterialGenerator::MakeOptionsForAsset(
     {
         Options.OwningWetClothingAsset = WetClothingAsset;
         Options.DWCDataUVChannelIndex = WetClothingAsset->GetDWCDataUVChannelIndex();
-        Options.bEnableDWCDataUVSampling = Options.DWCDataUVChannelIndex != INDEX_NONE;
-        Options.bConnectWetnessMapPath =
-            SimulationMode == EDWCSimulationMode::WetnessMapGPU &&
-            Options.bEnableDWCDataUVSampling;
     }
     return Options;
 }
@@ -1874,11 +2435,17 @@ FWetClothingUnifiedMaterialSetupResult FWCAMaterialGenerator::CreateOrUpdateUnif
         Result.Message = FString::Printf(TEXT("'%s' has no editable base material."), *GetNameSafe(SourceMaterial));
         return Result;
     }
+    if (HasFunctionCall(SourceBaseMaterial, LoadDwcMaterialFunction(DwcApplyWetnessFunctionCPU)) ||
+        HasFunctionCall(SourceBaseMaterial, LoadDwcMaterialFunction(DwcApplyWetnessFunctionGPU)))
+    {
+        Result.Message = FString::Printf(
+            TEXT("'%s' is already a generated DWC material. Generate from the original source material instead."),
+            *GetNameSafe(SourceMaterial));
+        return Result;
+    }
 
     FOptions UnifiedOptions = Options;
     UnifiedOptions.SimulationMode = EDWCSimulationMode::VertexCPU;
-    UnifiedOptions.bEnableDWCDataUVSampling = true;
-    UnifiedOptions.bConnectWetnessMapPath = true;
 
     FString    BaseError;
     bool       bReusedBase = false;
@@ -1928,6 +2495,19 @@ FWetClothingUnifiedMaterialSetupResult FWCAMaterialGenerator::CreateOrUpdateUnif
         return Result;
     }
 
+    FOptions CPUValidationOptions = UnifiedOptions;
+    CPUValidationOptions.SimulationMode = EDWCSimulationMode::VertexCPU;
+    FOptions GPUValidationOptions = UnifiedOptions;
+    GPUValidationOptions.SimulationMode = EDWCSimulationMode::WetnessMapGPU;
+    if (!IsMaterialConfiguredForDwc(CPUInstance, CPUValidationOptions) ||
+        !IsMaterialConfiguredForDwc(GPUInstance, GPUValidationOptions))
+    {
+        Result.Message = FString::Printf(
+            TEXT("Generated material '%s' compiled, but its CPU/GPU instances do not satisfy the fixed DWC graph contract."),
+            *GetNameSafe(GeneratedMaterial));
+        return Result;
+    }
+
     Result.bSucceeded = true;
     Result.bAlreadyConfigured = bReusedBase && bReusedCPU && bReusedGPU;
     Result.GeneratedMaterial = GeneratedMaterial;
@@ -1951,27 +2531,8 @@ bool FWCAMaterialGenerator::IsMaterialConfiguredForDwc(
     UMaterialInterface* MaterialInterface,
     const FOptions&     Options)
 {
-    if (!IsMaterialConfiguredForDwc(MaterialInterface))
-    {
-        return false;
-    }
-
-    UMaterial*                               Material = MaterialInterface->GetMaterial();
-    UMaterialExpressionMaterialFunctionCall* CPUApply = FindFunctionCall(
-        Material,
-        LoadDwcMaterialFunction(DwcApplyWetnessFunctionCPU));
-    UMaterialExpressionMaterialFunctionCall* GPUApply = FindFunctionCall(
-        Material,
-        LoadDwcMaterialFunction(DwcApplyWetnessFunctionGPU));
-    if (CPUApply == nullptr || GPUApply == nullptr ||
-        FindTextureSampleParameter(Material, TEXT("DWC_WetnessMap")) == nullptr ||
-        FindScalarParameter(Material, TEXT("DWC_WetPartDebugStrength")) == nullptr ||
-        FindScalarParameter(Material, TEXT("DWC_WetRoughness")) == nullptr ||
-        FindScalarParameter(Material, TEXT("DWC_SurfaceWaterStrength")) == nullptr ||
-        !IsFunctionInputConnected(CPUApply, TEXT("Wetness")) ||
-        !IsFunctionInputConnected(CPUApply, TEXT("SurfaceWaterUV")) ||
-        !IsFunctionInputConnected(GPUApply, TEXT("SurfaceWaterUV")) ||
-        !IsFunctionInputConnected(GPUApply, TEXT("WetnessMap")))
+    if (MaterialInterface == nullptr ||
+        !IsUnifiedDwcMaterial(MaterialInterface->GetMaterial(), Options.DWCDataUVChannelIndex))
     {
         return false;
     }
@@ -2187,10 +2748,12 @@ bool FWCAMaterialGenerator::ValidateSharedApplyWetnessFunction(FString& OutError
         return false;
     }
 
-    return true;
-}
+    TArray<FString> FailureReasons;
+    if (!ValidateFixedApplyWetnessFunctions(CPUFunction, GPUFunction, FailureReasons))
+    {
+        OutErrorMessage = FString::Join(FailureReasons, TEXT("\n"));
+        return false;
+    }
 
-bool FWCAMaterialGenerator::RepairOrUpgradeSharedApplyWetnessFunction(FString& OutErrorMessage)
-{
-    return ValidateSharedApplyWetnessFunction(OutErrorMessage);
+    return true;
 }

@@ -26,11 +26,14 @@ struct FDWCTransparencyAutoBakeResult
     int32 NoHitCount = 0;
     int32 OverlappedUVPixelCount = 0;
     TArray<FColor> InnerColorBuffer;
-    TArray<float> AutoAlphaBuffer;
+    TArray<uint8> AutoAlphaBuffer;
+    // Target-slot UV coverage is separate from ray-hit validity. It is used to
+    // feather island edges and dilate only outside the target surface.
+    TArray<uint8> OuterCoverageBuffer;
     TArray<uint8> ValidHitBuffer;
     TArray<float> HitDistanceBuffer;
-    TArray<float> RayConfidenceBuffer;
-    TArray<int32> SourcePriorityBuffer;
+    TArray<uint8> RayConfidenceBuffer;
+    TArray<int16> SourcePriorityBuffer;
     TArray<FDWCTransparencySourceHitStats> SourceStats;
 };
 

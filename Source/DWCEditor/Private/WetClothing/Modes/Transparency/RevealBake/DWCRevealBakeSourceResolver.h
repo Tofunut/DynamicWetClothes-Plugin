@@ -6,28 +6,14 @@
 
 #include <initializer_list>
 
-class UTexture;
 class UTexture2D;
 class UMaterialInterface;
-struct FDWCRevealBakeTextureWriteSettings;
 
 class FDWCRevealBakeSourceResolver
 {
   public:
-    static TArray<FName> BuildRevealSourceLayerIds(const TArray<FDWCRevealBakeSurface>& SourceSurfaces);
-
-    static const FDWCBakeResolvedLayer* FindResolvedLayerById(
-        const FDWCBakeSnapshot& Snapshot,
-        FName                   LayerId);
-
     static UTexture2D* ResolveRevealSourceBaseColorTexture(const FDWCBakeResolvedLayer& SourceLayer);
     static UTexture2D* ResolveRevealSourceBaseColorTexture(UMaterialInterface* SourceMaterial);
-    static UTexture* ResolvePreviewSourceTexture(const FDWCBakeResolvedLayer& SourceLayer);
-
-    static void PopulateSourceLayerTextures(
-        const FDWCBakeSnapshot&              Snapshot,
-        const TArray<FName>&                 SourceLayerIds,
-        FDWCRevealBakeTextureWriteSettings&  InOutTextureSettings);
 
   private:
     static FString NormalizeTextureSearchText(const FString& InText);

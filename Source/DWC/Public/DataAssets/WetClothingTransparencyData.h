@@ -5,7 +5,6 @@
 #include "WetClothingTransparencyData.generated.h"
 
 class AActor;
-class UMaterialInterface;
 class USkeletalMesh;
 class UTexture2D;
 
@@ -228,6 +227,27 @@ struct DWC_API FWetClothingBakedTransparencyMap
 
     UPROPERTY(VisibleAnywhere, Category = "Baked Transparency")
     bool bContainsTransparencyAlpha = true;
+
+    UPROPERTY(VisibleAnywhere, Category = "Baked Transparency|Wrinkle Suppression")
+    bool bWrinkleSuppressionBakedIntoAlpha = false;
+
+    UPROPERTY(VisibleAnywhere, Category = "Baked Transparency|Wrinkle Suppression")
+    FGuid SourceWrinkleMaskBakeGuid;
+
+    UPROPERTY(VisibleAnywhere, Category = "Baked Transparency|Wrinkle Suppression")
+    FString SourceWrinkleMaskBuildSignature;
+
+    UPROPERTY(VisibleAnywhere, Category = "Baked Transparency|Wrinkle Suppression")
+    FString WrinkleSuppressionSettingsSignature;
+
+    bool IsRuntimeUsable() const
+    {
+        return TransparencyMap != nullptr &&
+               BakeGuid.IsValid() &&
+               !BuildSignature.IsEmpty() &&
+               bContainsColorRGB &&
+               bContainsTransparencyAlpha;
+    }
 };
 
 USTRUCT(BlueprintType)
@@ -264,46 +284,12 @@ struct DWC_API FWetClothingTransparencyLayerData
     void MarkFinalBakeStale();
 };
 
-// Legacy multi-component reveal output. Retained until the existing DWCBakeComponent path writes packed maps.
-USTRUCT(BlueprintType)
-struct DWC_API FWetClothingBakedTransparencyRevealLayer
-{
-    GENERATED_BODY()
-
-    UPROPERTY(VisibleAnywhere, Category = "Baked Transparency")
-    FName LayerId;
-
-    UPROPERTY(VisibleAnywhere, Category = "Baked Transparency")
-    int32 MaterialSlotIndex = INDEX_NONE;
-
-    UPROPERTY(VisibleAnywhere, Category = "Baked Transparency")
-    TObjectPtr<UTexture2D> LookupMap = nullptr;
-
-    UPROPERTY(VisibleAnywhere, Category = "Baked Transparency")
-    TObjectPtr<UTexture2D> ColorMap = nullptr;
-
-    UPROPERTY(VisibleAnywhere, Category = "Baked Transparency")
-    TObjectPtr<UTexture2D> MaskMap = nullptr;
-
-    UPROPERTY(VisibleAnywhere, Category = "Baked Transparency")
-    TObjectPtr<UTexture2D> ConfidenceMap = nullptr;
-
-    UPROPERTY(VisibleAnywhere, Category = "Baked Transparency")
-    TObjectPtr<UMaterialInterface> RevealMaterial = nullptr;
-
-    UPROPERTY(VisibleAnywhere, Category = "Baked Transparency")
-    FString BuildSignature;
-
-    UPROPERTY(VisibleAnywhere, Category = "Baked Transparency")
-    FGuid BakeGuid;
-};
-
 USTRUCT(BlueprintType)
 struct DWC_API FWetClothingTransparencyData
 {
     GENERATED_BODY()
 
-    static constexpr int32 CurrentDataVersion = 2;
+    static constexpr int32 CurrentDataVersion = 6;
 
     UPROPERTY(VisibleAnywhere, Category = "Transparency")
     int32 DataVersion = CurrentDataVersion;
@@ -320,33 +306,34 @@ struct DWC_API FWetClothingTransparencyData
     UPROPERTY(EditAnywhere, Category = "Transparency", meta = (ClampMin = "0.0", UIMin = "0.0", UIMax = "32.0"))
     float TransparencyEdgeFeatherPixels = 4.0f;
 
-    UPROPERTY(EditAnywhere, Category = "Transparency Preview", meta = (ClampMin = "0.0", UIMin = "0.0", UIMax = "2.0"))
+    // Authoring strength baked into the final Transparency Map alpha. The legacy
+    // property name is retained so existing WCA assets keep their authored value.
+    UPROPERTY(EditAnywhere, Category = "Transparency Bake", meta = (DisplayName = "Transparency Strength", ClampMin = "0.0", UIMin = "0.0", UIMax = "2.0"))
     float TransparencyPreviewStrength = 0.4f;
 
-    UPROPERTY()
+    // Legacy spatial expansion settings. Suppression now follows the baked
+    // wrinkle mask exactly and does not create coverage outside that mask.
+    UPROPERTY(meta = (DeprecatedProperty))
     float WrinkleSuppressionRadiusPixels = 4.0f;
 
-    UPROPERTY()
+    UPROPERTY(meta = (DeprecatedProperty))
     float WrinkleSuppressionFeatherPixels = 16.0f;
 
-    UPROPERTY()
+    UPROPERTY(EditAnywhere, Category = "Transparency Bake|Wrinkle Suppression", meta = (ClampMin = "0.0", ClampMax = "1.0", UIMin = "0.0", UIMax = "1.0"))
     float WrinkleSuppressionCoverageThreshold = 0.15f;
 
-    UPROPERTY(EditAnywhere, Category = "Transparency Preview", meta = (ClampMin = "0.0", ClampMax = "5.0", UIMin = "0.0", UIMax = "5.0"))
+    // Softens only the value transition inside the baked wrinkle mask. This is
+    // not a spatial radius and never expands suppression into neighboring texels.
+    UPROPERTY(EditAnywhere, Category = "Transparency Bake|Wrinkle Suppression", meta = (ClampMin = "0.0", ClampMax = "1.0", UIMin = "0.0", UIMax = "0.25"))
+    float WrinkleSuppressionMaskSoftness = 0.05f;
+
+    UPROPERTY(EditAnywhere, Category = "Transparency Bake|Wrinkle Suppression", meta = (ClampMin = "0.0", ClampMax = "5.0", UIMin = "0.0", UIMax = "5.0"))
     float WrinkleSuppressionStrength = 0.6f;
 
-    // Existing multi-component bake configuration. Kept operational during the staged migration.
-    UPROPERTY(EditAnywhere, Category = "Legacy Bake")
+    // Future multi-component generation uses this source configuration and the
+    // DWC Bake Component snapshot without producing legacy reveal assets.
+    UPROPERTY(EditAnywhere, Category = "Multi-Mesh Source")
     TSoftClassPtr<AActor> SourceBlueprintClass;
-
-    UPROPERTY(EditAnywhere, Category = "Legacy Bake", meta = (ClampMin = "16", UIMin = "128", UIMax = "4096"))
-    int32 RevealBakeResolution = 1024;
-
-    UPROPERTY(EditAnywhere, Category = "Legacy Bake", meta = (ClampMin = "0.0", UIMin = "0.0", UIMax = "32.0"))
-    float RevealMaskFeatherRadiusPixels = 4.0f;
-
-    UPROPERTY(VisibleAnywhere, Category = "Legacy Baked")
-    TArray<FWetClothingBakedTransparencyRevealLayer> BakedRevealLayers;
 
     FWetClothingTransparencyLayerData* FindTransparencyLayer(int32 MaterialSlotIndex, int32 UVChannelIndex);
     const FWetClothingTransparencyLayerData* FindTransparencyLayer(int32 MaterialSlotIndex, int32 UVChannelIndex) const;
@@ -356,6 +343,12 @@ struct DWC_API FWetClothingTransparencyData
         int32 PreferredUVChannelIndex = INDEX_NONE,
         int32 PreferredLODIndex = INDEX_NONE,
         EDWCTransparencyBakedMapMatch* OutMatch = nullptr) const;
+
+    /** Runtime lookup never falls back across UV channels or LODs and rejects stale baked output. */
+    const FWetClothingBakedTransparencyMap* FindRuntimeBakedTransparencyMap(
+        int32 MaterialSlotIndex,
+        int32 DWCDataUVChannelIndex,
+        int32 LODIndex) const;
 
     UTexture2D* ResolveBakedTransparencyMap(
         int32 MaterialSlotIndex,

@@ -16,14 +16,6 @@ enum class EWetClothingTransparencyPreviewMode : uint8;
 enum class EDWCTransparencyVisualizationMode : uint8;
 struct FDWCTransparencyAutoBakeResult;
 
-enum class EDWCTransparencyRevealMapType : uint8
-{
-    Color,
-    Mask,
-    Confidence,
-    Lookup
-};
-
 enum class EDWCTransparencyPanelStatus : uint8
 {
     Info,
@@ -56,8 +48,6 @@ class SWetClothingTransparencyBakePanel : public SCompoundWidget
 
     void Construct(const FArguments& InArgs);
     void RefreshFromAsset();
-    bool HasPendingTransparencySetup(FString* OutSummary = nullptr) const;
-    bool BakeTransparencyRevealAssets(FString& OutSummary, bool* OutHadWarnings = nullptr);
     bool SaveTransparencySetupAssets() const;
     void RebuildEditorLayout();
 
@@ -102,8 +92,6 @@ class SWetClothingTransparencyBakePanel : public SCompoundWidget
     TSharedPtr<EDWCTransparencyVisualizationMode> FindVisualizationModeItem(EDWCTransparencyVisualizationMode Mode) const;
     ECheckBoxState IsPreviewModeChecked(EWetClothingTransparencyPreviewMode Mode) const;
     void HandlePreviewModeChanged(ECheckBoxState NewState, EWetClothingTransparencyPreviewMode Mode);
-    ECheckBoxState IsRevealMapTypeChecked(EDWCTransparencyRevealMapType MapType) const;
-    void HandleRevealMapTypeChanged(ECheckBoxState NewState, EDWCTransparencyRevealMapType MapType);
     bool IsGenerateEnabled() const;
     bool IsBakeEditedEnabled() const;
     bool CanUseFullBlueprintPreview() const;
@@ -115,11 +103,15 @@ class SWetClothingTransparencyBakePanel : public SCompoundWidget
     FWetClothingTransparencyLayerData* GetSelectedLayer();
     const FWetClothingTransparencyLayerData* GetSelectedLayer() const;
     FMaterialSlotItemPtr FindMaterialSlotItem(int32 SlotIndex) const;
+    FMaterialSlotItemPtr FindTargetMaterialSlotItem(int32 SlotIndex) const;
+    int32 GetTransparencyDataUVChannel() const;
+    bool HasUsableTransparencyDataUV() const;
     TSharedPtr<int32> FindUVChannelItem(int32 UVChannelIndex) const;
     TSharedPtr<EDWCTransparencySourceType> FindSourceTypeItem(EDWCTransparencySourceType SourceType) const;
     TSharedPtr<EDWCTransparencyUVAddressMode> FindAddressModeItem(EDWCTransparencyUVAddressMode AddressMode) const;
     void EditSelectedLayer(const FText& TransactionText, TFunctionRef<void(FWetClothingTransparencyLayerData&)> Edit, bool bRebuildLayout);
     void EditGlobalSettings(const FText& TransactionText, TFunctionRef<void(FWetClothingTransparencyData&)> Edit);
+    void EditFinalBakeSettings(const FText& TransactionText, TFunctionRef<void(FWetClothingTransparencyData&)> Edit, bool bRefreshSuppression);
 
     TSharedRef<ITableRow> GenerateLayerRow(FLayerItemPtr Item, const TSharedRef<STableViewBase>& OwnerTable);
     void HandleLayerSelectionChanged(FLayerItemPtr Item, ESelectInfo::Type SelectInfo);
@@ -135,7 +127,6 @@ class SWetClothingTransparencyBakePanel : public SCompoundWidget
     FText GetSourceTypeLabel(EDWCTransparencySourceType SourceType) const;
     FText GetAddressModeLabel(EDWCTransparencyUVAddressMode AddressMode) const;
     void HandleOuterMaterialSlotChanged(FMaterialSlotItemPtr Item, ESelectInfo::Type SelectInfo);
-    void HandleOuterUVChannelChanged(TSharedPtr<int32> Item, ESelectInfo::Type SelectInfo);
     void HandleSourceTypeChanged(TSharedPtr<EDWCTransparencySourceType> Item, ESelectInfo::Type SelectInfo);
     void HandleAddressModeChanged(TSharedPtr<EDWCTransparencyUVAddressMode> Item, ESelectInfo::Type SelectInfo);
 
@@ -163,10 +154,6 @@ class SWetClothingTransparencyBakePanel : public SCompoundWidget
     TSharedRef<SWidget> BuildTransparencyPreviewSection();
     TSharedRef<SWidget> BuildPreviewSettingsSection();
     TSharedRef<SWidget> BuildPreviewModeButton(EWetClothingTransparencyPreviewMode Mode, const FText& Label);
-    TSharedRef<SWidget> BuildRevealMapTypeButton(EDWCTransparencyRevealMapType MapType, const FText& Label);
-    TSharedRef<SWidget> BuildRevealMaterialSection();
-    TSharedRef<SWidget> BuildRevealTextureSection();
-    TSharedRef<SWidget> BuildSelectedRevealMapPreview(UObject* Texture, const FText& Label, const FText& Detail);
     TSharedRef<SWidget> BuildAssetSummaryRow(UObject* Asset, const FText& Label, const FText& Detail = FText::GetEmpty());
     TSharedRef<SWidget> BuildEmptyAssetRow(const FText& Label) const;
 
@@ -184,7 +171,9 @@ class SWetClothingTransparencyBakePanel : public SCompoundWidget
     FGuid SelectedLayerGuid;
     TArray<FLayerItemPtr> LayerItems;
     TSharedPtr<class SListView<FLayerItemPtr>> LayerListView;
+    // Inner source slots remain unrestricted. Only target slots need a valid CPU DWC preview material.
     TArray<FMaterialSlotItemPtr> MaterialSlotItems;
+    TArray<FMaterialSlotItemPtr> TargetMaterialSlotItems;
     TArray<TSharedPtr<int32>> UVChannelItems;
     TArray<TSharedPtr<EDWCTransparencySourceType>> SourceTypeItems;
     TArray<TSharedPtr<EDWCTransparencyUVAddressMode>> AddressModeItems;
@@ -192,7 +181,7 @@ class SWetClothingTransparencyBakePanel : public SCompoundWidget
     TWeakObjectPtr<USkeletalMesh> OptionItemsTargetMesh;
     int32 OptionItemsMaterialSlotCount = INDEX_NONE;
     int32 OptionItemsUVChannelCount = INDEX_NONE;
-    EDWCTransparencyRevealMapType SelectedRevealMapType = EDWCTransparencyRevealMapType::Color;
+    uint32 OptionItemsDWCReadySignature = 0;
     EDWCTransparencyVisualizationMode SelectedVisualizationMode = static_cast<EDWCTransparencyVisualizationMode>(0);
     float WetnessPreviewPercent = 100.0f;
     float TransparencyPreviewStrength = 0.4f;

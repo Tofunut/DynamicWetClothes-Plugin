@@ -5,6 +5,7 @@
 #include "Materials/Material.h"
 #include "Materials/MaterialExpressionConstant3Vector.h"
 #include "Materials/MaterialExpressionCustom.h"
+#include "Materials/MaterialExpressionFunctionInput.h"
 #include "Materials/MaterialExpressionGetMaterialAttributes.h"
 #include "Materials/MaterialExpressionMaterialFunctionCall.h"
 #include "Materials/MaterialExpressionScalarParameter.h"
@@ -147,6 +148,22 @@ namespace
         }
 
         return true;
+    }
+
+    bool HasFunctionInput(const UMaterialExpressionMaterialFunctionCall* FunctionCall, const FName InputName)
+    {
+        if (FunctionCall == nullptr)
+        {
+            return false;
+        }
+        for (const FFunctionExpressionInput& FunctionInput : FunctionCall->FunctionInputs)
+        {
+            if (FunctionInput.ExpressionInput != nullptr && FunctionInput.ExpressionInput->InputName == InputName)
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
     FString ResolveOutputName(const FExpressionInput& Input)
@@ -398,7 +415,16 @@ return CombinedTS;
             return false;
         }
 
-        return ConnectExpression(PreviewWetness, FString(), CpuApply, TEXT("Wetness"), OutError);
+        if (!ConnectExpression(PreviewWetness, FString(), CpuApply, TEXT("Wetness"), OutError))
+        {
+            return false;
+        }
+
+        // Runtime transparency uses a separate backend-resolved wetness input so the
+        // transient editor MID must override it alongside the CPU wetness input. Older
+        // generated materials remain usable until Material Setup refreshes their call node.
+        return !HasFunctionInput(CpuApply, TEXT("TransparencyWetness")) ||
+               ConnectExpression(PreviewWetness, FString(), CpuApply, TEXT("TransparencyWetness"), OutError);
     }
 
     bool ConnectPreviewGraph(
@@ -651,7 +677,8 @@ FWetWrinklePreviewMaterialBuildResult FWetWrinklePreviewMaterialBuilder::Build(c
         return Result;
     }
 
-    if (Args.UVChannelIndex < 0 || Args.UVChannelIndex >= MaxGpuSkinUVChannelCount)
+    if (Args.bBuildNormalOverlay &&
+        (Args.UVChannelIndex < 0 || Args.UVChannelIndex >= MaxGpuSkinUVChannelCount))
     {
         Result.ErrorMessage = FString::Printf(
             TEXT("Wrinkle preview UV channel %d is not supported by the skeletal GPUSkin path. Valid channels are 0 through %d."),
@@ -706,7 +733,8 @@ FWetWrinklePreviewMaterialBuildResult FWetWrinklePreviewMaterialBuilder::Build(c
         return Result;
     }
 
-    if (!ConnectPreviewGraph(TransientMaterial, Args.UVChannelIndex, PreviewWetness, Result.ErrorMessage))
+    if (Args.bBuildNormalOverlay &&
+        !ConnectPreviewGraph(TransientMaterial, Args.UVChannelIndex, PreviewWetness, Result.ErrorMessage))
     {
         return Result;
     }
@@ -736,8 +764,11 @@ FWetWrinklePreviewMaterialBuildResult FWetWrinklePreviewMaterialBuilder::Build(c
 
     PreviewMID->SetFlags(RF_Transient);
     PreviewMID->SetScalarParameterValue(WetWrinklePreviewMaterialParameters::PreviewWetness, 1.0f);
-    PreviewMID->SetScalarParameterValue(WetWrinklePreviewMaterialParameters::AccumulatedEnabled, 0.0f);
-    PreviewMID->SetScalarParameterValue(WetWrinklePreviewMaterialParameters::HoverEnabled, 0.0f);
+    if (Args.bBuildNormalOverlay)
+    {
+        PreviewMID->SetScalarParameterValue(WetWrinklePreviewMaterialParameters::AccumulatedEnabled, 0.0f);
+        PreviewMID->SetScalarParameterValue(WetWrinklePreviewMaterialParameters::HoverEnabled, 0.0f);
+    }
 
     ensureMsgf(
         SourceMaterial->GetOutermost()->IsDirty() == bSourcePackageWasDirty,

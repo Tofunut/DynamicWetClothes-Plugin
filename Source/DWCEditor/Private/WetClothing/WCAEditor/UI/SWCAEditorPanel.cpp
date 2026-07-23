@@ -473,6 +473,23 @@ FWCAEditorIssueStatus SWCAEditorPanel::CollectIssueStatus(
             bAssetHasUnsavedChanges,
             false));
     }
+    for (const FWetWrinkleRuntimeNormalSource& Source : Asset->Authored.WrinkleData.RuntimeNormalSources)
+    {
+        if (Source.Source != EDWCWrinkleNormalSource::CustomTexture ||
+            !Asset->IsMaterialSlotWettable(Source.MaterialSlotIndex))
+        {
+            continue;
+        }
+
+        if (Source.CustomWrinkleNormalMap == nullptr)
+        {
+            Result.bMapIssue = true;
+            RaiseIssueSeverity(Result, EWCAEditorStatusSeverity::Warning);
+            Result.MapMessages.Add(FString::Printf(
+                TEXT("Wrinkle Maps: Slot %d uses Custom Wrinkle Map but no texture is assigned."),
+                Source.MaterialSlotIndex));
+        }
+    }
     if (Asset->HasTransparencyBakeContent() && !DWCBuildStatus::IsUsable(State.TransparencyMaps))
     {
         Result.bMapIssue = true;
@@ -546,11 +563,6 @@ bool SWCAEditorPanel::HasPendingVisualBakeTasks(FString* OutSummary) const
     {
         PendingSections.Add(PartSummary);
     }
-    FString TransparencySummary;
-    if (FDWCTransparencyAssetBakeService::HasPendingTransparencySetup(WetClothingAsset.Get(), &TransparencySummary))
-    {
-        PendingSections.Add(TransparencySummary);
-    }
     if (OutSummary)
     {
         *OutSummary = PendingSections.IsEmpty() ? TEXT("Visual maps are up to date.") : FString::Join(PendingSections, TEXT("\n\n"));
@@ -590,22 +602,6 @@ bool SWCAEditorPanel::BakePendingVisualAssets(FString& OutSummary, bool* OutHadW
         }
     }
 
-    FString TransparencyPendingSummary;
-    if (FDWCTransparencyAssetBakeService::HasPendingTransparencySetup(WetClothingAsset.Get(), &TransparencyPendingSummary))
-    {
-        FString TransparencyBakeSummary;
-        bool bTransparencyWarnings = false;
-        if (BakeTransparencyRevealAssets(TransparencyBakeSummary, &bTransparencyWarnings))
-        {
-            Sections.Add(TransparencyBakeSummary);
-            bHadWarnings |= bTransparencyWarnings;
-        }
-        else
-        {
-            Failures.Add(FString::Printf(TEXT("Transparency Maps: %s"), *TransparencyBakeSummary));
-        }
-    }
-
     if (!Failures.IsEmpty())
     {
         OutSummary = FString::Join(Failures, TEXT("\n\n"));
@@ -622,19 +618,6 @@ bool SWCAEditorPanel::BakePendingVisualAssets(FString& OutSummary, bool* OutHadW
         *OutHadWarnings = bHadWarnings;
     }
     return true;
-}
-
-bool SWCAEditorPanel::BakeTransparencyRevealAssets(FString& OutSummary, bool* OutHadWarnings)
-{
-    UWetClothingAsset* Asset = WetClothingAsset.Get();
-    const bool bSucceeded = FDWCTransparencyAssetBakeService::BakeTransparencyRevealAssets(Asset, OutSummary, OutHadWarnings);
-    if (Asset != nullptr)
-    {
-        Asset->SetTransparencyBakeStatus(
-            bSucceeded ? EDWCBakeStatus::Valid : EDWCBakeStatus::Failed,
-            bSucceeded ? FString() : OutSummary);
-    }
-    return bSucceeded;
 }
 
 bool SWCAEditorPanel::BakeAllWrinkleMaps(FString& OutSummary, bool* OutHadWarnings)

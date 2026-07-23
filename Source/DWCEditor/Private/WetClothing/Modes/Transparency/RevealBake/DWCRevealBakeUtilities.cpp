@@ -4,11 +4,6 @@
 #include "Misc/PackageName.h"
 #include "UObject/Object.h"
 
-const TCHAR* FDWCRevealBakeUtilities::GetDefaultRevealBakePackagePath()
-{
-    return TEXT("/Game/DWC/Reveals");
-}
-
 FString FDWCRevealBakeUtilities::GetGeneratedPackagePath(const UObject& OwningAsset, const FString& RelativePath)
 {
     const FString OwningFolder = FPackageName::GetLongPackagePath(OwningAsset.GetOutermost()->GetName());

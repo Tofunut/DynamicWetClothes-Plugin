@@ -19,20 +19,22 @@
 #include "ToolMenus.h"
 #include "ViewportToolbar/UnrealEdViewportToolbar.h"
 #include "WetClothing/Foundation/MeshAnalysis/WetClothingAssetMeshAnalyzer.h"
-#include "WetClothing/Foundation/TextureAccess/WetClothingTextureReadback.h"
+#include "WetClothing/Modes/DWCEditorPreviewSlotUtils.h"
 #include "WetClothing/Modes/Transparency/AutoMap/DWCTransparencyAutoMapGenerator.h"
 #include "WetClothing/Modes/Transparency/Brush/DWCTransparencyBrushRasterizer.h"
 #include "WetClothing/Modes/Transparency/Material/WetTransparencyPreviewMaterialBuilder.h"
+#include "WetClothing/Modes/Transparency/Processing/DWCTransparencyComposite.h"
+#include "WetClothing/Modes/Transparency/Processing/DWCWrinkleSuppressionProcessor.h"
 
 #define LOCTEXT_NAMESPACE "WetClothingTransparencyPreviewViewport"
 
 namespace
 {
-    constexpr const TCHAR* UseRevealPreviewParameterName = TEXT("DWC_UseRevealPreview");
-    constexpr const TCHAR* RevealPreviewBlendParameterName = TEXT("DWC_RevealPreviewBlend");
-    constexpr const TCHAR* RevealMaskMultiplierParameterName = TEXT("DWC_RevealMaskMultiplier");
-    constexpr const TCHAR* RevealConfidenceMultiplierParameterName = TEXT("DWC_RevealConfidenceMultiplier");
+    constexpr int32 TransparencyHitBVHLeafTriangleCount = 8;
+    constexpr const TCHAR* TransparencyMapParameterName = TEXT("DWC_TransparencyMap");
     constexpr const TCHAR* UseRuntimeTransparencyParameterName = TEXT("DWC_UseTransparencyMap");
+    constexpr const TCHAR* TransparencyWetnessMinParameterName = TEXT("DWC_TransparencyWetnessMin");
+    constexpr const TCHAR* TransparencyWetnessMaxParameterName = TEXT("DWC_TransparencyWetnessMax");
     constexpr const TCHAR* WrinkleNormalMapParameterName = TEXT("DWC_WrinkleNormalMap");
     constexpr const TCHAR* UseWrinkleNormalMapParameterName = TEXT("DWC_UseWrinkleNormalMap");
 
@@ -65,6 +67,10 @@ namespace
             if (PreviewScene != nullptr && PreviewScene->GetWorld() != nullptr)
             {
                 PreviewScene->GetWorld()->Tick(LEVELTICK_All, DeltaSeconds);
+            }
+            if (const TSharedPtr<SWetClothingTransparencyPreviewViewport> Pinned = ViewportWidget.Pin())
+            {
+                Pinned->FlushPendingPreviewTextureUpdates();
             }
         }
 
@@ -198,20 +204,25 @@ namespace
         bool bPainting = false;
     };
 
-    int32 GetLOD0VertexCount(const USkeletalMesh* SkeletalMesh)
+    const FWetWrinkleBakedMapSet* FindExactWrinkleNormalMap(
+        const UWetClothingAsset* Asset,
+        const int32 MaterialSlotIndex,
+        const int32 UVChannelIndex,
+        const int32 LODIndex)
     {
-        if (SkeletalMesh == nullptr)
+        if (Asset == nullptr)
         {
-            return 0;
+            return nullptr;
         }
 
-        const FSkeletalMeshRenderData* RenderData = SkeletalMesh->GetResourceForRendering();
-        if (RenderData == nullptr || !RenderData->LODRenderData.IsValidIndex(0))
-        {
-            return 0;
-        }
-
-        return RenderData->LODRenderData[0].GetNumVertices();
+        return Asset->Authored.WrinkleData.BakedWrinkleMaps.FindByPredicate(
+            [MaterialSlotIndex, UVChannelIndex, LODIndex](const FWetWrinkleBakedMapSet& Candidate)
+            {
+                return Candidate.MaterialSlotIndex == MaterialSlotIndex &&
+                       Candidate.UVChannelIndex == UVChannelIndex &&
+                       Candidate.LODIndex == LODIndex &&
+                       Candidate.BakedWrinkleNormalMap != nullptr;
+            });
     }
 
     FVector ComputeBarycentric(const FVector& Point, const FVector& A, const FVector& B, const FVector& C)
@@ -242,6 +253,47 @@ namespace
             Result = FVector::CrossProduct(Normal, FVector::RightVector).GetSafeNormal();
         }
         return Result.IsNearlyZero() ? FVector::ForwardVector : Result;
+    }
+
+    bool DoesTransparencySegmentIntersectBox(const FBox& Box, const FVector& SegmentStart, const FVector& SegmentEnd)
+    {
+        if (!Box.IsValid)
+        {
+            return true;
+        }
+
+        const FVector Direction = SegmentEnd - SegmentStart;
+        double Entry = 0.0;
+        double Exit = 1.0;
+        for (int32 Axis = 0; Axis < 3; ++Axis)
+        {
+            const double Origin = SegmentStart[Axis];
+            const double Delta = Direction[Axis];
+            const double MinValue = Box.Min[Axis];
+            const double MaxValue = Box.Max[Axis];
+            if (FMath::IsNearlyZero(Delta))
+            {
+                if (Origin < MinValue || Origin > MaxValue)
+                {
+                    return false;
+                }
+                continue;
+            }
+
+            double AxisEntry = (MinValue - Origin) / Delta;
+            double AxisExit = (MaxValue - Origin) / Delta;
+            if (AxisEntry > AxisExit)
+            {
+                Swap(AxisEntry, AxisExit);
+            }
+            Entry = FMath::Max(Entry, AxisEntry);
+            Exit = FMath::Min(Exit, AxisExit);
+            if (Entry > Exit)
+            {
+                return false;
+            }
+        }
+        return Exit >= 0.0 && Entry <= 1.0;
     }
 }
 
@@ -274,6 +326,10 @@ void SWetClothingTransparencyPreviewViewport::AddReferencedObjects(FReferenceCol
     Collector.AddReferencedObjects(PreviewMIDs);
     Collector.AddReferencedObjects(TransparencyPreviewBaseMaterials);
     Collector.AddReferencedObjects(TransparencyPreviewMaterialParents);
+    Collector.AddReferencedObject(CachedPreviewSourceMaterial);
+    Collector.AddReferencedObject(CachedPreviewBaseMaterial);
+    Collector.AddReferencedObject(CachedPreviewMaterialParent);
+    Collector.AddReferencedObject(CachedPreviewMID);
     Collector.AddReferencedObject(TransparencyPreviewTexture);
     Collector.AddReferencedObject(BrushCursorComponent);
 }
@@ -331,6 +387,7 @@ void SWetClothingTransparencyPreviewViewport::SetTransparencyEditContext(
     EDWCTransparencyUVAddressMode InAddressMode)
 {
     const bool bMaterialSlotChanged = SelectedMaterialSlotIndex != InMaterialSlotIndex;
+    const bool bUVChannelChanged = SelectedUVChannelIndex != InUVChannelIndex;
     const bool bAddressModeChanged = SelectedUVAddressMode != InAddressMode;
     const bool bContextChanged = SelectedLayerGuid != InLayerGuid ||
         SelectedMaterialSlotIndex != InMaterialSlotIndex ||
@@ -340,7 +397,7 @@ void SWetClothingTransparencyPreviewViewport::SetTransparencyEditContext(
     SelectedMaterialSlotIndex = InMaterialSlotIndex;
     SelectedUVChannelIndex = InUVChannelIndex;
     SelectedUVAddressMode = InAddressMode;
-    if (bMaterialSlotChanged)
+    if (bMaterialSlotChanged || bUVChannelChanged)
     {
         RefreshPreview();
         return;
@@ -354,6 +411,7 @@ void SWetClothingTransparencyPreviewViewport::SetTransparencyEditContext(
     if (bContextChanged && AutoBakePreviewResult.IsValid())
     {
         RebuildWrinkleSuppressionBuffer();
+        RebuildOuterEdgeFeatherBuffer();
         RebuildManualOverridesFromStrokes();
         RebuildTransparencyPreviewTexture();
     }
@@ -370,7 +428,14 @@ void SWetClothingTransparencyPreviewViewport::SetTransparencyEditContext(
 
 void SWetClothingTransparencyPreviewViewport::SetTransparencyPreviewStrength(const float InStrength)
 {
-    TransparencyPreviewStrength = FMath::Max(0.0f, InStrength);
+    const float NewStrength = FMath::Max(0.0f, InStrength);
+    if (FMath::IsNearlyEqual(TransparencyPreviewStrength, NewStrength))
+    {
+        return;
+    }
+
+    TransparencyPreviewStrength = NewStrength;
+    RebuildTransparencyPreviewTexture();
     ApplyTransparencyPreviewParameters();
     InvalidatePreviewViewport();
 }
@@ -384,6 +449,15 @@ void SWetClothingTransparencyPreviewViewport::SetWrinkleSuppressionStrength(cons
     }
 
     WrinkleSuppressionStrength = NewStrength;
+    RebuildTransparencyPreviewTexture();
+    ApplyTransparencyPreviewParameters();
+    InvalidatePreviewViewport();
+}
+
+void SWetClothingTransparencyPreviewViewport::RefreshWrinkleSuppressionPreview()
+{
+    RebuildWrinkleSuppressionBuffer();
+    RebuildOuterEdgeFeatherBuffer();
     RebuildTransparencyPreviewTexture();
     ApplyTransparencyPreviewParameters();
     InvalidatePreviewViewport();
@@ -426,6 +500,7 @@ void SWetClothingTransparencyPreviewViewport::SetAutoBakePreviewResult(
 
     AutoBakePreviewResult = MoveTemp(InResult);
     RebuildWrinkleSuppressionBuffer();
+    RebuildOuterEdgeFeatherBuffer();
     RebuildManualOverridesFromStrokes();
     RebuildTransparencyPreviewTexture();
     ApplyTransparencyPreviewParameters();
@@ -436,9 +511,12 @@ void SWetClothingTransparencyPreviewViewport::ClearAutoBakePreviewResult()
 {
     AutoBakePreviewResult.Reset();
     WrinkleSuppressionBuffer.Reset();
+    OuterEdgeFeatherBuffer.Reset();
+    OuterEdgeFeatherBuffer.Reset();
     ManualPremultipliedBuffer.Reset();
     ManualWeightBuffer.Reset();
     LastHoverDirtyRect = FIntRect();
+    PendingPreviewDirtyRect = FIntRect();
     TransparencyPreviewTexture = nullptr;
     ApplyTransparencyPreviewParameters();
     InvalidatePreviewViewport();
@@ -506,6 +584,8 @@ void SWetClothingTransparencyPreviewViewport::ClearPreview()
     TransparencyPreviewMaterialParents.Reset();
     BrushCursorComponent = nullptr;
     CachedHitTriangles.Reset();
+    HitBVHTriangleIndices.Reset();
+    HitBVHNodes.Reset();
 }
 
 void SWetClothingTransparencyPreviewViewport::BuildTargetMeshPreview()
@@ -589,12 +669,12 @@ void SWetClothingTransparencyPreviewViewport::ConfigurePreviewMeshComponent(USke
     }
 
     PreviewMeshComponents.AddUnique(MeshComponent);
-    ApplyRevealMaterials(MeshComponent);
+    ApplyPreviewMaterials(MeshComponent);
     ApplyWetnessPreview(MeshComponent);
     MeshComponent->MarkRenderStateDirty();
 }
 
-void SWetClothingTransparencyPreviewViewport::ApplyRevealMaterials(USkeletalMeshComponent* MeshComponent)
+void SWetClothingTransparencyPreviewViewport::ApplyPreviewMaterials(USkeletalMeshComponent* MeshComponent)
 {
     const UWetClothingAsset* Asset = WetClothingAsset.Get();
     if (Asset == nullptr || MeshComponent == nullptr)
@@ -609,115 +689,109 @@ void SWetClothingTransparencyPreviewViewport::ApplyRevealMaterials(USkeletalMesh
     }
 
     const int32 MaterialCount = MeshComponent->GetNumMaterials();
+    PreviewMIDs.Init(nullptr, MaterialCount);
+    TransparencyPreviewBaseMaterials.Init(nullptr, MaterialCount);
+    TransparencyPreviewMaterialParents.Init(nullptr, MaterialCount);
+
     for (int32 MaterialSlotIndex = 0; MaterialSlotIndex < MaterialCount; ++MaterialSlotIndex)
     {
-        const FWetClothingGeneratedWetMaterialOverride* WetOverride =
-            Asset->Derived.Inline.GeneratedWetMaterialOverrides.FindByPredicate(
-                [MaterialSlotIndex](const FWetClothingGeneratedWetMaterialOverride& Candidate)
-                {
-                    return Candidate.MaterialSlotIndex == MaterialSlotIndex && Candidate.CPUMaterialInstance != nullptr;
-                });
-        if (WetOverride != nullptr)
+        if (UMaterialInstanceConstant* CpuMaterial =
+                DWCEditorPreviewSlotUtils::ResolveCpuPreviewMaterial(Asset, MaterialSlotIndex))
         {
-            MeshComponent->SetMaterial(MaterialSlotIndex, WetOverride->CPUMaterialInstance);
+            MeshComponent->SetMaterial(MaterialSlotIndex, CpuMaterial);
         }
     }
 
-    for (const FWetClothingBakedTransparencyRevealLayer& BakedLayer : Asset->Authored.TransparencyData.BakedRevealLayers)
+    if (SelectedMaterialSlotIndex >= 0 && SelectedMaterialSlotIndex < MaterialCount)
     {
-        if (BakedLayer.MaterialSlotIndex == INDEX_NONE || BakedLayer.RevealMaterial == nullptr)
+        UMaterialInstanceConstant* CpuMaterial =
+            DWCEditorPreviewSlotUtils::ResolveCpuPreviewMaterial(Asset, SelectedMaterialSlotIndex);
+        if (CpuMaterial != nullptr)
         {
-            continue;
-        }
-
-        if (BakedLayer.MaterialSlotIndex < MeshComponent->GetNumMaterials())
-        {
-            MeshComponent->SetMaterial(BakedLayer.MaterialSlotIndex, BakedLayer.RevealMaterial);
-        }
-    }
-
-    PreviewMIDs.SetNum(FMath::Max(PreviewMIDs.Num(), MaterialCount));
-    TransparencyPreviewBaseMaterials.SetNum(FMath::Max(TransparencyPreviewBaseMaterials.Num(), MaterialCount));
-    TransparencyPreviewMaterialParents.SetNum(FMath::Max(TransparencyPreviewMaterialParents.Num(), MaterialCount));
-    for (int32 MaterialSlotIndex = 0; MaterialSlotIndex < MaterialCount; ++MaterialSlotIndex)
-    {
-        UMaterialInstanceDynamic* MID = nullptr;
-        if (MaterialSlotIndex == SelectedMaterialSlotIndex)
-        {
-            FWetTransparencyPreviewMaterialBuildArgs BuildArgs;
-            BuildArgs.SourceMaterial = MeshComponent->GetMaterial(MaterialSlotIndex);
-            FWetTransparencyPreviewMaterialBuildResult BuildResult =
-                FWetTransparencyPreviewMaterialBuilder::Build(BuildArgs);
-            if (BuildResult.bSucceeded && BuildResult.PreviewMID != nullptr)
+            if (UMaterialInstanceDynamic* PreviewMID = GetOrBuildSelectedPreviewMID(CpuMaterial))
             {
-                TransparencyPreviewBaseMaterials[MaterialSlotIndex] = BuildResult.TransientBaseMaterial;
-                TransparencyPreviewMaterialParents[MaterialSlotIndex] = BuildResult.TransientMaterialParent;
-                MID = BuildResult.PreviewMID;
-                MeshComponent->SetMaterial(MaterialSlotIndex, MID);
-            }
-            else
-            {
-                UE_LOG(
-                    LogTemp,
-                    Warning,
-                    TEXT("DWC transparency preview material build failed for slot %d ('%s'): %s"),
-                    MaterialSlotIndex,
-                    *GetNameSafe(BuildArgs.SourceMaterial),
-                    *BuildResult.ErrorMessage);
+                MeshComponent->SetMaterial(SelectedMaterialSlotIndex, PreviewMID);
+                PreviewMIDs[SelectedMaterialSlotIndex] = PreviewMID;
+                TransparencyPreviewBaseMaterials[SelectedMaterialSlotIndex] = CachedPreviewBaseMaterial;
+                TransparencyPreviewMaterialParents[SelectedMaterialSlotIndex] = CachedPreviewMaterialParent;
             }
         }
-
-        if (MID == nullptr)
+        else
         {
-            MID = MeshComponent->CreateAndSetMaterialInstanceDynamic(MaterialSlotIndex);
-        }
-        PreviewMIDs[MaterialSlotIndex] = MID;
-    }
-
-    for (const FWetClothingBakedTransparencyRevealLayer& BakedLayer : Asset->Authored.TransparencyData.BakedRevealLayers)
-    {
-        if (!PreviewMIDs.IsValidIndex(BakedLayer.MaterialSlotIndex))
-        {
-            continue;
-        }
-
-        if (UMaterialInstanceDynamic* MID = PreviewMIDs[BakedLayer.MaterialSlotIndex])
-        {
-            MID->SetScalarParameterValue(UseRevealPreviewParameterName, 1.0f);
-            MID->SetScalarParameterValue(RevealPreviewBlendParameterName, 1.0f);
-            MID->SetScalarParameterValue(RevealMaskMultiplierParameterName, 1.0f);
-            MID->SetScalarParameterValue(RevealConfidenceMultiplierParameterName, 1.0f);
+            UE_LOG(
+                LogTemp,
+                Verbose,
+                TEXT("DWC transparency preview skipped slot %d because its CPU DWC material is not ready."),
+                SelectedMaterialSlotIndex);
         }
     }
 
     ApplyTransparencyPreviewParameters();
 }
 
+UMaterialInstanceDynamic* SWetClothingTransparencyPreviewViewport::GetOrBuildSelectedPreviewMID(UMaterialInterface* SourceMaterial)
+{
+    if (SourceMaterial == nullptr || SelectedMaterialSlotIndex == INDEX_NONE || SelectedUVChannelIndex < 0)
+    {
+        return nullptr;
+    }
+
+    const bool bCacheMatches =
+        CachedPreviewMID != nullptr &&
+        CachedPreviewSourceMaterial == SourceMaterial &&
+        CachedPreviewMaterialSlotIndex == SelectedMaterialSlotIndex &&
+        CachedPreviewUVChannelIndex == SelectedUVChannelIndex;
+    if (bCacheMatches)
+    {
+        return CachedPreviewMID;
+    }
+
+    CachedPreviewSourceMaterial = nullptr;
+    CachedPreviewBaseMaterial = nullptr;
+    CachedPreviewMaterialParent = nullptr;
+    CachedPreviewMID = nullptr;
+    CachedPreviewMaterialSlotIndex = INDEX_NONE;
+    CachedPreviewUVChannelIndex = INDEX_NONE;
+
+    FWetTransparencyPreviewMaterialBuildArgs BuildArgs;
+    BuildArgs.SourceMaterial = SourceMaterial;
+    BuildArgs.UVChannelIndex = SelectedUVChannelIndex;
+    const FWetTransparencyPreviewMaterialBuildResult BuildResult =
+        FWetTransparencyPreviewMaterialBuilder::Build(BuildArgs);
+    if (!BuildResult.bSucceeded || BuildResult.PreviewMID == nullptr)
+    {
+        UE_LOG(
+            LogTemp,
+            Warning,
+            TEXT("DWC transparency preview material build failed for slot %d ('%s'): %s"),
+            SelectedMaterialSlotIndex,
+            *GetNameSafe(SourceMaterial),
+            *BuildResult.ErrorMessage);
+        return nullptr;
+    }
+
+    CachedPreviewSourceMaterial = SourceMaterial;
+    CachedPreviewBaseMaterial = BuildResult.TransientBaseMaterial;
+    CachedPreviewMaterialParent = BuildResult.TransientMaterialParent;
+    CachedPreviewMID = BuildResult.PreviewMID;
+    CachedPreviewMaterialSlotIndex = SelectedMaterialSlotIndex;
+    CachedPreviewUVChannelIndex = SelectedUVChannelIndex;
+    return CachedPreviewMID;
+}
+
 void SWetClothingTransparencyPreviewViewport::ApplyWetnessPreview(USkeletalMeshComponent* MeshComponent)
 {
-    if (MeshComponent == nullptr || MeshComponent->GetSkeletalMeshAsset() == nullptr)
+    if (MeshComponent == nullptr)
     {
         return;
     }
 
     const float Wetness = FMath::Clamp(WetnessPreviewPercent / 100.0f, 0.0f, 1.0f);
-    const int32 VertexCount = GetLOD0VertexCount(MeshComponent->GetSkeletalMeshAsset());
-    if (VertexCount <= 0)
-    {
-        return;
-    }
-
-    TArray<FLinearColor> Colors;
-    Colors.Init(FLinearColor(Wetness, Wetness, 0.0f, 1.0f), VertexCount);
-    MeshComponent->SetVertexColorOverride_LinearColor(0, Colors);
-    MeshComponent->MarkRenderStateDirty();
-    MeshComponent->MarkRenderDynamicDataDirty();
-
     for (UMaterialInstanceDynamic* MID : PreviewMIDs)
     {
         if (MID != nullptr)
         {
-            MID->SetScalarParameterValue(UseRevealPreviewParameterName, Wetness > 0.0f ? 1.0f : 0.0f);
+            MID->SetScalarParameterValue(WetTransparencyPreviewMaterialParameters::PreviewWetness, Wetness);
         }
     }
     ApplyTransparencyPreviewParameters();
@@ -729,17 +803,18 @@ void SWetClothingTransparencyPreviewViewport::ApplyTransparencyPreviewParameters
     {
         if (MID != nullptr)
         {
-            MID->SetScalarParameterValue(WetTransparencyPreviewMaterialParameters::Enabled, 0.0f);
+            MID->SetTextureParameterValue(TransparencyMapParameterName, nullptr);
             MID->SetScalarParameterValue(UseRuntimeTransparencyParameterName, 0.0f);
         }
     }
 
+    const UWetClothingAsset* Asset = WetClothingAsset.Get();
+    const FWetClothingTransparencyLayerData* Layer = GetSelectedLayer();
     const bool bResultMatchesSelection = AutoBakePreviewResult.IsValid() &&
         AutoBakePreviewResult->LayerGuid == SelectedLayerGuid &&
         AutoBakePreviewResult->MaterialSlotIndex == SelectedMaterialSlotIndex &&
         AutoBakePreviewResult->UVChannelIndex == SelectedUVChannelIndex;
-    if (!bResultMatchesSelection || TransparencyPreviewTexture == nullptr ||
-        !PreviewMIDs.IsValidIndex(SelectedMaterialSlotIndex))
+    if (!PreviewMIDs.IsValidIndex(SelectedMaterialSlotIndex))
     {
         return;
     }
@@ -750,29 +825,51 @@ void SWetClothingTransparencyPreviewViewport::ApplyTransparencyPreviewParameters
         return;
     }
 
-    MID->SetTextureParameterValue(WetTransparencyPreviewMaterialParameters::Map, TransparencyPreviewTexture);
-    MID->SetScalarParameterValue(WetTransparencyPreviewMaterialParameters::Enabled, 1.0f);
-    MID->SetScalarParameterValue(WetTransparencyPreviewMaterialParameters::Strength, TransparencyPreviewStrength);
-    MID->SetScalarParameterValue(WetTransparencyPreviewMaterialParameters::Wetness, WetnessPreviewPercent / 100.0f);
-    MID->SetScalarParameterValue(
-        WetTransparencyPreviewMaterialParameters::UVChannel,
-        static_cast<float>(FMath::Clamp(SelectedUVChannelIndex, 0, 7)));
-    MID->SetScalarParameterValue(
-        WetTransparencyPreviewMaterialParameters::Debug,
-        VisualizationMode == EDWCTransparencyVisualizationMode::Final ? 0.0f : 1.0f);
-
-    const UWetClothingAsset* Asset = WetClothingAsset.Get();
-    const FWetWrinkleBakedMapSet* WrinkleMap = Asset != nullptr
-        ? Asset->Authored.WrinkleData.FindBakedWrinkleMap(SelectedMaterialSlotIndex, SelectedUVChannelIndex, AutoBakePreviewResult->LODIndex)
+    const int32 PreviewLODIndex = bResultMatchesSelection
+        ? AutoBakePreviewResult->LODIndex
+        : (Asset != nullptr ? Asset->GetSimulationLODIndex() : 0);
+    UTexture2D* PreviewTransparencyMap =
+        bResultMatchesSelection && TransparencyPreviewTexture != nullptr
+        ? TransparencyPreviewTexture.Get()
         : nullptr;
-    const bool bHasWrinkleCoverage = WrinkleMap != nullptr &&
-        WrinkleMap->BakedWrinkleNormalMap != nullptr &&
-        WrinkleMap->AlphaSemantic == EDWCWrinkleAlphaSemantic::ConvexSeparation;
-    if (bHasWrinkleCoverage)
+    if (PreviewTransparencyMap == nullptr && Layer != nullptr)
+    {
+        if (const FWetClothingBakedTransparencyMap* BakedMap = Layer->BakedMaps.FindByPredicate(
+                [this, PreviewLODIndex](const FWetClothingBakedTransparencyMap& Candidate)
+                {
+                    return Candidate.MaterialSlotIndex == SelectedMaterialSlotIndex &&
+                           Candidate.UVChannelIndex == SelectedUVChannelIndex &&
+                           Candidate.LODIndex == PreviewLODIndex &&
+                           Candidate.TransparencyMap != nullptr;
+                }))
+        {
+            PreviewTransparencyMap = BakedMap->TransparencyMap;
+        }
+    }
+    if (PreviewTransparencyMap == nullptr)
+    {
+        return;
+    }
+
+    MID->SetTextureParameterValue(TransparencyMapParameterName, PreviewTransparencyMap);
+    MID->SetScalarParameterValue(
+        WetTransparencyPreviewMaterialParameters::PreviewWetness,
+        WetnessPreviewPercent / 100.0f);
+    MID->SetScalarParameterValue(UseRuntimeTransparencyParameterName, 1.0f);
+    MID->SetScalarParameterValue(TransparencyWetnessMinParameterName, 0.0f);
+    MID->SetScalarParameterValue(TransparencyWetnessMaxParameterName, 1.0f);
+
+    const FWetWrinkleBakedMapSet* WrinkleMap = FindExactWrinkleNormalMap(
+        Asset,
+        SelectedMaterialSlotIndex,
+        SelectedUVChannelIndex,
+        PreviewLODIndex);
+    const bool bHasWrinkleNormal = WrinkleMap != nullptr;
+    if (bHasWrinkleNormal)
     {
         MID->SetTextureParameterValue(WrinkleNormalMapParameterName, WrinkleMap->BakedWrinkleNormalMap);
     }
-    MID->SetScalarParameterValue(UseWrinkleNormalMapParameterName, bHasWrinkleCoverage ? 1.0f : 0.0f);
+    MID->SetScalarParameterValue(UseWrinkleNormalMapParameterName, bHasWrinkleNormal ? 1.0f : 0.0f);
 }
 
 FWetClothingTransparencyLayerData* SWetClothingTransparencyPreviewViewport::GetSelectedLayer()
@@ -789,7 +886,7 @@ bool SWetClothingTransparencyPreviewViewport::CanPaint() const
 {
     return PaintSettings.bEnabled && PreviewMode == EWetClothingTransparencyPreviewMode::TargetMeshOnly &&
         AutoBakePreviewResult.IsValid() && TransparencyPreviewTexture != nullptr &&
-        SelectedMaterialSlotIndex != INDEX_NONE && SelectedUVChannelIndex == 0 &&
+        SelectedMaterialSlotIndex != INDEX_NONE && SelectedUVChannelIndex >= 0 &&
         (VisualizationMode == EDWCTransparencyVisualizationMode::Final ||
          VisualizationMode == EDWCTransparencyVisualizationMode::AutoAlpha);
 }
@@ -797,6 +894,8 @@ bool SWetClothingTransparencyPreviewViewport::CanPaint() const
 void SWetClothingTransparencyPreviewViewport::RebuildHitTriangles()
 {
     CachedHitTriangles.Reset();
+    HitBVHTriangleIndices.Reset();
+    HitBVHNodes.Reset();
     const UWetClothingAsset* Asset = WetClothingAsset.Get();
     if (Asset == nullptr || Asset->GetDWCSkeletalMesh() == nullptr || TargetMeshPreviewComponent == nullptr ||
         SelectedMaterialSlotIndex == INDEX_NONE || SelectedUVChannelIndex < 0)
@@ -846,6 +945,67 @@ void SWetClothingTransparencyPreviewViewport::RebuildHitTriangles()
             }
         }
     }
+    RebuildHitTriangleAccelerationStructures();
+}
+
+void SWetClothingTransparencyPreviewViewport::RebuildHitTriangleAccelerationStructures()
+{
+    HitBVHTriangleIndices.Reset();
+    HitBVHNodes.Reset();
+    if (CachedHitTriangles.IsEmpty())
+    {
+        return;
+    }
+
+    HitBVHTriangleIndices.Reserve(CachedHitTriangles.Num());
+    for (int32 TriangleIndex = 0; TriangleIndex < CachedHitTriangles.Num(); ++TriangleIndex)
+    {
+        HitBVHTriangleIndices.Add(TriangleIndex);
+    }
+
+    TFunction<int32(int32, int32)> BuildNode;
+    BuildNode = [this, &BuildNode](const int32 FirstIndex, const int32 TriangleCount)
+    {
+        const int32 NodeIndex = HitBVHNodes.AddDefaulted();
+        FBox Bounds(ForceInit);
+        FBox CenterBounds(ForceInit);
+        for (int32 Offset = 0; Offset < TriangleCount; ++Offset)
+        {
+            const FDWCTransparencyCachedHitTriangle& Triangle = CachedHitTriangles[HitBVHTriangleIndices[FirstIndex + Offset]];
+            Bounds += Triangle.WorldBounds;
+            CenterBounds += Triangle.WorldBounds.GetCenter();
+        }
+
+        HitBVHNodes[NodeIndex].Bounds = Bounds;
+        HitBVHNodes[NodeIndex].FirstTriangleIndex = FirstIndex;
+        HitBVHNodes[NodeIndex].TriangleCount = TriangleCount;
+        if (TriangleCount <= TransparencyHitBVHLeafTriangleCount)
+        {
+            return NodeIndex;
+        }
+
+        const FVector Extent = CenterBounds.GetExtent();
+        const int32 SplitAxis = Extent.Y > Extent.X
+            ? (Extent.Z > Extent.Y ? 2 : 1)
+            : (Extent.Z > Extent.X ? 2 : 0);
+        TArrayView<int32> TriangleRange(HitBVHTriangleIndices.GetData() + FirstIndex, TriangleCount);
+        Algo::Sort(TriangleRange, [this, SplitAxis](const int32 A, const int32 B)
+        {
+            return CachedHitTriangles[A].WorldBounds.GetCenter()[SplitAxis] <
+                   CachedHitTriangles[B].WorldBounds.GetCenter()[SplitAxis];
+        });
+
+        const int32 LeftCount = TriangleCount / 2;
+        const int32 LeftChild = BuildNode(FirstIndex, LeftCount);
+        const int32 RightChild = BuildNode(FirstIndex + LeftCount, TriangleCount - LeftCount);
+        // Recursive AddDefaulted calls may grow the backing array, so reacquire by index.
+        HitBVHNodes[NodeIndex].LeftChildIndex = LeftChild;
+        HitBVHNodes[NodeIndex].RightChildIndex = RightChild;
+        HitBVHNodes[NodeIndex].TriangleCount = 0;
+        return NodeIndex;
+    };
+
+    BuildNode(0, HitBVHTriangleIndices.Num());
 }
 
 bool SWetClothingTransparencyPreviewViewport::TraceSurface(
@@ -861,8 +1021,12 @@ bool SWetClothingTransparencyPreviewViewport::TraceSurface(
     }
 
     const FVector RayEnd = RayOrigin + Direction * 1000000.0f;
-    for (const FDWCTransparencyCachedHitTriangle& Triangle : CachedHitTriangles)
+    auto TestTriangle = [&OutHit, &RayOrigin, &RayEnd, &Direction](const FDWCTransparencyCachedHitTriangle& Triangle)
     {
+        if (Triangle.WorldBounds.IsValid && !DoesTransparencySegmentIntersectBox(Triangle.WorldBounds.ExpandBy(0.1f), RayOrigin, RayEnd))
+        {
+            return;
+        }
         FVector Intersection = FVector::ZeroVector;
         FVector TriangleNormal = FVector::ZeroVector;
         if (!FMath::SegmentTriangleIntersection(
@@ -874,12 +1038,12 @@ bool SWetClothingTransparencyPreviewViewport::TraceSurface(
                 Intersection,
                 TriangleNormal))
         {
-            continue;
+            return;
         }
         const double DistanceSq = FVector::DistSquared(RayOrigin, Intersection);
         if (DistanceSq >= OutHit.DistanceSq)
         {
-            continue;
+            return;
         }
 
         FVector Normal = Triangle.WorldNormal;
@@ -906,6 +1070,54 @@ bool SWetClothingTransparencyPreviewViewport::TraceSurface(
         OutHit.WorldTangent = Tangent;
         OutHit.UV = Triangle.UVs[0] * Barycentric.X + Triangle.UVs[1] * Barycentric.Y + Triangle.UVs[2] * Barycentric.Z;
         OutHit.DistanceSq = DistanceSq;
+    };
+
+    if (!HitBVHNodes.IsEmpty())
+    {
+        TArray<int32, TInlineAllocator<64>> NodeStack;
+        NodeStack.Add(0);
+        while (!NodeStack.IsEmpty())
+        {
+            const int32 NodeIndex = NodeStack.Pop(EAllowShrinking::No);
+            if (!HitBVHNodes.IsValidIndex(NodeIndex))
+            {
+                continue;
+            }
+            const FDWCTransparencyHitBVHNode& Node = HitBVHNodes[NodeIndex];
+            if (!Node.Bounds.IsValid || !DoesTransparencySegmentIntersectBox(Node.Bounds.ExpandBy(0.1f), RayOrigin, RayEnd))
+            {
+                continue;
+            }
+            if (Node.IsLeaf())
+            {
+                for (int32 Offset = 0; Offset < Node.TriangleCount; ++Offset)
+                {
+                    const int32 OrderedIndex = Node.FirstTriangleIndex + Offset;
+                    if (HitBVHTriangleIndices.IsValidIndex(OrderedIndex) && CachedHitTriangles.IsValidIndex(HitBVHTriangleIndices[OrderedIndex]))
+                    {
+                        TestTriangle(CachedHitTriangles[HitBVHTriangleIndices[OrderedIndex]]);
+                    }
+                }
+            }
+            else
+            {
+                if (Node.LeftChildIndex != INDEX_NONE)
+                {
+                    NodeStack.Add(Node.LeftChildIndex);
+                }
+                if (Node.RightChildIndex != INDEX_NONE)
+                {
+                    NodeStack.Add(Node.RightChildIndex);
+                }
+            }
+        }
+    }
+    else
+    {
+        for (const FDWCTransparencyCachedHitTriangle& Triangle : CachedHitTriangles)
+        {
+            TestTriangle(Triangle);
+        }
     }
     return OutHit.bHit;
 }
@@ -1192,7 +1404,7 @@ bool SWetClothingTransparencyPreviewViewport::RasterizeBrushSample(
         const float ManualWeight = (bHasSnapshotPixel ? PreviousWeight[SnapshotIndex] : ManualWeightBuffer[Index]) / 255.0f;
         const float ManualPremultiplied = (bHasSnapshotPixel ? PreviousPremultiplied[SnapshotIndex] : ManualPremultipliedBuffer[Index]) / 255.0f;
         const float AutoAlpha = AutoBakePreviewResult->AutoAlphaBuffer.IsValidIndex(Index)
-            ? FMath::Clamp(AutoBakePreviewResult->AutoAlphaBuffer[Index], 0.0f, 1.0f) : 0.0f;
+            ? AutoBakePreviewResult->AutoAlphaBuffer[Index] / 255.0f : 0.0f;
         return AutoAlpha * (1.0f - ManualWeight) + ManualPremultiplied;
     };
 
@@ -1392,52 +1604,56 @@ bool SWetClothingTransparencyPreviewViewport::RebuildWrinkleSuppressionBuffer()
         return false;
     }
 
-    WrinkleSuppressionBuffer.Init(0, PixelCount);
     const UWetClothingAsset* Asset = WetClothingAsset.Get();
-    const FWetWrinkleBakedMapSet* WrinkleMap = Asset != nullptr
-        ? Asset->Authored.WrinkleData.FindBakedWrinkleMap(
-            SelectedMaterialSlotIndex,
-            SelectedUVChannelIndex,
-            Result.LODIndex)
-        : nullptr;
-    if (WrinkleMap == nullptr ||
-        WrinkleMap->BakedWrinkleNormalMap == nullptr ||
-        WrinkleMap->AlphaSemantic != EDWCWrinkleAlphaSemantic::ConvexSeparation)
+    if (Asset == nullptr)
     {
+        WrinkleSuppressionBuffer.Init(0, PixelCount);
         return true;
     }
 
-    FWetClothingTextureReadback WrinkleReadback;
-    FString ReadError;
-    if (!FWetClothingTextureReadbackUtils::TryReadTextureSourceData(
-            WrinkleMap->BakedWrinkleNormalMap,
-            WrinkleReadback,
-            ReadError))
+    const FDWCWrinkleSuppressionSource SuppressionSource =
+        FDWCWrinkleSuppressionProcessor::FindExactSource(
+        Asset,
+        SelectedMaterialSlotIndex,
+        SelectedUVChannelIndex,
+        Result.LODIndex);
+    if (!SuppressionSource.IsValid())
     {
+        WrinkleSuppressionBuffer.Init(0, PixelCount);
         return true;
     }
 
-    for (int32 Y = 0; Y < Height; ++Y)
+    FString ProcessingError;
+    if (!FDWCWrinkleSuppressionProcessor::BuildProcessedBuffer(
+            SuppressionSource,
+            Result.Resolution,
+            Asset->Authored.TransparencyData.WrinkleSuppressionCoverageThreshold,
+            Asset->Authored.TransparencyData.WrinkleSuppressionMaskSoftness,
+            WrinkleSuppressionBuffer,
+            ProcessingError))
     {
-        const int32 SourceY = FMath::Clamp(
-            FMath::FloorToInt((static_cast<float>(Y) + 0.5f) * WrinkleReadback.Height / Height),
-            0,
-            WrinkleReadback.Height - 1);
-        for (int32 X = 0; X < Width; ++X)
-        {
-            const int32 SourceX = FMath::Clamp(
-                FMath::FloorToInt((static_cast<float>(X) + 0.5f) * WrinkleReadback.Width / Width),
-                0,
-                WrinkleReadback.Width - 1);
-            const float Separation = FMath::Clamp(
-                WrinkleReadback.GetLinearColor(SourceX, SourceY).A,
-                0.0f,
-                1.0f);
-            WrinkleSuppressionBuffer[Y * Width + X] =
-                static_cast<uint8>(FMath::RoundToInt(Separation * 255.0f));
-        }
+        WrinkleSuppressionBuffer.Init(0, PixelCount);
+        return true;
     }
     return true;
+}
+
+bool SWetClothingTransparencyPreviewViewport::RebuildOuterEdgeFeatherBuffer()
+{
+    OuterEdgeFeatherBuffer.Reset();
+    if (!AutoBakePreviewResult.IsValid())
+    {
+        return false;
+    }
+    const UWetClothingAsset* Asset = WetClothingAsset.Get();
+    const float FeatherPixels = Asset != nullptr
+        ? Asset->Authored.TransparencyData.TransparencyEdgeFeatherPixels
+        : 0.0f;
+    return FDWCTransparencyComposite::BuildCoverageEdgeFeatherBuffer(
+        AutoBakePreviewResult->Resolution,
+        AutoBakePreviewResult->OuterCoverageBuffer,
+        FeatherPixels,
+        OuterEdgeFeatherBuffer);
 }
 
 float SWetClothingTransparencyPreviewViewport::GetStoredEditedAlpha(const int32 PixelIndex) const
@@ -1459,7 +1675,7 @@ float SWetClothingTransparencyPreviewViewport::ApplyHoverToEditedAlpha(
 {
     if (!PaintSettings.bEnabled || ActiveStrokeGuid.IsValid() || !CurrentSurfaceHit.bHit ||
         PreviewMode != EWetClothingTransparencyPreviewMode::TargetMeshOnly ||
-        SelectedMaterialSlotIndex == INDEX_NONE || SelectedUVChannelIndex != 0 ||
+        SelectedMaterialSlotIndex == INDEX_NONE || SelectedUVChannelIndex < 0 ||
         (VisualizationMode != EDWCTransparencyVisualizationMode::Final &&
          VisualizationMode != EDWCTransparencyVisualizationMode::AutoAlpha) ||
         !AutoBakePreviewResult.IsValid())
@@ -1505,7 +1721,7 @@ float SWetClothingTransparencyPreviewViewport::ApplyHoverToEditedAlpha(
 
     if (PaintSettings.Mode == EDWCTransparencyBrushMode::ResetToAuto)
     {
-        const float AutoAlpha = FMath::Clamp(AutoBakePreviewResult->AutoAlphaBuffer[PixelIndex], 0.0f, 1.0f);
+        const float AutoAlpha = AutoBakePreviewResult->AutoAlphaBuffer[PixelIndex] / 255.0f;
         const float ManualWeight = ManualWeightBuffer.IsValidIndex(PixelIndex) ? ManualWeightBuffer[PixelIndex] / 255.0f : 0.0f;
         const float ManualPremultiplied = ManualPremultipliedBuffer.IsValidIndex(PixelIndex) ? ManualPremultipliedBuffer[PixelIndex] / 255.0f : 0.0f;
         const float RemainingWeight = ManualWeight * (1.0f - BrushWeight);
@@ -1588,14 +1804,18 @@ bool SWetClothingTransparencyPreviewViewport::BuildVisualizationPixels(TArray<FC
 
     for (int32 PixelIndex = 0; PixelIndex < PixelCount; ++PixelIndex)
     {
-        const float WrinkleSuppression = WrinkleSuppressionBuffer.IsValidIndex(PixelIndex)
-            ? FMath::Clamp(WrinkleSuppressionBuffer[PixelIndex] / 255.0f * WrinkleSuppressionStrength, 0.0f, 1.0f)
-            : 0.0f;
         const float EditedAlpha = ApplyHoverToEditedAlpha(PixelIndex, GetStoredEditedAlpha(PixelIndex));
-        const uint8 Alpha = static_cast<uint8>(FMath::RoundToInt(
-            FMath::Clamp(EditedAlpha, 0.0f, 1.0f) * (1.0f - WrinkleSuppression) * 255.0f));
+        const uint8 Alpha = FDWCTransparencyComposite::ResolveFinalAlpha8(
+            EditedAlpha,
+            TransparencyPreviewStrength,
+            WrinkleSuppressionBuffer.IsValidIndex(PixelIndex) ? WrinkleSuppressionBuffer[PixelIndex] : 0,
+            WrinkleSuppressionStrength);
+        const uint8 FeatheredAlpha = OuterEdgeFeatherBuffer.IsValidIndex(PixelIndex)
+            ? static_cast<uint8>(
+                (static_cast<uint32>(Alpha) * OuterEdgeFeatherBuffer[PixelIndex] + 127u) / 255u)
+            : Alpha;
         FColor Pixel = Result.InnerColorBuffer[PixelIndex];
-        Pixel.A = Alpha;
+        Pixel.A = FeatheredAlpha;
 
         switch (VisualizationMode)
         {
@@ -1603,7 +1823,7 @@ bool SWetClothingTransparencyPreviewViewport::BuildVisualizationPixels(TArray<FC
             Pixel.A = 255;
             break;
         case EDWCTransparencyVisualizationMode::AutoAlpha:
-            Pixel = FColor(Alpha, Alpha, Alpha, 255);
+            Pixel = FColor(FeatheredAlpha, FeatheredAlpha, FeatheredAlpha, FeatheredAlpha);
             break;
         case EDWCTransparencyVisualizationMode::WrinkleSeparation:
         {
@@ -1628,7 +1848,9 @@ bool SWetClothingTransparencyPreviewViewport::BuildVisualizationPixels(TArray<FC
         }
         case EDWCTransparencyVisualizationMode::RayConfidence:
         {
-            const float Confidence = Result.RayConfidenceBuffer.IsValidIndex(PixelIndex) ? Result.RayConfidenceBuffer[PixelIndex] : 0.0f;
+            const float Confidence = Result.RayConfidenceBuffer.IsValidIndex(PixelIndex)
+                ? Result.RayConfidenceBuffer[PixelIndex] / 255.0f
+                : 0.0f;
             const uint8 Value = static_cast<uint8>(FMath::RoundToInt(FMath::Clamp(Confidence, 0.0f, 1.0f) * 255.0f));
             Pixel = FColor(Value, Value, Value, 255);
             break;
@@ -1657,14 +1879,19 @@ FColor SWetClothingTransparencyPreviewViewport::BuildVisualizationPixel(const in
     {
         return FColor::Black;
     }
-    const float Suppression = WrinkleSuppressionBuffer.IsValidIndex(PixelIndex)
-        ? FMath::Clamp(WrinkleSuppressionBuffer[PixelIndex] / 255.0f * WrinkleSuppressionStrength, 0.0f, 1.0f)
-        : 0.0f;
     const float EditedAlpha = ApplyHoverToEditedAlpha(PixelIndex, GetStoredEditedAlpha(PixelIndex));
-    const uint8 Alpha = static_cast<uint8>(FMath::RoundToInt(FMath::Clamp(EditedAlpha, 0.0f, 1.0f) * (1.0f - Suppression) * 255.0f));
+    const uint8 Alpha = FDWCTransparencyComposite::ResolveFinalAlpha8(
+        EditedAlpha,
+        TransparencyPreviewStrength,
+        WrinkleSuppressionBuffer.IsValidIndex(PixelIndex) ? WrinkleSuppressionBuffer[PixelIndex] : 0,
+        WrinkleSuppressionStrength);
+    const uint8 FeatheredAlpha = OuterEdgeFeatherBuffer.IsValidIndex(PixelIndex)
+        ? static_cast<uint8>(
+            (static_cast<uint32>(Alpha) * OuterEdgeFeatherBuffer[PixelIndex] + 127u) / 255u)
+        : Alpha;
     if (VisualizationMode == EDWCTransparencyVisualizationMode::AutoAlpha)
     {
-        return FColor(Alpha, Alpha, Alpha, 255);
+        return FColor(FeatheredAlpha, FeatheredAlpha, FeatheredAlpha, FeatheredAlpha);
     }
     if (VisualizationMode == EDWCTransparencyVisualizationMode::WrinkleSeparation)
     {
@@ -1674,11 +1901,37 @@ FColor SWetClothingTransparencyPreviewViewport::BuildVisualizationPixel(const in
         return FColor(Separation, Separation, Separation, 255);
     }
     FColor Pixel = AutoBakePreviewResult->InnerColorBuffer[PixelIndex];
-    Pixel.A = Alpha;
+    Pixel.A = FeatheredAlpha;
     return Pixel;
 }
 
 void SWetClothingTransparencyPreviewViewport::UpdatePreviewTextureRegion(const FIntRect& DirtyRect)
+{
+    if (DirtyRect.IsEmpty())
+    {
+        return;
+    }
+    PendingPreviewDirtyRect = PendingPreviewDirtyRect.IsEmpty()
+        ? DirtyRect
+        : FIntRect(
+            FMath::Min(PendingPreviewDirtyRect.Min.X, DirtyRect.Min.X),
+            FMath::Min(PendingPreviewDirtyRect.Min.Y, DirtyRect.Min.Y),
+            FMath::Max(PendingPreviewDirtyRect.Max.X, DirtyRect.Max.X),
+            FMath::Max(PendingPreviewDirtyRect.Max.Y, DirtyRect.Max.Y));
+}
+
+void SWetClothingTransparencyPreviewViewport::FlushPendingPreviewTextureUpdates()
+{
+    if (PendingPreviewDirtyRect.IsEmpty())
+    {
+        return;
+    }
+    const FIntRect DirtyRect = PendingPreviewDirtyRect;
+    PendingPreviewDirtyRect = FIntRect();
+    UploadPreviewTextureRegion(DirtyRect);
+}
+
+void SWetClothingTransparencyPreviewViewport::UploadPreviewTextureRegion(const FIntRect& DirtyRect)
 {
     if (TransparencyPreviewTexture == nullptr || !AutoBakePreviewResult.IsValid() || DirtyRect.IsEmpty())
     {
@@ -1766,6 +2019,7 @@ bool SWetClothingTransparencyPreviewViewport::RebuildTransparencyPreviewTexture(
     Mip.BulkData.Unlock();
     TransparencyPreviewTexture->UpdateResource();
     LastHoverDirtyRect = ComputeCurrentHoverDirtyRect();
+    PendingPreviewDirtyRect = FIntRect();
     return true;
 }
 

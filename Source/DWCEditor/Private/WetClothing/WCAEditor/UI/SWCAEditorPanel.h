@@ -60,7 +60,6 @@ public:
     bool HasPendingVisualBakeTasks(FString* OutSummary = nullptr) const;
     bool BakeWetVisualAssets(FString& OutSummary, bool* OutHadWarnings = nullptr);
     bool BakePendingVisualAssets(FString& OutSummary, bool* OutHadWarnings = nullptr);
-    bool BakeTransparencyRevealAssets(FString& OutSummary, bool* OutHadWarnings = nullptr);
     FReply BakeSelectedWrinkleNormalMap();
     bool BakeAllWrinkleMaps(FString& OutSummary, bool* OutHadWarnings = nullptr);
     bool SaveBakedVisualAssets() const;

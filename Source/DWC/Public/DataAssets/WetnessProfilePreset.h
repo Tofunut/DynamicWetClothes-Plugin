@@ -36,8 +36,5 @@ class DWC_API UWetnessProfilePreset : public UDataAsset
     float GravityFlowStrength = 0.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly)
-    float TransparencyStrength = 0.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly)
     float SpecularBoost = 1.0f;
 };

@@ -1,29 +1,28 @@
 #include "WetClothing/Modes/Transparency/Material/WetTransparencyPreviewMaterialBuilder.h"
 
-#include "Materials/Material.h"
-#include "Materials/MaterialInstanceDynamic.h"
-#include "Materials/MaterialInterface.h"
-#include "UObject/Package.h"
+#include "WetClothing/Modes/Wrinkle/Material/WetWrinklePreviewMaterialBuilder.h"
 
 FWetTransparencyPreviewMaterialBuildResult FWetTransparencyPreviewMaterialBuilder::Build(
     const FWetTransparencyPreviewMaterialBuildArgs& Args)
 {
     FWetTransparencyPreviewMaterialBuildResult Result;
-    if (Args.SourceMaterial == nullptr)
+    FWetWrinklePreviewMaterialBuildArgs WetPreviewArgs;
+    WetPreviewArgs.SourceMaterial = Args.SourceMaterial;
+    WetPreviewArgs.UVChannelIndex = Args.UVChannelIndex;
+    WetPreviewArgs.bOverrideCpuWetnessInput = true;
+    WetPreviewArgs.bBuildNormalOverlay = false;
+
+    const FWetWrinklePreviewMaterialBuildResult WetPreviewResult =
+        FWetWrinklePreviewMaterialBuilder::Build(WetPreviewArgs);
+    if (!WetPreviewResult.bSucceeded)
     {
-        Result.ErrorMessage = TEXT("No source material was provided.");
+        Result.ErrorMessage = WetPreviewResult.ErrorMessage;
         return Result;
     }
 
-    Result.PreviewMID = UMaterialInstanceDynamic::Create(Args.SourceMaterial, GetTransientPackage());
-    if (Result.PreviewMID == nullptr)
-    {
-        Result.ErrorMessage = TEXT("Failed to create a transient transparency preview material instance.");
-        return Result;
-    }
-
-    Result.TransientBaseMaterial = Args.SourceMaterial->GetMaterial();
-    Result.TransientMaterialParent = Args.SourceMaterial;
-    Result.bSucceeded = true;
+    Result.TransientBaseMaterial = WetPreviewResult.TransientBaseMaterial;
+    Result.TransientMaterialParent = WetPreviewResult.TransientMaterialParent;
+    Result.PreviewMID = WetPreviewResult.PreviewMID;
+    Result.bSucceeded = Result.PreviewMID != nullptr;
     return Result;
 }

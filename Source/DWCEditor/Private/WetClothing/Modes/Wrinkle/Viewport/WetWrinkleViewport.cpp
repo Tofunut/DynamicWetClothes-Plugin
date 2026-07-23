@@ -783,6 +783,7 @@ void SWetWrinkleViewport::SetGeneratedNormalPreviewTexture(
     const int32 UVChannelIndex,
     UTexture2D* GeneratedNormalTexture)
 {
+    bGeneratedNormalPreviewOverrideActive = true;
     GeneratedNormalPreviewMaterialSlotIndex = MaterialSlotIndex;
     GeneratedNormalPreviewUVChannelIndex = UVChannelIndex;
     GeneratedNormalPreviewTexture = GeneratedNormalTexture;
@@ -793,6 +794,7 @@ void SWetWrinkleViewport::SetGeneratedNormalPreviewTexture(
 
 void SWetWrinkleViewport::ClearGeneratedNormalPreviewTexture()
 {
+    bGeneratedNormalPreviewOverrideActive = false;
     GeneratedNormalPreviewMaterialSlotIndex = INDEX_NONE;
     GeneratedNormalPreviewUVChannelIndex = INDEX_NONE;
     GeneratedNormalPreviewTexture = nullptr;
@@ -1540,7 +1542,7 @@ void SWetWrinkleViewport::RefreshWrinklePreviewMaterials()
             if (SlotState.PreviewStatus == EWetWrinklePreviewMaterialStatus::Ready && SlotState.PreviewMID != nullptr)
             {
                 UTexture2D* PreviewNormalTexture = nullptr;
-                if (GeneratedNormalPreviewTexture != nullptr &&
+                if (bGeneratedNormalPreviewOverrideActive &&
                     GeneratedNormalPreviewMaterialSlotIndex == ActiveMaterialSlotIndex &&
                     GeneratedNormalPreviewUVChannelIndex == BrushSettings.UVChannelIndex)
                 {

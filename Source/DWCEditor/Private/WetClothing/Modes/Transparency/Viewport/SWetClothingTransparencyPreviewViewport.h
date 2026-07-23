@@ -53,6 +53,21 @@ struct FDWCTransparencyCachedHitTriangle
     FBox WorldBounds = FBox(ForceInit);
 };
 
+/** World-space acceleration node for the selected target slot hit cache. */
+struct FDWCTransparencyHitBVHNode
+{
+    FBox Bounds = FBox(ForceInit);
+    int32 LeftChildIndex = INDEX_NONE;
+    int32 RightChildIndex = INDEX_NONE;
+    int32 FirstTriangleIndex = 0;
+    int32 TriangleCount = 0;
+
+    bool IsLeaf() const
+    {
+        return LeftChildIndex == INDEX_NONE && RightChildIndex == INDEX_NONE;
+    }
+};
+
 DECLARE_DELEGATE(FOnDWCTransparencyStrokesChanged);
 
 enum class EWetClothingTransparencyPreviewMode : uint8
@@ -96,6 +111,7 @@ class SWetClothingTransparencyPreviewViewport : public SEditorViewport, public F
     void SetTransparencyPreviewStrength(float InStrength);
     float GetTransparencyPreviewStrength() const { return TransparencyPreviewStrength; }
     void SetWrinkleSuppressionStrength(float InStrength);
+    void RefreshWrinkleSuppressionPreview();
     void SetPaintSettings(const FDWCTransparencyPaintSettings& InSettings);
     void RebuildManualOverridesFromStrokes();
     void RefreshManualPreviewFromStrokes();
@@ -114,6 +130,7 @@ class SWetClothingTransparencyPreviewViewport : public SEditorViewport, public F
         int32 InMaterialSlotIndex,
         int32 InUVChannelIndex,
         EDWCTransparencyUVAddressMode InAddressMode);
+    void FlushPendingPreviewTextureUpdates();
 
   protected:
     virtual TSharedRef<FEditorViewportClient> MakeEditorViewportClient() override;
@@ -124,12 +141,15 @@ class SWetClothingTransparencyPreviewViewport : public SEditorViewport, public F
     void BuildTargetMeshPreview();
     void BuildFullBlueprintPreview();
     void ConfigurePreviewMeshComponent(USkeletalMeshComponent* MeshComponent);
-    void ApplyRevealMaterials(USkeletalMeshComponent* MeshComponent);
+    void ApplyPreviewMaterials(USkeletalMeshComponent* MeshComponent);
     void ApplyWetnessPreview(USkeletalMeshComponent* MeshComponent);
+    UMaterialInstanceDynamic* GetOrBuildSelectedPreviewMID(UMaterialInterface* SourceMaterial);
     void ApplyTransparencyPreviewParameters();
     bool RebuildTransparencyPreviewTexture();
     bool RebuildWrinkleSuppressionBuffer();
+    bool RebuildOuterEdgeFeatherBuffer();
     void RebuildHitTriangles();
+    void RebuildHitTriangleAccelerationStructures();
     void EnsureBrushCursor();
     void RefreshBrushCursor();
     void ClearBrushCursor();
@@ -137,6 +157,7 @@ class SWetClothingTransparencyPreviewViewport : public SEditorViewport, public F
     FIntRect ComputeCurrentHoverDirtyRect() const;
     void RefreshHoverPreviewRegion();
     void UpdatePreviewTextureRegion(const FIntRect& DirtyRect);
+    void UploadPreviewTextureRegion(const FIntRect& DirtyRect);
     void AppendPaintSample(const FVector2D& PositionUV);
     FWetClothingTransparencyLayerData* GetSelectedLayer();
     float GetStoredEditedAlpha(int32 PixelIndex) const;
@@ -156,13 +177,22 @@ class SWetClothingTransparencyPreviewViewport : public SEditorViewport, public F
     TArray<TObjectPtr<UMaterialInstanceDynamic>> PreviewMIDs;
     TArray<TObjectPtr<UMaterial>> TransparencyPreviewBaseMaterials;
     TArray<TObjectPtr<UMaterialInterface>> TransparencyPreviewMaterialParents;
+    TObjectPtr<UMaterialInterface> CachedPreviewSourceMaterial = nullptr;
+    TObjectPtr<UMaterial> CachedPreviewBaseMaterial = nullptr;
+    TObjectPtr<UMaterialInterface> CachedPreviewMaterialParent = nullptr;
+    TObjectPtr<UMaterialInstanceDynamic> CachedPreviewMID = nullptr;
+    int32 CachedPreviewMaterialSlotIndex = INDEX_NONE;
+    int32 CachedPreviewUVChannelIndex = INDEX_NONE;
     TObjectPtr<UTexture2D> TransparencyPreviewTexture = nullptr;
     TObjectPtr<UProceduralMeshComponent> BrushCursorComponent = nullptr;
     TSharedPtr<const FDWCTransparencyAutoBakeResult> AutoBakePreviewResult;
     TArray<uint8> WrinkleSuppressionBuffer;
+    TArray<uint8> OuterEdgeFeatherBuffer;
     TArray<uint8> ManualPremultipliedBuffer;
     TArray<uint8> ManualWeightBuffer;
     TArray<FDWCTransparencyCachedHitTriangle> CachedHitTriangles;
+    TArray<int32> HitBVHTriangleIndices;
+    TArray<FDWCTransparencyHitBVHNode> HitBVHNodes;
     FDWCTransparencyPaintSettings PaintSettings;
     FDWCTransparencySurfaceHit CurrentSurfaceHit;
     FOnDWCTransparencyStrokesChanged OnStrokesChanged;
@@ -171,6 +201,7 @@ class SWetClothingTransparencyPreviewViewport : public SEditorViewport, public F
     FVector2D LastPointerUV = FVector2D::ZeroVector;
     float DistanceToNextStamp = 0.0f;
     FIntRect LastHoverDirtyRect;
+    FIntRect PendingPreviewDirtyRect;
     EWetClothingTransparencyPreviewMode PreviewMode = EWetClothingTransparencyPreviewMode::TargetMeshOnly;
     EDWCTransparencyVisualizationMode VisualizationMode = EDWCTransparencyVisualizationMode::Final;
     float WetnessPreviewPercent = 100.0f;

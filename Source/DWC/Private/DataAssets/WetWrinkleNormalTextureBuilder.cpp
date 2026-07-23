@@ -744,10 +744,17 @@ bool FWetWrinkleNormalTextureBuilder::BuildConvexSeparationBuffer(
     {
         return false;
     }
+
+    bool bFlipGreenChannel = false;
+#if WITH_EDITORONLY_DATA
+    bFlipGreenChannel = CorrectedNormalTexture != nullptr &&
+                        CorrectedNormalTexture->bFlipGreenChannel;
+#endif
+
     return BuildConvexSeparationFromPixels(
         CorrectedPixels,
         Size,
-        CorrectedNormalTexture != nullptr && CorrectedNormalTexture->bFlipGreenChannel,
+        bFlipGreenChannel,
         Settings,
         OutBuffer,
         OutError);

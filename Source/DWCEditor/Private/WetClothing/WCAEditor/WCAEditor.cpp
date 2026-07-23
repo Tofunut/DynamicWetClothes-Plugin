@@ -2020,20 +2020,9 @@ bool FWCAEditor::CanBakeWrinkleMaps() const
     return Status == EDWCBakeStatus::Required || Status == EDWCBakeStatus::OutOfDate || Status == EDWCBakeStatus::Failed;
 }
 
-bool FWCAEditor::CanBakeTransparencyMaps() const
-{
-    const UWetClothingAsset* Asset = WetClothingAsset.Get();
-    if (Asset == nullptr || !Asset->HasTransparencyBakeContent())
-    {
-        return false;
-    }
-    const EDWCBakeStatus Status = Asset->GetBakeState().TransparencyMaps;
-    return Status == EDWCBakeStatus::Required || Status == EDWCBakeStatus::OutOfDate || Status == EDWCBakeStatus::Failed;
-}
-
 bool FWCAEditor::CanBakeAnyMaps() const
 {
-    return CanBakeGPUMaps() || CanBakeWetnessProfileMaps() || CanBakeWrinkleMaps() || CanBakeTransparencyMaps();
+    return CanBakeGPUMaps() || CanBakeWetnessProfileMaps() || CanBakeWrinkleMaps();
 }
 
 bool FWCAEditor::CanBakeCurrentModeMaps() const
@@ -2047,7 +2036,8 @@ bool FWCAEditor::CanBakeCurrentModeMaps() const
         return CanBakeWrinkleMaps();
 
     case EWCAEditorMode::TransparencyBake:
-        return CanBakeTransparencyMaps();
+        // Transparency generation and edited-map baking live in the mode panel.
+        return false;
 
     default:
         return false;
@@ -2064,11 +2054,9 @@ TSharedRef<SWidget> FWCAEditor::BuildBakeMapsMenu()
     Args.EditorMode = CurrentMode;
     Args.OnBakeWetnessProfileMaps = FSimpleDelegate::CreateLambda([this]() { HandleBakeWetnessProfileMapsClicked(); });
     Args.OnBakeGPUWetnessMapData = FSimpleDelegate::CreateLambda([this]() { HandleBakeGPUWetnessMapDataClicked(); });
-    Args.OnBakeTransparencyRevealMaps = FSimpleDelegate::CreateLambda([this]() { HandleBakeTransparencyRevealMapsClicked(); });
     Args.OnBakeWrinkleNormalMap = FSimpleDelegate::CreateLambda([this]() { HandleBakeWrinkleNormalMapClicked(); });
     Args.CanBakeWetnessProfileMaps = FCanExecuteAction::CreateSP(this, &FWCAEditor::CanBakeWetnessProfileMaps);
     Args.CanBakeGPUWetnessMapData = FCanExecuteAction::CreateSP(this, &FWCAEditor::CanBakeGPUMaps);
-    Args.CanBakeTransparencyRevealMaps = FCanExecuteAction::CreateSP(this, &FWCAEditor::CanBakeTransparencyMaps);
     Args.CanBakeWrinkleNormalMap = FCanExecuteAction::CreateSP(this, &FWCAEditor::CanBakeWrinkleMaps);
     return FWCAEditorWidgets::BuildBakeMapsMenu(Args);
 }
@@ -2097,8 +2085,7 @@ FReply FWCAEditor::HandleBakeAllMapsClicked()
     const bool bBakeGPU = CanBakeGPUMaps();
     const bool bBakeProfiles = CanBakeWetnessProfileMaps();
     const bool bBakeWrinkles = CanBakeWrinkleMaps();
-    const bool bBakeTransparency = CanBakeTransparencyMaps();
-    if (!bBakeGPU && !bBakeProfiles && !bBakeWrinkles && !bBakeTransparency)
+    if (!bBakeGPU && !bBakeProfiles && !bBakeWrinkles)
     {
         return FReply::Handled();
     }
@@ -2125,7 +2112,6 @@ FReply FWCAEditor::HandleBakeAllMapsClicked()
         (bBakeGPU ? 2.0f : 0.0f) +
         (bBakeProfiles ? 1.0f : 0.0f) +
         (bBakeWrinkles ? 1.0f : 0.0f) +
-        (bBakeTransparency ? 1.0f : 0.0f) +
         1.0f;
     FScopedSlowTask SlowTask(
         TotalWork,
@@ -2198,25 +2184,6 @@ FReply FWCAEditor::HandleBakeAllMapsClicked()
         else if (!WrinkleSummary.IsEmpty())
         {
             Failures.Add(FString::Printf(TEXT("Wrinkle maps: %s"), *WrinkleSummary));
-        }
-    }
-
-    if (bBakeTransparency)
-    {
-        SlowTask.EnterProgressFrame(
-            1.0f,
-            LOCTEXT("BakeAllTransparencyMapsProgress", "Baking transparency maps..."));
-        FString TransparencySummary;
-        bool bTransparencyWarnings = false;
-        if (EditorPanel->BakeTransparencyRevealAssets(TransparencySummary, &bTransparencyWarnings))
-        {
-            Sections.Add(TransparencySummary);
-            bHadWarnings |= bTransparencyWarnings;
-            bBakedAnyOutput = true;
-        }
-        else
-        {
-            Failures.Add(FString::Printf(TEXT("Transparency maps: %s"), *TransparencySummary));
         }
     }
 
@@ -2379,54 +2346,6 @@ FReply FWCAEditor::HandleBakeGPUWetnessMapDataClicked()
     return FReply::Handled();
 }
 
-FReply FWCAEditor::HandleBakeTransparencyRevealMapsClicked()
-{
-    if (!CanBakeTransparencyMaps())
-    {
-        return FReply::Handled();
-    }
-    if (!EditorPanel.IsValid())
-    {
-        return FReply::Handled();
-    }
-
-    FScopedSlowTask SlowTask(
-        2.0f,
-        LOCTEXT("BakeTransparencyRevealMapsProgress", "Baking transparency reveal maps..."));
-    SlowTask.MakeDialog(false);
-    SlowTask.EnterProgressFrame(
-        1.0f,
-        LOCTEXT("BakeTransparencyRevealMapsBuildProgress", "Generating transparency reveal textures..."));
-
-    FString Summary;
-    bool bHadWarnings = false;
-    if (!EditorPanel->BakeTransparencyRevealAssets(Summary, &bHadWarnings))
-    {
-        RefreshAssetStateAndEditor();
-        FMessageDialog::Open(EAppMsgType::Ok, FText::FromString(Summary));
-        return FReply::Handled();
-    }
-
-    SlowTask.EnterProgressFrame(
-        1.0f,
-        LOCTEXT("BakeTransparencyRevealMapsSaveProgress", "Saving transparency reveal assets..."));
-    UWetClothingAsset* Asset = WetClothingAsset.Get();
-    if (Asset == nullptr || !DWCEditorUtils::SaveAsset(Asset))
-    {
-        RefreshAssetStateAndEditor();
-        FMessageDialog::Open(
-            EAppMsgCategory::Warning,
-            EAppMsgType::Ok,
-            LOCTEXT("BakeTransparencyRevealMapsSaveFailed", "Transparency maps were generated, but the generated textures or Wet Clothing Asset could not be saved."));
-        return FReply::Handled();
-    }
-    RefreshAssetStateAndEditor();
-
-    const EAppMsgCategory MessageCategory = bHadWarnings ? EAppMsgCategory::Warning : EAppMsgCategory::Success;
-    FMessageDialog::Open(MessageCategory, EAppMsgType::Ok, FText::FromString(Summary));
-    return FReply::Handled();
-}
-
 FReply FWCAEditor::HandleBakeWrinkleNormalMapClicked()
 {
     if (!CanBakeWrinkleMaps())
@@ -2526,19 +2445,25 @@ FReply FWCAEditor::GenerateWetMaterials()
             continue;
         }
 
-        UMaterialInterface* SourceMaterial = Materials[MaterialSlotIndex].MaterialInterface;
-        if (SourceMaterial == nullptr)
-        {
-            Failures.Add(FString::Printf(TEXT("Slot %d has no source material."), MaterialSlotIndex));
-            continue;
-        }
-
         FWetClothingGeneratedWetMaterialOverride* ExistingOverride =
             Asset->Derived.Inline.GeneratedWetMaterialOverrides.FindByPredicate(
                 [MaterialSlotIndex](const FWetClothingGeneratedWetMaterialOverride& MaterialOverride)
                 {
                     return MaterialOverride.MaterialSlotIndex == MaterialSlotIndex;
                 });
+
+        // A prepared DWC mesh can expose a generated material in its slot. Always retain the
+        // original source recorded by the WCA when it exists; generating from M_*_DWC would
+        // recursively duplicate an already rewritten graph and can lose the original inputs.
+        UMaterialInterface* SourceMaterial = ExistingOverride != nullptr && ExistingOverride->SourceMaterial != nullptr
+                                                 ? ExistingOverride->SourceMaterial.Get()
+                                                 : Materials[MaterialSlotIndex].MaterialInterface.Get();
+        if (SourceMaterial == nullptr)
+        {
+            Failures.Add(FString::Printf(TEXT("Slot %d has no source material."), MaterialSlotIndex));
+            continue;
+        }
+
         const bool bHadCompleteOverride =
             ExistingOverride != nullptr &&
             ExistingOverride->GeneratedMaterial != nullptr &&
@@ -2708,9 +2633,7 @@ bool FWCAEditor::ResolveIssuesAndSave(FString& OutFailure)
         EditorPanel->SaveBakedVisualAssets();
     }
 
-    const bool bHasWrinkleContent = !Asset->Authored.WrinkleData.BakedWrinkleMaps.IsEmpty() ||
-                                    !Asset->Authored.WrinkleData.EditablePatches.IsEmpty() ||
-                                    !Asset->Authored.WrinkleData.EditableProceduralRidgeStrokes.IsEmpty();
+    const bool bHasWrinkleContent = Asset->HasWrinkleBakeContent();
     if (bHasWrinkleContent && !DWCBuildStatus::IsUsable(Asset->GetBakeState().WrinkleMaps))
     {
         SlowTask.EnterProgressFrame(
@@ -2725,21 +2648,6 @@ bool FWCAEditor::ResolveIssuesAndSave(FString& OutFailure)
         }
     }
 
-    if (!Asset->Authored.TransparencyData.SourceBlueprintClass.IsNull() &&
-        !DWCBuildStatus::IsUsable(Asset->GetBakeState().TransparencyMaps))
-    {
-        SlowTask.EnterProgressFrame(
-            1.0f,
-            LOCTEXT("ResolveIssuesTransparencyMapsProgress", "Baking transparency reveal maps from the configured source blueprint..."));
-        FString TransparencySummary;
-        bool bTransparencyWarnings = false;
-        if (!EditorPanel->BakeTransparencyRevealAssets(TransparencySummary, &bTransparencyWarnings))
-        {
-            OutFailure = FString::Printf(TEXT("Transparency Maps: %s"), *TransparencySummary);
-            return false;
-        }
-        EditorPanel->SaveTransparencySetupAssets();
-    }
 #endif
 
     // Persist the rebuilt runtime structures and every explicit map-bake result in one final save.

@@ -579,28 +579,6 @@ void UDynamicWetClothesComponent::ApplyGeneratedWetMaterialOverrides()
 
         }
 
-        for (const FWetClothingBakedTransparencyRevealLayer& RevealLayer : ReceiverWetClothingAsset->Authored.TransparencyData.BakedRevealLayers)
-        {
-            if (RevealLayer.MaterialSlotIndex == INDEX_NONE || RevealLayer.RevealMaterial == nullptr)
-            {
-                continue;
-            }
-
-            if (RevealLayer.MaterialSlotIndex >= OverrideTargetMesh->GetNumMaterials())
-            {
-                UE_LOG(
-                    LogTemp,
-                    Warning,
-                    TEXT("DynamicWetClothesComponent: Transparency reveal material slot %d is out of range on %s."),
-                    RevealLayer.MaterialSlotIndex,
-                    *GetNameSafe(OverrideTargetMesh));
-                continue;
-            }
-
-            OverrideTargetMesh->SetMaterial(RevealLayer.MaterialSlotIndex, RevealLayer.RevealMaterial);
-        }
-
-
     }
 }
 

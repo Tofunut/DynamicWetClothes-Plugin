@@ -30,6 +30,7 @@ struct FWCAMaterialSlotRowArgs
     bool bShowWettableToggle = true;
     FOnWettableMaterialSlotClicked OnWettableSlotClicked;
     TFunction<FText(int32)> GetMaterialSlotStatusText;
+    TFunction<TSharedRef<SWidget>(int32)> BuildTrailingWidget;
 };
 
 struct FWCABakeMapsMenuArgs
@@ -37,11 +38,9 @@ struct FWCABakeMapsMenuArgs
     EWCAEditorMode EditorMode = EWCAEditorMode::PartEdit;
     FSimpleDelegate OnBakeWetnessProfileMaps;
     FSimpleDelegate OnBakeGPUWetnessMapData;
-    FSimpleDelegate OnBakeTransparencyRevealMaps;
     FSimpleDelegate OnBakeWrinkleNormalMap;
     FCanExecuteAction CanBakeWetnessProfileMaps;
     FCanExecuteAction CanBakeGPUWetnessMapData;
-    FCanExecuteAction CanBakeTransparencyRevealMaps;
     FCanExecuteAction CanBakeWrinkleNormalMap;
 };
 

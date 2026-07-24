@@ -613,7 +613,7 @@ void SWetClothingPartEditorPanel::Construct(const FArguments& InArgs)
                                                    .Value(this, &SWetClothingPartEditorPanel::GetSelectionLineThicknessScale)
                                                    .OnValueChanged(this, &SWetClothingPartEditorPanel::HandleSelectionLineThicknessChanged)]])]]];
 
-    RefreshFromAsset();
+    RefreshFromAssetLightweight();
 }
 
 void SWetClothingPartEditorPanel::RefreshFromAsset()
@@ -638,6 +638,12 @@ void SWetClothingPartEditorPanel::RefreshFromAsset()
 
     RefreshPreviewIslandHighlight();
     RefreshPreviewWetPartOverlay();
+}
+
+void SWetClothingPartEditorPanel::RefreshFromAssetLightweight()
+{
+    RefreshMaterialSlotItems();
+    RefreshMaterialTextures(false);
 }
 
 void SWetClothingPartEditorPanel::RefreshMaterialSlotItems()

@@ -298,7 +298,17 @@ void SWCAEditorPanel::RefreshFromAsset(const bool bRebuildActiveModePreview)
     switch (ActiveMode)
     {
     case EWCAEditorMode::PartEdit:
-        if (PartEditorPanel.IsValid()) PartEditorPanel->RefreshFromAsset();
+        if (PartEditorPanel.IsValid())
+        {
+            if (bRebuildActiveModePreview)
+            {
+                PartEditorPanel->RefreshFromAsset();
+            }
+            else
+            {
+                PartEditorPanel->RefreshFromAssetLightweight();
+            }
+        }
         break;
     case EWCAEditorMode::WrinkleEdit:
         if (WrinkleEditorPanel.IsValid())
@@ -384,12 +394,12 @@ FWCAEditorIssueStatus SWCAEditorPanel::CollectIssueStatus(
     }
 
     const bool bCPURuntimeSavePending = Asset->IsBakeOutputSavePending(DWCBakeOutput::CPURuntimeData);
-    if ((Setup.bBuildCPUVertexSimulationData || Asset->HasCPURuntimeDataPayload()) &&
+    if ((Setup.bBuildCPUVertexSimulationData || Asset->HasCPURuntimeDataPayloadMetadata()) &&
         State.CPURuntimeData != EDWCBakeStatus::Disabled &&
         (!DWCBuildStatus::IsUsable(State.CPURuntimeData) || bCPURuntimeSavePending))
     {
         Result.bRuntimeIssue = true;
-        const bool bHasPayload = Asset->HasCPURuntimeDataPayload();
+        const bool bHasPayload = Asset->HasCPURuntimeDataPayloadMetadata();
         const bool bWasEverGenerated = Asset->HasGeneratedBakeOutput(DWCBakeOutput::CPURuntimeData);
         const bool bWasEverSaved = Asset->HasSavedBakeOutput(DWCBakeOutput::CPURuntimeData);
         RaiseIssueSeverity(Result, GetRuntimeSeverity(State.CPURuntimeData, bHasPayload || bWasEverGenerated || bWasEverSaved));
@@ -404,12 +414,12 @@ FWCAEditorIssueStatus SWCAEditorPanel::CollectIssueStatus(
             State.LastFailure));
     }
     const bool bGPURuntimeSavePending = Asset->IsBakeOutputSavePending(DWCBakeOutput::GPURuntimeData);
-    if ((Setup.bBuildGPUWetnessMapSimulationData || Asset->HasGPURuntimeDataPayload()) &&
+    if ((Setup.bBuildGPUWetnessMapSimulationData || Asset->HasGPURuntimeDataPayloadMetadata()) &&
         State.GPURuntimeData != EDWCBakeStatus::Disabled &&
         (!DWCBuildStatus::IsUsable(State.GPURuntimeData) || bGPURuntimeSavePending))
     {
         Result.bRuntimeIssue = true;
-        const bool bHasPayload = Asset->HasGPURuntimeDataPayload();
+        const bool bHasPayload = Asset->HasGPURuntimeDataPayloadMetadata();
         const bool bWasEverGenerated = Asset->HasGeneratedBakeOutput(DWCBakeOutput::GPURuntimeData);
         const bool bWasEverSaved = Asset->HasSavedBakeOutput(DWCBakeOutput::GPURuntimeData);
         RaiseIssueSeverity(Result, GetRuntimeSeverity(State.GPURuntimeData, bHasPayload || bWasEverGenerated || bWasEverSaved));
@@ -425,14 +435,14 @@ FWCAEditorIssueStatus SWCAEditorPanel::CollectIssueStatus(
     }
 
     const bool bGPUMapSavePending = Asset->IsBakeOutputSavePending(DWCBakeOutput::GPUMaps);
-    if ((Setup.bBuildGPUWetnessMapSimulationData || Asset->HasGPUMapDataPayload()) &&
+    if ((Setup.bBuildGPUWetnessMapSimulationData || Asset->HasGPUMapDataPayloadMetadata()) &&
         State.GPUMaps != EDWCBakeStatus::Disabled &&
         (!DWCBuildStatus::IsUsable(State.GPUMaps) || bGPUMapSavePending))
     {
         Result.bMapIssue = true;
         RaiseIssueSeverity(Result, GetSeverityForStatus(State.GPUMaps));
         const bool bWasEverGenerated = Asset->HasGeneratedBakeOutput(DWCBakeOutput::GPUMaps);
-        const bool bWasEverSaved = Asset->HasGPUMapDataPayload() || Asset->HasSavedBakeOutput(DWCBakeOutput::GPUMaps);
+        const bool bWasEverSaved = Asset->HasGPUMapDataPayloadMetadata() || Asset->HasSavedBakeOutput(DWCBakeOutput::GPUMaps);
         Result.MapMessages.Add(BuildMapDataMessage(
             TEXT("GPU Simulation Maps"),
             State.GPUMaps,

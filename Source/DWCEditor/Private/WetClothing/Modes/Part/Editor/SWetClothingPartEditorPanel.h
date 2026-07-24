@@ -31,6 +31,7 @@ class SWetClothingPartEditorPanel : public SCompoundWidget
     void Construct(const FArguments& InArgs);
 
     void RefreshFromAsset();
+    void RefreshFromAssetLightweight();
     bool HasPendingVisualBakeTasks(FString* OutSummary = nullptr) const;
     bool BakeWetnessProfileMapsAndUpdateMaterials(FString& OutSummary, bool* OutHadWarnings = nullptr);
     bool SaveBakedWetnessAssets() const;

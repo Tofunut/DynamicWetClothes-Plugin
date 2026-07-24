@@ -222,10 +222,14 @@ class DWC_API UWetClothingAsset : public UDataAsset
     bool HasTransparencyBakeContent() const;
     const FWetClothingPrecomputedSimulationData& GetPrecomputedSimulationData() const;
     const FDWCGPULODBakeData& GetGPUWetMapRuntimeData(int32 LODIndex = 0) const;
+    const FDWCGPULODBakeData& GetGPUWetMapRuntimeDataMetadata(int32 LODIndex = 0) const;
     bool IsCurrentAssetDataVersion() const { return Metadata.AssetDataVersion == CurrentAssetDataVersion; }
     bool HasCPURuntimeDataPayload() const;
     bool HasGPURuntimeDataPayload() const;
     bool HasGPUMapDataPayload() const;
+    bool HasCPURuntimeDataPayloadMetadata() const;
+    bool HasGPURuntimeDataPayloadMetadata() const;
+    bool HasGPUMapDataPayloadMetadata() const;
 
     USkeletalMesh* GetSourceSkeletalMesh() const { return Metadata.SourceSkeletalMesh.Get(); }
     USkeletalMesh* GetDWCSkeletalMesh() const { return Metadata.DWCSkeletalMesh.Get(); }
@@ -283,6 +287,7 @@ class DWC_API UWetClothingAsset : public UDataAsset
     void ClearRuntimeBulkData();
 
 #if WITH_EDITOR
+    void ReleaseLoadedRuntimeBulkPayloadForEditor();
     void RefreshBakeStateFast();
     void RefreshBakeStateDeep();
     void RefreshBakeStateInternal(bool bRunDeepValidation);

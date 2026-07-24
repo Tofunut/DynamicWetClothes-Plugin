@@ -374,7 +374,7 @@ namespace
             State.OriginalUVTopology,
             LOCTEXT("ValidationOriginalUVTopologyAction", "Rebuild DWC Data UV."));
 
-        if ((Setup.bBuildCPUVertexSimulationData || Asset.HasCPURuntimeDataPayload()) &&
+        if ((Setup.bBuildCPUVertexSimulationData || Asset.HasCPURuntimeDataPayloadMetadata()) &&
             State.CPURuntimeData != EDWCBakeStatus::Disabled)
         {
             AddValidationActionIfRequired(
@@ -384,7 +384,7 @@ namespace
                 LOCTEXT("ValidationSaveAssetAction", "Save the asset to rebuild it."),
                 Asset.IsBakeOutputSavePending(DWCBakeOutput::CPURuntimeData));
         }
-        if ((Setup.bBuildGPUWetnessMapSimulationData || Asset.HasGPURuntimeDataPayload()) &&
+        if ((Setup.bBuildGPUWetnessMapSimulationData || Asset.HasGPURuntimeDataPayloadMetadata()) &&
             State.GPURuntimeData != EDWCBakeStatus::Disabled)
         {
             AddValidationActionIfRequired(
@@ -394,7 +394,7 @@ namespace
                 LOCTEXT("ValidationSaveAssetAction", "Save the asset to rebuild it."),
                 Asset.IsBakeOutputSavePending(DWCBakeOutput::GPURuntimeData));
         }
-        if ((Setup.bBuildGPUWetnessMapSimulationData || Asset.HasGPUMapDataPayload()) &&
+        if ((Setup.bBuildGPUWetnessMapSimulationData || Asset.HasGPUMapDataPayloadMetadata()) &&
             State.GPUMaps != EDWCBakeStatus::Disabled)
         {
             AddValidationActionIfRequired(
@@ -871,10 +871,16 @@ namespace
         auto IsHeavyGeneratedProperty = [](const FName PropertyName)
         {
             return PropertyName == FName(TEXT("BakedGPUWetMapLODs")) ||
+                   PropertyName == FName(TEXT("OriginalUVTopologies")) ||
                    PropertyName == FName(TEXT("OriginalUVTopologiesPerLOD")) ||
                    PropertyName == FName(TEXT("DataUVMetadataPerLOD")) ||
                    PropertyName == FName(TEXT("BakeState")) ||
                    PropertyName == FName(TEXT("ValidationSummary")) ||
+                   PropertyName == FName(TEXT("Bulk")) ||
+                   PropertyName == FName(TEXT("NeighborRuntimeData")) ||
+                   PropertyName == FName(TEXT("GPURuntimeData")) ||
+                   PropertyName == FName(TEXT("LODVertexColorRuntimeData")) ||
+                   PropertyName == FName(TEXT("Profiles")) ||
                    PropertyName == FName(TEXT("PrecomputedSimulationData")) ||
                    PropertyName == FName(TEXT("Triangles")) ||
                    PropertyName == FName(TEXT("VertexIncidentTriangles")) ||
@@ -1497,14 +1503,8 @@ void FWCAEditor::Initialize(const EToolkitMode::Type Mode, const TSharedPtr<IToo
     DetailsViewArgs.bAllowSearch = false;
     DetailsView = PropertyEditorModule.CreateDetailView(DetailsViewArgs);
     DetailsView->SetIsPropertyVisibleDelegate(FIsPropertyVisible::CreateStatic(&ShouldShowWetClothingAssetDetailProperty));
-    const double DetailsSetObjectStartTime = FPlatformTime::Seconds();
-    DetailsView->SetObject(InWetClothingAsset);
-    UE_LOG(
-        LogTemp,
-        Display,
-        TEXT("WCAEditor Details SetObject: '%s' completed in %.2f ms."),
-        *GetNameSafe(InWetClothingAsset),
-        (FPlatformTime::Seconds() - DetailsSetObjectStartTime) * 1000.0);
+    // The WCA panels own their editing UI. Binding the full asset to an unused DetailsView
+    // makes Slate walk runtime/bulk-heavy property trees during simple asset browsing.
     ObjectPropertyChangedHandle = FCoreUObjectDelegates::OnObjectPropertyChanged.AddSP(this, &FWCAEditor::HandleObjectPropertyChanged);
     AssetSavedHandle = DWCEditorUtils::OnAssetSaveAttemptFinished().AddSP(
         this,
@@ -2138,7 +2138,7 @@ FReply FWCAEditor::HandleBakeAllMapsClicked()
         {
             Sections.Add(FString::Printf(
                 TEXT("GPU maps: %d material-slot map(s) at %d x %d."),
-                Asset->GetGPUWetMapRuntimeData(Asset->GetSimulationLODIndex()).MaterialSlotMapCount,
+                Asset->GetGPUWetMapRuntimeDataMetadata(Asset->GetSimulationLODIndex()).MaterialSlotMapCount,
                 Setup.GetGPUSimulationMapResolution(),
                 Setup.GetGPUSimulationMapResolution()));
             bBakedAnyOutput = true;
@@ -2328,7 +2328,7 @@ FReply FWCAEditor::HandleBakeGPUWetnessMapDataClicked()
     }
     RefreshAssetStateAndEditor();
 
-    const FDWCGPULODBakeData& BakedGPUData = Asset->GetGPUWetMapRuntimeData(Asset->GetSimulationLODIndex());
+    const FDWCGPULODBakeData& BakedGPUData = Asset->GetGPUWetMapRuntimeDataMetadata(Asset->GetSimulationLODIndex());
     const int32 TriangleCount = BakedGPUData.TriangleCount;
     const int32 SlotCount = BakedGPUData.MaterialSlotMapCount;
     FMessageDialog::Open(

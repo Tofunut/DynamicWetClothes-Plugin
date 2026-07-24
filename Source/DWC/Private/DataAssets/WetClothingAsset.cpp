@@ -125,231 +125,6 @@ namespace
         return true;
     }
 
-    bool ResolveSavedDataUVLODRange(
-        const FDWCWetClothingAssetSetupSettings& Settings,
-        const TArray<FDWCDataUVLODMetadata>& DataUVMetadata,
-        int32& OutFirstLODIndex,
-        int32& OutLastLODIndex)
-    {
-        OutFirstLODIndex = FMath::Max(0, Settings.FirstGeneratedLODIndex);
-        OutLastLODIndex = Settings.LastGeneratedLODIndex;
-
-        int32 HighestSavedLODIndex = INDEX_NONE;
-        for (const FDWCDataUVLODMetadata& Metadata : DataUVMetadata)
-        {
-            HighestSavedLODIndex = FMath::Max(HighestSavedLODIndex, Metadata.LODIndex);
-        }
-
-        if (HighestSavedLODIndex == INDEX_NONE)
-        {
-            OutLastLODIndex = OutFirstLODIndex;
-            return false;
-        }
-        if (OutFirstLODIndex > HighestSavedLODIndex)
-        {
-            OutLastLODIndex = HighestSavedLODIndex;
-            return false;
-        }
-
-        if (OutLastLODIndex == MAX_int32)
-        {
-            OutLastLODIndex = HighestSavedLODIndex;
-        }
-        else if (OutLastLODIndex > HighestSavedLODIndex)
-        {
-            OutLastLODIndex = HighestSavedLODIndex;
-            return false;
-        }
-
-        OutLastLODIndex = FMath::Max(OutFirstLODIndex, OutLastLODIndex);
-        return true;
-    }
-
-    bool DoesSavedDataUVLODRangeHavePayload(
-        const FDWCWetClothingAssetSetupSettings& Settings,
-        const TArray<FDWCDataUVLODMetadata>& DataUVMetadata,
-        TFunctionRef<bool(int32)> Predicate)
-    {
-        int32 FirstLODIndex = 0;
-        int32 LastLODIndex = 0;
-        if (!ResolveSavedDataUVLODRange(Settings, DataUVMetadata, FirstLODIndex, LastLODIndex))
-        {
-            return false;
-        }
-
-        for (int32 LODIndex = FirstLODIndex; LODIndex <= LastLODIndex; ++LODIndex)
-        {
-            if (!Predicate(LODIndex))
-            {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    bool HasUsableBakedWrinkleMapForGroup(
-        const UWetClothingAsset& Asset,
-        const int32 MaterialSlotIndex,
-        const int32 UVChannelIndex,
-        const int32 LODIndex)
-    {
-        const FWetWrinkleBakedMapSet* BakedMap = Asset.Authored.WrinkleData.BakedWrinkleMaps.FindByPredicate(
-            [MaterialSlotIndex, UVChannelIndex, LODIndex](const FWetWrinkleBakedMapSet& Candidate)
-            {
-                return Candidate.MaterialSlotIndex == MaterialSlotIndex &&
-                       Candidate.UVChannelIndex == UVChannelIndex &&
-                       Candidate.LODIndex == LODIndex;
-            });
-
-        return BakedMap != nullptr &&
-               BakedMap->BakedWrinkleNormalMap != nullptr &&
-#if WITH_EDITORONLY_DATA
-               BakedMap->BakedWrinkleMask != nullptr &&
-#endif
-               BakedMap->BakeGuid.IsValid() &&
-               !BakedMap->BuildSignature.IsEmpty();
-    }
-
-    bool DoesWrinkleBakeGroupHaveContent(
-        const UWetClothingAsset& Asset,
-        const int32 MaterialSlotIndex,
-        const int32 UVChannelIndex,
-        const int32 LODIndex)
-    {
-        const FWetClothingWrinkleData& WrinkleData = Asset.Authored.WrinkleData;
-        const bool bIncludeDisabled = WrinkleData.BakeSettings.bIncludeDisabledPatches;
-
-        for (const FWetWrinklePatchPlacement& Patch : WrinkleData.EditablePatches)
-        {
-            if ((!Patch.bEnabled && !bIncludeDisabled) ||
-                Patch.MaterialSlotIndex != MaterialSlotIndex ||
-                Patch.UVChannelIndex != UVChannelIndex ||
-                Patch.WrinkleNormalTexture == nullptr)
-            {
-                continue;
-            }
-            return true;
-        }
-
-        for (const FWetProceduralRidgeStroke& Stroke : WrinkleData.EditableProceduralRidgeStrokes)
-        {
-            if ((!Stroke.bEnabled && !bIncludeDisabled) ||
-                Stroke.MaterialSlotIndex != MaterialSlotIndex ||
-                Stroke.UVChannelIndex != UVChannelIndex ||
-                Stroke.LODIndex != LODIndex ||
-                Stroke.Points.Num() < 2 ||
-                Stroke.WidthUV <= 0.0f ||
-                Stroke.Strength <= 0.0f)
-            {
-                continue;
-            }
-            return true;
-        }
-
-        return false;
-    }
-
-    bool AreRequiredWrinkleBakeAssetReferencesValid(const UWetClothingAsset& Asset)
-    {
-        const FWetClothingWrinkleData& WrinkleData = Asset.Authored.WrinkleData;
-        const int32 UVChannelIndex = Asset.GetDWCDataUVChannelIndex();
-        TArray<int32> LODIndices = WrinkleData.BakeSettings.TargetLODIndices;
-        if (LODIndices.IsEmpty())
-        {
-            LODIndices.Add(UWetClothingAsset::RuntimeSimulationLODIndex);
-        }
-
-        TSet<int32> MaterialSlotIndices;
-        for (const FWetWrinklePatchPlacement& Patch : WrinkleData.EditablePatches)
-        {
-            if ((!Patch.bEnabled && !WrinkleData.BakeSettings.bIncludeDisabledPatches) ||
-                Patch.MaterialSlotIndex == INDEX_NONE ||
-                Patch.UVChannelIndex != UVChannelIndex ||
-                Patch.WrinkleNormalTexture == nullptr ||
-                !Asset.IsMaterialSlotWettable(Patch.MaterialSlotIndex) ||
-                WrinkleData.IsUsingCustomWrinkleNormalMap(
-                    Patch.MaterialSlotIndex,
-                    UVChannelIndex,
-                    UWetClothingAsset::RuntimeSimulationLODIndex))
-            {
-                continue;
-            }
-            MaterialSlotIndices.Add(Patch.MaterialSlotIndex);
-        }
-
-        for (const FWetProceduralRidgeStroke& Stroke : WrinkleData.EditableProceduralRidgeStrokes)
-        {
-            if ((!Stroke.bEnabled && !WrinkleData.BakeSettings.bIncludeDisabledPatches) ||
-                Stroke.MaterialSlotIndex == INDEX_NONE ||
-                Stroke.UVChannelIndex != UVChannelIndex ||
-                Stroke.Points.Num() < 2 ||
-                Stroke.WidthUV <= 0.0f ||
-                Stroke.Strength <= 0.0f ||
-                !Asset.IsMaterialSlotWettable(Stroke.MaterialSlotIndex) ||
-                WrinkleData.IsUsingCustomWrinkleNormalMap(
-                    Stroke.MaterialSlotIndex,
-                    UVChannelIndex,
-                    UWetClothingAsset::RuntimeSimulationLODIndex))
-            {
-                continue;
-            }
-            MaterialSlotIndices.Add(Stroke.MaterialSlotIndex);
-        }
-
-        bool bFoundRequiredBake = false;
-        for (const int32 MaterialSlotIndex : MaterialSlotIndices)
-        {
-            for (const int32 RequestedLODIndex : LODIndices)
-            {
-                const int32 LODIndex = FMath::Max(0, RequestedLODIndex);
-                if (!DoesWrinkleBakeGroupHaveContent(Asset, MaterialSlotIndex, UVChannelIndex, LODIndex))
-                {
-                    continue;
-                }
-
-                bFoundRequiredBake = true;
-                if (!HasUsableBakedWrinkleMapForGroup(Asset, MaterialSlotIndex, UVChannelIndex, LODIndex))
-                {
-                    return false;
-                }
-            }
-        }
-
-        return bFoundRequiredBake;
-    }
-
-    bool AreRequiredTransparencyBakeAssetReferencesValid(const UWetClothingAsset& Asset)
-    {
-        bool bFoundRequiredLayer = false;
-        const int32 LODIndex = UWetClothingAsset::RuntimeSimulationLODIndex;
-
-        for (const FWetClothingTransparencyLayerData& Layer : Asset.Authored.TransparencyData.TransparencyLayers)
-        {
-            const int32 MaterialSlotIndex = Layer.TargetSurface.OuterMaterialSlotIndex;
-            if (Layer.SourceType != EDWCTransparencySourceType::SameMeshMaterialSlots ||
-                MaterialSlotIndex == INDEX_NONE ||
-                !Asset.IsMaterialSlotWettable(MaterialSlotIndex))
-            {
-                continue;
-            }
-
-            bFoundRequiredLayer = true;
-            const FWetClothingBakedTransparencyMap* BakedMap = Layer.BakedMaps.FindByPredicate(
-                [MaterialSlotIndex, &Layer, LODIndex](const FWetClothingBakedTransparencyMap& Candidate)
-                {
-                    return Candidate.MaterialSlotIndex == MaterialSlotIndex &&
-                           Candidate.UVChannelIndex == Layer.TargetSurface.OuterUVChannel &&
-                           Candidate.LODIndex == LODIndex;
-                });
-            if (BakedMap == nullptr || !BakedMap->IsRuntimeUsable())
-            {
-                return false;
-            }
-        }
-
-        return bFoundRequiredLayer;
-    }
-
     bool IsWettableMaterialSlot(
         const FWetClothingEditableWetPartData& WetPartData,
         const int32 MaterialSlotIndex)
@@ -365,24 +140,16 @@ namespace
 
     FString MakeSourceDataSignature(
         const FWetClothingEditableWetPartData& WetPartData,
-        const FSurfaceWaterSimulationSettings& SurfaceWaterSettings,
-        const bool bIncludeEditorDisplayFields)
+        const FSurfaceWaterSimulationSettings& SurfaceWaterSettings)
     {
-        FString Signature = FString::Printf(
-            TEXT("DWC_SourceData_v1|SurfaceWater=%d|RT=%d"),
-            SurfaceWaterSettings.bEnabled ? 1 : 0,
-            (bIncludeEditorDisplayFields || SurfaceWaterSettings.bEnabled)
-                ? SurfaceWaterSettings.RenderTargetResolution
-                : 0);
+    FString Signature = FString::Printf(
+        TEXT("DWC_SourceData_v1|SurfaceWater=%d|RT=%d"),
+        SurfaceWaterSettings.bEnabled ? 1 : 0,
+        SurfaceWaterSettings.RenderTargetResolution);
 
         TArray<int32> SlotIndices;
         for (int32 SlotIndex = 0; SlotIndex < WetPartData.WettableMaterialSlots.Num(); ++SlotIndex)
         {
-            if (!bIncludeEditorDisplayFields &&
-                !WetPartData.WettableMaterialSlots[SlotIndex].bIsWettableSlot)
-            {
-                continue;
-            }
             SlotIndices.Add(SlotIndex);
         }
         SlotIndices.Sort(
@@ -410,11 +177,6 @@ namespace
         TArray<int32> EntryIndices;
         for (int32 EntryIndex = 0; EntryIndex < WetPartData.WetPartEntries.Num(); ++EntryIndex)
         {
-            if (!bIncludeEditorDisplayFields &&
-                !IsWettableMaterialSlot(WetPartData, WetPartData.WetPartEntries[EntryIndex].MaterialSlotIndex))
-            {
-                continue;
-            }
             EntryIndices.Add(EntryIndex);
         }
         EntryIndices.Sort(
@@ -444,19 +206,14 @@ namespace
             AssignedIslandIDs.Sort();
 
             Signature += FString::Printf(
-                TEXT("|Entry{%s,%d,%d,%d"),
+                TEXT("|Entry{%s,%d,%d,%d,%s,%d,%s"),
                 *Entry.ComponentPath,
                 Entry.MaterialSlotIndex,
                 Entry.UVChannelIndex,
-                Entry.WetPartID);
-            if (bIncludeEditorDisplayFields)
-            {
-                Signature += FString::Printf(
-                    TEXT(",%s,%d,%s"),
-                    *Entry.DisplayName,
-                    Entry.bViewEnabled ? 1 : 0,
-                    *Entry.ProfileAssignment.SourceProfileName);
-            }
+                Entry.WetPartID,
+                *Entry.DisplayName,
+                Entry.bViewEnabled ? 1 : 0,
+                *Entry.ProfileAssignment.SourceProfileName);
             Signature += FString::Printf(TEXT(",Profile=%s"), *Entry.ProfileAssignment.SourceProfile.ToString());
             Signature += FString::Printf(TEXT(",Blend=%d"), static_cast<int32>(Entry.ProfileAssignment.BlendMode));
             Signature += FString::Printf(TEXT(",Islands=%d"), AssignedIslandIDs.Num());
@@ -468,12 +225,9 @@ namespace
         }
 
         TArray<int32> SurfaceSlotIndices;
-        if (bIncludeEditorDisplayFields || SurfaceWaterSettings.bEnabled)
+        for (int32 SurfaceSlotIndex = 0; SurfaceSlotIndex < SurfaceWaterSettings.SurfaceWaterMaterialSlots.Num(); ++SurfaceSlotIndex)
         {
-            for (int32 SurfaceSlotIndex = 0; SurfaceSlotIndex < SurfaceWaterSettings.SurfaceWaterMaterialSlots.Num(); ++SurfaceSlotIndex)
-            {
-                SurfaceSlotIndices.Add(SurfaceSlotIndex);
-            }
+            SurfaceSlotIndices.Add(SurfaceSlotIndex);
         }
         SurfaceSlotIndices.Sort(
             [&SurfaceWaterSettings](const int32 A, const int32 B)
@@ -486,26 +240,16 @@ namespace
         {
             const FSurfaceWaterMaterialSlotData& Slot = SurfaceWaterSettings.SurfaceWaterMaterialSlots[SurfaceSlotIndex];
             Signature += FString::Printf(
-                TEXT("|SurfaceSlot{%d,%d}"),
+                TEXT("|SurfaceSlot{%d,%d,%d,%d,%d,%s}"),
                 Slot.MaterialSlotIndex,
-                Slot.bEnabled ? 1 : 0);
+                Slot.bEnabled ? 1 : 0,
+                Slot.BakedFlowMap.bEnabled ? 1 : 0,
+                Slot.BakedFlowMap.bIsValid ? 1 : 0,
+                Slot.BakedFlowMap.Resolution,
+                *Slot.BakedFlowMap.BuildSignature);
         }
 
         return Signature;
-    }
-
-    FString MakeSourceDataSignature(
-        const FWetClothingEditableWetPartData& WetPartData,
-        const FSurfaceWaterSimulationSettings& SurfaceWaterSettings)
-    {
-        return MakeSourceDataSignature(WetPartData, SurfaceWaterSettings, false);
-    }
-
-    FString MakeLegacySourceDataSignature(
-        const FWetClothingEditableWetPartData& WetPartData,
-        const FSurfaceWaterSimulationSettings& SurfaceWaterSettings)
-    {
-        return MakeSourceDataSignature(WetPartData, SurfaceWaterSettings, true);
     }
 
     void ResolveWetnessProfilesForDerivedInline(
@@ -653,63 +397,6 @@ namespace
                 Ar.IsLoading() ? LoadingLabel : SavingLabel)));
     }
 
-    void SkipRuntimeBulkBytes(FArchive& Ar, const int64 ByteCount)
-    {
-        if (ByteCount > 0)
-        {
-            Ar.Seek(Ar.Tell() + ByteCount);
-        }
-    }
-
-    template <typename ElementType>
-    void SkipPODArray(FArchive& Ar)
-    {
-        int32 Num = 0;
-        Ar << Num;
-        if (Ar.IsLoading() && Num > 0)
-        {
-            SkipRuntimeBulkBytes(Ar, static_cast<int64>(Num) * sizeof(ElementType));
-        }
-    }
-
-    template <typename ElementType>
-    void SerializeOrSkipArrayWithProgress(
-        FArchive& Ar,
-        TArray<ElementType>& Array,
-        TFunctionRef<void(FArchive&, ElementType&)> SerializeElement,
-        TFunctionRef<void(FArchive&)> SkipElement,
-        const bool bLoadPayload,
-        FScopedSlowTask* SlowTask,
-        const float Work,
-        const TCHAR* LoadingLabel,
-        const TCHAR* SavingLabel)
-    {
-        if (!Ar.IsLoading() || bLoadPayload)
-        {
-            SerializeArrayWithProgress<ElementType>(
-                Ar,
-                Array,
-                SerializeElement,
-                SlowTask,
-                Work,
-                LoadingLabel,
-                SavingLabel);
-            return;
-        }
-
-        int32 Num = 0;
-        Ar << Num;
-        for (int32 ElementIndex = 0; ElementIndex < Num; ++ElementIndex)
-        {
-            SkipElement(Ar);
-        }
-
-        EnterRuntimeBulkProgressFrame(
-            SlowTask,
-            Work,
-            FText::FromString(FString::Printf(TEXT("Skipped %s %d record(s)."), LoadingLabel, Num)));
-    }
-
     void SerializeResolvedBoneRule(FArchive& Ar, FWetClothingPrecomputedResolvedBoneIncludeRule& Rule)
     {
         Ar << Rule.TargetBoneIndex;
@@ -801,15 +488,6 @@ namespace
         Ar << Profile.GravityFlowStrength;
     }
 
-    void SkipGPUProfile(FArchive& Ar)
-    {
-        float Value = 0.0f;
-        Ar << Value;
-        Ar << Value;
-        Ar << Value;
-        Ar << Value;
-    }
-
     void SerializeGPUTriangle(FArchive& Ar, FDWCGPUBakedTriangle& Triangle)
     {
         Ar << Triangle.TriangleID;
@@ -828,39 +506,10 @@ namespace
         Ar << Triangle.ProfileIndex;
     }
 
-    void SkipGPUTriangle(FArchive& Ar)
-    {
-        int32 IntValue = 0;
-        FVector2D UV = FVector2D::ZeroVector;
-        float FloatValue = 0.0f;
-
-        Ar << IntValue; // TriangleID
-        Ar << IntValue; // RenderTriangleID
-        Ar << IntValue; // MaterialSlotIndex
-        Ar << IntValue; // RenderSectionIndex
-        Ar << IntValue; // UVChannelIndex
-        Ar << IntValue; // UVIslandID
-        Ar << IntValue; // VertexIndices.X
-        Ar << IntValue; // VertexIndices.Y
-        Ar << IntValue; // VertexIndices.Z
-        Ar << UV;
-        Ar << UV;
-        Ar << UV;
-        Ar << FloatValue;
-        Ar << IntValue; // ProfileIndex
-    }
-
     void SerializeGPUIncident(FArchive& Ar, FDWCGPUVertexIncidentTriangles& Incident)
     {
         Ar << Incident.SourceVertexIndex;
         Ar << Incident.TriangleIDs;
-    }
-
-    void SkipGPUIncident(FArchive& Ar)
-    {
-        int32 SourceVertexIndex = INDEX_NONE;
-        Ar << SourceVertexIndex;
-        SkipPODArray<int32>(Ar);
     }
 
     void SerializeGPUSeamDestination(FArchive& Ar, FDWCGPUSeamDestination& Destination)
@@ -874,26 +523,6 @@ namespace
     {
         Ar << Incoming.SourceTexelIndex;
         Ar << Incoming.Weight;
-    }
-
-    void SkipGPUSeamDestinations(FArchive& Ar)
-    {
-        int32 Num = 0;
-        Ar << Num;
-        if (Ar.IsLoading() && Num > 0)
-        {
-            SkipRuntimeBulkBytes(Ar, static_cast<int64>(Num) * sizeof(int32) * 3);
-        }
-    }
-
-    void SkipGPUSeamIncoming(FArchive& Ar)
-    {
-        int32 Num = 0;
-        Ar << Num;
-        if (Ar.IsLoading() && Num > 0)
-        {
-            SkipRuntimeBulkBytes(Ar, static_cast<int64>(Num) * (sizeof(int32) + sizeof(float)));
-        }
     }
 
     void SerializeGPUMaterialSlot(FArchive& Ar, FDWCGPUMaterialSlotBakeData& Slot)
@@ -921,20 +550,6 @@ namespace
             });
     }
 
-    void SkipGPUMaterialSlot(FArchive& Ar)
-    {
-        int32 IntValue = 0;
-        Ar << IntValue; // MaterialSlotIndex
-        Ar << IntValue; // UVChannelIndex
-        Ar << IntValue; // Resolution
-        SkipPODArray<int32>(Ar);
-        SkipPODArray<uint32>(Ar);
-        SkipPODArray<float>(Ar);
-        SkipPODArray<uint8>(Ar);
-        SkipGPUSeamDestinations(Ar);
-        SkipGPUSeamIncoming(Ar);
-    }
-
     void SerializeGPULODMetadata(FArchive& Ar, FDWCGPULODBakeData& Data)
     {
         Ar << Data.RuntimeDataVersion;
@@ -959,7 +574,6 @@ namespace
         FArchive& Ar,
         FDWCGPULODBakeData& Data,
         const int32 PayloadVersion,
-        const int32 GPUOnlyLoadedLODIndex,
         FScopedSlowTask* SlowTask = nullptr,
         const float Work = 0.0f,
         const int32 GPUIndex = 0,
@@ -984,82 +598,46 @@ namespace
             SerializeGPULODMetadata(Ar, Data);
         }
 
-        const bool bLoadPayload =
-            !Ar.IsLoading() ||
-            GPUOnlyLoadedLODIndex == INDEX_NONE ||
-            (PayloadVersion >= 2 && Data.LODIndex == GPUOnlyLoadedLODIndex) ||
-            (PayloadVersion < 2 &&
-             GPUOnlyLoadedLODIndex == UWetClothingAsset::RuntimeSimulationLODIndex &&
-             GPUIndex == 0);
-
-        if (Ar.IsLoading() && !bLoadPayload)
-        {
-            Data.Profiles.Reset();
-            Data.Triangles.Reset();
-            Data.VertexIncidentTriangles.Reset();
-            Data.MaterialSlots.Reset();
-        }
-
-        SerializeOrSkipArrayWithProgress<FDWCGPUProfileParameters>(
+        SerializeArrayWithProgress<FDWCGPUProfileParameters>(
             Ar,
             Data.Profiles,
             [](FArchive& InnerAr, FDWCGPUProfileParameters& Profile)
             {
                 SerializeGPUProfile(InnerAr, Profile);
             },
-            [](FArchive& InnerAr)
-            {
-                SkipGPUProfile(InnerAr);
-            },
-            bLoadPayload,
             SlowTask,
             Work * ProfileRatio,
             TEXT("Loading GPU wetness profiles"),
             TEXT("Serializing GPU wetness profiles"));
-        SerializeOrSkipArrayWithProgress<FDWCGPUBakedTriangle>(
+        SerializeArrayWithProgress<FDWCGPUBakedTriangle>(
             Ar,
             Data.Triangles,
             [](FArchive& InnerAr, FDWCGPUBakedTriangle& Triangle)
             {
                 SerializeGPUTriangle(InnerAr, Triangle);
             },
-            [](FArchive& InnerAr)
-            {
-                SkipGPUTriangle(InnerAr);
-            },
-            bLoadPayload,
             SlowTask,
             Work * TriangleRatio,
             TEXT("Loading GPU runtime triangles"),
             TEXT("Serializing GPU runtime triangles"));
-        SerializeOrSkipArrayWithProgress<FDWCGPUVertexIncidentTriangles>(
+        SerializeArrayWithProgress<FDWCGPUVertexIncidentTriangles>(
             Ar,
             Data.VertexIncidentTriangles,
             [](FArchive& InnerAr, FDWCGPUVertexIncidentTriangles& Incident)
             {
                 SerializeGPUIncident(InnerAr, Incident);
             },
-            [](FArchive& InnerAr)
-            {
-                SkipGPUIncident(InnerAr);
-            },
-            bLoadPayload,
             SlowTask,
             Work * IncidentRatio,
             TEXT("Loading GPU vertex incident records"),
             TEXT("Serializing GPU vertex incident records"));
-        SerializeOrSkipArrayWithProgress<FDWCGPUMaterialSlotBakeData>(
+        SerializeArrayWithProgress<FDWCGPUMaterialSlotBakeData>(
             Ar,
             Data.MaterialSlots,
             [](FArchive& InnerAr, FDWCGPUMaterialSlotBakeData& Slot)
             {
                 SerializeGPUMaterialSlot(InnerAr, Slot);
             },
-            [](FArchive& InnerAr)
-            {
-                SkipGPUMaterialSlot(InnerAr);
-            },
-            bLoadPayload,
             SlowTask,
             Work * MaterialSlotRatio,
             TEXT("Loading GPU material-slot map payloads"),
@@ -1070,7 +648,6 @@ namespace
         FArchive& Ar,
         FWetClothingPrecomputedSimulationData& CPUData,
         TArray<FDWCGPULODBakeData>& GPUData,
-        const int32 GPUOnlyLoadedLODIndex = INDEX_NONE,
         FScopedSlowTask* SlowTask = nullptr)
     {
         EnterRuntimeBulkProgressFrame(
@@ -1142,7 +719,6 @@ namespace
                 Ar,
                 Data,
                 Version,
-                GPUOnlyLoadedLODIndex,
                 SlowTask,
                 GPUProgressPerLOD * 0.95f,
                 GPUIndex,
@@ -1351,15 +927,6 @@ namespace
             });
     }
 
-    int32 RemoveNonSimulationGPULODData(TArray<FDWCGPULODBakeData>& Data)
-    {
-        return Data.RemoveAll(
-            [](const FDWCGPULODBakeData& Candidate)
-            {
-                return Candidate.LODIndex != UWetClothingAsset::RuntimeSimulationLODIndex;
-            });
-    }
-
 } // namespace
 
 void UWetClothingAsset::ClearPrecomputedSimulationData()
@@ -1407,17 +974,6 @@ const FWetClothingPrecomputedSimulationData& UWetClothingAsset::GetPrecomputedSi
 const FDWCGPULODBakeData& UWetClothingAsset::GetGPUWetMapRuntimeData(const int32 LODIndex) const
 {
     EnsureRuntimeBulkDataLoaded();
-    if (const FDWCGPULODBakeData* Data = FindGPULODData(Derived.Bulk.GPURuntimeData, LODIndex))
-    {
-        return *Data;
-    }
-
-    static const FDWCGPULODBakeData EmptyData;
-    return EmptyData;
-}
-
-const FDWCGPULODBakeData& UWetClothingAsset::GetGPUWetMapRuntimeDataMetadata(const int32 LODIndex) const
-{
     if (const FDWCGPULODBakeData* Data = FindGPULODData(Derived.Bulk.GPURuntimeData, LODIndex))
     {
         return *Data;
@@ -1480,6 +1036,13 @@ bool UWetClothingAsset::HasWrinkleBakeContent() const
         {
             continue;
         }
+        if (Authored.WrinkleData.IsUsingCustomWrinkleNormalMap(
+                Patch.MaterialSlotIndex,
+                Authored.WrinkleData.WrinkleUVChannelIndex,
+                RuntimeSimulationLODIndex))
+        {
+            continue;
+        }
         if (Patch.MaterialSlotIndex != INDEX_NONE && IsMaterialSlotWettable(Patch.MaterialSlotIndex))
         {
             return true;
@@ -1489,6 +1052,13 @@ bool UWetClothingAsset::HasWrinkleBakeContent() const
     for (const FWetProceduralRidgeStroke& Stroke : Authored.WrinkleData.EditableProceduralRidgeStrokes)
     {
         if (!Stroke.bEnabled && !Authored.WrinkleData.BakeSettings.bIncludeDisabledPatches)
+        {
+            continue;
+        }
+        if (Authored.WrinkleData.IsUsingCustomWrinkleNormalMap(
+                Stroke.MaterialSlotIndex,
+                Authored.WrinkleData.WrinkleUVChannelIndex,
+                RuntimeSimulationLODIndex))
         {
             continue;
         }
@@ -1512,8 +1082,7 @@ bool UWetClothingAsset::HasTransparencyBakeContent() const
     return Authored.TransparencyData.TransparencyLayers.ContainsByPredicate(
         [this](const FWetClothingTransparencyLayerData& Layer)
         {
-            return Layer.SourceType == EDWCTransparencySourceType::SameMeshMaterialSlots &&
-                   Layer.TargetSurface.OuterMaterialSlotIndex != INDEX_NONE &&
+            return Layer.TargetSurface.OuterMaterialSlotIndex != INDEX_NONE &&
                    IsMaterialSlotWettable(Layer.TargetSurface.OuterMaterialSlotIndex);
         });
 }
@@ -1585,6 +1154,9 @@ void UWetClothingAsset::PostLoad()
     const double PostLoadStartTime = FPlatformTime::Seconds();
     Super::PostLoad();
     Metadata.SetupSettings.NormalizeMapResolutions();
+    ClampSetupLODRangeToMesh(
+        Metadata.DWCSkeletalMesh != nullptr ? Metadata.DWCSkeletalMesh.Get() : Metadata.SourceSkeletalMesh.Get(),
+        Metadata.SetupSettings);
     // Surface Water RT resolution is mirrored into setup settings so the
     // consolidated Map Resolutions panel reflects the runtime value for old assets.
     Metadata.SetupSettings.SurfaceWaterRTResolution = DWCMapResolution::ToInt(
@@ -1633,9 +1205,9 @@ void UWetClothingAsset::PostLoad()
     }
     else
     {
-        const bool bMetadataMatchesReferences = DoesSavedDataUVLODRangeHavePayload(
+        const bool bMetadataMatchesReferences = DoesMappedLODRangeHavePayload(
+            Metadata.DWCSkeletalMesh.Get(),
             Metadata.SetupSettings,
-            Derived.Inline.DataUVMetadata,
             [this](const int32 LODIndex)
             {
                 const FDWCDataUVLODMetadata* DataUVMetadata = FindDataUVMetadataForLOD(LODIndex);
@@ -1821,7 +1393,6 @@ bool UWetClothingAsset::LoadRuntimeBulkData(const bool bForceProgressDialog) con
         Reader,
         MutableThis->Derived.Bulk.NeighborRuntimeData,
         MutableThis->Derived.Bulk.GPURuntimeData,
-        RuntimeSimulationLODIndex,
         SlowTask.Get());
     if (Reader.IsError())
     {
@@ -1853,38 +1424,12 @@ bool UWetClothingAsset::LoadRuntimeBulkData(const bool bForceProgressDialog) con
             NSLOCTEXT("WetClothingAsset", "FinalizeRuntimeBulkLoad", "Finalizing WCA runtime data load..."));
     }
 
-    if (RemoveNonSimulationGPULODData(MutableThis->Derived.Bulk.GPURuntimeData) > 0 && GIsEditor)
-    {
-        MutableThis->bRuntimeBulkDataDirty = true;
-    }
     bRuntimeBulkDataLoaded = true;
     bRuntimeBulkDataLoadFailed = false;
     return true;
 }
 
 #if WITH_EDITOR
-void UWetClothingAsset::ReleaseLoadedRuntimeBulkPayloadForEditor()
-{
-    if (bRuntimeBulkDataDirty || RuntimeBulkData.GetBulkDataSize() <= 0)
-    {
-        return;
-    }
-
-    Derived.Bulk.NeighborRuntimeData.Vertices.Empty();
-    Derived.Bulk.NeighborRuntimeData.NeighborGraph.Empty();
-    Derived.Bulk.NeighborRuntimeData.BoneOptimizationCache.Reset();
-
-    for (FDWCGPULODBakeData& Data : Derived.Bulk.GPURuntimeData)
-    {
-        Data.Profiles.Empty();
-        Data.Triangles.Empty();
-        Data.VertexIncidentTriangles.Empty();
-        Data.MaterialSlots.Empty();
-    }
-
-    bRuntimeBulkDataLoaded = false;
-    bRuntimeBulkDataLoadFailed = false;
-}
 #endif
 
 void UWetClothingAsset::StoreRuntimeDataToBulkData()
@@ -1937,8 +1482,6 @@ void UWetClothingAsset::StoreRuntimeDataToBulkData()
         return;
     }
 
-    RemoveNonSimulationGPULODData(Derived.Bulk.GPURuntimeData);
-
     const bool bHasCPUData = Derived.Bulk.NeighborRuntimeData.bIsValid &&
                              (Derived.Bulk.NeighborRuntimeData.Vertices.Num() > 0 ||
                               Derived.Bulk.NeighborRuntimeData.NeighborGraph.Num() > 0 ||
@@ -1981,12 +1524,7 @@ void UWetClothingAsset::StoreRuntimeDataToBulkData()
 
     TArray<uint8> Bytes;
     FMemoryWriter Writer(Bytes, true);
-    SerializeRuntimeBulkPayload(
-        Writer,
-        Derived.Bulk.NeighborRuntimeData,
-        Derived.Bulk.GPURuntimeData,
-        INDEX_NONE,
-        SlowTask.Get());
+    SerializeRuntimeBulkPayload(Writer, Derived.Bulk.NeighborRuntimeData, Derived.Bulk.GPURuntimeData, SlowTask.Get());
     if (Writer.IsError() || Bytes.IsEmpty())
     {
         return;
@@ -2484,8 +2022,6 @@ void UWetClothingAsset::RefreshBakeStateInternal(const bool bRunDeepValidation)
     const EDWCBakeStatus PreviousCPUStatus = Derived.Inline.BakeState.CPURuntimeData;
     const EDWCBakeStatus PreviousGPUStatus = Derived.Inline.BakeState.GPURuntimeData;
     const EDWCBakeStatus PreviousGPUMapStatus = Derived.Inline.BakeState.GPUMaps;
-    const EDWCBakeStatus PreviousWrinkleMapStatus = Derived.Inline.BakeState.WrinkleMaps;
-    const EDWCBakeStatus PreviousTransparencyMapStatus = Derived.Inline.BakeState.TransparencyMaps;
     auto PreserveFailureStatus = [this](const EDWCBakeStatus PreviousStatus, const EDWCBakeStatus NewStatus)
     {
         return PreviousStatus == EDWCBakeStatus::Failed &&
@@ -2510,37 +2046,37 @@ void UWetClothingAsset::RefreshBakeStateInternal(const bool bRunDeepValidation)
     }
 
     USkeletalMesh* RuntimeMesh = GetRuntimeSkeletalMesh();
-    auto IsDataUVMetadataCurrent = [this, RuntimeMesh, bRunDeepValidation](const int32 LODIndex)
-    {
-        const FDWCDataUVLODMetadata* DataUVMetadata = FindDataUVMetadataForLOD(LODIndex);
-        bool bCurrent =
-            DataUVMetadata != nullptr && DataUVMetadata->bIsValid &&
-            DataUVMetadata->UVChannelIndex == Metadata.DWCDataUVChannelIndex &&
-            DataUVMetadata->GeneratorVersion == DWCGeneratedDataVersion::DataUV;
-        if (bCurrent && bRunDeepValidation)
+    const bool bDataUVMetadataValid = DoesMappedLODRangeHavePayload(
+        RuntimeMesh,
+        Metadata.SetupSettings,
+        [this, RuntimeMesh, bRunDeepValidation](const int32 LODIndex)
         {
-            const FString CurrentOriginalUVSignature = BuildMeshContentSignature(
-                RuntimeMesh, LODIndex, Metadata.OriginalUVChannelIndex);
-            const FString CurrentDataUVSignature = BuildMeshContentSignature(
-                RuntimeMesh, LODIndex, Metadata.DWCDataUVChannelIndex);
-            bCurrent =
-                !CurrentOriginalUVSignature.IsEmpty() &&
-                !CurrentDataUVSignature.IsEmpty() &&
-                DataUVMetadata->MeshInputSignature == CurrentOriginalUVSignature &&
-                DataUVMetadata->DataUVOutputSignature == CurrentDataUVSignature;
-        }
-        return bCurrent;
-    };
-    const bool bDataUVMetadataValid = bRunDeepValidation
-        ? DoesMappedLODRangeHavePayload(RuntimeMesh, Metadata.SetupSettings, IsDataUVMetadataCurrent)
-        : DoesSavedDataUVLODRangeHavePayload(Metadata.SetupSettings, Derived.Inline.DataUVMetadata, IsDataUVMetadataCurrent);
+            const FDWCDataUVLODMetadata* DataUVMetadata = FindDataUVMetadataForLOD(LODIndex);
+            bool bCurrent =
+                DataUVMetadata != nullptr && DataUVMetadata->bIsValid &&
+                DataUVMetadata->UVChannelIndex == Metadata.DWCDataUVChannelIndex &&
+                DataUVMetadata->GeneratorVersion == DWCGeneratedDataVersion::DataUV;
+            if (bCurrent && bRunDeepValidation)
+            {
+                const FString CurrentOriginalUVSignature = BuildMeshContentSignature(
+                    RuntimeMesh, LODIndex, Metadata.OriginalUVChannelIndex);
+                const FString CurrentDataUVSignature = BuildMeshContentSignature(
+                    RuntimeMesh, LODIndex, Metadata.DWCDataUVChannelIndex);
+                bCurrent =
+                    !CurrentOriginalUVSignature.IsEmpty() &&
+                    !CurrentDataUVSignature.IsEmpty() &&
+                    DataUVMetadata->MeshInputSignature == CurrentOriginalUVSignature &&
+                    DataUVMetadata->DataUVOutputSignature == CurrentDataUVSignature;
+            }
+            return bCurrent;
+        });
     Derived.Inline.BakeState.GeneratedDataUV = bDataUVMetadataValid
                                      ? EDWCBakeStatus::Valid
                                      : (!Derived.Inline.DataUVMetadata.IsEmpty() ? EDWCBakeStatus::OutOfDate : EDWCBakeStatus::Required);
 
     const int32 CanonicalTopologyLODIndex = RuntimeSimulationLODIndex;
     bool bTopologyValid = false;
-    if (RuntimeMesh != nullptr && (!bRunDeepValidation || GetLODCount(RuntimeMesh) > CanonicalTopologyLODIndex))
+    if (RuntimeMesh != nullptr && GetLODCount(RuntimeMesh) > CanonicalTopologyLODIndex)
     {
         const FDWCEditorUVTopologyData* Topology = FindOriginalUVTopologyForLOD(CanonicalTopologyLODIndex);
         bTopologyValid =
@@ -2562,10 +2098,15 @@ void UWetClothingAsset::RefreshBakeStateInternal(const bool bRunDeepValidation)
     const bool bCPUDataValid = bRunDeepValidation
                                    ? IsPrecomputedSimulationDataValidForMesh(RuntimeMesh)
                                    : IsPrecomputedSimulationDataMetadataValidForMesh(RuntimeMesh);
-    const int32 RuntimeLODIndex = RuntimeSimulationLODIndex;
-    const bool bGPUDataValid = bRunDeepValidation
-        ? IsGPURuntimeDataValidForMesh(RuntimeMesh, RuntimeLODIndex)
-        : IsGPURuntimeDataMetadataValidForMesh(RuntimeMesh, RuntimeLODIndex);
+    const bool bGPUDataValid = DoesMappedLODRangeHavePayload(
+        RuntimeMesh,
+        Metadata.SetupSettings,
+        [this, RuntimeMesh, bRunDeepValidation](const int32 LODIndex)
+        {
+            return bRunDeepValidation
+                ? IsGPURuntimeDataValidForMesh(RuntimeMesh, LODIndex)
+                : IsGPURuntimeDataMetadataValidForMesh(RuntimeMesh, LODIndex);
+        });
     const EDWCBakeStatus NewCPUStatus = Metadata.SetupSettings.bBuildCPUVertexSimulationData
                                             ? (bCPUDataValid
                                                    ? EDWCBakeStatus::Valid
@@ -2582,9 +2123,15 @@ void UWetClothingAsset::RefreshBakeStateInternal(const bool bRunDeepValidation)
                                             : EDWCBakeStatus::Disabled;
     Derived.Inline.BakeState.CPURuntimeData = PreserveFailureStatus(PreviousCPUStatus, NewCPUStatus);
     Derived.Inline.BakeState.GPURuntimeData = PreserveFailureStatus(PreviousGPUStatus, NewGPUStatus);
-    const bool bGPUMapDataValid = bRunDeepValidation
-        ? IsGPUWetMapDataValidForMesh(RuntimeMesh, RuntimeLODIndex)
-        : IsGPUWetMapDataMetadataValidForMesh(RuntimeMesh, RuntimeLODIndex);
+    const bool bGPUMapDataValid = DoesMappedLODRangeHavePayload(
+        RuntimeMesh,
+        Metadata.SetupSettings,
+        [this, RuntimeMesh, bRunDeepValidation](const int32 LODIndex)
+        {
+            return bRunDeepValidation
+                ? IsGPUWetMapDataValidForMesh(RuntimeMesh, LODIndex)
+                : IsGPUWetMapDataMetadataValidForMesh(RuntimeMesh, LODIndex);
+        });
     const EDWCBakeStatus NewGPUMapStatus = Metadata.SetupSettings.bBuildGPUWetnessMapSimulationData
                                                ? (bGPUMapDataValid
                                                       ? EDWCBakeStatus::Valid
@@ -2598,17 +2145,6 @@ void UWetClothingAsset::RefreshBakeStateInternal(const bool bRunDeepValidation)
     {
         Derived.Inline.BakeState.WrinkleMaps = EDWCBakeStatus::Disabled;
     }
-    else if (!AreRequiredWrinkleBakeAssetReferencesValid(*this))
-    {
-        const EDWCBakeStatus NewWrinkleMapStatus =
-            HasGeneratedBakeOutput(DWCBakeOutput::WrinkleMaps) ||
-                    HasSavedBakeOutput(DWCBakeOutput::WrinkleMaps) ||
-                    !Authored.WrinkleData.BakedWrinkleMaps.IsEmpty()
-                ? EDWCBakeStatus::OutOfDate
-                : EDWCBakeStatus::Required;
-        Derived.Inline.BakeState.WrinkleMaps =
-            PreserveFailureStatus(PreviousWrinkleMapStatus, NewWrinkleMapStatus);
-    }
     else if (Derived.Inline.BakeState.WrinkleMaps == EDWCBakeStatus::Disabled)
     {
         Derived.Inline.BakeState.WrinkleMaps = HasSavedBakeOutput(DWCBakeOutput::WrinkleMaps)
@@ -2619,22 +2155,6 @@ void UWetClothingAsset::RefreshBakeStateInternal(const bool bRunDeepValidation)
     if (!HasTransparencyBakeContent())
     {
         Derived.Inline.BakeState.TransparencyMaps = EDWCBakeStatus::Disabled;
-    }
-    else if (!AreRequiredTransparencyBakeAssetReferencesValid(*this))
-    {
-        const bool bHasAnyBakedTransparencyMap = Authored.TransparencyData.TransparencyLayers.ContainsByPredicate(
-            [](const FWetClothingTransparencyLayerData& Layer)
-            {
-                return !Layer.BakedMaps.IsEmpty();
-            });
-        const EDWCBakeStatus NewTransparencyMapStatus =
-            HasGeneratedBakeOutput(DWCBakeOutput::TransparencyMaps) ||
-                    HasSavedBakeOutput(DWCBakeOutput::TransparencyMaps) ||
-                    bHasAnyBakedTransparencyMap
-                ? EDWCBakeStatus::OutOfDate
-                : EDWCBakeStatus::Required;
-        Derived.Inline.BakeState.TransparencyMaps =
-            PreserveFailureStatus(PreviousTransparencyMapStatus, NewTransparencyMapStatus);
     }
     else if (Derived.Inline.BakeState.TransparencyMaps == EDWCBakeStatus::Disabled)
     {
@@ -2660,38 +2180,39 @@ bool UWetClothingAsset::RebuildGPURuntimeData(FString* OutErrorMessage)
         Derived.Inline.ResolvedWetnessProfileParameters);
 
     USkeletalMesh* RuntimeMesh = GetRuntimeSkeletalMesh();
-    const int32 LODIndex = RuntimeSimulationLODIndex;
-    if (RuntimeMesh == nullptr)
+    int32 FirstLODIndex = 0;
+    int32 LastLODIndex = 0;
+    if (!ResolveSetupLODRangeForMesh(RuntimeMesh, Metadata.SetupSettings, FirstLODIndex, LastLODIndex, OutErrorMessage))
     {
-        DWC::Error::SetMessage(OutErrorMessage, TEXT("No DWC Skeletal Mesh is assigned."));
         return false;
     }
 
     FScopedSlowTask SlowTask(
-        6.0f,
-        FText::FromString(FString::Printf(TEXT("Rebuilding DWC GPU runtime data for LOD%d..."), LODIndex)));
+        6.0f * FMath::Max(1, LastLODIndex - FirstLODIndex + 1),
+        FText::FromString(FString::Printf(TEXT("Rebuilding DWC GPU runtime data for LOD%d-LOD%d..."), FirstLODIndex, LastLODIndex)));
     SlowTask.MakeDialog(false);
 
-    RemoveNonSimulationGPULODData(Derived.Bulk.GPURuntimeData);
-    SlowTask.EnterProgressFrame(
-        0.5f,
-        FText::FromString(FString::Printf(TEXT("Checking generated DWC Data UV for LOD%d before GPU runtime rebuild..."), LODIndex)));
-
-    if (!HasValidDataUVForLOD(LODIndex))
+    for (int32 LODIndex = FirstLODIndex; LODIndex <= LastLODIndex; ++LODIndex)
     {
-        DWC::Error::SetMessage(OutErrorMessage, FString::Printf(TEXT("Generate valid DWC Data UV payloads for LOD%d before rebuilding GPU runtime data."), LODIndex));
-        return false;
-    }
+        SlowTask.EnterProgressFrame(
+            0.5f,
+            FText::FromString(FString::Printf(TEXT("Checking generated DWC Data UV for LOD%d before GPU runtime rebuild..."), LODIndex)));
 
-    if (!FWetGPUMapBakeBuilder::BuildRuntimeLOD(*this, LODIndex, OutErrorMessage, &SlowTask))
-    {
-        return false;
-    }
-    RemoveNonSimulationGPULODData(Derived.Bulk.GPURuntimeData);
+        if (!HasValidDataUVForLOD(LODIndex))
+        {
+            DWC::Error::SetMessage(OutErrorMessage, FString::Printf(TEXT("Generate valid DWC Data UV payloads for LOD%d before rebuilding GPU runtime data."), LODIndex));
+            return false;
+        }
 
-    SlowTask.EnterProgressFrame(
-        0.5f,
-        FText::FromString(FString::Printf(TEXT("Finalizing LOD%d GPU runtime triangles and vertex incident tables..."), LODIndex)));
+        if (!FWetGPUMapBakeBuilder::BuildRuntimeLOD(*this, LODIndex, OutErrorMessage, &SlowTask))
+        {
+            return false;
+        }
+
+        SlowTask.EnterProgressFrame(
+            0.5f,
+            FText::FromString(FString::Printf(TEXT("Finalizing LOD%d GPU runtime triangles and vertex incident tables..."), LODIndex)));
+    }
 
     MarkBakeOutputGenerated(DWCBakeOutput::GPURuntimeData);
     MarkRuntimeBulkDataDirty(DWCBakeOutput::GPURuntimeData);
@@ -2710,34 +2231,35 @@ bool UWetClothingAsset::BakeGPUWetnessMaps(FString* OutErrorMessage)
     }
 
     USkeletalMesh* RuntimeMesh = GetRuntimeSkeletalMesh();
-    const int32 LODIndex = RuntimeSimulationLODIndex;
-    if (RuntimeMesh == nullptr)
+    int32 FirstLODIndex = 0;
+    int32 LastLODIndex = 0;
+    if (!ResolveSetupLODRangeForMesh(RuntimeMesh, Metadata.SetupSettings, FirstLODIndex, LastLODIndex, OutErrorMessage))
     {
-        DWC::Error::SetMessage(OutErrorMessage, TEXT("No DWC Skeletal Mesh is assigned."));
         return false;
     }
 
     FScopedSlowTask SlowTask(
-        7.25f,
-        FText::FromString(FString::Printf(TEXT("Baking DWC GPU simulation maps for LOD%d..."), LODIndex)));
+        7.25f * FMath::Max(1, LastLODIndex - FirstLODIndex + 1),
+        FText::FromString(FString::Printf(TEXT("Baking DWC GPU simulation maps for LOD%d-LOD%d..."), FirstLODIndex, LastLODIndex)));
     SlowTask.MakeDialog(false);
 
-    RemoveNonSimulationGPULODData(Derived.Bulk.GPURuntimeData);
-    SlowTask.EnterProgressFrame(
-        0.5f,
-        FText::FromString(FString::Printf(TEXT("Preparing LOD%d GPU simulation map bake inputs..."), LODIndex)));
-
-    if (!FWetGPUMapBakeBuilder::BuildLODMaps(*this, LODIndex, OutErrorMessage, &SlowTask))
+    for (int32 LODIndex = FirstLODIndex; LODIndex <= LastLODIndex; ++LODIndex)
     {
-        Derived.Inline.BakeState.GPUMaps = EDWCBakeStatus::Failed;
-        Derived.Inline.BakeState.LastFailure = OutErrorMessage != nullptr ? *OutErrorMessage : FString();
-        return false;
-    }
-    RemoveNonSimulationGPULODData(Derived.Bulk.GPURuntimeData);
+        SlowTask.EnterProgressFrame(
+            0.5f,
+            FText::FromString(FString::Printf(TEXT("Preparing LOD%d GPU simulation map bake inputs..."), LODIndex)));
 
-    SlowTask.EnterProgressFrame(
-        0.5f,
-        FText::FromString(FString::Printf(TEXT("Saving LOD%d GPU simulation map data into the WCA runtime payload..."), LODIndex)));
+        if (!FWetGPUMapBakeBuilder::BuildLODMaps(*this, LODIndex, OutErrorMessage, &SlowTask))
+        {
+            Derived.Inline.BakeState.GPUMaps = EDWCBakeStatus::Failed;
+            Derived.Inline.BakeState.LastFailure = OutErrorMessage != nullptr ? *OutErrorMessage : FString();
+            return false;
+        }
+
+        SlowTask.EnterProgressFrame(
+            0.5f,
+            FText::FromString(FString::Printf(TEXT("Saving LOD%d GPU simulation map data into the WCA runtime payload..."), LODIndex)));
+    }
 
     Derived.Inline.BakeState.GPUMaps = EDWCBakeStatus::Valid;
     Derived.Inline.BakeState.LastFailure.Reset();
@@ -2795,6 +2317,9 @@ bool UWetClothingAsset::RebuildRuntimeDataForSave(FString* OutErrorMessage)
     bool bCPUSucceeded = true;
     bool bGPUSucceeded = true;
     const int32 RuntimeLODIndex = GetSimulationLODIndex();
+    int32 FirstMappedLODIndex = RuntimeLODIndex;
+    int32 LastMappedLODIndex = RuntimeLODIndex;
+    ResolveSetupLODRangeForMesh(RuntimeMesh, Metadata.SetupSettings, FirstMappedLODIndex, LastMappedLODIndex);
 
     if (!HasAnyWettableMaterialSlot())
     {
@@ -2803,7 +2328,7 @@ bool UWetClothingAsset::RebuildRuntimeDataForSave(FString* OutErrorMessage)
         ClearGPUWetMapData();
         Derived.Inline.ResolvedWetnessProfileParameters.Reset();
         Derived.Inline.GeneratedWetMaterialOverrides.Reset();
-        Derived.Inline.BakedProfileIDData = FWetClothingBakedProfileIDData();
+        Derived.Inline.BakedWetnessProfileMaps.Reset();
         Authored.WrinkleData.BakedWrinkleMaps.Reset();
         for (FWetClothingTransparencyLayerData& Layer : Authored.TransparencyData.TransparencyLayers)
         {
@@ -2898,14 +2423,21 @@ bool UWetClothingAsset::RebuildRuntimeDataForSave(FString* OutErrorMessage)
 
     if (Metadata.SetupSettings.bBuildGPUWetnessMapSimulationData)
     {
-        const bool bRuntimeGPUDataValid = IsGPURuntimeDataValidForMesh(RuntimeMesh, RuntimeLODIndex);
-        if (bRuntimeGPUDataValid)
+        const bool bMappedGPUDataValid = DoesMappedLODRangeHavePayload(
+            RuntimeMesh,
+            Metadata.SetupSettings,
+            [this, RuntimeMesh](const int32 LODIndex)
+            {
+                return IsGPURuntimeDataValidForMesh(RuntimeMesh, LODIndex);
+            });
+        if (bMappedGPUDataValid)
         {
             SlowTask.EnterProgressFrame(
                 1.5f,
                 FText::FromString(FString::Printf(
-                    TEXT("GPU wetness-map runtime data for LOD%d is already current..."),
-                    RuntimeLODIndex)));
+                    TEXT("GPU wetness-map runtime data for LOD%d-LOD%d is already current..."),
+                    FirstMappedLODIndex,
+                    LastMappedLODIndex)));
             Derived.Inline.BakeState.GPURuntimeData = EDWCBakeStatus::Valid;
             MarkBakeOutputGenerated(DWCBakeOutput::GPURuntimeData);
         }
@@ -2918,8 +2450,9 @@ bool UWetClothingAsset::RebuildRuntimeDataForSave(FString* OutErrorMessage)
             SlowTask.EnterProgressFrame(
                 1.5f,
                 FText::FromString(FString::Printf(
-                    TEXT("Building GPU wetness-map runtime data for LOD%d..."),
-                    RuntimeLODIndex)));
+                    TEXT("Building GPU wetness-map runtime data for LOD%d-LOD%d..."),
+                    FirstMappedLODIndex,
+                    LastMappedLODIndex)));
             FString GPUError;
             bGPUSucceeded = RebuildGPURuntimeData(&GPUError);
             Derived.Inline.BakeState.GPURuntimeData = bGPUSucceeded ? EDWCBakeStatus::Valid : EDWCBakeStatus::Failed;
@@ -3176,19 +2709,12 @@ bool UWetClothingAsset::IsPrecomputedSimulationDataValidForMesh(const USkeletalM
         ? Data.Vertices.Num() == LODData.GetNumVertices() && Data.NeighborGraph.Num() == LODData.GetNumVertices()
         : HasRuntimeBulkPayload();
 
-    const FString ExpectedSourceSignature = MakeSourceDataSignature(
-        Authored.PartData.EditableWetPartData,
-        Authored.SurfaceWaterSettings);
-    const FString LegacySourceSignature = MakeLegacySourceDataSignature(
-        Authored.PartData.EditableWetPartData,
-        Authored.SurfaceWaterSettings);
     return Data.DataVersion == CurrentPrecomputedSimulationDataVersion &&
            Data.LODIndex == LODIndex &&
            Data.VertexCount == LODData.GetNumVertices() &&
            bPayloadAvailable &&
            Data.MeshSignature == FDWCMeshContentSignature::BuildStructure(SkeletalMesh, LODData, LODIndex) &&
-           (Data.SourceDataSignature == ExpectedSourceSignature ||
-            Data.SourceDataSignature == LegacySourceSignature);
+           Data.SourceDataSignature == MakeSourceDataSignature(Authored.PartData.EditableWetPartData, Authored.SurfaceWaterSettings);
 }
 
 FString UWetClothingAsset::GetPrecomputedSimulationDataValidationSummary(const USkeletalMesh* SkeletalMesh) const
@@ -3212,12 +2738,7 @@ FString UWetClothingAsset::GetPrecomputedSimulationDataValidationSummary(const U
     const bool bNeighborPayloadMatches = ExpectedVertexCount != INDEX_NONE && Data.NeighborGraph.Num() == ExpectedVertexCount;
     const bool bHasRuntimePayload = bVertexPayloadMatches && bNeighborPayloadMatches;
     const bool bMeshSignatureMatches = !ExpectedMeshSignature.IsEmpty() && Data.MeshSignature == ExpectedMeshSignature;
-    const FString LegacySourceSignature = MakeLegacySourceDataSignature(
-        Authored.PartData.EditableWetPartData,
-        Authored.SurfaceWaterSettings);
-    const bool bSourceSignatureMatches =
-        Data.SourceDataSignature == ExpectedSourceSignature ||
-        Data.SourceDataSignature == LegacySourceSignature;
+    const bool bSourceSignatureMatches = Data.SourceDataSignature == ExpectedSourceSignature;
 
     return FString::Printf(
         TEXT("CPUPrecomputed{validFlag=%s, hasMesh=%s, hasLOD=%s, dataVersion=%d/%d:%s, lod=%d/%d:%s, vertexCount=%d/%d:%s, vertices=%d:%s, neighborGraph=%d:%s, boneCache=%s, hasBulk=%s, bulkLoaded=%s, bulkLoadFailed=%s, hasPayload=%s, meshSignature=%s, sourceSignature=%s}"),
@@ -3283,7 +2804,7 @@ bool UWetClothingAsset::IsGPURuntimeDataValidForMesh(const USkeletalMesh* Skelet
         return false;
     }
 
-    const FString ExpectedDataUVMeshSignature = BuildMeshContentSignature(
+    const FString ExpectedDataUVMeshSignature = FDWCMeshContentSignature::BuildUVContent(
         SkeletalMesh,
         LODIndex,
         GetDWCDataUVChannelIndex());
@@ -3404,17 +2925,18 @@ bool UWetClothingAsset::RebuildPrecomputedSimulationData(FString* OutErrorMessag
                    !IsWettableMaterialSlot(Authored.PartData.EditableWetPartData, MaterialOverride.MaterialSlotIndex);
         });
 
-    Derived.Inline.BakedProfileIDData.SlotTextures.RemoveAll(
-        [this](const FWetClothingBakedProfileIDSlotTexture& SlotTexture)
+    Derived.Inline.BakedWetnessProfileMaps.RemoveAll(
+        [this](const FWetClothingBakedWetnessProfileMap& BakedMap)
         {
-            return !IsWettableMaterialSlot(
-                Authored.PartData.EditableWetPartData,
-                SlotTexture.MaterialSlotIndex);
+            for (const int32 MaterialSlotIndex : BakedMap.MaterialSlotIndices)
+            {
+                if (IsWettableMaterialSlot(Authored.PartData.EditableWetPartData, MaterialSlotIndex))
+                {
+                    return false;
+                }
+            }
+            return true;
         });
-    if (Derived.Inline.BakedProfileIDData.SlotTextures.IsEmpty())
-    {
-        Derived.Inline.BakedProfileIDData = FWetClothingBakedProfileIDData();
-    }
 
     Derived.Bulk.NeighborRuntimeData.bIsValid = true;
     Derived.Bulk.NeighborRuntimeData.LODIndex = LODIndex;

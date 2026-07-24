@@ -6,6 +6,14 @@
 
 class UTexture2D;
 
+UENUM(BlueprintType)
+enum class ESurfaceWaterDropletPlacementMode : uint8
+{
+    ContactCandidates UMETA(DisplayName = "Contact Candidates"),
+    RadiusAroundBest UMETA(DisplayName = "Within Radius Around Best"),
+    FullUVIslandRandom UMETA(DisplayName = "Random Within UV Island")
+};
+
 USTRUCT(BlueprintType)
 struct DWC_API FAbsorbedWetnessProfileParameters
 {
@@ -56,6 +64,12 @@ struct DWC_API FSurfaceWaterProfileParameters
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float DropletSpawnProbability = 0.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet")
+    ESurfaceWaterDropletPlacementMode DropletPlacementMode = ESurfaceWaterDropletPlacementMode::ContactCandidates;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet", meta = (ClampMin = "0.0", ClampMax = "4096.0", DisplayName = "Placement Radius (RT Pixels)"))
+    float DropletPlacementRadiusPixels = 32.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Flow", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float FlowSpawnProbability = 0.1f;

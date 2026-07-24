@@ -20,7 +20,9 @@
 #include "Runtime/Engine/Public/Rendering/SkinWeightVertexBuffer.h"
 #include "Utility/DWCLog.h"
 #include "Utility/DWCProfiling.h"
+#include "HAL/PlatformTime.h"
 #include "Misc/ScopeLock.h"
+#include "Profiling/DWCStats.h"
 
 namespace
 {
@@ -128,6 +130,7 @@ namespace
     {
         int32 VertexIndex = INDEX_NONE;
         int32 MaterialSlotIndex = INDEX_NONE;
+        int32 UVIslandID = INDEX_NONE;
         FVector2f SurfaceUV = FVector2f::ZeroVector;
         float Influence = 0.0f;
         const FWetnessProfileParameters* Profile = nullptr;
@@ -138,6 +141,8 @@ namespace
         float TotalSurfaceAmount = 0.0f;
         float BestInfluence = -1.0f;
         FVector2f BestUV = FVector2f::ZeroVector;
+        int32 BestUVIslandID = INDEX_NONE;
+        TMap<int32, TArray<FVector2f>> CandidateUVsByUVIsland;
         FSurfaceWaterProfileParameters Profile;
         bool bHasProfile = false;
     };
@@ -334,6 +339,10 @@ namespace
         {
             Receiver.RuntimeData->TryGetSurfaceWaterBinding(
                 VertexIndex, OutSample.MaterialSlotIndex, OutSample.SurfaceUV);
+            if (Receiver.RuntimeData->SurfaceWaterUVIslandIDs.IsValidIndex(VertexIndex))
+            {
+                OutSample.UVIslandID = Receiver.RuntimeData->SurfaceWaterUVIslandIDs[VertexIndex];
+            }
         }
     }
 
@@ -342,6 +351,7 @@ namespace
         const float InputAmount,
         const TArray<FWaterInputVertexSample>& Samples,
         const bool bNormalizePositiveInfluence,
+        const bool bRandomizeSurfaceStampPosition,
         bool& bDirty,
         bool& bQueuedWetness)
     {
@@ -409,10 +419,15 @@ namespace
             //TODO : Maybe this will be bad for concise expression
             FSurfaceWaterInputAccumulator& Accumulator = SurfaceAccumulators.FindOrAdd(Sample.MaterialSlotIndex);
             Accumulator.TotalSurfaceAmount += SurfaceAmount;
+            if (bRandomizeSurfaceStampPosition && Sample.UVIslandID != INDEX_NONE)
+            {
+                Accumulator.CandidateUVsByUVIsland.FindOrAdd(Sample.UVIslandID).Add(Sample.SurfaceUV);
+            }
             if (Sample.Influence > Accumulator.BestInfluence)
             {
                 Accumulator.BestInfluence = Sample.Influence;
                 Accumulator.BestUV = Sample.SurfaceUV;
+                Accumulator.BestUVIslandID = Sample.UVIslandID;
                 Accumulator.Profile = Surface;
                 Accumulator.bHasProfile = true;
             }
@@ -428,9 +443,9 @@ namespace
         FRandomStream& RandomStream = Receiver.SurfaceWaterRandomStream
             ? *Receiver.SurfaceWaterRandomStream
             : FallbackRandomStream;
-        // For each material slot, use the highest-influence sample's UV and profile
-        // as the representative stamp data, and use the accumulated surface amount
-        // to queue droplet and flow stamps.
+        // Use the highest-influence sample for the representative profile and amount
+        // context. Droplets select uniformly from the valid candidates on that
+        // sample's UV island, while flow stamps remain anchored to BestUV.
         for (const TPair<int32, FSurfaceWaterInputAccumulator>& Pair : SurfaceAccumulators)
         {
             const FSurfaceWaterInputAccumulator& Accumulator = Pair.Value;
@@ -443,8 +458,54 @@ namespace
             const FSurfaceWaterProfileParameters& Surface = Accumulator.Profile;
             if (RandomStream.FRand() < FMath::Clamp(Surface.DropletSpawnProbability, 0.0f, 1.0f))
             {
+                const double PlacementStartSeconds = FPlatformTime::Seconds();
+                FVector2f DropletUV = Accumulator.BestUV;
+                const TArray<FVector2f>* CandidateUVs =
+                    Accumulator.CandidateUVsByUVIsland.Find(Accumulator.BestUVIslandID);
+                TArray<FVector2f> RadiusCandidates;
+
+                if (Surface.DropletPlacementMode == ESurfaceWaterDropletPlacementMode::RadiusAroundBest)
+                {
+                    if (const TArray<FVector2f>* IslandUVs =
+                            Receiver.RuntimeData->SurfaceWaterUVsByUVIsland.Find(Accumulator.BestUVIslandID))
+                    {
+                        const int32 Resolution = Receiver.SurfaceWaterSettings
+                            ? FMath::Max(1, Receiver.SurfaceWaterSettings->RenderTargetResolution)
+                            : 1024;
+                        const float RadiusUV = FMath::Max(0.0f, Surface.DropletPlacementRadiusPixels) /
+                                               static_cast<float>(Resolution);
+                        const float RadiusUVSquared = RadiusUV * RadiusUV;
+                        for (const FVector2f& CandidateUV : *IslandUVs)
+                        {
+                            if ((CandidateUV - Accumulator.BestUV).SizeSquared() <= RadiusUVSquared)
+                            {
+                                RadiusCandidates.Add(CandidateUV);
+                            }
+                        }
+                    }
+                    if (!RadiusCandidates.IsEmpty())
+                    {
+                        CandidateUVs = &RadiusCandidates;
+                    }
+                }
+                else if (Surface.DropletPlacementMode == ESurfaceWaterDropletPlacementMode::FullUVIslandRandom)
+                {
+                    if (const TArray<FVector2f>* IslandUVs =
+                            Receiver.RuntimeData->SurfaceWaterUVsByUVIsland.Find(Accumulator.BestUVIslandID);
+                        IslandUVs != nullptr && !IslandUVs->IsEmpty())
+                    {
+                        CandidateUVs = IslandUVs;
+                    }
+                }
+
+                if (CandidateUVs != nullptr && !CandidateUVs->IsEmpty())
+                {
+                    DropletUV = (*CandidateUVs)[RandomStream.RandRange(0, CandidateUVs->Num() - 1)];
+                }
+                FDWCWorkloadStats::RecordSurfaceWaterPlacementTime(
+                    (FPlatformTime::Seconds() - PlacementStartSeconds) * 1000.0);
                 (*StatePtr)->QueueDropletStamp(
-                    Accumulator.BestUV,
+                    DropletUV,
                     Accumulator.TotalSurfaceAmount * FMath::Max(0.0f, Surface.DropletIntensityMultiplier),
                     Surface.DropletRadiusPixels,
                     Surface.DropletLifetimeSeconds);
@@ -548,7 +609,7 @@ namespace
         }
 
         return ApplyWaterSamples(
-            Receiver, Evaluation.EffectiveAmount, Samples, true, bDirty, bQueuedWetness);
+            Receiver, Evaluation.EffectiveAmount, Samples, true, true, bDirty, bQueuedWetness);
     }
 
     bool ApplyDirectSkinnedWetContact(
@@ -625,7 +686,7 @@ namespace
         }
 
         return ApplyWaterSamples(
-            Receiver, Evaluation.EffectiveAmount, Samples, true, bDirty, bQueuedWetness);
+            Receiver, Evaluation.EffectiveAmount, Samples, true, true, bDirty, bQueuedWetness);
     }
 } // namespace
 
@@ -685,7 +746,7 @@ void FWetInputStage::ApplyWetAll(FWetInputStageArgs& Receiver, float Amount)
         InitializeWaterSample(Receiver, VertexIndex, 1.0f, Samples.AddDefaulted_GetRef());
     }
 
-    ApplyWaterSamples(Receiver, EffectiveAmount, Samples, false, bDirty, bQueuedWetness);
+    ApplyWaterSamples(Receiver, EffectiveAmount, Samples, false, false, bDirty, bQueuedWetness);
 }
 
 bool FWetInputStage::ApplyWetSurface(FWetInputStageArgs& Receiver, const FDWCWaterSurfaceData& WaterSurfaceData, const float Amount, const bool bApplyMaterial)
@@ -777,7 +838,7 @@ bool FWetInputStage::ApplyWetSurface(FWetInputStageArgs& Receiver, const FDWCWat
     }
 
     return ApplyWaterSamples(
-        Receiver, EffectiveAmount, Samples, false, bDirty, bQueuedWetness);
+        Receiver, EffectiveAmount, Samples, false, false, bDirty, bQueuedWetness);
 }
 
 bool FWetInputStage::ApplyWetArea(FWetInputStageArgs&    Receiver,
@@ -919,7 +980,7 @@ bool FWetInputStage::ApplyWetArea(FWetInputStageArgs&    Receiver,
     }
 
     return ApplyWaterSamples(
-        Receiver, AreaData.Amount, Samples, false, bDirty, bQueuedWetness);
+        Receiver, AreaData.Amount, Samples, false, false, bDirty, bQueuedWetness);
 }
 
 bool FWetInputStage::ApplyWetContact(

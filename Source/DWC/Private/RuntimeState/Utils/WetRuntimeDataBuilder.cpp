@@ -71,6 +71,8 @@ bool FWetRuntimeDataBuilder::InitializeWetPartVertexData(FWetRuntimeDataBuildArg
     Receiver.MutableRuntimeData->SurfaceWaterUVs.SetNum(VertexCount);
     Receiver.MutableRuntimeData->SurfaceWaterUVValidFlags.Init(false,VertexCount);
     Receiver.MutableRuntimeData->SurfaceWaterMaterialSlotIndices.Init(INDEX_NONE, VertexCount);
+    Receiver.MutableRuntimeData->SurfaceWaterUVIslandIDs.Init(INDEX_NONE, VertexCount);
+    Receiver.MutableRuntimeData->SurfaceWaterUVsByUVIsland.Reset();
 
     if (!Receiver.WetClothingAsset || !Receiver.TargetSkeletalMesh)
     {
@@ -247,6 +249,12 @@ bool FWetRuntimeDataBuilder::InitializeWetPartVertexDataFromPrecomputedData(
             Receiver.MutableRuntimeData->SurfaceWaterUVs[VertexIndex] = FVector2f(PrecomputedVertex.SurfaceWaterUV);
             Receiver.MutableRuntimeData->SurfaceWaterUVValidFlags[VertexIndex] = true;
             Receiver.MutableRuntimeData->SurfaceWaterMaterialSlotIndices[VertexIndex] = PrecomputedVertex.MaterialSlotIndex;
+            Receiver.MutableRuntimeData->SurfaceWaterUVIslandIDs[VertexIndex] = PrecomputedVertex.UVIslandID;
+            if (PrecomputedVertex.UVIslandID != INDEX_NONE)
+            {
+                Receiver.MutableRuntimeData->SurfaceWaterUVsByUVIsland.FindOrAdd(PrecomputedVertex.UVIslandID).Add(
+                    FVector2f(PrecomputedVertex.SurfaceWaterUV));
+            }
             Receiver.MutableRuntimeData->VertexSurfaceWaterFlags[VertexIndex] =
                 Receiver.MutableRuntimeData->GetWetnessProfileParameters(VertexIndex) != nullptr &&
                 Receiver.MutableRuntimeData->GetWetnessProfileParameters(VertexIndex)->SupportsSurfaceWater();

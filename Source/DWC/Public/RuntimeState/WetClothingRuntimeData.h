@@ -61,6 +61,8 @@ class DWC_API FWetClothingRuntimeData
     TArray<FVector2f>                 SurfaceWaterUVs;
     TArray<bool>                      SurfaceWaterUVValidFlags;
     TArray<int32>                     SurfaceWaterMaterialSlotIndices;
+    TArray<int32>                     SurfaceWaterUVIslandIDs;
+    TMap<int32, TArray<FVector2f>>    SurfaceWaterUVsByUVIsland;
     bool                              bHasNeighborGraph = false;
 
     FWetBoneOptimizationCache BoneOptimizationCache;

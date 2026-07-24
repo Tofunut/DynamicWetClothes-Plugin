@@ -183,6 +183,16 @@ void UDWCStatsSubsystem::RefreshWorkloadRates(const float SampleSeconds)
         Current.SurfaceWaterStampsSubmitted, LastWorkloadEventTotals.SurfaceWaterStampsSubmitted, SampleSeconds);
     LatestWorkloadSnapshot.SurfaceWaterGPUDispatchesPerSecond = CalculatePerSecondRate(
         Current.SurfaceWaterGPUDispatches, LastWorkloadEventTotals.SurfaceWaterGPUDispatches, SampleSeconds);
+
+    const uint64 PlacementSamples = Current.SurfaceWaterPlacementSamples >= LastWorkloadEventTotals.SurfaceWaterPlacementSamples
+        ? Current.SurfaceWaterPlacementSamples - LastWorkloadEventTotals.SurfaceWaterPlacementSamples
+        : 0;
+    const uint64 PlacementTimeMicroseconds = Current.SurfaceWaterPlacementTimeMicroseconds >= LastWorkloadEventTotals.SurfaceWaterPlacementTimeMicroseconds
+        ? Current.SurfaceWaterPlacementTimeMicroseconds - LastWorkloadEventTotals.SurfaceWaterPlacementTimeMicroseconds
+        : 0;
+    LatestWorkloadSnapshot.SurfaceWaterPlacementAverageMilliseconds = PlacementSamples > 0
+        ? static_cast<float>(static_cast<double>(PlacementTimeMicroseconds) / static_cast<double>(PlacementSamples) / 1000.0)
+        : 0.0f;
     LatestWorkloadSnapshot.SurfaceWaterMaxPendingStamps = FDWCWorkloadStats::ConsumeSurfaceWaterMaxPendingStamps();
 
     LatestWorkloadSnapshot.CPUSkinningCompletedPerSecond = CalculatePerSecondRate(
@@ -529,6 +539,7 @@ void UDWCStatsSubsystem::PublishWorkloadStats(const FDWCWorkloadStatsSnapshot& S
     SET_DWORD_STAT(STAT_DWC_SurfaceWaterStampsQueuedRate, Snapshot.SurfaceWaterStampsQueuedPerSecond);
     SET_DWORD_STAT(STAT_DWC_SurfaceWaterStampsSubmittedRate, Snapshot.SurfaceWaterStampsSubmittedPerSecond);
     SET_DWORD_STAT(STAT_DWC_SurfaceWaterGPUDispatchesRate, Snapshot.SurfaceWaterGPUDispatchesPerSecond);
+    SET_FLOAT_STAT(STAT_DWC_SurfaceWaterPlacementAverageMilliseconds, Snapshot.SurfaceWaterPlacementAverageMilliseconds);
     SET_DWORD_STAT(STAT_DWC_SurfaceWaterMaxPendingStamps, Snapshot.SurfaceWaterMaxPendingStamps);
     SET_DWORD_STAT(STAT_DWC_SurfaceWaterPendingStamps, Snapshot.SurfaceWaterPendingStamps);
     SET_DWORD_STAT(STAT_DWC_CPUSkinningCompletedRate, Snapshot.CPUSkinningCompletedPerSecond);

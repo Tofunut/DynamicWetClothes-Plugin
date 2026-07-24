@@ -81,6 +81,8 @@ struct DWC_API FDWCWorkloadEventTotals
     uint64 SurfaceWaterStampsQueued = 0;
     uint64 SurfaceWaterStampsSubmitted = 0;
     uint64 SurfaceWaterGPUDispatches = 0;
+    uint64 SurfaceWaterPlacementSamples = 0;
+    uint64 SurfaceWaterPlacementTimeMicroseconds = 0;
     uint64 CPUSkinningCompleted = 0;
     uint64 CPUSkinningVerticesProcessed = 0;
     uint64 LODTransferCompleted = 0;
@@ -102,6 +104,7 @@ struct DWC_API FDWCWorkloadStatsSnapshot
     uint32 SurfaceWaterStampsQueuedPerSecond = 0;
     uint32 SurfaceWaterStampsSubmittedPerSecond = 0;
     uint32 SurfaceWaterGPUDispatchesPerSecond = 0;
+    float SurfaceWaterPlacementAverageMilliseconds = 0.0f;
     uint32 SurfaceWaterMaxPendingStamps = 0;
     uint32 SurfaceWaterPendingStamps = 0;
 
@@ -136,6 +139,7 @@ public:
     static void RecordSurfaceWaterStampQueued(uint32 PendingStampCount);
     static void RecordSurfaceWaterStampsSubmitted(uint32 StampCount);
     static void RecordSurfaceWaterGPUDispatch();
+    static void RecordSurfaceWaterPlacementTime(double ElapsedMilliseconds);
     static void RecordCPUSkinningCompleted(uint32 VertexCount);
     static void RecordLODTransferCompleted(uint32 DirtyVertexCount);
     static void RecordWetContactsReceived(uint32 ContactCount);
@@ -152,6 +156,7 @@ public:
     static void RecordSurfaceWaterStampQueued(uint32) {}
     static void RecordSurfaceWaterStampsSubmitted(uint32) {}
     static void RecordSurfaceWaterGPUDispatch() {}
+    static void RecordSurfaceWaterPlacementTime(double) {}
     static void RecordCPUSkinningCompleted(uint32) {}
     static void RecordLODTransferCompleted(uint32) {}
     static void RecordWetContactsReceived(uint32) {}
@@ -224,6 +229,7 @@ DECLARE_MEMORY_STAT_POOL_EXTERN(TEXT("Total Tracked"), STAT_DWC_TotalTrackedGPU,
 DECLARE_DWORD_ACCUMULATOR_STAT_EXTERN(TEXT("Surface Water - Stamps Queued/s"), STAT_DWC_SurfaceWaterStampsQueuedRate, STATGROUP_DWCWorkload, DWC_API);
 DECLARE_DWORD_ACCUMULATOR_STAT_EXTERN(TEXT("Surface Water - Stamps Submitted/s"), STAT_DWC_SurfaceWaterStampsSubmittedRate, STATGROUP_DWCWorkload, DWC_API);
 DECLARE_DWORD_ACCUMULATOR_STAT_EXTERN(TEXT("Surface Water - GPU Dispatches/s"), STAT_DWC_SurfaceWaterGPUDispatchesRate, STATGROUP_DWCWorkload, DWC_API);
+DECLARE_FLOAT_ACCUMULATOR_STAT_EXTERN(TEXT("Surface Water - Placement Avg (ms)"), STAT_DWC_SurfaceWaterPlacementAverageMilliseconds, STATGROUP_DWCWorkload, DWC_API);
 DECLARE_DWORD_ACCUMULATOR_STAT_EXTERN(TEXT("Surface Water - Max Pending Stamps (1s)"), STAT_DWC_SurfaceWaterMaxPendingStamps, STATGROUP_DWCWorkload, DWC_API);
 DECLARE_DWORD_ACCUMULATOR_STAT_EXTERN(TEXT("Surface Water - Pending Stamps"), STAT_DWC_SurfaceWaterPendingStamps, STATGROUP_DWCWorkload, DWC_API);
 

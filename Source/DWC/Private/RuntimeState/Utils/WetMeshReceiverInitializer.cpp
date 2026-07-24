@@ -52,6 +52,8 @@ namespace
                A.FlowMaskTexture == B.FlowMaskTexture &&
                A.FlowNormalTexture == B.FlowNormalTexture &&
                FMath::IsNearlyEqual(A.DropletTiling, B.DropletTiling) &&
+               A.DropletPlacementMode == B.DropletPlacementMode &&
+               FMath::IsNearlyEqual(A.DropletPlacementRadiusPixels, B.DropletPlacementRadiusPixels) &&
                FMath::IsNearlyEqual(A.SurfaceAmountThresholdMin, B.SurfaceAmountThresholdMin) &&
                FMath::IsNearlyEqual(A.SurfaceAmountThresholdMax, B.SurfaceAmountThresholdMax) &&
                FMath::IsNearlyEqual(A.DropletMaskMin, B.DropletMaskMin) &&

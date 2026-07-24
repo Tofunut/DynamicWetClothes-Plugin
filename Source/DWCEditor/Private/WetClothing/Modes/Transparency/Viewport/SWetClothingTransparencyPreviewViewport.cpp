@@ -646,13 +646,11 @@ void SWetClothingTransparencyPreviewViewport::BuildFullBlueprintPreview()
     PreviewActor->GetComponents<USkeletalMeshComponent>(MeshComponents);
     for (USkeletalMeshComponent* MeshComponent : MeshComponents)
     {
-        if (MeshComponent != nullptr && MeshComponent->GetSkeletalMeshAsset() == Asset->GetDWCSkeletalMesh())
+        if (MeshComponent != nullptr)
         {
             ConfigurePreviewMeshComponent(MeshComponent);
         }
     }
-
-    PreviewMeshComponents.Append(MeshComponents);
 
     if (USkeletalMeshComponent* FocusMesh = FindFocusMeshComponent())
     {
@@ -669,6 +667,7 @@ void SWetClothingTransparencyPreviewViewport::ConfigurePreviewMeshComponent(USke
     }
 
     PreviewMeshComponents.AddUnique(MeshComponent);
+    MeshComponent->SetForcedLOD(1);
     ApplyPreviewMaterials(MeshComponent);
     ApplyWetnessPreview(MeshComponent);
     MeshComponent->MarkRenderStateDirty();

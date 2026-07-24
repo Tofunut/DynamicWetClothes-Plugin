@@ -253,6 +253,7 @@ void SDWCPartViewport::Construct(const FArguments& InArgs)
     PreviewMeshComponent = NewObject<USkeletalMeshComponent>(GetTransientPackage(), NAME_None, RF_Transient);
     PreviewMeshComponent->SetMobility(EComponentMobility::Movable);
     PreviewMeshComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    PreviewMeshComponent->SetForcedLOD(1);
     PreviewScene->AddComponent(PreviewMeshComponent, FTransform::Identity);
 
     WetPartOverlayComponent = NewObject<UProceduralMeshComponent>(GetTransientPackage(), NAME_None, RF_Transient);
@@ -338,6 +339,7 @@ void SDWCPartViewport::RefreshPreviewMesh()
     }
 
     PreviewMeshComponent->SetSkeletalMeshAsset(TargetMesh);
+    PreviewMeshComponent->SetForcedLOD(1);
     PreviewMeshComponent->ShowAllMaterialSections(0);
     if (WetPartOverlayComponent != nullptr)
     {

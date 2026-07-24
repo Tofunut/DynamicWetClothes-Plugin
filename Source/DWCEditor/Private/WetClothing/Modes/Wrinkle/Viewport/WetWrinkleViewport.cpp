@@ -683,6 +683,7 @@ void SWetWrinkleViewport::RefreshPreviewMesh(const bool bForceMaterialRebuild)
     {
         PreviewMeshComponent->SetSkeletalMeshAsset(TargetMesh);
     }
+    PreviewMeshComponent->SetForcedLOD(1);
 
     const bool bMaterialSourcesChanged = bMeshChanged || !ArePreviewMaterialSlotsCurrent();
     if (bForceMaterialRebuild || bMaterialSourcesChanged)
@@ -2331,17 +2332,20 @@ void SWetWrinkleViewport::ApplyMaterialSlotVisibility()
         return;
     }
 
-    for (int32 LODIndex = 0; LODIndex < RenderData->LODRenderData.Num(); ++LODIndex)
+    constexpr int32 PreviewLODIndex = 0;
+    if (!RenderData->LODRenderData.IsValidIndex(PreviewLODIndex))
     {
-        const FSkeletalMeshLODRenderData& LODData = RenderData->LODRenderData[LODIndex];
-        for (int32 SectionIndex = 0; SectionIndex < LODData.RenderSections.Num(); ++SectionIndex)
-        {
-            const FSkelMeshRenderSection& Section = LODData.RenderSections[SectionIndex];
-            const bool bShowSection = BrushSettings.MaterialSlotIndex == INDEX_NONE
-                                          ? DWCEditorPreviewSlotUtils::IsCpuPreviewReady(WetClothingAsset.Get(), Section.MaterialIndex)
-                                          : Section.MaterialIndex == BrushSettings.MaterialSlotIndex;
-            PreviewMeshComponent->ShowMaterialSection(Section.MaterialIndex, SectionIndex, bShowSection, LODIndex);
-        }
+        return;
+    }
+
+    const FSkeletalMeshLODRenderData& LODData = RenderData->LODRenderData[PreviewLODIndex];
+    for (int32 SectionIndex = 0; SectionIndex < LODData.RenderSections.Num(); ++SectionIndex)
+    {
+        const FSkelMeshRenderSection& Section = LODData.RenderSections[SectionIndex];
+        const bool bShowSection = BrushSettings.MaterialSlotIndex == INDEX_NONE
+                                      ? DWCEditorPreviewSlotUtils::IsCpuPreviewReady(WetClothingAsset.Get(), Section.MaterialIndex)
+                                      : Section.MaterialIndex == BrushSettings.MaterialSlotIndex;
+        PreviewMeshComponent->ShowMaterialSection(Section.MaterialIndex, SectionIndex, bShowSection, PreviewLODIndex);
     }
 }
 

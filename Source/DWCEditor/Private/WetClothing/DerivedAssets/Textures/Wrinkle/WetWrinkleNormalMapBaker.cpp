@@ -1088,7 +1088,7 @@ UTexture2D* FWetWrinkleNormalMapBaker::CreateOrUpdateNormalTextureAsset(
 #if WITH_EDITORONLY_DATA
     const FString AssetPackageName = WetClothingAsset.GetOutermost()->GetName();
     const FString WcaFolder = FPackageName::GetLongPackagePath(AssetPackageName);
-    const FString PackagePath = WcaFolder / TEXT("Generated") / WetClothingAsset.GetName() / TEXT("Maps") / TEXT("Wrinkles");
+    const FString PackagePath = WcaFolder / TEXT("Generated") / WetClothingAsset.GetName() / TEXT("Textures") / TEXT("Wrinkles");
     if (PackagePath.IsEmpty())
     {
         OutErrorMessage = TEXT("Could not resolve a package path for the Wet Clothing Asset.");
@@ -1154,7 +1154,7 @@ UTexture2D* FWetWrinkleNormalMapBaker::CreateOrUpdateMaskTextureAsset(
 #if WITH_EDITORONLY_DATA
     const FString AssetPackageName = WetClothingAsset.GetOutermost()->GetName();
     const FString WcaFolder = FPackageName::GetLongPackagePath(AssetPackageName);
-    const FString PackagePath = WcaFolder / TEXT("Generated") / WetClothingAsset.GetName() / TEXT("Maps") / TEXT("Wrinkles");
+    const FString PackagePath = WcaFolder / TEXT("Generated") / WetClothingAsset.GetName() / TEXT("Textures") / TEXT("Wrinkles");
     if (PackagePath.IsEmpty())
     {
         OutErrorMessage = TEXT("Could not resolve a package path for the Wet Clothing Asset.");

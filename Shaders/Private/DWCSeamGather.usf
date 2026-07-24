@@ -1,9 +1,7 @@
 #include "/Engine/Public/Platform.ush"
 
 Texture2D<float> SourceWetnessTexture;
-Texture2D<float> SourcePendingWetnessTexture;
 RWTexture2D<float> DestinationWetnessTexture;
-RWTexture2D<float> DestinationPendingWetnessTexture;
 // x=destination texel index, y=incoming start, z=incoming count
 StructuredBuffer<uint4> SeamDestinations;
 // x=source texel index, y=normalized weight
@@ -58,8 +56,9 @@ void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 
     const float DestinationArea = GetArea(DestinationTexelIndex);
     const float DestinationWetness = max(SourceWetnessTexture.Load(int3(DestinationTexel, 0)), 0.0);
-    const float DestinationPendingWetness = max(SourcePendingWetnessTexture.Load(int3(DestinationTexel, 0)), 0.0);
-    float NewPendingMass = DestinationPendingWetness * DestinationArea;
+    const float DestinationRate = max(Profiles[TriangleProfileIndices[DestinationLookup.x]].x, 0.0) *
+        SeamTransferScale * DWCSeamSpreadResponseScale;
+    float NewMass = DestinationWetness * DestinationArea;
 
     [loop]
     for (uint IncomingOffset = 0u; IncomingOffset < IncomingCount; ++IncomingOffset)
@@ -76,20 +75,19 @@ void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
         const int2 SourceTexel = int2(
             (int)(SourceTexelIndex % Width),
             (int)(SourceTexelIndex / Width));
-        const float SourcePendingWetness = max(SourcePendingWetnessTexture.Load(int3(SourceTexel, 0)), 0.0);
+        const float SourceWetness = max(SourceWetnessTexture.Load(int3(SourceTexel, 0)), 0.0);
         const float SourceArea = GetArea(SourceTexelIndex);
         const float SourceRate = max(Profiles[TriangleProfileIndices[SourceLookup.x]].x, 0.0) *
             SeamTransferScale * DWCSeamSpreadResponseScale;
 
+        const float OutFraction = min(saturate(DeltaSeconds * DestinationRate * Weight), DWCMaxSeamTransferFraction);
         const float InFraction = min(saturate(DeltaSeconds * SourceRate * Weight), DWCMaxSeamTransferFraction);
-        NewPendingMass += SourcePendingWetness * SourceArea * InFraction;
+        NewMass -= DestinationWetness * DestinationArea * OutFraction;
+        NewMass += SourceWetness * SourceArea * InFraction;
     }
 
     DestinationWetnessTexture[DestinationTexel] = clamp(
-        DestinationWetness,
+        max(NewMass, 0.0) / max(DestinationArea, 1.0e-10),
         0.0,
         MaxWetness);
-    DestinationPendingWetnessTexture[DestinationTexel] = max(
-        NewPendingMass / max(DestinationArea, 1.0e-10),
-        0.0);
 }

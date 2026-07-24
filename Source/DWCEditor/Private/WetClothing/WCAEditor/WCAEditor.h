@@ -51,17 +51,19 @@ class FWCAEditor : public FAssetEditorToolkit
     TSharedRef<SWidget>  BuildBakeMapsMenu();
     TSharedRef<SWidget>  BuildGenerateMaterialsMenu();
     FReply               HandleBakeAllMapsClicked();
-    FReply               HandleBakeWetnessProfileMapsClicked();
+    FReply               HandleBakeRenderProfileDataClicked();
     FReply               HandleBakeGPUWetnessMapDataClicked();
     FReply               HandleBakeWrinkleNormalMapClicked();
+    FReply               HandleBakeTransparencyMapsClicked();
     FReply               HandleGenerateMaterialsClicked();
     FReply               GenerateWetMaterials();
     bool                 CanBakeAnyMaps() const;
     bool                 CanBakeCurrentModeMaps() const;
     bool                 CanBakeGPUMaps() const;
-    bool                 CanBakeWetnessProfileMaps() const;
+    bool                 CanBakeRenderProfileData() const;
     bool                 CanBakeWrinkleMaps() const;
-    bool                 ResolveIssuesAndSave(FString& OutFailure);
+    bool                 CanBakeTransparencyMaps() const;
+    bool                 ResolveIssuesAndSave(FString& OutFailure, FString* OutSuccessSummary = nullptr);
     void                 RefreshAssetStateAndEditor(
         bool bRunDeepValidation = false,
         bool bRebuildActiveModePreview = true);

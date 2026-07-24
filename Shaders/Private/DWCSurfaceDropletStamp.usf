@@ -1,0 +1,44 @@
+#include "/Engine/Public/Platform.ush"
+#include "/DWCGPU/DWCSurfaceStampCommon.ush"
+
+StructuredBuffer<uint4> TexelLookup;
+RWTexture2D<float4> TargetSurface;
+
+int2 TextureSize;
+uint TriangleCount;
+int2 StampMinPixel;
+int2 StampDispatchSize;
+float2 StampUV;
+float2 StampCenterPixels;
+float2 StampHalfSizePixels;
+float StampAmount;
+float StampTimeSeconds;
+float StampLifetimeSeconds;
+
+[numthreads(8, 8, 1)]
+void MainCS(uint3 DispatchThreadID : SV_DispatchThreadID)
+{
+    if (any(DispatchThreadID.xy >= uint2(StampDispatchSize))) return;
+
+    uint4 Lookup;
+    if (!DWC_ResolveStampLookup(StampUV, TextureSize, TexelLookup, Lookup)) return;
+    if (Lookup.x >= TriangleCount) return;
+
+    const int2 Pixel = StampMinPixel + int2(DispatchThreadID.xy);
+    if (any(Pixel < 0) || any(Pixel >= TextureSize)) return;
+
+    // Keep the brush inside the same packed Data-UV island as its resolved center.
+    // This prevents a large stamp from crossing padding into an adjacent island.
+    const uint4 PixelLookup = TexelLookup[Pixel.y * TextureSize.x + Pixel.x];
+    if (!DWC_IsValidLookup(PixelLookup) || PixelLookup.w != Lookup.w) return;
+
+    const float2 Delta = (float2(Pixel) + 0.5) - StampCenterPixels;
+    const float2 Local = Delta / max(StampHalfSizePixels, float2(0.5, 0.5));
+    DWC_WriteDropletStamp(
+        Pixel,
+        DWC_StampBrush(Local),
+        StampAmount,
+        StampTimeSeconds,
+        StampLifetimeSeconds,
+        TargetSurface);
+}

@@ -13,6 +13,7 @@
 #include "WetClothingAsset.generated.h"
 
 class USkeletalMesh;
+class UMaterialFunctionInterface;
 
 USTRUCT(BlueprintType)
 struct DWC_API FWCAAuthoredData
@@ -77,14 +78,25 @@ struct DWC_API FWCADerivedInlineData
     UPROPERTY(VisibleAnywhere, Category = "Wet Clothing|Generated Assets")
     TArray<FWetClothingGeneratedWetMaterialOverride> GeneratedWetMaterialOverrides;
 
-    UPROPERTY(VisibleAnywhere, Category = "Wet Clothing|Baked Wetness Profile Maps")
-    TArray<FWetClothingBakedWetnessProfileMap> BakedWetnessProfileMaps;
+    /** Current render-profile lookup baked in DWC Data UV space. */
+    UPROPERTY(VisibleAnywhere, Category = "Wet Clothing|Profile ID Texture")
+    FWetClothingBakedProfileIDData BakedProfileIDData;
 
     /** Metadata only. UV coordinates live exclusively in the prepared mesh's DWC Data UV channel. */
     UPROPERTY(VisibleAnywhere, Category = "Wet Clothing|DWC Data UV")
     TArray<FDWCDataUVLODMetadata> DataUVMetadata;
 
 #if WITH_EDITORONLY_DATA
+    UPROPERTY(VisibleAnywhere, Category = "Wet Clothing|Generated Materials")
+    TObjectPtr<UMaterialFunctionInterface> GeneratedEvaluateSurfaceAppearanceFunction = nullptr;
+
+    /** Legacy references kept only so existing WCA assets can migrate. */
+    UPROPERTY(meta = (DeprecatedProperty, DeprecationMessage = "Use GeneratedEvaluateSurfaceAppearanceFunction."))
+    TObjectPtr<UMaterialFunctionInterface> GeneratedCPUApplyWetnessFunction_DEPRECATED = nullptr;
+
+    UPROPERTY(meta = (DeprecatedProperty, DeprecationMessage = "Use GeneratedEvaluateSurfaceAppearanceFunction."))
+    TObjectPtr<UMaterialFunctionInterface> GeneratedGPUApplyWetnessFunction_DEPRECATED = nullptr;
+
     UPROPERTY(VisibleAnywhere, Category = "Wet Clothing|Editor Derived Data")
     TArray<FDWCEditorUVTopologyData> OriginalUVTopologies;
 
@@ -151,6 +163,7 @@ struct DWC_API FWCAMetadata
 
     UPROPERTY(VisibleAnywhere, Category = "Wet Clothing|Setup", meta = (ShowOnlyInnerProperties))
     FDWCWetClothingAssetSetupSettings SetupSettings;
+
 };
 
 UCLASS(BlueprintType)
@@ -159,10 +172,10 @@ class DWC_API UWetClothingAsset : public UDataAsset
     GENERATED_BODY()
 
   public:
-    static constexpr int32 CurrentAssetDataVersion = 6;
+    static constexpr int32 CurrentAssetDataVersion = 8;
     static constexpr int32 FirstAssetVersionWithSerializedRuntimeBulkData = 4;
-    static constexpr int32 CurrentPrecomputedSimulationDataVersion = 7;
-    static constexpr int32 CurrentRuntimeBulkDataVersion = 2;
+    static constexpr int32 CurrentPrecomputedSimulationDataVersion = 8;
+    static constexpr int32 CurrentRuntimeBulkDataVersion = 4;
     static constexpr int32 RuntimeSimulationLODIndex = 0;
 
     virtual void Serialize(FArchive& Ar) override;
@@ -197,6 +210,7 @@ class DWC_API UWetClothingAsset : public UDataAsset
     bool RebuildRuntimeDataForSave(FString* OutErrorMessage = nullptr);
     bool CanPrepareRuntimeDataForEditorSave(FString* OutSkipReason = nullptr) const;
     bool PrepareRuntimeDataForEditorSave(FString* OutErrorMessage = nullptr);
+    void ReleaseLoadedRuntimeBulkPayloadForEditor();
     void ClearRuntimeDataEditorSavePreparation();
     void BeginRuntimeDataEditorSaveAttempt();
     void CompleteRuntimeDataEditorSaveAttempt(bool bSaveSucceeded);
@@ -227,9 +241,6 @@ class DWC_API UWetClothingAsset : public UDataAsset
     bool HasCPURuntimeDataPayload() const;
     bool HasGPURuntimeDataPayload() const;
     bool HasGPUMapDataPayload() const;
-    bool HasCPURuntimeDataPayloadMetadata() const;
-    bool HasGPURuntimeDataPayloadMetadata() const;
-    bool HasGPUMapDataPayloadMetadata() const;
 
     USkeletalMesh* GetSourceSkeletalMesh() const { return Metadata.SourceSkeletalMesh.Get(); }
     USkeletalMesh* GetDWCSkeletalMesh() const { return Metadata.DWCSkeletalMesh.Get(); }
@@ -287,7 +298,6 @@ class DWC_API UWetClothingAsset : public UDataAsset
     void ClearRuntimeBulkData();
 
 #if WITH_EDITOR
-    void ReleaseLoadedRuntimeBulkPayloadForEditor();
     void RefreshBakeStateFast();
     void RefreshBakeStateDeep();
     void RefreshBakeStateInternal(bool bRunDeepValidation);

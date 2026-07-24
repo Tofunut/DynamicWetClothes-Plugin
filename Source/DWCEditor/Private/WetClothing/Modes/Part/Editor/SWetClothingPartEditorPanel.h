@@ -31,10 +31,9 @@ class SWetClothingPartEditorPanel : public SCompoundWidget
     void Construct(const FArguments& InArgs);
 
     void RefreshFromAsset();
-    void RefreshFromAssetLightweight();
     bool HasPendingVisualBakeTasks(FString* OutSummary = nullptr) const;
-    bool BakeWetnessProfileMapsAndUpdateMaterials(FString& OutSummary, bool* OutHadWarnings = nullptr);
-    bool SaveBakedWetnessAssets() const;
+    bool BakeRenderProfileDataAndUpdateMaterials(FString& OutSummary, bool* OutHadWarnings = nullptr);
+    bool SaveBakedRenderProfileAssets() const;
 
   private:
     using FMaterialSlotItemPtr = TSharedPtr<FWCAMaterialSlotItem>;
@@ -129,10 +128,10 @@ class SWetClothingPartEditorPanel : public SCompoundWidget
     FText                                          GetSelectedMaterialSlotText() const;
     FText                                          GetMaterialSlotStatusText(int32 MaterialSlotIndex) const;
     FText                                          GetSelectedTextureText() const;
-    FText                                          GetWetnessProfileMapBakeSourceText() const;
-    FText                                          GetWetnessProfileMapBakeSlotsText() const;
-    FText                                          GetWetnessProfileMapBakeStatusText() const;
-    FText                                          GetWetnessProfileMapBakeSettingsText() const;
+    FText                                          GetRenderProfileBakeSourceText() const;
+    FText                                          GetRenderProfileBakeSlotsText() const;
+    FText                                          GetRenderProfileBakeStatusText() const;
+    FText                                          GetRenderProfileBakeSettingsText() const;
     FText                                          GetOriginalUVChannelText() const;
     FText                                          GetSelectedUVDisplayModeText() const;
     float                                          GetUVViewBackgroundTextureOpacity() const;
@@ -160,11 +159,9 @@ class SWetClothingPartEditorPanel : public SCompoundWidget
     FReply                                         HandleFocusPreviewClicked();
     FReply                                         HandleSaveAssetClicked();
     FReply                                         HandleBakeAllMapsClicked();
-    bool                                           IsWetnessProfileMapBakeSourceValid() const;
-    bool                                           CanBakeAnyWetnessProfileMap() const;
-    FReply                                         HandleBakeSelectedWetnessProfileMapClicked();
-    FReply                                         HandleBakeAllWetnessProfileMapsClicked();
-    const FWetClothingBakedWetnessProfileMap*      FindBakedWetnessProfileMap(UTexture* SourceTexture, int32 UVChannelIndex) const;
+    bool                                           IsRenderProfileBakeSourceValid() const;
+    bool                                           CanBakeAnyRenderProfileData() const;
+    FReply                                         HandleBakeRenderProfileDataClicked();
     UTexture*                                      ResolveSelectedMaterialTexture() const;
     UTexture*                                      ResolveTextureAddressTexture() const;
     void                                           SaveSelectedTexture();
@@ -172,8 +169,6 @@ class SWetClothingPartEditorPanel : public SCompoundWidget
     UTexture*                                      ResolveOrSaveTextureSelection(int32 MaterialSlotIndex, int32 UVChannelIndex);
     bool                                           HasSavedTextureSelection(int32 MaterialSlotIndex, int32 UVChannelIndex) const;
     void                                           SaveTextureSelection(int32 MaterialSlotIndex, int32 UVChannelIndex, UTexture* Texture);
-    void                                           CollectMaterialSlotsForWetnessProfileMap(UTexture* SourceTexture, int32 UVChannelIndex, TArray<int32>& OutMaterialSlotIndices) const;
-    void                                           CollectWetnessProfileMapSourceTextures(int32 UVChannelIndex, TArray<UTexture*>& OutSourceTextures) const;
 
   private:
     TWeakObjectPtr<UWetClothingAsset>                  WetClothingAsset;

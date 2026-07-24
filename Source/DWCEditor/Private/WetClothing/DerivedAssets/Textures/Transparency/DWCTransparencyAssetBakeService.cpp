@@ -2,6 +2,8 @@
 
 #include "DataAssets/WetClothingAsset.h"
 #include "FileHelpers.h"
+#include "Materials/Material.h"
+#include "Materials/MaterialInstanceConstant.h"
 #include "UObject/Package.h"
 
 namespace

@@ -20,7 +20,7 @@
 #include "WetRendering/WetRenderStage.h"
 #include "RuntimeState/Utils/WetSimulationStage.h"
 #include "WetSimulation/AbsorbedWetness/AbsorbedWetnessSimulationState.h"
-#include "WetSimulation/SurfaceWater/SurfaceWaterSimulationState.h"
+#include "GPU/DWCSurfaceWaterSimulationState.h"
 #include "Templates/UniquePtr.h"
 
 #include "DynamicWetClothesComponent.generated.h"
@@ -65,9 +65,9 @@ struct FDWCWetMeshReceiverRuntime
     TUniquePtr<FWetClothingMeshSampler> MeshSampler;
     TUniquePtr<FWetRenderStage> RenderStage;
 
-    // Per-receiver surface-water state.
-    // The state owns CPU-side pending stamps and GPU render-target resources.
-    TMap<int32, TUniquePtr<FSurfaceWaterSimulationState>> SurfaceWaterStatesByMaterialSlot;
+    // Per-receiver surface-water presentation state.
+    // DWC owns only the interface; RT/compute implementation lives in DWCGPU.
+    TMap<int32, TUniquePtr<IDWCSurfaceWaterSimulationState>> SurfaceWaterStatesByMaterialSlot;
     TMap<int32, FSurfaceWaterProfileParameters> SurfaceWaterProfilesByMaterialSlot;
     FRandomStream SurfaceWaterRandomStream = FRandomStream(0x445743);
 
@@ -124,6 +124,8 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
     // Debug and quality LOD API.
     UFUNCTION(BlueprintCallable, Category = "Wetness|Debug")
     void SetWetPartDebugColorsEnabled(bool bEnabled);
+    UFUNCTION(BlueprintCallable, Category = "Wetness|Debug")
+    void SetSurfaceWaterDebugColorsEnabled(bool bEnabled);
     UFUNCTION(BlueprintCallable, Category = "Wetness|LOD")
     void SetDWCQualityLOD(int32 InQualityLOD);
     UFUNCTION(BlueprintCallable, Category = "Wetness|LOD")
@@ -239,10 +241,6 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Simulation|GPU|Tuning", meta = (EditCondition = "SimulationMode == EDWCSimulationMode::WetnessMapGPU", ClampMin = "0.0", AdvancedDisplay))
     float GPUDryRateScale = 1.0f;
 
-    /** Fraction of newly arriving GPU water absorbed immediately; the remainder becomes Pending water for propagation. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Simulation|GPU|Tuning", meta = (EditCondition = "SimulationMode == EDWCSimulationMode::WetnessMapGPU", ClampMin = "0.0", ClampMax = "1.0", UIMin = "0.0", UIMax = "1.0"))
-    float GPUImmediateAbsorptionFraction = 0.35f;
-
     // Contact and surface-water configuration.
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Contact", meta = (AllowPrivateAccess = "true"))
     bool bBatchWetContactsPerFrame = true;
@@ -296,6 +294,10 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
      */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Debug")
     bool bShowWetPartDebugColors = false;
+
+    /** Displays GPU surface-water droplets/rivulets as debug colors over the wet part debug overlay. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Debug", meta = (EditCondition = "SimulationMode == EDWCSimulationMode::WetnessMapGPU"))
+    bool bShowSurfaceWaterDebugColors = false;
 
   private:
     // Runtime mode state.

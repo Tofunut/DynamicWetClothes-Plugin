@@ -11,8 +11,6 @@ namespace
     std::atomic<uint64> GSurfaceWaterStampsQueued{0};
     std::atomic<uint64> GSurfaceWaterStampsSubmitted{0};
     std::atomic<uint64> GSurfaceWaterGPUDispatches{0};
-    std::atomic<uint64> GSurfaceWaterPlacementSamples{0};
-    std::atomic<uint64> GSurfaceWaterPlacementTimeMicroseconds{0};
     std::atomic<uint64> GSurfaceWaterMaxPendingStamps{0};
     std::atomic<uint64> GCPUSkinningCompleted{0};
     std::atomic<uint64> GCPUSkinningVerticesProcessed{0};
@@ -53,19 +51,6 @@ void FDWCWorkloadStats::RecordSurfaceWaterStampsSubmitted(const uint32 StampCoun
 void FDWCWorkloadStats::RecordSurfaceWaterGPUDispatch()
 {
     GSurfaceWaterGPUDispatches.fetch_add(1, std::memory_order_relaxed);
-}
-
-void FDWCWorkloadStats::RecordSurfaceWaterPlacementTime(const double ElapsedMilliseconds)
-{
-    if (ElapsedMilliseconds <= 0.0)
-    {
-        return;
-    }
-
-    GSurfaceWaterPlacementSamples.fetch_add(1, std::memory_order_relaxed);
-    GSurfaceWaterPlacementTimeMicroseconds.fetch_add(
-        static_cast<uint64>(ElapsedMilliseconds * 1000.0 + 0.5),
-        std::memory_order_relaxed);
 }
 
 void FDWCWorkloadStats::RecordCPUSkinningCompleted(const uint32 VertexCount)
@@ -126,8 +111,6 @@ FDWCWorkloadEventTotals FDWCWorkloadStats::ReadEventTotals()
     Totals.SurfaceWaterStampsQueued = GSurfaceWaterStampsQueued.load(std::memory_order_relaxed);
     Totals.SurfaceWaterStampsSubmitted = GSurfaceWaterStampsSubmitted.load(std::memory_order_relaxed);
     Totals.SurfaceWaterGPUDispatches = GSurfaceWaterGPUDispatches.load(std::memory_order_relaxed);
-    Totals.SurfaceWaterPlacementSamples = GSurfaceWaterPlacementSamples.load(std::memory_order_relaxed);
-    Totals.SurfaceWaterPlacementTimeMicroseconds = GSurfaceWaterPlacementTimeMicroseconds.load(std::memory_order_relaxed);
     Totals.CPUSkinningCompleted = GCPUSkinningCompleted.load(std::memory_order_relaxed);
     Totals.CPUSkinningVerticesProcessed = GCPUSkinningVerticesProcessed.load(std::memory_order_relaxed);
     Totals.LODTransferCompleted = GLODTransferCompleted.load(std::memory_order_relaxed);
@@ -164,6 +147,8 @@ DEFINE_STAT(STAT_DWC_SharedRuntimeDataCount);
 DEFINE_STAT(STAT_DWC_SharedSkinningDataCount);
 DEFINE_STAT(STAT_DWC_SharedLODStaticDataCount);
 DEFINE_STAT(STAT_DWC_SharedLODTransferMapCount);
+DEFINE_STAT(STAT_DWC_SharedGPUStaticResourceCount);
+DEFINE_STAT(STAT_DWC_RuntimeRenderProfileCount);
 DEFINE_STAT(STAT_DWC_AbsorbedStateCount);
 DEFINE_STAT(STAT_DWC_SurfaceWaterStateCount);
 DEFINE_STAT(STAT_DWC_WrinkleMaterialBindingCount);
@@ -187,10 +172,15 @@ DEFINE_STAT(STAT_DWC_LODVertexColorCacheCPU);
 DEFINE_STAT(STAT_DWC_PendingLODDirtyCPU);
 DEFINE_STAT(STAT_DWC_SurfaceWaterCPU);
 DEFINE_STAT(STAT_DWC_GPUBackendCPU);
+DEFINE_STAT(STAT_DWC_GPUResourceSubsystemCPU);
 DEFINE_STAT(STAT_DWC_ReceiverMetadataCPU);
 DEFINE_STAT(STAT_DWC_TotalTrackedCPU);
-DEFINE_STAT(STAT_DWC_SurfaceWaterGPU);
 DEFINE_STAT(STAT_DWC_GPUBackendGPU);
+DEFINE_STAT(STAT_DWC_SharedGPUStaticBufferGPU);
+DEFINE_STAT(STAT_DWC_SharedGPURenderProfileLUTGPU);
+DEFINE_STAT(STAT_DWC_SharedGPUProfileIDRemapGPU);
+DEFINE_STAT(STAT_DWC_SharedGPUSurfaceNormalArrayGPU);
+DEFINE_STAT(STAT_DWC_SharedGPUResourceGPU);
 DEFINE_STAT(STAT_DWC_WrinkleTextureGPU);
 DEFINE_STAT(STAT_DWC_TransparencyTextureGPU);
 DEFINE_STAT(STAT_DWC_TotalTrackedGPU);
@@ -198,7 +188,6 @@ DEFINE_STAT(STAT_DWC_TotalTrackedGPU);
 DEFINE_STAT(STAT_DWC_SurfaceWaterStampsQueuedRate);
 DEFINE_STAT(STAT_DWC_SurfaceWaterStampsSubmittedRate);
 DEFINE_STAT(STAT_DWC_SurfaceWaterGPUDispatchesRate);
-DEFINE_STAT(STAT_DWC_SurfaceWaterPlacementAverageMilliseconds);
 DEFINE_STAT(STAT_DWC_SurfaceWaterMaxPendingStamps);
 DEFINE_STAT(STAT_DWC_SurfaceWaterPendingStamps);
 DEFINE_STAT(STAT_DWC_CPUSkinningCompletedRate);

@@ -9,7 +9,26 @@ class UDynamicWetClothesComponent;
 class USkeletalMeshComponent;
 class UWetClothingAsset;
 class UMaterialInstanceDynamic;
+class IDWCSurfaceWaterSimulationState;
 struct FWetClothingSettings;
+
+
+enum class EDWCSurfaceStampType : uint8
+{
+    Droplet,
+    Rivulet
+};
+
+/** CPU-side routing request. TriangleID is intentionally resolved from UV through TexelLookup on GPU. */
+struct DWC_API FDWCSurfaceStampRequest
+{
+    EDWCSurfaceStampType Type = EDWCSurfaceStampType::Droplet;
+    FVector2f UV = FVector2f::ZeroVector;
+    FVector2f HalfSizePixels = FVector2f::ZeroVector;
+    float Amount = 0.0f;
+    float LifetimeSeconds = 0.0f;
+    int32 MaterialSlotIndex = INDEX_NONE;
+};
 
 struct DWC_API FDWCGPUBackendInitArgs
 {
@@ -22,7 +41,6 @@ struct DWC_API FDWCGPUBackendInitArgs
     float SpreadRateScale = 1.0f;
     float DryRateScale = 1.0f;
     float GravityFlowStrengthScale = 1.0f;
-    float CapillaryImmediateAbsorptionFraction = 0.65f;
     bool bUseEightDirectionDiffusion = false;
 };
 
@@ -42,6 +60,7 @@ public:
 
     virtual bool Initialize(const FDWCGPUBackendInitArgs& Args) = 0;
     virtual bool EnqueueResolvedContacts(const TArray<FDWCResolvedSurfaceContact>& Contacts) = 0;
+    virtual bool EnqueueSurfaceStamps(const TArray<FDWCSurfaceStampRequest>& Stamps) = 0;
     virtual bool ApplyWetAll(float Amount) = 0;
     virtual void Update(float DeltaSeconds) = 0;
     virtual FDWCGPUBackendStats GetStats() const = 0;
@@ -57,4 +76,5 @@ public:
     virtual ~IDWCGPUModule();
 
     virtual TUniquePtr<IDWCGPUBackend> CreateBackend() = 0;
+    virtual TUniquePtr<IDWCSurfaceWaterSimulationState> CreateSurfaceWaterSimulationState() = 0;
 };

@@ -21,7 +21,6 @@ public:
         SHADER_PARAMETER(FVector4f, P1AndMaxWetness)
         SHADER_PARAMETER(FVector4f, P2AndMode)
         SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float>, WetnessTexture)
-        SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float>, PendingWetnessTexture)
     END_SHADER_PARAMETER_STRUCT()
 
     static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters);
@@ -61,13 +60,8 @@ public:
         SHADER_PARAMETER(FIntPoint, TextureSize)
         SHADER_PARAMETER(float, DeltaSeconds)
         SHADER_PARAMETER(float, MaxWetness)
-        SHADER_PARAMETER(float, CapillaryImmediateAbsorptionFraction)
-        SHADER_PARAMETER(uint32, DiffuseDiagnosticsEnabled)
         SHADER_PARAMETER_RDG_TEXTURE(Texture2D, SourceWetnessTexture)
-        SHADER_PARAMETER_RDG_TEXTURE(Texture2D, PendingWetnessTexture)
         SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float>, DestinationWetnessTexture)
-        SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float>, DestinationPendingWetnessTexture)
-        SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<uint>, DiffuseDiagnostics)
         SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint4>, TexelLookup)
         SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float4>, TriangleFlow)
         SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float4>, TriangleMetric)
@@ -99,7 +93,7 @@ public:
     static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters);
 };
 
-/** 8-neighbor CPU-style Pending spread, gravity bias, and drying. */
+/** 8-neighbor absorbed-wetness spread, gravity bias, and drying using precomputed transfer scales. */
 class FDWCDiffuseDry8CS final : public FGlobalShader
 {
 public:
@@ -110,14 +104,9 @@ public:
         SHADER_PARAMETER(FIntPoint, TextureSize)
         SHADER_PARAMETER(float, DeltaSeconds)
         SHADER_PARAMETER(float, MaxWetness)
-        SHADER_PARAMETER(float, CapillaryImmediateAbsorptionFraction)
-        SHADER_PARAMETER(uint32, DiffuseDiagnosticsEnabled)
         SHADER_PARAMETER_RDG_TEXTURE(Texture2D, SourceWetnessTexture)
         SHADER_PARAMETER_RDG_TEXTURE(Texture2D, TransferScaleTexture)
-        SHADER_PARAMETER_RDG_TEXTURE(Texture2D, PendingWetnessTexture)
         SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float>, DestinationWetnessTexture)
-        SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float>, DestinationPendingWetnessTexture)
-        SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<uint>, DiffuseDiagnostics)
         SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint4>, TexelLookup)
         SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float4>, TriangleFlow)
         SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float4>, TriangleMetric)
@@ -142,15 +131,66 @@ public:
         SHADER_PARAMETER(float, SeamTransferScale)
         SHADER_PARAMETER(float, MaxWetness)
         SHADER_PARAMETER_RDG_TEXTURE(Texture2D, SourceWetnessTexture)
-        SHADER_PARAMETER_RDG_TEXTURE(Texture2D, SourcePendingWetnessTexture)
         SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float>, DestinationWetnessTexture)
-        SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float>, DestinationPendingWetnessTexture)
         SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint4>, SeamDestinations)
         SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float4>, SeamIncoming)
         SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint4>, TexelLookup)
         SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float4>, TriangleFlow)
         SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float4>, Profiles)
         SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, TriangleProfileIndices)
+    END_SHADER_PARAMETER_STRUCT()
+
+    static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters);
+};
+
+/** Writes one droplet stamp into a slot-local surface-state RT. */
+class FDWCSurfaceDropletStampCS final : public FGlobalShader
+{
+public:
+    DECLARE_GLOBAL_SHADER(FDWCSurfaceDropletStampCS);
+    SHADER_USE_PARAMETER_STRUCT(FDWCSurfaceDropletStampCS, FGlobalShader);
+
+    BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
+        SHADER_PARAMETER(FIntPoint, TextureSize)
+        SHADER_PARAMETER(uint32, TriangleCount)
+        SHADER_PARAMETER(FIntPoint, StampMinPixel)
+        SHADER_PARAMETER(FIntPoint, StampDispatchSize)
+        SHADER_PARAMETER(FVector2f, StampUV)
+        SHADER_PARAMETER(FVector2f, StampCenterPixels)
+        SHADER_PARAMETER(FVector2f, StampHalfSizePixels)
+        SHADER_PARAMETER(float, StampAmount)
+        SHADER_PARAMETER(float, StampTimeSeconds)
+        SHADER_PARAMETER(float, StampLifetimeSeconds)
+        SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint4>, TexelLookup)
+        SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float4>, TargetSurface)
+    END_SHADER_PARAMETER_STRUCT()
+
+    static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters);
+};
+
+/** Writes one gravity-aligned rivulet stamp into a slot-local surface-state RT. */
+class FDWCSurfaceRivuletStampCS final : public FGlobalShader
+{
+public:
+    DECLARE_GLOBAL_SHADER(FDWCSurfaceRivuletStampCS);
+    SHADER_USE_PARAMETER_STRUCT(FDWCSurfaceRivuletStampCS, FGlobalShader);
+
+    BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
+        SHADER_PARAMETER(FIntPoint, TextureSize)
+        SHADER_PARAMETER(uint32, TriangleCount)
+        SHADER_PARAMETER(FIntPoint, StampMinPixel)
+        SHADER_PARAMETER(FIntPoint, StampDispatchSize)
+        SHADER_PARAMETER(FVector2f, StampUV)
+        SHADER_PARAMETER(FVector2f, StampCenterPixels)
+        SHADER_PARAMETER(FVector2f, StampHalfSizePixels)
+        SHADER_PARAMETER(float, StampAmount)
+        SHADER_PARAMETER(float, StampTimeSeconds)
+        SHADER_PARAMETER(float, StampLifetimeSeconds)
+        SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint4>, TexelLookup)
+        SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float4>, TriangleFlow)
+        SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float4>, TriangleMetric)
+        SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float4>, TriangleDataToSurfaceWaterNormalUV)
+        SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float4>, TargetSurface)
     END_SHADER_PARAMETER_STRUCT()
 
     static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters);

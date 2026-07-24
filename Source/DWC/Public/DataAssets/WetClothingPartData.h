@@ -144,37 +144,131 @@ struct DWC_API FWetClothingGeneratedWetMaterialOverride
     TObjectPtr<UMaterialInstanceConstant> GPUMaterialInstance = nullptr;
 };
 
+
 USTRUCT(BlueprintType)
-struct DWC_API FWetClothingBakedWetnessProfileMap
+struct DWC_API FWetClothingLocalRenderProfile
 {
     GENERATED_BODY()
 
-    UPROPERTY(VisibleAnywhere, Category = "Baked Wetness Profile Map")
-    FString ComponentPath;
+    /** Source profile identity used for deterministic runtime deduplication. */
+    UPROPERTY(VisibleAnywhere, Category = "Profile ID Texture")
+    FSoftObjectPath SourceProfile;
 
-    UPROPERTY(VisibleAnywhere, Category = "Baked Wetness Profile Map")
-    TObjectPtr<UTexture> SourceTexture = nullptr;
+    /** Resolved fallback used when the source profile is unavailable at runtime. */
+    UPROPERTY(VisibleAnywhere, Category = "Profile ID Texture")
+    FWetnessProfileParameters Parameters;
 
-    UPROPERTY(VisibleAnywhere, Category = "Baked Wetness Profile Map")
-    int32 UVChannelIndex = 0;
+    /** Stable build key. Local ID 0 is always neutral and is not stored here. */
+    UPROPERTY(VisibleAnywhere, Category = "Profile ID Texture")
+    FString StableKey;
 
-    UPROPERTY(VisibleAnywhere, Category = "Baked Wetness Profile Map")
-    TArray<int32> MaterialSlotIndices;
+    /** Array-compatible Derived textures. Runtime never packs the source profile textures directly. */
+    UPROPERTY()
+    TObjectPtr<UTexture2D> NormalizedDropletMask_DEPRECATED = nullptr;
 
-    UPROPERTY(VisibleAnywhere, Category = "Baked Wetness Profile Map")
-    TObjectPtr<UTexture2D> WetnessProfileMap0 = nullptr;
+    UPROPERTY(VisibleAnywhere, Category = "Profile ID Texture|Surface Texture")
+    TObjectPtr<UTexture2D> NormalizedDropletNormal = nullptr;
 
-    UPROPERTY(VisibleAnywhere, Category = "Baked Wetness Profile Map")
-    int32 Resolution = 256;
+    UPROPERTY()
+    TObjectPtr<UTexture2D> NormalizedRivuletMask_DEPRECATED = nullptr;
 
-    UPROPERTY(VisibleAnywhere, Category = "Baked Wetness Profile Map")
-    int32 PaddingPixels = 4;
+    UPROPERTY(VisibleAnywhere, Category = "Profile ID Texture|Surface Texture")
+    TObjectPtr<UTexture2D> NormalizedRivuletNormal = nullptr;
+};
 
-    UPROPERTY(VisibleAnywhere, Category = "Baked Wetness Profile Map")
+USTRUCT(BlueprintType)
+struct DWC_API FWetClothingBakedProfileIDSlotTexture
+{
+    GENERATED_BODY()
+
+    UPROPERTY(VisibleAnywhere, Category = "Profile ID Texture")
+    int32 MaterialSlotIndex = INDEX_NONE;
+
+    /** Point-sampled local profile IDs rasterized in this slot's DWC Data UV space. */
+    UPROPERTY(VisibleAnywhere, Category = "Profile ID Texture")
+    TObjectPtr<UTexture2D> ProfileIDTexture = nullptr;
+
+    UPROPERTY(VisibleAnywhere, Category = "Profile ID Texture")
     FString BuildSignature;
 
-    UPROPERTY(VisibleAnywhere, Category = "Baked Wetness Profile Map")
+    UPROPERTY(VisibleAnywhere, Category = "Profile ID Texture")
     FGuid BakeGuid;
+
+    bool IsValid() const
+    {
+        return MaterialSlotIndex != INDEX_NONE && ProfileIDTexture != nullptr;
+    }
+};
+
+USTRUCT(BlueprintType)
+struct DWC_API FWetClothingBakedProfileIDData
+{
+    GENERATED_BODY()
+
+    /** WCA-wide local profile table. Texture value N maps to LocalProfiles[N - 1]. */
+    UPROPERTY(VisibleAnywhere, Category = "Profile ID Texture")
+    TArray<FWetClothingLocalRenderProfile> LocalProfiles;
+
+    /** One Profile ID Texture per wettable material slot. */
+    UPROPERTY(VisibleAnywhere, Category = "Profile ID Texture")
+    TArray<FWetClothingBakedProfileIDSlotTexture> SlotTextures;
+
+    UPROPERTY(VisibleAnywhere, Category = "Profile ID Texture")
+    int32 DataUVChannelIndex = INDEX_NONE;
+
+    UPROPERTY(VisibleAnywhere, Category = "Profile ID Texture")
+    int32 Resolution = 256;
+
+    UPROPERTY(VisibleAnywhere, Category = "Profile ID Texture")
+    int32 PaddingPixels = 4;
+
+    /** Resolution shared by every normalized surface Mask/Normal texture. */
+    UPROPERTY(VisibleAnywhere, Category = "Profile ID Texture|Surface Texture")
+    int32 SurfaceTextureResolution = 256;
+
+    /** Shared flat normal used as Texture2DArray slice 0. */
+    UPROPERTY(VisibleAnywhere, Category = "Profile ID Texture|Surface Texture")
+    TObjectPtr<UTexture2D> NormalizedNeutralSurfaceNormal = nullptr;
+
+    /** Signature covering the WCA-wide local table and every slot bake. */
+    UPROPERTY(VisibleAnywhere, Category = "Profile ID Texture")
+    FString BuildSignature;
+
+    UPROPERTY(VisibleAnywhere, Category = "Profile ID Texture")
+    FGuid BakeGuid;
+
+    const FWetClothingBakedProfileIDSlotTexture* FindSlot(const int32 MaterialSlotIndex) const
+    {
+        return SlotTextures.FindByPredicate(
+            [MaterialSlotIndex](const FWetClothingBakedProfileIDSlotTexture& Candidate)
+            {
+                return Candidate.MaterialSlotIndex == MaterialSlotIndex;
+            });
+    }
+
+    FWetClothingBakedProfileIDSlotTexture* FindSlot(const int32 MaterialSlotIndex)
+    {
+        return SlotTextures.FindByPredicate(
+            [MaterialSlotIndex](const FWetClothingBakedProfileIDSlotTexture& Candidate)
+            {
+                return Candidate.MaterialSlotIndex == MaterialSlotIndex;
+            });
+    }
+
+    bool IsValid() const
+    {
+        return DataUVChannelIndex != INDEX_NONE &&
+               SurfaceTextureResolution > 0 &&
+               NormalizedNeutralSurfaceNormal != nullptr &&
+               LocalProfiles.Num() <= 254 &&
+               !BuildSignature.IsEmpty() &&
+               !SlotTextures.IsEmpty() &&
+               !SlotTextures.ContainsByPredicate(
+                   [](const FWetClothingBakedProfileIDSlotTexture& Slot)
+                   {
+                       return !Slot.IsValid() || Slot.BuildSignature.IsEmpty();
+                   });
+    }
 };
 
 USTRUCT(BlueprintType)

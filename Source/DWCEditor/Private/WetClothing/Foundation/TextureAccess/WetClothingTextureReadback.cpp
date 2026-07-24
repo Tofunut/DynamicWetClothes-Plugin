@@ -14,6 +14,7 @@ namespace
         int32 Width = 0;
         int32 Height = 0;
         ETextureSourceFormat Format = TSF_Invalid;
+        FGuid SourceId;
         bool bSRGB = false;
         TextureAddress AddressX = TA_Clamp;
         TextureAddress AddressY = TA_Clamp;
@@ -81,6 +82,7 @@ bool FWetClothingTextureReadbackUtils::TryReadTextureSourceData(
             if (Cached->Width == Texture->Source.GetSizeX() &&
                 Cached->Height == Texture->Source.GetSizeY() &&
                 Cached->Format == Texture->Source.GetFormat() &&
+                Cached->SourceId == Texture->Source.GetId() &&
                 Cached->bSRGB == Texture->SRGB &&
                 Cached->AddressX == Texture->AddressX &&
                 Cached->AddressY == Texture->AddressY)
@@ -94,7 +96,7 @@ bool FWetClothingTextureReadbackUtils::TryReadTextureSourceData(
 
     if (Texture == nullptr)
     {
-        OutErrorMessage = TEXT("Turn on a texture image for the selected material slot before running Auto-Partitioning.");
+        OutErrorMessage = TEXT("Texture is null.");
         return false;
     }
 
@@ -107,7 +109,7 @@ bool FWetClothingTextureReadbackUtils::TryReadTextureSourceData(
     const ETextureSourceFormat SourceFormat = Texture->Source.GetFormat();
     if (SourceFormat != TSF_BGRA8 && SourceFormat != TSF_G8)
     {
-        OutErrorMessage = FString::Printf(TEXT("Texture '%s' uses an unsupported source format for Auto-Partitioning."), *Texture->GetName());
+        OutErrorMessage = FString::Printf(TEXT("Texture '%s' uses an unsupported source format. DWC currently supports BGRA8 and G8 source data."), *Texture->GetName());
         return false;
     }
 
@@ -137,6 +139,7 @@ bool FWetClothingTextureReadbackUtils::TryReadTextureSourceData(
     CacheEntry.Width = OutTextureData.Width;
     CacheEntry.Height = OutTextureData.Height;
     CacheEntry.Format = OutTextureData.Format;
+    CacheEntry.SourceId = Texture->Source.GetId();
     CacheEntry.bSRGB = OutTextureData.bSRGB;
     CacheEntry.AddressX = OutTextureData.AddressX;
     CacheEntry.AddressY = OutTextureData.AddressY;
@@ -145,7 +148,7 @@ bool FWetClothingTextureReadbackUtils::TryReadTextureSourceData(
     OutErrorMessage.Reset();
     return true;
 #else
-    OutErrorMessage = TEXT("Auto-Partitioning requires editor-only texture source data.");
+    OutErrorMessage = TEXT("Texture source readback requires editor-only source data.");
     return false;
 #endif
 }

@@ -8,6 +8,7 @@
 #include "Materials/MaterialInstanceConstant.h"
 #include "UObject/Object.h"
 #include "UObject/Package.h"
+#include "UObject/UObjectGlobals.h"
 #include "Framework/Notifications/NotificationManager.h"
 #include "Misc/ScopedSlowTask.h"
 #include "Widgets/Notifications/SNotificationList.h"
@@ -122,12 +123,19 @@ bool DWCEditorUtils::SaveAsset(UObject* Asset)
             AddDirtyGeneratedPackage(MaterialOverride.GPUMaterialInstance.Get());
         }
 
-        for (const FWetClothingBakedWetnessProfileMap& ProfileMap :
-             WetClothingAsset->Derived.Inline.BakedWetnessProfileMaps)
+        for (const FWetClothingBakedProfileIDSlotTexture& SlotTexture :
+             WetClothingAsset->Derived.Inline.BakedProfileIDData.SlotTextures)
         {
-            AddDirtyGeneratedPackage(ProfileMap.WetnessProfileMap0.Get());
+            AddDirtyGeneratedPackage(SlotTexture.ProfileIDTexture.Get());
+        }
+        for (const FWetClothingLocalRenderProfile& LocalProfile :
+             WetClothingAsset->Derived.Inline.BakedProfileIDData.LocalProfiles)
+        {
+            AddDirtyGeneratedPackage(LocalProfile.NormalizedDropletNormal.Get());
+            AddDirtyGeneratedPackage(LocalProfile.NormalizedRivuletNormal.Get());
         }
 
+        // Deprecated RGB profile maps may still exist on assets that have not been rebaked.
         for (const FWetWrinkleBakedMapSet& WrinkleMap :
              WetClothingAsset->Authored.WrinkleData.BakedWrinkleMaps)
         {

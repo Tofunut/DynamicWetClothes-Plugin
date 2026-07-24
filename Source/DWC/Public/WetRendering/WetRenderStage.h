@@ -11,7 +11,7 @@ class UTexture2D;
 class UWetClothingAsset;
 class FWetClothingRuntimeData;
 class FAbsorbedWetnessSimulationState;
-class FSurfaceWaterSimulationState;
+class IDWCSurfaceWaterSimulationState;
 struct FWetClothingSettings;
 
 /*
@@ -21,7 +21,7 @@ WetRenderStage �행�요�자 묶음�다.
 �더 �현갱신�요참조�모� ��자
 ��:
 - Wetness 값을 MaterialInstance parameter반영
-- WetnessProfileMap parameter �정
+- Render profile lookup parameters
 - VertexColor 기반 debug / 1�wetness �현 갱신
 */
 struct DWC_API FWetRenderStageArgs
@@ -33,9 +33,9 @@ struct DWC_API FWetRenderStageArgs
     const FWetClothingRuntimeData*   RuntimeData = nullptr;
     FAbsorbedWetnessSimulationState* SimulationState = nullptr;
     bool bShowWetPartDebugColors = false;
+    bool bShowSurfaceWaterDebugColors = false;
     bool bGPUWetnessMode = false;
-    const TMap<int32, TUniquePtr<FSurfaceWaterSimulationState>>* SurfaceWaterStatesByMaterialSlot = nullptr;
-    const TMap<int32, FSurfaceWaterProfileParameters>* SurfaceWaterProfilesByMaterialSlot = nullptr;
+    const TMap<int32, TUniquePtr<IDWCSurfaceWaterSimulationState>>* SurfaceWaterStatesByMaterialSlot = nullptr;
 
     TArray<TObjectPtr<UMaterialInstanceDynamic>>* WetMaterialInstances = nullptr;
 
@@ -64,7 +64,6 @@ class DWC_API FWetRenderStage
 
     void         InitializeWetMaterialInstance(FWetRenderStageArgs& Args);
     void         ApplyWetMaterialParameters(FWetRenderStageArgs& Args);
-    void         ApplyWetnessProfileMapParameters(FWetRenderStageArgs& Args);
     void         ApplyWetWrinkleNormalMapParameters(FWetRenderStageArgs& Args);
     void         ApplyWetTransparencyMapParameters(FWetRenderStageArgs& Args);
     void         ApplyWetnessToMaterial(FWetRenderStageArgs& Args);
@@ -74,38 +73,7 @@ class DWC_API FWetRenderStage
     // because all material parameter updates are performed through this stage.
     TArray<TObjectPtr<UMaterialInstanceDynamic>> WetMaterialInstances;
 
-    TArray<FColor> CachedWetVertexColors; // VertexColor 
+    TArray<FColor> CachedWetVertexColors; // VertexColor
     TMap<int32, FLinearColor> CachedWetPartDebugColorsByID; // ID is at FWetClothingRuntimeData.
-    TWeakObjectPtr<UWetClothingAsset> CachedWetPartDebugColorAsset; // What Asset is Debug Color based on 
-
-    // Keep runtime transparency diagnostics useful without emitting once per material update.
-    TMap<int32, FString> LastTransparencyBindingLogKeys;
-
-  private:
-    struct FTransparencyRuntimeBinding
-    {
-        int32 MaterialSlotIndex = INDEX_NONE;
-        int32 UVChannelIndex = INDEX_NONE;
-        int32 LODIndex = INDEX_NONE;
-        TWeakObjectPtr<UMaterialInstanceDynamic> MaterialInstance;
-        TWeakObjectPtr<UTexture2D> TransparencyMap;
-        FGuid BakeGuid;
-        bool bUsable = false;
-        bool bAppliedEnabled = false;
-    };
-
-    void InvalidateTransparencyBindingCache();
-    bool IsTransparencyBindingCacheCurrent(const FWetRenderStageArgs& Args) const;
-    void RebuildTransparencyBindingCache(
-        FWetRenderStageArgs& Args,
-        float WetnessMin,
-        float WetnessMax);
-
-    TArray<FTransparencyRuntimeBinding> TransparencyRuntimeBindings;
-    TWeakObjectPtr<UWetClothingAsset> CachedTransparencyAsset;
-    int32 CachedTransparencyLODIndex = INDEX_NONE;
-    int32 CachedTransparencyUVChannelIndex = INDEX_NONE;
-    float CachedTransparencyWetnessMin = -1.0f;
-    float CachedTransparencyWetnessMax = -1.0f;
-    bool bTransparencyBindingCacheValid = false;
+    TWeakObjectPtr<UWetClothingAsset> CachedWetPartDebugColorAsset; // What Asset is Debug Color based on
 };

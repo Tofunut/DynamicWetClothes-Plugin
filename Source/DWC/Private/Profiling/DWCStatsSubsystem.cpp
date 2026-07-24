@@ -8,6 +8,7 @@
 #include "Engine/GameViewportClient.h"
 #include "Engine/Texture2D.h"
 #include "Engine/World.h"
+#include "WetRendering/DWCGPUResourceSubsystem.h"
 
 namespace
 {
@@ -183,16 +184,6 @@ void UDWCStatsSubsystem::RefreshWorkloadRates(const float SampleSeconds)
         Current.SurfaceWaterStampsSubmitted, LastWorkloadEventTotals.SurfaceWaterStampsSubmitted, SampleSeconds);
     LatestWorkloadSnapshot.SurfaceWaterGPUDispatchesPerSecond = CalculatePerSecondRate(
         Current.SurfaceWaterGPUDispatches, LastWorkloadEventTotals.SurfaceWaterGPUDispatches, SampleSeconds);
-
-    const uint64 PlacementSamples = Current.SurfaceWaterPlacementSamples >= LastWorkloadEventTotals.SurfaceWaterPlacementSamples
-        ? Current.SurfaceWaterPlacementSamples - LastWorkloadEventTotals.SurfaceWaterPlacementSamples
-        : 0;
-    const uint64 PlacementTimeMicroseconds = Current.SurfaceWaterPlacementTimeMicroseconds >= LastWorkloadEventTotals.SurfaceWaterPlacementTimeMicroseconds
-        ? Current.SurfaceWaterPlacementTimeMicroseconds - LastWorkloadEventTotals.SurfaceWaterPlacementTimeMicroseconds
-        : 0;
-    LatestWorkloadSnapshot.SurfaceWaterPlacementAverageMilliseconds = PlacementSamples > 0
-        ? static_cast<float>(static_cast<double>(PlacementTimeMicroseconds) / static_cast<double>(PlacementSamples) / 1000.0)
-        : 0.0f;
     LatestWorkloadSnapshot.SurfaceWaterMaxPendingStamps = FDWCWorkloadStats::ConsumeSurfaceWaterMaxPendingStamps();
 
     LatestWorkloadSnapshot.CPUSkinningCompletedPerSecond = CalculatePerSecondRate(
@@ -259,7 +250,7 @@ void UDWCStatsSubsystem::CollectBacklogStats(FDWCWorkloadStatsSnapshot& OutSnaps
             LODTransferPendingTasks += Receiver->bLODVertexColorTransferPending ? 1u : 0u;
             PendingLODDirtyVertices += Receiver->PendingLODVertexColorDirtySourceVertices.Num();
 
-            for (const TPair<int32, TUniquePtr<FSurfaceWaterSimulationState>>& Pair : Receiver->SurfaceWaterStatesByMaterialSlot)
+            for (const TPair<int32, TUniquePtr<IDWCSurfaceWaterSimulationState>>& Pair : Receiver->SurfaceWaterStatesByMaterialSlot)
             {
                 if (Pair.Value.IsValid())
                 {
@@ -277,6 +268,22 @@ void UDWCStatsSubsystem::CollectBacklogStats(FDWCWorkloadStatsSnapshot& OutSnaps
 
 void UDWCStatsSubsystem::CollectStats(FDWCStatsSnapshot& OutSnapshot)
 {
+    if (UWorld* World = GetWorld())
+    {
+        if (const UDWCGPUResourceSubsystem* GPUResourceSubsystem = World->GetSubsystem<UDWCGPUResourceSubsystem>())
+        {
+            const FDWCGPUResourceSubsystemStats ResourceStats = GPUResourceSubsystem->GetStats();
+            OutSnapshot.SharedGPUStaticResourceCount = ResourceStats.StaticSlotResourceCount;
+            OutSnapshot.RuntimeRenderProfileCount = ResourceStats.RuntimeProfileCount;
+            OutSnapshot.GPUResourceSubsystemCPUBytes = ResourceStats.CPUBytes;
+            OutSnapshot.SharedGPUStaticBufferGPUBytes = ResourceStats.StaticBufferGPUBytes;
+            OutSnapshot.SharedGPURenderProfileLUTGPUBytes = ResourceStats.RenderProfileLUTGPUBytes;
+            OutSnapshot.SharedGPUProfileIDRemapGPUBytes = ResourceStats.ProfileIDRemapGPUBytes;
+            OutSnapshot.SharedGPUSurfaceNormalArrayGPUBytes = ResourceStats.SurfaceNormalArrayGPUBytes;
+            OutSnapshot.SharedGPUResourceGPUBytes = ResourceStats.GetGPUBytes();
+        }
+    }
+
     TSet<const FWetClothingRuntimeData*> SeenRuntimeData;
     TSet<const FDWCSkinningStaticData*> SeenSkinningStaticData;
     TSet<const FDWCLODVertexStaticData*> SeenLODVertexStaticData;
@@ -393,13 +400,12 @@ void UDWCStatsSubsystem::CollectStats(FDWCStatsSnapshot& OutSnapshot)
                 Receiver->PendingLODVertexColorDirtySourceVertices.GetAllocatedSize();
 
             OutSnapshot.SurfaceWaterCPUBytes += Receiver->SurfaceWaterStatesByMaterialSlot.GetAllocatedSize();
-            for (const TPair<int32, TUniquePtr<FSurfaceWaterSimulationState>>& Pair : Receiver->SurfaceWaterStatesByMaterialSlot)
+            for (const TPair<int32, TUniquePtr<IDWCSurfaceWaterSimulationState>>& Pair : Receiver->SurfaceWaterStatesByMaterialSlot)
             {
                 if (Pair.Value.IsValid())
                 {
                     ++OutSnapshot.SurfaceWaterStateCount;
                     OutSnapshot.SurfaceWaterCPUBytes += Pair.Value->GetAllocatedMemoryBytes();
-                    OutSnapshot.SurfaceWaterGPUBytes += Pair.Value->GetEstimatedGpuMemoryBytes();
                 }
             }
 
@@ -434,21 +440,22 @@ void UDWCStatsSubsystem::CollectStats(FDWCStatsSnapshot& OutSnapshot)
                         continue;
                     }
 
-                    if (const FWetWrinkleBakedMapSet* WrinkleMap =
-                            WetClothingAsset->Authored.WrinkleData.FindBakedWrinkleMap(
-                                MaterialSlotIndex,
-                                PreferredWrinkleUVChannel,
-                                UWetClothingAsset::RuntimeSimulationLODIndex))
+                    const FWetWrinkleResolvedNormalMap WrinkleMap =
+                        WetClothingAsset->Authored.WrinkleData.ResolveRuntimeWrinkleNormalMap(
+                            MaterialSlotIndex,
+                            PreferredWrinkleUVChannel,
+                            UWetClothingAsset::RuntimeSimulationLODIndex);
+                    if (WrinkleMap.IsValid() &&
+                        WrinkleMap.Texture != nullptr &&
+                        WrinkleMap.UVChannelIndex == PreferredWrinkleUVChannel &&
+                        WrinkleMap.LODIndex == UWetClothingAsset::RuntimeSimulationLODIndex)
                     {
-                        if (WrinkleMap->BakedWrinkleNormalMap != nullptr)
-                        {
-                            ++OutSnapshot.WrinkleMaterialBindingCount;
-                            AddUniqueResidentTexture(
-                                WrinkleMap->BakedWrinkleNormalMap,
-                                SeenWrinkleTextures,
-                                OutSnapshot.WrinkleTextureCount,
-                                OutSnapshot.WrinkleTextureGPUBytes);
-                        }
+                        ++OutSnapshot.WrinkleMaterialBindingCount;
+                        AddUniqueResidentTexture(
+                            WrinkleMap.Texture,
+                            SeenWrinkleTextures,
+                            OutSnapshot.WrinkleTextureCount,
+                            OutSnapshot.WrinkleTextureGPUBytes);
                     }
 
                     const FWetClothingTransparencyLayerData* TransparencyLayer =
@@ -463,7 +470,7 @@ void UDWCStatsSubsystem::CollectStats(FDWCStatsSnapshot& OutSnapshot)
                     }
 
                     const FWetClothingBakedTransparencyMap* TransparencyMap =
-                        WetClothingAsset->Authored.TransparencyData.FindBakedTransparencyMap(
+                        WetClothingAsset->Authored.TransparencyData.FindRuntimeBakedTransparencyMap(
                             MaterialSlotIndex,
                             TransparencyLayer->TargetSurface.OuterUVChannel,
                             UWetClothingAsset::RuntimeSimulationLODIndex);
@@ -502,6 +509,8 @@ void UDWCStatsSubsystem::PublishStats(const FDWCStatsSnapshot& Snapshot) const
     SET_DWORD_STAT(STAT_DWC_SharedSkinningDataCount, Snapshot.SharedSkinningStaticDataCount);
     SET_DWORD_STAT(STAT_DWC_SharedLODStaticDataCount, Snapshot.SharedLODVertexStaticDataCount);
     SET_DWORD_STAT(STAT_DWC_SharedLODTransferMapCount, Snapshot.SharedLODVertexColorTransferMapCount);
+    SET_DWORD_STAT(STAT_DWC_SharedGPUStaticResourceCount, Snapshot.SharedGPUStaticResourceCount);
+    SET_DWORD_STAT(STAT_DWC_RuntimeRenderProfileCount, Snapshot.RuntimeRenderProfileCount);
     SET_DWORD_STAT(STAT_DWC_AbsorbedStateCount, Snapshot.AbsorbedSimulationStateCount);
     SET_DWORD_STAT(STAT_DWC_SurfaceWaterStateCount, Snapshot.SurfaceWaterStateCount);
     SET_DWORD_STAT(STAT_DWC_WrinkleMaterialBindingCount, Snapshot.WrinkleMaterialBindingCount);
@@ -525,10 +534,15 @@ void UDWCStatsSubsystem::PublishStats(const FDWCStatsSnapshot& Snapshot) const
     SET_MEMORY_STAT(STAT_DWC_PendingLODDirtyCPU, Snapshot.PendingLODVertexColorDirtyCPUBytes);
     SET_MEMORY_STAT(STAT_DWC_SurfaceWaterCPU, Snapshot.SurfaceWaterCPUBytes);
     SET_MEMORY_STAT(STAT_DWC_GPUBackendCPU, Snapshot.GPUBackendCPUBytes);
+    SET_MEMORY_STAT(STAT_DWC_GPUResourceSubsystemCPU, Snapshot.GPUResourceSubsystemCPUBytes);
     SET_MEMORY_STAT(STAT_DWC_ReceiverMetadataCPU, Snapshot.ReceiverMetadataCPUBytes);
     SET_MEMORY_STAT(STAT_DWC_TotalTrackedCPU, Snapshot.GetTrackedCPUBytes());
-    SET_MEMORY_STAT(STAT_DWC_SurfaceWaterGPU, Snapshot.SurfaceWaterGPUBytes);
     SET_MEMORY_STAT(STAT_DWC_GPUBackendGPU, Snapshot.GPUBackendGPUBytes);
+    SET_MEMORY_STAT(STAT_DWC_SharedGPUStaticBufferGPU, Snapshot.SharedGPUStaticBufferGPUBytes);
+    SET_MEMORY_STAT(STAT_DWC_SharedGPURenderProfileLUTGPU, Snapshot.SharedGPURenderProfileLUTGPUBytes);
+    SET_MEMORY_STAT(STAT_DWC_SharedGPUProfileIDRemapGPU, Snapshot.SharedGPUProfileIDRemapGPUBytes);
+    SET_MEMORY_STAT(STAT_DWC_SharedGPUSurfaceNormalArrayGPU, Snapshot.SharedGPUSurfaceNormalArrayGPUBytes);
+    SET_MEMORY_STAT(STAT_DWC_SharedGPUResourceGPU, Snapshot.SharedGPUResourceGPUBytes);
     SET_MEMORY_STAT(STAT_DWC_WrinkleTextureGPU, Snapshot.WrinkleTextureGPUBytes);
     SET_MEMORY_STAT(STAT_DWC_TransparencyTextureGPU, Snapshot.TransparencyTextureGPUBytes);
     SET_MEMORY_STAT(STAT_DWC_TotalTrackedGPU, Snapshot.GetTrackedGPUBytes());
@@ -539,7 +553,6 @@ void UDWCStatsSubsystem::PublishWorkloadStats(const FDWCWorkloadStatsSnapshot& S
     SET_DWORD_STAT(STAT_DWC_SurfaceWaterStampsQueuedRate, Snapshot.SurfaceWaterStampsQueuedPerSecond);
     SET_DWORD_STAT(STAT_DWC_SurfaceWaterStampsSubmittedRate, Snapshot.SurfaceWaterStampsSubmittedPerSecond);
     SET_DWORD_STAT(STAT_DWC_SurfaceWaterGPUDispatchesRate, Snapshot.SurfaceWaterGPUDispatchesPerSecond);
-    SET_FLOAT_STAT(STAT_DWC_SurfaceWaterPlacementAverageMilliseconds, Snapshot.SurfaceWaterPlacementAverageMilliseconds);
     SET_DWORD_STAT(STAT_DWC_SurfaceWaterMaxPendingStamps, Snapshot.SurfaceWaterMaxPendingStamps);
     SET_DWORD_STAT(STAT_DWC_SurfaceWaterPendingStamps, Snapshot.SurfaceWaterPendingStamps);
     SET_DWORD_STAT(STAT_DWC_CPUSkinningCompletedRate, Snapshot.CPUSkinningCompletedPerSecond);

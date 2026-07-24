@@ -31,6 +31,7 @@
 namespace
 {
     constexpr int32 TransparencyHitBVHLeafTriangleCount = 8;
+    constexpr int32 ForceRenderLOD0 = 1; // USkinnedMeshComponent forced LOD is 1-based; 0 means automatic.
     constexpr const TCHAR* TransparencyMapParameterName = TEXT("DWC_TransparencyMap");
     constexpr const TCHAR* UseRuntimeTransparencyParameterName = TEXT("DWC_UseTransparencyMap");
     constexpr const TCHAR* TransparencyWetnessMinParameterName = TEXT("DWC_TransparencyWetnessMin");
@@ -372,7 +373,13 @@ void SWetClothingTransparencyPreviewViewport::SetPreviewMode(const EWetClothingT
 
 void SWetClothingTransparencyPreviewViewport::SetWetnessPreviewPercent(const float InPercent)
 {
-    WetnessPreviewPercent = FMath::Clamp(InPercent, 0.0f, 100.0f);
+    const float NewPercent = FMath::Clamp(InPercent, 0.0f, 100.0f);
+    if (FMath::IsNearlyEqual(WetnessPreviewPercent, NewPercent))
+    {
+        return;
+    }
+
+    WetnessPreviewPercent = NewPercent;
     for (USkeletalMeshComponent* MeshComponent : PreviewMeshComponents)
     {
         ApplyWetnessPreview(MeshComponent);
@@ -393,6 +400,11 @@ void SWetClothingTransparencyPreviewViewport::SetTransparencyEditContext(
         SelectedMaterialSlotIndex != InMaterialSlotIndex ||
         SelectedUVChannelIndex != InUVChannelIndex ||
         SelectedUVAddressMode != InAddressMode;
+    if (!bContextChanged)
+    {
+        return;
+    }
+
     SelectedLayerGuid = InLayerGuid;
     SelectedMaterialSlotIndex = InMaterialSlotIndex;
     SelectedUVChannelIndex = InUVChannelIndex;
@@ -465,6 +477,19 @@ void SWetClothingTransparencyPreviewViewport::RefreshWrinkleSuppressionPreview()
 
 void SWetClothingTransparencyPreviewViewport::SetPaintSettings(const FDWCTransparencyPaintSettings& InSettings)
 {
+    const bool bSettingsChanged =
+        PaintSettings.Mode != InSettings.Mode ||
+        !FMath::IsNearlyEqual(PaintSettings.RadiusUV, InSettings.RadiusUV) ||
+        !FMath::IsNearlyEqual(PaintSettings.Strength, InSettings.Strength) ||
+        !FMath::IsNearlyEqual(PaintSettings.Falloff, InSettings.Falloff) ||
+        !FMath::IsNearlyEqual(PaintSettings.Spacing, InSettings.Spacing) ||
+        !FMath::IsNearlyEqual(PaintSettings.TargetAlpha, InSettings.TargetAlpha) ||
+        PaintSettings.bEnabled != InSettings.bEnabled;
+    if (!bSettingsChanged)
+    {
+        return;
+    }
+
     PaintSettings = InSettings;
     PaintSettings.RadiusUV = FMath::Clamp(PaintSettings.RadiusUV, 0.0001f, 0.5f);
     PaintSettings.Strength = FMath::Clamp(PaintSettings.Strength, 0.0f, 1.0f);
@@ -509,6 +534,16 @@ void SWetClothingTransparencyPreviewViewport::SetAutoBakePreviewResult(
 
 void SWetClothingTransparencyPreviewViewport::ClearAutoBakePreviewResult()
 {
+    if (!AutoBakePreviewResult.IsValid() &&
+        WrinkleSuppressionBuffer.IsEmpty() &&
+        OuterEdgeFeatherBuffer.IsEmpty() &&
+        ManualPremultipliedBuffer.IsEmpty() &&
+        ManualWeightBuffer.IsEmpty() &&
+        TransparencyPreviewTexture == nullptr)
+    {
+        return;
+    }
+
     AutoBakePreviewResult.Reset();
     WrinkleSuppressionBuffer.Reset();
     OuterEdgeFeatherBuffer.Reset();
@@ -646,11 +681,19 @@ void SWetClothingTransparencyPreviewViewport::BuildFullBlueprintPreview()
     PreviewActor->GetComponents<USkeletalMeshComponent>(MeshComponents);
     for (USkeletalMeshComponent* MeshComponent : MeshComponents)
     {
-        if (MeshComponent != nullptr)
+        if (MeshComponent == nullptr)
+        {
+            continue;
+        }
+
+        MeshComponent->SetForcedLOD(ForceRenderLOD0);
+        if (MeshComponent->GetSkeletalMeshAsset() == Asset->GetDWCSkeletalMesh())
         {
             ConfigurePreviewMeshComponent(MeshComponent);
         }
     }
+
+    PreviewMeshComponents.Append(MeshComponents);
 
     if (USkeletalMeshComponent* FocusMesh = FindFocusMeshComponent())
     {
@@ -667,7 +710,7 @@ void SWetClothingTransparencyPreviewViewport::ConfigurePreviewMeshComponent(USke
     }
 
     PreviewMeshComponents.AddUnique(MeshComponent);
-    MeshComponent->SetForcedLOD(1);
+    MeshComponent->SetForcedLOD(ForceRenderLOD0);
     ApplyPreviewMaterials(MeshComponent);
     ApplyWetnessPreview(MeshComponent);
     MeshComponent->MarkRenderStateDirty();
@@ -675,7 +718,7 @@ void SWetClothingTransparencyPreviewViewport::ConfigurePreviewMeshComponent(USke
 
 void SWetClothingTransparencyPreviewViewport::ApplyPreviewMaterials(USkeletalMeshComponent* MeshComponent)
 {
-    const UWetClothingAsset* Asset = WetClothingAsset.Get();
+    UWetClothingAsset* Asset = WetClothingAsset.Get();
     if (Asset == nullptr || MeshComponent == nullptr)
     {
         return;
@@ -709,6 +752,12 @@ void SWetClothingTransparencyPreviewViewport::ApplyPreviewMaterials(USkeletalMes
         {
             if (UMaterialInstanceDynamic* PreviewMID = GetOrBuildSelectedPreviewMID(CpuMaterial))
             {
+                DWCEditorPreviewSlotUtils::ApplyRenderProfileResources(
+                    Asset,
+                    SelectedMaterialSlotIndex,
+                    MaterialCount,
+                    PreviewMID,
+                    PreviewScene.IsValid() ? PreviewScene->GetWorld() : nullptr);
                 MeshComponent->SetMaterial(SelectedMaterialSlotIndex, PreviewMID);
                 PreviewMIDs[SelectedMaterialSlotIndex] = PreviewMID;
                 TransparencyPreviewBaseMaterials[SelectedMaterialSlotIndex] = CachedPreviewBaseMaterial;

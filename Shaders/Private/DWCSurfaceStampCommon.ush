@@ -1,0 +1,112 @@
+#ifndef DWC_SURFACE_STAMP_COMMON
+#define DWC_SURFACE_STAMP_COMMON
+
+bool DWC_IsValidLookup(uint4 Lookup)
+{
+    return Lookup.w != 0u && Lookup.x != 0xffffffffu;
+}
+
+bool DWC_ResolveStampLookup(
+    float2 StampUV,
+    int2 TextureSize,
+    StructuredBuffer<uint4> TexelLookup,
+    out uint4 OutLookup)
+{
+    const int2 Center = clamp(int2(StampUV * float2(TextureSize)), int2(0, 0), TextureSize - 1);
+    [unroll]
+    for (int Radius = 0; Radius <= 1; ++Radius)
+    {
+        [unroll]
+        for (int Y = -1; Y <= 1; ++Y)
+        {
+            [unroll]
+            for (int X = -1; X <= 1; ++X)
+            {
+                if (Radius == 0 && (X != 0 || Y != 0)) continue;
+                if (Radius == 1 && X == 0 && Y == 0) continue;
+                const int2 P = clamp(Center + int2(X, Y), int2(0, 0), TextureSize - 1);
+                const uint4 Lookup = TexelLookup[P.y * TextureSize.x + P.x];
+                if (DWC_IsValidLookup(Lookup))
+                {
+                    OutLookup = Lookup;
+                    return true;
+                }
+            }
+        }
+    }
+    OutLookup = uint4(0xffffffffu, 0u, 0u, 0u);
+    return false;
+}
+
+float DWC_StampBrush(float2 LocalPosition)
+{
+    const float Radius = length(LocalPosition);
+    return 1.0 - smoothstep(0.82, 1.0, Radius);
+}
+
+float DWC_VisibleSurfaceAmount(float4 State, float CurrentTimeSeconds)
+{
+    if (State.b <= 0.0)
+    {
+        return 0.0;
+    }
+
+    const float Age = max(CurrentTimeSeconds - State.g, 0.0);
+    const float Fade = 1.0 - smoothstep(0.0, max(State.b, 0.01), Age);
+    return State.r * Fade;
+}
+
+void DWC_WriteDropletStamp(
+    int2 Pixel,
+    float Brush,
+    float StampAmount,
+    float StampTimeSeconds,
+    float StampLifetimeSeconds,
+    RWTexture2D<float4> TargetSurface)
+{
+    if (Brush <= 0.0) return;
+
+    const float4 Existing = TargetSurface[Pixel];
+    const float ExistingVisibleAmount =
+        DWC_VisibleSurfaceAmount(Existing, StampTimeSeconds);
+    const float NewAmount = saturate(max(ExistingVisibleAmount, Brush * StampAmount));
+
+    // Droplet A is reserved. Keep 1 for compatibility and debugging.
+    TargetSurface[Pixel] = float4(
+        NewAmount,
+        StampTimeSeconds,
+        StampLifetimeSeconds,
+        1.0);
+}
+
+void DWC_WriteRivuletStamp(
+    int2 Pixel,
+    float Brush,
+    float StampAmount,
+    float StampTimeSeconds,
+    float StampLifetimeSeconds,
+    float EncodedFlowAngle,
+    RWTexture2D<float4> TargetSurface)
+{
+    if (Brush <= 0.0) return;
+
+    const float NewVisibleAmount = saturate(Brush * StampAmount);
+    const float4 Existing = TargetSurface[Pixel];
+    const float ExistingVisibleAmount =
+        DWC_VisibleSurfaceAmount(Existing, StampTimeSeconds);
+
+    // One channel cannot hold a circular average safely. Keep the direction of
+    // the dominant visible rivulet instead of averaging encoded angles.
+    if (NewVisibleAmount < ExistingVisibleAmount)
+    {
+        return;
+    }
+
+    TargetSurface[Pixel] = float4(
+        NewVisibleAmount,
+        StampTimeSeconds,
+        StampLifetimeSeconds,
+        saturate(EncodedFlowAngle));
+}
+
+#endif

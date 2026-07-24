@@ -68,6 +68,16 @@ struct DWC_API FDWCGPUBakedTriangle
     UPROPERTY(VisibleAnywhere, Category = "GPU Wet Map")
     FVector2D UV2 = FVector2D::ZeroVector;
 
+    /**
+     * Row-major 2x2 transform from DWCDataUV direction to
+     * SurfaceWaterNormalUV direction:
+     *
+     * | X Y |
+     * | Z W |
+     */
+    UPROPERTY(VisibleAnywhere, Category = "GPU Wet Map")
+    FVector4 DataToSurfaceWaterNormalUV = FVector4(1.0, 0.0, 0.0, 1.0);
+
     UPROPERTY(VisibleAnywhere, Category = "GPU Wet Map")
     float RestSurfaceArea = 0.0f;
 
@@ -165,9 +175,9 @@ struct DWC_API FDWCGPULODBakeData
 {
     GENERATED_BODY()
 
-    static constexpr int32 CurrentRuntimeDataVersion = 2;
-    static constexpr int32 CurrentMapBakeVersion = 3;
-    static constexpr int32 CurrentBulkDataVersion = 2;
+    static constexpr int32 CurrentRuntimeDataVersion = 4;
+    static constexpr int32 CurrentMapBakeVersion = 5;
+    static constexpr int32 CurrentBulkDataVersion = 4;
 
     UPROPERTY(VisibleAnywhere, Category = "GPU Runtime Data")
     int32 RuntimeDataVersion = 0;

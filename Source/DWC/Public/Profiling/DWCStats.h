@@ -19,6 +19,8 @@ struct DWC_API FDWCStatsSnapshot
     uint32 SharedSkinningStaticDataCount = 0;
     uint32 SharedLODVertexStaticDataCount = 0;
     uint32 SharedLODVertexColorTransferMapCount = 0;
+    uint32 SharedGPUStaticResourceCount = 0;
+    uint32 RuntimeRenderProfileCount = 0;
     uint32 AbsorbedSimulationStateCount = 0;
     uint32 SurfaceWaterStateCount = 0;
     uint32 WrinkleMaterialBindingCount = 0;
@@ -44,10 +46,15 @@ struct DWC_API FDWCStatsSnapshot
     uint64 PendingLODVertexColorDirtyCPUBytes = 0;
     uint64 SurfaceWaterCPUBytes = 0;
     uint64 GPUBackendCPUBytes = 0;
+    uint64 GPUResourceSubsystemCPUBytes = 0;
     uint64 ReceiverMetadataCPUBytes = 0;
 
-    uint64 SurfaceWaterGPUBytes = 0;
     uint64 GPUBackendGPUBytes = 0;
+    uint64 SharedGPUStaticBufferGPUBytes = 0;
+    uint64 SharedGPURenderProfileLUTGPUBytes = 0;
+    uint64 SharedGPUProfileIDRemapGPUBytes = 0;
+    uint64 SharedGPUSurfaceNormalArrayGPUBytes = 0;
+    uint64 SharedGPUResourceGPUBytes = 0;
     uint64 WrinkleTextureGPUBytes = 0;
     uint64 TransparencyTextureGPUBytes = 0;
 
@@ -64,13 +71,14 @@ struct DWC_API FDWCStatsSnapshot
                PendingLODVertexColorDirtyCPUBytes +
                SurfaceWaterCPUBytes +
                GPUBackendCPUBytes +
+               GPUResourceSubsystemCPUBytes +
                ReceiverMetadataCPUBytes;
     }
 
     uint64 GetTrackedGPUBytes() const
     {
-        return SurfaceWaterGPUBytes +
-               GPUBackendGPUBytes +
+        return GPUBackendGPUBytes +
+               SharedGPUResourceGPUBytes +
                WrinkleTextureGPUBytes +
                TransparencyTextureGPUBytes;
     }
@@ -81,8 +89,6 @@ struct DWC_API FDWCWorkloadEventTotals
     uint64 SurfaceWaterStampsQueued = 0;
     uint64 SurfaceWaterStampsSubmitted = 0;
     uint64 SurfaceWaterGPUDispatches = 0;
-    uint64 SurfaceWaterPlacementSamples = 0;
-    uint64 SurfaceWaterPlacementTimeMicroseconds = 0;
     uint64 CPUSkinningCompleted = 0;
     uint64 CPUSkinningVerticesProcessed = 0;
     uint64 LODTransferCompleted = 0;
@@ -104,7 +110,6 @@ struct DWC_API FDWCWorkloadStatsSnapshot
     uint32 SurfaceWaterStampsQueuedPerSecond = 0;
     uint32 SurfaceWaterStampsSubmittedPerSecond = 0;
     uint32 SurfaceWaterGPUDispatchesPerSecond = 0;
-    float SurfaceWaterPlacementAverageMilliseconds = 0.0f;
     uint32 SurfaceWaterMaxPendingStamps = 0;
     uint32 SurfaceWaterPendingStamps = 0;
 
@@ -139,7 +144,6 @@ public:
     static void RecordSurfaceWaterStampQueued(uint32 PendingStampCount);
     static void RecordSurfaceWaterStampsSubmitted(uint32 StampCount);
     static void RecordSurfaceWaterGPUDispatch();
-    static void RecordSurfaceWaterPlacementTime(double ElapsedMilliseconds);
     static void RecordCPUSkinningCompleted(uint32 VertexCount);
     static void RecordLODTransferCompleted(uint32 DirtyVertexCount);
     static void RecordWetContactsReceived(uint32 ContactCount);
@@ -156,7 +160,6 @@ public:
     static void RecordSurfaceWaterStampQueued(uint32) {}
     static void RecordSurfaceWaterStampsSubmitted(uint32) {}
     static void RecordSurfaceWaterGPUDispatch() {}
-    static void RecordSurfaceWaterPlacementTime(double) {}
     static void RecordCPUSkinningCompleted(uint32) {}
     static void RecordLODTransferCompleted(uint32) {}
     static void RecordWetContactsReceived(uint32) {}
@@ -193,6 +196,8 @@ DECLARE_DWORD_ACCUMULATOR_STAT_EXTERN(TEXT("Shared Runtime Data"), STAT_DWC_Shar
 DECLARE_DWORD_ACCUMULATOR_STAT_EXTERN(TEXT("Shared Skinning Data"), STAT_DWC_SharedSkinningDataCount, STATGROUP_DWCInstances, DWC_API);
 DECLARE_DWORD_ACCUMULATOR_STAT_EXTERN(TEXT("Shared LOD Static Data"), STAT_DWC_SharedLODStaticDataCount, STATGROUP_DWCInstances, DWC_API);
 DECLARE_DWORD_ACCUMULATOR_STAT_EXTERN(TEXT("Shared LOD Transfer Maps"), STAT_DWC_SharedLODTransferMapCount, STATGROUP_DWCInstances, DWC_API);
+DECLARE_DWORD_ACCUMULATOR_STAT_EXTERN(TEXT("Shared GPU Resource Sets"), STAT_DWC_SharedGPUStaticResourceCount, STATGROUP_DWCInstances, DWC_API);
+DECLARE_DWORD_ACCUMULATOR_STAT_EXTERN(TEXT("Runtime Render Profiles"), STAT_DWC_RuntimeRenderProfileCount, STATGROUP_DWCInstances, DWC_API);
 DECLARE_DWORD_ACCUMULATOR_STAT_EXTERN(TEXT("Absorbed States"), STAT_DWC_AbsorbedStateCount, STATGROUP_DWCInstances, DWC_API);
 DECLARE_DWORD_ACCUMULATOR_STAT_EXTERN(TEXT("Surface Water States"), STAT_DWC_SurfaceWaterStateCount, STATGROUP_DWCInstances, DWC_API);
 DECLARE_DWORD_ACCUMULATOR_STAT_EXTERN(TEXT("Wrinkle Material Bindings"), STAT_DWC_WrinkleMaterialBindingCount, STATGROUP_DWCInstances, DWC_API);
@@ -216,20 +221,74 @@ DECLARE_MEMORY_STAT_POOL_EXTERN(TEXT("Render Stages"), STAT_DWC_RenderStageCPU, 
 DECLARE_MEMORY_STAT_POOL_EXTERN(TEXT("LOD Vertex Color Caches"), STAT_DWC_LODVertexColorCacheCPU, STATGROUP_DWCCPUMemory, FPlatformMemory::MCR_Physical, DWC_API);
 DECLARE_MEMORY_STAT_POOL_EXTERN(TEXT("Pending LOD Dirty Vertices"), STAT_DWC_PendingLODDirtyCPU, STATGROUP_DWCCPUMemory, FPlatformMemory::MCR_Physical, DWC_API);
 DECLARE_MEMORY_STAT_POOL_EXTERN(TEXT("Surface Water"), STAT_DWC_SurfaceWaterCPU, STATGROUP_DWCCPUMemory, FPlatformMemory::MCR_Physical, DWC_API);
-DECLARE_MEMORY_STAT_POOL_EXTERN(TEXT("GPU Backends"), STAT_DWC_GPUBackendCPU, STATGROUP_DWCCPUMemory, FPlatformMemory::MCR_Physical, DWC_API);
+DECLARE_MEMORY_STAT_POOL_EXTERN(TEXT("GPU Backend Instances"), STAT_DWC_GPUBackendCPU, STATGROUP_DWCCPUMemory, FPlatformMemory::MCR_Physical, DWC_API);
+DECLARE_MEMORY_STAT_POOL_EXTERN(TEXT("GPU Resource Subsystem"), STAT_DWC_GPUResourceSubsystemCPU, STATGROUP_DWCCPUMemory, FPlatformMemory::MCR_Physical, DWC_API);
 DECLARE_MEMORY_STAT_POOL_EXTERN(TEXT("Receiver Metadata"), STAT_DWC_ReceiverMetadataCPU, STATGROUP_DWCCPUMemory, FPlatformMemory::MCR_Physical, DWC_API);
-DECLARE_MEMORY_STAT_POOL_EXTERN(TEXT("Total Tracked"), STAT_DWC_TotalTrackedCPU, STATGROUP_DWCCPUMemory, FPlatformMemory::MCR_Physical, DWC_API);
 
-DECLARE_MEMORY_STAT_POOL_EXTERN(TEXT("Surface Water"), STAT_DWC_SurfaceWaterGPU, STATGROUP_DWCGPUMemory, FPlatformMemory::MCR_GPU, DWC_API);
-DECLARE_MEMORY_STAT_POOL_EXTERN(TEXT("Wetness Backends"), STAT_DWC_GPUBackendGPU, STATGROUP_DWCGPUMemory, FPlatformMemory::MCR_GPU, DWC_API);
-DECLARE_MEMORY_STAT_POOL_EXTERN(TEXT("Wrinkle Textures"), STAT_DWC_WrinkleTextureGPU, STATGROUP_DWCGPUMemory, FPlatformMemory::MCR_GPU, DWC_API);
-DECLARE_MEMORY_STAT_POOL_EXTERN(TEXT("Transparency Textures"), STAT_DWC_TransparencyTextureGPU, STATGROUP_DWCGPUMemory, FPlatformMemory::MCR_GPU, DWC_API);
+DECLARE_MEMORY_STAT_POOL_EXTERN(TEXT("Total Tracked"), STAT_DWC_TotalTrackedCPU, STATGROUP_DWCCPUMemory, FPlatformMemory::MCR_Physical, DWC_API);
+DECLARE_MEMORY_STAT_POOL_EXTERN(
+    TEXT("All Shared Resources / Global"),
+    STAT_DWC_SharedGPUResourceGPU,
+    STATGROUP_DWCGPUMemory,
+    FPlatformMemory::MCR_GPU,
+    DWC_API);
+
+DECLARE_MEMORY_STAT_POOL_EXTERN(
+    TEXT("Baked GPU Simulation Data / Global"),
+    STAT_DWC_SharedGPUStaticBufferGPU,
+    STATGROUP_DWCGPUMemory,
+    FPlatformMemory::MCR_GPU,
+    DWC_API);
+
+DECLARE_MEMORY_STAT_POOL_EXTERN(
+    TEXT("Profile Parameters LUT / Global"),
+    STAT_DWC_SharedGPURenderProfileLUTGPU,
+    STATGROUP_DWCGPUMemory,
+    FPlatformMemory::MCR_GPU,
+    DWC_API);
+
+DECLARE_MEMORY_STAT_POOL_EXTERN(
+    TEXT("Profile ID + Remap / Global"),
+    STAT_DWC_SharedGPUProfileIDRemapGPU,
+    STATGROUP_DWCGPUMemory,
+    FPlatformMemory::MCR_GPU,
+    DWC_API);
+
+DECLARE_MEMORY_STAT_POOL_EXTERN(
+    TEXT("Surface Water Normal Texture Arrays / Global"),
+    STAT_DWC_SharedGPUSurfaceNormalArrayGPU,
+    STATGROUP_DWCGPUMemory,
+    FPlatformMemory::MCR_GPU,
+    DWC_API);
+
+DECLARE_MEMORY_STAT_POOL_EXTERN(
+    TEXT("Wrinkle Textures / Per WCA"),
+    STAT_DWC_WrinkleTextureGPU,
+    STATGROUP_DWCGPUMemory,
+    FPlatformMemory::MCR_GPU,
+    DWC_API);
+
+DECLARE_MEMORY_STAT_POOL_EXTERN(
+    TEXT("Transparency Textures / Per WCA"),
+    STAT_DWC_TransparencyTextureGPU,
+    STATGROUP_DWCGPUMemory,
+    FPlatformMemory::MCR_GPU,
+    DWC_API);
+
+DECLARE_MEMORY_STAT_POOL_EXTERN(
+    TEXT("GPU Simulation RTs / Per Receiver"),
+    STAT_DWC_GPUBackendGPU,
+    STATGROUP_DWCGPUMemory,
+    FPlatformMemory::MCR_GPU,
+    DWC_API);
+
+
+
 DECLARE_MEMORY_STAT_POOL_EXTERN(TEXT("Total Tracked"), STAT_DWC_TotalTrackedGPU, STATGROUP_DWCGPUMemory, FPlatformMemory::MCR_GPU, DWC_API);
 
 DECLARE_DWORD_ACCUMULATOR_STAT_EXTERN(TEXT("Surface Water - Stamps Queued/s"), STAT_DWC_SurfaceWaterStampsQueuedRate, STATGROUP_DWCWorkload, DWC_API);
 DECLARE_DWORD_ACCUMULATOR_STAT_EXTERN(TEXT("Surface Water - Stamps Submitted/s"), STAT_DWC_SurfaceWaterStampsSubmittedRate, STATGROUP_DWCWorkload, DWC_API);
 DECLARE_DWORD_ACCUMULATOR_STAT_EXTERN(TEXT("Surface Water - GPU Dispatches/s"), STAT_DWC_SurfaceWaterGPUDispatchesRate, STATGROUP_DWCWorkload, DWC_API);
-DECLARE_FLOAT_ACCUMULATOR_STAT_EXTERN(TEXT("Surface Water - Placement Avg (ms)"), STAT_DWC_SurfaceWaterPlacementAverageMilliseconds, STATGROUP_DWCWorkload, DWC_API);
 DECLARE_DWORD_ACCUMULATOR_STAT_EXTERN(TEXT("Surface Water - Max Pending Stamps (1s)"), STAT_DWC_SurfaceWaterMaxPendingStamps, STATGROUP_DWCWorkload, DWC_API);
 DECLARE_DWORD_ACCUMULATOR_STAT_EXTERN(TEXT("Surface Water - Pending Stamps"), STAT_DWC_SurfaceWaterPendingStamps, STATGROUP_DWCWorkload, DWC_API);
 

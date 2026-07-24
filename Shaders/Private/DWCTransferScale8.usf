@@ -142,12 +142,24 @@ float RawEdgeFraction(
     float4 Metric = TriangleMetric[TriangleID];
 
     if (!all(isfinite(Profile.xyz)) ||
-        !all(isfinite(Flow.xyz)) ||
-        !all(isfinite(Metric.xyz)) ||
-        Profile.w <= 0.0 ||
-        Metric.w <= 0.0)
+        Profile.w <= 0.0)
     {
         return 0.0;
+    }
+
+    if (!all(isfinite(Flow.xyz)) ||
+        Flow.z <= 0.0 ||
+        Flow.w <= 0.0)
+    {
+        Flow = float4(0.0, 0.0, 1.0, 1.0);
+    }
+
+    if (!all(isfinite(Metric.xyz)) ||
+        Metric.x <= 0.0 ||
+        Metric.z <= 0.0 ||
+        Metric.w <= 0.0)
+    {
+        Metric = float4(1.0, 0.0, 1.0, 1.0);
     }
 
     const float2 SafeTextureSize =

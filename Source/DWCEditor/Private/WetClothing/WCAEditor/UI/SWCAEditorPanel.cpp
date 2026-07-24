@@ -4,7 +4,7 @@
 #include "IDetailsView.h"
 #include "Styling/AppStyle.h"
 #include "WetClothing/Modes/Part/Editor/SWetClothingPartEditorPanel.h"
-#include "WetClothing/DerivedAssets/Textures/WetnessProfile/WetClothingWetnessProfileMapBakeService.h"
+#include "WetClothing/DerivedAssets/Textures/WetnessProfile/WetClothingRenderProfileBakeService.h"
 #include "WetClothing/Modes/Transparency/Editor/SWetClothingTransparencyBakePanel.h"
 #include "WetClothing/DerivedAssets/Textures/Transparency/DWCTransparencyAssetBakeService.h"
 #include "WetClothing/DerivedAssets/Materials/WCAMaterialGenerator.h"
@@ -298,17 +298,7 @@ void SWCAEditorPanel::RefreshFromAsset(const bool bRebuildActiveModePreview)
     switch (ActiveMode)
     {
     case EWCAEditorMode::PartEdit:
-        if (PartEditorPanel.IsValid())
-        {
-            if (bRebuildActiveModePreview)
-            {
-                PartEditorPanel->RefreshFromAsset();
-            }
-            else
-            {
-                PartEditorPanel->RefreshFromAssetLightweight();
-            }
-        }
+        if (PartEditorPanel.IsValid()) PartEditorPanel->RefreshFromAsset();
         break;
     case EWCAEditorMode::WrinkleEdit:
         if (WrinkleEditorPanel.IsValid())
@@ -394,12 +384,12 @@ FWCAEditorIssueStatus SWCAEditorPanel::CollectIssueStatus(
     }
 
     const bool bCPURuntimeSavePending = Asset->IsBakeOutputSavePending(DWCBakeOutput::CPURuntimeData);
-    if ((Setup.bBuildCPUVertexSimulationData || Asset->HasCPURuntimeDataPayloadMetadata()) &&
+    if ((Setup.bBuildCPUVertexSimulationData || Asset->HasCPURuntimeDataPayload()) &&
         State.CPURuntimeData != EDWCBakeStatus::Disabled &&
         (!DWCBuildStatus::IsUsable(State.CPURuntimeData) || bCPURuntimeSavePending))
     {
         Result.bRuntimeIssue = true;
-        const bool bHasPayload = Asset->HasCPURuntimeDataPayloadMetadata();
+        const bool bHasPayload = Asset->HasCPURuntimeDataPayload();
         const bool bWasEverGenerated = Asset->HasGeneratedBakeOutput(DWCBakeOutput::CPURuntimeData);
         const bool bWasEverSaved = Asset->HasSavedBakeOutput(DWCBakeOutput::CPURuntimeData);
         RaiseIssueSeverity(Result, GetRuntimeSeverity(State.CPURuntimeData, bHasPayload || bWasEverGenerated || bWasEverSaved));
@@ -414,12 +404,12 @@ FWCAEditorIssueStatus SWCAEditorPanel::CollectIssueStatus(
             State.LastFailure));
     }
     const bool bGPURuntimeSavePending = Asset->IsBakeOutputSavePending(DWCBakeOutput::GPURuntimeData);
-    if ((Setup.bBuildGPUWetnessMapSimulationData || Asset->HasGPURuntimeDataPayloadMetadata()) &&
+    if ((Setup.bBuildGPUWetnessMapSimulationData || Asset->HasGPURuntimeDataPayload()) &&
         State.GPURuntimeData != EDWCBakeStatus::Disabled &&
         (!DWCBuildStatus::IsUsable(State.GPURuntimeData) || bGPURuntimeSavePending))
     {
         Result.bRuntimeIssue = true;
-        const bool bHasPayload = Asset->HasGPURuntimeDataPayloadMetadata();
+        const bool bHasPayload = Asset->HasGPURuntimeDataPayload();
         const bool bWasEverGenerated = Asset->HasGeneratedBakeOutput(DWCBakeOutput::GPURuntimeData);
         const bool bWasEverSaved = Asset->HasSavedBakeOutput(DWCBakeOutput::GPURuntimeData);
         RaiseIssueSeverity(Result, GetRuntimeSeverity(State.GPURuntimeData, bHasPayload || bWasEverGenerated || bWasEverSaved));
@@ -435,14 +425,14 @@ FWCAEditorIssueStatus SWCAEditorPanel::CollectIssueStatus(
     }
 
     const bool bGPUMapSavePending = Asset->IsBakeOutputSavePending(DWCBakeOutput::GPUMaps);
-    if ((Setup.bBuildGPUWetnessMapSimulationData || Asset->HasGPUMapDataPayloadMetadata()) &&
+    if ((Setup.bBuildGPUWetnessMapSimulationData || Asset->HasGPUMapDataPayload()) &&
         State.GPUMaps != EDWCBakeStatus::Disabled &&
         (!DWCBuildStatus::IsUsable(State.GPUMaps) || bGPUMapSavePending))
     {
         Result.bMapIssue = true;
         RaiseIssueSeverity(Result, GetSeverityForStatus(State.GPUMaps));
         const bool bWasEverGenerated = Asset->HasGeneratedBakeOutput(DWCBakeOutput::GPUMaps);
-        const bool bWasEverSaved = Asset->HasGPUMapDataPayloadMetadata() || Asset->HasSavedBakeOutput(DWCBakeOutput::GPUMaps);
+        const bool bWasEverSaved = Asset->HasGPUMapDataPayload() || Asset->HasSavedBakeOutput(DWCBakeOutput::GPUMaps);
         Result.MapMessages.Add(BuildMapDataMessage(
             TEXT("GPU Simulation Maps"),
             State.GPUMaps,
@@ -569,20 +559,20 @@ bool SWCAEditorPanel::HasPendingVisualBakeTasks(FString* OutSummary) const
 {
     TArray<FString> PendingSections;
     FString PartSummary;
-    if (FWetClothingWetnessProfileMapBakeService::HasPendingVisualBakeTasks(WetClothingAsset.Get(), &PartSummary))
+    if (FWetClothingRenderProfileBakeService::HasPendingVisualBakeTasks(WetClothingAsset.Get(), &PartSummary))
     {
         PendingSections.Add(PartSummary);
     }
     if (OutSummary)
     {
-        *OutSummary = PendingSections.IsEmpty() ? TEXT("Visual maps are up to date.") : FString::Join(PendingSections, TEXT("\n\n"));
+        *OutSummary = PendingSections.IsEmpty() ? TEXT("Render profile data is up to date.") : FString::Join(PendingSections, TEXT("\n\n"));
     }
     return !PendingSections.IsEmpty();
 }
 
 bool SWCAEditorPanel::BakeWetVisualAssets(FString& OutSummary, bool* OutHadWarnings)
 {
-    return FWetClothingWetnessProfileMapBakeService::BakeWetnessProfileMapsAndUpdateMaterials(WetClothingAsset.Get(), OutSummary, OutHadWarnings);
+    return FWetClothingRenderProfileBakeService::BakeRenderProfileDataAndUpdateMaterials(WetClothingAsset.Get(), OutSummary, OutHadWarnings);
 }
 
 bool SWCAEditorPanel::BakePendingVisualAssets(FString& OutSummary, bool* OutHadWarnings)
@@ -597,18 +587,18 @@ bool SWCAEditorPanel::BakePendingVisualAssets(FString& OutSummary, bool* OutHadW
     bool bHadWarnings = false;
 
     FString PartPendingSummary;
-    if (FWetClothingWetnessProfileMapBakeService::HasPendingVisualBakeTasks(WetClothingAsset.Get(), &PartPendingSummary))
+    if (FWetClothingRenderProfileBakeService::HasPendingVisualBakeTasks(WetClothingAsset.Get(), &PartPendingSummary))
     {
         FString PartBakeSummary;
         bool bPartWarnings = false;
-        if (FWetClothingWetnessProfileMapBakeService::BakeWetnessProfileMapsAndUpdateMaterials(WetClothingAsset.Get(), PartBakeSummary, &bPartWarnings))
+        if (FWetClothingRenderProfileBakeService::BakeRenderProfileDataAndUpdateMaterials(WetClothingAsset.Get(), PartBakeSummary, &bPartWarnings))
         {
             Sections.Add(PartBakeSummary);
             bHadWarnings |= bPartWarnings;
         }
         else
         {
-            Failures.Add(FString::Printf(TEXT("Wetness Profile Maps: %s"), *PartBakeSummary));
+            Failures.Add(FString::Printf(TEXT("Render Profile Data: %s"), *PartBakeSummary));
         }
     }
 
@@ -622,7 +612,7 @@ bool SWCAEditorPanel::BakePendingVisualAssets(FString& OutSummary, bool* OutHadW
         return false;
     }
 
-    OutSummary = Sections.IsEmpty() ? TEXT("Visual maps are up to date.") : FString::Join(Sections, TEXT("\n\n"));
+    OutSummary = Sections.IsEmpty() ? TEXT("Render profile data is up to date.") : FString::Join(Sections, TEXT("\n\n"));
     if (OutHadWarnings != nullptr)
     {
         *OutHadWarnings = bHadWarnings;
@@ -651,7 +641,7 @@ bool SWCAEditorPanel::SaveTransparencySetupAssets() const
 bool SWCAEditorPanel::SaveBakedVisualAssets() const
 {
     bool bSaved = true;
-    bSaved &= FWetClothingWetnessProfileMapBakeService::SaveBakedWetnessAssets(WetClothingAsset.Get());
+    bSaved &= FWetClothingRenderProfileBakeService::SaveBakedRenderProfileAssets(WetClothingAsset.Get());
     bSaved &= FDWCTransparencyAssetBakeService::SaveTransparencySetupAssets(WetClothingAsset.Get());
     return bSaved;
 }

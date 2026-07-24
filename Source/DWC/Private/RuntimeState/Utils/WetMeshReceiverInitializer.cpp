@@ -12,7 +12,9 @@
 #include "WetInputSystem/Sampling/WetClothingMeshSampler.h"
 #include "WetRendering/WetRenderStage.h"
 #include "WetSimulation/AbsorbedWetness/AbsorbedWetnessSimulationState.h"
-#include "WetSimulation/SurfaceWater/SurfaceWaterSimulationState.h"
+#include "GPU/DWCSurfaceWaterSimulationState.h"
+#include "GPU/DWCGPUBackend.h"
+#include "Modules/ModuleManager.h"
 #include "Utility/DWCLog.h"
 
 namespace
@@ -35,32 +37,6 @@ namespace
         return Mode == EDWCSimulationMode::WetnessMapGPU;
     }
 
-    bool HasEquivalentSurfacePresentation(
-        const FSurfaceWaterProfileParameters& A,
-        const FSurfaceWaterProfileParameters& B)
-    {
-        return FMath::IsNearlyEqual(A.MaterialTimeUpdateInterval, B.MaterialTimeUpdateInterval) &&
-               FMath::IsNearlyEqual(A.NormalStrength, B.NormalStrength) &&
-               FMath::IsNearlyEqual(A.SurfaceRoughness, B.SurfaceRoughness) &&
-               FMath::IsNearlyEqual(A.FlowTiling, B.FlowTiling) &&
-               FMath::IsNearlyEqual(A.FlowPanningX, B.FlowPanningX) &&
-               FMath::IsNearlyEqual(A.FlowPanningY, B.FlowPanningY) &&
-               FMath::IsNearlyEqual(A.FlowNormalStrength, B.FlowNormalStrength) &&
-               FMath::IsNearlyEqual(A.FlowRoughness, B.FlowRoughness) &&
-               FMath::IsNearlyEqual(A.FlowMaskMin, B.FlowMaskMin) &&
-               FMath::IsNearlyEqual(A.FlowMaskMax, B.FlowMaskMax) &&
-               A.FlowMaskTexture == B.FlowMaskTexture &&
-               A.FlowNormalTexture == B.FlowNormalTexture &&
-               FMath::IsNearlyEqual(A.DropletTiling, B.DropletTiling) &&
-               A.DropletPlacementMode == B.DropletPlacementMode &&
-               FMath::IsNearlyEqual(A.DropletPlacementRadiusPixels, B.DropletPlacementRadiusPixels) &&
-               FMath::IsNearlyEqual(A.SurfaceAmountThresholdMin, B.SurfaceAmountThresholdMin) &&
-               FMath::IsNearlyEqual(A.SurfaceAmountThresholdMax, B.SurfaceAmountThresholdMax) &&
-               FMath::IsNearlyEqual(A.DropletMaskMin, B.DropletMaskMin) &&
-               FMath::IsNearlyEqual(A.DropletMaskMax, B.DropletMaskMax) &&
-               A.DropletMaskTexture == B.DropletMaskTexture &&
-               A.DropletNormalTexture == B.DropletNormalTexture;
-    }
 
     void ReleaseReceiverResources(FDWCWetMeshReceiverRuntime& Receiver)
     {
@@ -70,7 +46,7 @@ namespace
             Receiver.GPUBackend.Reset();
         }
 
-        for (TPair<int32, TUniquePtr<FSurfaceWaterSimulationState>>& Pair :
+        for (TPair<int32, TUniquePtr<IDWCSurfaceWaterSimulationState>>& Pair :
              Receiver.SurfaceWaterStatesByMaterialSlot)
         {
             if (Pair.Value.IsValid())
@@ -469,10 +445,10 @@ bool FWetMeshReceiverInitializer::InitializeReceiver(
 
     const FSurfaceWaterSimulationSettings& SurfaceSimulationSettings =
         Receiver.WetClothingAsset->Authored.SurfaceWaterSettings;
-    if (SurfaceSimulationSettings.bEnabled)
+    if (SurfaceSimulationSettings.bEnabled &&
+        !IsReceiverInitializerGPUWetnessMode(Context.SimulationMode))
     {
         TSet<int32> SurfaceEnabledMaterialSlots;
-        TSet<int32> ConflictingProfileSlots;
         for (int32 VertexIndex = 0;
              VertexIndex < Receiver.SharedRuntimeData->SurfaceWaterMaterialSlotIndices.Num();
              ++VertexIndex)
@@ -495,23 +471,25 @@ bool FWetMeshReceiverInitializer::InitializeReceiver(
                 const FSurfaceWaterProfileParameters& Candidate = Profile->SurfaceWater;
                 FSurfaceWaterProfileParameters* Existing =
                     Receiver.SurfaceWaterProfilesByMaterialSlot.Find(MaterialSlotIndex);
-                if (Existing == nullptr)
+                if (Existing == nullptr ||
+                    Candidate.MaterialTimeUpdateInterval < Existing->MaterialTimeUpdateInterval)
                 {
+                    // The per-pixel presentation now comes from the render-profile LUT. This map is
+                    // retained only to resolve the fastest Surface Water material update interval.
                     Receiver.SurfaceWaterProfilesByMaterialSlot.Add(MaterialSlotIndex, Candidate);
                 }
-                else if (!HasEquivalentSurfacePresentation(*Existing, Candidate) &&
-                         !ConflictingProfileSlots.Contains(MaterialSlotIndex))
-                {
-                    ConflictingProfileSlots.Add(MaterialSlotIndex);
-                    UE_LOG(
-                        LogDWC,
-                        Warning,
-                        TEXT("DWC Surface Water: material slot %d uses multiple presentation profiles. "
-                             "The first deterministic profile is used for slot-wide rendering parameters; "
-                             "split the material slot to render different droplet styles."),
-                        MaterialSlotIndex);
-                }
             }
+        }
+
+        IDWCGPUModule* GPUModule =
+            FModuleManager::Get().LoadModulePtr<IDWCGPUModule>(TEXT("DWCGPU"));
+        if (GPUModule == nullptr)
+        {
+            UE_LOG(
+                LogDWC,
+                Warning,
+                TEXT("DynamicWetClothesComponent: DWCGPU is unavailable, so CPU surface-water render targets cannot be created for '%s'."),
+                *GetNameSafe(Context.Owner));
         }
 
         for (const int32 MaterialSlotIndex : SurfaceEnabledMaterialSlots)
@@ -523,9 +501,12 @@ bool FWetMeshReceiverInitializer::InitializeReceiver(
                 continue;
             }
 
-            TUniquePtr<FSurfaceWaterSimulationState> State =
-                MakeUnique<FSurfaceWaterSimulationState>();
-            if (State->Initialize(
+            TUniquePtr<IDWCSurfaceWaterSimulationState> State;
+            if (GPUModule != nullptr)
+            {
+                State = GPUModule->CreateSurfaceWaterSimulationState();
+            }
+            if (State.IsValid() && State->Initialize(
                     Context.Component,
                     SurfaceSimulationSettings.RenderTargetResolution))
             {
@@ -544,7 +525,7 @@ bool FWetMeshReceiverInitializer::InitializeReceiver(
         }
 
         uint64 EstimatedGpuMemoryBytes = 0;
-        for (const TPair<int32, TUniquePtr<FSurfaceWaterSimulationState>>& Pair :
+        for (const TPair<int32, TUniquePtr<IDWCSurfaceWaterSimulationState>>& Pair :
              Receiver.SurfaceWaterStatesByMaterialSlot)
         {
             if (Pair.Value.IsValid())

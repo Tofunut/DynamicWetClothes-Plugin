@@ -29,7 +29,6 @@ struct FWetWrinklePreviewMaterialBuildArgs
     UMaterialInterface* SourceMaterial = nullptr;
     int32 UVChannelIndex = INDEX_NONE;
     bool bOverrideCpuWetnessInput = false;
-    // Transparency preview reuses the CPU wetness override without injecting wrinkle overlay expressions.
     bool bBuildNormalOverlay = true;
 };
 

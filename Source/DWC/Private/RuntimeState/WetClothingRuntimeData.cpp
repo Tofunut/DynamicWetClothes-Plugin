@@ -16,12 +16,7 @@ uint64 FWetClothingRuntimeData::GetAllocatedMemoryBytes() const
     Bytes += SurfaceWaterUVs.GetAllocatedSize();
     Bytes += SurfaceWaterUVValidFlags.GetAllocatedSize();
     Bytes += SurfaceWaterMaterialSlotIndices.GetAllocatedSize();
-    Bytes += SurfaceWaterUVIslandIDs.GetAllocatedSize();
-    Bytes += SurfaceWaterUVsByUVIsland.GetAllocatedSize();
-    for (const TPair<int32, TArray<FVector2f>>& Pair : SurfaceWaterUVsByUVIsland)
-    {
-        Bytes += Pair.Value.GetAllocatedSize();
-    }
+    Bytes += SurfaceWaterFlowTriangleBindings.GetAllocatedSize();
     Bytes += BoneOptimizationCacheFallbackReason.GetAllocatedSize();
 
     Bytes += BoneOptimizationCache.PrimaryVertexCache.BoneStartOffsets.GetAllocatedSize();
@@ -46,8 +41,7 @@ void FWetClothingRuntimeData::ResetWetPartData()
     SurfaceWaterUVs.Reset();
     SurfaceWaterUVValidFlags.Reset();
     SurfaceWaterMaterialSlotIndices.Reset();
-    SurfaceWaterUVIslandIDs.Reset();
-    SurfaceWaterUVsByUVIsland.Reset();
+    SurfaceWaterFlowTriangleBindings.Reset();
 }
 
 void FWetClothingRuntimeData::ResetNeighborGraph()

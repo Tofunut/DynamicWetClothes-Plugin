@@ -9,7 +9,7 @@ class USkeletalMeshComponent;
 class FWetClothingRuntimeData;
 class FWetClothingMeshSampler;
 class FAbsorbedWetnessSimulationState;
-class FSurfaceWaterSimulationState;
+class IDWCSurfaceWaterSimulationState;
 struct FSurfaceWaterSimulationSettings;
 
 /*
@@ -31,7 +31,7 @@ struct DWC_API FWetInputStageArgs
 
     const FWetClothingRuntimeData*   RuntimeData = nullptr;
     FAbsorbedWetnessSimulationState* SimulationState = nullptr;
-    TMap<int32, TUniquePtr<FSurfaceWaterSimulationState>>* SurfaceWaterStatesByMaterialSlot = nullptr;
+    TMap<int32, TUniquePtr<IDWCSurfaceWaterSimulationState>>* SurfaceWaterStatesByMaterialSlot = nullptr;
     const FSurfaceWaterSimulationSettings* SurfaceWaterSettings = nullptr;
     FRandomStream* SurfaceWaterRandomStream = nullptr;
 

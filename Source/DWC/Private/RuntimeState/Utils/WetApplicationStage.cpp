@@ -2,11 +2,11 @@
 
 #include "Components/DynamicWetClothesComponent.h"
 #include "Engine/SkeletalMesh.h"
-#include "HAL/PlatformTime.h"
+#include "GPU/DWCGPUBackend.h"
 #include "Profiling/DWCStatsSubsystem.h"
 #include "Runtime/Engine/Classes/Components/SkeletalMeshComponent.h"
 #include "Utility/DWCLog.h"
-#include "WetSimulation/SurfaceWater/SurfaceWaterSimulationState.h"
+#include "GPU/DWCSurfaceWaterSimulationState.h"
 
 namespace
 {
@@ -20,8 +20,6 @@ namespace
         float TotalSurfaceAmount = 0.0f;
         float BestInfluence = -1.0f;
         FVector2f BestUV = FVector2f::ZeroVector;
-        int32 BestUVIslandID = INDEX_NONE;
-        TMap<int32, TArray<FVector2f>> CandidateUVsByUVIsland;
         FSurfaceWaterProfileParameters Profile;
         bool bHasProfile = false;
     };
@@ -42,12 +40,14 @@ namespace
     }
 
     bool QueueGPUSurfaceWaterStamps(
-        FDWCWetMeshReceiverRuntime&              Receiver,
+        FDWCWetMeshReceiverRuntime& Receiver,
         const TArray<FDWCResolvedSurfaceContact>& Contacts)
     {
         const UWetClothingAsset* Asset = Receiver.WetClothingAsset.Get();
-        if (Asset == nullptr || !Receiver.SharedRuntimeData.IsValid() ||
-            !Asset->Authored.SurfaceWaterSettings.bEnabled || Receiver.SurfaceWaterStatesByMaterialSlot.IsEmpty() ||
+        if (Asset == nullptr ||
+            !Receiver.GPUBackend.IsValid() ||
+            !Receiver.SharedRuntimeData.IsValid() ||
+            !Asset->Authored.SurfaceWaterSettings.bEnabled ||
             Contacts.IsEmpty())
         {
             return false;
@@ -93,133 +93,61 @@ namespace
 
             FGPUSurfaceWaterAccumulator& Accumulator = Accumulators.FindOrAdd(Contact.MaterialSlotIndex);
             Accumulator.TotalSurfaceAmount += SurfaceAmount;
-            Accumulator.CandidateUVsByUVIsland.FindOrAdd(Triangle.UVIslandID).Add(Contact.ContactUV);
             if (Contact.TriangleInfluence > Accumulator.BestInfluence)
             {
                 Accumulator.BestInfluence = Contact.TriangleInfluence;
                 Accumulator.BestUV = Contact.ContactUV;
-                Accumulator.BestUVIslandID = Triangle.UVIslandID;
                 Accumulator.Profile = SurfaceProfile;
                 Accumulator.bHasProfile = true;
             }
         }
 
-        bool bNeedsFullIslandUVs = false;
-        for (const TPair<int32, FGPUSurfaceWaterAccumulator>& Pair : Accumulators)
-        {
-            bNeedsFullIslandUVs |=
-                Pair.Value.Profile.DropletPlacementMode == ESurfaceWaterDropletPlacementMode::RadiusAroundBest ||
-                Pair.Value.Profile.DropletPlacementMode == ESurfaceWaterDropletPlacementMode::FullUVIslandRandom;
-        }
-
-        TMap<int32, TArray<FVector2f>> FullIslandUVsByMaterialSlot;
-        for (const FDWCGPUBakedTriangle& Triangle : GPUData.Triangles)
-        {
-            if (!bNeedsFullIslandUVs)
-            {
-                break;
-            }
-            const FGPUSurfaceWaterAccumulator* Accumulator = Accumulators.Find(Triangle.MaterialSlotIndex);
-            if (Accumulator == nullptr ||
-                (Accumulator->Profile.DropletPlacementMode != ESurfaceWaterDropletPlacementMode::RadiusAroundBest &&
-                 Accumulator->Profile.DropletPlacementMode != ESurfaceWaterDropletPlacementMode::FullUVIslandRandom) ||
-                Triangle.UVIslandID != Accumulator->BestUVIslandID)
-            {
-                continue;
-            }
-
-            TArray<FVector2f>& IslandUVs = FullIslandUVsByMaterialSlot.FindOrAdd(Triangle.MaterialSlotIndex);
-            IslandUVs.Add(FVector2f(Triangle.UV0));
-            IslandUVs.Add(FVector2f(Triangle.UV1));
-            IslandUVs.Add(FVector2f(Triangle.UV2));
-        }
-
-        // Droplet centers are sampled uniformly from resolved contacts on the
-        // representative UV island. Flow centers remain anchored to BestUV.
         FRandomStream& RandomStream = Receiver.SurfaceWaterRandomStream;
-        bool bAnyQueued = false;
+        TArray<FDWCSurfaceStampRequest> Requests;
+        Requests.Reserve(Accumulators.Num() * 2);
+
         for (const TPair<int32, FGPUSurfaceWaterAccumulator>& Pair : Accumulators)
         {
             const FGPUSurfaceWaterAccumulator& Accumulator = Pair.Value;
-            TUniquePtr<FSurfaceWaterSimulationState>* State =
-                Receiver.SurfaceWaterStatesByMaterialSlot.Find(Pair.Key);
-            if (!Accumulator.bHasProfile || State == nullptr || !State->IsValid())
+            if (!Accumulator.bHasProfile)
             {
                 continue;
             }
 
             const FSurfaceWaterProfileParameters& Surface = Accumulator.Profile;
-            if (RandomStream.FRand() < FMath::Clamp(Surface.DropletSpawnProbability, 0.0f, 1.0f))
+            if (Surface.bEnableDroplets &&
+                RandomStream.FRand() < FMath::Clamp(Surface.DropletSpawnProbability, 0.0f, 1.0f))
             {
-                const double PlacementStartSeconds = FPlatformTime::Seconds();
-                FVector2f DropletUV = Accumulator.BestUV;
-                const TArray<FVector2f>* CandidateUVs =
-                    Accumulator.CandidateUVsByUVIsland.Find(Accumulator.BestUVIslandID);
-                TArray<FVector2f> RadiusCandidates;
-
-                if (Surface.DropletPlacementMode == ESurfaceWaterDropletPlacementMode::RadiusAroundBest)
-                {
-                    if (const TArray<FVector2f>* IslandUVs =
-                            FullIslandUVsByMaterialSlot.Find(Pair.Key))
-                    {
-                        const int32 Resolution = FMath::Max(
-                            1,
-                            Receiver.WetClothingAsset->Authored.SurfaceWaterSettings.RenderTargetResolution);
-                        const float RadiusUV = FMath::Max(0.0f, Surface.DropletPlacementRadiusPixels) /
-                                               static_cast<float>(Resolution);
-                        const float RadiusUVSquared = RadiusUV * RadiusUV;
-                        for (const FVector2f& IslandUV : *IslandUVs)
-                        {
-                            if ((IslandUV - Accumulator.BestUV).SizeSquared() <= RadiusUVSquared)
-                            {
-                                RadiusCandidates.Add(IslandUV);
-                            }
-                        }
-                    }
-                    if (!RadiusCandidates.IsEmpty())
-                    {
-                        CandidateUVs = &RadiusCandidates;
-                    }
-                }
-                else if (Surface.DropletPlacementMode == ESurfaceWaterDropletPlacementMode::FullUVIslandRandom)
-                {
-                    if (const TArray<FVector2f>* IslandUVs =
-                            FullIslandUVsByMaterialSlot.Find(Pair.Key);
-                        IslandUVs != nullptr && !IslandUVs->IsEmpty())
-                    {
-                        CandidateUVs = IslandUVs;
-                    }
-                }
-
-                if (CandidateUVs != nullptr && !CandidateUVs->IsEmpty())
-                {
-                    DropletUV = (*CandidateUVs)[RandomStream.RandRange(0, CandidateUVs->Num() - 1)];
-                }
-                FDWCWorkloadStats::RecordSurfaceWaterPlacementTime(
-                    (FPlatformTime::Seconds() - PlacementStartSeconds) * 1000.0);
-                (*State)->QueueDropletStamp(
-                    DropletUV,
-                    Accumulator.TotalSurfaceAmount * FMath::Max(0.0f, Surface.DropletIntensityMultiplier),
-                    Surface.DropletRadiusPixels,
-                    Surface.DropletLifetimeSeconds);
-                bAnyQueued = true;
+                FDWCSurfaceStampRequest& Request = Requests.AddDefaulted_GetRef();
+                Request.Type = EDWCSurfaceStampType::Droplet;
+                Request.MaterialSlotIndex = Pair.Key;
+                Request.UV = Accumulator.BestUV;
+                Request.HalfSizePixels = FVector2f(FMath::Max(0.5f, Surface.DropletRadiusPixels));
+                Request.Amount = Accumulator.TotalSurfaceAmount *
+                    FMath::Max(0.0f, Surface.DropletIntensityMultiplier);
+                Request.LifetimeSeconds = FMath::Max(0.01f, Surface.DropletLifetimeSeconds);
             }
 
-            if (Accumulator.TotalSurfaceAmount >= FMath::Max(0.0f, Surface.MinimumFlowSurfaceAmount) &&
+            if (Surface.bEnableRivulets &&
+                Accumulator.TotalSurfaceAmount >= FMath::Max(0.0f, Surface.MinimumFlowSurfaceAmount) &&
                 RandomStream.FRand() < FMath::Clamp(Surface.FlowSpawnProbability, 0.0f, 1.0f))
             {
-                (*State)->QueueFlowStamp(
-                    Accumulator.BestUV,
-                    Accumulator.TotalSurfaceAmount * FMath::Max(0.0f, Surface.FlowIntensityMultiplier),
-                    Surface.FlowWidthPixels,
-                    Surface.FlowLengthPixels,
-                    Surface.FlowLifetimeSeconds);
-                bAnyQueued = true;
+                FDWCSurfaceStampRequest& Request = Requests.AddDefaulted_GetRef();
+                Request.Type = EDWCSurfaceStampType::Rivulet;
+                Request.MaterialSlotIndex = Pair.Key;
+                Request.UV = Accumulator.BestUV;
+                Request.HalfSizePixels = FVector2f(
+                    FMath::Max(0.5f, Surface.FlowWidthPixels * 0.5f),
+                    FMath::Max(0.5f, Surface.FlowLengthPixels * 0.5f));
+                Request.Amount = Accumulator.TotalSurfaceAmount *
+                    FMath::Max(0.0f, Surface.FlowIntensityMultiplier);
+                Request.LifetimeSeconds = FMath::Max(0.01f, Surface.FlowLifetimeSeconds);
             }
         }
 
-        return bAnyQueued;
+        return !Requests.IsEmpty() && Receiver.GPUBackend->EnqueueSurfaceStamps(Requests);
     }
+
 }
 
 FWetInputStageArgs FWetApplicationStage::MakeWetInputStageArgs(

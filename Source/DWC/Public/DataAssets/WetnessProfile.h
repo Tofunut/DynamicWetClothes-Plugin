@@ -6,14 +6,6 @@
 
 class UTexture2D;
 
-UENUM(BlueprintType)
-enum class ESurfaceWaterDropletPlacementMode : uint8
-{
-    ContactCandidates UMETA(DisplayName = "Contact Candidates"),
-    RadiusAroundBest UMETA(DisplayName = "Within Radius Around Best"),
-    FullUVIslandRandom UMETA(DisplayName = "Random Within UV Island")
-};
-
 USTRUCT(BlueprintType)
 struct DWC_API FAbsorbedWetnessProfileParameters
 {
@@ -36,7 +28,7 @@ struct DWC_API FAbsorbedWetnessProfileParameters
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Absorbed Wetness", meta = (ClampMin = "0.0", ClampMax = "100.0", UIMin = "0.0", UIMax = "100.0", Units = "Percent", DisplayName = "Dry Rate"))
     float DryRate = 10.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Absorbed Wetness", meta = (ClampMin = "0.0"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Absorbed Wetness", meta = (ClampMin = "0.0", DisplayName = "Gravity Spread Bias"))
     float GravityFlowStrength = 1.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Absorbed Wetness|Rendering", meta = (ClampMin = "0.0"))
@@ -58,6 +50,14 @@ struct DWC_API FSurfaceWaterProfileParameters
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water")
     bool bEnabled = false;
 
+    /** Enables droplet stamp generation for this profile. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet")
+    bool bEnableDroplets = true;
+
+    /** Enables rivulet stamp generation for this profile. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rivulet")
+    bool bEnableRivulets = true;
+
     /** Fraction of water rejected by absorption that is represented visually. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float SurfaceRepresentationFraction = 1.0f;
@@ -65,19 +65,13 @@ struct DWC_API FSurfaceWaterProfileParameters
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float DropletSpawnProbability = 0.5f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet")
-    ESurfaceWaterDropletPlacementMode DropletPlacementMode = ESurfaceWaterDropletPlacementMode::ContactCandidates;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet", meta = (ClampMin = "0.0", ClampMax = "4096.0", DisplayName = "Placement Radius (RT Pixels)"))
-    float DropletPlacementRadiusPixels = 32.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Flow", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rivulet", meta = (ClampMin = "0.0", ClampMax = "1.0", DisplayName = "Rivulet Spawn Probability"))
     float FlowSpawnProbability = 0.1f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet", meta = (ClampMin = "0.0"))
     float DropletIntensityMultiplier = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Flow", meta = (ClampMin = "0.0"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rivulet", meta = (ClampMin = "0.0", DisplayName = "Rivulet Intensity Multiplier"))
     float FlowIntensityMultiplier = 1.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet", meta = (ClampMin = "0.01", Units = "s"))
@@ -86,78 +80,98 @@ struct DWC_API FSurfaceWaterProfileParameters
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet", meta = (ClampMin="0.5", ClampMax="256.0", DisplayName="Base Radius (RT Pixels)"))
     float DropletRadiusPixels = 16.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Flow", meta = (ClampMin = "0.01", Units = "s"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rivulet", meta = (ClampMin = "0.01", Units = "s", DisplayName = "Rivulet Lifetime"))
     float FlowLifetimeSeconds = 7.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Flow", meta = (ClampMin = "0.0"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rivulet", meta = (ClampMin = "0.0", DisplayName = "Minimum Rivulet Surface Amount"))
     float MinimumFlowSurfaceAmount = 0.05f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Flow", meta = (ClampMin="0.5", ClampMax="256.0", DisplayName="Base Width (RT Pixels)"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rivulet", meta = (ClampMin="0.5", ClampMax="256.0", DisplayName="Rivulet Base Width (RT Pixels)"))
     float FlowWidthPixels = 8.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Flow", meta = (ClampMin="1.0", ClampMax="512.0", DisplayName="Base Length (RT Pixels)"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rivulet", meta = (ClampMin="1.0", ClampMax="512.0", DisplayName="Rivulet Base Length (RT Pixels)"))
     float FlowLengthPixels = 48.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rendering", meta=(ClampMin="0.001"))
     float MaterialTimeUpdateInterval = 1.0f / 30.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet", meta=(ClampMin="0.0", ClampMax="8.0", DisplayName="Normal Strength"))
-    float NormalStrength = 1.0f;
+    /** Shared strength applied to both droplet and rivulet normals. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rendering", meta=(ClampMin="0.0", ClampMax="8.0"))
+    float SurfaceWaterNormalStrength = 1.0f;
 
+    /** Strength of the Surface Water roughness blend toward the material-wide target roughness. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rendering", meta=(ClampMin="0.0", ClampMax="1.0"))
-    float SurfaceRoughness = 0.0f;
+    float SurfaceWaterRoughnessStrength = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Flow", meta=(ClampMin="0.01", ClampMax="100.0"))
-    float FlowTiling = 1.0f;
+    /** Minimum visible RT amount before Surface Water rendering begins. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rendering", meta=(ClampMin="0.0", ClampMax="1.0"))
+    float SurfaceVisibilityThreshold = 0.25f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Flow")
-    float FlowPanningX = 0.0f;
+    /** UV scroll speed along the decoded rivulet flow direction. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rivulet|Rendering")
+    float RivuletUVScrollSpeed = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Flow")
-    float FlowPanningY = 0.0f;
+    // Legacy mask fields are serialized only so old assets can load and resave.
+    UPROPERTY()
+    float FlowMaskMin = -1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Flow", meta=(ClampMin="0.0", ClampMax="8.0"))
-    float FlowNormalStrength = 1.0f;
+    UPROPERTY()
+    float FlowMaskMax = -1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Flow", meta=(ClampMin="0.0", ClampMax="1.0"))
-    float FlowRoughness = 0.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Flow", meta=(ClampMin="0.0", ClampMax="1.0"))
-    float FlowMaskMin = 0.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Flow", meta=(ClampMin="0.0", ClampMax="1.0"))
-    float FlowMaskMax = 1.0f;
-
-    /** Optional profile override. Null disables the mask contribution. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Flow")
+    UPROPERTY()
     TObjectPtr<UTexture2D> FlowMaskTexture = nullptr;
 
-    /** Optional profile override. Null disables the normal contribution. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Flow")
-    TObjectPtr<UTexture2D> FlowNormalTexture = nullptr;
+    /** Optional profile override. Null disables the rivulet normal contribution. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rivulet|Rendering")
+    TObjectPtr<UTexture2D> RivuletNormalTexture = nullptr;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet", meta=(ClampMin="0.01", ClampMax="100.0"))
-    float DropletTiling = 1.0f;
+    UPROPERTY()
+    float DropletMaskMin = -1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet", meta=(ClampMin="0.0", ClampMax="1.0"))
-    float SurfaceAmountThresholdMin = 0.25f;
+    UPROPERTY()
+    float DropletMaskMax = -1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet", meta=(ClampMin="0.0", ClampMax="1.0"))
-    float SurfaceAmountThresholdMax = 0.65f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet", meta=(ClampMin="0.0", ClampMax="1.0"))
-    float DropletMaskMin = 0.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet", meta=(ClampMin="0.0", ClampMax="1.0"))
-    float DropletMaskMax = 1.0f;
-
-    /** Optional profile override. Null disables the mask contribution. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet")
+    UPROPERTY()
     TObjectPtr<UTexture2D> DropletMaskTexture = nullptr;
 
     /** Optional profile override. Null disables the normal contribution. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet|Rendering")
     TObjectPtr<UTexture2D> DropletNormalTexture = nullptr;
+
+    // Legacy rendering fields kept for one compatibility cycle. PostLoad migrates
+    // these values into the consolidated rendering parameters above.
+    UPROPERTY()
+    float NormalStrength = -1.0f;
+
+    UPROPERTY()
+    float SurfaceRoughness = -1.0f;
+
+    UPROPERTY()
+    float FlowTiling = 1.0f;
+
+    UPROPERTY()
+    float FlowPanningX = 0.0f;
+
+    UPROPERTY()
+    float FlowPanningY = 0.0f;
+
+    UPROPERTY()
+    float FlowNormalStrength = -1.0f;
+
+    UPROPERTY()
+    float FlowRoughness = -1.0f;
+
+    UPROPERTY()
+    TObjectPtr<UTexture2D> FlowNormalTexture = nullptr;
+
+    UPROPERTY()
+    float DropletTiling = 1.0f;
+
+    UPROPERTY()
+    float SurfaceAmountThresholdMin = -1.0f;
+
+    UPROPERTY()
+    float SurfaceAmountThresholdMax = -1.0f;
 
 };
 
@@ -190,12 +204,8 @@ struct DWC_API FWetnessProfileParameters
     UPROPERTY()
     float WetVisualStrength = -1.0f;
 
-    // Serialized compatibility only. Transparency strength now comes from the
-    // packed Transparency Map alpha authored per WCA material slot.
-    UPROPERTY(meta = (DeprecatedProperty, DeprecationMessage = "Wetness Profile transparency strength is no longer used."))
-    float TransparencyStrength = -1.0f;
-
     bool MigrateLegacyAbsorbedWetness();
+    bool MigrateLegacySurfaceWaterRendering();
 
     float GetAbsorptionFraction() const
     {

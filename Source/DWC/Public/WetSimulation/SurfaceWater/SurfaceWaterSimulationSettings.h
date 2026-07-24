@@ -3,30 +3,6 @@
 #include "CoreMinimal.h"
 #include "SurfaceWaterSimulationSettings.generated.h"
 
-class UTexture2D;
-
-USTRUCT(BlueprintType)
-struct DWC_API FSurfaceWaterBakedFlowMapData
-{
-    GENERATED_BODY()
-    UPROPERTY(EditAnywhere, Category="Surface Water|Flow Map")
-    bool bEnabled = true;
-    UPROPERTY(VisibleAnywhere, Category="Surface Water|Flow Map")
-    bool bIsValid = false;
-    UPROPERTY(VisibleAnywhere, Category="Surface Water|Flow Map")
-    int32 SourceLODIndex = 0;
-    UPROPERTY(VisibleAnywhere, Category="Surface Water|Flow Map")
-    int32 Resolution = 512;
-    UPROPERTY(EditAnywhere, Category="Surface Water|Flow Map", meta=(ClampMin="0", ClampMax="64"))
-    int32 PaddingPixels = 4;
-    UPROPERTY(VisibleAnywhere, Category="Surface Water|Flow Map")
-    TObjectPtr<UTexture2D> FlowMap = nullptr;
-    UPROPERTY(VisibleAnywhere, Category="Surface Water|Flow Map")
-    FString BuildSignature;
-    UPROPERTY(VisibleAnywhere, Category="Surface Water|Flow Map")
-    FGuid BakeGuid;
-};
-
 USTRUCT(BlueprintType)
 struct DWC_API FSurfaceWaterMaterialSlotData
 {
@@ -38,8 +14,20 @@ struct DWC_API FSurfaceWaterMaterialSlotData
     UPROPERTY(EditAnywhere, Category="Surface Water|Material Slot")
     bool bEnabled = true;
 
-    UPROPERTY(VisibleAnywhere, Category="Surface Water|Material Slot", meta=(ShowOnlyInnerProperties))
-    FSurfaceWaterBakedFlowMapData BakedFlowMap;
+    /**
+     * Mesh UV channel used to sample repeating droplet/rivulet normal textures.
+     * INDEX_NONE falls back to the WCA Original UV channel.
+     */
+    UPROPERTY(EditAnywhere, Category="Surface Water|Material Slot|Rendering", meta=(ClampMin="-1", ClampMax="7"))
+    int32 SurfaceWaterNormalUVChannel = INDEX_NONE;
+
+    /** X/Y repeat count for the droplet normal texture. */
+    UPROPERTY(EditAnywhere, Category="Surface Water|Material Slot|Rendering", meta=(ClampMin="0.001"))
+    FVector2D DropletUVTiling = FVector2D(1.0, 1.0);
+
+    /** Across/along-flow repeat count for the rivulet normal texture. */
+    UPROPERTY(EditAnywhere, Category="Surface Water|Material Slot|Rendering", meta=(ClampMin="0.001"))
+    FVector2D RivuletUVTiling = FVector2D(1.0, 1.0);
 };
 
 USTRUCT(BlueprintType)
@@ -49,13 +37,14 @@ struct DWC_API FSurfaceWaterSimulationSettings
 
     UPROPERTY(EditAnywhere, Category="Surface Water")
     bool bEnabled = true;
+
     UPROPERTY(EditAnywhere, Category="Surface Water", meta=(ClampMin="16", ClampMax="4096"))
     int32 RenderTargetResolution = 1024;
 
-    UPROPERTY(VisibleAnywhere, Category="Surface Water|Material Slots", meta=(TitleProperty="Material Slot {MaterialSlotIndex}"))
+    UPROPERTY(EditAnywhere, Category="Surface Water|Material Slots", meta=(TitleProperty="Material Slot {MaterialSlotIndex}"))
     TArray<FSurfaceWaterMaterialSlotData> SurfaceWaterMaterialSlots;
 
-    const FSurfaceWaterMaterialSlotData* FindMaterialSlot(int32 MaterialSlotIndex) const
+    const FSurfaceWaterMaterialSlotData* FindMaterialSlot(const int32 MaterialSlotIndex) const
     {
         return SurfaceWaterMaterialSlots.FindByPredicate(
             [MaterialSlotIndex](const FSurfaceWaterMaterialSlotData& Data)

@@ -173,10 +173,15 @@ bool FWCAUVIslandViewCache::GetMaterialSlotUVIslands(
         !Topology->BuildSignature.IsEmpty() &&
         !Topology->Islands.IsEmpty())
     {
-        bUseStoredTopology = true;
-        DependencyHash = HashCombine(
-            ::GetTypeHash(Topology->GeneratorVersion),
-            HashString(Topology->BuildSignature));
+        const FString CurrentPreparedMeshSignature = UWetClothingAsset::BuildMeshContentSignature(
+            AnalysisMesh, LODIndex, OriginalUVChannelIndex);
+        bUseStoredTopology = Topology->BuildSignature == CurrentPreparedMeshSignature;
+        if (bUseStoredTopology)
+        {
+            DependencyHash = HashCombine(
+                ::GetTypeHash(Topology->GeneratorVersion),
+                HashString(Topology->BuildSignature));
+        }
     }
 #endif
 

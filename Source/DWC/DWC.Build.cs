@@ -11,14 +11,14 @@ public class DWC : ModuleRules
 			{
 				"Core",
 				"CoreUObject",
-				"Engine"
+				"Engine",
+                "RenderCore",
+                "RHI"
 			});
 
 		PrivateDependencyModuleNames.AddRange(
 			new string[]
 			{
-				"RHI",
-				"RenderCore",
 				"PhysicsCore",
 				"Renderer",
 				"Projects"

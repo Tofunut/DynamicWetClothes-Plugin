@@ -45,3 +45,15 @@ bool FDWCSeamGatherCS::ShouldCompilePermutation(const FGlobalShaderPermutationPa
 {
     return ShouldCompileDWC(Parameters);
 }
+
+IMPLEMENT_GLOBAL_SHADER(FDWCSurfaceDropletStampCS, "/DWCGPU/DWCSurfaceDropletStamp.usf", "MainCS", SF_Compute);
+bool FDWCSurfaceDropletStampCS::ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
+{
+    return ShouldCompileDWC(Parameters);
+}
+
+IMPLEMENT_GLOBAL_SHADER(FDWCSurfaceRivuletStampCS, "/DWCGPU/DWCSurfaceRivuletStamp.usf", "MainCS", SF_Compute);
+bool FDWCSurfaceRivuletStampCS::ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
+{
+    return ShouldCompileDWC(Parameters);
+}

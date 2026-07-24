@@ -33,7 +33,7 @@ namespace
         const TArray<FColor>& Pixels,
         FString& OutErrorMessage)
     {
-        const FString PackagePath = FDWCRevealBakeUtilities::GetGeneratedPackagePath(Asset, TEXT("Maps/Transparency"));
+        const FString PackagePath = FDWCRevealBakeUtilities::GetGeneratedPackagePath(Asset, TEXT("Textures/Transparency"));
         const FString AssetName = BuildTransparencyMapAssetName(Asset, AutoResult);
         if (PackagePath.IsEmpty())
         {

@@ -486,9 +486,14 @@ namespace
         {
             const FSurfaceWaterMaterialSlotData& Slot = SurfaceWaterSettings.SurfaceWaterMaterialSlots[SurfaceSlotIndex];
             Signature += FString::Printf(
-                TEXT("|SurfaceSlot{%d,%d}"),
+                TEXT("|SurfaceSlot{%d,%d,NormalUV=%d,DropletTiling=%.9g,%.9g,RivuletTiling=%.9g,%.9g}"),
                 Slot.MaterialSlotIndex,
-                Slot.bEnabled ? 1 : 0);
+                Slot.bEnabled ? 1 : 0,
+                Slot.SurfaceWaterNormalUVChannel,
+                Slot.DropletUVTiling.X,
+                Slot.DropletUVTiling.Y,
+                Slot.RivuletUVTiling.X,
+                Slot.RivuletUVTiling.Y);
         }
 
         return Signature;
@@ -810,7 +815,10 @@ namespace
         Ar << Value;
     }
 
-    void SerializeGPUTriangle(FArchive& Ar, FDWCGPUBakedTriangle& Triangle)
+    void SerializeGPUTriangle(
+        FArchive& Ar,
+        FDWCGPUBakedTriangle& Triangle,
+        const int32 PayloadVersion)
     {
         Ar << Triangle.TriangleID;
         Ar << Triangle.RenderTriangleID;
@@ -824,14 +832,23 @@ namespace
         Ar << Triangle.UV0;
         Ar << Triangle.UV1;
         Ar << Triangle.UV2;
+        if (PayloadVersion >= 3)
+        {
+            Ar << Triangle.DataToSurfaceWaterNormalUV;
+        }
+        else if (Ar.IsLoading())
+        {
+            Triangle.DataToSurfaceWaterNormalUV = FVector4(1.0, 0.0, 0.0, 1.0);
+        }
         Ar << Triangle.RestSurfaceArea;
         Ar << Triangle.ProfileIndex;
     }
 
-    void SkipGPUTriangle(FArchive& Ar)
+    void SkipGPUTriangle(FArchive& Ar, const int32 PayloadVersion)
     {
         int32 IntValue = 0;
         FVector2D UV = FVector2D::ZeroVector;
+        FVector4 Transform = FVector4(1.0, 0.0, 0.0, 1.0);
         float FloatValue = 0.0f;
 
         Ar << IntValue; // TriangleID
@@ -846,6 +863,10 @@ namespace
         Ar << UV;
         Ar << UV;
         Ar << UV;
+        if (PayloadVersion >= 3)
+        {
+            Ar << Transform;
+        }
         Ar << FloatValue;
         Ar << IntValue; // ProfileIndex
     }
@@ -1019,13 +1040,13 @@ namespace
         SerializeOrSkipArrayWithProgress<FDWCGPUBakedTriangle>(
             Ar,
             Data.Triangles,
-            [](FArchive& InnerAr, FDWCGPUBakedTriangle& Triangle)
+            [PayloadVersion](FArchive& InnerAr, FDWCGPUBakedTriangle& Triangle)
             {
-                SerializeGPUTriangle(InnerAr, Triangle);
+                SerializeGPUTriangle(InnerAr, Triangle, PayloadVersion);
             },
-            [](FArchive& InnerAr)
+            [PayloadVersion](FArchive& InnerAr)
             {
-                SkipGPUTriangle(InnerAr);
+                SkipGPUTriangle(InnerAr, PayloadVersion);
             },
             bLoadPayload,
             SlowTask,
@@ -1458,38 +1479,6 @@ bool UWetClothingAsset::HasGPUMapDataPayload() const
         });
 }
 
-bool UWetClothingAsset::HasCPURuntimeDataPayloadMetadata() const
-{
-    const bool bHasStoredOrPendingRuntimePayload = HasRuntimeBulkPayload() || bRuntimeBulkDataDirty;
-    return Derived.Bulk.NeighborRuntimeData.bIsValid &&
-           Derived.Bulk.NeighborRuntimeData.VertexCount > 0 &&
-           bHasStoredOrPendingRuntimePayload;
-}
-
-bool UWetClothingAsset::HasGPURuntimeDataPayloadMetadata() const
-{
-    const bool bHasStoredOrPendingRuntimePayload = HasRuntimeBulkPayload() || bRuntimeBulkDataDirty;
-    return Derived.Bulk.GPURuntimeData.ContainsByPredicate(
-        [bHasStoredOrPendingRuntimePayload](const FDWCGPULODBakeData& Data)
-        {
-            return Data.bRuntimeDataValid &&
-                   Data.TriangleCount > 0 &&
-                   bHasStoredOrPendingRuntimePayload;
-        });
-}
-
-bool UWetClothingAsset::HasGPUMapDataPayloadMetadata() const
-{
-    const bool bHasStoredOrPendingRuntimePayload = HasRuntimeBulkPayload() || bRuntimeBulkDataDirty;
-    return Derived.Bulk.GPURuntimeData.ContainsByPredicate(
-        [bHasStoredOrPendingRuntimePayload](const FDWCGPULODBakeData& Data)
-        {
-            return Data.bMapDataValid &&
-                   Data.MaterialSlotMapCount > 0 &&
-                   bHasStoredOrPendingRuntimePayload;
-        });
-}
-
 bool UWetClothingAsset::IsMaterialSlotWettable(const int32 MaterialSlotIndex) const
 {
     return IsWettableMaterialSlot(Authored.PartData.EditableWetPartData, MaterialSlotIndex);
@@ -1616,6 +1605,90 @@ void UWetClothingAsset::PostLoad()
 {
     const double PostLoadStartTime = FPlatformTime::Seconds();
     Super::PostLoad();
+    const int32 LoadedAssetDataVersion = Metadata.AssetDataVersion;
+
+#if WITH_EDITORONLY_DATA
+    if (Derived.Inline.GeneratedEvaluateSurfaceAppearanceFunction == nullptr)
+    {
+        Derived.Inline.GeneratedEvaluateSurfaceAppearanceFunction =
+            Derived.Inline.GeneratedCPUApplyWetnessFunction_DEPRECATED != nullptr
+                ? Derived.Inline.GeneratedCPUApplyWetnessFunction_DEPRECATED
+                : Derived.Inline.GeneratedGPUApplyWetnessFunction_DEPRECATED;
+    }
+#endif
+
+    for (FWetClothingWetPartEntry& Entry : Authored.PartData.EditableWetPartData.WetPartEntries)
+    {
+        Entry.ProfileAssignment.Parameters.MigrateLegacyAbsorbedWetness();
+        Entry.ProfileAssignment.Parameters.MigrateLegacySurfaceWaterRendering();
+    }
+    for (FWetClothingLocalRenderProfile& LocalProfile : Derived.Inline.BakedProfileIDData.LocalProfiles)
+    {
+        LocalProfile.Parameters.MigrateLegacyAbsorbedWetness();
+        LocalProfile.Parameters.MigrateLegacySurfaceWaterRendering();
+    }
+
+    if (LoadedAssetDataVersion < 7)
+    {
+        // Legacy UV tiling lived on each Wetness Profile. Move it to the WCA
+        // material-slot settings only when every profile in the slot agrees.
+        for (const FWetClothingWettableMaterialSlotState& WettableSlot :
+             Authored.PartData.EditableWetPartData.WettableMaterialSlots)
+        {
+            if (!WettableSlot.bIsWettableSlot || WettableSlot.MaterialSlotIndex == INDEX_NONE)
+            {
+                continue;
+            }
+
+            FSurfaceWaterMaterialSlotData* SlotSettings =
+                Authored.SurfaceWaterSettings.SurfaceWaterMaterialSlots.FindByPredicate(
+                    [&WettableSlot](const FSurfaceWaterMaterialSlotData& Candidate)
+                    {
+                        return Candidate.MaterialSlotIndex == WettableSlot.MaterialSlotIndex;
+                    });
+            if (SlotSettings == nullptr)
+            {
+                SlotSettings = &Authored.SurfaceWaterSettings.SurfaceWaterMaterialSlots.AddDefaulted_GetRef();
+                SlotSettings->MaterialSlotIndex = WettableSlot.MaterialSlotIndex;
+            }
+
+            bool bFoundProfile = false;
+            bool bTilingConflict = false;
+            float DropletTiling = 1.0f;
+            float RivuletTiling = 1.0f;
+            for (const FWetClothingWetPartEntry& Entry :
+                 Authored.PartData.EditableWetPartData.WetPartEntries)
+            {
+                if (Entry.MaterialSlotIndex != WettableSlot.MaterialSlotIndex ||
+                    !Entry.ProfileAssignment.Parameters.SurfaceWater.bEnabled)
+                {
+                    continue;
+                }
+
+                const FSurfaceWaterProfileParameters& Surface =
+                    Entry.ProfileAssignment.Parameters.SurfaceWater;
+                if (!bFoundProfile)
+                {
+                    DropletTiling = Surface.DropletTiling;
+                    RivuletTiling = Surface.FlowTiling;
+                    bFoundProfile = true;
+                }
+                else if (!FMath::IsNearlyEqual(DropletTiling, Surface.DropletTiling) ||
+                         !FMath::IsNearlyEqual(RivuletTiling, Surface.FlowTiling))
+                {
+                    bTilingConflict = true;
+                    break;
+                }
+            }
+
+            if (bFoundProfile && !bTilingConflict)
+            {
+                SlotSettings->DropletUVTiling = FVector2D(DropletTiling, DropletTiling);
+                SlotSettings->RivuletUVTiling = FVector2D(RivuletTiling, RivuletTiling);
+            }
+        }
+    }
+
     Metadata.SetupSettings.NormalizeMapResolutions();
     // Surface Water RT resolution is mirrored into setup settings so the
     // consolidated Map Resolutions panel reflects the runtime value for old assets.
@@ -2145,12 +2218,18 @@ bool UWetClothingAsset::InitializeNewAsset(
 
     Authored.PartData.EditableWetPartData.WettableMaterialSlots.Reset();
     Authored.PartData.EditableWetPartData.WetPartEntries.Reset();
+    Authored.SurfaceWaterSettings.SurfaceWaterMaterialSlots.Reset();
     for (int32 MaterialSlotIndex = 0; MaterialSlotIndex < InSourceMesh->GetMaterials().Num(); ++MaterialSlotIndex)
     {
         FWetClothingWettableMaterialSlotState& SlotState =
             Authored.PartData.EditableWetPartData.WettableMaterialSlots.AddDefaulted_GetRef();
         SlotState.MaterialSlotIndex = MaterialSlotIndex;
         SlotState.bIsWettableSlot = false;
+
+        FSurfaceWaterMaterialSlotData& SurfaceSlot =
+            Authored.SurfaceWaterSettings.SurfaceWaterMaterialSlots.AddDefaulted_GetRef();
+        SurfaceSlot.MaterialSlotIndex = MaterialSlotIndex;
+        SurfaceSlot.SurfaceWaterNormalUVChannel = Metadata.OriginalUVChannelIndex;
 
         FWetClothingWetPartEntry& DefaultPart =
             Authored.PartData.EditableWetPartData.WetPartEntries.AddDefaulted_GetRef();
@@ -2253,7 +2332,7 @@ bool UWetClothingAsset::ApplySetupSettings(
         // A resolution-only change does not invalidate CPU/GPU runtime topology.
         // It invalidates only the generated GPU simulation maps.
         Derived.Inline.BakeState.GPUMaps = Metadata.SetupSettings.bBuildGPUWetnessMapSimulationData
-            ? (HasGPUMapDataPayloadMetadata() ? EDWCBakeStatus::OutOfDate : EDWCBakeStatus::Required)
+            ? (HasGPUMapDataPayload() ? EDWCBakeStatus::OutOfDate : EDWCBakeStatus::Required)
             : EDWCBakeStatus::Disabled;
     }
 
@@ -2386,17 +2465,17 @@ void UWetClothingAsset::MarkSimulationBakeOutOfDate()
     }
 
     Derived.Inline.BakeState.CPURuntimeData = Metadata.SetupSettings.bBuildCPUVertexSimulationData
-                                    ? (HasCPURuntimeDataPayloadMetadata()
+                                    ? (HasCPURuntimeDataPayload()
                                            ? EDWCBakeStatus::OutOfDate
                                            : EDWCBakeStatus::Required)
                                     : EDWCBakeStatus::Disabled;
     Derived.Inline.BakeState.GPURuntimeData = Metadata.SetupSettings.bBuildGPUWetnessMapSimulationData
-                                    ? (HasGPURuntimeDataPayloadMetadata()
+                                    ? (HasGPURuntimeDataPayload()
                                            ? EDWCBakeStatus::OutOfDate
                                            : EDWCBakeStatus::Required)
                                     : EDWCBakeStatus::Disabled;
     Derived.Inline.BakeState.GPUMaps = Metadata.SetupSettings.bBuildGPUWetnessMapSimulationData
-                            ? (HasGPUMapDataPayloadMetadata()
+                            ? (HasGPUMapDataPayload()
                                    ? EDWCBakeStatus::OutOfDate
                                    : EDWCBakeStatus::Required)
                             : EDWCBakeStatus::Disabled;
@@ -2601,14 +2680,14 @@ void UWetClothingAsset::RefreshBakeStateInternal(const bool bRunDeepValidation)
     const EDWCBakeStatus NewCPUStatus = Metadata.SetupSettings.bBuildCPUVertexSimulationData
                                             ? (bCPUDataValid
                                                    ? EDWCBakeStatus::Valid
-                                                   : ((bRunDeepValidation ? HasCPURuntimeDataPayload() : HasCPURuntimeDataPayloadMetadata())
+                                                   : (HasCPURuntimeDataPayload()
                                                           ? EDWCBakeStatus::OutOfDate
                                                           : EDWCBakeStatus::Required))
                                             : EDWCBakeStatus::Disabled;
     const EDWCBakeStatus NewGPUStatus = Metadata.SetupSettings.bBuildGPUWetnessMapSimulationData
                                             ? (bGPUDataValid
                                                    ? EDWCBakeStatus::Valid
-                                                   : ((bRunDeepValidation ? HasGPURuntimeDataPayload() : HasGPURuntimeDataPayloadMetadata())
+                                                   : (HasGPURuntimeDataPayload()
                                                           ? EDWCBakeStatus::OutOfDate
                                                           : EDWCBakeStatus::Required))
                                             : EDWCBakeStatus::Disabled;
@@ -2620,7 +2699,7 @@ void UWetClothingAsset::RefreshBakeStateInternal(const bool bRunDeepValidation)
     const EDWCBakeStatus NewGPUMapStatus = Metadata.SetupSettings.bBuildGPUWetnessMapSimulationData
                                                ? (bGPUMapDataValid
                                                       ? EDWCBakeStatus::Valid
-                                                      : ((bRunDeepValidation ? HasGPUMapDataPayload() : HasGPUMapDataPayloadMetadata())
+                                                      : (HasGPUMapDataPayload()
                                                              ? EDWCBakeStatus::OutOfDate
                                                              : EDWCBakeStatus::Required))
                                                : EDWCBakeStatus::Disabled;
@@ -2835,6 +2914,7 @@ bool UWetClothingAsset::RebuildRuntimeDataForSave(FString* OutErrorMessage)
         ClearGPUWetMapData();
         Derived.Inline.ResolvedWetnessProfileParameters.Reset();
         Derived.Inline.GeneratedWetMaterialOverrides.Reset();
+        Derived.Inline.BakedProfileIDData = FWetClothingBakedProfileIDData();
         Authored.WrinkleData.BakedWrinkleMaps.Reset();
         for (FWetClothingTransparencyLayerData& Layer : Authored.TransparencyData.TransparencyLayers)
         {
@@ -3184,7 +3264,7 @@ bool UWetClothingAsset::IsPrecomputedSimulationDataMetadataValidForMesh(
            Data.VertexCount > 0 &&
            !Data.MeshSignature.IsEmpty() &&
            !Data.SourceDataSignature.IsEmpty() &&
-           HasCPURuntimeDataPayloadMetadata();
+           HasCPURuntimeDataPayload();
 }
 
 bool UWetClothingAsset::IsPrecomputedSimulationDataValidForMesh(const USkeletalMesh* SkeletalMesh) const
@@ -3297,7 +3377,7 @@ bool UWetClothingAsset::IsGPURuntimeDataMetadataValidForMesh(
            Data->ProfileCount > 0 &&
            Data->TriangleCount > 0 &&
            Data->VertexIncidentRecordCount > 0 &&
-           HasGPURuntimeDataPayloadMetadata();
+           HasGPURuntimeDataPayload();
 }
 
 bool UWetClothingAsset::IsGPURuntimeDataValidForMesh(const USkeletalMesh* SkeletalMesh, const int32 LODIndex) const
@@ -3355,7 +3435,7 @@ bool UWetClothingAsset::IsGPUWetMapDataMetadataValidForMesh(
            Data->MapBakeVersion == FDWCGPULODBakeData::CurrentMapBakeVersion &&
            Data->MaterialSlotMapCount > 0 &&
            !Data->MapSignature.IsEmpty() &&
-           HasGPUMapDataPayloadMetadata();
+           HasGPUMapDataPayload();
 }
 
 bool UWetClothingAsset::IsGPUWetMapDataValidForMesh(const USkeletalMesh* SkeletalMesh, const int32 LODIndex) const
@@ -3434,6 +3514,18 @@ bool UWetClothingAsset::RebuildPrecomputedSimulationData(FString* OutErrorMessag
             return MaterialOverride.MaterialSlotIndex != INDEX_NONE &&
                    !IsWettableMaterialSlot(Authored.PartData.EditableWetPartData, MaterialOverride.MaterialSlotIndex);
         });
+
+    Derived.Inline.BakedProfileIDData.SlotTextures.RemoveAll(
+        [this](const FWetClothingBakedProfileIDSlotTexture& SlotTexture)
+        {
+            return !IsWettableMaterialSlot(
+                Authored.PartData.EditableWetPartData,
+                SlotTexture.MaterialSlotIndex);
+        });
+    if (Derived.Inline.BakedProfileIDData.SlotTextures.IsEmpty())
+    {
+        Derived.Inline.BakedProfileIDData = FWetClothingBakedProfileIDData();
+    }
 
     Derived.Bulk.NeighborRuntimeData.bIsValid = true;
     Derived.Bulk.NeighborRuntimeData.LODIndex = LODIndex;

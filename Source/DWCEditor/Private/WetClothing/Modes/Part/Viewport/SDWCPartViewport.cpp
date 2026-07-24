@@ -20,6 +20,8 @@
 
 namespace
 {
+    constexpr int32 ForceRenderLOD0 = 1; // USkinnedMeshComponent forced LOD is 1-based; 0 means automatic.
+
     struct FQuantizedLocalVertex
     {
         int32 X = 0;
@@ -253,7 +255,7 @@ void SDWCPartViewport::Construct(const FArguments& InArgs)
     PreviewMeshComponent = NewObject<USkeletalMeshComponent>(GetTransientPackage(), NAME_None, RF_Transient);
     PreviewMeshComponent->SetMobility(EComponentMobility::Movable);
     PreviewMeshComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-    PreviewMeshComponent->SetForcedLOD(1);
+    PreviewMeshComponent->SetForcedLOD(ForceRenderLOD0);
     PreviewScene->AddComponent(PreviewMeshComponent, FTransform::Identity);
 
     WetPartOverlayComponent = NewObject<UProceduralMeshComponent>(GetTransientPackage(), NAME_None, RF_Transient);
@@ -339,7 +341,7 @@ void SDWCPartViewport::RefreshPreviewMesh()
     }
 
     PreviewMeshComponent->SetSkeletalMeshAsset(TargetMesh);
-    PreviewMeshComponent->SetForcedLOD(1);
+    PreviewMeshComponent->SetForcedLOD(ForceRenderLOD0);
     PreviewMeshComponent->ShowAllMaterialSections(0);
     if (WetPartOverlayComponent != nullptr)
     {

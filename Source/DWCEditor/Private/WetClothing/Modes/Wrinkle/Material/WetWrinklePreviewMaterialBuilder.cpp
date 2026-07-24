@@ -5,7 +5,6 @@
 #include "Materials/Material.h"
 #include "Materials/MaterialExpressionConstant3Vector.h"
 #include "Materials/MaterialExpressionCustom.h"
-#include "Materials/MaterialExpressionFunctionInput.h"
 #include "Materials/MaterialExpressionGetMaterialAttributes.h"
 #include "Materials/MaterialExpressionMaterialFunctionCall.h"
 #include "Materials/MaterialExpressionScalarParameter.h"
@@ -19,7 +18,6 @@
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Engine/Engine.h"
 #include "Engine/Texture.h"
-#include "Interfaces/IPluginManager.h"
 #include "UObject/UObjectGlobals.h"
 
 namespace WetWrinklePreviewMaterialParameters
@@ -45,8 +43,6 @@ namespace
     constexpr int32 MaxGpuSkinUVChannelCount = 4;
     constexpr const TCHAR* PreviewBlendDescription = TEXT("DWC Wrinkle Preview Normal Blend");
     constexpr const TCHAR* LegacyPreviewBlendDescription = TEXT("DWC Preview Brush Normal Blend");
-    constexpr const TCHAR* DynamicWetClothesPluginName = TEXT("DynamicWetClothes");
-    constexpr const TCHAR* DwcApplyWetnessCpuFunctionName = TEXT("MF_DWC_ApplyWetness_CPU");
 
     UTexture* LoadWetWrinkleDefaultNormalTexture()
     {
@@ -58,22 +54,11 @@ namespace
         return LoadObject<UTexture>(nullptr, TEXT("/Engine/EngineMaterials/T_Default_Normal.T_Default_Normal"));
     }
 
-    UMaterialFunctionInterface* LoadDwcApplyWetnessCpuFunction()
+    UMaterialFunctionInterface* LoadDwcEvaluateSurfaceAppearanceFunction()
     {
-        const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(DynamicWetClothesPluginName);
-        if (!Plugin.IsValid())
-        {
-            return nullptr;
-        }
-
-        FString MountedAssetPath = Plugin->GetMountedAssetPath();
-        MountedAssetPath.RemoveFromEnd(TEXT("/"));
-        const FString ObjectPath = FString::Printf(
-            TEXT("%s/Materials/Functions/%s.%s"),
-            *MountedAssetPath,
-            DwcApplyWetnessCpuFunctionName,
-            DwcApplyWetnessCpuFunctionName);
-        return LoadObject<UMaterialFunctionInterface>(nullptr, *ObjectPath);
+        return LoadObject<UMaterialFunctionInterface>(
+            nullptr,
+            TEXT("/DynamicWetClothes/Materials/Functions/MF_DWC_EvaluateSurfaceAppearance.MF_DWC_EvaluateSurfaceAppearance"));
     }
 
     bool IsExpectedFunctionCall(
@@ -148,22 +133,6 @@ namespace
         }
 
         return true;
-    }
-
-    bool HasFunctionInput(const UMaterialExpressionMaterialFunctionCall* FunctionCall, const FName InputName)
-    {
-        if (FunctionCall == nullptr)
-        {
-            return false;
-        }
-        for (const FFunctionExpressionInput& FunctionInput : FunctionCall->FunctionInputs)
-        {
-            if (FunctionInput.ExpressionInput != nullptr && FunctionInput.ExpressionInput->InputName == InputName)
-            {
-                return true;
-            }
-        }
-        return false;
     }
 
     FString ResolveOutputName(const FExpressionInput& Input)
@@ -391,40 +360,31 @@ return CombinedTS;
         return Custom;
     }
 
-    bool OverrideCpuApplyWetnessInput(
+    bool OverrideEvaluateSurfaceWetnessInput(
         UMaterial* Material,
-        UMaterialFunctionInterface* CpuApplyFunction,
+        UMaterialFunctionInterface* EvaluateSurfaceFunction,
         UMaterialExpressionScalarParameter* PreviewWetness,
         FString& OutError)
     {
-        if (Material == nullptr || CpuApplyFunction == nullptr || PreviewWetness == nullptr)
+        if (Material == nullptr || EvaluateSurfaceFunction == nullptr || PreviewWetness == nullptr)
         {
-            OutError = TEXT("Cannot override the preview wetness input without a CPU function call and scalar parameter.");
+            OutError = TEXT("Cannot override the preview wetness input without a surface-evaluation function call and scalar parameter.");
             return false;
         }
 
-        UMaterialExpressionMaterialFunctionCall* CpuApply = FindFunctionCall(
+        UMaterialExpressionMaterialFunctionCall* EvaluateSurface = FindFunctionCall(
             Material,
-            CpuApplyFunction,
-            DwcApplyWetnessCpuFunctionName);
-        if (CpuApply == nullptr)
+            EvaluateSurfaceFunction,
+            *EvaluateSurfaceFunction->GetName());
+        if (EvaluateSurface == nullptr)
         {
             OutError = FString::Printf(
-                TEXT("The duplicated CPU preview graph does not contain MF_DWC_ApplyWetness_CPU. Function calls found: %s."),
+                TEXT("The duplicated preview graph does not contain MF_DWC_EvaluateSurfaceAppearance. Function calls found: %s."),
                 *DescribeMaterialFunctionCalls(Material));
             return false;
         }
 
-        if (!ConnectExpression(PreviewWetness, FString(), CpuApply, TEXT("Wetness"), OutError))
-        {
-            return false;
-        }
-
-        // Runtime transparency uses a separate backend-resolved wetness input so the
-        // transient editor MID must override it alongside the CPU wetness input. Older
-        // generated materials remain usable until Material Setup refreshes their call node.
-        return !HasFunctionInput(CpuApply, TEXT("TransparencyWetness")) ||
-               ConnectExpression(PreviewWetness, FString(), CpuApply, TEXT("TransparencyWetness"), OutError);
+        return ConnectExpression(PreviewWetness, FString(), EvaluateSurface, TEXT("Wetness"), OutError);
     }
 
     bool ConnectPreviewGraph(
@@ -677,8 +637,7 @@ FWetWrinklePreviewMaterialBuildResult FWetWrinklePreviewMaterialBuilder::Build(c
         return Result;
     }
 
-    if (Args.bBuildNormalOverlay &&
-        (Args.UVChannelIndex < 0 || Args.UVChannelIndex >= MaxGpuSkinUVChannelCount))
+    if (Args.UVChannelIndex < 0 || Args.UVChannelIndex >= MaxGpuSkinUVChannelCount)
     {
         Result.ErrorMessage = FString::Printf(
             TEXT("Wrinkle preview UV channel %d is not supported by the skeletal GPUSkin path. Valid channels are 0 through %d."),
@@ -687,13 +646,13 @@ FWetWrinklePreviewMaterialBuildResult FWetWrinklePreviewMaterialBuilder::Build(c
         return Result;
     }
 
-    UMaterialFunctionInterface* CpuApplyFunction = nullptr;
+    UMaterialFunctionInterface* EvaluateSurfaceFunction = nullptr;
     if (Args.bOverrideCpuWetnessInput)
     {
-        CpuApplyFunction = LoadDwcApplyWetnessCpuFunction();
-        if (CpuApplyFunction == nullptr)
+        EvaluateSurfaceFunction = LoadDwcEvaluateSurfaceAppearanceFunction();
+        if (EvaluateSurfaceFunction == nullptr)
         {
-            Result.ErrorMessage = TEXT("Could not load MF_DWC_ApplyWetness_CPU for the DWC CPU preview path.");
+            Result.ErrorMessage = TEXT("Could not load MF_DWC_EvaluateSurfaceAppearance for the DWC preview path.");
             return Result;
         }
     }
@@ -728,7 +687,7 @@ FWetWrinklePreviewMaterialBuildResult FWetWrinklePreviewMaterialBuilder::Build(c
     }
 
     if (Args.bOverrideCpuWetnessInput &&
-        !OverrideCpuApplyWetnessInput(TransientMaterial, CpuApplyFunction, PreviewWetness, Result.ErrorMessage))
+        !OverrideEvaluateSurfaceWetnessInput(TransientMaterial, EvaluateSurfaceFunction, PreviewWetness, Result.ErrorMessage))
     {
         return Result;
     }
@@ -764,11 +723,8 @@ FWetWrinklePreviewMaterialBuildResult FWetWrinklePreviewMaterialBuilder::Build(c
 
     PreviewMID->SetFlags(RF_Transient);
     PreviewMID->SetScalarParameterValue(WetWrinklePreviewMaterialParameters::PreviewWetness, 1.0f);
-    if (Args.bBuildNormalOverlay)
-    {
-        PreviewMID->SetScalarParameterValue(WetWrinklePreviewMaterialParameters::AccumulatedEnabled, 0.0f);
-        PreviewMID->SetScalarParameterValue(WetWrinklePreviewMaterialParameters::HoverEnabled, 0.0f);
-    }
+    PreviewMID->SetScalarParameterValue(WetWrinklePreviewMaterialParameters::AccumulatedEnabled, 0.0f);
+    PreviewMID->SetScalarParameterValue(WetWrinklePreviewMaterialParameters::HoverEnabled, 0.0f);
 
     ensureMsgf(
         SourceMaterial->GetOutermost()->IsDirty() == bSourcePackageWasDirty,

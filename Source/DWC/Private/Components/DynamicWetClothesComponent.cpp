@@ -16,7 +16,7 @@
 #include "RuntimeState/WetClothingRuntimeData.h"
 #include "RuntimeState/Utils/WetSimulationStage.h"
 #include "WetSimulation/AbsorbedWetness/AbsorbedWetnessSimulationState.h"
-#include "WetSimulation/SurfaceWater/SurfaceWaterSimulationState.h"
+#include "GPU/DWCSurfaceWaterSimulationState.h"
 #include "Engine/SkeletalMesh.h"
 #include "UObject/UnrealType.h"
 #include "Engine/Texture2D.h"
@@ -33,7 +33,7 @@ namespace
 {
     void ReleaseSurfaceWaterStates(FDWCWetMeshReceiverRuntime& Receiver)
     {
-        for (TPair<int32, TUniquePtr<FSurfaceWaterSimulationState>>& Pair : Receiver.SurfaceWaterStatesByMaterialSlot)
+        for (TPair<int32, TUniquePtr<IDWCSurfaceWaterSimulationState>>& Pair : Receiver.SurfaceWaterStatesByMaterialSlot)
         {
             if (Pair.Value.IsValid()) Pair.Value->Release();
         }
@@ -461,7 +461,6 @@ FWetRenderStageArgs UDynamicWetClothesComponent::MakeWetRenderStageArgs(FDWCWetM
     Args.RuntimeData = Receiver.SharedRuntimeData.Get();
     Args.SimulationState = Receiver.SimulationState.Get();
     Args.SurfaceWaterStatesByMaterialSlot = &Receiver.SurfaceWaterStatesByMaterialSlot;
-    Args.SurfaceWaterProfilesByMaterialSlot = &Receiver.SurfaceWaterProfilesByMaterialSlot;
     Args.WetMaterialInstances = &Receiver.RenderStage->WetMaterialInstances;
     Args.SurfaceWaterTimeSeconds = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
     Args.WrinkleStrength = WrinkleStrength;
@@ -476,6 +475,9 @@ FWetRenderStageArgs UDynamicWetClothesComponent::MakeWetRenderStageArgs(FDWCWetM
     Args.bShowWetPartDebugColors =
         bShowWetPartDebugColors &&
         (IsGPUWetnessMode(GetActiveSimulationMode()) || ShouldEnableCPUWetnessRendering(Receiver));
+    Args.bShowSurfaceWaterDebugColors =
+        bShowSurfaceWaterDebugColors &&
+        IsGPUWetnessMode(GetActiveSimulationMode());
     Args.bGPUWetnessMode = IsGPUWetnessMode(GetActiveSimulationMode());
     Args.LODIndex = UWetClothingAsset::RuntimeSimulationLODIndex;
     return Args;
@@ -516,7 +518,6 @@ bool UDynamicWetClothesComponent::InitializeGPUBackend(FDWCWetMeshReceiverRuntim
     InitArgs.SpreadRateScale = GPUSpreadRateScale;
     InitArgs.DryRateScale = GPUDryRateScale;
     InitArgs.GravityFlowStrengthScale = GPUGravityFlowStrengthScale;
-    InitArgs.CapillaryImmediateAbsorptionFraction = GPUImmediateAbsorptionFraction;
     InitArgs.bUseEightDirectionDiffusion =
         GPUDiffusionNeighborMode == EDWCGPUDiffusionNeighborMode::EightDirections;
 
@@ -1005,13 +1006,12 @@ void UDynamicWetClothesComponent::UpdateSurfaceWater()
         const FSurfaceWaterSimulationSettings& Settings = Receiver->WetClothingAsset->Authored.SurfaceWaterSettings;
         if (!Settings.bEnabled) continue;
         bool bAnyChanged = false;
-        for (TPair<int32, TUniquePtr<FSurfaceWaterSimulationState>>& Pair : Receiver->SurfaceWaterStatesByMaterialSlot)
+        for (TPair<int32, TUniquePtr<IDWCSurfaceWaterSimulationState>>& Pair : Receiver->SurfaceWaterStatesByMaterialSlot)
         {
             if (!Pair.Value.IsValid()) continue;
             const FSurfaceWaterMaterialSlotData* SlotData = Settings.FindMaterialSlot(Pair.Key);
-            const FSurfaceWaterBakedFlowMapData* FlowData = SlotData ? &SlotData->BakedFlowMap : nullptr;
-            UTexture2D* FlowMap = FlowData && FlowData->bIsValid && FlowData->bEnabled && FlowData->Resolution == Pair.Value->GetResolution() ? FlowData->FlowMap.Get() : nullptr;
-            bAnyChanged |= Pair.Value->FlushStamps(FlowMap, CurrentSurfaceTimeSeconds);
+            if (SlotData != nullptr && !SlotData->bEnabled) continue;
+            bAnyChanged |= Pair.Value->FlushStamps(CurrentSurfaceTimeSeconds);
         }
         if (bAnyChanged || !Receiver->SurfaceWaterStatesByMaterialSlot.IsEmpty())
         {
@@ -1108,6 +1108,27 @@ void UDynamicWetClothesComponent::SetWetPartDebugColorsEnabled(const bool bEnabl
     bWetRenderDirty = true;
 }
 
+void UDynamicWetClothesComponent::SetSurfaceWaterDebugColorsEnabled(const bool bEnabled)
+{
+    if (bShowSurfaceWaterDebugColors == bEnabled)
+    {
+        return;
+    }
+
+    bShowSurfaceWaterDebugColors = bEnabled;
+    for (const TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver : Receivers)
+    {
+        if (!Receiver.IsValid() || !Receiver->RenderStage.IsValid())
+        {
+            continue;
+        }
+
+        FWetRenderStageArgs RenderArgs = MakeWetRenderStageArgs(*Receiver);
+        Receiver->RenderStage->ApplyWetMaterialParameters(RenderArgs);
+    }
+    bWetRenderDirty = true;
+}
+
 void UDynamicWetClothesComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
@@ -1129,14 +1150,7 @@ void UDynamicWetClothesComponent::PostEditChangeProperty(FPropertyChangedEvent& 
     const FName PropertyName = PropertyChangedEvent.GetPropertyName();
     const bool bRequiresRuntimeRebuild =
         PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, WetClothingAssets) ||
-        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, SimulationMode) ||
-        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, GPUContactNearestSeedVertexCount) ||
-        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, GPUDiffusionNeighborMode) ||
-        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, GPUSpreadRateScale) ||
-        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, GPUGravityFlowStrengthScale) ||
-        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, GPUDryRateScale) ||
-        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, GPUImmediateAbsorptionFraction) ||
-        PropertyName == GET_MEMBER_NAME_CHECKED(FWetClothingSettings, CapillaryImmediateAbsorptionFraction);
+        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, SimulationMode);
     const bool bRequiresMaterialRefresh =
         bRequiresRuntimeRebuild ||
         PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, bEnableDWCQualityLOD) ||
@@ -1148,7 +1162,8 @@ void UDynamicWetClothesComponent::PostEditChangeProperty(FPropertyChangedEvent& 
         PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, TransparencyWetnessMax) ||
         PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, FallbackUnderColor) ||
         PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, WetUnderColorBlendStrength) ||
-        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, bShowWetPartDebugColors);
+        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, bShowWetPartDebugColors) ||
+        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, bShowSurfaceWaterDebugColors);
 
     if (!bRequiresMaterialRefresh)
     {

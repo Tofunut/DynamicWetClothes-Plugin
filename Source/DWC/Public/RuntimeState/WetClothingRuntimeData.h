@@ -6,6 +6,33 @@
 
 struct FWetnessProfileParameters;
 
+
+/**
+ * Transient CPU-side representative triangle used to convert one projected
+ * surface-flow direction into both DWCDataUV and SurfaceWaterNormalUV angles.
+ */
+struct FSurfaceWaterFlowTriangleBinding
+{
+    FIntVector VertexIndices = FIntVector(INDEX_NONE, INDEX_NONE, INDEX_NONE);
+
+    // DWCDataUV is used to rotate the actual RT stamp geometry.
+    FVector2f DataUV0 = FVector2f::ZeroVector;
+    FVector2f DataUV1 = FVector2f::ZeroVector;
+    FVector2f DataUV2 = FVector2f::ZeroVector;
+
+    // SurfaceWaterNormalUV is used to orient the repeating rivulet normal.
+    FVector2f NormalUV0 = FVector2f::ZeroVector;
+    FVector2f NormalUV1 = FVector2f::ZeroVector;
+    FVector2f NormalUV2 = FVector2f::ZeroVector;
+
+    bool IsValid() const
+    {
+        return VertexIndices.X != INDEX_NONE &&
+               VertexIndices.Y != INDEX_NONE &&
+               VertexIndices.Z != INDEX_NONE;
+    }
+};
+
 struct FWetVertexNeighborRange
 {
     int32 StartOffset = 0;
@@ -61,8 +88,7 @@ class DWC_API FWetClothingRuntimeData
     TArray<FVector2f>                 SurfaceWaterUVs;
     TArray<bool>                      SurfaceWaterUVValidFlags;
     TArray<int32>                     SurfaceWaterMaterialSlotIndices;
-    TArray<int32>                     SurfaceWaterUVIslandIDs;
-    TMap<int32, TArray<FVector2f>>    SurfaceWaterUVsByUVIsland;
+    TArray<FSurfaceWaterFlowTriangleBinding> SurfaceWaterFlowTriangleBindings;
     bool                              bHasNeighborGraph = false;
 
     FWetBoneOptimizationCache BoneOptimizationCache;
@@ -95,5 +121,13 @@ class DWC_API FWetClothingRuntimeData
         if (!SupportsSurfaceWater(VertexIndex) || !TryGetSurfaceWaterUV(VertexIndex, OutUV) || !SurfaceWaterMaterialSlotIndices.IsValidIndex(VertexIndex)) return false;
         OutMaterialSlotIndex = SurfaceWaterMaterialSlotIndices[VertexIndex];
         return OutMaterialSlotIndex != INDEX_NONE;
+    }
+
+    const FSurfaceWaterFlowTriangleBinding* FindSurfaceWaterFlowTriangleBinding(int32 VertexIndex) const
+    {
+        return SurfaceWaterFlowTriangleBindings.IsValidIndex(VertexIndex) &&
+               SurfaceWaterFlowTriangleBindings[VertexIndex].IsValid()
+            ? &SurfaceWaterFlowTriangleBindings[VertexIndex]
+            : nullptr;
     }
 };

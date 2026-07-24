@@ -5,6 +5,7 @@
 #include "WetClothing/WCAEditor/WCAEditorMode.h"
 #include "WetClothing/WCAEditor/WCAEditorTypes.h"
 #include "Widgets/Input/SComboBox.h"
+#include "Widgets/Input/SEditableTextBox.h"
 
 class FAssetThumbnail;
 class FAssetThumbnailPool;
@@ -36,17 +37,21 @@ struct FWCAMaterialSlotRowArgs
 struct FWCABakeMapsMenuArgs
 {
     EWCAEditorMode EditorMode = EWCAEditorMode::PartEdit;
-    FSimpleDelegate OnBakeWetnessProfileMaps;
+    FSimpleDelegate OnBakeAllMaps;
+    FSimpleDelegate OnBakeRenderProfileData;
     FSimpleDelegate OnBakeGPUWetnessMapData;
     FSimpleDelegate OnBakeWrinkleNormalMap;
-    FCanExecuteAction CanBakeWetnessProfileMaps;
+    FSimpleDelegate OnBakeTransparencyMaps;
+    FCanExecuteAction CanBakeAnyMaps;
+    FCanExecuteAction CanBakeRenderProfileData;
     FCanExecuteAction CanBakeGPUWetnessMapData;
     FCanExecuteAction CanBakeWrinkleNormalMap;
+    FCanExecuteAction CanBakeTransparencyMaps;
 };
 
 struct FWCAGenerateMaterialsMenuArgs
 {
-    const UWetClothingAsset* WetClothingAsset = nullptr;
+    UWetClothingAsset* WetClothingAsset = nullptr;
     FSimpleDelegate OnGenerateMaterials;
 };
 

@@ -443,6 +443,50 @@ bool IsWettableMaterialSlot(const UWetClothingAsset& Asset, const int32 Material
     return Asset.IsMaterialSlotWettable(MaterialSlotIndex);
 }
 
+int32 ResolveGPUMapSurfaceWaterNormalUVChannel(
+    const UWetClothingAsset& Asset,
+    const int32 MaterialSlotIndex)
+{
+    if (const FSurfaceWaterMaterialSlotData* SlotData =
+            Asset.Authored.SurfaceWaterSettings.FindMaterialSlot(MaterialSlotIndex))
+    {
+        if (SlotData->SurfaceWaterNormalUVChannel != INDEX_NONE)
+        {
+            return SlotData->SurfaceWaterNormalUVChannel;
+        }
+    }
+
+    return Asset.GetOriginalUVChannelIndex();
+}
+
+FVector4 BuildDataToSurfaceWaterNormalUVTransform(
+    const FVector2D& DataUV0,
+    const FVector2D& DataUV1,
+    const FVector2D& DataUV2,
+    const FVector2D& NormalUV0,
+    const FVector2D& NormalUV1,
+    const FVector2D& NormalUV2)
+{
+    const FVector2D DataEdge1 = DataUV1 - DataUV0;
+    const FVector2D DataEdge2 = DataUV2 - DataUV0;
+    const FVector2D NormalEdge1 = NormalUV1 - NormalUV0;
+    const FVector2D NormalEdge2 = NormalUV2 - NormalUV0;
+
+    const double Determinant =
+        DataEdge1.X * DataEdge2.Y - DataEdge2.X * DataEdge1.Y;
+    if (FMath::Abs(Determinant) <= SMALL_NUMBER)
+    {
+        return FVector4(1.0, 0.0, 0.0, 1.0);
+    }
+
+    const double InvDeterminant = 1.0 / Determinant;
+    return FVector4(
+        (NormalEdge1.X * DataEdge2.Y - NormalEdge2.X * DataEdge1.Y) * InvDeterminant,
+        (-NormalEdge1.X * DataEdge2.X + NormalEdge2.X * DataEdge1.X) * InvDeterminant,
+        (NormalEdge1.Y * DataEdge2.Y - NormalEdge2.Y * DataEdge1.Y) * InvDeterminant,
+        (-NormalEdge1.Y * DataEdge2.X + NormalEdge2.Y * DataEdge1.X) * InvDeterminant);
+}
+
 bool BuildOriginalUVTrianglePartLookupForLOD(
     const UWetClothingAsset& Asset,
     const int32 LODIndex,
@@ -1158,6 +1202,17 @@ void StoreCachedSignature(const FString& CacheKey, const FString& Signature)
 
 void AddProfileParametersToSignature(FGPUWetMapSignatureBuilder& Builder, const FWetnessProfileParameters& Parameters)
 {
+    Builder.AddValue(Parameters.AbsorbedWetness.bEnabled ? 1 : 0);
+    Builder.AddValue(Parameters.GetAbsorptionFraction());
+    Builder.AddValue(Parameters.GetAbsorptionRate());
+    Builder.AddValue(Parameters.GetAbsorptionMultiplier());
+    Builder.AddValue(Parameters.GetSpreadRatePerSecond());
+    Builder.AddValue(Parameters.GetDryRatePerSecond());
+    Builder.AddValue(Parameters.GetGravityFlowStrength());
+    Builder.AddValue(Parameters.GetWetVisualStrength());
+
+    // Keep legacy serialized fields in the signature so old assets that have
+    // not migrated yet still produce stable invalidation behavior.
     Builder.AddValue(Parameters.Absorption);
     Builder.AddValue(Parameters.SpreadRate);
     Builder.AddValue(Parameters.DryRate);
@@ -1227,6 +1282,13 @@ FString BuildRuntimeSignatureCacheKey(
     for (const int32 MaterialSlotIndex : WettableMaterialSlots)
     {
         Builder.AddValue(MaterialSlotIndex);
+        const int32 NormalUVChannel =
+            ResolveGPUMapSurfaceWaterNormalUVChannel(Asset, MaterialSlotIndex);
+        Builder.AddValue(NormalUVChannel);
+        Builder.AddString(UWetClothingAsset::BuildMeshContentSignature(
+            &RuntimeMesh,
+            LODIndex,
+            NormalUVChannel));
     }
 
     Builder.AddValue(LODData.RenderSections.Num());
@@ -1418,6 +1480,40 @@ bool FWetGPUMapBakeBuilder::BuildLODRuntimeSignature(
         return false;
     }
 
+    for (const int32 MaterialSlotIndex : WettableMaterialSlots)
+    {
+        const int32 NormalUVChannel =
+            ResolveGPUMapSurfaceWaterNormalUVChannel(Asset, MaterialSlotIndex);
+        if (NormalUVChannel < 0 || NormalUVChannel >= TexCoordCount)
+        {
+            SetGPUMapBakeError(
+                OutErrorMessage,
+                FString::Printf(
+                    TEXT("LOD%d material slot %d SurfaceWaterNormalUV channel %d is unavailable (mesh has %d channels)."),
+                    LODIndex,
+                    MaterialSlotIndex,
+                    NormalUVChannel,
+                    TexCoordCount));
+            return false;
+        }
+
+        const FString NormalUVSignature = UWetClothingAsset::BuildMeshContentSignature(
+            RuntimeMesh,
+            LODIndex,
+            NormalUVChannel);
+        if (NormalUVSignature.IsEmpty())
+        {
+            SetGPUMapBakeError(
+                OutErrorMessage,
+                FString::Printf(
+                    TEXT("LOD%d material slot %d SurfaceWaterNormalUV channel %d could not be read."),
+                    LODIndex,
+                    MaterialSlotIndex,
+                    NormalUVChannel));
+            return false;
+        }
+    }
+
     const FString CacheKey = BuildRuntimeSignatureCacheKey(
         Asset,
         *RuntimeMesh,
@@ -1463,6 +1559,13 @@ bool FWetGPUMapBakeBuilder::BuildLODRuntimeSignature(
     for (const int32 MaterialSlotIndex : WettableMaterialSlots)
     {
         Builder.AddValue(MaterialSlotIndex);
+        const int32 NormalUVChannel =
+            ResolveGPUMapSurfaceWaterNormalUVChannel(Asset, MaterialSlotIndex);
+        Builder.AddValue(NormalUVChannel);
+        Builder.AddString(UWetClothingAsset::BuildMeshContentSignature(
+            RuntimeMesh,
+            LODIndex,
+            NormalUVChannel));
     }
 
     const int32 SectionCount = LODData.RenderSections.Num();
@@ -1721,6 +1824,34 @@ static bool BuildLODInternal(
         }
     };
 
+    TMap<int32, int32> SurfaceWaterNormalUVChannelByMaterialSlot;
+    TMap<int32, FDWCDataUVBufferView> SurfaceWaterNormalUVViews;
+    for (const int32 MaterialSlotIndex : WettableMaterialSlots)
+    {
+        const int32 NormalUVChannel =
+            ResolveGPUMapSurfaceWaterNormalUVChannel(Asset, MaterialSlotIndex);
+        FDWCDataUVBufferView& NormalUVView =
+            SurfaceWaterNormalUVViews.FindOrAdd(NormalUVChannel);
+        if (!NormalUVView.IsValid())
+        {
+            FString NormalUVError;
+            if (!NormalUVView.Initialize(RuntimeMesh, LODIndex, NormalUVChannel, &NormalUVError) ||
+                NormalUVView.NumVertices() != VertexCount)
+            {
+                SetGPUMapBakeError(
+                    OutErrorMessage,
+                    FString::Printf(
+                        TEXT("LOD%d Surface Water Normal UV%d is invalid for material slot %d. %s"),
+                        LODIndex,
+                        NormalUVChannel,
+                        MaterialSlotIndex,
+                        *NormalUVError));
+                return false;
+            }
+        }
+        SurfaceWaterNormalUVChannelByMaterialSlot.Add(MaterialSlotIndex, NormalUVChannel);
+    }
+
     TMap<int32, int32> MaterialToOutputIndex;
     for (const int32 MaterialSlotIndex : WettableMaterialSlots)
     {
@@ -1763,6 +1894,22 @@ static bool BuildLODInternal(
         }
 
         FDWCGPUMaterialSlotBakeData& Slot = Output.MaterialSlots[*SlotOutputIndex];
+        const int32* NormalUVChannel =
+            SurfaceWaterNormalUVChannelByMaterialSlot.Find(Section.MaterialIndex);
+        const FDWCDataUVBufferView* SurfaceWaterNormalUVView =
+            NormalUVChannel != nullptr
+                ? SurfaceWaterNormalUVViews.Find(*NormalUVChannel)
+                : nullptr;
+        if (SurfaceWaterNormalUVView == nullptr || !SurfaceWaterNormalUVView->IsValid())
+        {
+            SetGPUMapBakeError(
+                OutErrorMessage,
+                FString::Printf(
+                    TEXT("LOD%d Surface Water Normal UV view is missing for material slot %d."),
+                    LODIndex,
+                    Section.MaterialIndex));
+            return false;
+        }
 
         const int32 FirstIndex = static_cast<int32>(Section.BaseIndex);
         const int32 LastIndex = FMath::Min(FirstIndex + static_cast<int32>(Section.NumTriangles * 3), IndexBuffer.Num());
@@ -1810,6 +1957,9 @@ static bool BuildLODInternal(
             const FVector2D UV0(DataUVView.GetUV(V0));
             const FVector2D UV1(DataUVView.GetUV(V1));
             const FVector2D UV2(DataUVView.GetUV(V2));
+            const FVector2D SurfaceWaterNormalUV0(SurfaceWaterNormalUVView->GetUV(V0));
+            const FVector2D SurfaceWaterNormalUV1(SurfaceWaterNormalUVView->GetUV(V1));
+            const FVector2D SurfaceWaterNormalUV2(SurfaceWaterNormalUVView->GetUV(V2));
 
             auto IsDataUVInRange = [](const FVector2D& UV)
             {
@@ -1857,6 +2007,14 @@ static bool BuildLODInternal(
             Triangle.UV0 = UV0;
             Triangle.UV1 = UV1;
             Triangle.UV2 = UV2;
+            Triangle.DataToSurfaceWaterNormalUV =
+                BuildDataToSurfaceWaterNormalUVTransform(
+                    UV0,
+                    UV1,
+                    UV2,
+                    SurfaceWaterNormalUV0,
+                    SurfaceWaterNormalUV1,
+                    SurfaceWaterNormalUV2);
             Triangle.RestSurfaceArea = RestSurfaceArea;
             Triangle.ProfileIndex = FindOrAddProfile(
                 Output.Profiles,

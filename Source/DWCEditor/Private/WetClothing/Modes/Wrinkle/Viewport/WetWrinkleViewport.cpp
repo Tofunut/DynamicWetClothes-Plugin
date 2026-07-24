@@ -34,15 +34,13 @@ namespace
 {
     constexpr int32 WetWrinkleUVGridResolution = 64;
     constexpr int32 WetWrinkleBVHLeafTriangleCount = 8;
+    constexpr int32 ForceRenderLOD0 = 1; // USkinnedMeshComponent forced LOD is 1-based; 0 means automatic.
 
     uint64 MakeWetWrinkleTriangleLookupKey(const int32 MaterialSlotIndex, const int32 TriangleID)
     {
         return (static_cast<uint64>(static_cast<uint32>(MaterialSlotIndex)) << 32) |
             static_cast<uint32>(TriangleID);
     }
-
-    const FName EditorPreviewWetnessProfileMap0ParameterName(TEXT("DWC_WetnessProfileMap0"));
-    const FName EditorPreviewUseWetnessProfileMap0ParameterName(TEXT("DWC_UseWetnessProfileMap0"));
 
     UMaterialInterface* ResolveSourceMeshMaterialForPreviewSlot(
         const USkeletalMesh* PreparedMesh,
@@ -617,6 +615,7 @@ void SWetWrinkleViewport::Construct(const FArguments& InArgs)
     PreviewMeshComponent = NewObject<USkeletalMeshComponent>(GetTransientPackage(), NAME_None, RF_Transient);
     PreviewMeshComponent->SetMobility(EComponentMobility::Movable);
     PreviewMeshComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    PreviewMeshComponent->SetForcedLOD(ForceRenderLOD0);
     PreviewScene->AddComponent(PreviewMeshComponent, FTransform::Identity);
 
     RefreshPreviewMesh();
@@ -683,7 +682,7 @@ void SWetWrinkleViewport::RefreshPreviewMesh(const bool bForceMaterialRebuild)
     {
         PreviewMeshComponent->SetSkeletalMeshAsset(TargetMesh);
     }
-    PreviewMeshComponent->SetForcedLOD(1);
+    PreviewMeshComponent->SetForcedLOD(ForceRenderLOD0);
 
     const bool bMaterialSourcesChanged = bMeshChanged || !ArePreviewMaterialSlotsCurrent();
     if (bForceMaterialRebuild || bMaterialSourcesChanged)
@@ -784,7 +783,6 @@ void SWetWrinkleViewport::SetGeneratedNormalPreviewTexture(
     const int32 UVChannelIndex,
     UTexture2D* GeneratedNormalTexture)
 {
-    bGeneratedNormalPreviewOverrideActive = true;
     GeneratedNormalPreviewMaterialSlotIndex = MaterialSlotIndex;
     GeneratedNormalPreviewUVChannelIndex = UVChannelIndex;
     GeneratedNormalPreviewTexture = GeneratedNormalTexture;
@@ -795,7 +793,6 @@ void SWetWrinkleViewport::SetGeneratedNormalPreviewTexture(
 
 void SWetWrinkleViewport::ClearGeneratedNormalPreviewTexture()
 {
-    bGeneratedNormalPreviewOverrideActive = false;
     GeneratedNormalPreviewMaterialSlotIndex = INDEX_NONE;
     GeneratedNormalPreviewUVChannelIndex = INDEX_NONE;
     GeneratedNormalPreviewTexture = nullptr;
@@ -1485,38 +1482,6 @@ UMaterialInterface* SWetWrinkleViewport::GetPreviewSourceMaterial(int32 Material
                : nullptr;
 }
 
-UTexture2D* SWetWrinkleViewport::ResolveWetnessProfileMapForSlot(int32 MaterialSlotIndex) const
-{
-    const UWetClothingAsset* SourceWetClothingAsset = ResolveSourceWetClothingAsset();
-    if (SourceWetClothingAsset == nullptr)
-    {
-        return nullptr;
-    }
-
-    const UTexture* DesiredSourceTexture = ResolveSourceTextureForMaterialSlot(MaterialSlotIndex, BrushSettings.UVChannelIndex);
-
-    const FWetClothingBakedWetnessProfileMap* ExactMatch = SourceWetClothingAsset->Derived.Inline.BakedWetnessProfileMaps.FindByPredicate(
-        [MaterialSlotIndex, DesiredSourceTexture, this](const FWetClothingBakedWetnessProfileMap& Entry)
-        {
-            return Entry.WetnessProfileMap0 != nullptr &&
-                   Entry.SourceTexture == DesiredSourceTexture &&
-                   Entry.UVChannelIndex == BrushSettings.UVChannelIndex &&
-                   Entry.MaterialSlotIndices.Contains(MaterialSlotIndex);
-        });
-    if (ExactMatch != nullptr)
-    {
-        return ExactMatch->WetnessProfileMap0.Get();
-    }
-
-    const FWetClothingBakedWetnessProfileMap* SlotMatch = SourceWetClothingAsset->Derived.Inline.BakedWetnessProfileMaps.FindByPredicate(
-        [MaterialSlotIndex](const FWetClothingBakedWetnessProfileMap& Entry)
-        {
-            return Entry.WetnessProfileMap0 != nullptr &&
-                   Entry.MaterialSlotIndices.Contains(MaterialSlotIndex);
-        });
-    return SlotMatch != nullptr ? SlotMatch->WetnessProfileMap0.Get() : nullptr;
-}
-
 void SWetWrinkleViewport::RefreshWrinklePreviewMaterials()
 {
     const int32 ActiveMaterialSlotIndex = ResolveActivePreviewMaterialSlot();
@@ -1543,7 +1508,7 @@ void SWetWrinkleViewport::RefreshWrinklePreviewMaterials()
             if (SlotState.PreviewStatus == EWetWrinklePreviewMaterialStatus::Ready && SlotState.PreviewMID != nullptr)
             {
                 UTexture2D* PreviewNormalTexture = nullptr;
-                if (bGeneratedNormalPreviewOverrideActive &&
+                if (GeneratedNormalPreviewTexture != nullptr &&
                     GeneratedNormalPreviewMaterialSlotIndex == ActiveMaterialSlotIndex &&
                     GeneratedNormalPreviewUVChannelIndex == BrushSettings.UVChannelIndex)
                 {
@@ -1757,6 +1722,12 @@ bool SWetWrinkleViewport::EnsurePreviewMaterialForSlot(int32 MaterialSlotIndex)
     SlotState.TransientPreviewMaterial = BuildResult.TransientBaseMaterial;
     SlotState.TransientPreviewParent = BuildResult.TransientMaterialParent;
     SlotState.PreviewMID = BuildResult.PreviewMID;
+    DWCEditorPreviewSlotUtils::ApplyRenderProfileResources(
+        WetClothingAsset.Get(),
+        MaterialSlotIndex,
+        PreviewMaterialSlots.Num(),
+        SlotState.PreviewMID,
+        PreviewScene.IsValid() ? PreviewScene->GetWorld() : nullptr);
     SlotState.PreviewStatus = EWetWrinklePreviewMaterialStatus::Ready;
     SlotState.PreviewBuildError.Reset();
     ResetPreviewMaterialParameters(MaterialSlotIndex);
@@ -1794,18 +1765,6 @@ void SWetWrinkleViewport::ResetPreviewMaterialParameters(int32 MaterialSlotIndex
     SlotState.PreviewMID->SetVectorParameterValue(
         WetWrinklePreviewMaterialParameters::HoverScale,
         FLinearColor(1.0f, 1.0f, 0.0f, 0.0f));
-
-    SlotState.PreviewMID->SetTextureParameterValue(EditorPreviewWetnessProfileMap0ParameterName, nullptr);
-    SlotState.PreviewMID->SetScalarParameterValue(EditorPreviewUseWetnessProfileMap0ParameterName, 0.0f);
-
-    if (SlotState.bUsesDwcWetMaterial)
-    {
-        if (UTexture2D* WetnessProfileMap0 = ResolveWetnessProfileMapForSlot(MaterialSlotIndex))
-        {
-            SlotState.PreviewMID->SetTextureParameterValue(EditorPreviewWetnessProfileMap0ParameterName, WetnessProfileMap0);
-            SlotState.PreviewMID->SetScalarParameterValue(EditorPreviewUseWetnessProfileMap0ParameterName, 1.0f);
-        }
-    }
 
 }
 
@@ -2332,20 +2291,17 @@ void SWetWrinkleViewport::ApplyMaterialSlotVisibility()
         return;
     }
 
-    constexpr int32 PreviewLODIndex = 0;
-    if (!RenderData->LODRenderData.IsValidIndex(PreviewLODIndex))
+    for (int32 LODIndex = 0; LODIndex < RenderData->LODRenderData.Num(); ++LODIndex)
     {
-        return;
-    }
-
-    const FSkeletalMeshLODRenderData& LODData = RenderData->LODRenderData[PreviewLODIndex];
-    for (int32 SectionIndex = 0; SectionIndex < LODData.RenderSections.Num(); ++SectionIndex)
-    {
-        const FSkelMeshRenderSection& Section = LODData.RenderSections[SectionIndex];
-        const bool bShowSection = BrushSettings.MaterialSlotIndex == INDEX_NONE
-                                      ? DWCEditorPreviewSlotUtils::IsCpuPreviewReady(WetClothingAsset.Get(), Section.MaterialIndex)
-                                      : Section.MaterialIndex == BrushSettings.MaterialSlotIndex;
-        PreviewMeshComponent->ShowMaterialSection(Section.MaterialIndex, SectionIndex, bShowSection, PreviewLODIndex);
+        const FSkeletalMeshLODRenderData& LODData = RenderData->LODRenderData[LODIndex];
+        for (int32 SectionIndex = 0; SectionIndex < LODData.RenderSections.Num(); ++SectionIndex)
+        {
+            const FSkelMeshRenderSection& Section = LODData.RenderSections[SectionIndex];
+            const bool bShowSection = BrushSettings.MaterialSlotIndex == INDEX_NONE
+                                          ? DWCEditorPreviewSlotUtils::IsCpuPreviewReady(WetClothingAsset.Get(), Section.MaterialIndex)
+                                          : Section.MaterialIndex == BrushSettings.MaterialSlotIndex;
+            PreviewMeshComponent->ShowMaterialSection(Section.MaterialIndex, SectionIndex, bShowSection, LODIndex);
+        }
     }
 }
 

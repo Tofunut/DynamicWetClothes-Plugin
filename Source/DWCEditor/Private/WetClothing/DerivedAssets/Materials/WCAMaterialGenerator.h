@@ -6,6 +6,7 @@
 class UMaterial;
 class UMaterialInstanceConstant;
 class UMaterialInterface;
+class UMaterialFunctionInterface;
 class UWetClothingAsset;
 
 struct FWetClothingUnifiedMaterialSetupResult
@@ -15,6 +16,7 @@ struct FWetClothingUnifiedMaterialSetupResult
     UMaterial* GeneratedMaterial = nullptr;
     UMaterialInstanceConstant* CPUMaterialInstance = nullptr;
     UMaterialInstanceConstant* GPUMaterialInstance = nullptr;
+    UMaterialFunctionInterface* EvaluateSurfaceAppearanceFunction = nullptr;
     FString Message;
 };
 
@@ -25,6 +27,16 @@ class FWCAMaterialGenerator
     {
         EDWCSimulationMode SimulationMode = EDWCSimulationMode::VertexCPU;
         int32 DWCDataUVChannelIndex = INDEX_NONE;
+        int32 OriginalUVChannelIndex = 0;
+        int32 MaterialSlotIndex = INDEX_NONE;
+        int32 SurfaceWaterNormalUVChannelIndex = 0;
+        FVector2D DropletUVTiling = FVector2D(1.0, 1.0);
+        FVector2D RivuletUVTiling = FVector2D(1.0, 1.0);
+        float SurfaceWaterTargetRoughness = 0.05f;
+        bool bUseDropletNormal = false;
+        bool bUseRivuletNormal = false;
+        bool bEnableDWCDataUVSampling = false;
+        bool bConnectWetnessMapPath = false;
 
         /** Optional owner used to place generated assets in a WCA-specific deterministic folder. */
         const UWetClothingAsset* OwningWetClothingAsset = nullptr;
@@ -32,7 +44,8 @@ class FWCAMaterialGenerator
 
     static FOptions MakeOptionsForAsset(
         const UWetClothingAsset* WetClothingAsset,
-        EDWCSimulationMode SimulationMode = EDWCSimulationMode::VertexCPU);
+        EDWCSimulationMode SimulationMode = EDWCSimulationMode::VertexCPU,
+        int32 MaterialSlotIndex = INDEX_NONE);
 
     /** Creates one shared DWC material graph and two static CPU/GPU MIC permutations. */
     static FWetClothingUnifiedMaterialSetupResult CreateOrUpdateUnifiedMaterialSet(
@@ -47,7 +60,6 @@ class FWCAMaterialGenerator
     /** Deep graph and static-permutation validation used by explicit validation/generation workflows. */
     static void ValidateGeneratedMaterialOverrides(const UWetClothingAsset* WetClothingAsset, TArray<FString>& OutMessages);
 
-    // Routine material setup treats the shared functions as fixed, read-only assets.
-    static bool ValidateSharedApplyWetnessFunction(FString& OutErrorMessage);
+    static bool ValidateSurfaceAppearanceFunctions(FString& OutErrorMessage);
 
 };

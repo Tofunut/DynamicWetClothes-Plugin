@@ -1,13 +1,20 @@
 #include "/Engine/Public/Platform.ush"
+#include "/DWCGPU/DWCDiffuseDiagnostics.ush"
+
+// Diagnostics are intentionally compiled out of the production DiffuseDry path.
+#define DWCRecordCount(StatIndex)
+#define DWCRecordMax(StatIndex, Value)
 
 Texture2D<float> SourceWetnessTexture;
+Texture2D<float> PendingWetnessTexture;
 RWTexture2D<float> DestinationWetnessTexture;
+RWTexture2D<float> DestinationPendingWetnessTexture;
 
 StructuredBuffer<uint4> TexelLookup;
 StructuredBuffer<float4> TriangleFlow;
 
 // x=dot(dPdu,dPdu), y=dot(dPdu,dPdv),
-// z=dot(dPdv,dPdv), w=valid
+// z=dot(dPdv,dPdv), w=(UV island ID + 1), or 0 for invalid texels.
 StructuredBuffer<float4> TriangleMetric;
 
 // x=SpreadRate/s, y=DryRate/s,
@@ -19,9 +26,10 @@ StructuredBuffer<uint> TriangleProfileIndices;
 int2 TextureSize;
 float DeltaSeconds;
 float MaxWetness;
+float CapillaryImmediateAbsorptionFraction;
 
-static const float DWCSpreadResponseScale = 1.75;
-static const float DWCGravityResponseScale = 1.50;
+static const float DWCSpreadResponseScale = 2;
+static const float DWCGravityResponseScale = 1.75;
 
 // 한 방향으로 강하게 흐르는 것은 허용한다.
 static const float DWCMaxEdgeTransferFraction = 0.35;
@@ -29,6 +37,14 @@ static const float DWCMaxEdgeTransferFraction = 0.35;
 // 하지만 한 texel이 한 step 동안 네 방향으로 내보내는 총량은 제한한다.
 // 자기 질량의 절반 이상을 남겨 checkerboard/진동을 방지한다.
 static const float DWCMaxTotalTransferFraction = 0.45;
+
+// Temporary isolation test: allow Pending water to cross baked UV-island IDs.
+// If the hard horizontal frontier disappears, the cause is the GPU lookup/island gate.
+static const bool DWC_DEBUG_ALLOW_PENDING_ACROSS_UV_ISLANDS = true;
+
+// Temporary diagnostic: display the StableEdgeFraction read from the GPU path.
+static const bool DWC_DEBUG_PROFILE_SPREAD_OUTPUT = false;
+static const bool DWC_DEBUG_STABLE_FRACTION_OUTPUT = false;
 
 static const int2 DWCNeighborOffsets[4] =
 {
@@ -78,7 +94,8 @@ bool IsConnectedNeighbor(uint4 SourceLookup, uint4 NeighborLookup)
 {
     return
         IsValidLookup(NeighborLookup) &&
-        NeighborLookup.w == SourceLookup.w;
+        (DWC_DEBUG_ALLOW_PENDING_ACROSS_UV_ISLANDS ||
+         NeighborLookup.w == SourceLookup.w);
 }
 
 float TexelArea(uint4 Lookup)
@@ -211,6 +228,84 @@ float StableEdgeFraction(
     return RequestedFraction * NormalizationScale;
 }
 
+float ComputePendingSpreadableWetness(
+    float StoredWetness,
+    float PendingWetness,
+    out float AbsorbedWetness)
+{
+    const float SafeStoredWetness = clamp(StoredWetness, 0.0, MaxWetness);
+    const float SafePendingWetness = max(PendingWetness, 0.0);
+    const float DesiredAbsorption =
+        SafePendingWetness *
+        clamp(CapillaryImmediateAbsorptionFraction, 0.0, MaxWetness);
+    const float AvailableCapacity = max(MaxWetness - SafeStoredWetness, 0.0);
+
+    AbsorbedWetness = min(DesiredAbsorption, AvailableCapacity);
+    const float OverflowWetness = max(DesiredAbsorption - AbsorbedWetness, 0.0);
+    const float CapillaryWetness =
+        max(SafePendingWetness - DesiredAbsorption, 0.0);
+
+    return CapillaryWetness + OverflowWetness;
+}
+
+float PendingSpreadAlpha(uint4 SourceLookup)
+{
+    if (!IsValidLookup(SourceLookup))
+    {
+        return 0.0;
+    }
+
+    const uint ProfileIndex = TriangleProfileIndices[SourceLookup.x];
+    const float SpreadRate = max(Profiles[ProfileIndex].x, 0.0);
+    return saturate(SpreadRate * max(DeltaSeconds, 0.0));
+}
+
+float PendingGravityBias(uint4 SourceLookup, uint DirectionIndex)
+{
+    if (!IsValidLookup(SourceLookup))
+    {
+        return 0.0;
+    }
+
+    const uint ProfileIndex = TriangleProfileIndices[SourceLookup.x];
+    const float GravityStrength = max(Profiles[ProfileIndex].z, 0.0);
+    const float2 Flow = TriangleFlow[SourceLookup.x].xy;
+    const float4 Metric = TriangleMetric[SourceLookup.x];
+
+    if (!isfinite(GravityStrength) ||
+        !all(isfinite(Flow)) ||
+        !all(isfinite(Metric)))
+    {
+        return 1.0;
+    }
+
+    // TriangleFlow.xy is the UV-space contravariant projection of gravity.
+    // Multiplying by the metric converts it into the gravity covector, so the
+    // dot product below matches CPU's normalized world-space edge alignment.
+    const float2 GravityCovector = float2(
+        Metric.x * Flow.x + Metric.y * Flow.y,
+        Metric.y * Flow.x + Metric.z * Flow.y);
+    const float2 DirectionUV = DWCNeighborDirections[DirectionIndex];
+    const float DirectionLengthSquared =
+        DirectionUV.x * DirectionUV.x * Metric.x +
+        2.0 * DirectionUV.x * DirectionUV.y * Metric.y +
+        DirectionUV.y * DirectionUV.y * Metric.z;
+
+    if (DirectionLengthSquared <= 1.0e-8)
+    {
+        return 1.0;
+    }
+
+    const float GravityAlignment =
+        dot(DirectionUV, GravityCovector) /
+        sqrt(DirectionLengthSquared);
+
+    return clamp(
+        1.0 + GravityAlignment * GravityStrength,
+        0.0,
+        2.0);
+}
+
 [numthreads(8, 8, 1)]
 void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
@@ -227,6 +322,7 @@ void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
     if (!IsValidLookup(CenterLookup))
     {
         DestinationWetnessTexture[Texel] = 0.0;
+        DestinationPendingWetnessTexture[Texel] = 0.0;
         return;
     }
 
@@ -236,8 +332,142 @@ void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
         max(
             SourceWetnessTexture.Load(int3(Texel, 0)),
             0.0);
+    const float CenterPendingWetness =
+        max(
+            PendingWetnessTexture.Load(int3(Texel, 0)),
+            0.0);
 
-    float NewMass = CenterWetness * CenterArea;
+    DWCRecordCount(DWC_DIAG_VALID_TEXELS);
+    DWCRecordMax(DWC_DIAG_CENTER_WETNESS_MAX, CenterWetness);
+    DWCRecordMax(DWC_DIAG_CENTER_AREA_MAX, CenterArea);
+    if (CenterWetness > 1.0e-6)
+    {
+        DWCRecordCount(DWC_DIAG_SOURCE_WET_TEXELS);
+    }
+
+    const bool bDryCenter = CenterWetness <= 1.0e-6;
+    const bool bLowWetnessCenter = CenterWetness <= 1.0e-2;
+    if (bDryCenter)
+    {
+        DWCRecordCount(DWC_DIAG_DRY_TEXELS);
+    }
+    if (bLowWetnessCenter)
+    {
+        DWCRecordCount(DWC_DIAG_LOW_WETNESS_TEXELS);
+    }
+
+    float IncomingMassTotal = 0.0;
+
+    if (DWC_DEBUG_PROFILE_SPREAD_OUTPUT)
+    {
+        const uint ProfileIndex =
+            TriangleProfileIndices[CenterLookup.x];
+
+        const float GPUSpreadRate =
+            max(Profiles[ProfileIndex].x, 0.0);
+
+        DestinationWetnessTexture[Texel] =
+            clamp(
+                GPUSpreadRate / 5000.0 * MaxWetness,
+                0.0,
+                MaxWetness);
+        DestinationPendingWetnessTexture[Texel] = 0.0;
+        return;
+    }
+
+    if (DWC_DEBUG_STABLE_FRACTION_OUTPUT)
+    {
+        float MaxStableFraction = 0.0;
+
+        [unroll]
+        for (uint DirectionIndex = 0u;
+             DirectionIndex < 4u;
+             ++DirectionIndex)
+        {
+            const int2 NeighborTexel =
+                Texel + DWCNeighborOffsets[DirectionIndex];
+
+            if (!IsInside(NeighborTexel))
+            {
+                continue;
+            }
+
+            const uint4 NeighborLookup =
+                TexelLookup[Flatten(NeighborTexel)];
+
+            if (!IsConnectedNeighbor(CenterLookup, NeighborLookup))
+            {
+                continue;
+            }
+
+            const float StableFraction =
+                StableEdgeFraction(
+                    CenterLookup,
+                    Texel,
+                    DirectionIndex);
+
+            if (isfinite(StableFraction))
+            {
+                MaxStableFraction =
+                    max(MaxStableFraction, max(StableFraction, 0.0));
+            }
+        }
+
+        DestinationWetnessTexture[Texel] =
+            clamp(
+                MaxStableFraction / DWCMaxEdgeTransferFraction * MaxWetness,
+                0.0,
+                MaxWetness);
+        DestinationPendingWetnessTexture[Texel] = 0.0;
+        return;
+    }
+
+    float AbsorbedWetness = 0.0;
+    const float SpreadableWetness =
+        ComputePendingSpreadableWetness(
+            CenterWetness,
+            CenterPendingWetness,
+            AbsorbedWetness);
+
+    float NewWetness = CenterWetness + AbsorbedWetness;
+    const float CenterSpreadAlpha = PendingSpreadAlpha(CenterLookup);
+    float CenterTotalWeight = 0.0;
+
+    // CPU parity: distribute Pending water by target capacity and gravity.
+    [unroll]
+    for (uint DirectionIndex = 0u;
+         DirectionIndex < 4u;
+         ++DirectionIndex)
+    {
+        const int2 NeighborTexel =
+            Texel + DWCNeighborOffsets[DirectionIndex];
+
+        if (!IsInside(NeighborTexel))
+        {
+            continue;
+        }
+
+        const uint4 NeighborLookup =
+            TexelLookup[Flatten(NeighborTexel)];
+
+        if (!IsConnectedNeighbor(CenterLookup, NeighborLookup))
+        {
+            continue;
+        }
+
+        const float NeighborWetness =
+            max(
+                SourceWetnessTexture.Load(
+                    int3(NeighborTexel, 0)),
+                0.0);
+        const float TargetCapacity =
+            max(MaxWetness - min(NeighborWetness, MaxWetness), 0.0);
+        CenterTotalWeight +=
+            TargetCapacity *
+            PendingGravityBias(CenterLookup, DirectionIndex);
+    }
+
+    float PendingNextWetness = 0.0;
 
     [unroll]
     for (uint DirectionIndex = 0u;
@@ -261,39 +491,111 @@ void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
             continue;
         }
 
+        DWCRecordCount(DWC_DIAG_CONNECTED_NEIGHBORS);
+
         // 현재 texel이 이웃 방향으로 내보내는 질량.
-        const float OutFraction =
-            StableEdgeFraction(
-                CenterLookup,
-                Texel,
-                DirectionIndex);
-
-        NewMass -=
-            CenterWetness *
-            CenterArea *
-            OutFraction;
-
-        // 이웃 texel이 현재 texel 방향으로 내보내는 질량.
-        // 이웃 기준에서는 반대 방향 인덱스를 사용한다.
-        const float NeighborArea =
-            TexelArea(NeighborLookup);
-
         const float NeighborWetness =
             max(
                 SourceWetnessTexture.Load(
                     int3(NeighborTexel, 0)),
                 0.0);
+        const float TargetCapacity =
+            max(MaxWetness - min(NeighborWetness, MaxWetness), 0.0);
+        const float NeighborWeight =
+            TargetCapacity *
+            PendingGravityBias(CenterLookup, DirectionIndex);
+        const float OutFraction =
+            CenterTotalWeight > 1.0e-8
+                ? NeighborWeight / CenterTotalWeight
+                : 0.0;
+
+        DWCRecordMax(DWC_DIAG_OUT_FRACTION_MAX, OutFraction);
+        const float OutgoingMass =
+            SpreadableWetness *
+            CenterSpreadAlpha *
+            OutFraction;
+        DWCRecordMax(
+            DWC_DIAG_OUTGOING_MASS_MAX,
+            OutgoingMass);
+
+        // 이웃 texel이 현재 texel 방향으로 내보내는 질량.
+        // 이웃 기준에서는 반대 방향 인덱스를 사용한다.
+        const float NeighborPendingWetness =
+            max(
+                PendingWetnessTexture.Load(
+                    int3(NeighborTexel, 0)),
+                0.0);
+
+        float NeighborAbsorbedWetness = 0.0;
+        const float NeighborSpreadableWetness =
+            ComputePendingSpreadableWetness(
+                NeighborWetness,
+                NeighborPendingWetness,
+                NeighborAbsorbedWetness);
+
+        const float NeighborSpreadAlpha = PendingSpreadAlpha(NeighborLookup);
+        float NeighborTotalWeight = 0.0;
+        float NeighborWeightToCenter = 0.0;
+
+        [unroll]
+        for (uint NeighborDirectionIndex = 0u;
+             NeighborDirectionIndex < 4u;
+             ++NeighborDirectionIndex)
+        {
+            const int2 CandidateTexel =
+                NeighborTexel + DWCNeighborOffsets[NeighborDirectionIndex];
+
+            if (!IsInside(CandidateTexel))
+            {
+                continue;
+            }
+
+            const uint4 CandidateLookup =
+                TexelLookup[Flatten(CandidateTexel)];
+
+            if (!IsConnectedNeighbor(NeighborLookup, CandidateLookup))
+            {
+                continue;
+            }
+
+            const float CandidateWetness =
+                max(
+                    SourceWetnessTexture.Load(
+                        int3(CandidateTexel, 0)),
+                    0.0);
+            const float CandidateCapacity =
+                max(MaxWetness - min(CandidateWetness, MaxWetness), 0.0);
+            const float CandidateWeight =
+                CandidateCapacity *
+                PendingGravityBias(NeighborLookup, NeighborDirectionIndex);
+
+            NeighborTotalWeight += CandidateWeight;
+            if (NeighborDirectionIndex == DWCOppositeDirectionIndices[DirectionIndex])
+            {
+                NeighborWeightToCenter = CandidateWeight;
+            }
+        }
 
         const float InFraction =
-            StableEdgeFraction(
-                NeighborLookup,
-                NeighborTexel,
-                DWCOppositeDirectionIndices[DirectionIndex]);
-
-        NewMass +=
-            NeighborWetness *
-            NeighborArea *
+            NeighborTotalWeight > 1.0e-8
+                ? NeighborWeightToCenter / NeighborTotalWeight
+                : 0.0;
+        const float IncomingWetness =
+            NeighborSpreadableWetness *
+            NeighborSpreadAlpha *
             InFraction;
+        const float IncomingMass = IncomingWetness;
+
+        IncomingMassTotal += IncomingMass;
+
+        DWCRecordMax(DWC_DIAG_IN_FRACTION_MAX, InFraction);
+        DWCRecordMax(DWC_DIAG_INCOMING_MASS_MAX, IncomingMass);
+        if (IncomingMass > 0.0)
+        {
+            DWCRecordCount(DWC_DIAG_INCOMING_POSITIVE_EDGES);
+        }
+
+        PendingNextWetness += IncomingWetness;
     }
 
     const uint CenterProfileIndex =
@@ -305,12 +607,9 @@ void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
     const float TimeStep =
         max(DeltaSeconds, 0.0);
 
-    NewMass =
-        max(NewMass, 0.0) *
+    NewWetness =
+        max(NewWetness, 0.0) *
         exp(-DryRate * TimeStep);
-
-    float NewWetness =
-        NewMass / max(CenterArea, 1.0e-10);
 
     if (!isfinite(NewWetness))
     {
@@ -322,4 +621,30 @@ void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
             NewWetness,
             0.0,
             MaxWetness);
+
+    float NewPendingWetness = PendingNextWetness;
+
+    if (!isfinite(NewPendingWetness))
+    {
+        NewPendingWetness = 0.0;
+    }
+
+    DestinationPendingWetnessTexture[Texel] =
+        max(NewPendingWetness, 0.0);
+
+    DWCRecordMax(DWC_DIAG_NEW_WETNESS_MAX, NewWetness);
+    if (CenterWetness <= 1.0e-6)
+    {
+        DWCRecordMax(DWC_DIAG_NEW_WETNESS_ON_DRY_MAX, NewWetness);
+        DWCRecordMax(DWC_DIAG_INCOMING_MASS_ON_DRY_MAX, IncomingMassTotal);
+        if (IncomingMassTotal > 0.0)
+        {
+            DWCRecordCount(DWC_DIAG_DRY_TEXELS_WITH_INCOMING);
+        }
+    }
+    if (CenterWetness <= 1.0e-2)
+    {
+        DWCRecordMax(DWC_DIAG_NEW_WETNESS_ON_LOW_WETNESS_MAX, NewWetness);
+        DWCRecordMax(DWC_DIAG_INCOMING_MASS_ON_LOW_WETNESS_MAX, IncomingMassTotal);
+    }
 }

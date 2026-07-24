@@ -21,6 +21,7 @@ public:
         SHADER_PARAMETER(FVector4f, P1AndMaxWetness)
         SHADER_PARAMETER(FVector4f, P2AndMode)
         SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float>, WetnessTexture)
+        SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float>, PendingWetnessTexture)
     END_SHADER_PARAMETER_STRUCT()
 
     static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters);
@@ -60,8 +61,13 @@ public:
         SHADER_PARAMETER(FIntPoint, TextureSize)
         SHADER_PARAMETER(float, DeltaSeconds)
         SHADER_PARAMETER(float, MaxWetness)
+        SHADER_PARAMETER(float, CapillaryImmediateAbsorptionFraction)
+        SHADER_PARAMETER(uint32, DiffuseDiagnosticsEnabled)
         SHADER_PARAMETER_RDG_TEXTURE(Texture2D, SourceWetnessTexture)
+        SHADER_PARAMETER_RDG_TEXTURE(Texture2D, PendingWetnessTexture)
         SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float>, DestinationWetnessTexture)
+        SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float>, DestinationPendingWetnessTexture)
+        SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<uint>, DiffuseDiagnostics)
         SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint4>, TexelLookup)
         SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float4>, TriangleFlow)
         SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float4>, TriangleMetric)
@@ -93,7 +99,7 @@ public:
     static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters);
 };
 
-/** 8-neighbor absorbed-wetness spread, gravity bias, and drying using precomputed transfer scales. */
+/** 8-neighbor CPU-style Pending spread, gravity bias, and drying. */
 class FDWCDiffuseDry8CS final : public FGlobalShader
 {
 public:
@@ -104,9 +110,14 @@ public:
         SHADER_PARAMETER(FIntPoint, TextureSize)
         SHADER_PARAMETER(float, DeltaSeconds)
         SHADER_PARAMETER(float, MaxWetness)
+        SHADER_PARAMETER(float, CapillaryImmediateAbsorptionFraction)
+        SHADER_PARAMETER(uint32, DiffuseDiagnosticsEnabled)
         SHADER_PARAMETER_RDG_TEXTURE(Texture2D, SourceWetnessTexture)
         SHADER_PARAMETER_RDG_TEXTURE(Texture2D, TransferScaleTexture)
+        SHADER_PARAMETER_RDG_TEXTURE(Texture2D, PendingWetnessTexture)
         SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float>, DestinationWetnessTexture)
+        SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float>, DestinationPendingWetnessTexture)
+        SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<uint>, DiffuseDiagnostics)
         SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint4>, TexelLookup)
         SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float4>, TriangleFlow)
         SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float4>, TriangleMetric)
@@ -131,7 +142,9 @@ public:
         SHADER_PARAMETER(float, SeamTransferScale)
         SHADER_PARAMETER(float, MaxWetness)
         SHADER_PARAMETER_RDG_TEXTURE(Texture2D, SourceWetnessTexture)
+        SHADER_PARAMETER_RDG_TEXTURE(Texture2D, SourcePendingWetnessTexture)
         SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float>, DestinationWetnessTexture)
+        SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float>, DestinationPendingWetnessTexture)
         SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint4>, SeamDestinations)
         SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float4>, SeamIncoming)
         SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint4>, TexelLookup)

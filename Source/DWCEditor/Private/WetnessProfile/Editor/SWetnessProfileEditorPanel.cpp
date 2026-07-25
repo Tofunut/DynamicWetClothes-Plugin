@@ -108,7 +108,7 @@ void SWetnessProfileEditorPanel::RefreshFromProfile()
 {
     if (PreviewViewport.IsValid())
     {
-        PreviewViewport->RefreshPreviewScene();
+        PreviewViewport->RefreshFromProfile();
     }
 }
 
@@ -155,7 +155,7 @@ TSharedRef<SWidget> SWetnessProfileEditorPanel::BuildPreviewSettingsSection()
                         + SHorizontalBox::Slot()
                               .FillWidth(1.0f)
                                   [SNew(STextBlock)
-                                       .Text(LOCTEXT("PreviewAbsorbedWaterLabel", "Absorbed Water"))]
+                                       .Text(LOCTEXT("PreviewAbsorbedWetnessLabel", "Absorbed Wetness"))]
 
                         + SHorizontalBox::Slot()
                               .AutoWidth()

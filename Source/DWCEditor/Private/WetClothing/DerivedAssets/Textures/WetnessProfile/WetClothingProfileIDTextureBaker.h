@@ -47,12 +47,12 @@ public:
         FString& OutErrorMessage);
 
 private:
-    static bool ResolveEntryParameters(
-        const FWetClothingWetPartEntry& Entry,
+    static bool ResolveProfileParameters(
+        const FWetPartProfileAssignment* ProfileAssignment,
         FWetnessProfileParameters& OutParameters);
 
     static FString MakeProfileStableKey(
-        const FWetClothingWetPartEntry& Entry,
+        const FWetPartProfileAssignment* ProfileAssignment,
         const FWetnessProfileParameters& Parameters);
 
     static bool IsUVPointInsideTriangle(

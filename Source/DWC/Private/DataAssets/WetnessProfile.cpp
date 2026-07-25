@@ -34,13 +34,6 @@ bool FWetnessProfileParameters::MigrateLegacyAbsorbedWetness()
         bMigrated = true;
     }
 
-    if (WetVisualStrength >= 0.0f)
-    {
-        AbsorbedWetness.WetVisualStrength = WetVisualStrength;
-        WetVisualStrength = -1.0f;
-        bMigrated = true;
-    }
-
     return bMigrated;
 }
 

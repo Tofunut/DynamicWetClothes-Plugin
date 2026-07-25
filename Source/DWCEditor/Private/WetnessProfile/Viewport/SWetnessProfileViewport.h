@@ -6,9 +6,10 @@
 
 class FAdvancedPreviewScene;
 class FWetnessProfileViewportClient;
-class UMaterial;
 class UMaterialInstanceDynamic;
+class UMaterialInterface;
 class UStaticMeshComponent;
+class UTexture;
 class UWetnessProfile;
 class SRichTextBlock;
 
@@ -22,13 +23,14 @@ class SWetnessProfileViewport : public SEditorViewport, public FGCObject
     void Construct(const FArguments& InArgs);
     virtual ~SWetnessProfileViewport() override;
 
-    virtual void    AddReferencedObjects(FReferenceCollector& Collector) override;
+    virtual void AddReferencedObjects(FReferenceCollector& Collector) override;
     virtual FString GetReferencerName() const override
     {
         return TEXT("SWetnessProfileViewport");
     }
 
-    void RefreshPreviewScene();
+    /** Updates only MID parameters and invalidates the viewport. */
+    void RefreshFromProfile();
     void FocusOnPreviewMesh(bool bInstant = false);
 
     void SetPreviewAbsorbedWater(float InAmount);
@@ -39,24 +41,23 @@ class SWetnessProfileViewport : public SEditorViewport, public FGCObject
 
   protected:
     virtual TSharedRef<FEditorViewportClient> MakeEditorViewportClient() override;
-    virtual void                              PopulateViewportOverlays(TSharedRef<SOverlay> Overlay) override;
-    virtual void                              OnFocusViewportToSelection() override;
+    virtual void PopulateViewportOverlays(TSharedRef<SOverlay> Overlay) override;
+    virtual void OnFocusViewportToSelection() override;
 
   private:
     void InitializePreviewComponents();
     void RefreshPreviewMaterialParameters();
-    UMaterial* ResolvePreviewBaseMaterial();
     FText GetOverlayText() const;
 
-    TWeakObjectPtr<UWetnessProfile>           WetnessProfile;
-    TSharedPtr<FAdvancedPreviewScene>         PreviewScene;
+    TWeakObjectPtr<UWetnessProfile> WetnessProfile;
+    TSharedPtr<FAdvancedPreviewScene> PreviewScene;
     TSharedPtr<FWetnessProfileViewportClient> ViewportClient;
-    TObjectPtr<UStaticMeshComponent>          PreviewMeshComponent = nullptr;
-    TObjectPtr<UMaterial>                     PreviewBaseMaterial = nullptr;
-    TObjectPtr<UMaterialInstanceDynamic>      PreviewMaterialInstance = nullptr;
-    TSharedPtr<SRichTextBlock>                OverlayText;
+    TObjectPtr<UStaticMeshComponent> PreviewMeshComponent = nullptr;
+    TObjectPtr<UMaterialInterface> PreviewBaseMaterial = nullptr;
+    TObjectPtr<UMaterialInstanceDynamic> PreviewMaterialInstance = nullptr;
+    TObjectPtr<UTexture> PreviewDefaultNormalTexture = nullptr;
+    TSharedPtr<SRichTextBlock> OverlayText;
 
     float PreviewAbsorbedWater = 0.5f;
     float PreviewSurfaceWater = 0.5f;
-    bool  bPreviewCameraInitialized = false;
 };

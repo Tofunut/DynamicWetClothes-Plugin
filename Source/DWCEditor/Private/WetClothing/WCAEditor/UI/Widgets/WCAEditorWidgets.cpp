@@ -60,12 +60,16 @@ namespace
         }
 
         int32 MissingProfilePartCount = 0;
-        for (const FWetClothingWetPartEntry& Entry : WetClothingAsset->Authored.PartData.EditableWetPartData.WetPartEntries)
+        const FWetClothingEditableWetPartData& EditableData = WetClothingAsset->Authored.PartData.EditableWetPartData;
+        if (const FWetClothingAuthoredMaterialSlot* SlotData = EditableData.FindMaterialSlot(MaterialSlotIndex))
         {
-            if (Entry.MaterialSlotIndex == MaterialSlotIndex &&
-                !Entry.ProfileAssignment.SourceProfile.IsValid())
+            for (const FWetClothingWetPartEntry& Entry : SlotData->WetPartEntries)
             {
-                ++MissingProfilePartCount;
+                const FWetPartProfileAssignment* Profile = EditableData.FindProfile(Entry);
+                if (Profile == nullptr || !Profile->SourceProfile.IsValid())
+                {
+                    ++MissingProfilePartCount;
+                }
             }
         }
 
@@ -926,13 +930,8 @@ bool FWCAEditorWidgets::IsMaterialSlotWettable(const UWetClothingAsset* WetCloth
         return false;
     }
 
-    const FWetClothingWettableMaterialSlotState* State =
-        WetClothingAsset->Authored.PartData.EditableWetPartData.WettableMaterialSlots.FindByPredicate(
-            [MaterialSlotIndex](const FWetClothingWettableMaterialSlotState& Candidate)
-            {
-                return Candidate.MaterialSlotIndex == MaterialSlotIndex;
-            });
-
+    const FWetClothingAuthoredMaterialSlot* State =
+        WetClothingAsset->Authored.PartData.EditableWetPartData.FindMaterialSlot(MaterialSlotIndex);
     return State != nullptr && State->bIsWettableSlot;
 }
 
@@ -943,12 +942,8 @@ void FWCAEditorWidgets::SetMaterialSlotWettable(UWetClothingAsset* WetClothingAs
         return;
     }
 
-    FWetClothingWettableMaterialSlotState* State =
-        WetClothingAsset->Authored.PartData.EditableWetPartData.WettableMaterialSlots.FindByPredicate(
-            [MaterialSlotIndex](const FWetClothingWettableMaterialSlotState& Candidate)
-            {
-                return Candidate.MaterialSlotIndex == MaterialSlotIndex;
-            });
+    FWetClothingEditableWetPartData& EditableData = WetClothingAsset->Authored.PartData.EditableWetPartData;
+    FWetClothingAuthoredMaterialSlot* State = EditableData.FindMaterialSlot(MaterialSlotIndex);
 
     const bool bHasStaleMaterialOverrides =
         !bIsWettableSlot &&
@@ -965,8 +960,7 @@ void FWCAEditorWidgets::SetMaterialSlotWettable(UWetClothingAsset* WetClothingAs
     WetClothingAsset->Modify();
     if (State == nullptr)
     {
-        State = &WetClothingAsset->Authored.PartData.EditableWetPartData.WettableMaterialSlots.AddDefaulted_GetRef();
-        State->MaterialSlotIndex = MaterialSlotIndex;
+        State = &EditableData.FindOrAddMaterialSlot(MaterialSlotIndex);
     }
 
     State->bIsWettableSlot = bIsWettableSlot;

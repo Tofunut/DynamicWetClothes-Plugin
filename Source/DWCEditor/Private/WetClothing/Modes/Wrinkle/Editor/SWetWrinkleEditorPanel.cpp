@@ -5660,7 +5660,7 @@ FWetWrinklePatchPlacement SWetWrinkleEditorPanel::MakeStampFromHit(const FWetWri
     Stamp.PatchGuid = FGuid::NewGuid();
     Stamp.MaterialSlotIndex = SurfaceHit.MaterialSlotIndex;
     Stamp.UVChannelIndex = SurfaceHit.UVChannelIndex;
-    Stamp.SourceTexture = ResolveSourceTextureForStamp(SurfaceHit.MaterialSlotIndex, SurfaceHit.UVChannelIndex);
+    Stamp.SourceTexture = ResolveSourceTextureForStamp(SurfaceHit.MaterialSlotIndex);
     Stamp.PositionUV = SurfaceHit.UV;
     Stamp.BrushRadiusUV = BrushSettings.BrushRadiusUV;
     Stamp.RotationRadians = BrushSettings.RotationRadians;
@@ -5679,12 +5679,11 @@ FWetWrinklePatchPlacement SWetWrinkleEditorPanel::MakeStampFromHit(const FWetWri
     return Stamp;
 }
 
-UTexture* SWetWrinkleEditorPanel::ResolveSourceTextureForStamp(int32 MaterialSlotIndex, int32 UVChannelIndex) const
+UTexture* SWetWrinkleEditorPanel::ResolveSourceTextureForStamp(int32 MaterialSlotIndex) const
 {
     return FWetClothingMaterialTextureResolver::ResolveOrSaveTextureSelection(
         const_cast<UWetClothingAsset*>(WetClothingAsset.Get()),
-        MaterialSlotIndex,
-        UVChannelIndex);
+        MaterialSlotIndex);
 }
 
 bool SWetWrinkleEditorPanel::IsCurrentWrinkleNormalUsable(FString* OutReason) const

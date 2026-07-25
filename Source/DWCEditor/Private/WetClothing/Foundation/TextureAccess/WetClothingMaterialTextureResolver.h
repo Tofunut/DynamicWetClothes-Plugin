@@ -24,29 +24,24 @@ class FWetClothingMaterialTextureResolver
 
     static UTexture* FindSavedTextureSelection(
         const UWetClothingAsset* WetClothingAsset,
-        int32 MaterialSlotIndex,
-        int32 UVChannelIndex);
+        int32 MaterialSlotIndex);
 
     static bool HasSavedTextureSelection(
         const UWetClothingAsset* WetClothingAsset,
-        int32 MaterialSlotIndex,
-        int32 UVChannelIndex);
+        int32 MaterialSlotIndex);
 
     static void SaveTextureSelection(
         UWetClothingAsset* WetClothingAsset,
         int32 MaterialSlotIndex,
-        int32 UVChannelIndex,
         UTexture* Texture);
 
     static UTexture* ResolveOrSaveTextureSelection(
         UWetClothingAsset* WetClothingAsset,
-        int32 MaterialSlotIndex,
-        int32 UVChannelIndex);
+        int32 MaterialSlotIndex);
 
     static void BuildTextureItemsForMaterialSlot(
         UWetClothingAsset* WetClothingAsset,
         int32 MaterialSlotIndex,
-        int32 UVChannelIndex,
         TArray<TSharedPtr<FWCATextureItem>>& OutItems,
         TSharedPtr<FWCATextureItem>& OutSelectedItem,
         bool bDefaultToNone = false);

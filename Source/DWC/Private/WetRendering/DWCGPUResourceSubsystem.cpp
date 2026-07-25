@@ -9,6 +9,7 @@
 #include "Misc/SecureHash.h"
 #include "Rendering/Texture2DResource.h"
 #include "RHICommandList.h"
+#include "UObject/Package.h"
 #include "WetRendering/WetMaterialParameters.h"
 #include "Utility/DWCLog.h"
 
@@ -58,12 +59,13 @@ namespace
 
         const FSurfaceWaterProfileParameters& Surface = LocalProfile.Parameters.SurfaceWater;
         const FString ParameterState = FString::Printf(
-            TEXT("WetVisual=%.9g|")
+            TEXT("AbsorbedDarkening=%.9g|AbsorbedGlossiness=%.9g|")
             TEXT("DropletsEnabled=%d|DropletNormal=%s|")
             TEXT("RivuletsEnabled=%d|RivuletNormal=%s|")
             TEXT("NormalStrength=%.9g|RoughnessStrength=%.9g|")
             TEXT("VisibilityThreshold=%.9g|RivuletScrollSpeed=%.9g"),
-            LocalProfile.Parameters.GetWetVisualStrength(),
+            LocalProfile.Parameters.GetAbsorbedDarkeningStrength(),
+            LocalProfile.Parameters.GetAbsorbedGlossinessStrength(),
             Surface.bEnabled && Surface.bEnableDroplets ? 1 : 0,
             LocalProfile.NormalizedDropletNormal != nullptr
                 ? *LocalProfile.NormalizedDropletNormal->GetPathName()
@@ -88,11 +90,12 @@ namespace
     {
         const FSurfaceWaterProfileParameters& Surface = Parameters.SurfaceWater;
         return FString::Printf(
-            TEXT("WetVisual=%.9g|DropletsEnabled=%d|DropletNormal=%s|")
+            TEXT("AbsorbedDarkening=%.9g|AbsorbedGlossiness=%.9g|DropletsEnabled=%d|DropletNormal=%s|")
             TEXT("RivuletsEnabled=%d|RivuletNormal=%s|")
             TEXT("NormalStrength=%.9g|RoughnessStrength=%.9g|")
             TEXT("VisibilityThreshold=%.9g|RivuletScrollSpeed=%.9g"),
-            Parameters.GetWetVisualStrength(),
+            Parameters.GetAbsorbedDarkeningStrength(),
+            Parameters.GetAbsorbedGlossinessStrength(),
             Surface.bEnabled && Surface.bEnableDroplets ? 1 : 0,
             *GetPathNameSafe(Surface.DropletNormalTexture),
             Surface.bEnabled && Surface.bEnableRivulets ? 1 : 0,
@@ -103,9 +106,67 @@ namespace
             Surface.RivuletUVScrollSpeed);
     }
 
+    bool ResolveSourceProfileParameters(
+        const FSoftObjectPath& SourceProfilePath,
+        const bool bResolveUnloadedProfile,
+        FWetnessProfileParameters& OutParameters)
+    {
+        if (!SourceProfilePath.IsValid())
+        {
+            return false;
+        }
+
+        UObject* SourceObject = SourceProfilePath.ResolveObject();
+        if (SourceObject == nullptr && bResolveUnloadedProfile)
+        {
+            SourceObject = SourceProfilePath.TryLoad();
+        }
+
+        if (const UWetnessProfile* SourceProfile = Cast<UWetnessProfile>(SourceObject))
+        {
+            if (const UPackage* SourcePackage = SourceProfile->GetOutermost();
+                SourcePackage != nullptr && SourcePackage->IsDirty())
+            {
+                return false;
+            }
+
+            OutParameters = SourceProfile->GetParameters();
+            return true;
+        }
+
+        return false;
+    }
+
+    TArray<FWetClothingLocalRenderProfile> MakeResolvedLocalRenderProfiles(
+        const UWetClothingAsset* WetClothingAsset,
+        const bool bResolveUnloadedProfiles)
+    {
+        TArray<FWetClothingLocalRenderProfile> Profiles;
+        if (WetClothingAsset == nullptr)
+        {
+            return Profiles;
+        }
+
+        Profiles = WetClothingAsset->Derived.Inline.BakedProfileIDData.LocalProfiles;
+        for (FWetClothingLocalRenderProfile& Profile : Profiles)
+        {
+            FWetnessProfileParameters ResolvedParameters;
+            if (ResolveSourceProfileParameters(
+                    Profile.SourceProfile,
+                    bResolveUnloadedProfiles,
+                    ResolvedParameters))
+            {
+                Profile.Parameters = ResolvedParameters;
+                Profile.StableKey.Reset();
+            }
+        }
+
+        return Profiles;
+    }
+
     const FWetClothingLocalRenderProfile* FindMatchingBakedFallbackProfile(
         const UWetClothingAsset* WetClothingAsset,
-        const FWetClothingWetPartEntry& SourceEntry,
+        const FWetPartProfileAssignment& SourceAssignment,
         const FWetnessProfileParameters& Parameters)
     {
         if (WetClothingAsset == nullptr ||
@@ -117,12 +178,12 @@ namespace
         const TArray<FWetClothingLocalRenderProfile>& LocalProfiles =
             WetClothingAsset->Derived.Inline.BakedProfileIDData.LocalProfiles;
         const FString ParameterKey = MakeRenderFallbackParameterKey(Parameters);
-        if (SourceEntry.ProfileAssignment.SourceProfile.IsValid())
+        if (SourceAssignment.SourceProfile.IsValid())
         {
             if (const FWetClothingLocalRenderProfile* ExactSourceMatch = LocalProfiles.FindByPredicate(
-                    [&SourceEntry, &ParameterKey](const FWetClothingLocalRenderProfile& Candidate)
+                    [&SourceAssignment, &ParameterKey](const FWetClothingLocalRenderProfile& Candidate)
                     {
-                        return Candidate.SourceProfile == SourceEntry.ProfileAssignment.SourceProfile &&
+                        return Candidate.SourceProfile == SourceAssignment.SourceProfile &&
                                MakeRenderFallbackParameterKey(Candidate.Parameters) == ParameterKey;
                     }))
             {
@@ -139,12 +200,12 @@ namespace
             return ParameterMatch;
         }
 
-        if (SourceEntry.ProfileAssignment.SourceProfile.IsValid())
+        if (SourceAssignment.SourceProfile.IsValid())
         {
             if (const FWetClothingLocalRenderProfile* SourceMatch = LocalProfiles.FindByPredicate(
-                    [&SourceEntry](const FWetClothingLocalRenderProfile& Candidate)
+                    [&SourceAssignment](const FWetClothingLocalRenderProfile& Candidate)
                     {
-                        return Candidate.SourceProfile == SourceEntry.ProfileAssignment.SourceProfile;
+                        return Candidate.SourceProfile == SourceAssignment.SourceProfile;
                     }))
             {
                 return SourceMatch;
@@ -157,70 +218,67 @@ namespace
     bool ResolveFallbackRenderProfile(
         const UWetClothingAsset* WetClothingAsset,
         const int32 MaterialSlotIndex,
-        FWetClothingLocalRenderProfile& OutProfile)
+        FWetClothingLocalRenderProfile& OutProfile,
+        const bool bResolveSourceProfile)
     {
         if (WetClothingAsset == nullptr || MaterialSlotIndex == INDEX_NONE)
         {
             return false;
         }
 
-        const FWetClothingWetPartEntry* FirstSlotEntry = nullptr;
-        const FWetClothingWetPartEntry* DefaultSlotEntry = nullptr;
-        for (const FWetClothingWetPartEntry& Entry :
-             WetClothingAsset->Authored.PartData.EditableWetPartData.WetPartEntries)
+        const FWetClothingEditableWetPartData& WetPartData =
+            WetClothingAsset->Authored.PartData.EditableWetPartData;
+        const FWetClothingAuthoredMaterialSlot* Slot = WetPartData.FindMaterialSlot(MaterialSlotIndex);
+        if (Slot == nullptr)
         {
-            if (Entry.MaterialSlotIndex != MaterialSlotIndex)
-            {
-                continue;
-            }
-
-            if (FirstSlotEntry == nullptr)
-            {
-                FirstSlotEntry = &Entry;
-            }
-            if (Entry.WetPartID == 0)
-            {
-                DefaultSlotEntry = &Entry;
-                break;
-            }
+            return false;
         }
 
-        const FWetClothingWetPartEntry* SourceEntry =
-            DefaultSlotEntry != nullptr ? DefaultSlotEntry : FirstSlotEntry;
+        const FWetClothingWetPartEntry* SourceEntry = Slot->FindPart(0);
+        if (SourceEntry == nullptr && !Slot->WetPartEntries.IsEmpty())
+        {
+            SourceEntry = &Slot->WetPartEntries[0];
+        }
         if (SourceEntry == nullptr)
         {
             return false;
         }
 
-        FWetnessProfileParameters Parameters;
-        if (SourceEntry->ProfileAssignment.SourceProfile.IsValid())
+        const FWetPartProfileAssignment* SourceAssignment = WetPartData.FindProfile(*SourceEntry);
+        if (SourceAssignment == nullptr)
         {
-            if (const UWetnessProfile* SourceProfile =
-                    Cast<UWetnessProfile>(SourceEntry->ProfileAssignment.SourceProfile.TryLoad()))
-            {
-                Parameters = SourceProfile->GetParameters();
-                if (const FWetClothingLocalRenderProfile* BakedProfile =
-                        FindMatchingBakedFallbackProfile(WetClothingAsset, *SourceEntry, Parameters))
-                {
-                    OutProfile = *BakedProfile;
-                    return true;
-                }
+            return false;
+        }
 
-                OutProfile.SourceProfile = SourceEntry->ProfileAssignment.SourceProfile;
-                OutProfile.Parameters = Parameters;
-                return true;
+        FWetnessProfileParameters Parameters = SourceAssignment->Parameters;
+        if (bResolveSourceProfile && SourceAssignment->SourceProfile.IsValid())
+        {
+            UObject* SourceObject = SourceAssignment->SourceProfile.ResolveObject();
+            if (SourceObject == nullptr)
+            {
+                SourceObject = SourceAssignment->SourceProfile.TryLoad();
+            }
+
+            if (const UWetnessProfile* SourceProfile = Cast<UWetnessProfile>(SourceObject))
+            {
+                if (const UPackage* SourcePackage = SourceProfile->GetOutermost();
+                    SourcePackage == nullptr || !SourcePackage->IsDirty())
+                {
+                    Parameters = SourceProfile->GetParameters();
+                }
             }
         }
 
-        Parameters = SourceEntry->ProfileAssignment.Parameters;
         if (const FWetClothingLocalRenderProfile* BakedProfile =
-                FindMatchingBakedFallbackProfile(WetClothingAsset, *SourceEntry, Parameters))
+                FindMatchingBakedFallbackProfile(WetClothingAsset, *SourceAssignment, Parameters))
         {
             OutProfile = *BakedProfile;
+            OutProfile.SourceProfile = SourceAssignment->SourceProfile;
+            OutProfile.Parameters = Parameters;
             return true;
         }
 
-        OutProfile.SourceProfile = SourceEntry->ProfileAssignment.SourceProfile;
+        OutProfile.SourceProfile = SourceAssignment->SourceProfile;
         OutProfile.Parameters = Parameters;
         return true;
     }
@@ -242,17 +300,17 @@ namespace
         {
         case 0:
             return FLinearColor(
-                Parameters.GetWetVisualStrength(),
+                Parameters.GetAbsorbedDarkeningStrength(),
+                Parameters.GetAbsorbedGlossinessStrength(),
                 static_cast<float>(Surface.bEnabled && Surface.bEnableDroplets ? Slices.DropletNormal : 0),
-                static_cast<float>(Surface.bEnabled && Surface.bEnableRivulets ? Slices.RivuletNormal : 0),
-                FMath::Max(0.0f, Surface.SurfaceWaterNormalStrength));
+                static_cast<float>(Surface.bEnabled && Surface.bEnableRivulets ? Slices.RivuletNormal : 0));
 
         case 1:
             return FLinearColor(
+                FMath::Max(0.0f, Surface.SurfaceWaterNormalStrength),
                 FMath::Clamp(Surface.SurfaceWaterRoughnessStrength, 0.0f, 1.0f),
                 FMath::Clamp(Surface.SurfaceVisibilityThreshold, 0.0f, 1.0f),
-                Surface.RivuletUVScrollSpeed,
-                0.0f);
+                Surface.RivuletUVScrollSpeed);
 
         default:
             return FLinearColor::Black;
@@ -606,15 +664,15 @@ int32 UDWCGPUResourceSubsystem::FindOrAddRuntimeProfile(
             : 0;
 
     Record.PackedTexels[0] = FLinearColor(
-        LocalProfile.Parameters.GetWetVisualStrength(),
+        LocalProfile.Parameters.GetAbsorbedDarkeningStrength(),
+        LocalProfile.Parameters.GetAbsorbedGlossinessStrength(),
         static_cast<float>(DropletNormalSlice),
-        static_cast<float>(RivuletNormalSlice),
-        FMath::Max(0.0f, Surface.SurfaceWaterNormalStrength));
+        static_cast<float>(RivuletNormalSlice));
     Record.PackedTexels[1] = FLinearColor(
+        FMath::Max(0.0f, Surface.SurfaceWaterNormalStrength),
         FMath::Clamp(Surface.SurfaceWaterRoughnessStrength, 0.0f, 1.0f),
         FMath::Clamp(Surface.SurfaceVisibilityThreshold, 0.0f, 1.0f),
-        Surface.RivuletUVScrollSpeed,
-        0.0f);
+        Surface.RivuletUVScrollSpeed);
 
     bOutChanged = true;
     bTextureArraysDirty |= bTextureArraysChanged;
@@ -806,14 +864,16 @@ const FDWCAssetRenderProfileResources* UDWCGPUResourceSubsystem::AcquireAssetRes
     RivuletNormalRegistry.SetNeutral(NeutralNormal, bNeutralRegistryChanged);
     bTextureArraysDirty |= bNeutralRegistryChanged;
 
+    const TArray<FWetClothingLocalRenderProfile> ResolvedLocalProfiles =
+        MakeResolvedLocalRenderProfiles(Asset, true);
     TArray<int32> LocalToRuntime;
-    LocalToRuntime.Init(0, Asset->Derived.Inline.BakedProfileIDData.LocalProfiles.Num() + 1);
+    LocalToRuntime.Init(0, ResolvedLocalProfiles.Num() + 1);
     for (int32 LocalProfileIndex = 0;
-         LocalProfileIndex < Asset->Derived.Inline.BakedProfileIDData.LocalProfiles.Num();
+         LocalProfileIndex < ResolvedLocalProfiles.Num();
          ++LocalProfileIndex)
     {
         LocalToRuntime[LocalProfileIndex + 1] = FindOrAddRuntimeProfile(
-            Asset->Derived.Inline.BakedProfileIDData.LocalProfiles[LocalProfileIndex],
+            ResolvedLocalProfiles[LocalProfileIndex],
             bRegistryChanged);
     }
 
@@ -837,6 +897,7 @@ const FDWCAssetRenderProfileResources* UDWCGPUResourceSubsystem::AcquireAssetRes
 
     FDWCAssetRenderProfileResources& Resources = AssetResources.FindOrAdd(Asset);
     Resources.ProfileIDTexturesByMaterialSlot.Reset();
+    Resources.FallbackRenderProfilesByMaterialSlot.Reset();
     for (const FWetClothingBakedProfileIDSlotTexture& SlotTexture :
          Asset->Derived.Inline.BakedProfileIDData.SlotTextures)
     {
@@ -847,10 +908,43 @@ const FDWCAssetRenderProfileResources* UDWCGPUResourceSubsystem::AcquireAssetRes
                 SlotTexture.ProfileIDTexture);
         }
     }
+    for (const FWetClothingAuthoredMaterialSlot& Slot :
+         Asset->Authored.PartData.EditableWetPartData.MaterialSlots)
+    {
+        if (Slot.MaterialSlotIndex == INDEX_NONE)
+        {
+            continue;
+        }
+
+        FWetClothingLocalRenderProfile FallbackProfile;
+        if (ResolveFallbackRenderProfile(Asset, Slot.MaterialSlotIndex, FallbackProfile, true))
+        {
+            Resources.FallbackRenderProfilesByMaterialSlot.Add(
+                Slot.MaterialSlotIndex,
+                FallbackProfile);
+        }
+    }
     Resources.ProfileRemapLUT = BuildAssetRemapLUT(Asset, LocalToRuntime);
     Resources.SourceBakeGuid = Asset->Derived.Inline.BakedProfileIDData.BakeGuid;
     Resources.RegistryRevision = RegistryRevision;
     return Resources.IsValid() ? &Resources : nullptr;
+}
+
+
+void UDWCGPUResourceSubsystem::InvalidateAssetResources(const UWetClothingAsset* Asset)
+{
+    if (Asset == nullptr)
+    {
+        return;
+    }
+
+    for (auto It = AssetResources.CreateIterator(); It; ++It)
+    {
+        if (It.Key().Get() == Asset)
+        {
+            It.RemoveCurrent();
+        }
+    }
 }
 
 
@@ -950,10 +1044,18 @@ void UDWCGPUResourceSubsystem::BindGlobalResources(UMaterialInstanceDynamic& MID
 void UDWCGPUResourceSubsystem::ApplyFallbackRenderProfileParameters(
     UMaterialInstanceDynamic& MID,
     const UWetClothingAsset* WetClothingAsset,
-    const int32 MaterialSlotIndex)
+    const int32 MaterialSlotIndex,
+    const FWetClothingLocalRenderProfile* CachedProfile)
 {
     FWetClothingLocalRenderProfile Profile;
-    ResolveFallbackRenderProfile(WetClothingAsset, MaterialSlotIndex, Profile);
+    if (CachedProfile != nullptr)
+    {
+        Profile = *CachedProfile;
+    }
+    else
+    {
+        ResolveFallbackRenderProfile(WetClothingAsset, MaterialSlotIndex, Profile, false);
+    }
 
     bool bTextureArraysChanged = false;
     if (WetClothingAsset != nullptr)
@@ -1001,7 +1103,13 @@ void UDWCGPUResourceSubsystem::ApplyResourcesToMaterials(
             continue;
         }
 
-        ApplyFallbackRenderProfileParameters(*MID, Asset, MaterialSlotIndex);
+        ApplyFallbackRenderProfileParameters(
+            *MID,
+            Asset,
+            MaterialSlotIndex,
+            Resources != nullptr
+                ? Resources->FallbackRenderProfilesByMaterialSlot.Find(MaterialSlotIndex)
+                : nullptr);
         const bool bUseRenderProfileLUT =
             Resources != nullptr &&
             Resources->ProfileRemapLUT != nullptr &&

@@ -11,6 +11,7 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "Core/WetClothingSettings.h"
 #include "DataAssets/WetClothingAsset.h"
+#include "DataAssets/WetnessProfile.h"
 #include "Engine/SkeletalMesh.h"
 #include "Engine/TextureRenderTarget2D.h"
 #include "Materials/MaterialInstanceDynamic.h"
@@ -22,6 +23,7 @@
 #include "RenderTargetPool.h"
 #include "RenderingThread.h"
 #include "SkeletalRenderPublic.h"
+#include "UObject/Package.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogDWCGPU, Log, All);
 
@@ -47,95 +49,129 @@ FDWCGPUProfileParameters MakeRuntimeGPUProfile(const FWetnessProfileParameters& 
     return Result;
 }
 
-TArray<FDWCGPUProfileParameters> ResolveCurrentGPUProfiles(const UWetClothingAsset& Asset)
+FWetnessProfileParameters ResolveRuntimeWetnessProfileParameters(
+    const UWetClothingAsset& Asset,
+    const int32 ProfileIndex)
 {
-    TArray<FDWCGPUProfileParameters> Profiles;
-    const TArray<FWetClothingWetPartEntry>& Entries =
-        Asset.Authored.PartData.EditableWetPartData.WetPartEntries;
-    Profiles.Reserve(Entries.Num());
-
-    for (int32 EntryIndex = 0; EntryIndex < Entries.Num(); ++EntryIndex)
+    const FWetClothingEditableWetPartData& WetPartData = Asset.Authored.PartData.EditableWetPartData;
+    const FWetPartProfileAssignment* AuthoredProfile = WetPartData.FindProfile(ProfileIndex);
+    if (AuthoredProfile == nullptr)
     {
-        if (!Asset.IsMaterialSlotWettable(Entries[EntryIndex].MaterialSlotIndex))
-        {
-            continue;
-        }
-
-        const FWetnessProfileParameters& Parameters =
-            Asset.Derived.Inline.ResolvedWetnessProfileParameters.IsValidIndex(EntryIndex)
-                ? Asset.Derived.Inline.ResolvedWetnessProfileParameters[EntryIndex]
-                : Entries[EntryIndex].ProfileAssignment.Parameters;
-        const FDWCGPUProfileParameters Candidate = MakeRuntimeGPUProfile(Parameters);
-        const bool bAlreadyPresent = Profiles.ContainsByPredicate(
-            [&Candidate](const FDWCGPUProfileParameters& Existing)
-            {
-                return Existing.Equals(Candidate);
-            });
-        if (!bAlreadyPresent)
-        {
-            Profiles.Add(Candidate);
-        }
+        return FWetnessProfileParameters();
     }
 
-    return Profiles;
+#if WITH_EDITOR
+    if (AuthoredProfile->SourceProfile.IsValid())
+    {
+        UObject* SourceObject = AuthoredProfile->SourceProfile.ResolveObject();
+        if (SourceObject == nullptr)
+        {
+            SourceObject = AuthoredProfile->SourceProfile.TryLoad();
+        }
+
+        if (const UWetnessProfile* SourceProfile =
+                Cast<UWetnessProfile>(SourceObject))
+        {
+            if (const UPackage* SourcePackage = SourceProfile->GetOutermost();
+                SourcePackage != nullptr && SourcePackage->IsDirty())
+            {
+                UE_LOG(
+                    LogDWCGPU,
+                    Verbose,
+                    TEXT("DWCGPU: Wetness Profile '%s' has unsaved editor changes while initializing WCA '%s'. Using the WCA snapshot/fallback profile."),
+                    *AuthoredProfile->SourceProfile.ToString(),
+                    *GetNameSafe(&Asset));
+            }
+            else
+            {
+                return SourceProfile->GetParameters();
+            }
+        }
+        else
+        {
+            UE_LOG(
+                LogDWCGPU,
+                Warning,
+                TEXT("DWCGPU: Failed to resolve Wetness Profile '%s' for WCA '%s'. Using the WCA snapshot/fallback profile."),
+                *AuthoredProfile->SourceProfile.ToString(),
+                *GetNameSafe(&Asset));
+        }
+    }
+#endif
+
+    return Asset.Derived.Inline.ResolvedWetnessProfileParameters.IsValidIndex(ProfileIndex)
+        ? Asset.Derived.Inline.ResolvedWetnessProfileParameters[ProfileIndex]
+        : AuthoredProfile->Parameters;
 }
 
-bool TryPatchStaleBakedProfileFromCurrent(
-    const FDWCGPUProfileParameters& BakedProfile,
-    const TArray<FDWCGPUProfileParameters>& CurrentProfiles,
-    FDWCGPUProfileParameters& OutProfile)
+int32 FindOrAddGPUProfile(
+    TArray<FVector4f>& Profiles,
+    const FDWCGPUProfileParameters& Candidate,
+    const float SpreadRateScale,
+    const float DryRateScale,
+    const float GravityFlowStrengthScale,
+    float& OutMaxSpreadRate,
+    float& OutMaxDryRate,
+    float& OutMaxGravityFlowStrength)
 {
-    const bool bBakedHasSimulationRates =
-        BakedProfile.SpreadRatePerSecond > 0.0f ||
-        BakedProfile.DryRatePerSecond > 0.0f ||
-        BakedProfile.GravityFlowStrength > 0.0f;
-    if (bBakedHasSimulationRates)
+    const float SpreadRate = FMath::Max(0.0f, Candidate.SpreadRatePerSecond * SpreadRateScale);
+    const float DryRate = FMath::Max(0.0f, Candidate.DryRatePerSecond * DryRateScale);
+    const float GravityFlowStrength = FMath::Max(0.0f, Candidate.GravityFlowStrength * GravityFlowStrengthScale);
+    const FVector4f PackedProfile(SpreadRate, DryRate, GravityFlowStrength, 1.0f);
+    for (int32 ProfileIndex = 0; ProfileIndex < Profiles.Num(); ++ProfileIndex)
     {
-        return false;
-    }
-
-    const FDWCGPUProfileParameters* BestMatch = nullptr;
-    for (const FDWCGPUProfileParameters& CurrentProfile : CurrentProfiles)
-    {
-        const bool bAbsorptionMatches =
-            FMath::IsNearlyEqual(
-                CurrentProfile.AbsorptionMultiplier,
-                BakedProfile.AbsorptionMultiplier,
-                KINDA_SMALL_NUMBER);
-        const bool bCurrentHasSimulationRates =
-            CurrentProfile.SpreadRatePerSecond > 0.0f ||
-            CurrentProfile.DryRatePerSecond > 0.0f ||
-            CurrentProfile.GravityFlowStrength > 0.0f;
-        if (bAbsorptionMatches && bCurrentHasSimulationRates)
+        const FVector4f& Existing = Profiles[ProfileIndex];
+        if (FMath::IsNearlyEqual(Existing.X, PackedProfile.X, KINDA_SMALL_NUMBER) &&
+            FMath::IsNearlyEqual(Existing.Y, PackedProfile.Y, KINDA_SMALL_NUMBER) &&
+            FMath::IsNearlyEqual(Existing.Z, PackedProfile.Z, KINDA_SMALL_NUMBER))
         {
-            BestMatch = &CurrentProfile;
-            break;
+            return ProfileIndex;
         }
     }
 
-    if (BestMatch == nullptr && CurrentProfiles.Num() == 1)
+    OutMaxSpreadRate = FMath::Max(OutMaxSpreadRate, SpreadRate);
+    OutMaxDryRate = FMath::Max(OutMaxDryRate, DryRate);
+    OutMaxGravityFlowStrength = FMath::Max(OutMaxGravityFlowStrength, GravityFlowStrength);
+    return Profiles.Add(PackedProfile);
+}
+
+int32 ResolveAuthoredProfileIndexForBakedTriangle(
+    const UWetClothingAsset& Asset,
+    const FDWCGPUBakedTriangle& Triangle)
+{
+    const FWetClothingEditableWetPartData& WetPartData = Asset.Authored.PartData.EditableWetPartData;
+    const FWetClothingAuthoredMaterialSlot* Slot = WetPartData.FindMaterialSlot(Triangle.MaterialSlotIndex);
+    if (Slot == nullptr)
     {
-        const FDWCGPUProfileParameters& OnlyProfile = CurrentProfiles[0];
-        const bool bCurrentHasSimulationRates =
-            OnlyProfile.SpreadRatePerSecond > 0.0f ||
-            OnlyProfile.DryRatePerSecond > 0.0f ||
-            OnlyProfile.GravityFlowStrength > 0.0f;
-        if (bCurrentHasSimulationRates)
+        return INDEX_NONE;
+    }
+
+    int32 DefaultProfileIndex = INDEX_NONE;
+    int32 IslandProfileIndex = INDEX_NONE;
+    for (const FWetClothingWetPartEntry& Entry : Slot->WetPartEntries)
+    {
+        const int32 ProfileIndex = WetPartData.Profiles.IsValidIndex(Entry.ProfileIndex)
+            ? Entry.ProfileIndex
+            : 0;
+        if (Entry.WetPartID == 0 && DefaultProfileIndex == INDEX_NONE)
         {
-            BestMatch = &OnlyProfile;
+            DefaultProfileIndex = ProfileIndex;
+        }
+        if (Entry.AssignedUVIslandIDs.Contains(Triangle.UVIslandID))
+        {
+            IslandProfileIndex = ProfileIndex;
         }
     }
 
-    if (BestMatch == nullptr)
+    if (WetPartData.Profiles.IsValidIndex(IslandProfileIndex))
     {
-        return false;
+        return IslandProfileIndex;
     }
-
-    OutProfile = BakedProfile;
-    OutProfile.SpreadRatePerSecond = BestMatch->SpreadRatePerSecond;
-    OutProfile.DryRatePerSecond = BestMatch->DryRatePerSecond;
-    OutProfile.GravityFlowStrength = BestMatch->GravityFlowStrength;
-    return true;
+    if (WetPartData.Profiles.IsValidIndex(DefaultProfileIndex))
+    {
+        return DefaultProfileIndex;
+    }
+    return WetPartData.Profiles.IsValidIndex(0) ? 0 : INDEX_NONE;
 }
 
 struct alignas(16) FUint4GPU
@@ -289,7 +325,7 @@ void FillTriangleUVs(const FDWCGPUBakedTriangle& Triangle, FTriangleAbsorptionDi
 void CollectExpectedWettableSlots(const UWetClothingAsset& Asset, TSet<int32>& OutMaterialSlots)
 {
     OutMaterialSlots.Reset();
-    for (const FWetClothingWettableMaterialSlotState& SlotState : Asset.Authored.PartData.EditableWetPartData.WettableMaterialSlots)
+    for (const FWetClothingAuthoredMaterialSlot& SlotState : Asset.Authored.PartData.EditableWetPartData.MaterialSlots)
     {
         if (SlotState.bIsWettableSlot && SlotState.MaterialSlotIndex != INDEX_NONE)
         {
@@ -402,6 +438,9 @@ struct FDWCGPUBackend::FRenderState
     /** Per-component profile buffer after runtime Spread/Dry/Gravity scale overrides. */
     TRefCountPtr<FRDGPooledBuffer> Profiles;
 
+    /** Per-component triangle -> runtime profile index buffer because profile dedupe can change without a GPU-map rebake. */
+    TRefCountPtr<FRDGPooledBuffer> TriangleProfileIndices;
+
     /** Per-character buffers updated from the current skinned pose. */
     TRefCountPtr<FRDGPooledBuffer> TriangleFlow;
     TRefCountPtr<FRDGPooledBuffer> TriangleMetric;
@@ -452,7 +491,7 @@ bool FDWCGPUBackend::Initialize(const FDWCGPUBackendInitArgs& Args)
     if (!Args.OwnerComponent || !Args.TargetSkeletalMesh || !Args.WetClothingAsset ||
         !Args.WetMaterialInstances || Args.LODIndex < 0)
     {
-        UE_LOG(LogTemp, Warning, TEXT("DWCGPU: Full wetness-map simulation requires an owner, mesh, asset, and valid LOD."));
+        UE_LOG(LogDWCGPU, Warning, TEXT("DWCGPU: Full wetness-map simulation requires an owner, mesh, asset, and valid LOD."));
         return false;
     }
 
@@ -461,7 +500,7 @@ bool FDWCGPUBackend::Initialize(const FDWCGPUBackendInitArgs& Args)
     if (!SkeletalMesh || !Args.WetClothingAsset->IsGPUWetMapDataValidForMesh(SkeletalMesh, Args.LODIndex) ||
         !GPUData.bMapDataValid || GPUData.MapBakeVersion != DWCFullSimulationMapVersion || GPUData.LODIndex != Args.LODIndex)
     {
-        UE_LOG(LogTemp, Warning, TEXT("DWCGPU: GPU simulation maps are missing or out of date for %s. Use Bake Maps in the Wet Clothing Asset editor."), *GetNameSafe(SkeletalMesh));
+        UE_LOG(LogDWCGPU, Warning, TEXT("DWCGPU: GPU simulation maps are missing or out of date for %s. Use Bake Maps in the Wet Clothing Asset editor."), *GetNameSafe(SkeletalMesh));
         return false;
     }
 
@@ -554,52 +593,21 @@ bool FDWCGPUBackend::BuildStaticSimulationData()
 
     TSharedPtr<FStaticSimulationData, ESPMode::ThreadSafe> Data = MakeShared<FStaticSimulationData, ESPMode::ThreadSafe>();
     Data->TriangleCount = Baked.Triangles.Num();
-    Data->Profiles.Reserve(Baked.Profiles.Num());
-    const TArray<FDWCGPUProfileParameters> CurrentProfiles = ResolveCurrentGPUProfiles(*Asset);
+    Data->Profiles.Reserve(FMath::Max(1, Baked.Profiles.Num()));
+    const FWetClothingEditableWetPartData& WetPartData = Asset->Authored.PartData.EditableWetPartData;
+    TArray<FDWCGPUProfileParameters> CurrentAuthoredProfiles;
+    CurrentAuthoredProfiles.SetNum(WetPartData.Profiles.Num());
+    for (int32 ProfileIndex = 0; ProfileIndex < WetPartData.Profiles.Num(); ++ProfileIndex)
+    {
+        CurrentAuthoredProfiles[ProfileIndex] =
+            MakeRuntimeGPUProfile(ResolveRuntimeWetnessProfileParameters(*Asset, ProfileIndex));
+    }
     float MaxSpreadRate = 0.0f;
     float MaxDryRate = 0.0f;
     float MaxGravityFlowStrength = 0.0f;
-    int32 StaleProfilePatchCount = 0;
-    for (const FDWCGPUProfileParameters& Profile : Baked.Profiles)
-    {
-        FDWCGPUProfileParameters EffectiveProfile = Profile;
-        if (TryPatchStaleBakedProfileFromCurrent(Profile, CurrentProfiles, EffectiveProfile))
-        {
-            ++StaleProfilePatchCount;
-        }
-
-        const float SpreadRate = FMath::Max(0.0f, EffectiveProfile.SpreadRatePerSecond * SpreadRateScale);
-        const float DryRate = FMath::Max(0.0f, EffectiveProfile.DryRatePerSecond * DryRateScale);
-        const float GravityFlowStrength = FMath::Max(0.0f, EffectiveProfile.GravityFlowStrength * GravityFlowStrengthScale);
-        MaxSpreadRate = FMath::Max(MaxSpreadRate, SpreadRate);
-        MaxDryRate = FMath::Max(MaxDryRate, DryRate);
-        MaxGravityFlowStrength = FMath::Max(MaxGravityFlowStrength, GravityFlowStrength);
-        Data->Profiles.Add(FVector4f(SpreadRate, DryRate, GravityFlowStrength, 1.0f));
-    }
-    if (Data->TriangleCount <= 0 || Data->Profiles.IsEmpty())
+    if (Data->TriangleCount <= 0)
     {
         return false;
-    }
-    if (MaxSpreadRate <= 0.0f && MaxDryRate <= 0.0f)
-    {
-        UE_LOG(
-            LogDWCGPU,
-            Warning,
-            TEXT("DWCGPU: All baked GPU wetness profiles for '%s' have zero spread and dry rates after runtime scales. Absorption can still appear, but absorbed wetness will not diffuse or dry. Rebuild GPU Simulation Maps if the Wetness Profile was edited recently. Profiles=%d, SpreadScale=%.3f, DryScale=%.3f, GravityScale=%.3f."),
-            *GetNameSafe(Asset),
-            Baked.Profiles.Num(),
-            SpreadRateScale,
-            DryRateScale,
-            GravityFlowStrengthScale);
-    }
-    else if (StaleProfilePatchCount > 0)
-    {
-        UE_LOG(
-            LogDWCGPU,
-            Warning,
-            TEXT("DWCGPU: Patched %d stale baked GPU profile(s) for '%s' from current Wetness Profile rates. Rebuild GPU Simulation Maps to make the baked payload match the asset."),
-            StaleProfilePatchCount,
-            *GetNameSafe(Asset));
     }
 
     Data->TriangleProfileIndices.Init(MAX_uint32, Data->TriangleCount);
@@ -620,7 +628,7 @@ bool FDWCGPUBackend::BuildStaticSimulationData()
     for (const FDWCGPUBakedTriangle& Triangle : Baked.Triangles)
     {
         if (Triangle.TriangleID == INDEX_NONE || !Data->TriangleProfileIndices.IsValidIndex(Triangle.TriangleID) ||
-            !Data->Profiles.IsValidIndex(Triangle.ProfileIndex) || !Data->Sections.IsValidIndex(Triangle.RenderSectionIndex))
+            !Data->Sections.IsValidIndex(Triangle.RenderSectionIndex))
         {
             return false;
         }
@@ -648,7 +656,29 @@ bool FDWCGPUBackend::BuildStaticSimulationData()
             return false;
         }
 
-        Data->TriangleProfileIndices[Triangle.TriangleID] = static_cast<uint32>(Triangle.ProfileIndex);
+        const int32 AuthoredProfileIndex = ResolveAuthoredProfileIndexForBakedTriangle(*Asset, Triangle);
+        if (AuthoredProfileIndex == INDEX_NONE)
+        {
+            UE_LOG(
+                LogDWCGPU,
+                Warning,
+                TEXT("DWCGPU: Could not resolve current Wetness Profile for baked triangle %d in '%s'. Save the Wet Clothing Asset and Bake GPU Simulation Maps again."),
+                Triangle.TriangleID,
+                *GetNameSafe(Asset));
+            return false;
+        }
+        const FDWCGPUProfileParameters& CurrentProfile = CurrentAuthoredProfiles[AuthoredProfileIndex];
+        const int32 RuntimeProfileIndex = FindOrAddGPUProfile(
+            Data->Profiles,
+            CurrentProfile,
+            SpreadRateScale,
+            DryRateScale,
+            GravityFlowStrengthScale,
+            MaxSpreadRate,
+            MaxDryRate,
+            MaxGravityFlowStrength);
+
+        Data->TriangleProfileIndices[Triangle.TriangleID] = static_cast<uint32>(RuntimeProfileIndex);
         Data->TriangleDataToSurfaceWaterNormalUV[Triangle.TriangleID] = FVector4f(
             static_cast<float>(Triangle.DataToSurfaceWaterNormalUV.X),
             static_cast<float>(Triangle.DataToSurfaceWaterNormalUV.Y),
@@ -667,6 +697,22 @@ bool FDWCGPUBackend::BuildStaticSimulationData()
         Section.TriangleUV2RestArea.Add(FVector4f(
             static_cast<float>(Triangle.UV2.X), static_cast<float>(Triangle.UV2.Y),
             Triangle.RestSurfaceArea, 0.0f));
+    }
+    if (Data->Profiles.IsEmpty())
+    {
+        return false;
+    }
+    if (MaxSpreadRate <= 0.0f && MaxDryRate <= 0.0f)
+    {
+        UE_LOG(
+            LogDWCGPU,
+            Warning,
+            TEXT("DWCGPU: All current GPU wetness profiles for '%s' have zero spread and dry rates after runtime scales. Absorption can still appear, but absorbed wetness will not diffuse or dry. Profiles=%d, SpreadScale=%.3f, DryScale=%.3f, GravityScale=%.3f."),
+            *GetNameSafe(Asset),
+            Data->Profiles.Num(),
+            SpreadRateScale,
+            DryRateScale,
+            GravityFlowStrengthScale);
     }
 
     TSet<int32> SeenMaterialSlots;
@@ -916,7 +962,7 @@ bool FDWCGPUBackend::BuildDebugVertexLookup()
     for (int32 VertexIndex = 0; VertexIndex < VertexCount; ++VertexIndex)
     {
         const FWetClothingPrecomputedVertexData& VertexData = Precomputed.Vertices[VertexIndex];
-        if (!VertexData.bIsWettable)
+        if (!VertexData.IsWettable())
         {
             continue;
         }
@@ -1517,8 +1563,8 @@ void FDWCGPUBackend::DispatchSimulation(
                 StaticData->Profiles);
             FRDGBufferRef TriangleProfileIndexBuffer = RegisterOrUploadStructuredBuffer(
                 GraphBuilder,
-                SharedStaticResources[0]->TriangleProfileIndices,
-                TEXT("DWC.SharedTriangleProfileIndices"),
+                RTState->TriangleProfileIndices,
+                TEXT("DWC.InstanceTriangleProfileIndices"),
                 StaticData->TriangleProfileIndices);
             FRDGBufferRef TriangleDataToNormalUVBuffer = RegisterOrUploadStructuredBuffer(
                 GraphBuilder,

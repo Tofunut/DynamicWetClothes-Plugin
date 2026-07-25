@@ -45,7 +45,7 @@ class FWCAEditor : public FAssetEditorToolkit
     void                 FillAssetToolbar(FToolBarBuilder& ToolbarBuilder);
     void                 HandleAssetSetupClicked();
     void                 HandleGenerateGeneratedDataUVClicked();
-    void                 RebuildGeneratedDataUV(bool bAllowOverwriteExistingDataUVChannel);
+    void                 RebuildGeneratedDataUV(bool bAllowOverwriteExistingDataUVChannel, bool bUsePreferredDataUVChannel = false);
     void                 HandleValidationClicked();
     FReply               HandleValidationResolveClicked(TWeakPtr<SWindow> DialogWindow);
     TSharedRef<SWidget>  BuildBakeMapsMenu();

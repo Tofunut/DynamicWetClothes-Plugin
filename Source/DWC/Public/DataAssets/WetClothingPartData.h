@@ -4,6 +4,7 @@
 #include "UObject/SoftObjectPath.h"
 #include "DataAssets/WetnessProfile.h"
 #include "DataAssets/WetClothingPrecomputedBoneOptimizationCache.h"
+#include "WetSimulation/SurfaceWater/SurfaceWaterSimulationSettings.h"
 #include "WetClothingPartData.generated.h"
 
 class UMaterial;
@@ -18,13 +19,11 @@ enum class EWetPartProfileBlendMode : uint8
     Standard UMETA(DisplayName = "Standard")
 };
 
+/** WCA-wide authored profile record. Wet Parts reference this table by index. */
 USTRUCT(BlueprintType)
 struct DWC_API FWetPartProfileAssignment
 {
     GENERATED_BODY()
-
-    UPROPERTY(VisibleAnywhere, Category = "Wetness Profile")
-    FString SourceProfileName;
 
     UPROPERTY(VisibleAnywhere, Category = "Wetness Profile")
     FSoftObjectPath SourceProfile;
@@ -32,56 +31,21 @@ struct DWC_API FWetPartProfileAssignment
     UPROPERTY(EditAnywhere, Category = "Wetness Profile")
     EWetPartProfileBlendMode BlendMode = EWetPartProfileBlendMode::Standard;
 
+    /** Runtime-safe fallback used when SourceProfile cannot be loaded. */
     UPROPERTY(EditAnywhere, Category = "Wetness Profile", meta = (ShowOnlyInnerProperties))
     FWetnessProfileParameters Parameters;
+
+    FString GetDisplayName() const
+    {
+        return SourceProfile.IsValid() ? SourceProfile.GetAssetName() : FString();
+    }
 };
 
-USTRUCT(BlueprintType)
-struct DWC_API FWetClothingSourceTextureSelection
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, Category = "Wet Part")
-    FString ComponentPath;
-
-    UPROPERTY(EditAnywhere, Category = "Wet Part")
-    int32 MaterialSlotIndex = INDEX_NONE;
-
-    UPROPERTY(EditAnywhere, Category = "Wet Part")
-    int32 UVChannelIndex = 0;
-
-    UPROPERTY(EditAnywhere, Category = "Wet Part")
-    TObjectPtr<UTexture> Texture = nullptr;
-};
-
-USTRUCT(BlueprintType)
-struct DWC_API FWetClothingWettableMaterialSlotState
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, Category = "Wet Part")
-    FString ComponentPath;
-
-    UPROPERTY(EditAnywhere, Category = "Wet Part")
-    int32 MaterialSlotIndex = INDEX_NONE;
-
-    UPROPERTY(EditAnywhere, Category = "Wet Part")
-    bool bIsWettableSlot = false;
-};
-
+/** Part-local data. Material slot and UV channel are owned by the parent WCA/slot. */
 USTRUCT(BlueprintType)
 struct DWC_API FWetClothingWetPartEntry
 {
     GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, Category = "Wet Part")
-    FString ComponentPath;
-
-    UPROPERTY(EditAnywhere, Category = "Wet Part")
-    int32 MaterialSlotIndex = INDEX_NONE;
-
-    UPROPERTY(EditAnywhere, Category = "Wet Part")
-    int32 UVChannelIndex = 0;
 
     UPROPERTY(EditAnywhere, Category = "Wet Part")
     int32 WetPartID = 0;
@@ -98,8 +62,57 @@ struct DWC_API FWetClothingWetPartEntry
     UPROPERTY(EditAnywhere, Category = "Wet Part")
     TArray<int32> AssignedUVIslandIDs;
 
-    UPROPERTY(EditAnywhere, Category = "Wetness Profile")
-    FWetPartProfileAssignment ProfileAssignment;
+    /** Index into FWetClothingEditableWetPartData::Profiles. Index 0 is the default inline profile. */
+    UPROPERTY(EditAnywhere, Category = "Wetness Profile", meta = (ClampMin = "0"))
+    int32 ProfileIndex = 0;
+};
+
+/** Authoritative data for one material slot. */
+USTRUCT(BlueprintType)
+struct DWC_API FWetClothingAuthoredMaterialSlot
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, Category = "Wet Part")
+    int32 MaterialSlotIndex = INDEX_NONE;
+
+    UPROPERTY(EditAnywhere, Category = "Wet Part")
+    bool bIsWettableSlot = false;
+
+    /** Slot-specific Surface Water simulation/render settings. */
+    UPROPERTY(EditAnywhere, Category = "Surface Water", meta = (ShowOnlyInnerProperties))
+    FSurfaceWaterMaterialSlotData SurfaceWater;
+
+#if WITH_EDITORONLY_DATA
+    /** Distinguishes an explicit None selection from an unresolved slot. */
+    UPROPERTY(EditAnywhere, Category = "Wet Part")
+    bool bHasSourceTextureSelection = false;
+
+    /** Editor preview/UV background only. Runtime never consumes this texture. */
+    UPROPERTY(EditAnywhere, Category = "Wet Part")
+    TObjectPtr<UTexture> SourceTexture = nullptr;
+#endif
+
+    UPROPERTY(EditAnywhere, Category = "Wet Part")
+    TArray<FWetClothingWetPartEntry> WetPartEntries;
+
+    FWetClothingWetPartEntry* FindPart(const int32 WetPartID)
+    {
+        return WetPartEntries.FindByPredicate(
+            [WetPartID](const FWetClothingWetPartEntry& Candidate)
+            {
+                return Candidate.WetPartID == WetPartID;
+            });
+    }
+
+    const FWetClothingWetPartEntry* FindPart(const int32 WetPartID) const
+    {
+        return WetPartEntries.FindByPredicate(
+            [WetPartID](const FWetClothingWetPartEntry& Candidate)
+            {
+                return Candidate.WetPartID == WetPartID;
+            });
+    }
 };
 
 USTRUCT(BlueprintType)
@@ -107,23 +120,144 @@ struct DWC_API FWetClothingEditableWetPartData
 {
     GENERATED_BODY()
 
+    /** One authoritative record per material slot. */
     UPROPERTY(EditAnywhere, Category = "Wet Part")
-    TArray<FWetClothingSourceTextureSelection> SourceTextureSelections;
+    TArray<FWetClothingAuthoredMaterialSlot> MaterialSlots;
 
-    UPROPERTY(EditAnywhere, Category = "Wet Part")
-    TArray<FWetClothingWettableMaterialSlotState> WettableMaterialSlots;
+    /** WCA-wide deduplicated authored profile table. Index 0 is always the default inline profile. */
+    UPROPERTY(EditAnywhere, Category = "Wetness Profile")
+    TArray<FWetPartProfileAssignment> Profiles;
 
-    UPROPERTY(EditAnywhere, Category = "Wet Part")
-    TArray<FWetClothingWetPartEntry> WetPartEntries;
+    FWetClothingAuthoredMaterialSlot* FindMaterialSlot(const int32 MaterialSlotIndex)
+    {
+        return MaterialSlots.FindByPredicate(
+            [MaterialSlotIndex](const FWetClothingAuthoredMaterialSlot& Candidate)
+            {
+                return Candidate.MaterialSlotIndex == MaterialSlotIndex;
+            });
+    }
+
+    const FWetClothingAuthoredMaterialSlot* FindMaterialSlot(const int32 MaterialSlotIndex) const
+    {
+        return MaterialSlots.FindByPredicate(
+            [MaterialSlotIndex](const FWetClothingAuthoredMaterialSlot& Candidate)
+            {
+                return Candidate.MaterialSlotIndex == MaterialSlotIndex;
+            });
+    }
+
+    FWetClothingAuthoredMaterialSlot& FindOrAddMaterialSlot(const int32 MaterialSlotIndex)
+    {
+        if (FWetClothingAuthoredMaterialSlot* Existing = FindMaterialSlot(MaterialSlotIndex))
+        {
+            return *Existing;
+        }
+
+        FWetClothingAuthoredMaterialSlot& Added = MaterialSlots.AddDefaulted_GetRef();
+        Added.MaterialSlotIndex = MaterialSlotIndex;
+        return Added;
+    }
+
+    void EnsureDefaultProfile()
+    {
+        if (Profiles.IsEmpty())
+        {
+            Profiles.AddDefaulted();
+        }
+    }
+
+    FWetPartProfileAssignment* FindProfile(const int32 ProfileIndex)
+    {
+        return Profiles.IsValidIndex(ProfileIndex) ? &Profiles[ProfileIndex] : nullptr;
+    }
+
+    const FWetPartProfileAssignment* FindProfile(const int32 ProfileIndex) const
+    {
+        return Profiles.IsValidIndex(ProfileIndex) ? &Profiles[ProfileIndex] : nullptr;
+    }
+
+    const FWetPartProfileAssignment* FindProfile(const FWetClothingWetPartEntry& Entry) const
+    {
+        return FindProfile(Entry.ProfileIndex);
+    }
+
+    int32 FindOrAddProfile(
+        const FSoftObjectPath& SourceProfile,
+        const FWetnessProfileParameters& Parameters,
+        const EWetPartProfileBlendMode BlendMode = EWetPartProfileBlendMode::Standard)
+    {
+        EnsureDefaultProfile();
+        if (!SourceProfile.IsValid())
+        {
+            return 0;
+        }
+
+        const int32 ExistingIndex = Profiles.IndexOfByPredicate(
+            [&SourceProfile, BlendMode](const FWetPartProfileAssignment& Candidate)
+            {
+                return Candidate.SourceProfile == SourceProfile && Candidate.BlendMode == BlendMode;
+            });
+        if (ExistingIndex != INDEX_NONE)
+        {
+            Profiles[ExistingIndex].Parameters = Parameters;
+            return ExistingIndex;
+        }
+
+        FWetPartProfileAssignment& Added = Profiles.AddDefaulted_GetRef();
+        Added.SourceProfile = SourceProfile;
+        Added.BlendMode = BlendMode;
+        Added.Parameters = Parameters;
+        return Profiles.Num() - 1;
+    }
+
+    /** Removes unreferenced authored profiles while preserving index 0 and remapping every Part. */
+    void CompactProfiles()
+    {
+        EnsureDefaultProfile();
+
+        TSet<int32> UsedProfileIndices;
+        UsedProfileIndices.Add(0);
+        for (const FWetClothingAuthoredMaterialSlot& Slot : MaterialSlots)
+        {
+            for (const FWetClothingWetPartEntry& Entry : Slot.WetPartEntries)
+            {
+                if (Profiles.IsValidIndex(Entry.ProfileIndex))
+                {
+                    UsedProfileIndices.Add(Entry.ProfileIndex);
+                }
+            }
+        }
+
+        TArray<int32> OldToNew;
+        OldToNew.Init(INDEX_NONE, Profiles.Num());
+        TArray<FWetPartProfileAssignment> Compacted;
+        Compacted.Reserve(UsedProfileIndices.Num());
+        for (int32 OldIndex = 0; OldIndex < Profiles.Num(); ++OldIndex)
+        {
+            if (!UsedProfileIndices.Contains(OldIndex))
+            {
+                continue;
+            }
+            OldToNew[OldIndex] = Compacted.Add(Profiles[OldIndex]);
+        }
+
+        for (FWetClothingAuthoredMaterialSlot& Slot : MaterialSlots)
+        {
+            for (FWetClothingWetPartEntry& Entry : Slot.WetPartEntries)
+            {
+                Entry.ProfileIndex = OldToNew.IsValidIndex(Entry.ProfileIndex) && OldToNew[Entry.ProfileIndex] != INDEX_NONE
+                    ? OldToNew[Entry.ProfileIndex]
+                    : 0;
+            }
+        }
+        Profiles = MoveTemp(Compacted);
+    }
 };
 
 USTRUCT(BlueprintType)
 struct DWC_API FWetClothingGeneratedWetMaterialOverride
 {
     GENERATED_BODY()
-
-    UPROPERTY(VisibleAnywhere, Category = "Generated Wet Material")
-    FString ComponentPath;
 
     UPROPERTY(VisibleAnywhere, Category = "Generated Wet Material")
     int32 MaterialSlotIndex = INDEX_NONE;
@@ -279,17 +413,13 @@ struct DWC_API FWetClothingPrecomputedVertexData
     UPROPERTY(VisibleAnywhere, Category = "Precomputed Simulation Data")
     int32 WetPartID = INDEX_NONE;
 
+    /** Direct index into Authored.PartData.EditableWetPartData.Profiles. */
     UPROPERTY(VisibleAnywhere, Category = "Precomputed Simulation Data")
-    int32 WetPartEntryIndex = INDEX_NONE;
+    int32 ProfileIndex = INDEX_NONE;
 
+    /** INDEX_NONE means this vertex is not part of a wettable material slot. */
     UPROPERTY(VisibleAnywhere, Category = "Precomputed Simulation Data")
     int32 MaterialSlotIndex = INDEX_NONE;
-
-    UPROPERTY(VisibleAnywhere, Category = "Precomputed Simulation Data")
-    int32 UVChannelIndex = INDEX_NONE;
-
-    UPROPERTY(VisibleAnywhere, Category = "Precomputed Simulation Data")
-    int32 UVIslandID = INDEX_NONE;
 
     UPROPERTY(VisibleAnywhere, Category = "Precomputed Simulation Data")
     FVector2D SurfaceWaterUV = FVector2D::ZeroVector;
@@ -297,8 +427,10 @@ struct DWC_API FWetClothingPrecomputedVertexData
     UPROPERTY(VisibleAnywhere, Category = "Precomputed Simulation Data")
     bool bHasSurfaceWaterUV = false;
 
-    UPROPERTY(VisibleAnywhere, Category = "Precomputed Simulation Data")
-    bool bIsWettable = false;
+    bool IsWettable() const
+    {
+        return MaterialSlotIndex != INDEX_NONE && ProfileIndex != INDEX_NONE;
+    }
 };
 
 USTRUCT(BlueprintType)

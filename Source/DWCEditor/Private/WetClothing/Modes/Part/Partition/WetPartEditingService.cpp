@@ -4,17 +4,11 @@
 
 #include "WetClothing/Modes/Part/Partition/WetPartEditingService.h"
 
-FWetPartScope FWetPartEditingService::MakeScope(int32 MaterialSlotIndex, int32 UVChannelIndex)
+FWetPartScope FWetPartEditingService::MakeScope(int32 MaterialSlotIndex)
 {
     FWetPartScope Scope;
     Scope.MaterialSlotIndex = MaterialSlotIndex;
-    Scope.UVChannelIndex = UVChannelIndex;
     return Scope;
-}
-
-bool FWetPartEditingService::MatchesScope(const FWetClothingWetPartEntry& Entry, const FWetPartScope& Scope)
-{
-    return Entry.MaterialSlotIndex == Scope.MaterialSlotIndex && Entry.UVChannelIndex == Scope.UVChannelIndex;
 }
 
 bool FWetPartEditingService::EnsureDefaultWetPartForScope(UWetClothingAsset* WetClothingAsset, const FWetPartScope& Scope)
@@ -24,25 +18,23 @@ bool FWetPartEditingService::EnsureDefaultWetPartForScope(UWetClothingAsset* Wet
         return false;
     }
 
-    for (FWetClothingWetPartEntry& Entry : WetClothingAsset->Authored.PartData.EditableWetPartData.WetPartEntries)
+    FWetClothingEditableWetPartData& EditableData = WetClothingAsset->Authored.PartData.EditableWetPartData;
+    FWetClothingAuthoredMaterialSlot& SlotData = EditableData.FindOrAddMaterialSlot(Scope.MaterialSlotIndex);
+    if (SlotData.FindPart(0) != nullptr)
     {
-        if (MatchesScope(Entry, Scope) && Entry.WetPartID == 0)
-        {
-            return true;
-        }
+        return true;
     }
 
     WetClothingAsset->Modify();
+    EditableData.EnsureDefaultProfile();
 
-    FWetClothingWetPartEntry NewEntry;
-    NewEntry.MaterialSlotIndex = Scope.MaterialSlotIndex;
-    NewEntry.UVChannelIndex = Scope.UVChannelIndex;
+    FWetClothingWetPartEntry& NewEntry = SlotData.WetPartEntries.AddDefaulted_GetRef();
     NewEntry.WetPartID = 0;
-    NewEntry.DisplayName = GetDefaultWetPartName(NewEntry.WetPartID);
-    NewEntry.Color = GetDefaultWetPartColor(NewEntry.WetPartID);
+    NewEntry.DisplayName = GetDefaultWetPartName(0);
+    NewEntry.Color = GetDefaultWetPartColor(0);
     NewEntry.bViewEnabled = true;
+    NewEntry.ProfileIndex = 0;
 
-    WetClothingAsset->Authored.PartData.EditableWetPartData.WetPartEntries.Add(NewEntry);
     WetClothingAsset->MarkPackageDirty();
     return true;
 }
@@ -50,17 +42,19 @@ bool FWetPartEditingService::EnsureDefaultWetPartForScope(UWetClothingAsset* Wet
 int32 FWetPartEditingService::FindNextWetPartIDForScope(const UWetClothingAsset* WetClothingAsset, const FWetPartScope& Scope)
 {
     int32 MaxWetPartID = 0;
-    if (WetClothingAsset != nullptr && Scope.IsValid())
+    if (WetClothingAsset == nullptr || !Scope.IsValid())
     {
-        for (const FWetClothingWetPartEntry& Entry : WetClothingAsset->Authored.PartData.EditableWetPartData.WetPartEntries)
-        {
-            if (MatchesScope(Entry, Scope))
-            {
-                MaxWetPartID = FMath::Max(MaxWetPartID, Entry.WetPartID);
-            }
-        }
+        return MaxWetPartID + 1;
     }
 
+    const FWetClothingAuthoredMaterialSlot* SlotData = WetClothingAsset->Authored.PartData.EditableWetPartData.FindMaterialSlot(Scope.MaterialSlotIndex);
+    if (SlotData != nullptr)
+    {
+        for (const FWetClothingWetPartEntry& Entry : SlotData->WetPartEntries)
+        {
+            MaxWetPartID = FMath::Max(MaxWetPartID, Entry.WetPartID);
+        }
+    }
     return MaxWetPartID + 1;
 }
 
@@ -71,15 +65,8 @@ FWetClothingWetPartEntry* FWetPartEditingService::FindMutableEntry(UWetClothingA
         return nullptr;
     }
 
-    for (FWetClothingWetPartEntry& Entry : WetClothingAsset->Authored.PartData.EditableWetPartData.WetPartEntries)
-    {
-        if (MatchesScope(Entry, Scope) && Entry.WetPartID == WetPartID)
-        {
-            return &Entry;
-        }
-    }
-
-    return nullptr;
+    FWetClothingAuthoredMaterialSlot* SlotData = WetClothingAsset->Authored.PartData.EditableWetPartData.FindMaterialSlot(Scope.MaterialSlotIndex);
+    return SlotData != nullptr ? SlotData->FindPart(WetPartID) : nullptr;
 }
 
 const FWetClothingWetPartEntry* FWetPartEditingService::FindEntry(const UWetClothingAsset* WetClothingAsset, const FWetPartScope& Scope, int32 WetPartID)
@@ -89,15 +76,8 @@ const FWetClothingWetPartEntry* FWetPartEditingService::FindEntry(const UWetClot
         return nullptr;
     }
 
-    for (const FWetClothingWetPartEntry& Entry : WetClothingAsset->Authored.PartData.EditableWetPartData.WetPartEntries)
-    {
-        if (MatchesScope(Entry, Scope) && Entry.WetPartID == WetPartID)
-        {
-            return &Entry;
-        }
-    }
-
-    return nullptr;
+    const FWetClothingAuthoredMaterialSlot* SlotData = WetClothingAsset->Authored.PartData.EditableWetPartData.FindMaterialSlot(Scope.MaterialSlotIndex);
+    return SlotData != nullptr ? SlotData->FindPart(WetPartID) : nullptr;
 }
 
 const FWetClothingWetPartEntry* FWetPartEditingService::FindEntryForUVIsland(const UWetClothingAsset* WetClothingAsset, const FWetPartScope& Scope, int32 UVIslandID)
@@ -107,15 +87,14 @@ const FWetClothingWetPartEntry* FWetPartEditingService::FindEntryForUVIsland(con
         return nullptr;
     }
 
-    for (const FWetClothingWetPartEntry& Entry : WetClothingAsset->Authored.PartData.EditableWetPartData.WetPartEntries)
-    {
-        if (MatchesScope(Entry, Scope) && Entry.AssignedUVIslandIDs.Contains(UVIslandID))
-        {
-            return &Entry;
-        }
-    }
-
-    return nullptr;
+    const FWetClothingAuthoredMaterialSlot* SlotData = WetClothingAsset->Authored.PartData.EditableWetPartData.FindMaterialSlot(Scope.MaterialSlotIndex);
+    return SlotData != nullptr
+        ? SlotData->WetPartEntries.FindByPredicate(
+              [UVIslandID](const FWetClothingWetPartEntry& Entry)
+              {
+                  return Entry.AssignedUVIslandIDs.Contains(UVIslandID);
+              })
+        : nullptr;
 }
 
 const FWetClothingWetPartEntry* FWetPartEditingService::FindEffectiveEntryForUVIsland(const UWetClothingAsset* WetClothingAsset, const FWetPartScope& Scope, int32 UVIslandID)
@@ -124,32 +103,33 @@ const FWetClothingWetPartEntry* FWetPartEditingService::FindEffectiveEntryForUVI
     {
         return AssignedEntry;
     }
-
     return FindEntry(WetClothingAsset, Scope, 0);
 }
 
 void FWetPartEditingService::BuildWetPartItemsForScope(
-    const UWetClothingAsset*                           WetClothingAsset,
-    const FWetPartScope&                               Scope,
+    const UWetClothingAsset* WetClothingAsset,
+    const FWetPartScope& Scope,
     TArray<TSharedPtr<FWetClothingWetPartEntry>>& OutItems)
 {
     OutItems.Reset();
-
     if (WetClothingAsset == nullptr || !Scope.IsValid())
     {
         return;
     }
 
-    for (const FWetClothingWetPartEntry& Entry : WetClothingAsset->Authored.PartData.EditableWetPartData.WetPartEntries)
+    const FWetClothingAuthoredMaterialSlot* SlotData = WetClothingAsset->Authored.PartData.EditableWetPartData.FindMaterialSlot(Scope.MaterialSlotIndex);
+    if (SlotData != nullptr)
     {
-        if (MatchesScope(Entry, Scope))
+        for (const FWetClothingWetPartEntry& Entry : SlotData->WetPartEntries)
         {
             OutItems.Add(MakeShared<FWetClothingWetPartEntry>(Entry));
         }
     }
 
     OutItems.Sort([](const TSharedPtr<FWetClothingWetPartEntry>& A, const TSharedPtr<FWetClothingWetPartEntry>& B)
-                  { return A.IsValid() && B.IsValid() ? A->WetPartID < B->WetPartID : A.IsValid(); });
+    {
+        return A.IsValid() && B.IsValid() ? A->WetPartID < B->WetPartID : A.IsValid();
+    });
 }
 
 TSet<int32> FWetPartEditingService::GetUVIslandIDsForWetPart(
@@ -227,9 +207,20 @@ FString FWetPartEditingService::GetWetPartDisplayName(const FWetClothingWetPartE
     return GetDefaultWetPartName(Entry.WetPartID);
 }
 
-FString FWetPartEditingService::GetAssignedProfileLabel(const FWetClothingWetPartEntry& Entry)
+FString FWetPartEditingService::GetAssignedProfileLabel(const UWetClothingAsset* WetClothingAsset, const FWetClothingWetPartEntry& Entry)
 {
-    const FString TrimmedLabel = Entry.ProfileAssignment.SourceProfileName.TrimStartAndEnd();
+    if (WetClothingAsset == nullptr)
+    {
+        return TEXT("Select Profile");
+    }
+
+    const FWetPartProfileAssignment* Profile = WetClothingAsset->Authored.PartData.EditableWetPartData.FindProfile(Entry);
+    if (Profile == nullptr)
+    {
+        return TEXT("Select Profile");
+    }
+
+    const FString TrimmedLabel = Profile->GetDisplayName().TrimStartAndEnd();
     return TrimmedLabel.IsEmpty() ? TEXT("Select Profile") : TrimmedLabel;
 }
 

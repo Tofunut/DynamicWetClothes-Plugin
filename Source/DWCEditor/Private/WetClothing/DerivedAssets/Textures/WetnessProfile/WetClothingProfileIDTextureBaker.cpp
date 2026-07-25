@@ -36,14 +36,16 @@ namespace
     {
         const FSurfaceWaterProfileParameters& Surface = Parameters.SurfaceWater;
         return FString::Printf(
-            TEXT("WetVisual=%.9g|")
+            TEXT("AbsorbedDarkening=%.9g|")
+            TEXT("AbsorbedGlossiness=%.9g|")
             TEXT("DropletsEnabled=%d|DropletNormal=%s|")
             TEXT("RivuletsEnabled=%d|RivuletNormal=%s|")
             TEXT("SurfaceWaterNormalStrength=%.9g|")
             TEXT("SurfaceWaterRoughnessStrength=%.9g|")
             TEXT("SurfaceVisibilityThreshold=%.9g|")
             TEXT("RivuletUVScrollSpeed=%.9g"),
-            Parameters.GetWetVisualStrength(),
+            Parameters.GetAbsorbedDarkeningStrength(),
+            Parameters.GetAbsorbedGlossinessStrength(),
             Surface.bEnabled && Surface.bEnableDroplets ? 1 : 0,
             *MakeTextureBuildKey(Surface.DropletNormalTexture),
             Surface.bEnabled && Surface.bEnableRivulets ? 1 : 0,
@@ -54,12 +56,48 @@ namespace
             Surface.RivuletUVScrollSpeed);
     }
 
-    bool IsEntryBakeable(const UWetClothingAsset& Asset, const FWetClothingWetPartEntry& Entry)
+    struct FProfileBakeEntry
     {
-        return Entry.MaterialSlotIndex != INDEX_NONE &&
-               Entry.UVChannelIndex != INDEX_NONE &&
-               !Entry.AssignedUVIslandIDs.IsEmpty() &&
-               Asset.IsMaterialSlotWettable(Entry.MaterialSlotIndex);
+        int32 MaterialSlotIndex = INDEX_NONE;
+        const FWetClothingWetPartEntry* Entry = nullptr;
+        const FWetPartProfileAssignment* Profile = nullptr;
+    };
+
+    bool IsEntryBakeable(const FWetClothingAuthoredMaterialSlot& Slot, const FWetClothingWetPartEntry& Entry)
+    {
+        return Slot.bIsWettableSlot &&
+               Slot.MaterialSlotIndex != INDEX_NONE &&
+               !Entry.AssignedUVIslandIDs.IsEmpty();
+    }
+
+    void CollectBakeEntries(const UWetClothingAsset& Asset, TArray<FProfileBakeEntry>& OutEntries)
+    {
+        OutEntries.Reset();
+        const FWetClothingEditableWetPartData& EditableData = Asset.Authored.PartData.EditableWetPartData;
+        for (const FWetClothingAuthoredMaterialSlot& Slot : EditableData.MaterialSlots)
+        {
+            for (const FWetClothingWetPartEntry& Entry : Slot.WetPartEntries)
+            {
+                if (!IsEntryBakeable(Slot, Entry))
+                {
+                    continue;
+                }
+
+                FProfileBakeEntry& BakeEntry = OutEntries.AddDefaulted_GetRef();
+                BakeEntry.MaterialSlotIndex = Slot.MaterialSlotIndex;
+                BakeEntry.Entry = &Entry;
+                BakeEntry.Profile = EditableData.FindProfile(Entry);
+            }
+        }
+
+        OutEntries.Sort([](const FProfileBakeEntry& A, const FProfileBakeEntry& B)
+        {
+            if (A.MaterialSlotIndex != B.MaterialSlotIndex)
+            {
+                return A.MaterialSlotIndex < B.MaterialSlotIndex;
+            }
+            return A.Entry != nullptr && B.Entry != nullptr ? A.Entry->WetPartID < B.Entry->WetPartID : A.Entry != nullptr;
+        });
     }
 
     FString MakeSlotSignature(const FString& GlobalSignature, const int32 MaterialSlotIndex)
@@ -71,13 +109,13 @@ namespace
     }
 }
 
-bool FWetClothingProfileIDTextureBaker::ResolveEntryParameters(
-    const FWetClothingWetPartEntry& Entry,
+bool FWetClothingProfileIDTextureBaker::ResolveProfileParameters(
+    const FWetPartProfileAssignment* ProfileAssignment,
     FWetnessProfileParameters& OutParameters)
 {
-    if (Entry.ProfileAssignment.SourceProfile.IsValid())
+    if (ProfileAssignment != nullptr && ProfileAssignment->SourceProfile.IsValid())
     {
-        if (const UWetnessProfile* Profile = Cast<UWetnessProfile>(Entry.ProfileAssignment.SourceProfile.TryLoad()))
+        if (const UWetnessProfile* Profile = Cast<UWetnessProfile>(ProfileAssignment->SourceProfile.TryLoad()))
         {
             OutParameters = Profile->GetParameters();
             OutParameters.MigrateLegacyAbsorbedWetness();
@@ -87,7 +125,7 @@ bool FWetClothingProfileIDTextureBaker::ResolveEntryParameters(
         }
     }
 
-    OutParameters = Entry.ProfileAssignment.Parameters;
+    OutParameters = ProfileAssignment != nullptr ? ProfileAssignment->Parameters : FWetnessProfileParameters();
     OutParameters.MigrateLegacyAbsorbedWetness();
     OutParameters.MigrateLegacySurfaceWaterRendering();
     FWetnessProfileEditorPolicy::SanitizeParameters(OutParameters);
@@ -95,20 +133,20 @@ bool FWetClothingProfileIDTextureBaker::ResolveEntryParameters(
 }
 
 FString FWetClothingProfileIDTextureBaker::MakeProfileStableKey(
-    const FWetClothingWetPartEntry& Entry,
+    const FWetPartProfileAssignment* ProfileAssignment,
     const FWetnessProfileParameters& Parameters)
 {
     const FString ParameterHash = FMD5::HashAnsiString(*FString::Printf(
-        TEXT("DWC.RenderProfile.v3|SurfaceTextureNormalization=%d|%s"),
+        TEXT("DWC.RenderProfile.v4|SurfaceTextureNormalization=%d|%s"),
         DWCSurfaceTextureNormalization::Version,
         *MakeParametersKey(Parameters)));
-    if (Entry.ProfileAssignment.SourceProfile.IsValid())
+    if (ProfileAssignment != nullptr && ProfileAssignment->SourceProfile.IsValid())
     {
         // Include the resolved parameter state so editing a profile asset produces a
         // new immutable runtime row even though the asset path itself is unchanged.
         return FString::Printf(
             TEXT("Asset:%s|Parameters:%s"),
-            *Entry.ProfileAssignment.SourceProfile.ToString(),
+            *ProfileAssignment->SourceProfile.ToString(),
             *ParameterHash);
     }
 
@@ -331,34 +369,27 @@ FString FWetClothingProfileIDTextureBaker::MakeBuildSignature(const UWetClothing
         DWCSurfaceTextureNormalization::Version,
         DWCSurfaceTextureNormalization::Resolution);
 
-    TArray<const FWetClothingWetPartEntry*> Entries;
-    for (const FWetClothingWetPartEntry& Entry : WetClothingAsset->Authored.PartData.EditableWetPartData.WetPartEntries)
-    {
-        if (IsEntryBakeable(*WetClothingAsset, Entry))
-        {
-            Entries.Add(&Entry);
-        }
-    }
-    Entries.Sort([](const FWetClothingWetPartEntry& A, const FWetClothingWetPartEntry& B)
-    {
-        if (A.MaterialSlotIndex != B.MaterialSlotIndex) return A.MaterialSlotIndex < B.MaterialSlotIndex;
-        if (A.UVChannelIndex != B.UVChannelIndex) return A.UVChannelIndex < B.UVChannelIndex;
-        return A.WetPartID < B.WetPartID;
-    });
+    TArray<FProfileBakeEntry> Entries;
+    CollectBakeEntries(*WetClothingAsset, Entries);
 
-    for (const FWetClothingWetPartEntry* Entry : Entries)
+    for (const FProfileBakeEntry& BakeEntry : Entries)
     {
+        if (BakeEntry.Entry == nullptr)
+        {
+            continue;
+        }
+
         FWetnessProfileParameters Parameters;
-        ResolveEntryParameters(*Entry, Parameters);
-        TArray<int32> IslandIDs = Entry->AssignedUVIslandIDs;
+        ResolveProfileParameters(BakeEntry.Profile, Parameters);
+        TArray<int32> IslandIDs = BakeEntry.Entry->AssignedUVIslandIDs;
         IslandIDs.Sort();
         Canonical += FString::Printf(
             TEXT("|Slot=%d;OriginalUV=%d;Part=%d;Profile=%s;Key=%s;Islands="),
-            Entry->MaterialSlotIndex,
-            Entry->UVChannelIndex,
-            Entry->WetPartID,
-            *Entry->ProfileAssignment.SourceProfile.ToString(),
-            *MakeProfileStableKey(*Entry, Parameters));
+            BakeEntry.MaterialSlotIndex,
+            WetClothingAsset->GetOriginalUVChannelIndex(),
+            BakeEntry.Entry->WetPartID,
+            BakeEntry.Profile != nullptr ? *BakeEntry.Profile->SourceProfile.ToString() : TEXT("None"),
+            *MakeProfileStableKey(BakeEntry.Profile, Parameters));
         for (const int32 IslandID : IslandIDs)
         {
             Canonical += FString::Printf(TEXT("%d,"), IslandID);
@@ -386,20 +417,8 @@ bool FWetClothingProfileIDTextureBaker::Bake(
         return false;
     }
 
-    TArray<const FWetClothingWetPartEntry*> Entries;
-    for (const FWetClothingWetPartEntry& Entry : WetClothingAsset->Authored.PartData.EditableWetPartData.WetPartEntries)
-    {
-        if (IsEntryBakeable(*WetClothingAsset, Entry))
-        {
-            Entries.Add(&Entry);
-        }
-    }
-    Entries.Sort([](const FWetClothingWetPartEntry& A, const FWetClothingWetPartEntry& B)
-    {
-        if (A.MaterialSlotIndex != B.MaterialSlotIndex) return A.MaterialSlotIndex < B.MaterialSlotIndex;
-        if (A.UVChannelIndex != B.UVChannelIndex) return A.UVChannelIndex < B.UVChannelIndex;
-        return A.WetPartID < B.WetPartID;
-    });
+    TArray<FProfileBakeEntry> Entries;
+    CollectBakeEntries(*WetClothingAsset, Entries);
 
     if (Entries.IsEmpty())
     {
@@ -411,11 +430,17 @@ bool FWetClothingProfileIDTextureBaker::Bake(
     TMap<FString, uint8> LocalIDByStableKey;
     TArray<FWetClothingLocalRenderProfile> LocalProfiles;
     TMap<const FWetClothingWetPartEntry*, uint8> LocalIDByEntry;
-    for (const FWetClothingWetPartEntry* Entry : Entries)
+    for (const FProfileBakeEntry& BakeEntry : Entries)
     {
+        const FWetClothingWetPartEntry* Entry = BakeEntry.Entry;
+        if (Entry == nullptr)
+        {
+            continue;
+        }
+
         FWetnessProfileParameters Parameters;
-        ResolveEntryParameters(*Entry, Parameters);
-        const FString StableKey = MakeProfileStableKey(*Entry, Parameters);
+        ResolveProfileParameters(BakeEntry.Profile, Parameters);
+        const FString StableKey = MakeProfileStableKey(BakeEntry.Profile, Parameters);
 
         uint8 LocalProfileID = DWCProfileIDTextureBake::NeutralProfileID;
         if (const uint8* ExistingID = LocalIDByStableKey.Find(StableKey))
@@ -434,7 +459,7 @@ bool FWetClothingProfileIDTextureBaker::Bake(
 
             LocalProfileID = static_cast<uint8>(LocalProfiles.Num() + 1);
             FWetClothingLocalRenderProfile& LocalProfile = LocalProfiles.AddDefaulted_GetRef();
-            LocalProfile.SourceProfile = Entry->ProfileAssignment.SourceProfile;
+            LocalProfile.SourceProfile = BakeEntry.Profile != nullptr ? BakeEntry.Profile->SourceProfile : FSoftObjectPath();
             LocalProfile.Parameters = Parameters;
             LocalProfile.StableKey = StableKey;
             if (!FWetClothingSurfaceTextureNormalizer::NormalizeProfileTextures(
@@ -460,9 +485,12 @@ bool FWetClothingProfileIDTextureBaker::Bake(
     }
 
     TMap<int32, TArray<const FWetClothingWetPartEntry*>> EntriesBySlot;
-    for (const FWetClothingWetPartEntry* Entry : Entries)
+    for (const FProfileBakeEntry& BakeEntry : Entries)
     {
-        EntriesBySlot.FindOrAdd(Entry->MaterialSlotIndex).Add(Entry);
+        if (BakeEntry.Entry != nullptr)
+        {
+            EntriesBySlot.FindOrAdd(BakeEntry.MaterialSlotIndex).Add(BakeEntry.Entry);
+        }
     }
 
     TArray<int32> MaterialSlots;
@@ -485,7 +513,7 @@ bool FWetClothingProfileIDTextureBaker::Bake(
             if (!FWetClothingAssetMeshAnalyzer::BuildMaterialSlotUVIslands(
                     WetClothingAsset->GetRuntimeSkeletalMesh(),
                     0,
-                    Entry->UVChannelIndex,
+                    WetClothingAsset->GetOriginalUVChannelIndex(),
                     MaterialSlotIndex,
                     OriginalIslands,
                     &BuildError))

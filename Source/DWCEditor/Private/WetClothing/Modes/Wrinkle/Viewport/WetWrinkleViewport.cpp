@@ -1279,20 +1279,19 @@ const UWetClothingAsset* SWetWrinkleViewport::ResolveSourceWetClothingAsset() co
     return WetClothingAsset.Get();
 }
 
-UTexture* SWetWrinkleViewport::ResolveSourceTextureForMaterialSlot(int32 MaterialSlotIndex, int32 UVChannelIndex) const
+UTexture* SWetWrinkleViewport::ResolveSourceTextureForMaterialSlot(int32 MaterialSlotIndex) const
 {
     const UWetClothingAsset* SourceWetClothingAsset = ResolveSourceWetClothingAsset();
     if (SourceWetClothingAsset != nullptr)
     {
-        for (const FWetClothingSourceTextureSelection& TextureSelection : SourceWetClothingAsset->Authored.PartData.EditableWetPartData.SourceTextureSelections)
+#if WITH_EDITORONLY_DATA
+        const FWetClothingAuthoredMaterialSlot* SlotData =
+            SourceWetClothingAsset->Authored.PartData.EditableWetPartData.FindMaterialSlot(MaterialSlotIndex);
+        if (SlotData != nullptr && SlotData->bHasSourceTextureSelection)
         {
-            if (TextureSelection.MaterialSlotIndex == MaterialSlotIndex &&
-                TextureSelection.UVChannelIndex == UVChannelIndex &&
-                TextureSelection.Texture != nullptr)
-            {
-                return TextureSelection.Texture;
-            }
+            return SlotData->SourceTexture.Get();
         }
+#endif
     }
 
     const USkeletalMesh* TargetMesh = ResolveTargetMesh();
@@ -1516,7 +1515,7 @@ void SWetWrinkleViewport::RefreshWrinklePreviewMaterials()
                 }
                 else
                 {
-                    UTexture* SourceTexture = ResolveSourceTextureForMaterialSlot(ActiveMaterialSlotIndex, BrushSettings.UVChannelIndex);
+                    UTexture* SourceTexture = ResolveSourceTextureForMaterialSlot(ActiveMaterialSlotIndex);
                     PreviewNormalTexture = ResolveAccumulatedPreviewTexture(SourceTexture, ActiveMaterialSlotIndex, BrushSettings.UVChannelIndex);
                 }
 
@@ -1844,7 +1843,7 @@ void SWetWrinkleViewport::AppendAccumulatedPreviewProceduralStroke(const FWetPro
         return;
     }
 
-    UTexture* SourceTexture = ResolveSourceTextureForMaterialSlot(Stroke.MaterialSlotIndex, Stroke.UVChannelIndex);
+    UTexture* SourceTexture = ResolveSourceTextureForMaterialSlot(Stroke.MaterialSlotIndex);
     FWetWrinkleAccumulatedPreviewState* PreviewState =
         FindOrAddAccumulatedPreviewState(SourceTexture, Stroke.MaterialSlotIndex, Stroke.UVChannelIndex);
     if (PreviewState == nullptr)
@@ -1927,7 +1926,7 @@ bool SWetWrinkleViewport::EnsureTransientProceduralPreviewState(
         return false;
     }
 
-    UTexture* SourceTexture = ResolveSourceTextureForMaterialSlot(MaterialSlotIndex, UVChannelIndex);
+    UTexture* SourceTexture = ResolveSourceTextureForMaterialSlot(MaterialSlotIndex);
     const FIntPoint TextureSize = ComputeWetWrinklePreviewTextureSize(WetClothingAsset.Get());
     const FIntPoint WorkingTextureSize = WetWrinkleTextureRaster::ResolveWorkingTextureSize(TextureSize);
     const int32 PixelCount = TextureSize.X * TextureSize.Y;

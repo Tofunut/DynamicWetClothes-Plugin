@@ -365,7 +365,7 @@ void AddSeamDirection(
 struct FTrianglePartMetadata
 {
     int32 IslandID = INDEX_NONE;
-    int32 WetPartEntryIndex = INDEX_NONE;
+    int32 AuthoredProfileIndex = INDEX_NONE;
 };
 
 struct FRenderSurfaceTriangle
@@ -397,22 +397,95 @@ struct FRenderSurfaceBVH
     TArray<FRenderSurfaceBVHNode> Nodes;
 };
 
-FWetnessProfileParameters ResolveProfileParametersForEntry(
-    const UWetClothingAsset& Asset,
-    const int32 EntryIndex)
+class FResolvedProfileParameterCache
 {
-    if (!Asset.Authored.PartData.EditableWetPartData.WetPartEntries.IsValidIndex(EntryIndex))
+  public:
+    explicit FResolvedProfileParameterCache(const UWetClothingAsset& InAsset)
+        : Asset(InAsset)
     {
+        const int32 ProfileCount = Asset.Authored.PartData.EditableWetPartData.Profiles.Num();
+        ParametersByIndex.Reserve(ProfileCount);
+        for (int32 ProfileIndex = 0; ProfileIndex < ProfileCount; ++ProfileIndex)
+        {
+            ParametersByIndex.Add(ProfileIndex, ResolveUncached(ProfileIndex));
+        }
+    }
+
+    const FWetnessProfileParameters& Resolve(const int32 ProfileIndex) const
+    {
+        if (const FWetnessProfileParameters* Parameters = ParametersByIndex.Find(ProfileIndex))
+        {
+            return *Parameters;
+        }
+        return DefaultParameters;
+    }
+
+  private:
+    const UWetnessProfile* ResolveSourceProfile(const FSoftObjectPath& SourceProfilePath)
+    {
+        if (!SourceProfilePath.IsValid())
+        {
+            return nullptr;
+        }
+
+        if (const TWeakObjectPtr<UWetnessProfile>* CachedProfile = SourceProfilesByPath.Find(SourceProfilePath))
+        {
+            return CachedProfile->Get();
+        }
+
+        // ResolveObject avoids a synchronous load when the referenced profile is already
+        // open in an editor. TryLoad is reached at most once for each unique source path
+        // while this WCA cache is alive.
+        UWetnessProfile* SourceProfile = Cast<UWetnessProfile>(SourceProfilePath.ResolveObject());
+        if (SourceProfile == nullptr)
+        {
+            SourceProfile = Cast<UWetnessProfile>(SourceProfilePath.TryLoad());
+        }
+        SourceProfilesByPath.Add(SourceProfilePath, SourceProfile);
+        return SourceProfile;
+    }
+
+    FWetnessProfileParameters ResolveUncached(const int32 ProfileIndex)
+    {
+        const FWetPartProfileAssignment* Profile =
+            Asset.Authored.PartData.EditableWetPartData.FindProfile(ProfileIndex);
+        if (Profile != nullptr && Profile->SourceProfile.IsValid())
+        {
+            if (const UWetnessProfile* SourceProfile = ResolveSourceProfile(Profile->SourceProfile))
+            {
+                return SourceProfile->GetParameters();
+            }
+
+            if (!FailedSourceProfiles.Contains(Profile->SourceProfile))
+            {
+                FailedSourceProfiles.Add(Profile->SourceProfile);
+                UE_LOG(
+                    LogTemp,
+                    Warning,
+                    TEXT("WetGPUMapBakeBuilder: Failed to resolve Wetness Profile '%s' for WCA '%s'. Using the WCA snapshot/fallback profile."),
+                    *Profile->SourceProfile.ToString(),
+                    *GetNameSafe(&Asset));
+            }
+        }
+
+        if (Asset.Derived.Inline.ResolvedWetnessProfileParameters.IsValidIndex(ProfileIndex))
+        {
+            return Asset.Derived.Inline.ResolvedWetnessProfileParameters[ProfileIndex];
+        }
+
+        if (Profile != nullptr)
+        {
+            return Profile->Parameters;
+        }
         return FWetnessProfileParameters();
     }
 
-    if (Asset.Derived.Inline.ResolvedWetnessProfileParameters.IsValidIndex(EntryIndex))
-    {
-        return Asset.Derived.Inline.ResolvedWetnessProfileParameters[EntryIndex];
-    }
-
-    return Asset.Authored.PartData.EditableWetPartData.WetPartEntries[EntryIndex].ProfileAssignment.Parameters;
-}
+    const UWetClothingAsset& Asset;
+    TMap<int32, FWetnessProfileParameters> ParametersByIndex;
+    TMap<FSoftObjectPath, TWeakObjectPtr<UWetnessProfile>> SourceProfilesByPath;
+    TSet<FSoftObjectPath> FailedSourceProfiles;
+    FWetnessProfileParameters DefaultParameters;
+};
 
 FDWCGPUProfileParameters MakeGPUProfile(const FWetnessProfileParameters& Parameters)
 {
@@ -447,8 +520,9 @@ int32 ResolveGPUMapSurfaceWaterNormalUVChannel(
     const UWetClothingAsset& Asset,
     const int32 MaterialSlotIndex)
 {
-    if (const FSurfaceWaterMaterialSlotData* SlotData =
-            Asset.Authored.SurfaceWaterSettings.FindMaterialSlot(MaterialSlotIndex))
+    const FWetClothingAuthoredMaterialSlot* AuthoredSlot =
+        Asset.Authored.PartData.EditableWetPartData.FindMaterialSlot(MaterialSlotIndex);
+    if (const FSurfaceWaterMaterialSlotData* SlotData = AuthoredSlot != nullptr ? &AuthoredSlot->SurfaceWater : nullptr)
     {
         if (SlotData->SurfaceWaterNormalUVChannel != INDEX_NONE)
         {
@@ -491,11 +565,11 @@ bool BuildOriginalUVTrianglePartLookupForLOD(
     const UWetClothingAsset& Asset,
     const int32 LODIndex,
     TMap<int32, FTrianglePartMetadata>& OutLookup,
-    TMap<int32, int32>& OutDefaultEntryByMaterial,
+    TMap<int32, int32>& OutDefaultProfileByMaterial,
     FString* OutErrorMessage)
 {
     OutLookup.Reset();
-    OutDefaultEntryByMaterial.Reset();
+    OutDefaultProfileByMaterial.Reset();
 #if WITH_EDITORONLY_DATA
     const FDWCEditorUVTopologyData* Topology = Asset.FindOriginalUVTopologyForLOD(LODIndex);
     const FString CurrentTopologySignature = UWetClothingAsset::BuildMeshContentSignature(
@@ -513,44 +587,51 @@ bool BuildOriginalUVTrianglePartLookupForLOD(
         return false;
     }
 
-    TMap<int32, TMap<int32, int32>> EntryByIslandByMaterial;
-    const TArray<FWetClothingWetPartEntry>& Entries = Asset.Authored.PartData.EditableWetPartData.WetPartEntries;
-    for (int32 EntryIndex = 0; EntryIndex < Entries.Num(); ++EntryIndex)
+    const FWetClothingEditableWetPartData& WetPartData = Asset.Authored.PartData.EditableWetPartData;
+    TMap<int32, TMap<int32, int32>> ProfileByIslandByMaterial;
+    for (const FWetClothingAuthoredMaterialSlot& Slot : WetPartData.MaterialSlots)
     {
-        const FWetClothingWetPartEntry& Entry = Entries[EntryIndex];
-        if (!Asset.IsMaterialSlotWettable(Entry.MaterialSlotIndex))
+        if (!Slot.bIsWettableSlot || Slot.MaterialSlotIndex == INDEX_NONE)
         {
             continue;
         }
-        if (Entry.WetPartID == 0)
+
+        for (const FWetClothingWetPartEntry& Entry : Slot.WetPartEntries)
         {
-            if (OutDefaultEntryByMaterial.Contains(Entry.MaterialSlotIndex))
+            const int32 ProfileIndex = WetPartData.Profiles.IsValidIndex(Entry.ProfileIndex)
+                ? Entry.ProfileIndex
+                : 0;
+            if (Entry.WetPartID == 0)
             {
-                SetGPUMapBakeError(
-                    OutErrorMessage,
-                    FString::Printf(
-                        TEXT("Wettable material slot %d has more than one default Wet Part entry."),
-                        Entry.MaterialSlotIndex));
-                return false;
-            }
-            OutDefaultEntryByMaterial.Add(Entry.MaterialSlotIndex, EntryIndex);
-        }
-        else
-        {
-            TMap<int32, int32>& EntryByIsland = EntryByIslandByMaterial.FindOrAdd(Entry.MaterialSlotIndex);
-            for (const int32 IslandID : Entry.AssignedUVIslandIDs)
-            {
-                if (EntryByIsland.Contains(IslandID))
+                if (OutDefaultProfileByMaterial.Contains(Slot.MaterialSlotIndex))
                 {
                     SetGPUMapBakeError(
                         OutErrorMessage,
                         FString::Printf(
-                            TEXT("Original-UV island %d in material slot %d is assigned to more than one Wet Part."),
-                            IslandID,
-                            Entry.MaterialSlotIndex));
+                            TEXT("Wettable material slot %d has more than one default Wet Part entry."),
+                            Slot.MaterialSlotIndex));
                     return false;
                 }
-                EntryByIsland.Add(IslandID, EntryIndex);
+                OutDefaultProfileByMaterial.Add(Slot.MaterialSlotIndex, ProfileIndex);
+            }
+            else
+            {
+                TMap<int32, int32>& ProfileByIsland =
+                    ProfileByIslandByMaterial.FindOrAdd(Slot.MaterialSlotIndex);
+                for (const int32 IslandID : Entry.AssignedUVIslandIDs)
+                {
+                    if (ProfileByIsland.Contains(IslandID))
+                    {
+                        SetGPUMapBakeError(
+                            OutErrorMessage,
+                            FString::Printf(
+                                TEXT("Original-UV island %d in material slot %d is assigned to more than one Wet Part."),
+                                IslandID,
+                                Slot.MaterialSlotIndex));
+                        return false;
+                    }
+                    ProfileByIsland.Add(IslandID, ProfileIndex);
+                }
             }
         }
     }
@@ -561,28 +642,30 @@ bool BuildOriginalUVTrianglePartLookupForLOD(
         {
             continue;
         }
-        int32 EntryIndex = INDEX_NONE;
-        if (const int32* DefaultEntry = OutDefaultEntryByMaterial.Find(Island.MaterialSlotIndex))
+
+        int32 ProfileIndex = INDEX_NONE;
+        if (const int32* DefaultProfile = OutDefaultProfileByMaterial.Find(Island.MaterialSlotIndex))
         {
-            EntryIndex = *DefaultEntry;
+            ProfileIndex = *DefaultProfile;
         }
-        if (const TMap<int32, int32>* ByIsland = EntryByIslandByMaterial.Find(Island.MaterialSlotIndex))
+        if (const TMap<int32, int32>* ByIsland = ProfileByIslandByMaterial.Find(Island.MaterialSlotIndex))
         {
-            if (const int32* OverrideEntry = ByIsland->Find(Island.IslandID))
+            if (const int32* OverrideProfile = ByIsland->Find(Island.IslandID))
             {
-                EntryIndex = *OverrideEntry;
+                ProfileIndex = *OverrideProfile;
             }
         }
-        if (!Entries.IsValidIndex(EntryIndex))
+        if (!WetPartData.Profiles.IsValidIndex(ProfileIndex))
         {
             SetGPUMapBakeError(
                 OutErrorMessage,
                 FString::Printf(
-                    TEXT("Wettable material slot %d has Original-UV island %d with no default or explicit Wet Part assignment."),
+                    TEXT("Wettable material slot %d has Original-UV island %d with no valid default or explicit Wet Part profile."),
                     Island.MaterialSlotIndex,
                     Island.IslandID));
             return false;
         }
+
         for (const int32 TriangleID : Island.TriangleIndices)
         {
             if (TriangleID < 0 || OutLookup.Contains(TriangleID))
@@ -594,7 +677,7 @@ bool BuildOriginalUVTrianglePartLookupForLOD(
                         TriangleID));
                 return false;
             }
-            OutLookup.Add(TriangleID, {Island.IslandID, EntryIndex});
+            OutLookup.Add(TriangleID, {Island.IslandID, ProfileIndex});
         }
     }
 
@@ -1041,11 +1124,11 @@ bool BuildTransferredTrianglePartLookup(
     const UWetClothingAsset& Asset,
     const int32 LODIndex,
     TMap<int32, FTrianglePartMetadata>& OutLookup,
-    TMap<int32, int32>& OutDefaultEntryByMaterial,
+    TMap<int32, int32>& OutDefaultProfileByMaterial,
     FString* OutErrorMessage)
 {
     OutLookup.Reset();
-    OutDefaultEntryByMaterial.Reset();
+    OutDefaultProfileByMaterial.Reset();
 
     USkeletalMesh* RuntimeMesh = Asset.GetRuntimeSkeletalMesh();
     if (RuntimeMesh == nullptr)
@@ -1059,7 +1142,7 @@ bool BuildTransferredTrianglePartLookup(
             Asset,
             CanonicalWetPartLODIndex,
             CanonicalLookup,
-            OutDefaultEntryByMaterial,
+            OutDefaultProfileByMaterial,
             OutErrorMessage))
     {
         return false;
@@ -1118,7 +1201,7 @@ bool BuildTrianglePartLookup(
     const UWetClothingAsset& Asset,
     const int32 LODIndex,
     TMap<int32, FTrianglePartMetadata>& OutLookup,
-    TMap<int32, int32>& OutDefaultEntryByMaterial,
+    TMap<int32, int32>& OutDefaultProfileByMaterial,
     FString* OutErrorMessage)
 {
     return LODIndex == CanonicalWetPartLODIndex
@@ -1126,13 +1209,13 @@ bool BuildTrianglePartLookup(
             Asset,
             CanonicalWetPartLODIndex,
             OutLookup,
-            OutDefaultEntryByMaterial,
+            OutDefaultProfileByMaterial,
             OutErrorMessage)
         : BuildTransferredTrianglePartLookup(
             Asset,
             LODIndex,
             OutLookup,
-            OutDefaultEntryByMaterial,
+            OutDefaultProfileByMaterial,
             OutErrorMessage);
 }
 
@@ -1200,23 +1283,57 @@ void StoreCachedSignature(const FString& CacheKey, const FString& Signature)
     GGPUWetSignatureCache.Add(CacheKey, Signature);
 }
 
-void AddProfileParametersToSignature(FGPUWetMapSignatureBuilder& Builder, const FWetnessProfileParameters& Parameters)
+void AddAuthoredWetPartDataToSignature(
+    FGPUWetMapSignatureBuilder& Builder,
+    const UWetClothingAsset& Asset)
 {
-    Builder.AddValue(Parameters.AbsorbedWetness.bEnabled ? 1 : 0);
-    Builder.AddValue(Parameters.GetAbsorptionFraction());
-    Builder.AddValue(Parameters.GetAbsorptionRate());
-    Builder.AddValue(Parameters.GetAbsorptionMultiplier());
-    Builder.AddValue(Parameters.GetSpreadRatePerSecond());
-    Builder.AddValue(Parameters.GetDryRatePerSecond());
-    Builder.AddValue(Parameters.GetGravityFlowStrength());
-    Builder.AddValue(Parameters.GetWetVisualStrength());
+    const FWetClothingEditableWetPartData& WetPartData = Asset.Authored.PartData.EditableWetPartData;
+    TArray<int32> SlotIndices;
+    for (int32 SlotIndex = 0; SlotIndex < WetPartData.MaterialSlots.Num(); ++SlotIndex)
+    {
+        if (WetPartData.MaterialSlots[SlotIndex].bIsWettableSlot)
+        {
+            SlotIndices.Add(SlotIndex);
+        }
+    }
+    SlotIndices.Sort([&WetPartData](const int32 A, const int32 B)
+    {
+        return WetPartData.MaterialSlots[A].MaterialSlotIndex <
+               WetPartData.MaterialSlots[B].MaterialSlotIndex;
+    });
 
-    // Keep legacy serialized fields in the signature so old assets that have
-    // not migrated yet still produce stable invalidation behavior.
-    Builder.AddValue(Parameters.Absorption);
-    Builder.AddValue(Parameters.SpreadRate);
-    Builder.AddValue(Parameters.DryRate);
-    Builder.AddValue(Parameters.GravityFlowStrength);
+    Builder.AddValue(Asset.GetOriginalUVChannelIndex());
+    Builder.AddValue(SlotIndices.Num());
+    for (const int32 SlotIndex : SlotIndices)
+    {
+        const FWetClothingAuthoredMaterialSlot& Slot = WetPartData.MaterialSlots[SlotIndex];
+        Builder.AddValue(Slot.MaterialSlotIndex);
+
+        TArray<int32> EntryIndices;
+        for (int32 EntryIndex = 0; EntryIndex < Slot.WetPartEntries.Num(); ++EntryIndex)
+        {
+            EntryIndices.Add(EntryIndex);
+        }
+        EntryIndices.Sort([&Slot](const int32 A, const int32 B)
+        {
+            return Slot.WetPartEntries[A].WetPartID < Slot.WetPartEntries[B].WetPartID;
+        });
+
+        Builder.AddValue(EntryIndices.Num());
+        for (const int32 EntryIndex : EntryIndices)
+        {
+            const FWetClothingWetPartEntry& Entry = Slot.WetPartEntries[EntryIndex];
+            Builder.AddValue(Entry.WetPartID);
+
+            TArray<int32> SortedIslandIDs = Entry.AssignedUVIslandIDs;
+            SortedIslandIDs.Sort();
+            Builder.AddValue(SortedIslandIDs.Num());
+            for (const int32 IslandID : SortedIslandIDs)
+            {
+                Builder.AddValue(IslandID);
+            }
+        }
+    }
 }
 
 bool ResolveWettableMaterialSlots(
@@ -1232,7 +1349,7 @@ bool ResolveWettableMaterialSlots(
         SetGPUMapBakeError(OutErrorMessage, TEXT("No DWC Prepared Skeletal Mesh is available."));
         return false;
     }
-    for (const FWetClothingWettableMaterialSlotState& SlotState : Asset.Authored.PartData.EditableWetPartData.WettableMaterialSlots)
+    for (const FWetClothingAuthoredMaterialSlot& SlotState : Asset.Authored.PartData.EditableWetPartData.MaterialSlots)
     {
         if (!SlotState.bIsWettableSlot)
         {
@@ -1301,79 +1418,7 @@ FString BuildRuntimeSignatureCacheKey(
         Builder.AddValue(Section.NumVertices);
     }
 
-    const TArray<FWetClothingWettableMaterialSlotState>& WettableSlots =
-        Asset.Authored.PartData.EditableWetPartData.WettableMaterialSlots;
-    TArray<int32> WettableSlotIndices;
-    for (int32 SlotStateIndex = 0; SlotStateIndex < WettableSlots.Num(); ++SlotStateIndex)
-    {
-        if (WettableSlots[SlotStateIndex].bIsWettableSlot)
-        {
-            WettableSlotIndices.Add(SlotStateIndex);
-        }
-    }
-    WettableSlotIndices.Sort([&WettableSlots](const int32 A, const int32 B)
-    {
-        const FWetClothingWettableMaterialSlotState& Left = WettableSlots[A];
-        const FWetClothingWettableMaterialSlotState& Right = WettableSlots[B];
-        if (Left.MaterialSlotIndex != Right.MaterialSlotIndex)
-        {
-            return Left.MaterialSlotIndex < Right.MaterialSlotIndex;
-        }
-        return Left.ComponentPath < Right.ComponentPath;
-    });
-    Builder.AddValue(WettableSlotIndices.Num());
-    for (const int32 SlotStateIndex : WettableSlotIndices)
-    {
-        const FWetClothingWettableMaterialSlotState& SlotState = WettableSlots[SlotStateIndex];
-        Builder.AddString(SlotState.ComponentPath);
-        Builder.AddValue(SlotState.MaterialSlotIndex);
-    }
-
-    const TArray<FWetClothingWetPartEntry>& Entries = Asset.Authored.PartData.EditableWetPartData.WetPartEntries;
-    TArray<int32> WettableEntryIndices;
-    for (int32 EntryIndex = 0; EntryIndex < Entries.Num(); ++EntryIndex)
-    {
-        if (Asset.IsMaterialSlotWettable(Entries[EntryIndex].MaterialSlotIndex))
-        {
-            WettableEntryIndices.Add(EntryIndex);
-        }
-    }
-    WettableEntryIndices.Sort([&Entries](const int32 A, const int32 B)
-    {
-        const FWetClothingWetPartEntry& Left = Entries[A];
-        const FWetClothingWetPartEntry& Right = Entries[B];
-        if (Left.MaterialSlotIndex != Right.MaterialSlotIndex)
-        {
-            return Left.MaterialSlotIndex < Right.MaterialSlotIndex;
-        }
-        if (Left.WetPartID != Right.WetPartID)
-        {
-            return Left.WetPartID < Right.WetPartID;
-        }
-        return Left.ComponentPath < Right.ComponentPath;
-    });
-    Builder.AddValue(Asset.GetOriginalUVChannelIndex());
-    Builder.AddValue(WettableEntryIndices.Num());
-    for (const int32 EntryIndex : WettableEntryIndices)
-    {
-        const FWetClothingWetPartEntry& Entry = Entries[EntryIndex];
-        Builder.AddString(Entry.ComponentPath);
-        Builder.AddValue(Entry.MaterialSlotIndex);
-        Builder.AddValue(Asset.GetOriginalUVChannelIndex());
-        Builder.AddValue(Entry.WetPartID);
-
-        TArray<int32> SortedIslandIDs = Entry.AssignedUVIslandIDs;
-        SortedIslandIDs.Sort();
-        Builder.AddValue(SortedIslandIDs.Num());
-        for (const int32 IslandID : SortedIslandIDs)
-        {
-            Builder.AddValue(IslandID);
-        }
-
-        Builder.AddString(Entry.ProfileAssignment.SourceProfile.ToString());
-        Builder.AddValue(static_cast<uint8>(Entry.ProfileAssignment.BlendMode));
-        AddProfileParametersToSignature(Builder, ResolveProfileParametersForEntry(Asset, EntryIndex));
-    }
+    AddAuthoredWetPartDataToSignature(Builder, Asset);
 
     return Builder.Finalize();
 }
@@ -1392,7 +1437,7 @@ FString BuildMapSignatureFromRuntimeSignature(
 
 using namespace DWCWetGPUMapBakePrivate;
 
-bool FWetGPUMapBakeBuilder::BuildLODRuntimeSignature(
+static bool BuildLODRuntimeSignatureInternal(
     const UWetClothingAsset& Asset,
     const int32 LODIndex,
     FString& OutSignature,
@@ -1579,85 +1624,25 @@ bool FWetGPUMapBakeBuilder::BuildLODRuntimeSignature(
         Builder.AddValue(Section.NumVertices);
     }
 
-    const TArray<FWetClothingWettableMaterialSlotState>& WettableSlots =
-        Asset.Authored.PartData.EditableWetPartData.WettableMaterialSlots;
-    TArray<int32> WettableSlotIndices;
-    for (int32 SlotStateIndex = 0; SlotStateIndex < WettableSlots.Num(); ++SlotStateIndex)
-    {
-        if (WettableSlots[SlotStateIndex].bIsWettableSlot)
-        {
-            WettableSlotIndices.Add(SlotStateIndex);
-        }
-    }
-    WettableSlotIndices.Sort([&WettableSlots](const int32 A, const int32 B)
-    {
-        const FWetClothingWettableMaterialSlotState& Left = WettableSlots[A];
-        const FWetClothingWettableMaterialSlotState& Right = WettableSlots[B];
-        if (Left.MaterialSlotIndex != Right.MaterialSlotIndex)
-        {
-            return Left.MaterialSlotIndex < Right.MaterialSlotIndex;
-        }
-        return Left.ComponentPath < Right.ComponentPath;
-    });
-    Builder.AddValue(WettableSlotIndices.Num());
-    for (const int32 SlotStateIndex : WettableSlotIndices)
-    {
-        const FWetClothingWettableMaterialSlotState& SlotState = WettableSlots[SlotStateIndex];
-        Builder.AddString(SlotState.ComponentPath);
-        Builder.AddValue(SlotState.MaterialSlotIndex);
-    }
-
-    const TArray<FWetClothingWetPartEntry>& Entries = Asset.Authored.PartData.EditableWetPartData.WetPartEntries;
-    TArray<int32> WettableEntryIndices;
-    for (int32 EntryIndex = 0; EntryIndex < Entries.Num(); ++EntryIndex)
-    {
-        if (Asset.IsMaterialSlotWettable(Entries[EntryIndex].MaterialSlotIndex))
-        {
-            WettableEntryIndices.Add(EntryIndex);
-        }
-    }
-    WettableEntryIndices.Sort([&Entries](const int32 A, const int32 B)
-    {
-        const FWetClothingWetPartEntry& Left = Entries[A];
-        const FWetClothingWetPartEntry& Right = Entries[B];
-        if (Left.MaterialSlotIndex != Right.MaterialSlotIndex)
-        {
-            return Left.MaterialSlotIndex < Right.MaterialSlotIndex;
-        }
-        if (Left.WetPartID != Right.WetPartID)
-        {
-            return Left.WetPartID < Right.WetPartID;
-        }
-        return Left.ComponentPath < Right.ComponentPath;
-    });
-    // Part Mode is fixed to the asset's Original UV. Do not let a stale per-entry
-    // UV field invalidate an otherwise identical GPU bake.
-    Builder.AddValue(Asset.GetOriginalUVChannelIndex());
-    Builder.AddValue(WettableEntryIndices.Num());
-    for (const int32 EntryIndex : WettableEntryIndices)
-    {
-        const FWetClothingWetPartEntry& Entry = Entries[EntryIndex];
-        Builder.AddString(Entry.ComponentPath);
-        Builder.AddValue(Entry.MaterialSlotIndex);
-        Builder.AddValue(Asset.GetOriginalUVChannelIndex());
-        Builder.AddValue(Entry.WetPartID);
-        TArray<int32> SortedIslandIDs = Entry.AssignedUVIslandIDs;
-        SortedIslandIDs.Sort();
-        Builder.AddValue(SortedIslandIDs.Num());
-        for (const int32 IslandID : SortedIslandIDs)
-        {
-            Builder.AddValue(IslandID);
-        }
-
-        Builder.AddString(Entry.ProfileAssignment.SourceProfile.ToString());
-        Builder.AddValue(static_cast<uint8>(Entry.ProfileAssignment.BlendMode));
-        AddProfileParametersToSignature(Builder, ResolveProfileParametersForEntry(Asset, EntryIndex));
-    }
+    AddAuthoredWetPartDataToSignature(Builder, Asset);
 
     OutSignature = Builder.Finalize();
     StoreCachedSignature(CacheKey, OutSignature);
     SetGPUMapBakeError(OutErrorMessage, TEXT(""));
     return true;
+}
+
+bool FWetGPUMapBakeBuilder::BuildLODRuntimeSignature(
+    const UWetClothingAsset& Asset,
+    const int32 LODIndex,
+    FString& OutSignature,
+    FString* OutErrorMessage)
+{
+    return BuildLODRuntimeSignatureInternal(
+        Asset,
+        LODIndex,
+        OutSignature,
+        OutErrorMessage);
 }
 
 bool FWetGPUMapBakeBuilder::BuildLODMapSignature(
@@ -1667,7 +1652,11 @@ bool FWetGPUMapBakeBuilder::BuildLODMapSignature(
     FString* OutErrorMessage)
 {
     FString RuntimeSignature;
-    if (!BuildLODRuntimeSignature(Asset, LODIndex, RuntimeSignature, OutErrorMessage))
+    if (!BuildLODRuntimeSignatureInternal(
+            Asset,
+            LODIndex,
+            RuntimeSignature,
+            OutErrorMessage))
     {
         return false;
     }
@@ -1781,26 +1770,31 @@ static bool BuildLODInternal(
         1.0f,
         FText::FromString(FString::Printf(TEXT("Preparing LOD%d material-slot map buffers and runtime signatures..."), LODIndex)));
 
+    const FResolvedProfileParameterCache ProfileCache(Asset);
     FString RuntimeSignature;
-    if (!FWetGPUMapBakeBuilder::BuildLODRuntimeSignature(Asset, LODIndex, RuntimeSignature, OutErrorMessage))
-    {
-        return false;
-    }
-
-    FString MapSignature;
-    if (bBuildMaps && !FWetGPUMapBakeBuilder::BuildLODMapSignature(Asset, LODIndex, MapSignature, OutErrorMessage))
+    if (!BuildLODRuntimeSignatureInternal(
+            Asset,
+            LODIndex,
+            RuntimeSignature,
+            OutErrorMessage))
     {
         return false;
     }
 
     const int32 Resolution = Asset.GetSetupSettings().GetGPUSimulationMapResolution();
+    FString MapSignature;
+    if (bBuildMaps)
+    {
+        MapSignature = BuildMapSignatureFromRuntimeSignature(RuntimeSignature, Resolution);
+    }
+
     const int32 TexelCount = Resolution * Resolution;
     const int32 TriangleCapacity = IndexBuffer.Num() / 3;
     const bool bAllowProjectedLODDataUVOverlap = LODIndex != CanonicalWetPartLODIndex;
 
     TMap<int32, FTrianglePartMetadata> TrianglePartLookup;
-    TMap<int32, int32> DefaultEntryByMaterial;
-    if (!BuildTrianglePartLookup(Asset, LODIndex, TrianglePartLookup, DefaultEntryByMaterial, OutErrorMessage))
+    TMap<int32, int32> DefaultProfileByMaterial;
+    if (!BuildTrianglePartLookup(Asset, LODIndex, TrianglePartLookup, DefaultProfileByMaterial, OutErrorMessage))
     {
         return false;
     }
@@ -1924,10 +1918,10 @@ static bool BuildLODInternal(
             {
                 ++ValidationSummary.DegenerateOriginalUVTriangles;
                 RecordExampleTriangle(RenderTriangleID);
-                if (const int32* DefaultEntry = DefaultEntryByMaterial.Find(Section.MaterialIndex))
+                if (const int32* DefaultProfile = DefaultProfileByMaterial.Find(Section.MaterialIndex))
                 {
                     FallbackPartMetadata.IslandID = INDEX_NONE;
-                    FallbackPartMetadata.WetPartEntryIndex = *DefaultEntry;
+                    FallbackPartMetadata.AuthoredProfileIndex = *DefaultProfile;
                     PartMetadata = &FallbackPartMetadata;
                 }
                 else
@@ -2018,7 +2012,7 @@ static bool BuildLODInternal(
             Triangle.RestSurfaceArea = RestSurfaceArea;
             Triangle.ProfileIndex = FindOrAddProfile(
                 Output.Profiles,
-                MakeGPUProfile(ResolveProfileParametersForEntry(Asset, PartMetadata->WetPartEntryIndex)));
+                MakeGPUProfile(ProfileCache.Resolve(PartMetadata->AuthoredProfileIndex)));
 
             IncidentTrianglesByVertex.FindOrAdd(V0).Add(TriangleID);
             IncidentTrianglesByVertex.FindOrAdd(V1).Add(TriangleID);

@@ -216,7 +216,7 @@ class SWetWrinkleViewport : public SEditorViewport, public FGCObject
     float CalculateBrushCursorWorldRadius() const;
     FText GetViewportHintText() const;
     const UWetClothingAsset* ResolveSourceWetClothingAsset() const;
-    UTexture* ResolveSourceTextureForMaterialSlot(int32 MaterialSlotIndex, int32 UVChannelIndex) const;
+    UTexture* ResolveSourceTextureForMaterialSlot(int32 MaterialSlotIndex) const;
     bool ArePreviewMaterialSlotsCurrent() const;
     void RebuildPreviewMaterialSlots();
     void ReleasePreviewMaterialSlots();

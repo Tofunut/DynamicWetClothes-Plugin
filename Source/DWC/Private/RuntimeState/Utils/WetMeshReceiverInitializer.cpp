@@ -494,9 +494,9 @@ bool FWetMeshReceiverInitializer::InitializeReceiver(
 
         for (const int32 MaterialSlotIndex : SurfaceEnabledMaterialSlots)
         {
-            const FSurfaceWaterMaterialSlotData* SlotData =
-                SurfaceSimulationSettings.FindMaterialSlot(MaterialSlotIndex);
-            if (SlotData != nullptr && !SlotData->bEnabled)
+            const FWetClothingAuthoredMaterialSlot* AuthoredSlot =
+                Receiver.WetClothingAsset->Authored.PartData.EditableWetPartData.FindMaterialSlot(MaterialSlotIndex);
+            if (AuthoredSlot != nullptr && !AuthoredSlot->SurfaceWater.bEnabled)
             {
                 continue;
             }

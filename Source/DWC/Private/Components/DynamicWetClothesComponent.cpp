@@ -7,12 +7,14 @@
 #include "Async/DWCTaskQueue.h"
 #include "Runtime/Engine/Classes/Components/SkeletalMeshComponent.h"
 #include "RuntimeState/Utils/DWCLODVertexColorTransferCoordinator.h"
+#include "RuntimeState/DWCRuntimeDataSubsystem.h"
 #include "RuntimeState/Utils/WetMeshReceiverInitializer.h"
 #include "RuntimeState/Utils/WetInputStage.h"
 #include "RuntimeState/Utils/DWCLodCoordinator.h"
 #include "WetInputSystem/Sampling/WetClothingMeshSampler.h"
 #include "WetRendering/WetRenderStage.h"
 #include "WetRendering/WetMaterialParameters.h"
+#include "WetRendering/DWCGPUResourceSubsystem.h"
 #include "RuntimeState/WetClothingRuntimeData.h"
 #include "RuntimeState/Utils/WetSimulationStage.h"
 #include "WetSimulation/AbsorbedWetness/AbsorbedWetnessSimulationState.h"
@@ -48,13 +50,9 @@ namespace
             return false;
         }
 
-        const FWetClothingWettableMaterialSlotState* State = WetClothingAsset->Authored.PartData.EditableWetPartData.WettableMaterialSlots.FindByPredicate(
-            [MaterialSlotIndex](const FWetClothingWettableMaterialSlotState& Candidate)
-            {
-                return Candidate.MaterialSlotIndex == MaterialSlotIndex;
-            });
-
-        return State != nullptr && State->bIsWettableSlot;
+        const FWetClothingAuthoredMaterialSlot* Slot =
+            WetClothingAsset->Authored.PartData.EditableWetPartData.FindMaterialSlot(MaterialSlotIndex);
+        return Slot != nullptr && Slot->bIsWettableSlot;
     }
 
     bool IsGPUWetnessMode(const EDWCSimulationMode Mode)
@@ -160,6 +158,40 @@ bool UDynamicWetClothesComponent::InitializeWetRuntime()
         LODCoordinator->ResetRenderLODState();
     }
     CurrentRenderLODScreenSize = 0.0f;
+
+    // Wetness Profile references are resolved into runtime/render-profile caches
+    // at initialization time. During an in-place runtime rebuild, refresh only
+    // the profile-dependent caches. Fresh PIE worlds start with empty caches.
+    const bool bReinitializingRuntime = !Receivers.IsEmpty();
+    if (bReinitializingRuntime)
+    {
+        if (UWorld* World = GetWorld())
+        {
+            UDWCRuntimeDataSubsystem* RuntimeDataSubsystem =
+                World->GetSubsystem<UDWCRuntimeDataSubsystem>();
+            UDWCGPUResourceSubsystem* GPUResourceSubsystem =
+                World->GetSubsystem<UDWCGPUResourceSubsystem>();
+            TSet<const UWetClothingAsset*> InvalidatedAssets;
+            for (const TObjectPtr<UWetClothingAsset>& WetClothingAsset : WetClothingAssets)
+            {
+                const UWetClothingAsset* Asset = WetClothingAsset.Get();
+                if (Asset == nullptr || InvalidatedAssets.Contains(Asset))
+                {
+                    continue;
+                }
+
+                if (RuntimeDataSubsystem != nullptr)
+                {
+                    RuntimeDataSubsystem->InvalidateSharedRuntimeData(Asset);
+                }
+                if (GPUResourceSubsystem != nullptr)
+                {
+                    GPUResourceSubsystem->InvalidateAssetResources(Asset);
+                }
+                InvalidatedAssets.Add(Asset);
+            }
+        }
+    }
 
     FWetMeshReceiverInitializerContext InitializerContext =
         MakeWetMeshReceiverInitializerContext();
@@ -1010,8 +1042,9 @@ void UDynamicWetClothesComponent::UpdateSurfaceWater()
         for (TPair<int32, TUniquePtr<IDWCSurfaceWaterSimulationState>>& Pair : Receiver->SurfaceWaterStatesByMaterialSlot)
         {
             if (!Pair.Value.IsValid()) continue;
-            const FSurfaceWaterMaterialSlotData* SlotData = Settings.FindMaterialSlot(Pair.Key);
-            if (SlotData != nullptr && !SlotData->bEnabled) continue;
+            const FWetClothingAuthoredMaterialSlot* AuthoredSlot =
+                Receiver->WetClothingAsset->Authored.PartData.EditableWetPartData.FindMaterialSlot(Pair.Key);
+            if (AuthoredSlot != nullptr && !AuthoredSlot->SurfaceWater.bEnabled) continue;
             bAnyChanged |= Pair.Value->FlushStamps(CurrentSurfaceTimeSeconds);
         }
         if (bAnyChanged || !Receiver->SurfaceWaterStatesByMaterialSlot.IsEmpty())

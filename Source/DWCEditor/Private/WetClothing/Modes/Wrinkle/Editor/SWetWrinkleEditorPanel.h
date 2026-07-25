@@ -283,7 +283,7 @@ class SWetWrinkleEditorPanel : public SCompoundWidget, public FEditorUndoClient
         const FWetWrinkleSurfaceHit& Current,
         const FWetWrinkleSurfaceHit& Next,
         FWetWrinkleSurfaceHit& OutSmoothedHit) const;
-    UTexture* ResolveSourceTextureForStamp(int32 MaterialSlotIndex, int32 UVChannelIndex) const;
+    UTexture* ResolveSourceTextureForStamp(int32 MaterialSlotIndex) const;
     bool IsCurrentWrinkleNormalUsable(FString* OutReason = nullptr) const;
     FText GetMaterialSlotDisplayText(int32 MaterialSlotIndex) const;
     TSharedPtr<int32> FindMaterialSlotOption(int32 MaterialSlotIndex) const;

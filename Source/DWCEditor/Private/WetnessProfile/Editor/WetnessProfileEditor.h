@@ -25,7 +25,6 @@ class FWetnessProfileEditor : public FAssetEditorToolkit
     virtual FLinearColor GetWorldCentricTabColorScale() const override;
 
   private:
-    void                 HandleFinishedChangingProperties(const FPropertyChangedEvent& PropertyChangedEvent);
     void                 HandleObjectPropertyChanged(UObject* ObjectBeingModified, FPropertyChangedEvent& PropertyChangedEvent);
     TSharedRef<SDockTab> SpawnMainTab(const FSpawnTabArgs& Args);
 

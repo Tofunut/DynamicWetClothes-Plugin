@@ -116,6 +116,8 @@ namespace
 
             const FSurfaceWaterProfileParameters& Surface = Accumulator.Profile;
             if (Surface.bEnableDroplets &&
+                Surface.DropletIntensityMultiplier > 0.0f &&
+                Surface.DropletRadiusPixels > 0.0f &&
                 RandomStream.FRand() < FMath::Clamp(Surface.DropletSpawnProbability, 0.0f, 1.0f))
             {
                 FDWCSurfaceStampRequest& Request = Requests.AddDefaulted_GetRef();
@@ -129,6 +131,9 @@ namespace
             }
 
             if (Surface.bEnableRivulets &&
+                Surface.FlowIntensityMultiplier > 0.0f &&
+                Surface.FlowWidthPixels > 0.0f &&
+                Surface.FlowLengthPixels > 0.0f &&
                 Accumulator.TotalSurfaceAmount >= FMath::Max(0.0f, Surface.MinimumFlowSurfaceAmount) &&
                 RandomStream.FRand() < FMath::Clamp(Surface.FlowSpawnProbability, 0.0f, 1.0f))
             {

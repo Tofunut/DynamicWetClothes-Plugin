@@ -8,9 +8,6 @@ struct DWC_API FSurfaceWaterMaterialSlotData
 {
     GENERATED_BODY()
 
-    UPROPERTY(VisibleAnywhere, Category="Surface Water|Material Slot")
-    int32 MaterialSlotIndex = INDEX_NONE;
-
     UPROPERTY(EditAnywhere, Category="Surface Water|Material Slot")
     bool bEnabled = true;
 
@@ -40,16 +37,4 @@ struct DWC_API FSurfaceWaterSimulationSettings
 
     UPROPERTY(EditAnywhere, Category="Surface Water", meta=(ClampMin="16", ClampMax="4096"))
     int32 RenderTargetResolution = 1024;
-
-    UPROPERTY(EditAnywhere, Category="Surface Water|Material Slots", meta=(TitleProperty="Material Slot {MaterialSlotIndex}"))
-    TArray<FSurfaceWaterMaterialSlotData> SurfaceWaterMaterialSlots;
-
-    const FSurfaceWaterMaterialSlotData* FindMaterialSlot(const int32 MaterialSlotIndex) const
-    {
-        return SurfaceWaterMaterialSlots.FindByPredicate(
-            [MaterialSlotIndex](const FSurfaceWaterMaterialSlotData& Data)
-            {
-                return Data.MaterialSlotIndex == MaterialSlotIndex;
-            });
-    }
 };

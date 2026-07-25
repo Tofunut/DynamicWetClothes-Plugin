@@ -12,8 +12,6 @@
 #include "RuntimeState/Utils/WetRuntimeDataBuilder.h"
 #include "Utility/DWCLog.h"
 
-#include "DataAssets/WetClothingAsset.h"
-
 TSharedPtr<const FWetClothingRuntimeData, ESPMode::ThreadSafe>
 UDWCRuntimeDataSubsystem::AcquireSharedRuntimeData(
     const UWetClothingAsset& WetClothingAsset,
@@ -101,6 +99,23 @@ UDWCRuntimeDataSubsystem::AcquireSharedRuntimeData(
     SharedRuntimeDataCache.Add(Key, SharedData);
     PruneExpiredEntries();
     return SharedData;
+}
+
+void UDWCRuntimeDataSubsystem::InvalidateSharedRuntimeData(const UWetClothingAsset* WetClothingAsset)
+{
+    if (WetClothingAsset == nullptr)
+    {
+        return;
+    }
+
+    const FObjectKey AssetKey(WetClothingAsset);
+    for (auto It = SharedRuntimeDataCache.CreateIterator(); It; ++It)
+    {
+        if (It.Key().WetClothingAsset == AssetKey)
+        {
+            It.RemoveCurrent();
+        }
+    }
 }
 
 FDWCLODVertexStaticDataKey UDWCRuntimeDataSubsystem::MakeLODVertexStaticDataKey(

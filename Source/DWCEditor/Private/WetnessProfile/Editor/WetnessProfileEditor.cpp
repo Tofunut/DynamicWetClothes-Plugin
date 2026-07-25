@@ -35,7 +35,6 @@ void FWetnessProfileEditor::Initialize(const EToolkitMode::Type Mode, const TSha
     DetailsViewArgs.bHideSelectionTip = true;
     DetailsView = PropertyEditorModule.CreateDetailView(DetailsViewArgs);
     DetailsView->SetObject(InProfile);
-    DetailsView->OnFinishedChangingProperties().AddSP(this, &FWetnessProfileEditor::HandleFinishedChangingProperties);
     ObjectPropertyChangedHandle = FCoreUObjectDelegates::OnObjectPropertyChanged.AddSP(this, &FWetnessProfileEditor::HandleObjectPropertyChanged);
 
     const TSharedRef<FTabManager::FLayout> Layout = FTabManager::NewLayout("Standalone_WetnessProfileEditor_Layout_v1")
@@ -80,14 +79,6 @@ FString FWetnessProfileEditor::GetWorldCentricTabPrefix() const
 FLinearColor FWetnessProfileEditor::GetWorldCentricTabColorScale() const
 {
     return FLinearColor(0.0f, 0.2f, 0.2f, 0.5f);
-}
-
-void FWetnessProfileEditor::HandleFinishedChangingProperties(const FPropertyChangedEvent& PropertyChangedEvent)
-{
-    if (EditorPanel.IsValid())
-    {
-        EditorPanel->RefreshFromProfile();
-    }
 }
 
 void FWetnessProfileEditor::HandleObjectPropertyChanged(UObject* ObjectBeingModified, FPropertyChangedEvent& PropertyChangedEvent)

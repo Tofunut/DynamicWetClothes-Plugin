@@ -21,6 +21,10 @@ struct FDWCDataUVBuildResult
 class FDWCDataUVBuildService
 {
 public:
-    static FDWCDataUVBuildResult Generate(UWetClothingAsset& Asset, bool bForceNewAsset = false, bool bAllowOverwriteExistingDataUVChannel = false);
+    static FDWCDataUVBuildResult Generate(
+        UWetClothingAsset& Asset,
+        bool bForceNewAsset = false,
+        bool bAllowOverwriteExistingDataUVChannel = false,
+        bool bUsePreferredDataUVChannel = false);
     static bool BuildOriginalUVTopology(UWetClothingAsset& Asset, FString* OutErrorMessage = nullptr);
 };

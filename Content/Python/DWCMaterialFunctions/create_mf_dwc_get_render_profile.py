@@ -124,15 +124,15 @@ def build() -> None:
     c.try_connect(uv0_use, ("", "Result"), lut0, ("Coordinates", "UVs"))
     c.try_connect(uv1_use, ("", "Result"), lut1, ("Coordinates", "UVs"))
     # Texture Sample's primary output is RGB, so append A explicitly to preserve
-    # the packed fourth channel used by SurfaceWaterNormalStrength.
+    # the packed fourth channels used by the render-profile data.
     lut0_rgba = c.append_vector(mf, lut0, "RGB", lut0, "A", 3150, -1650, "Reconstruct packed RGBA texel 0.")
     lut1_rgba = c.append_vector(mf, lut1, "RGB", lut1, "A", 3150, -950, "Reconstruct packed RGBA texel 1.")
     fallback0 = c.vector_parameter(
-        mf, "DWC_FallbackRenderProfile0", (1.0, 0.0, 0.0, 0.0), 3200, -1250,
+        mf, "DWC_FallbackRenderProfile0", (0.5, 0.5, 0.0, 0.0), 3200, -1250,
         group="DWC Render Profile", description="Fallback packed profile texel 0.",
     )
     fallback1 = c.vector_parameter(
-        mf, "DWC_FallbackRenderProfile1", (1.0, 0.25, 0.0, 0.0), 3200, -550,
+        mf, "DWC_FallbackRenderProfile1", (1.0, 0.5, 0.2, 0.5), 3200, -550,
         group="DWC Render Profile", description="Fallback packed profile texel 1.",
     )
     fallback0_rgba = c.append_vector(
@@ -165,10 +165,10 @@ def build() -> None:
     # 3-1 Decode packed texel 0.
     texel0_uses = [c.named_usage(mf, texel0_decl, 5150, -1600 + i * 380) for i in range(4)]
     texel0_names = [
-        ("WetVisualStrength", "R", "PROFILE_WetVisualStrength"),
-        ("DropletNormalSlice", "G", "PROFILE_DropletNormalSlice"),
-        ("RivuletNormalSlice", "B", "PROFILE_RivuletNormalSlice"),
-        ("SurfaceWaterNormalStrength", "A", "PROFILE_SurfaceWaterNormalStrength"),
+        ("AbsorbedDarkeningStrength", "R", "PROFILE_AbsorbedDarkeningStrength"),
+        ("AbsorbedGlossinessStrength", "G", "PROFILE_AbsorbedGlossinessStrength"),
+        ("DropletNormalSlice", "B", "PROFILE_DropletNormalSlice"),
+        ("RivuletNormalSlice", "A", "PROFILE_RivuletNormalSlice"),
     ]
     profile_decls: dict[str, object] = {}
     for i, (output_name, channel, reroute_name) in enumerate(texel0_names):
@@ -178,11 +178,12 @@ def build() -> None:
         )
 
     # 3-2 Decode packed texel 1.
-    texel1_uses = [c.named_usage(mf, texel1_decl, 7400, -1500 + i * 480) for i in range(3)]
+    texel1_uses = [c.named_usage(mf, texel1_decl, 7400, -1500 + i * 480) for i in range(4)]
     texel1_names = [
-        ("SurfaceWaterRoughnessStrength", "R", "PROFILE_SurfaceWaterRoughnessStrength"),
-        ("SurfaceVisibilityThreshold", "G", "PROFILE_SurfaceVisibilityThreshold"),
-        ("RivuletUVScrollSpeed", "B", "PROFILE_RivuletUVScrollSpeed"),
+        ("SurfaceWaterNormalStrength", "R", "PROFILE_SurfaceWaterNormalStrength"),
+        ("SurfaceWaterRoughnessStrength", "G", "PROFILE_SurfaceWaterRoughnessStrength"),
+        ("SurfaceVisibilityThreshold", "B", "PROFILE_SurfaceVisibilityThreshold"),
+        ("RivuletUVScrollSpeed", "A", "PROFILE_RivuletUVScrollSpeed"),
     ]
     for i, (output_name, channel, reroute_name) in enumerate(texel1_names):
         mask = c.component_mask(mf, texel1_uses[i], ("", "Result"), channel, 7800, -1500 + i * 480)
@@ -192,12 +193,14 @@ def build() -> None:
 
     # 3-3 Function outputs use only local Named Reroute usages; no wires cross comments.
     ordered_outputs = [
-        "WetVisualStrength", "DropletNormalSlice", "RivuletNormalSlice",
+        "AbsorbedDarkeningStrength", "AbsorbedGlossinessStrength",
+        "DropletNormalSlice", "RivuletNormalSlice",
         "SurfaceWaterNormalStrength", "SurfaceWaterRoughnessStrength",
         "SurfaceVisibilityThreshold", "RivuletUVScrollSpeed",
     ]
     descriptions = {
-        "WetVisualStrength": "Absorbed wetness visual darkening multiplier.",
+        "AbsorbedDarkeningStrength": "Absorbed wetness base-color darkening strength.",
+        "AbsorbedGlossinessStrength": "Absorbed wetness roughness blend strength.",
         "DropletNormalSlice": "Droplet normal Texture2DArray slice.",
         "RivuletNormalSlice": "Rivulet normal Texture2DArray slice.",
         "SurfaceWaterNormalStrength": "Common surface-water detail-normal strength.",

@@ -54,9 +54,27 @@ def load_asset(path: str) -> Any:
     return unreal.load_asset(path)
 
 
+def checkout_asset(path: str) -> None:
+    checkout = getattr(EAL, "checkout_asset", None)
+    does_asset_exist = getattr(EAL, "does_asset_exist", None)
+    if callable(checkout) and (not callable(does_asset_exist) or does_asset_exist(path)):
+        try:
+            checkout(path)
+        except Exception as exc:
+            warn(f"Could not checkout {path}: {exc}")
+
+
 def save_asset(path: str) -> None:
+    checkout_asset(path)
     if not EAL.save_asset(path, only_if_is_dirty=False):
         fail(f"Could not save asset: {path}")
+
+
+def get_property(obj: Any, property_name: str, default: Any = None) -> Any:
+    try:
+        return obj.get_editor_property(property_name)
+    except Exception:
+        return default
 
 
 def enum_value(enum_type: Any, *candidate_names: str) -> Any:
@@ -93,6 +111,13 @@ def set_property(obj: Any, property_name: str, value: Any, *, required: bool = T
                 f"Could not set {obj.get_class().get_name()}.{property_name}: {exc}"
             )
         return False
+
+
+def set_property_if_changed(obj: Any, property_name: str, value: Any) -> bool:
+    current = get_property(obj, property_name, None)
+    if current == value:
+        return False
+    return set_property(obj, property_name, value, required=False)
 
 
 def set_first_property(
@@ -716,6 +741,12 @@ def create_or_replace_material_function(asset_name: str, overwrite_existing: boo
                 "Set OVERWRITE_EXISTING = True only when you intentionally want to replace it."
             )
         log(f"Deleting existing material function: {package_path}")
+        warn(
+            "Existing generated DWC materials may log temporary 'Missing Material Function' "
+            "warnings while this function is replaced. Run all three DWC MF scripts, then "
+            "run Generate Materials for each affected Wet Clothing Asset."
+        )
+        checkout_asset(package_path)
         if not EAL.delete_asset(package_path):
             fail(f"Could not delete existing asset: {package_path}")
 
@@ -777,44 +808,46 @@ def _import_texture_if_missing(asset_name: str, filename: str) -> Any:
 
 
 def _configure_data_texture(texture: Any) -> None:
-    set_property(texture, "srgb", False, required=False)
+    changed = set_property_if_changed(texture, "srgb", False)
     compression_enum = getattr(unreal, "TextureCompressionSettings", None)
     if compression_enum is not None:
         for name in ("TC_VECTOR_DISPLACEMENTMAP", "TC_HDR", "TC_DEFAULT"):
             if hasattr(compression_enum, name):
-                set_property(texture, "compression_settings", getattr(compression_enum, name), required=False)
+                changed |= set_property_if_changed(texture, "compression_settings", getattr(compression_enum, name))
                 break
     mip_enum = getattr(unreal, "TextureMipGenSettings", None)
     if mip_enum is not None and hasattr(mip_enum, "TMGS_NO_MIPMAPS"):
-        set_property(texture, "mip_gen_settings", mip_enum.TMGS_NO_MIPMAPS, required=False)
+        changed |= set_property_if_changed(texture, "mip_gen_settings", mip_enum.TMGS_NO_MIPMAPS)
     filter_enum = getattr(unreal, "TextureFilter", None)
     if filter_enum is not None and hasattr(filter_enum, "TF_NEAREST"):
-        set_property(texture, "filter", filter_enum.TF_NEAREST, required=False)
+        changed |= set_property_if_changed(texture, "filter", filter_enum.TF_NEAREST)
     address_enum = getattr(unreal, "TextureAddress", None)
     if address_enum is not None and hasattr(address_enum, "TA_CLAMP"):
-        set_property(texture, "address_x", address_enum.TA_CLAMP, required=False)
-        set_property(texture, "address_y", address_enum.TA_CLAMP, required=False)
-    texture.modify()
-    save_asset(texture.get_path_name().split(".")[0])
+        changed |= set_property_if_changed(texture, "address_x", address_enum.TA_CLAMP)
+        changed |= set_property_if_changed(texture, "address_y", address_enum.TA_CLAMP)
+    if changed:
+        texture.modify()
+        save_asset(texture.get_path_name().split(".")[0])
 
 
 def _configure_normal_texture(texture: Any) -> None:
-    set_property(texture, "srgb", False, required=False)
+    changed = set_property_if_changed(texture, "srgb", False)
     compression_enum = getattr(unreal, "TextureCompressionSettings", None)
     if compression_enum is not None and hasattr(compression_enum, "TC_NORMALMAP"):
-        set_property(texture, "compression_settings", compression_enum.TC_NORMALMAP, required=False)
+        changed |= set_property_if_changed(texture, "compression_settings", compression_enum.TC_NORMALMAP)
     mip_enum = getattr(unreal, "TextureMipGenSettings", None)
     if mip_enum is not None and hasattr(mip_enum, "TMGS_NO_MIPMAPS"):
-        set_property(texture, "mip_gen_settings", mip_enum.TMGS_NO_MIPMAPS, required=False)
+        changed |= set_property_if_changed(texture, "mip_gen_settings", mip_enum.TMGS_NO_MIPMAPS)
     filter_enum = getattr(unreal, "TextureFilter", None)
     if filter_enum is not None and hasattr(filter_enum, "TF_BILINEAR"):
-        set_property(texture, "filter", filter_enum.TF_BILINEAR, required=False)
+        changed |= set_property_if_changed(texture, "filter", filter_enum.TF_BILINEAR)
     address_enum = getattr(unreal, "TextureAddress", None)
     if address_enum is not None and hasattr(address_enum, "TA_WRAP"):
-        set_property(texture, "address_x", address_enum.TA_WRAP, required=False)
-        set_property(texture, "address_y", address_enum.TA_WRAP, required=False)
-    texture.modify()
-    save_asset(texture.get_path_name().split(".")[0])
+        changed |= set_property_if_changed(texture, "address_x", address_enum.TA_WRAP)
+        changed |= set_property_if_changed(texture, "address_y", address_enum.TA_WRAP)
+    if changed:
+        texture.modify()
+        save_asset(texture.get_path_name().split(".")[0])
 
 
 def ensure_default_textures() -> tuple[Any, Any]:
@@ -850,24 +883,29 @@ def ensure_default_textures() -> tuple[Any, Any]:
         if normal_array is None:
             fail(f"Could not create fallback Texture2DArray: {array_path}")
 
-    set_first_property(
-        normal_array,
-        ("source_textures",),
-        [normal_texture],
-        required=False,
-    )
-    update_source = getattr(normal_array, "update_source_from_source_textures", None)
-    if callable(update_source):
-        try:
-            update_source(False)
-        except TypeError:
-            update_source()
-    set_property(normal_array, "srgb", False, required=False)
+    array_changed = False
+    current_sources = get_property(normal_array, "source_textures", [])
+    if list(current_sources or []) != [normal_texture]:
+        array_changed |= set_first_property(
+            normal_array,
+            ("source_textures",),
+            [normal_texture],
+            required=False,
+        ) is not None
+    if array_changed:
+        update_source = getattr(normal_array, "update_source_from_source_textures", None)
+        if callable(update_source):
+            try:
+                update_source(False)
+            except TypeError:
+                update_source()
+    array_changed |= set_property_if_changed(normal_array, "srgb", False)
     compression_enum = getattr(unreal, "TextureCompressionSettings", None)
     if compression_enum is not None and hasattr(compression_enum, "TC_NORMALMAP"):
-        set_property(normal_array, "compression_settings", compression_enum.TC_NORMALMAP, required=False)
-    normal_array.modify()
-    save_asset(array_path)
+        array_changed |= set_property_if_changed(normal_array, "compression_settings", compression_enum.TC_NORMALMAP)
+    if array_changed:
+        normal_array.modify()
+        save_asset(array_path)
     return data_texture, normal_array
 
 

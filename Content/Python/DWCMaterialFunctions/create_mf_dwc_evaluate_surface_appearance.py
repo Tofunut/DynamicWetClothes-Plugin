@@ -116,7 +116,8 @@ def build() -> None:
     )
     c.try_connect(data_uv_use, ("", "Result"), profile_call, "DWCDataUV")
     profile_outputs = [
-        "WetVisualStrength", "DropletNormalSlice", "RivuletNormalSlice",
+        "AbsorbedDarkeningStrength", "AbsorbedGlossinessStrength",
+        "DropletNormalSlice", "RivuletNormalSlice",
         "SurfaceWaterNormalStrength", "SurfaceWaterRoughnessStrength",
         "SurfaceVisibilityThreshold", "RivuletUVScrollSpeed",
     ]
@@ -151,15 +152,15 @@ def build() -> None:
     base_color_use = c.named_usage(mf, declarations["BaseColor"], -4650, -4900)
     absorbed_use = c.named_usage(mf, absorbed_wetness_decl, -4650, -4250)
     darkening_use = c.named_usage(mf, declarations["WetDarkeningStrength"], -4650, -3600)
-    visual_use = c.named_usage(mf, profile_declarations["WetVisualStrength"], -4650, -2950)
+    profile_darkening_use = c.named_usage(mf, profile_declarations["AbsorbedDarkeningStrength"], -4650, -2950)
     wet_base_color = c.custom_expression(
         mf,
-        "float Amount = saturate(Wetness * DarkeningStrength * VisualStrength);\nreturn BaseColor * (1.0 - Amount);",
+        "float Amount = saturate(Wetness * DarkeningStrength * ProfileDarkeningStrength);\nreturn BaseColor * (1.0 - Amount);",
         [
             ("BaseColor", base_color_use, ("", "Result")),
             ("Wetness", absorbed_use, ("", "Result")),
             ("DarkeningStrength", darkening_use, ("", "Result")),
-            ("VisualStrength", visual_use, ("", "Result")),
+            ("ProfileDarkeningStrength", profile_darkening_use, ("", "Result")),
         ],
         "float3", -3500, -4050, "Apply absorbed-wetness darkening to original Base Color."
     )
@@ -361,15 +362,17 @@ return smoothstep(VisibilityThreshold, VisibilityThreshold + VisibilityFeather, 
     base_rough_use = c.named_usage(mf, declarations["BaseRoughness"], 17700, -4900)
     wet_rough_use = c.named_usage(mf, declarations["WetRoughness"], 17700, -4250)
     absorbed_wet_use2 = c.named_usage(mf, absorbed_wetness_decl, 17700, -3600)
-    surface_target_use = c.named_usage(mf, declarations["SurfaceWaterTargetRoughness"], 17700, -2950)
-    surface_rough_weight_use = c.named_usage(mf, surface_roughness_decl, 17700, -2300)
+    absorbed_gloss_use = c.named_usage(mf, profile_declarations["AbsorbedGlossinessStrength"], 17700, -2950)
+    surface_target_use = c.named_usage(mf, declarations["SurfaceWaterTargetRoughness"], 17700, -2300)
+    surface_rough_weight_use = c.named_usage(mf, surface_roughness_decl, 17700, -1650)
     final_roughness = c.custom_expression(
         mf,
-        "float AbsorbedRoughness = lerp(BaseRoughness, WetRoughness, saturate(Wetness));\nreturn lerp(AbsorbedRoughness, SurfaceTargetRoughness, saturate(SurfaceWeight));",
+        "float AbsorbedRoughness = lerp(BaseRoughness, WetRoughness, saturate(Wetness * AbsorbedGlossinessStrength));\nreturn lerp(AbsorbedRoughness, SurfaceTargetRoughness, saturate(SurfaceWeight));",
         [
             ("BaseRoughness", base_rough_use, ("", "Result")),
             ("WetRoughness", wet_rough_use, ("", "Result")),
             ("Wetness", absorbed_wet_use2, ("", "Result")),
+            ("AbsorbedGlossinessStrength", absorbed_gloss_use, ("", "Result")),
             ("SurfaceTargetRoughness", surface_target_use, ("", "Result")),
             ("SurfaceWeight", surface_rough_weight_use, ("", "Result")),
         ],

@@ -85,7 +85,7 @@ class SWetClothingPartEditorPanel : public SCompoundWidget
     TSharedRef<ITableRow>     GenerateMaterialSlotRow(FMaterialSlotItemPtr Item, const TSharedRef<STableViewBase>& OwnerTable);
     void                      HandleMaterialSlotSelectionChanged(FMaterialSlotItemPtr Item, ESelectInfo::Type);
     FReply                    HandleWettableMaterialSlotClicked(int32 MaterialSlotIndex);
-    void                      MarkSelectedMaterialSlotWettable();
+    void                      MarkSelectedMaterialSlotWettable(bool bInvalidateBake = true);
     TSharedRef<SWidget>       GenerateTextureComboItem(FTextureItemPtr Item);
     void                      HandleTextureSelectionChanged(FTextureItemPtr Item, ESelectInfo::Type SelectInfo);
     TSharedRef<SWidget>       BuildTextureComboContent(FTextureItemPtr Item, float ThumbnailSize, bool bCompactLayout);
@@ -165,10 +165,7 @@ class SWetClothingPartEditorPanel : public SCompoundWidget
     UTexture*                                      ResolveSelectedMaterialTexture() const;
     UTexture*                                      ResolveTextureAddressTexture() const;
     void                                           SaveSelectedTexture();
-    UTexture*                                      FindSavedTextureSelection(int32 MaterialSlotIndex, int32 UVChannelIndex) const;
-    UTexture*                                      ResolveOrSaveTextureSelection(int32 MaterialSlotIndex, int32 UVChannelIndex);
-    bool                                           HasSavedTextureSelection(int32 MaterialSlotIndex, int32 UVChannelIndex) const;
-    void                                           SaveTextureSelection(int32 MaterialSlotIndex, int32 UVChannelIndex, UTexture* Texture);
+    void                                           SaveTextureSelection(int32 MaterialSlotIndex, UTexture* Texture);
 
   private:
     TWeakObjectPtr<UWetClothingAsset>                  WetClothingAsset;

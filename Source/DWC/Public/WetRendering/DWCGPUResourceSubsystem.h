@@ -108,6 +108,10 @@ struct DWC_API FDWCAssetRenderProfileResources
     UPROPERTY(Transient)
     TObjectPtr<UTexture2D> ProfileRemapLUT = nullptr;
 
+    /** Slot fallback render profiles resolved with the asset resource cache, not every material apply. */
+    UPROPERTY(Transient)
+    TMap<int32, FWetClothingLocalRenderProfile> FallbackRenderProfilesByMaterialSlot;
+
     /** Bake identity used to invalidate this WCA's slot texture/remap cache after an editor rebake. */
     FGuid SourceBakeGuid;
 
@@ -161,6 +165,7 @@ public:
         uint32 TriangleCount,
         int32 SectionCount);
 
+    void InvalidateAssetResources(const UWetClothingAsset* Asset);
     void InvalidateStaticResources(const UWetClothingAsset* Asset);
 
     void ApplyResourcesToMaterials(
@@ -207,7 +212,8 @@ private:
     void ApplyFallbackRenderProfileParameters(
         UMaterialInstanceDynamic& MID,
         const UWetClothingAsset* WetClothingAsset,
-        int32 MaterialSlotIndex);
+        int32 MaterialSlotIndex,
+        const FWetClothingLocalRenderProfile* CachedProfile);
 
     UTexture2DArray* BuildTextureArray(
         const TCHAR* DebugName,

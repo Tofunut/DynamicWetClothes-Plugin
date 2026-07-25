@@ -14,16 +14,6 @@
 
 namespace
 {
-    bool IsWetPartEntryRelevantForVisualBake(
-        const UWetClothingAsset& Asset,
-        const FWetClothingWetPartEntry& Entry)
-    {
-        return Entry.MaterialSlotIndex != INDEX_NONE &&
-               Entry.UVChannelIndex != INDEX_NONE &&
-               Entry.AssignedUVIslandIDs.Num() > 0 &&
-               Asset.IsMaterialSlotWettable(Entry.MaterialSlotIndex);
-    }
-
     void CollectWetMaterialSlots(const UWetClothingAsset* Asset, TSet<int32>& OutSlots)
     {
         OutSlots.Reset();
@@ -32,11 +22,21 @@ namespace
             return;
         }
 
-        for (const FWetClothingWetPartEntry& Entry : Asset->Authored.PartData.EditableWetPartData.WetPartEntries)
+        for (const FWetClothingAuthoredMaterialSlot& SlotData : Asset->Authored.PartData.EditableWetPartData.MaterialSlots)
         {
-            if (IsWetPartEntryRelevantForVisualBake(*Asset, Entry))
+            if (!SlotData.bIsWettableSlot || SlotData.MaterialSlotIndex == INDEX_NONE)
             {
-                OutSlots.Add(Entry.MaterialSlotIndex);
+                continue;
+            }
+
+            const bool bHasAssignedIslands = SlotData.WetPartEntries.ContainsByPredicate(
+                [](const FWetClothingWetPartEntry& Entry)
+                {
+                    return Entry.AssignedUVIslandIDs.Num() > 0;
+                });
+            if (bHasAssignedIslands)
+            {
+                OutSlots.Add(SlotData.MaterialSlotIndex);
             }
         }
     }

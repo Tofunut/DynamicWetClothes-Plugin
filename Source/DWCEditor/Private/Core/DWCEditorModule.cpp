@@ -13,6 +13,7 @@ class FDWCEditorModule : public IModuleInterface
     {
         FDWCEditorStyle::Initialize();
 
+
         FPropertyEditorModule& PropertyEditorModule = FModuleManager::LoadModuleChecked<FPropertyEditorModule>(TEXT("PropertyEditor"));
         PropertyEditorModule.RegisterCustomClassLayout(
             TEXT("DynamicWetClothesComponent"),

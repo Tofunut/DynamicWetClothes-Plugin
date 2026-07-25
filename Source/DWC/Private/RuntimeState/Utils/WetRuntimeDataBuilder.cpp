@@ -17,16 +17,80 @@
 #include "Runtime/Engine/Public/Rendering/SkeletalMeshRenderData.h"
 #include "Runtime/Engine/Public/Rendering/StaticMeshVertexBuffer.h"
 #include "DataAssets/WetClothingAsset.h"
+#include "DataAssets/WetnessProfile.h"
+#include "UObject/Package.h"
 
 
 namespace
 {
+    FWetnessProfileParameters ResolveRuntimeWetnessProfileParameters(
+        const UWetClothingAsset& Asset,
+        const int32 ProfileIndex,
+        const UObject* OwnerForLogs)
+    {
+        const FWetClothingEditableWetPartData& EditableWetPartData =
+            Asset.Authored.PartData.EditableWetPartData;
+        const FWetPartProfileAssignment* ProfileAssignment =
+            EditableWetPartData.FindProfile(ProfileIndex);
+        if (ProfileAssignment == nullptr)
+        {
+            return FWetnessProfileParameters();
+        }
+
+#if WITH_EDITOR
+        if (ProfileAssignment->SourceProfile.IsValid())
+        {
+            UObject* SourceObject = ProfileAssignment->SourceProfile.ResolveObject();
+            if (SourceObject == nullptr)
+            {
+                SourceObject = ProfileAssignment->SourceProfile.TryLoad();
+            }
+
+            if (const UWetnessProfile* SourceProfile =
+                    Cast<UWetnessProfile>(SourceObject))
+            {
+                if (const UPackage* SourcePackage = SourceProfile->GetOutermost();
+                    SourcePackage != nullptr && SourcePackage->IsDirty())
+                {
+                    UE_LOG(
+                        LogTemp,
+                        Verbose,
+                        TEXT("DynamicWetClothesComponent: Wetness Profile '%s' has unsaved editor changes while initializing WCA '%s' on '%s'. Using the WCA snapshot/fallback profile."),
+                        *ProfileAssignment->SourceProfile.ToString(),
+                        *GetNameSafe(&Asset),
+                        *GetNameSafe(OwnerForLogs));
+                }
+                else
+                {
+                    return SourceProfile->GetParameters();
+                }
+            }
+            else
+            {
+                UE_LOG(
+                    LogTemp,
+                    Warning,
+                    TEXT("DynamicWetClothesComponent: Failed to resolve Wetness Profile '%s' for WCA '%s' on '%s'. Using the WCA snapshot/fallback profile."),
+                    *ProfileAssignment->SourceProfile.ToString(),
+                    *GetNameSafe(&Asset),
+                    *GetNameSafe(OwnerForLogs));
+            }
+        }
+#endif
+
+        return Asset.Derived.Inline.ResolvedWetnessProfileParameters.IsValidIndex(ProfileIndex)
+            ? Asset.Derived.Inline.ResolvedWetnessProfileParameters[ProfileIndex]
+            : ProfileAssignment->Parameters;
+    }
+
     int32 ResolveSurfaceWaterNormalUVChannel(
         const UWetClothingAsset& Asset,
         const int32 MaterialSlotIndex)
     {
+        const FWetClothingAuthoredMaterialSlot* AuthoredSlot =
+            Asset.Authored.PartData.EditableWetPartData.FindMaterialSlot(MaterialSlotIndex);
         if (const FSurfaceWaterMaterialSlotData* SlotData =
-                Asset.Authored.SurfaceWaterSettings.FindMaterialSlot(MaterialSlotIndex))
+                AuthoredSlot != nullptr ? &AuthoredSlot->SurfaceWater : nullptr)
         {
             if (SlotData->SurfaceWaterNormalUVChannel != INDEX_NONE)
             {
@@ -60,8 +124,9 @@ namespace
             }
 
             const int32 MaterialSlotIndex = Section.MaterialIndex;
-            const FSurfaceWaterMaterialSlotData* SlotData =
-                Asset.Authored.SurfaceWaterSettings.FindMaterialSlot(MaterialSlotIndex);
+            const FWetClothingAuthoredMaterialSlot* AuthoredSlot =
+                Asset.Authored.PartData.EditableWetPartData.FindMaterialSlot(MaterialSlotIndex);
+            const FSurfaceWaterMaterialSlotData* SlotData = AuthoredSlot != nullptr ? &AuthoredSlot->SurfaceWater : nullptr;
             if (SlotData != nullptr && !SlotData->bEnabled)
             {
                 continue;
@@ -310,21 +375,35 @@ bool FWetRuntimeDataBuilder::InitializeWetPartVertexDataFromPrecomputedData(
         return false;
     }
 
-    TMap<int32, FWetnessProfileParameters> ResolvedWetPartParametersByEntryIndex;
-    for (int32 EntryIndex = 0; EntryIndex < Receiver.WetClothingAsset->Authored.PartData.EditableWetPartData.WetPartEntries.Num(); ++EntryIndex)
+    const FWetClothingEditableWetPartData& EditableWetPartData =
+        Receiver.WetClothingAsset->Authored.PartData.EditableWetPartData;
+    Receiver.MutableRuntimeData->WetnessProfileTable.SetNum(EditableWetPartData.Profiles.Num());
+    for (int32 ProfileIndex = 0; ProfileIndex < EditableWetPartData.Profiles.Num(); ++ProfileIndex)
     {
-        const FWetClothingWetPartEntry& WetPartEntry = Receiver.WetClothingAsset->Authored.PartData.EditableWetPartData.WetPartEntries[EntryIndex];
+        Receiver.MutableRuntimeData->WetnessProfileTable[ProfileIndex] =
+            ResolveRuntimeWetnessProfileParameters(
+                *Receiver.WetClothingAsset,
+                ProfileIndex,
+                Receiver.OwnerForLogs);
+    }
+    if (Receiver.MutableRuntimeData->WetnessProfileTable.IsEmpty())
+    {
+        Receiver.MutableRuntimeData->WetnessProfileTable.Add(FWetnessProfileParameters());
+    }
 
-        const FWetnessProfileParameters& ResolvedParameters =
-            Receiver.WetClothingAsset->Derived.Inline.ResolvedWetnessProfileParameters.IsValidIndex(EntryIndex)
-                ? Receiver.WetClothingAsset->Derived.Inline.ResolvedWetnessProfileParameters[EntryIndex]
-                : WetPartEntry.ProfileAssignment.Parameters;
-        ResolvedWetPartParametersByEntryIndex.Add(EntryIndex, ResolvedParameters);
+    if (Receiver.MutableRuntimeData->WetnessProfileTable.Num() >=
+        static_cast<int32>(FWetClothingRuntimeData::InvalidWetnessProfileIndex))
+    {
+        UE_LOG(
+            LogTemp,
+            Error,
+            TEXT("DynamicWetClothesComponent: Too many authored wetness profiles for uint16 vertex mapping on %s."),
+            *GetNameSafe(Receiver.OwnerForLogs));
+        return false;
     }
 
     int32 PrecomputedWettableVertexCount = 0;
     int32 RuntimeWettableVertexCount = 0;
-    TMap<int32, int32> ProfileIndexByWetPartEntryIndex;
 
     for (int32 VertexIndex = 0; VertexIndex < PrecomputedData.Vertices.Num(); ++VertexIndex)
     {
@@ -338,37 +417,16 @@ bool FWetRuntimeDataBuilder::InitializeWetPartVertexDataFromPrecomputedData(
             continue;
         }
 
-        if (PrecomputedVertex.bIsWettable)
+        if (PrecomputedVertex.IsWettable())
         {
             ++PrecomputedWettableVertexCount;
         }
 
-        if (PrecomputedVertex.bIsWettable &&
-            Receiver.WetClothingAsset->Authored.PartData.EditableWetPartData.WetPartEntries.IsValidIndex(PrecomputedVertex.WetPartEntryIndex) &&
-            ResolvedWetPartParametersByEntryIndex.Contains(PrecomputedVertex.WetPartEntryIndex))
+        const int32 ProfileIndex = PrecomputedVertex.ProfileIndex;
+        if (PrecomputedVertex.IsWettable() &&
+            EditableWetPartData.Profiles.IsValidIndex(ProfileIndex) &&
+            Receiver.MutableRuntimeData->WetnessProfileTable.IsValidIndex(ProfileIndex))
         {
-            int32 ProfileIndex = INDEX_NONE;
-            if (const int32* ExistingProfileIndex = ProfileIndexByWetPartEntryIndex.Find(PrecomputedVertex.WetPartEntryIndex))
-            {
-                ProfileIndex = *ExistingProfileIndex;
-            }
-            else
-            {
-                ProfileIndex = Receiver.MutableRuntimeData->WetnessProfileTable.Add(
-                    ResolvedWetPartParametersByEntryIndex[PrecomputedVertex.WetPartEntryIndex]);
-                ProfileIndexByWetPartEntryIndex.Add(PrecomputedVertex.WetPartEntryIndex, ProfileIndex);
-            }
-
-            if (ProfileIndex >= static_cast<int32>(FWetClothingRuntimeData::InvalidWetnessProfileIndex))
-            {
-                UE_LOG(
-                    LogTemp,
-                    Error,
-                    TEXT("DynamicWetClothesComponent: Too many unique wetness profiles for uint16 vertex mapping on %s."),
-                    *GetNameSafe(Receiver.OwnerForLogs));
-                continue;
-            }
-
             Receiver.MutableRuntimeData->VertexWettableFlags[VertexIndex] = true;
             Receiver.MutableRuntimeData->VertexWetPartIDs[VertexIndex] = PrecomputedVertex.WetPartID;
             Receiver.MutableRuntimeData->VertexWetnessProfileIndices[VertexIndex] = static_cast<uint16>(ProfileIndex);

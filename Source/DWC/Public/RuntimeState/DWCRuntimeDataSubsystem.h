@@ -130,6 +130,8 @@ public:
         USkeletalMeshComponent& TargetSkeletalMesh,
         UObject* OwnerForLogs = nullptr);
 
+    void InvalidateSharedRuntimeData(const UWetClothingAsset* WetClothingAsset);
+
     TSharedPtr<const FDWCSkinningStaticData, ESPMode::ThreadSafe> AcquireSkinningStaticData(
         USkeletalMeshComponent& TargetSkeletalMesh,
         const FString& MeshSignature);

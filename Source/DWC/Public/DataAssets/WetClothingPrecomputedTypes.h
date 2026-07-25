@@ -7,7 +7,7 @@ WetClothingAsset의 precomputed simulation data에서 여러 파일이 공통으
 예상 내용:
 - Mesh / Skeleton / SkinWeight 검증용 signature 구조체
 - MaterialSlotIndex + UVChannelIndex + UVIslandID를 묶는 precompute key
-- VertexIndex / WetPartID / WetPartEntryIndex를 묶는 precomputed vertex record
+- VertexIndex / WetPartID / ProfileIndex / MaterialSlotIndex를 묶는 precomputed vertex record
 - NeighborGraph 저장용 lightweight neighbor record
 - precomputed data 버전 번호와 호환성 검사 enum
 

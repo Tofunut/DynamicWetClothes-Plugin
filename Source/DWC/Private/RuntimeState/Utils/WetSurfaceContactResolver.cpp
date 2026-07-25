@@ -137,8 +137,9 @@ float ComputeWetAreaSampleRadius(const FVector& P0, const FVector& P1, const FVe
 }
 
 float ResolveGPUAbsorptionMultiplier(
-    const FDWCGPULODBakeData& GPUData,
     const FDWCGPUBakedTriangle& Triangle,
+    const FVector3f& Barycentric,
+    const FWetClothingRuntimeData* RuntimeData,
     const float Amount)
 {
     if (Amount < 0.0f)
@@ -146,11 +147,21 @@ float ResolveGPUAbsorptionMultiplier(
         return 1.0f;
     }
 
-    const FDWCGPUProfileParameters* Profile =
-        GPUData.Profiles.IsValidIndex(Triangle.ProfileIndex)
-            ? &GPUData.Profiles[Triangle.ProfileIndex]
-            : nullptr;
-    return FMath::Max(0.0f, Profile ? Profile->AbsorptionMultiplier : 1.0f);
+    int32 VertexIndex = Triangle.VertexIndices.X;
+    float BestWeight = Barycentric.X;
+    if (Barycentric.Y > BestWeight)
+    {
+        BestWeight = Barycentric.Y;
+        VertexIndex = Triangle.VertexIndices.Y;
+    }
+    if (Barycentric.Z > BestWeight)
+    {
+        VertexIndex = Triangle.VertexIndices.Z;
+    }
+
+    const FWetnessProfileParameters* Profile =
+        RuntimeData != nullptr ? RuntimeData->GetWetnessProfileParameters(VertexIndex) : nullptr;
+    return FMath::Max(0.0f, Profile ? Profile->GetAbsorptionMultiplier() : 1.0f);
 }
 
 FVector OrientTriangleNormalForContact(const FVector& TriangleNormal, const FDWCWetContact& Contact)
@@ -482,7 +493,11 @@ bool FWetSurfaceContactResolver::ResolveContact(
         Resolved.TriangleInfluence = FMath::Clamp(1.0f - Distance / SafeRadius, 0.0f, 1.0f);
         Resolved.Amount = Contact.Amount * Exposure;
         Resolved.Radius = SafeRadius;
-        Resolved.AbsorptionMultiplier = ResolveGPUAbsorptionMultiplier(GPUData, Triangle, Contact.Amount);
+        Resolved.AbsorptionMultiplier = ResolveGPUAbsorptionMultiplier(
+            Triangle,
+            Barycentric,
+            Args.RuntimeData,
+            Contact.Amount);
     }
 
     KeepPrimaryContactSurface(GPUData, Contact, OutContacts);
@@ -779,7 +794,11 @@ bool FWetSurfaceContactResolver::ResolveWetArea(
             Resolved.TriangleInfluence = 1.0f;
             Resolved.Amount = EffectiveAmount;
             Resolved.Radius = ComputeWetAreaSampleRadius(P0, P1, P2);
-            Resolved.AbsorptionMultiplier = ResolveGPUAbsorptionMultiplier(GPUData, Triangle, EffectiveAmount);
+            Resolved.AbsorptionMultiplier = ResolveGPUAbsorptionMultiplier(
+                Triangle,
+                Barycentric,
+                Args.RuntimeData,
+                EffectiveAmount);
         }
     }
 
@@ -927,7 +946,11 @@ bool FWetSurfaceContactResolver::ResolveWaterSurface(
         Resolved.TriangleInfluence = 1.0f;
         Resolved.Amount = Amount;
         Resolved.Radius = ComputeTriangleContactRadius(ContactPoint, P0, P1, P2);
-        Resolved.AbsorptionMultiplier = ResolveGPUAbsorptionMultiplier(GPUData, Triangle, Amount);
+        Resolved.AbsorptionMultiplier = ResolveGPUAbsorptionMultiplier(
+            Triangle,
+            Barycentric,
+            Args.RuntimeData,
+            Amount);
     }
 
     return !OutContacts.IsEmpty();

@@ -98,7 +98,8 @@ bool FDWCDataUVBuildService::BuildOriginalUVTopology(
 FDWCDataUVBuildResult FDWCDataUVBuildService::Generate(
     UWetClothingAsset& Asset,
     const bool bForceNewAsset,
-    const bool bAllowOverwriteExistingDataUVChannel)
+    const bool bAllowOverwriteExistingDataUVChannel,
+    const bool bUsePreferredDataUVChannel)
 {
     using namespace DWCDataUVBuildServicePrivate;
 
@@ -193,7 +194,10 @@ FDWCDataUVBuildResult FDWCDataUVBuildService::Generate(
     bool bGeneratedWithWarnings = false;
 
     int32 DataUVChannelIndex = Asset.GetDWCDataUVChannelIndex();
-    if (DataUVChannelIndex == INDEX_NONE || bForceNewAsset || Asset.GetRuntimeSkeletalMesh() != PreparedMesh)
+    if (DataUVChannelIndex == INDEX_NONE ||
+        bForceNewAsset ||
+        bUsePreferredDataUVChannel ||
+        Asset.GetRuntimeSkeletalMesh() != PreparedMesh)
     {
         DataUVChannelIndex = FMath::Clamp(
             Asset.GetSetupSettings().PreferredDWCDataUVChannelIndex,

@@ -1482,8 +1482,8 @@ namespace
         }
 
         TArray<int32> WettableSlots;
-        for (const FWetClothingWettableMaterialSlotState& SlotState :
-             Asset.Authored.PartData.EditableWetPartData.WettableMaterialSlots)
+        for (const FWetClothingAuthoredMaterialSlot& SlotState :
+             Asset.Authored.PartData.EditableWetPartData.MaterialSlots)
         {
             if (SlotState.bIsWettableSlot && SlotState.MaterialSlotIndex != INDEX_NONE)
             {
@@ -2188,7 +2188,7 @@ void FWCAEditor::HandleAssetSetupClicked()
 
     if (DialogResult == EWCASetupDialogResult::Rebuild)
     {
-        RebuildGeneratedDataUV(bAllowOverwriteExistingDataUVChannel);
+        RebuildGeneratedDataUV(bAllowOverwriteExistingDataUVChannel, true);
     }
 }
 
@@ -2220,7 +2220,9 @@ void FWCAEditor::HandleGenerateGeneratedDataUVClicked()
     RebuildGeneratedDataUV(bAllowOverwriteExistingDataUVChannel);
 }
 
-void FWCAEditor::RebuildGeneratedDataUV(const bool bAllowOverwriteExistingDataUVChannel)
+void FWCAEditor::RebuildGeneratedDataUV(
+    const bool bAllowOverwriteExistingDataUVChannel,
+    const bool bUsePreferredDataUVChannel)
 {
     UWetClothingAsset* Asset = WetClothingAsset.Get();
     if (Asset == nullptr)
@@ -2236,7 +2238,11 @@ void FWCAEditor::RebuildGeneratedDataUV(const bool bAllowOverwriteExistingDataUV
     SlowTask.EnterProgressFrame(
         1.0f,
         LOCTEXT("GenerateDataUVBuildProgress", "Building generated DWC mesh UV data..."));
-    const FDWCDataUVBuildResult Result = FDWCDataUVBuildService::Generate(*Asset, true, bAllowOverwriteExistingDataUVChannel);
+    const FDWCDataUVBuildResult Result = FDWCDataUVBuildService::Generate(
+        *Asset,
+        false,
+        bAllowOverwriteExistingDataUVChannel,
+        bUsePreferredDataUVChannel);
     if (!Result.bSucceeded)
     {
         Asset->SetLastBakeFailure(Result.Message);
@@ -2269,6 +2275,11 @@ void FWCAEditor::HandleValidationClicked()
     // Explicit validation is the only routine editor action that performs full
     // runtime/map signature and generated-material graph validation.
     Asset->RefreshBakeState(true);
+    if (EditorPanel.IsValid())
+    {
+        EditorPanel->RefreshStatusFromAsset();
+    }
+    RegenerateMenusAndToolbars();
 
 #if WITH_EDITORONLY_DATA
     const FDWCTriangleValidationSummary& Summary = Asset->GetValidationSummary();
@@ -2869,7 +2880,7 @@ FReply FWCAEditor::GenerateWetMaterials()
     }
 
     TArray<int32> WettableSlots;
-    for (const FWetClothingWettableMaterialSlotState& SlotState : Asset->Authored.PartData.EditableWetPartData.WettableMaterialSlots)
+    for (const FWetClothingAuthoredMaterialSlot& SlotState : Asset->Authored.PartData.EditableWetPartData.MaterialSlots)
     {
         if (SlotState.bIsWettableSlot && SlotState.MaterialSlotIndex != INDEX_NONE)
         {
@@ -3047,7 +3058,7 @@ bool FWCAEditor::ResolveIssuesAndSave(FString& OutFailure, FString* OutSuccessSu
         SlowTask.EnterProgressFrame(
             1.0f,
             LOCTEXT("ResolveIssuesGenerateDataUVProgress", "Rebuilding DWC Data UV because mesh UV data is missing or stale..."));
-        const FDWCDataUVBuildResult DataUVResult = FDWCDataUVBuildService::Generate(*Asset, true);
+        const FDWCDataUVBuildResult DataUVResult = FDWCDataUVBuildService::Generate(*Asset, false, false, true);
         if (!DataUVResult.bSucceeded)
         {
             Asset->SetLastBakeFailure(DataUVResult.Message);

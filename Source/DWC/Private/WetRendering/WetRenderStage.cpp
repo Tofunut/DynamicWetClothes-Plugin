@@ -60,13 +60,9 @@ namespace
             return false;
         }
 
-        const FWetClothingWettableMaterialSlotState* State = WetClothingAsset->Authored.PartData.EditableWetPartData.WettableMaterialSlots.FindByPredicate(
-            [MaterialSlotIndex](const FWetClothingWettableMaterialSlotState& Candidate)
-            {
-                return Candidate.MaterialSlotIndex == MaterialSlotIndex;
-            });
-
-        return State != nullptr && State->bIsWettableSlot;
+        const FWetClothingAuthoredMaterialSlot* Slot =
+            WetClothingAsset->Authored.PartData.EditableWetPartData.FindMaterialSlot(MaterialSlotIndex);
+        return Slot != nullptr && Slot->bIsWettableSlot;
     }
 
 }
@@ -613,10 +609,13 @@ void FWetRenderStage::ApplyWetnessToMaterial(FWetRenderStageArgs& Receiver)
         CachedWetPartDebugColorsByID.Reset();
         if (Receiver.WetClothingAsset != nullptr)
         {
-            for (const FWetClothingWetPartEntry& Entry :
-                 Receiver.WetClothingAsset->Authored.PartData.EditableWetPartData.WetPartEntries)
+            for (const FWetClothingAuthoredMaterialSlot& Slot :
+                 Receiver.WetClothingAsset->Authored.PartData.EditableWetPartData.MaterialSlots)
             {
-                CachedWetPartDebugColorsByID.FindOrAdd(Entry.WetPartID, Entry.Color);
+                for (const FWetClothingWetPartEntry& Entry : Slot.WetPartEntries)
+                {
+                    CachedWetPartDebugColorsByID.FindOrAdd(Entry.WetPartID, Entry.Color);
+                }
             }
         }
     }

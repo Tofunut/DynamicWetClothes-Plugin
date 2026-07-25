@@ -13,40 +13,40 @@ namespace
         double NonFiniteDefault;
     };
 
-    // These are hard data-contract limits, not merely slider limits. In
-    // particular, WetVisualStrength is packed directly into the render-profile
-    // LUT. A value such as 300 makes the absorbed-water darkening equation
-    // saturate to full black.
+    // These are hard data-contract limits, not merely slider limits. The
+    // absorbed rendering strengths are packed directly into the render-profile
+    // LUT, so out-of-range values would produce invalid material results.
     const FNumericRule NumericRules[] = {
-        // Simulation | Absorbed Water
-        { TEXT("Parameters.AbsorbedWetness.AbsorptionFraction"), 0.0, 1.0, 1.0 },
+        // Simulation | Absorbed Wetness
+        { TEXT("Parameters.AbsorbedWetness.AbsorptionFraction"), 0.0, 1.0, 0.5 },
         { TEXT("Parameters.AbsorbedWetness.AbsorptionRate"), 0.0, 10.0, 1.0 },
-        { TEXT("Parameters.AbsorbedWetness.SpreadRate"), 0.0, 10.0, 1.0 },
-        { TEXT("Parameters.AbsorbedWetness.DryRate"), 0.0, 100.0, 10.0 },
+        { TEXT("Parameters.AbsorbedWetness.SpreadRate"), 0.0, 10.0, 6.5 },
+        { TEXT("Parameters.AbsorbedWetness.DryRate"), 0.0, 100.0, 20.0 },
         { TEXT("Parameters.AbsorbedWetness.GravityFlowStrength"), 0.0, 10.0, 1.0 },
 
-        // Rendering | Absorbed Water
-        { TEXT("Parameters.AbsorbedWetness.WetVisualStrength"), 0.0, 1.0, 1.0 },
+        // Rendering | Absorbed Wetness
+        { TEXT("Parameters.AbsorbedWetness.AbsorbedDarkeningStrength"), 0.0, 1.0, 0.5 },
+        { TEXT("Parameters.AbsorbedWetness.AbsorbedGlossinessStrength"), 0.0, 1.0, 0.5 },
 
         // Simulation | Surface Water
-        { TEXT("Parameters.SurfaceWater.SurfaceRepresentationFraction"), 0.0, 1.0, 1.0 },
+        { TEXT("Parameters.SurfaceWater.SurfaceRepresentationFraction"), 0.0, 1.0, 0.5 },
         { TEXT("Parameters.SurfaceWater.DropletSpawnProbability"), 0.0, 1.0, 0.5 },
-        { TEXT("Parameters.SurfaceWater.FlowSpawnProbability"), 0.0, 1.0, 0.1 },
+        { TEXT("Parameters.SurfaceWater.FlowSpawnProbability"), 0.0, 1.0, 0.2 },
         { TEXT("Parameters.SurfaceWater.DropletIntensityMultiplier"), 0.0, 10.0, 1.0 },
         { TEXT("Parameters.SurfaceWater.FlowIntensityMultiplier"), 0.0, 10.0, 1.0 },
         { TEXT("Parameters.SurfaceWater.DropletLifetimeSeconds"), 0.01, 120.0, 5.0 },
-        { TEXT("Parameters.SurfaceWater.DropletRadiusPixels"), 0.5, 256.0, 16.0 },
+        { TEXT("Parameters.SurfaceWater.DropletRadiusPixels"), 0.0, 256.0, 16.0 },
         { TEXT("Parameters.SurfaceWater.FlowLifetimeSeconds"), 0.01, 120.0, 7.0 },
-        { TEXT("Parameters.SurfaceWater.MinimumFlowSurfaceAmount"), 0.0, 1.0, 0.05 },
-        { TEXT("Parameters.SurfaceWater.FlowWidthPixels"), 0.5, 256.0, 8.0 },
-        { TEXT("Parameters.SurfaceWater.FlowLengthPixels"), 1.0, 512.0, 48.0 },
+        { TEXT("Parameters.SurfaceWater.MinimumFlowSurfaceAmount"), 0.0, 1.0, 0.2 },
+        { TEXT("Parameters.SurfaceWater.FlowWidthPixels"), 0.0, 256.0, 8.0 },
+        { TEXT("Parameters.SurfaceWater.FlowLengthPixels"), 0.0, 512.0, 48.0 },
 
         // Rendering | Surface Water
         { TEXT("Parameters.SurfaceWater.MaterialTimeUpdateInterval"), 0.001, 1.0, 1.0 / 30.0 },
         { TEXT("Parameters.SurfaceWater.SurfaceWaterNormalStrength"), 0.0, 8.0, 1.0 },
-        { TEXT("Parameters.SurfaceWater.SurfaceWaterRoughnessStrength"), 0.0, 1.0, 1.0 },
-        { TEXT("Parameters.SurfaceWater.SurfaceVisibilityThreshold"), 0.0, 1.0, 0.25 },
-        { TEXT("Parameters.SurfaceWater.RivuletUVScrollSpeed"), 0.0, 10.0, 0.0 },
+        { TEXT("Parameters.SurfaceWater.SurfaceWaterRoughnessStrength"), 0.0, 1.0, 0.5 },
+        { TEXT("Parameters.SurfaceWater.SurfaceVisibilityThreshold"), 0.0, 1.0, 0.2 },
+        { TEXT("Parameters.SurfaceWater.RivuletUVScrollSpeed"), 0.0, 10.0, 0.5 },
     };
 
     const FNumericRule* FindNumericRule(const FString& PropertyPath)
@@ -339,6 +339,7 @@ bool FWetnessProfileEditorPolicy::IsObsoleteEditorPropertyPath(const FString& Pr
         TEXT("Parameters.DryRate"),
         TEXT("Parameters.GravityFlowStrength"),
         TEXT("Parameters.WetVisualStrength"),
+        TEXT("Parameters.AbsorbedWetness.WetVisualStrength"),
 
         // FSurfaceWaterProfileParameters legacy mask/rendering fields.
         TEXT("Parameters.SurfaceWater.FlowMaskMin"),

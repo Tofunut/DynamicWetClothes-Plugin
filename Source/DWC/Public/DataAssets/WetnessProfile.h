@@ -16,23 +16,26 @@ struct DWC_API FAbsorbedWetnessProfileParameters
 
     /** Fraction of incoming water routed to the absorbed-wetness channel. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Absorbed Wetness", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float AbsorptionFraction = 1.0f;
+    float AbsorptionFraction = 0.5f;
 
     /** Legacy absorption response multiplier. This is intentionally not a per-second rate. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Absorbed Wetness", meta = (ClampMin = "0.0", DisplayName = "Absorption Rate"))
     float AbsorptionRate = 1.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Absorbed Wetness", meta = (ClampMin = "0.0"))
-    float SpreadRate = 1.0f;
+    float SpreadRate = 6.5f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Absorbed Wetness", meta = (ClampMin = "0.0", ClampMax = "100.0", UIMin = "0.0", UIMax = "100.0", Units = "Percent", DisplayName = "Dry Rate"))
-    float DryRate = 10.0f;
+    float DryRate = 20.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Absorbed Wetness", meta = (ClampMin = "0.0", DisplayName = "Gravity Spread Bias"))
     float GravityFlowStrength = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Absorbed Wetness|Rendering", meta = (ClampMin = "0.0"))
-    float WetVisualStrength = 1.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Absorbed Wetness|Rendering", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float AbsorbedDarkeningStrength = 0.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Absorbed Wetness|Rendering", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float AbsorbedGlossinessStrength = 0.5f;
 
     float GetDryRatePerSecond() const
     {
@@ -60,13 +63,13 @@ struct DWC_API FSurfaceWaterProfileParameters
 
     /** Fraction of water rejected by absorption that is represented visually. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float SurfaceRepresentationFraction = 1.0f;
+    float SurfaceRepresentationFraction = 0.5f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float DropletSpawnProbability = 0.5f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rivulet", meta = (ClampMin = "0.0", ClampMax = "1.0", DisplayName = "Rivulet Spawn Probability"))
-    float FlowSpawnProbability = 0.1f;
+    float FlowSpawnProbability = 0.2f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet", meta = (ClampMin = "0.0"))
     float DropletIntensityMultiplier = 1.0f;
@@ -77,19 +80,19 @@ struct DWC_API FSurfaceWaterProfileParameters
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet", meta = (ClampMin = "0.01", Units = "s"))
     float DropletLifetimeSeconds = 5.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet", meta = (ClampMin="0.5", ClampMax="256.0", DisplayName="Base Radius (RT Pixels)"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet", meta = (ClampMin="0.0", ClampMax="256.0", DisplayName="Base Radius (RT Pixels)"))
     float DropletRadiusPixels = 16.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rivulet", meta = (ClampMin = "0.01", Units = "s", DisplayName = "Rivulet Lifetime"))
     float FlowLifetimeSeconds = 7.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rivulet", meta = (ClampMin = "0.0", DisplayName = "Minimum Rivulet Surface Amount"))
-    float MinimumFlowSurfaceAmount = 0.05f;
+    float MinimumFlowSurfaceAmount = 0.2f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rivulet", meta = (ClampMin="0.5", ClampMax="256.0", DisplayName="Rivulet Base Width (RT Pixels)"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rivulet", meta = (ClampMin="0.0", ClampMax="256.0", DisplayName="Rivulet Base Width (RT Pixels)"))
     float FlowWidthPixels = 8.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rivulet", meta = (ClampMin="1.0", ClampMax="512.0", DisplayName="Rivulet Base Length (RT Pixels)"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rivulet", meta = (ClampMin="0.0", ClampMax="512.0", DisplayName="Rivulet Base Length (RT Pixels)"))
     float FlowLengthPixels = 48.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rendering", meta=(ClampMin="0.001"))
@@ -101,15 +104,15 @@ struct DWC_API FSurfaceWaterProfileParameters
 
     /** Strength of the Surface Water roughness blend toward the material-wide target roughness. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rendering", meta=(ClampMin="0.0", ClampMax="1.0"))
-    float SurfaceWaterRoughnessStrength = 1.0f;
+    float SurfaceWaterRoughnessStrength = 0.5f;
 
     /** Minimum visible RT amount before Surface Water rendering begins. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rendering", meta=(ClampMin="0.0", ClampMax="1.0"))
-    float SurfaceVisibilityThreshold = 0.25f;
+    float SurfaceVisibilityThreshold = 0.2f;
 
     /** UV scroll speed along the decoded rivulet flow direction. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rivulet|Rendering")
-    float RivuletUVScrollSpeed = 0.0f;
+    float RivuletUVScrollSpeed = 0.5f;
 
     // Legacy mask fields are serialized only so old assets can load and resave.
     UPROPERTY()
@@ -201,9 +204,6 @@ struct DWC_API FWetnessProfileParameters
     UPROPERTY()
     float GravityFlowStrength = -1.0f;
 
-    UPROPERTY()
-    float WetVisualStrength = -1.0f;
-
     bool MigrateLegacyAbsorbedWetness();
     bool MigrateLegacySurfaceWaterRendering();
 
@@ -252,10 +252,18 @@ struct DWC_API FWetnessProfileParameters
         return FMath::Max(0.0f, GravityFlowStrength >= 0.0f ? GravityFlowStrength : AbsorbedWetness.GravityFlowStrength);
     }
 
-    float GetWetVisualStrength() const
+    float GetAbsorbedDarkeningStrength() const
     {
-        const float Strength = WetVisualStrength >= 0.0f ? WetVisualStrength : AbsorbedWetness.WetVisualStrength;
-        return AbsorbedWetness.bEnabled ? FMath::Max(0.0f, Strength) : 0.0f;
+        return AbsorbedWetness.bEnabled
+                   ? FMath::Clamp(AbsorbedWetness.AbsorbedDarkeningStrength, 0.0f, 1.0f)
+                   : 0.0f;
+    }
+
+    float GetAbsorbedGlossinessStrength() const
+    {
+        return AbsorbedWetness.bEnabled
+                   ? FMath::Clamp(AbsorbedWetness.AbsorbedGlossinessStrength, 0.0f, 1.0f)
+                   : 0.0f;
     }
 
     /** Legacy material-map compatibility. Surface visibility itself comes from the independent RTs. */
@@ -289,7 +297,9 @@ class DWC_API UWetnessProfile : public UDataAsset
     UFUNCTION(BlueprintPure, Category = "Wetness Profile")
     float GetRunoffStrength() const { return Parameters.GetRunoffStrength(); }
     UFUNCTION(BlueprintPure, Category = "Wetness Profile")
-    float GetWetVisualStrength() const { return Parameters.GetWetVisualStrength(); }
+    float GetAbsorbedDarkeningStrength() const { return Parameters.GetAbsorbedDarkeningStrength(); }
+    UFUNCTION(BlueprintPure, Category = "Wetness Profile")
+    float GetAbsorbedGlossinessStrength() const { return Parameters.GetAbsorbedGlossinessStrength(); }
 #if WITH_EDITORONLY_DATA
     UPROPERTY(EditAnywhere, Category = "Wetness Profile")
     FString PreferredSaveDirectory = TEXT("/Game/WetnessProfiles");

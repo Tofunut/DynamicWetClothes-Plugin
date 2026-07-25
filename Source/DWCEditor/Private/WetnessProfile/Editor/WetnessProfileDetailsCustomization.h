@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "IDetailCustomization.h"
 #include "Input/Reply.h"
+#include "Templates/Function.h"
 
 class IDetailGroup;
 class IPropertyHandle;
@@ -50,6 +51,24 @@ private:
         const FText& Suffix,
         TAttribute<bool> IsEnabled = TAttribute<bool>(true));
 
+    void AddMappedFloatProperty(
+        IDetailGroup& Group,
+        const TSharedPtr<IPropertyHandle>& Handle,
+        const FText& DisplayName,
+        const FText& Tooltip,
+        float HardDisplayMin,
+        float HardDisplayMax,
+        float SliderDisplayMin,
+        float SliderDisplayMax,
+        float DisplayDelta,
+        int32 MaxFractionalDigits,
+        const FText& Suffix,
+        TFunction<float(float)> RawToDisplay,
+        TFunction<float(float)> DisplayToRaw,
+        float RawHardMin,
+        float RawHardMax,
+        TAttribute<bool> IsEnabled = TAttribute<bool>(true));
+
     TOptional<float> GetDisplayedFloatValue(
         TWeakPtr<IPropertyHandle> WeakHandle,
         float DisplayScale) const;
@@ -59,6 +78,15 @@ private:
         float HardMin,
         float HardMax,
         float DisplayScale);
+    TOptional<float> GetMappedDisplayedFloatValue(
+        TWeakPtr<IPropertyHandle> WeakHandle,
+        const TFunction<float(float)>& RawToDisplay) const;
+    void SetMappedDisplayedFloatValue(
+        float DisplayValue,
+        TWeakPtr<IPropertyHandle> WeakHandle,
+        const TFunction<float(float)>& DisplayToRaw,
+        float RawHardMin,
+        float RawHardMax);
 
     FText GetValidationText() const;
     FReply HandleClampValuesClicked();

@@ -29,14 +29,19 @@ private:
         int32 StaticSlotIndex = INDEX_NONE;
         int32 Resolution = 0;
         TArray<TStrongObjectPtr<UTextureRenderTarget2D>> WetnessMaps;
+        TArray<TStrongObjectPtr<UTextureRenderTarget2D>> PendingWetnessMaps;
         TStrongObjectPtr<UTextureRenderTarget2D> SurfaceDropletRT;
         TStrongObjectPtr<UTextureRenderTarget2D> SurfaceRivuletRT;
         int32 CurrentTextureIndex = 0;
+        int32 CurrentPendingTextureIndex = 0;
         TWeakObjectPtr<UMaterialInstanceDynamic> MaterialInstance;
 
         UTextureRenderTarget2D* GetCurrentMap() const;
         UTextureRenderTarget2D* GetNextMap() const;
+        UTextureRenderTarget2D* GetCurrentPendingMap() const;
+        UTextureRenderTarget2D* GetNextPendingMap() const;
         void SwapMaps();
+        void SwapPendingMaps();
     };
 
     bool BuildStaticSimulationData();
@@ -68,6 +73,7 @@ private:
     float SpreadRateScale = 1.0f;
     float DryRateScale = 1.0f;
     float GravityFlowStrengthScale = 1.0f;
+    float CapillaryImmediateAbsorptionFraction = 0.65f;
     int32 LODIndex = 0;
     int32 DebugDispatchLogCount = 0;
     bool bUseEightDirectionDiffusion = false;

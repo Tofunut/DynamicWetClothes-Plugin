@@ -1,6 +1,7 @@
 #include "/Engine/Public/Platform.ush"
 
 RWTexture2D<float> WetnessTexture;
+RWTexture2D<float> PendingWetnessTexture;
 
 int2 TextureSize;
 int2 DispatchMin;
@@ -85,9 +86,18 @@ void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
         }
     }
 
-    const float OldWetness = WetnessTexture[Texel];
-    WetnessTexture[Texel] = clamp(
-        OldWetness + P0AndAmount.w * Influence,
-        0.0,
-        P1AndMaxWetness.w);
+    const float AppliedWetness = P0AndAmount.w * Influence;
+    if (AppliedWetness < 0.0)
+    {
+        const float OldWetness = WetnessTexture[Texel];
+        WetnessTexture[Texel] = clamp(
+            OldWetness + AppliedWetness,
+            0.0,
+            P1AndMaxWetness.w);
+    }
+    else if (AppliedWetness > 0.0)
+    {
+        const float OldPendingWetness = max(PendingWetnessTexture[Texel], 0.0);
+        PendingWetnessTexture[Texel] = OldPendingWetness + AppliedWetness;
+    }
 }

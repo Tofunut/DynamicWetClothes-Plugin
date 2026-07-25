@@ -238,6 +238,9 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Simulation|GPU|Tuning", meta = (EditCondition = "SimulationMode == EDWCSimulationMode::WetnessMapGPU", ClampMin = "0.0", AdvancedDisplay))
     float GPUGravityFlowStrengthScale = 1.0f;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Simulation|GPU|Tuning", meta = (EditCondition = "SimulationMode == EDWCSimulationMode::WetnessMapGPU", ClampMin = "0.0", ClampMax = "1.0", UIMin = "0.0", UIMax = "1.0", AdvancedDisplay))
+    float GPUImmediateAbsorptionFraction = 0.35f;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Simulation|GPU|Tuning", meta = (EditCondition = "SimulationMode == EDWCSimulationMode::WetnessMapGPU", ClampMin = "0.0", AdvancedDisplay))
     float GPUDryRateScale = 1.0f;
 

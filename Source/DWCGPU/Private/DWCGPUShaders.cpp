@@ -28,12 +28,6 @@ bool FDWCDiffuseDryCS::ShouldCompilePermutation(const FGlobalShaderPermutationPa
     return ShouldCompileDWC(Parameters);
 }
 
-IMPLEMENT_GLOBAL_SHADER(FDWCTransferScale8CS, "/DWCGPU/DWCTransferScale8.usf", "MainCS", SF_Compute);
-bool FDWCTransferScale8CS::ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
-{
-    return ShouldCompileDWC(Parameters);
-}
-
 IMPLEMENT_GLOBAL_SHADER(FDWCDiffuseDry8CS, "/DWCGPU/DWCDiffuseDry8.usf", "MainCS", SF_Compute);
 bool FDWCDiffuseDry8CS::ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
 {

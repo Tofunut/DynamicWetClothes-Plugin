@@ -1,33 +1,20 @@
 #include "/Engine/Public/Platform.ush"
 
-// 8-neighbor order:
-// 0: +X, 1: -X, 2: +Y, 3: -Y,
-// 4: +X+Y, 5: -X+Y, 6: +X-Y, 7: -X-Y
+Texture2D<float> SourceWetnessTexture;
+Texture2D<float> PendingWetnessTexture;
+RWTexture2D<float> DestinationWetnessTexture;
+RWTexture2D<float> DestinationPendingWetnessTexture;
 
 StructuredBuffer<uint4> TexelLookup;
 StructuredBuffer<float4> TriangleFlow;
-
-// x=dot(dPdu,dPdu), y=dot(dPdu,dPdv),
-// z=dot(dPdv,dPdv), w=valid
 StructuredBuffer<float4> TriangleMetric;
-
-// x=SpreadRate/s, y=DryRate/s,
-// z=GravityStrength, w=valid profile
 StructuredBuffer<float4> Profiles;
-
 StructuredBuffer<uint> TriangleProfileIndices;
 
 int2 TextureSize;
 float DeltaSeconds;
-
-static const float DWCSpreadResponseScale = 1.75;
-static const float DWCGravityResponseScale = 1.50;
-
-// 한 방향으로의 강한 흐름은 허용한다.
-static const float DWCMaxEdgeTransferFraction = 0.35;
-
-// 한 texel이 한 step 동안 모든 방향으로 내보내는 총량 제한.
-static const float DWCMaxTotalTransferFraction = 0.45;
+float MaxWetness;
+float CapillaryImmediateAbsorptionFraction;
 
 static const int DWCNeighborCount = 8;
 
@@ -37,7 +24,6 @@ static const int2 DWCNeighborOffsets[DWCNeighborCount] =
     int2(-1,  0),
     int2( 0,  1),
     int2( 0, -1),
-
     int2( 1,  1),
     int2(-1,  1),
     int2( 1, -1),
@@ -50,26 +36,10 @@ static const float2 DWCNeighborDirections[DWCNeighborCount] =
     float2(-1.0,  0.0),
     float2( 0.0,  1.0),
     float2( 0.0, -1.0),
-
     float2( 1.0,  1.0),
     float2(-1.0,  1.0),
     float2( 1.0, -1.0),
     float2(-1.0, -1.0)
-};
-
-// 대각선의 기여도를 직교 방향보다 낮게 둔다.
-// 4 * 0.1464466094 + 4 * 0.1035533906 = 1.0
-static const float DWCNeighborSpreadWeights[DWCNeighborCount] =
-{
-    0.1464466094,
-    0.1464466094,
-    0.1464466094,
-    0.1464466094,
-
-    0.1035533906,
-    0.1035533906,
-    0.1035533906,
-    0.1035533906
 };
 
 static const uint DWCOppositeDirectionIndices[DWCNeighborCount] =
@@ -78,7 +48,6 @@ static const uint DWCOppositeDirectionIndices[DWCNeighborCount] =
     0u,
     3u,
     2u,
-
     7u,
     6u,
     5u,
@@ -92,11 +61,10 @@ uint Flatten(int2 Texel)
 
 bool IsInside(int2 Texel)
 {
-    return
-        Texel.x >= 0 &&
-        Texel.y >= 0 &&
-        Texel.x < TextureSize.x &&
-        Texel.y < TextureSize.y;
+    return Texel.x >= 0 &&
+           Texel.y >= 0 &&
+           Texel.x < TextureSize.x &&
+           Texel.y < TextureSize.y;
 }
 
 bool IsValidLookup(uint4 Lookup)
@@ -106,294 +74,245 @@ bool IsValidLookup(uint4 Lookup)
 
 bool IsConnectedNeighbor(uint4 SourceLookup, uint4 NeighborLookup)
 {
-    return
-        IsValidLookup(NeighborLookup) &&
-        NeighborLookup.w == SourceLookup.w;
+    return IsValidLookup(NeighborLookup) &&
+           NeighborLookup.w == SourceLookup.w;
 }
 
-float TexelArea(uint4 Lookup)
+float ComputePendingSpreadableWetness(
+    float StoredWetness,
+    float PendingWetness,
+    out float AbsorbedWetness)
 {
-    if (!IsValidLookup(Lookup))
-    {
-        return 0.0;
-    }
+    const float SafeMaxWetness = max(MaxWetness, 0.0);
+    const float SafeStoredWetness = clamp(
+        StoredWetness,
+        0.0,
+        SafeMaxWetness);
+    const float SafePendingWetness = max(PendingWetness, 0.0);
+    const float ImmediateAbsorptionFraction = clamp(
+        CapillaryImmediateAbsorptionFraction,
+        0.0,
+        SafeMaxWetness);
+    const float DesiredAbsorption =
+        SafePendingWetness * ImmediateAbsorptionFraction;
+    const float AvailableCapacity =
+        max(SafeMaxWetness - SafeStoredWetness, 0.0);
 
-    const float RestArea = max(asfloat(Lookup.z), 1.0e-10);
-    float AreaScale = TriangleFlow[Lookup.x].z;
+    AbsorbedWetness = min(DesiredAbsorption, AvailableCapacity);
 
-    if (!isfinite(AreaScale))
-    {
-        AreaScale = 1.0;
-    }
+    const float OverflowWetness =
+        max(DesiredAbsorption - AbsorbedWetness, 0.0);
+    const float CapillaryWetness =
+        max(SafePendingWetness - DesiredAbsorption, 0.0);
 
-    return RestArea * max(AreaScale, 1.0e-4);
+    return CapillaryWetness + OverflowWetness;
 }
 
-float RawEdgeFraction(
-    uint4 Lookup,
-    float2 DirectionStep,
-    float SpreadWeight)
+float PendingSpreadAlpha(uint4 SourceLookup)
 {
-    const uint TriangleID = Lookup.x;
-    const uint ProfileIndex = TriangleProfileIndices[TriangleID];
-
-    float4 Profile = Profiles[ProfileIndex];
-    float4 Flow = TriangleFlow[TriangleID];
-    float4 Metric = TriangleMetric[TriangleID];
-
-    if (!all(isfinite(Profile.xyz)) ||
-        Profile.w <= 0.0)
+    if (!IsValidLookup(SourceLookup))
     {
         return 0.0;
     }
 
-    if (!all(isfinite(Flow.xyz)) ||
-        Flow.z <= 0.0 ||
-        Flow.w <= 0.0)
-    {
-        Flow = float4(0.0, 0.0, 1.0, 1.0);
-    }
-
-    if (!all(isfinite(Metric.xyz)) ||
-        Metric.x <= 0.0 ||
-        Metric.z <= 0.0 ||
-        Metric.w <= 0.0)
-    {
-        Metric = float4(1.0, 0.0, 1.0, 1.0);
-    }
-
-    const float2 SafeTextureSize =
-        max(float2(TextureSize), float2(1.0, 1.0));
-
-    // 실제 한 texel 이동 거리.
-    // 대각선은 자연스럽게 직교 방향보다 더 먼 거리로 계산된다.
-    const float2 DeltaUV =
-        DirectionStep / SafeTextureSize;
-
-    const float PhysicalDistanceSquared =
-        DeltaUV.x * DeltaUV.x * Metric.x +
-        2.0 * DeltaUV.x * DeltaUV.y * Metric.y +
-        DeltaUV.y * DeltaUV.y * Metric.z;
-
-    const float PhysicalDistance =
-        sqrt(max(PhysicalDistanceSquared, 1.0e-12));
-
-    const float CharacteristicLength =
-        sqrt(max(TexelArea(Lookup), 1.0e-12));
-
-    const float DistanceScale =
-        clamp(
-            CharacteristicLength / PhysicalDistance,
-            0.25,
-            4.0);
-
-    const float SpreadRate =
-        max(Profile.x, 0.0) *
-        SpreadWeight *
-        DWCSpreadResponseScale *
-        DistanceScale;
-
-    const float FlowLength = length(Flow.xy);
-
-    const float2 FlowDirection =
-        FlowLength > 1.0e-8
-            ? Flow.xy / FlowLength
-            : float2(0.0, 0.0);
-
-    const float2 UnitDirection =
-        normalize(DirectionStep);
-
-    const float GravityRate =
-        max(Profile.z, 0.0) *
-        DWCGravityResponseScale *
-        saturate(FlowLength) *
-        max(dot(FlowDirection, UnitDirection), 0.0) *
-        DistanceScale;
-
-    const float TimeStep = max(DeltaSeconds, 0.0);
-
-    const float Fraction =
-        TimeStep * (SpreadRate + GravityRate);
-
-    if (!isfinite(Fraction))
-    {
-        return 0.0;
-    }
-
-    return min(
-        saturate(Fraction),
-        DWCMaxEdgeTransferFraction);
+    const uint ProfileIndex = TriangleProfileIndices[SourceLookup.x];
+    const float SpreadRate = max(Profiles[ProfileIndex].x, 0.0);
+    return saturate(SpreadRate * max(DeltaSeconds, 0.0));
 }
 
+float PendingGravityBias(uint4 SourceLookup, uint DirectionIndex)
+{
+    if (!IsValidLookup(SourceLookup))
+    {
+        return 0.0;
+    }
 
-Texture2D<float> SourceWetnessTexture;
-Texture2D<float> TransferScaleTexture;
-RWTexture2D<float> DestinationWetnessTexture;
+    const uint ProfileIndex = TriangleProfileIndices[SourceLookup.x];
+    const float GravityStrength = max(Profiles[ProfileIndex].z, 0.0);
+    const float2 Flow = TriangleFlow[SourceLookup.x].xy;
+    const float4 Metric = TriangleMetric[SourceLookup.x];
 
-float MaxWetness;
+    if (!isfinite(GravityStrength) ||
+        !all(isfinite(Flow)) ||
+        !all(isfinite(Metric)))
+    {
+        return 1.0;
+    }
+
+    const float2 GravityCovector = float2(
+        Metric.x * Flow.x + Metric.y * Flow.y,
+        Metric.y * Flow.x + Metric.z * Flow.y);
+    const float2 DirectionUV = DWCNeighborDirections[DirectionIndex];
+    const float DirectionLengthSquared =
+        DirectionUV.x * DirectionUV.x * Metric.x +
+        2.0 * DirectionUV.x * DirectionUV.y * Metric.y +
+        DirectionUV.y * DirectionUV.y * Metric.z;
+
+    if (DirectionLengthSquared <= 1.0e-8)
+    {
+        return 1.0;
+    }
+
+    const float GravityAlignment =
+        dot(DirectionUV, GravityCovector) /
+        sqrt(DirectionLengthSquared);
+
+    return clamp(
+        1.0 + GravityAlignment * GravityStrength,
+        0.0,
+        2.0);
+}
+
+float SanitizeWetness(float Value)
+{
+    return isfinite(Value) ? max(Value, 0.0) : 0.0;
+}
+
+float IncomingPendingFromNeighbor(
+    int2 CenterTexel,
+    uint DirectionIndex,
+    uint4 CenterLookup)
+{
+    const int2 NeighborTexel =
+        CenterTexel + DWCNeighborOffsets[DirectionIndex];
+    if (!IsInside(NeighborTexel))
+    {
+        return 0.0;
+    }
+
+    const uint4 NeighborLookup =
+        TexelLookup[Flatten(NeighborTexel)];
+    if (!IsConnectedNeighbor(CenterLookup, NeighborLookup))
+    {
+        return 0.0;
+    }
+
+    const float NeighborWetness =
+        SanitizeWetness(SourceWetnessTexture.Load(int3(NeighborTexel, 0)));
+    const float NeighborPendingWetness =
+        SanitizeWetness(PendingWetnessTexture.Load(int3(NeighborTexel, 0)));
+
+    float UnusedNeighborAbsorption = 0.0;
+    const float NeighborSpreadableWetness =
+        ComputePendingSpreadableWetness(
+            NeighborWetness,
+            NeighborPendingWetness,
+            UnusedNeighborAbsorption);
+    const float NeighborSpreadAlpha =
+        PendingSpreadAlpha(NeighborLookup);
+
+    float NeighborTotalWeight = 0.0;
+    float NeighborWeightToCenter = 0.0;
+
+    [unroll]
+    for (uint CandidateDirectionIndex = 0u;
+         CandidateDirectionIndex < DWCNeighborCount;
+         ++CandidateDirectionIndex)
+    {
+        const int2 CandidateTexel =
+            NeighborTexel + DWCNeighborOffsets[CandidateDirectionIndex];
+        if (!IsInside(CandidateTexel))
+        {
+            continue;
+        }
+
+        const uint4 CandidateLookup =
+            TexelLookup[Flatten(CandidateTexel)];
+        if (!IsConnectedNeighbor(NeighborLookup, CandidateLookup))
+        {
+            continue;
+        }
+
+        const float CandidateWetness =
+            SanitizeWetness(SourceWetnessTexture.Load(int3(CandidateTexel, 0)));
+        const float CandidateCapacity =
+            max(MaxWetness - min(CandidateWetness, MaxWetness), 0.0);
+        const float CandidateWeight =
+            CandidateCapacity *
+            PendingGravityBias(
+                NeighborLookup,
+                CandidateDirectionIndex);
+
+        NeighborTotalWeight += CandidateWeight;
+        if (CandidateDirectionIndex ==
+            DWCOppositeDirectionIndices[DirectionIndex])
+        {
+            NeighborWeightToCenter = CandidateWeight;
+        }
+    }
+
+    const float InFraction =
+        NeighborTotalWeight > 1.0e-8
+            ? NeighborWeightToCenter / NeighborTotalWeight
+            : 0.0;
+
+    return NeighborSpreadableWetness *
+           NeighborSpreadAlpha *
+           InFraction;
+}
 
 [numthreads(8, 8, 1)]
 void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
     const int2 Texel = int2(DispatchThreadId.xy);
-
     if (!IsInside(Texel))
     {
         return;
     }
 
-    const uint TexelIndex = Flatten(Texel);
     const uint4 CenterLookup =
-        TexelLookup[TexelIndex];
-
+        TexelLookup[Flatten(Texel)];
     if (!IsValidLookup(CenterLookup))
     {
         DestinationWetnessTexture[Texel] = 0.0;
+        DestinationPendingWetnessTexture[Texel] = 0.0;
         return;
     }
 
-    const float CenterArea =
-        TexelArea(CenterLookup);
+    const float CenterWetness =
+        SanitizeWetness(SourceWetnessTexture.Load(int3(Texel, 0)));
+    const float CenterPendingWetness =
+        SanitizeWetness(PendingWetnessTexture.Load(int3(Texel, 0)));
 
-    float CenterWetness =
-        SourceWetnessTexture.Load(
-            int3(Texel, 0));
+    float AbsorbedWetness = 0.0;
+    ComputePendingSpreadableWetness(
+        CenterWetness,
+        CenterPendingWetness,
+        AbsorbedWetness);
 
-    if (!isfinite(CenterWetness))
-    {
-        CenterWetness = 0.0;
-    }
-
-    CenterWetness = max(CenterWetness, 0.0);
-
-    float CenterTransferScale =
-        TransferScaleTexture.Load(
-            int3(Texel, 0));
-
-    if (!isfinite(CenterTransferScale))
-    {
-        CenterTransferScale = 0.0;
-    }
-
-    CenterTransferScale =
-        saturate(CenterTransferScale);
-
-    float NewMass =
-        CenterWetness * CenterArea;
+    float NewWetness = CenterWetness + AbsorbedWetness;
+    float PendingNextWetness = 0.0;
 
     [unroll]
     for (uint DirectionIndex = 0u;
          DirectionIndex < DWCNeighborCount;
          ++DirectionIndex)
     {
-        const int2 NeighborTexel =
-            Texel + DWCNeighborOffsets[DirectionIndex];
-
-        if (!IsInside(NeighborTexel))
-        {
-            continue;
-        }
-
-        const uint4 NeighborLookup =
-            TexelLookup[Flatten(NeighborTexel)];
-
-        if (!IsConnectedNeighbor(
-                CenterLookup,
-                NeighborLookup))
-        {
-            // 서로 다른 UV island는 Seam Gather Pass에서만 통신한다.
-            continue;
-        }
-
-        // 현재 texel → 이웃 texel.
-        const float OutFraction =
-            RawEdgeFraction(
-                CenterLookup,
-                DWCNeighborDirections[DirectionIndex],
-                DWCNeighborSpreadWeights[DirectionIndex]) *
-            CenterTransferScale;
-
-        NewMass -=
-            CenterWetness *
-            CenterArea *
-            OutFraction;
-
-        // 이웃 texel → 현재 texel.
-        const float NeighborArea =
-            TexelArea(NeighborLookup);
-
-        float NeighborWetness =
-            SourceWetnessTexture.Load(
-                int3(NeighborTexel, 0));
-
-        if (!isfinite(NeighborWetness))
-        {
-            NeighborWetness = 0.0;
-        }
-
-        NeighborWetness =
-            max(NeighborWetness, 0.0);
-
-        float NeighborTransferScale =
-            TransferScaleTexture.Load(
-                int3(NeighborTexel, 0));
-
-        if (!isfinite(NeighborTransferScale))
-        {
-            NeighborTransferScale = 0.0;
-        }
-
-        NeighborTransferScale =
-            saturate(NeighborTransferScale);
-
-        const uint OppositeDirectionIndex =
-            DWCOppositeDirectionIndices[DirectionIndex];
-
-        const float InFraction =
-            RawEdgeFraction(
-                NeighborLookup,
-                DWCNeighborDirections[OppositeDirectionIndex],
-                DWCNeighborSpreadWeights[OppositeDirectionIndex]) *
-            NeighborTransferScale;
-
-        NewMass +=
-            NeighborWetness *
-            NeighborArea *
-            InFraction;
+        PendingNextWetness += IncomingPendingFromNeighbor(
+            Texel,
+            DirectionIndex,
+            CenterLookup);
     }
 
-    const uint CenterProfileIndex =
+    const uint ProfileIndex =
         TriangleProfileIndices[CenterLookup.x];
-
-    float DryRate =
-        Profiles[CenterProfileIndex].y;
-
-    if (!isfinite(DryRate))
-    {
-        DryRate = 0.0;
-    }
-
-    DryRate = max(DryRate, 0.0);
-
-    const float TimeStep =
-        max(DeltaSeconds, 0.0);
-
-    NewMass =
-        max(NewMass, 0.0) *
-        exp(-DryRate * TimeStep);
-
-    float NewWetness =
-        NewMass /
-        max(CenterArea, 1.0e-10);
+    const float DryRate =
+        max(Profiles[ProfileIndex].y, 0.0);
+    NewWetness =
+        max(NewWetness, 0.0) *
+        exp(-DryRate * max(DeltaSeconds, 0.0));
 
     if (!isfinite(NewWetness))
     {
         NewWetness = 0.0;
     }
+    if (!isfinite(PendingNextWetness))
+    {
+        PendingNextWetness = 0.0;
+    }
 
     DestinationWetnessTexture[Texel] =
-        clamp(
-            NewWetness,
-            0.0,
-            MaxWetness);
+        clamp(NewWetness, 0.0, MaxWetness);
+    DestinationPendingWetnessTexture[Texel] =
+        max(PendingNextWetness, 0.0);
 }

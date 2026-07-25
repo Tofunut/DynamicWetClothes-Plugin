@@ -18,6 +18,18 @@ struct FNearestVertex
     float DistanceSquared = TNumericLimits<float>::Max();
 };
 
+struct FWetAreaCandidate
+{
+    int32 VertexIndex = INDEX_NONE;
+    float Exposure = 1.0f;
+    float PickWeight = 1.0f;
+};
+
+constexpr float GPUWetAreaNormalExposureMinInfluence = 0.05f;
+constexpr int32 GPUWetAreaNormalExposureCandidateMultiplier = 3;
+constexpr int32 GPUWetAreaNormalExposureMinCandidateCount = 128;
+constexpr float GPUWetAreaNormalExposurePickPower = 2.0f;
+
 FVector3f ComputeTriangleBarycentric(
     const FVector& Point,
     const FVector& A,
@@ -160,6 +172,34 @@ FVector OrientTriangleNormalForContact(const FVector& TriangleNormal, const FDWC
     }
 
     return TriangleNormal;
+}
+
+int32 SelectWetAreaCandidateIndex(
+    const TArray<FWetAreaCandidate>& Candidates,
+    FRandomStream& RandomStream)
+{
+    float TotalPickWeight = 0.0f;
+    for (const FWetAreaCandidate& Candidate : Candidates)
+    {
+        TotalPickWeight += Candidate.PickWeight;
+    }
+
+    if (TotalPickWeight <= KINDA_SMALL_NUMBER)
+    {
+        return Candidates.IsEmpty() ? INDEX_NONE : RandomStream.RandRange(0, Candidates.Num() - 1);
+    }
+
+    float PickValue = RandomStream.FRandRange(0.0f, TotalPickWeight);
+    for (int32 CandidateIndex = 0; CandidateIndex < Candidates.Num(); ++CandidateIndex)
+    {
+        PickValue -= Candidates[CandidateIndex].PickWeight;
+        if (PickValue <= 0.0f)
+        {
+            return CandidateIndex;
+        }
+    }
+
+    return Candidates.Num() - 1;
 }
 
 void KeepPrimaryContactSurface(
@@ -527,38 +567,16 @@ bool FWetSurfaceContactResolver::ResolveWetArea(
     const FVector SafeNormal = -SafeDirection;
     const FTransform ComponentTransform = Args.TargetSkeletalMesh->GetComponentTransform();
 
-    TArray<int32> SelectedVertices;
     const int32 SamplesToProcess = FMath::Min(AreaData.SampleCount, WettableVertices.Num());
-    SelectedVertices.Reserve(SamplesToProcess);
-    if (SamplesToProcess == WettableVertices.Num())
+
+    FRandomStream RandomStream;
+    if (AreaData.bOverrideRandomSeed)
     {
-        SelectedVertices = MoveTemp(WettableVertices);
+        RandomStream.Initialize(AreaData.RandomSeed);
     }
     else
     {
-        FRandomStream RandomStream;
-        if (AreaData.bOverrideRandomSeed)
-        {
-            RandomStream.Initialize(AreaData.RandomSeed);
-        }
-        else
-        {
-            RandomStream.GenerateNewSeed();
-        }
-
-        TSet<int32> SelectedSet;
-        SelectedSet.Reserve(SamplesToProcess);
-        int32 Attempts = 0;
-        const int32 MaxAttempts = SamplesToProcess * 8;
-        while (SelectedSet.Num() < SamplesToProcess && Attempts < MaxAttempts)
-        {
-            ++Attempts;
-            SelectedSet.Add(WettableVertices[RandomStream.RandRange(0, WettableVertices.Num() - 1)]);
-        }
-        for (const int32 VertexIndex : SelectedSet)
-        {
-            SelectedVertices.Add(VertexIndex);
-        }
+        RandomStream.GenerateNewSeed();
     }
 
     TMap<int32, FVector> WorldPositionCache;
@@ -604,8 +622,102 @@ bool FWetSurfaceContactResolver::ResolveWetArea(
         return false;
     };
 
-    for (const int32 VertexIndex : SelectedVertices)
+    TArray<FWetAreaCandidate> SelectedCandidates;
+    SelectedCandidates.Reserve(SamplesToProcess);
+    if (!bWantsNormalExposure)
     {
+        if (SamplesToProcess == WettableVertices.Num())
+        {
+            for (const int32 VertexIndex : WettableVertices)
+            {
+                SelectedCandidates.Add({VertexIndex, 1.0f, 1.0f});
+            }
+        }
+        else
+        {
+            TSet<int32> SelectedSet;
+            SelectedSet.Reserve(SamplesToProcess);
+            int32 Attempts = 0;
+            const int32 MaxAttempts = SamplesToProcess * 8;
+            while (SelectedSet.Num() < SamplesToProcess && Attempts < MaxAttempts)
+            {
+                ++Attempts;
+                SelectedSet.Add(WettableVertices[RandomStream.RandRange(0, WettableVertices.Num() - 1)]);
+            }
+            for (const int32 VertexIndex : SelectedSet)
+            {
+                SelectedCandidates.Add({VertexIndex, 1.0f, 1.0f});
+            }
+        }
+    }
+    else
+    {
+        const int32 CandidateCount =
+            FMath::Min(
+                WettableVertices.Num(),
+                FMath::Max(
+                    SamplesToProcess * GPUWetAreaNormalExposureCandidateMultiplier,
+                    GPUWetAreaNormalExposureMinCandidateCount));
+
+        TSet<int32> CandidateVertexIndices;
+        CandidateVertexIndices.Reserve(CandidateCount);
+        if (CandidateCount == WettableVertices.Num())
+        {
+            for (const int32 VertexIndex : WettableVertices)
+            {
+                CandidateVertexIndices.Add(VertexIndex);
+            }
+        }
+        else
+        {
+            int32 Attempts = 0;
+            const int32 MaxAttempts = CandidateCount * 8;
+            while (CandidateVertexIndices.Num() < CandidateCount && Attempts < MaxAttempts)
+            {
+                ++Attempts;
+                CandidateVertexIndices.Add(WettableVertices[RandomStream.RandRange(0, WettableVertices.Num() - 1)]);
+            }
+        }
+
+        TArray<FWetAreaCandidate> Candidates;
+        Candidates.Reserve(CandidateVertexIndices.Num());
+        for (const int32 VertexIndex : CandidateVertexIndices)
+        {
+            float RawExposure = 0.0f;
+            FVector WorldNormal = FVector::ZeroVector;
+            if (GetWorldNormal(VertexIndex, WorldNormal))
+            {
+                RawExposure = FWetInputStage::CalculateContactExposure(
+                    WorldNormal,
+                    SafeDirection,
+                    SafeNormal,
+                    *Args.WetnessSettings);
+            }
+
+            const float EffectiveExposure = FMath::Clamp(RawExposure, GPUWetAreaNormalExposureMinInfluence, 1.0f);
+            Candidates.Add({
+                VertexIndex,
+                EffectiveExposure,
+                FMath::Pow(EffectiveExposure, GPUWetAreaNormalExposurePickPower)});
+        }
+
+        const int32 PickCount = FMath::Min(SamplesToProcess, Candidates.Num());
+        for (int32 PickIndex = 0; PickIndex < PickCount; ++PickIndex)
+        {
+            const int32 SelectedCandidateIndex = SelectWetAreaCandidateIndex(Candidates, RandomStream);
+            if (SelectedCandidateIndex == INDEX_NONE)
+            {
+                break;
+            }
+
+            SelectedCandidates.Add(Candidates[SelectedCandidateIndex]);
+            Candidates.RemoveAtSwap(SelectedCandidateIndex, 1, EAllowShrinking::No);
+        }
+    }
+
+    for (const FWetAreaCandidate& SelectedCandidate : SelectedCandidates)
+    {
+        const int32 VertexIndex = SelectedCandidate.VertexIndex;
         const FDWCGPUVertexIncidentTriangles* const* Incident = IncidentByVertex.Find(VertexIndex);
         if (Incident == nullptr || *Incident == nullptr)
         {
@@ -618,27 +730,7 @@ bool FWetSurfaceContactResolver::ResolveWetArea(
             continue;
         }
 
-        float Exposure = 1.0f;
-        if (bWantsNormalExposure)
-        {
-            FVector WorldNormal = FVector::ZeroVector;
-            if (!GetWorldNormal(VertexIndex, WorldNormal))
-            {
-                continue;
-            }
-
-            Exposure = FWetInputStage::CalculateContactExposure(
-                WorldNormal,
-                SafeDirection,
-                SafeNormal,
-                *Args.WetnessSettings);
-            if (Exposure <= KINDA_SMALL_NUMBER)
-            {
-                continue;
-            }
-        }
-
-        const float EffectiveAmount = AreaData.Amount * Exposure;
+        const float EffectiveAmount = AreaData.Amount * SelectedCandidate.Exposure;
         TSet<int32> AddedTriangleIDs;
         for (const int32 TriangleID : (*Incident)->TriangleIDs)
         {

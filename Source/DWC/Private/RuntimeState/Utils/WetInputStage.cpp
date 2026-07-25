@@ -50,6 +50,11 @@ namespace
         float Amount = 0.0f;
     };
 
+    constexpr float WetAreaNormalExposureMinInfluence = 0.05f;
+    constexpr int32 WetAreaNormalExposureCandidateMultiplier = 3;
+    constexpr int32 WetAreaNormalExposureMinCandidateCount = 128;
+    constexpr float WetAreaNormalExposurePickPower = 2.0f;
+
     bool RequestAsyncSkinning(FWetInputStageArgs& Receiver, const bool bComputePositions, const bool bComputeNormals)
     {
         if (!Receiver.RequestAsyncSkinning)
@@ -487,6 +492,7 @@ namespace
         const TArray<FWaterInputVertexSample>& Samples,
         const bool bNormalizePositiveInfluence,
         const FVector& WorldFlowDirection,
+        const bool bApplySurfaceWater,
         bool& bDirty,
         bool& bQueuedWetness)
     {
@@ -535,7 +541,8 @@ namespace
                 bApplied = true;
             }
 
-            if (!Sample.Profile || Sample.MaterialSlotIndex == INDEX_NONE ||
+            if (!bApplySurfaceWater ||
+                !Sample.Profile || Sample.MaterialSlotIndex == INDEX_NONE ||
                 !Receiver.RuntimeData->SupportsSurfaceWater(Sample.VertexIndex))
             {
                 continue;
@@ -707,6 +714,7 @@ namespace
             Samples,
             true,
             Evaluation.SafeDirection,
+            true,
             bDirty,
             bQueuedWetness);
     }
@@ -790,6 +798,7 @@ namespace
             Samples,
             true,
             Evaluation.SafeDirection,
+            true,
             bDirty,
             bQueuedWetness);
     }
@@ -818,6 +827,101 @@ float FWetInputStage::CalculateContactExposure(
     }
 
     return Exposure;
+}
+
+bool FWetInputStage::CanApplyWetAreaToVertex(
+    const FWetInputStageArgs& Args,
+    const FDWCWetAreaData& AreaData,
+    const int32 VertexIndex)
+{
+    if (!Args.SimulationState ||
+        !Args.SimulationState->AbsorbedWetnessPerVertex.IsValidIndex(VertexIndex) ||
+        !Args.RuntimeData ||
+        !Args.RuntimeData->SupportsAbsorbedWetness(VertexIndex))
+    {
+        return false;
+    }
+
+    if (AreaData.Amount < 0.0f &&
+        Args.SimulationState->AbsorbedWetnessPerVertex[VertexIndex] <= 0.0f)
+    {
+        return false;
+    }
+
+    return true;
+}
+
+float FWetInputStage::CalculateWetAreaRawExposure(
+    const FWetInputStageArgs& Args,
+    const FSkeletalMeshLODRenderData& LODData,
+    const FTransform& ComponentTransform,
+    const FVector& SafeDirection,
+    const FVector& SafeNormal,
+    const bool bWantsNormalExposure,
+    const bool bHasSkinnedNormals,
+    const int32 VertexIndex)
+{
+    if (!bWantsNormalExposure)
+    {
+        return 1.0f;
+    }
+
+    FVector WorldNormal = FVector::ZeroVector;
+    if (bHasSkinnedNormals &&
+        Args.MeshSampler &&
+        Args.MeshSampler->CachedSkinnedNormals.IsValidIndex(VertexIndex))
+    {
+        WorldNormal =
+            ComponentTransform.TransformVectorNoScale(
+                                  FVector(Args.MeshSampler->CachedSkinnedNormals[VertexIndex]))
+                .GetSafeNormal();
+    }
+    else if (VertexIndex < static_cast<int32>(LODData.StaticVertexBuffers.StaticMeshVertexBuffer.GetNumVertices()))
+    {
+        WorldNormal =
+            ComponentTransform.TransformVectorNoScale(
+                                  FVector(LODData.StaticVertexBuffers.StaticMeshVertexBuffer.VertexTangentZ(VertexIndex)))
+                .GetSafeNormal();
+    }
+
+    if (WorldNormal.IsNearlyZero() || !Args.WetnessSettings)
+    {
+        return 0.0f;
+    }
+
+    return CalculateContactExposure(
+        WorldNormal,
+        SafeDirection,
+        SafeNormal,
+        *Args.WetnessSettings);
+}
+
+int32 FWetInputStage::SelectWetAreaCandidateIndex(
+    const TArray<FWetAreaCandidate>& Candidates,
+    FRandomStream& RandomStream)
+{
+    float TotalPickWeight = 0.0f;
+    for (const FWetAreaCandidate& Candidate : Candidates)
+    {
+        TotalPickWeight += Candidate.PickWeight;
+    }
+
+    if (TotalPickWeight <= KINDA_SMALL_NUMBER)
+    {
+        return Candidates.IsEmpty() ? INDEX_NONE : RandomStream.RandRange(0, Candidates.Num() - 1);
+    }
+
+    float PickValue = RandomStream.FRandRange(0.0f, TotalPickWeight);
+    for (int32 CandidateIndex = 0; CandidateIndex < Candidates.Num(); ++CandidateIndex)
+    {
+        PickValue -= Candidates[CandidateIndex].PickWeight;
+        if (PickValue <= 0.0f)
+        {
+            return CandidateIndex;
+        }
+    }
+
+    return Candidates.Num() - 1;
 }
 
 void FWetInputStage::ApplyWetAll(FWetInputStageArgs& Receiver, float Amount)
@@ -857,6 +961,7 @@ void FWetInputStage::ApplyWetAll(FWetInputStageArgs& Receiver, float Amount)
         Samples,
         false,
         FVector::DownVector,
+        true,
         bDirty,
         bQueuedWetness);
 }
@@ -955,6 +1060,7 @@ bool FWetInputStage::ApplyWetSurface(FWetInputStageArgs& Receiver, const FDWCWat
         Samples,
         false,
         FVector::DownVector,
+        true,
         bDirty,
         bQueuedWetness);
 }
@@ -1016,84 +1122,111 @@ bool FWetInputStage::ApplyWetArea(FWetInputStageArgs&    Receiver,
     TArray<FWaterInputVertexSample> Samples;
     Samples.Reserve(SamplesToProcess);
 
-    auto ApplyRainToVertex = [&](const int32 VertexIndex)
+    if (!bWantsNormalExposure)
     {
-        if (!Receiver.SimulationState->AbsorbedWetnessPerVertex.IsValidIndex(VertexIndex) ||
-            !Receiver.RuntimeData ||
-            (AreaData.Amount > 0.0f
-                 ? !Receiver.RuntimeData->SupportsWaterContact(VertexIndex)
-                 : !Receiver.RuntimeData->SupportsAbsorbedWetness(VertexIndex)))
+        if (SamplesToProcess == VertexCount)
         {
-            return;
-        }
-
-        if (AreaData.Amount < 0.0f &&
-            Receiver.SimulationState->AbsorbedWetnessPerVertex[VertexIndex] <= 0.0f)
-        {
-            return;
-        }
-
-        float Exposure = 1.0f;
-        if (bWantsNormalExposure)
-        {
-            FVector WorldNormal = FVector::ZeroVector;
-            if (bHasSkinnedNormals && Receiver.MeshSampler->CachedSkinnedNormals.IsValidIndex(VertexIndex))
+            for (int32 VertexIndex = 0; VertexIndex < VertexCount; ++VertexIndex)
             {
-                WorldNormal =
-                    ComponentTransform.TransformVectorNoScale(
-                                          FVector(Receiver.MeshSampler->CachedSkinnedNormals[VertexIndex]))
-                        .GetSafeNormal();
-            }
-            else if (VertexIndex < static_cast<int32>(LODData->StaticVertexBuffers.StaticMeshVertexBuffer.GetNumVertices()))
-            {
-                WorldNormal =
-                    ComponentTransform.TransformVectorNoScale(
-                                          FVector(LODData->StaticVertexBuffers.StaticMeshVertexBuffer.VertexTangentZ(VertexIndex)))
-                        .GetSafeNormal();
-            }
-
-            if (WorldNormal.IsNearlyZero())
-            {
-                return;
-            }
-
-            Exposure = FWetInputStage::CalculateContactExposure(
-                WorldNormal,
-                SafeDirection,
-                SafeNormal,
-                *Receiver.WetnessSettings);
-            if (Exposure <= KINDA_SMALL_NUMBER)
-            {
-                return;
+                if (CanApplyWetAreaToVertex(Receiver, AreaData, VertexIndex))
+                {
+                    InitializeWaterSample(Receiver, VertexIndex, 1.0f, Samples.AddDefaulted_GetRef());
+                }
             }
         }
-
-        InitializeWaterSample(Receiver, VertexIndex, Exposure, Samples.AddDefaulted_GetRef());
-    };
-
-    if (SamplesToProcess == VertexCount)
-    {
-        for (int32 VertexIndex = 0; VertexIndex < VertexCount; ++VertexIndex)
+        else
         {
-            ApplyRainToVertex(VertexIndex);
+            TSet<int32> SelectedVertexIndices;
+            SelectedVertexIndices.Reserve(SamplesToProcess);
+
+            int32       Attempts = 0;
+            const int32 MaxAttempts = SamplesToProcess * 8;
+            while (SelectedVertexIndices.Num() < SamplesToProcess && Attempts < MaxAttempts)
+            {
+                ++Attempts;
+                SelectedVertexIndices.Add(RandomStream.RandRange(0, VertexCount - 1));
+            }
+
+            for (const int32 VertexIndex : SelectedVertexIndices)
+            {
+                if (CanApplyWetAreaToVertex(Receiver, AreaData, VertexIndex))
+                {
+                    InitializeWaterSample(Receiver, VertexIndex, 1.0f, Samples.AddDefaulted_GetRef());
+                }
+            }
         }
     }
     else
     {
-        TSet<int32> SelectedVertexIndices;
-        SelectedVertexIndices.Reserve(SamplesToProcess);
+        const int32 CandidateCount =
+            FMath::Min(
+                VertexCount,
+                FMath::Max(
+                    SamplesToProcess * WetAreaNormalExposureCandidateMultiplier,
+                    WetAreaNormalExposureMinCandidateCount));
 
-        int32       Attempts = 0;
-        const int32 MaxAttempts = SamplesToProcess * 8;
-        while (SelectedVertexIndices.Num() < SamplesToProcess && Attempts < MaxAttempts)
+        TSet<int32> CandidateVertexIndices;
+        CandidateVertexIndices.Reserve(CandidateCount);
+
+        if (CandidateCount == VertexCount)
         {
-            ++Attempts;
-            SelectedVertexIndices.Add(RandomStream.RandRange(0, VertexCount - 1));
+            for (int32 VertexIndex = 0; VertexIndex < VertexCount; ++VertexIndex)
+            {
+                CandidateVertexIndices.Add(VertexIndex);
+            }
+        }
+        else
+        {
+            int32       Attempts = 0;
+            const int32 MaxAttempts = CandidateCount * 8;
+            while (CandidateVertexIndices.Num() < CandidateCount && Attempts < MaxAttempts)
+            {
+                ++Attempts;
+                CandidateVertexIndices.Add(RandomStream.RandRange(0, VertexCount - 1));
+            }
         }
 
-        for (const int32 VertexIndex : SelectedVertexIndices)
+        TArray<FWetAreaCandidate> Candidates;
+        Candidates.Reserve(CandidateVertexIndices.Num());
+        for (const int32 VertexIndex : CandidateVertexIndices)
         {
-            ApplyRainToVertex(VertexIndex);
+            if (!CanApplyWetAreaToVertex(Receiver, AreaData, VertexIndex))
+            {
+                continue;
+            }
+
+            const float RawExposure = CalculateWetAreaRawExposure(
+                Receiver,
+                *LODData,
+                ComponentTransform,
+                SafeDirection,
+                SafeNormal,
+                bWantsNormalExposure,
+                bHasSkinnedNormals,
+                VertexIndex);
+            const float EffectiveExposure = FMath::Clamp(RawExposure, WetAreaNormalExposureMinInfluence, 1.0f);
+            Candidates.Add({
+                VertexIndex,
+                EffectiveExposure,
+                FMath::Pow(EffectiveExposure, WetAreaNormalExposurePickPower)});
+        }
+
+        const int32 PickCount = FMath::Min(SamplesToProcess, Candidates.Num());
+        for (int32 PickIndex = 0; PickIndex < PickCount; ++PickIndex)
+        {
+            const int32 SelectedCandidateIndex = SelectWetAreaCandidateIndex(Candidates, RandomStream);
+            if (SelectedCandidateIndex == INDEX_NONE)
+            {
+                break;
+            }
+
+            const FWetAreaCandidate SelectedCandidate = Candidates[SelectedCandidateIndex];
+            InitializeWaterSample(
+                Receiver,
+                SelectedCandidate.VertexIndex,
+                SelectedCandidate.Exposure,
+                Samples.AddDefaulted_GetRef());
+            Candidates.RemoveAtSwap(SelectedCandidateIndex, 1, EAllowShrinking::No);
         }
     }
 
@@ -1103,6 +1236,7 @@ bool FWetInputStage::ApplyWetArea(FWetInputStageArgs&    Receiver,
         Samples,
         false,
         SafeDirection,
+        false,
         bDirty,
         bQueuedWetness);
 }

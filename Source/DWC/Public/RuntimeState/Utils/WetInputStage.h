@@ -6,6 +6,7 @@
 #include "Templates/Function.h"
 
 class USkeletalMeshComponent;
+class FSkeletalMeshLODRenderData;
 class FWetClothingRuntimeData;
 class FWetClothingMeshSampler;
 class FAbsorbedWetnessSimulationState;
@@ -79,4 +80,25 @@ class DWC_API FWetInputStage
         const FVector&              WorldPosition,
         float&                      OutSurfaceZ);
 
+  private:
+    struct FWetAreaCandidate
+    {
+        int32 VertexIndex = INDEX_NONE;
+        float Exposure = 1.0f;
+        float PickWeight = 1.0f;
+    };
+
+    static bool CanApplyWetAreaToVertex(const FWetInputStageArgs& Args, const FDWCWetAreaData& AreaData, int32 VertexIndex);
+
+    static float CalculateWetAreaRawExposure(
+        const FWetInputStageArgs&         Args,
+        const FSkeletalMeshLODRenderData& LODData,
+        const FTransform&                 ComponentTransform,
+        const FVector&                    SafeDirection,
+        const FVector&                    SafeNormal,
+        bool                              bWantsNormalExposure,
+        bool                              bHasSkinnedNormals,
+        int32                             VertexIndex);
+
+    static int32 SelectWetAreaCandidateIndex(const TArray<FWetAreaCandidate>& Candidates, FRandomStream& RandomStream);
 };

@@ -12,9 +12,7 @@
 #include "WetInputSystem/Sampling/WetClothingMeshSampler.h"
 #include "WetRendering/WetRenderStage.h"
 #include "WetSimulation/AbsorbedWetness/AbsorbedWetnessSimulationState.h"
-#include "GPU/DWCSurfaceWaterSimulationState.h"
 #include "GPU/DWCGPUBackend.h"
-#include "Modules/ModuleManager.h"
 #include "Utility/DWCLog.h"
 
 namespace
@@ -46,16 +44,6 @@ namespace
             Receiver.GPUBackend.Reset();
         }
 
-        for (TPair<int32, TUniquePtr<IDWCSurfaceWaterSimulationState>>& Pair :
-             Receiver.SurfaceWaterStatesByMaterialSlot)
-        {
-            if (Pair.Value.IsValid())
-            {
-                Pair.Value->Release();
-            }
-        }
-        Receiver.SurfaceWaterStatesByMaterialSlot.Reset();
-        Receiver.SurfaceWaterProfilesByMaterialSlot.Reset();
     }
 
     void LogRuntimeModeData(
@@ -443,107 +431,6 @@ bool FWetMeshReceiverInitializer::InitializeReceiver(
         }
     }
 
-    const FSurfaceWaterSimulationSettings& SurfaceSimulationSettings =
-        Receiver.WetClothingAsset->Authored.SurfaceWaterSettings;
-    if (SurfaceSimulationSettings.bEnabled &&
-        !IsReceiverInitializerGPUWetnessMode(Context.SimulationMode))
-    {
-        TSet<int32> SurfaceEnabledMaterialSlots;
-        for (int32 VertexIndex = 0;
-             VertexIndex < Receiver.SharedRuntimeData->SurfaceWaterMaterialSlotIndices.Num();
-             ++VertexIndex)
-        {
-            if (!Receiver.SharedRuntimeData->SupportsSurfaceWater(VertexIndex))
-            {
-                continue;
-            }
-            const int32 MaterialSlotIndex =
-                Receiver.SharedRuntimeData->SurfaceWaterMaterialSlotIndices[VertexIndex];
-            if (MaterialSlotIndex == INDEX_NONE)
-            {
-                continue;
-            }
-            SurfaceEnabledMaterialSlots.Add(MaterialSlotIndex);
-
-            if (const FWetnessProfileParameters* Profile =
-                    Receiver.SharedRuntimeData->GetWetnessProfileParameters(VertexIndex))
-            {
-                const FSurfaceWaterProfileParameters& Candidate = Profile->SurfaceWater;
-                FSurfaceWaterProfileParameters* Existing =
-                    Receiver.SurfaceWaterProfilesByMaterialSlot.Find(MaterialSlotIndex);
-                if (Existing == nullptr ||
-                    Candidate.MaterialTimeUpdateInterval < Existing->MaterialTimeUpdateInterval)
-                {
-                    // The per-pixel presentation now comes from the render-profile LUT. This map is
-                    // retained only to resolve the fastest Surface Water material update interval.
-                    Receiver.SurfaceWaterProfilesByMaterialSlot.Add(MaterialSlotIndex, Candidate);
-                }
-            }
-        }
-
-        IDWCGPUModule* GPUModule =
-            FModuleManager::Get().LoadModulePtr<IDWCGPUModule>(TEXT("DWCGPU"));
-        if (GPUModule == nullptr)
-        {
-            UE_LOG(
-                LogDWC,
-                Warning,
-                TEXT("DynamicWetClothesComponent: DWCGPU is unavailable, so CPU surface-water render targets cannot be created for '%s'."),
-                *GetNameSafe(Context.Owner));
-        }
-
-        for (const int32 MaterialSlotIndex : SurfaceEnabledMaterialSlots)
-        {
-            const FWetClothingAuthoredMaterialSlot* AuthoredSlot =
-                Receiver.WetClothingAsset->Authored.PartData.EditableWetPartData.FindMaterialSlot(MaterialSlotIndex);
-            if (AuthoredSlot != nullptr && !AuthoredSlot->SurfaceWater.bEnabled)
-            {
-                continue;
-            }
-
-            TUniquePtr<IDWCSurfaceWaterSimulationState> State;
-            if (GPUModule != nullptr)
-            {
-                State = GPUModule->CreateSurfaceWaterSimulationState();
-            }
-            if (State.IsValid() && State->Initialize(
-                    Context.Component,
-                    SurfaceSimulationSettings.RenderTargetResolution))
-            {
-                Receiver.SurfaceWaterStatesByMaterialSlot.Add(
-                    MaterialSlotIndex,
-                    MoveTemp(State));
-            }
-            else
-            {
-                UE_LOG(
-                    LogTemp,
-                    Warning,
-                    TEXT("DynamicWetClothesComponent: Surface Water RTs for material slot %d could not be initialized; absorbed wetness remains active."),
-                    MaterialSlotIndex);
-            }
-        }
-
-        uint64 EstimatedGpuMemoryBytes = 0;
-        for (const TPair<int32, TUniquePtr<IDWCSurfaceWaterSimulationState>>& Pair :
-             Receiver.SurfaceWaterStatesByMaterialSlot)
-        {
-            if (Pair.Value.IsValid())
-            {
-                EstimatedGpuMemoryBytes += Pair.Value->GetEstimatedGpuMemoryBytes();
-            }
-        }
-        UE_LOG(
-            LogDWC,
-            Log,
-            TEXT("DWC Surface Water: receiver '%s' initialized %d material-slot state(s), %d render targets, estimated RT memory %.2f MiB at %dx%d."),
-            *Receiver.ReceiverId.ToString(),
-            Receiver.SurfaceWaterStatesByMaterialSlot.Num(),
-            Receiver.SurfaceWaterStatesByMaterialSlot.Num() * 2,
-            static_cast<double>(EstimatedGpuMemoryBytes) / (1024.0 * 1024.0),
-            SurfaceSimulationSettings.RenderTargetResolution,
-            SurfaceSimulationSettings.RenderTargetResolution);
-    }
 
     return true;
 }

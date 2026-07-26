@@ -1,9 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "DataAssets/WetnessProfile.h"
 #include "WetRendering/WetMaterialParameters.h"
-#include "WetSimulation/SurfaceWater/SurfaceWaterSimulationSettings.h"
 
 class USkeletalMeshComponent;
 class UMaterialInstanceDynamic;
@@ -11,7 +9,6 @@ class UTexture2D;
 class UWetClothingAsset;
 class FWetClothingRuntimeData;
 class FAbsorbedWetnessSimulationState;
-class IDWCSurfaceWaterSimulationState;
 struct FWetClothingSettings;
 
 /*
@@ -35,7 +32,6 @@ struct DWC_API FWetRenderStageArgs
     bool bShowWetPartDebugColors = false;
     bool bShowSurfaceWaterDebugColors = false;
     bool bGPUWetnessMode = false;
-    const TMap<int32, TUniquePtr<IDWCSurfaceWaterSimulationState>>* SurfaceWaterStatesByMaterialSlot = nullptr;
 
     TArray<TObjectPtr<UMaterialInstanceDynamic>>* WetMaterialInstances = nullptr;
 

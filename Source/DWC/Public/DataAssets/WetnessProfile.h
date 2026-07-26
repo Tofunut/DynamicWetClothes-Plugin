@@ -50,7 +50,7 @@ struct DWC_API FSurfaceWaterProfileParameters
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water", meta = (DisplayName = "Enabled (GPU Simulation Only)", ToolTip = "Surface Water is available only when the component uses GPU Simulation."))
     bool bEnabled = false;
 
     /** Enables droplet stamp generation for this profile. */
@@ -95,8 +95,6 @@ struct DWC_API FSurfaceWaterProfileParameters
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rivulet", meta = (ClampMin="0.0", ClampMax="512.0", DisplayName="Rivulet Base Length (RT Pixels)"))
     float FlowLengthPixels = 48.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rendering", meta=(ClampMin="0.001"))
-    float MaterialTimeUpdateInterval = 1.0f / 30.0f;
 
     /** Shared strength applied to both droplet and rivulet normals. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rendering", meta=(ClampMin="0.0", ClampMax="8.0"))

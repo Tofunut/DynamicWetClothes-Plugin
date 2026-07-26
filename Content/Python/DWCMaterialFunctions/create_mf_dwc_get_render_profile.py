@@ -168,7 +168,7 @@ def build() -> None:
         ("AbsorbedDarkeningStrength", "R", "PROFILE_AbsorbedDarkeningStrength"),
         ("AbsorbedGlossinessStrength", "G", "PROFILE_AbsorbedGlossinessStrength"),
         ("DropletNormalSlice", "B", "PROFILE_DropletNormalSlice"),
-        ("RivuletNormalSlice", "A", "PROFILE_RivuletNormalSlice"),
+        ("StreakNormalSlice", "A", "PROFILE_StreakNormalSlice"),
     ]
     profile_decls: dict[str, object] = {}
     for i, (output_name, channel, reroute_name) in enumerate(texel0_names):
@@ -183,7 +183,7 @@ def build() -> None:
         ("SurfaceWaterNormalStrength", "R", "PROFILE_SurfaceWaterNormalStrength"),
         ("SurfaceWaterRoughnessStrength", "G", "PROFILE_SurfaceWaterRoughnessStrength"),
         ("SurfaceVisibilityThreshold", "B", "PROFILE_SurfaceVisibilityThreshold"),
-        ("RivuletUVScrollSpeed", "A", "PROFILE_RivuletUVScrollSpeed"),
+        ("StreakDetailMotionSpeed", "A", "PROFILE_StreakDetailMotionSpeed"),
     ]
     for i, (output_name, channel, reroute_name) in enumerate(texel1_names):
         mask = c.component_mask(mf, texel1_uses[i], ("", "Result"), channel, 7800, -1500 + i * 480)
@@ -194,19 +194,19 @@ def build() -> None:
     # 3-3 Function outputs use only local Named Reroute usages; no wires cross comments.
     ordered_outputs = [
         "AbsorbedDarkeningStrength", "AbsorbedGlossinessStrength",
-        "DropletNormalSlice", "RivuletNormalSlice",
+        "DropletNormalSlice", "StreakNormalSlice",
         "SurfaceWaterNormalStrength", "SurfaceWaterRoughnessStrength",
-        "SurfaceVisibilityThreshold", "RivuletUVScrollSpeed",
+        "SurfaceVisibilityThreshold", "StreakDetailMotionSpeed",
     ]
     descriptions = {
         "AbsorbedDarkeningStrength": "Absorbed wetness base-color darkening strength.",
         "AbsorbedGlossinessStrength": "Absorbed wetness roughness blend strength.",
         "DropletNormalSlice": "Droplet normal Texture2DArray slice.",
-        "RivuletNormalSlice": "Rivulet normal Texture2DArray slice.",
+        "StreakNormalSlice": "Streak normal Texture2DArray slice.",
         "SurfaceWaterNormalStrength": "Common surface-water detail-normal strength.",
         "SurfaceWaterRoughnessStrength": "Surface-water roughness blend strength.",
-        "SurfaceVisibilityThreshold": "Visible amount threshold for droplet/rivulet coverage.",
-        "RivuletUVScrollSpeed": "Flow-axis scroll speed for rivulet detail normals.",
+        "SurfaceVisibilityThreshold": "Visible amount threshold for droplet/streak coverage.",
+        "StreakDetailMotionSpeed": "Flow-axis scroll speed for streak detail normals.",
     }
     for i, name in enumerate(ordered_outputs):
         usage = c.named_usage(mf, profile_decls[name], 9650, -1700 + i * 240)

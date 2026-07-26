@@ -42,7 +42,6 @@ namespace
         { TEXT("Parameters.SurfaceWater.FlowLengthPixels"), 0.0, 512.0, 48.0 },
 
         // Rendering | Surface Water
-        { TEXT("Parameters.SurfaceWater.MaterialTimeUpdateInterval"), 0.001, 1.0, 1.0 / 30.0 },
         { TEXT("Parameters.SurfaceWater.SurfaceWaterNormalStrength"), 0.0, 8.0, 1.0 },
         { TEXT("Parameters.SurfaceWater.SurfaceWaterRoughnessStrength"), 0.0, 1.0, 0.5 },
         { TEXT("Parameters.SurfaceWater.SurfaceVisibilityThreshold"), 0.0, 1.0, 0.2 },

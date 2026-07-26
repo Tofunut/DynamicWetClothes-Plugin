@@ -63,14 +63,6 @@ void FDWCLodCoordinator::RefreshReceiverQualityLODPolicy(
     }
 }
 
-bool FDWCLodCoordinator::ShouldRunSurfaceWater(
-    FDWCQualityLODRuntimeState& State,
-    const float BaseInterval)
-{
-    return !QualityLODController.IsValid() ||
-           QualityLODController->ShouldRunSurfaceWater(State, BaseInterval);
-}
-
 bool FDWCLodCoordinator::ShouldRunCPUWetnessRendering(
     FDWCQualityLODRuntimeState& State,
     const float BaseInterval)

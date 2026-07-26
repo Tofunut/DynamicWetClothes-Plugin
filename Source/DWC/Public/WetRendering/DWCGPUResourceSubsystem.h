@@ -10,6 +10,13 @@
 class UMaterialInstanceDynamic;
 class UTexture2D;
 class UTexture2DArray;
+
+/** Runtime render resources required by a receiver backend. */
+enum class EDWCRenderResourceUsage : uint8
+{
+    AbsorbedOnly,
+    FullGPU
+};
 /** Cache identity for immutable GPU lookup resources baked from one WCA material slot. */
 struct DWC_API FDWCGPUStaticResourceKey
 {
@@ -61,6 +68,8 @@ struct DWC_API FDWCGPUStaticSlotResources
     FDWCGPUStaticResourceKey Key;
     FIntPoint LookupExtent = FIntPoint::ZeroValue;
     uint32 TexelCount = 0;
+    FIntPoint SurfaceLookupExtent = FIntPoint::ZeroValue;
+    uint32 SurfaceTexelCount = 0;
     uint32 TriangleCount = 0;
     uint32 SeamDestinationCount = 0;
     uint32 SeamIncomingCount = 0;
@@ -70,6 +79,7 @@ struct DWC_API FDWCGPUStaticSlotResources
     TArray<FDWCGPUStaticSectionResources> Sections;
 
     TRefCountPtr<FRDGPooledBuffer> TexelLookup;
+    TRefCountPtr<FRDGPooledBuffer> SurfaceTexelLookup;
     TRefCountPtr<FRDGPooledBuffer> SeamDestinations;
     TRefCountPtr<FRDGPooledBuffer> SeamIncoming;
 };
@@ -116,6 +126,7 @@ struct DWC_API FDWCAssetRenderProfileResources
     FGuid SourceBakeGuid;
 
     int32 RegistryRevision = INDEX_NONE;
+    bool bSurfaceResourcesResolved = false;
 
     bool IsValid() const
     {
@@ -154,7 +165,9 @@ public:
 
     virtual void Deinitialize() override;
 
-    const FDWCAssetRenderProfileResources* AcquireAssetResources(UWetClothingAsset* Asset);
+    const FDWCAssetRenderProfileResources* AcquireAssetResources(
+        UWetClothingAsset* Asset,
+        EDWCRenderResourceUsage Usage);
 
     TSharedPtr<FDWCGPUStaticSlotResources, ESPMode::ThreadSafe> AcquireStaticSlotResources(
         const UWetClothingAsset* Asset,
@@ -162,6 +175,8 @@ public:
         const FString& BuildSignature,
         FIntPoint LookupExtent,
         uint32 TexelCount,
+        FIntPoint SurfaceLookupExtent,
+        uint32 SurfaceTexelCount,
         uint32 TriangleCount,
         int32 SectionCount);
 
@@ -170,7 +185,8 @@ public:
 
     void ApplyResourcesToMaterials(
         UWetClothingAsset* Asset,
-        const TArray<TObjectPtr<UMaterialInstanceDynamic>>& MaterialInstances);
+        const TArray<TObjectPtr<UMaterialInstanceDynamic>>& MaterialInstances,
+        EDWCRenderResourceUsage Usage);
 
     UTexture2D* GetGlobalRenderProfileLUT() const { return GlobalRenderProfileLUT; }
     UTexture2DArray* GetDropletNormalArray() const { return DropletNormalArray; }
@@ -183,6 +199,7 @@ private:
     {
         FString StableKey;
         TArray<FLinearColor> PackedTexels;
+        bool bSurfaceResourcesResolved = false;
     };
 
     struct FTextureArrayRegistry
@@ -192,6 +209,8 @@ private:
         int32 SizeX = 0;
         int32 SizeY = 0;
         int32 PixelFormat = INDEX_NONE;
+        int32 AllocatedCapacity = 0;
+        TSet<int32> DirtySlices;
 
         void SetNeutral(UTexture2D* Texture, bool& bOutChanged);
         int32 FindOrAdd(UTexture2D* Texture, bool& bOutChanged);
@@ -200,11 +219,24 @@ private:
 
     int32 FindOrAddRuntimeProfile(
         const struct FWetClothingLocalRenderProfile& LocalProfile,
-        bool& bOutChanged);
+        EDWCRenderResourceUsage Usage);
 
     void EnsureNeutralResources();
     void RebuildGlobalRenderProfileLUT();
-    void RebuildTextureArrays();
+    void UpdateGlobalRenderProfileLUT(int32 RuntimeProfileIndex);
+    void FlushDirtyRuntimeProfiles();
+    void RebindGlobalRenderProfileLUT();
+    bool EnsureTextureArraysUpToDate();
+    bool EnsureTextureArray(
+        const TCHAR* DebugName,
+        FTextureArrayRegistry& Registry,
+        TObjectPtr<UTexture2DArray>& Array,
+        bool bNormalArray);
+    void UploadTextureArraySlices(
+        UTexture2DArray* Array,
+        const FTextureArrayRegistry& Registry,
+        const TSet<int32>& SliceIndices);
+    void RebindGPUTextureArrays();
     UTexture2D* BuildAssetRemapLUT(
         UWetClothingAsset* Asset,
         const TArray<int32>& LocalToRuntimeProfileIndices);
@@ -213,14 +245,16 @@ private:
         UMaterialInstanceDynamic& MID,
         const UWetClothingAsset* WetClothingAsset,
         int32 MaterialSlotIndex,
-        const FWetClothingLocalRenderProfile* CachedProfile);
+        const FWetClothingLocalRenderProfile* CachedProfile,
+        EDWCRenderResourceUsage Usage);
 
     UTexture2DArray* BuildTextureArray(
         const TCHAR* DebugName,
         const TArray<TObjectPtr<UTexture2D>>& SourceTextures,
+        int32 SliceCapacity,
         bool bNormalArray);
 
-    void BindGlobalResources(UMaterialInstanceDynamic& MID) const;
+    void BindGlobalResources(UMaterialInstanceDynamic& MID, EDWCRenderResourceUsage Usage) const;
 
     UPROPERTY(Transient)
     TObjectPtr<UTexture2D> NeutralProfileIDTexture = nullptr;
@@ -246,6 +280,9 @@ private:
     TMap<FString, int32> RuntimeProfileIndexByKey;
     FTextureArrayRegistry DropletNormalRegistry;
     FTextureArrayRegistry RivuletNormalRegistry;
+    TSet<int32> DirtyRuntimeProfileIndices;
+    TSet<TWeakObjectPtr<UMaterialInstanceDynamic>> RegisteredMaterialInstances;
+    TSet<TWeakObjectPtr<UMaterialInstanceDynamic>> GPUMaterialInstances;
     bool bTextureArraysDirty = false;
     int32 RegistryRevision = 0;
 };

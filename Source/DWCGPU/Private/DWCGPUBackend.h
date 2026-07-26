@@ -28,6 +28,8 @@ private:
         int32 MaterialSlotIndex = INDEX_NONE;
         int32 StaticSlotIndex = INDEX_NONE;
         int32 Resolution = 0;
+        int32 SurfaceWaterResolution = 0;
+        bool bUsesSurfaceWater = false;
         TArray<TStrongObjectPtr<UTextureRenderTarget2D>> WetnessMaps;
         TArray<TStrongObjectPtr<UTextureRenderTarget2D>> PendingWetnessMaps;
         TStrongObjectPtr<UTextureRenderTarget2D> SurfaceDropletRT;

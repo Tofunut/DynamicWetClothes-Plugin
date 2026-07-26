@@ -4,8 +4,6 @@ namespace
 {
     constexpr int32 DefaultQualityLODCount = 5;
     constexpr float DefaultCPUWetnessRenderUpdateInterval = 0.1f;
-    constexpr float DefaultSurfaceWaterUpdateRateHz = 30.0f;
-    constexpr float DefaultSurfaceWaterUpdateInterval = 1.0f / DefaultSurfaceWaterUpdateRateHz;
 
     FDWCQualityLODPolicyEntry MakeDefaultQualityLODPolicyEntry(const int32 InQualityLOD)
     {
@@ -35,7 +33,6 @@ FDWCQualityLODPolicy UDWCQualityLODProfile::MakeDefaultPolicyForLOD(const int32 
     FDWCQualityLODPolicy DefaultPolicy;
     const float IntervalMultiplier = SafeLOD == 0 ? 1.0f : FMath::Pow(2.0f, static_cast<float>(FMath::Min(SafeLOD, 4)));
     DefaultPolicy.RenderUpdateInterval = DefaultCPUWetnessRenderUpdateInterval * IntervalMultiplier;
-    DefaultPolicy.SurfaceWaterUpdateInterval = DefaultSurfaceWaterUpdateInterval * IntervalMultiplier;
 
     if (SafeLOD == 2)
     {

@@ -10,6 +10,9 @@ struct FScopedSlowTask;
 class DWC_API FWetGPUMapBakeBuilder
 {
 public:
+    /** Returns the progress work consumed by BuildLODMaps(). */
+    static float GetLODMapBakeProgressWork(const UWetClothingAsset& Asset);
+
     /** Builds triangle/profile/incident data only. */
     static bool BuildRuntimeLOD(
         UWetClothingAsset& Asset,

@@ -48,7 +48,6 @@ namespace
 #include "DataAssets/WetClothingTransparencyData.h"
 #include "DataAssets/WetClothingWrinkleData.h"
 #include "Profiling/DWCStats.h"
-#include "GPU/DWCSurfaceWaterSimulationState.h"
 #include "Utility/DWCLog.h"
 
 namespace
@@ -122,7 +121,10 @@ void FWetRenderStage::ApplyWetMaterialParameters(FWetRenderStageArgs& Receiver)
             {
                 ResourceSubsystem->ApplyResourcesToMaterials(
                     const_cast<UWetClothingAsset*>(Receiver.WetClothingAsset),
-                    *Receiver.WetMaterialInstances);
+                    *Receiver.WetMaterialInstances,
+                    Receiver.bGPUWetnessMode
+                        ? EDWCRenderResourceUsage::FullGPU
+                        : EDWCRenderResourceUsage::AbsorbedOnly);
             }
         }
     }
@@ -142,82 +144,26 @@ void FWetRenderStage::ApplyWetMaterialParameters(FWetRenderStageArgs& Receiver)
                 DWCWetMaterialParameters::WetPartDebugStrength(),
                 Receiver.bShowWetPartDebugColors ? 1.0f : 0.0f);
         }
-        if (!DWCWetMaterialParameters::SurfaceWaterDebugStrength().IsNone())
+        if (Receiver.bGPUWetnessMode)
         {
-            MID->SetScalarParameterValue(
-                DWCWetMaterialParameters::SurfaceWaterDebugStrength(),
-                Receiver.bGPUWetnessMode && Receiver.bShowSurfaceWaterDebugColors ? 1.0f : 0.0f);
-        }
-        if (!DWCWetMaterialParameters::SurfaceWaterDebugDropletColor().IsNone())
-        {
-            MID->SetVectorParameterValue(
-                DWCWetMaterialParameters::SurfaceWaterDebugDropletColor(),
-                FLinearColor(1.0f, 1.0f, 0.0f, 1.0f));
-        }
-        if (!DWCWetMaterialParameters::SurfaceWaterDebugRivuletColor().IsNone())
-        {
-            MID->SetVectorParameterValue(
-                DWCWetMaterialParameters::SurfaceWaterDebugRivuletColor(),
-                FLinearColor(0.78f, 0.58f, 1.0f, 1.0f));
-        }
-        if (!Receiver.bGPUWetnessMode)
-        {
-            IDWCSurfaceWaterSimulationState* SurfaceState = nullptr;
-            if (Receiver.SurfaceWaterStatesByMaterialSlot != nullptr)
-            {
-                if (const TUniquePtr<IDWCSurfaceWaterSimulationState>* Found =
-                        Receiver.SurfaceWaterStatesByMaterialSlot->Find(MaterialSlotIndex))
-                {
-                    SurfaceState = Found->Get();
-                }
-            }
-
-            // CPU and GPU rendering share the same Profile ID/LUT/TextureArray
-            // resources. The CPU path only owns and binds its surface-state RTs.
-            if (!DWCWetMaterialParameters::SurfaceWaterRT().IsNone())
-            {
-                MID->SetTextureParameterValue(
-                    DWCWetMaterialParameters::SurfaceWaterRT(),
-                    SurfaceState != nullptr ? SurfaceState->GetDropletRenderTarget() : nullptr);
-            }
-            if (!DWCWetMaterialParameters::SurfaceDropletRT().IsNone())
-            {
-                MID->SetTextureParameterValue(
-                    DWCWetMaterialParameters::SurfaceDropletRT(),
-                    SurfaceState != nullptr ? SurfaceState->GetDropletRenderTarget() : nullptr);
-            }
-            if (!DWCWetMaterialParameters::SurfaceRivuletRT().IsNone())
-            {
-                MID->SetTextureParameterValue(
-                    DWCWetMaterialParameters::SurfaceRivuletRT(),
-                    SurfaceState != nullptr ? SurfaceState->GetRivuletRenderTarget() : nullptr);
-            }
-            // Temporary compatibility alias for an un-migrated material function.
-            if (!DWCWetMaterialParameters::SurfaceFlowRT().IsNone())
-            {
-                MID->SetTextureParameterValue(
-                    DWCWetMaterialParameters::SurfaceFlowRT(),
-                    SurfaceState != nullptr ? SurfaceState->GetRivuletRenderTarget() : nullptr);
-            }
-            if (!DWCWetMaterialParameters::SurfaceWaterTime().IsNone())
+            if (!DWCWetMaterialParameters::SurfaceWaterDebugStrength().IsNone())
             {
                 MID->SetScalarParameterValue(
-                    DWCWetMaterialParameters::SurfaceWaterTime(),
-                    Receiver.SurfaceWaterTimeSeconds);
+                    DWCWetMaterialParameters::SurfaceWaterDebugStrength(),
+                    Receiver.bShowSurfaceWaterDebugColors ? 1.0f : 0.0f);
             }
-            if (!DWCWetMaterialParameters::SurfaceWaterTexelSize().IsNone())
+            if (!DWCWetMaterialParameters::SurfaceWaterDebugDropletColor().IsNone())
             {
-                MID->SetScalarParameterValue(
-                    DWCWetMaterialParameters::SurfaceWaterTexelSize(),
-                    SurfaceState != nullptr && SurfaceState->GetResolution() > 0
-                        ? 1.0f / static_cast<float>(SurfaceState->GetResolution())
-                        : 0.0f);
+                MID->SetVectorParameterValue(
+                    DWCWetMaterialParameters::SurfaceWaterDebugDropletColor(),
+                    FLinearColor(1.0f, 1.0f, 0.0f, 1.0f));
             }
-        }
-        else
-        {
-            // GPU surface RTs and profile resources are owned/bound by DWCGPU and
-            // UDWCGPUResourceSubsystem. Keep only time synchronized here.
+            if (!DWCWetMaterialParameters::SurfaceWaterDebugRivuletColor().IsNone())
+            {
+                MID->SetVectorParameterValue(
+                    DWCWetMaterialParameters::SurfaceWaterDebugRivuletColor(),
+                    FLinearColor(0.78f, 0.58f, 1.0f, 1.0f));
+            }
             if (!DWCWetMaterialParameters::SurfaceWaterTime().IsNone())
             {
                 MID->SetScalarParameterValue(

@@ -10,7 +10,7 @@ struct DWC_API FDWCQualityLODPolicy
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD|Feature")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD|Feature", meta = (DisplayName = "Update GPU Surface Water"))
     bool bUpdateSurfaceWater = true;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD|Feature", meta = (DisplayName = "Update CPU Wetness Rendering"))
@@ -25,8 +25,6 @@ struct DWC_API FDWCQualityLODPolicy
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD|Performance", meta = (ClampMin = "0.0", Units = "s", DisplayName = "CPU Wetness Render Update Interval"))
     float RenderUpdateInterval = 0.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD|Performance", meta = (ClampMin = "0.0", Units = "s"))
-    float SurfaceWaterUpdateInterval = 0.0f;
 };
 
 USTRUCT(BlueprintType)
@@ -46,7 +44,6 @@ struct DWC_API FDWCQualityLODRuntimeState
     int32 CurrentQualityLOD = 0;
     FDWCQualityLODPolicy ResolvedPolicy;
     float RenderUpdateAccumulator = 0.0f;
-    float SurfaceWaterUpdateAccumulator = 0.0f;
 };
 
 USTRUCT(BlueprintType)

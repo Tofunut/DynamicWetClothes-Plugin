@@ -15,7 +15,6 @@
 #include "Runtime/Engine/Classes/Engine/SkeletalMesh.h"
 #include "Runtime/Engine/Public/Rendering/SkeletalMeshLODRenderData.h"
 #include "Runtime/Engine/Public/Rendering/SkeletalMeshRenderData.h"
-#include "Runtime/Engine/Public/Rendering/StaticMeshVertexBuffer.h"
 #include "DataAssets/WetClothingAsset.h"
 #include "DataAssets/WetnessProfile.h"
 #include "UObject/Package.h"
@@ -83,134 +82,6 @@ namespace
             : ProfileAssignment->Parameters;
     }
 
-    int32 ResolveSurfaceWaterNormalUVChannel(
-        const UWetClothingAsset& Asset,
-        const int32 MaterialSlotIndex)
-    {
-        const FWetClothingAuthoredMaterialSlot* AuthoredSlot =
-            Asset.Authored.PartData.EditableWetPartData.FindMaterialSlot(MaterialSlotIndex);
-        if (const FSurfaceWaterMaterialSlotData* SlotData =
-                AuthoredSlot != nullptr ? &AuthoredSlot->SurfaceWater : nullptr)
-        {
-            if (SlotData->SurfaceWaterNormalUVChannel != INDEX_NONE)
-            {
-                return SlotData->SurfaceWaterNormalUVChannel;
-            }
-        }
-        return Asset.GetOriginalUVChannelIndex();
-    }
-
-    void BuildSurfaceWaterFlowTriangleBindings(
-        const UWetClothingAsset& Asset,
-        const FSkeletalMeshLODRenderData& LODData,
-        FWetClothingRuntimeData& RuntimeData)
-    {
-        const int32 VertexCount = LODData.GetNumVertices();
-        RuntimeData.SurfaceWaterFlowTriangleBindings.Init(
-            FSurfaceWaterFlowTriangleBinding(),
-            VertexCount);
-
-        TArray<uint32> IndexBuffer;
-        LODData.MultiSizeIndexContainer.GetIndexBuffer(IndexBuffer);
-        const int32 UVChannelCount = static_cast<int32>(LODData.GetNumTexCoords());
-        const FStaticMeshVertexBuffer& VertexBuffer =
-            LODData.StaticVertexBuffers.StaticMeshVertexBuffer;
-
-        for (const FSkelMeshRenderSection& Section : LODData.RenderSections)
-        {
-            if (!Section.IsValid())
-            {
-                continue;
-            }
-
-            const int32 MaterialSlotIndex = Section.MaterialIndex;
-            const FWetClothingAuthoredMaterialSlot* AuthoredSlot =
-                Asset.Authored.PartData.EditableWetPartData.FindMaterialSlot(MaterialSlotIndex);
-            const FSurfaceWaterMaterialSlotData* SlotData = AuthoredSlot != nullptr ? &AuthoredSlot->SurfaceWater : nullptr;
-            if (SlotData != nullptr && !SlotData->bEnabled)
-            {
-                continue;
-            }
-
-            const int32 NormalUVChannel =
-                ResolveSurfaceWaterNormalUVChannel(Asset, MaterialSlotIndex);
-            if (NormalUVChannel < 0 || NormalUVChannel >= UVChannelCount)
-            {
-                continue;
-            }
-
-            const int32 FirstIndex = static_cast<int32>(Section.BaseIndex);
-            const int32 LastIndex = FMath::Min(
-                FirstIndex + static_cast<int32>(Section.NumTriangles * 3),
-                IndexBuffer.Num());
-
-            for (int32 IndexOffset = FirstIndex; IndexOffset + 2 < LastIndex; IndexOffset += 3)
-            {
-                const int32 V0 = static_cast<int32>(IndexBuffer[IndexOffset]);
-                const int32 V1 = static_cast<int32>(IndexBuffer[IndexOffset + 1]);
-                const int32 V2 = static_cast<int32>(IndexBuffer[IndexOffset + 2]);
-                if (V0 < 0 || V1 < 0 || V2 < 0 ||
-                    V0 >= VertexCount || V1 >= VertexCount || V2 >= VertexCount)
-                {
-                    continue;
-                }
-
-                const FVector2f UV0 = VertexBuffer.GetVertexUV(V0, NormalUVChannel);
-                const FVector2f UV1 = VertexBuffer.GetVertexUV(V1, NormalUVChannel);
-                const FVector2f UV2 = VertexBuffer.GetVertexUV(V2, NormalUVChannel);
-                if (UV0.ContainsNaN() || UV1.ContainsNaN() || UV2.ContainsNaN())
-                {
-                    continue;
-                }
-
-                const float UVArea2 = FMath::Abs(
-                    (UV1.X - UV0.X) * (UV2.Y - UV0.Y) -
-                    (UV1.Y - UV0.Y) * (UV2.X - UV0.X));
-                if (UVArea2 <= 1.0e-10f)
-                {
-                    continue;
-                }
-
-                FVector2f DataUV0;
-                FVector2f DataUV1;
-                FVector2f DataUV2;
-                if (!RuntimeData.TryGetSurfaceWaterUV(V0, DataUV0) ||
-                    !RuntimeData.TryGetSurfaceWaterUV(V1, DataUV1) ||
-                    !RuntimeData.TryGetSurfaceWaterUV(V2, DataUV2))
-                {
-                    continue;
-                }
-
-                const float DataUVArea2 = FMath::Abs(
-                    (DataUV1.X - DataUV0.X) * (DataUV2.Y - DataUV0.Y) -
-                    (DataUV1.Y - DataUV0.Y) * (DataUV2.X - DataUV0.X));
-                if (DataUVArea2 <= 1.0e-10f)
-                {
-                    continue;
-                }
-
-                FSurfaceWaterFlowTriangleBinding Binding;
-                Binding.VertexIndices = FIntVector(V0, V1, V2);
-                Binding.DataUV0 = DataUV0;
-                Binding.DataUV1 = DataUV1;
-                Binding.DataUV2 = DataUV2;
-                Binding.NormalUV0 = UV0;
-                Binding.NormalUV1 = UV1;
-                Binding.NormalUV2 = UV2;
-                for (const int32 VertexIndex : {V0, V1, V2})
-                {
-                    if (!RuntimeData.SupportsSurfaceWater(VertexIndex) ||
-                        !RuntimeData.SurfaceWaterMaterialSlotIndices.IsValidIndex(VertexIndex) ||
-                        RuntimeData.SurfaceWaterMaterialSlotIndices[VertexIndex] != MaterialSlotIndex ||
-                        RuntimeData.SurfaceWaterFlowTriangleBindings[VertexIndex].IsValid())
-                    {
-                        continue;
-                    }
-                    RuntimeData.SurfaceWaterFlowTriangleBindings[VertexIndex] = Binding;
-                }
-            }
-        }
-    }
 }
 void FWetRuntimeDataBuilder::InitializeAbsorbedWetnessData(FWetRuntimeDataBuildArgs& Receiver)
 {
@@ -259,14 +130,10 @@ bool FWetRuntimeDataBuilder::InitializeWetPartVertexData(FWetRuntimeDataBuildArg
     Receiver.MutableRuntimeData->VertexWetPartIDs.Init(INDEX_NONE, VertexCount);
     Receiver.MutableRuntimeData->VertexWettableFlags.Init(false, VertexCount);
     Receiver.MutableRuntimeData->VertexAbsorbedWetnessFlags.Init(false, VertexCount);
-    Receiver.MutableRuntimeData->VertexSurfaceWaterFlags.Init(false, VertexCount);
     Receiver.MutableRuntimeData->WetnessProfileTable.Reset();
     Receiver.MutableRuntimeData->VertexWetnessProfileIndices.Init(
         FWetClothingRuntimeData::InvalidWetnessProfileIndex,
         VertexCount);
-    Receiver.MutableRuntimeData->SurfaceWaterUVs.SetNum(VertexCount);
-    Receiver.MutableRuntimeData->SurfaceWaterUVValidFlags.Init(false,VertexCount);
-    Receiver.MutableRuntimeData->SurfaceWaterMaterialSlotIndices.Init(INDEX_NONE, VertexCount);
 
     if (!Receiver.WetClothingAsset || !Receiver.TargetSkeletalMesh)
     {
@@ -315,10 +182,6 @@ bool FWetRuntimeDataBuilder::InitializeWetPartVertexData(FWetRuntimeDataBuildArg
         return false;
     }
 
-    BuildSurfaceWaterFlowTriangleBindings(
-        *Receiver.WetClothingAsset,
-        *LODData,
-        *Receiver.MutableRuntimeData);
     return true;
 }
 
@@ -411,7 +274,6 @@ bool FWetRuntimeDataBuilder::InitializeWetPartVertexDataFromPrecomputedData(
         if (!Receiver.MutableRuntimeData->VertexWetPartIDs.IsValidIndex(VertexIndex) ||
             !Receiver.MutableRuntimeData->VertexWettableFlags.IsValidIndex(VertexIndex) ||
             !Receiver.MutableRuntimeData->VertexAbsorbedWetnessFlags.IsValidIndex(VertexIndex) ||
-            !Receiver.MutableRuntimeData->VertexSurfaceWaterFlags.IsValidIndex(VertexIndex) ||
             !Receiver.MutableRuntimeData->VertexWetnessProfileIndices.IsValidIndex(VertexIndex))
         {
             continue;
@@ -434,15 +296,6 @@ bool FWetRuntimeDataBuilder::InitializeWetPartVertexDataFromPrecomputedData(
             Receiver.MutableRuntimeData->VertexAbsorbedWetnessFlags[VertexIndex] =
                 Profile != nullptr && Profile->SupportsAbsorbedWetness();
             ++RuntimeWettableVertexCount;
-        }
-        if (PrecomputedVertex.bHasSurfaceWaterUV && PrecomputedVertex.SurfaceWaterUV.ContainsNaN() == false)
-        {
-            Receiver.MutableRuntimeData->SurfaceWaterUVs[VertexIndex] = FVector2f(PrecomputedVertex.SurfaceWaterUV);
-            Receiver.MutableRuntimeData->SurfaceWaterUVValidFlags[VertexIndex] = true;
-            Receiver.MutableRuntimeData->SurfaceWaterMaterialSlotIndices[VertexIndex] = PrecomputedVertex.MaterialSlotIndex;
-            Receiver.MutableRuntimeData->VertexSurfaceWaterFlags[VertexIndex] =
-                Receiver.MutableRuntimeData->GetWetnessProfileParameters(VertexIndex) != nullptr &&
-                Receiver.MutableRuntimeData->GetWetnessProfileParameters(VertexIndex)->SupportsSurfaceWater();
         }
     }
 

@@ -21,7 +21,6 @@ class FDWCLodCoordinator
     void SetReceiverQualityLOD(FDWCWetMeshReceiverRuntime& Receiver, int32 InQualityLOD) const;
     void RefreshReceiverQualityLODPolicy(FDWCWetMeshReceiverRuntime& Receiver) const;
 
-    bool ShouldRunSurfaceWater(FDWCQualityLODRuntimeState& State, float BaseInterval);
     bool ShouldRunCPUWetnessRendering(FDWCQualityLODRuntimeState& State, float BaseInterval);
     bool ShouldEnableCPUWetnessRendering(const FDWCQualityLODRuntimeState& State) const;
     bool ShouldUpdateWrinkle(const FDWCQualityLODRuntimeState& State) const;

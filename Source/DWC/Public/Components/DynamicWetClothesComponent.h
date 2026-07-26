@@ -20,7 +20,6 @@
 #include "WetRendering/WetRenderStage.h"
 #include "RuntimeState/Utils/WetSimulationStage.h"
 #include "WetSimulation/AbsorbedWetness/AbsorbedWetnessSimulationState.h"
-#include "GPU/DWCSurfaceWaterSimulationState.h"
 #include "Templates/UniquePtr.h"
 
 #include "DynamicWetClothesComponent.generated.h"
@@ -65,14 +64,10 @@ struct FDWCWetMeshReceiverRuntime
     TUniquePtr<FWetClothingMeshSampler> MeshSampler;
     TUniquePtr<FWetRenderStage> RenderStage;
 
-    // Per-receiver surface-water presentation state.
-    // DWC owns only the interface; RT/compute implementation lives in DWCGPU.
-    TMap<int32, TUniquePtr<IDWCSurfaceWaterSimulationState>> SurfaceWaterStatesByMaterialSlot;
-    TMap<int32, FSurfaceWaterProfileParameters> SurfaceWaterProfilesByMaterialSlot;
-    FRandomStream SurfaceWaterRandomStream = FRandomStream(0x445743);
 
-    // Per-receiver GPU simulation backend.
+    // Per-receiver GPU simulation backend and GPU-only surface stamp RNG.
     TUniquePtr<IDWCGPUBackend> GPUBackend;
+    FRandomStream GPUSurfaceWaterRandomStream = FRandomStream(0x445743);
 
     // LOD vertex-color transfer data.
     // Static LOD data and transfer maps can be shared by multiple receivers,
@@ -182,10 +177,8 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
 
     // Per-frame simulation and rendering updates.
     void                     UpdateWetness();
-    void                     UpdateSurfaceWater();
     void                     UpdateWetRendering();
     bool                     FlushPendingWetContacts();
-    bool                     ShouldUpdateSurfaceWater(FDWCWetMeshReceiverRuntime& Receiver) const;
     bool                     ShouldUpdateCPUWetnessRendering(FDWCWetMeshReceiverRuntime& Receiver) const;
     bool                     ShouldEnableCPUWetnessRendering(const FDWCWetMeshReceiverRuntime& Receiver) const;
 
@@ -318,10 +311,8 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
 
     // Timers and pending frame work.
     FTimerHandle           WetnessSimulationTimer;
-    FTimerHandle           SurfaceWaterSimulationTimer;
     FTimerHandle           WetnessRenderTimer;
     FTimerHandle           RenderLODEvaluationTimer;
-    float                  SurfaceWaterTimerInterval = 1.0f / 30.0f;
     TArray<FDWCWetContact> PendingWetContacts;
     bool                   bPendingWetContactsApplyMaterial = false;
     bool                   bWetRenderDirty = false;

@@ -1,7 +1,5 @@
 #include "DWCGPUBackend.h"
 #include "GPU/DWCGPUBackend.h"
-#include "GPU/DWCSurfaceWaterSimulationState.h"
-#include "SurfaceWater/DWCSurfaceWaterSimulationState.h"
 #include "Interfaces/IPluginManager.h"
 #include "Misc/Paths.h"
 #include "Modules/ModuleManager.h"
@@ -29,10 +27,6 @@ public:
         return MakeUnique<FDWCGPUBackend>();
     }
 
-    virtual TUniquePtr<IDWCSurfaceWaterSimulationState> CreateSurfaceWaterSimulationState() override
-    {
-        return MakeUnique<FDWCSurfaceWaterSimulationState>();
-    }
 };
 
 IMPLEMENT_MODULE(FDWCGPUModule, DWCGPU)

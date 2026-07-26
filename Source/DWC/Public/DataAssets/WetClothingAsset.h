@@ -29,9 +29,6 @@ struct DWC_API FWCAAuthoredData
     UPROPERTY(EditAnywhere, Category = "Wet Clothing|Transparency")
     FWetClothingTransparencyData TransparencyData;
 
-    UPROPERTY(EditAnywhere, Category = "Surface Water", meta = (ShowOnlyInnerProperties))
-    FSurfaceWaterSimulationSettings SurfaceWaterSettings;
-
 #if WITH_EDITORONLY_DATA
     UPROPERTY(EditAnywhere, Category = "Wet Clothing")
     TArray<FString> AdditionalProfileSearchPaths;
@@ -172,10 +169,10 @@ class DWC_API UWetClothingAsset : public UDataAsset
     GENERATED_BODY()
 
   public:
-    static constexpr int32 CurrentAssetDataVersion = 10;
+    static constexpr int32 CurrentAssetDataVersion = 11;
     static constexpr int32 FirstAssetVersionWithSerializedRuntimeBulkData = 4;
-    static constexpr int32 CurrentPrecomputedSimulationDataVersion = 9;
-    static constexpr int32 CurrentRuntimeBulkDataVersion = 5;
+    static constexpr int32 CurrentPrecomputedSimulationDataVersion = 10;
+    static constexpr int32 CurrentRuntimeBulkDataVersion = 6;
     static constexpr int32 RuntimeSimulationLODIndex = 0;
 
     virtual void Serialize(FArchive& Ar) override;
@@ -232,6 +229,8 @@ class DWC_API UWetClothingAsset : public UDataAsset
     FString GetPrecomputedSimulationDataValidationSummary(const USkeletalMesh* SkeletalMesh) const;
     bool IsMaterialSlotWettable(int32 MaterialSlotIndex) const;
     bool HasAnyWettableMaterialSlot() const;
+    bool DoesMaterialSlotUseSurfaceWater(int32 MaterialSlotIndex) const;
+    bool UsesSurfaceWater() const;
     bool HasWrinkleBakeContent() const;
     bool HasTransparencyBakeContent() const;
     const FWetClothingPrecomputedSimulationData& GetPrecomputedSimulationData() const;

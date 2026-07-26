@@ -48,9 +48,9 @@ def build() -> None:
     c.create_comment(mf, "3. Surface Water Appearance", 0, -6000, 11500, 9000, parent=True)
     c.create_comment(mf, "3-1. Surface State Sampling", 500, -5500, 3300, 3500)
     c.create_comment(mf, "3-2. Droplet Lifetime & Coverage", 4300, -5500, 3000, 3500)
-    c.create_comment(mf, "3-3. Rivulet Lifetime & Coverage", 7800, -5500, 3200, 3500)
-    c.create_comment(mf, "3-4. Detail Normal Sampling & Weight", 500, -1500, 6000, 4000)
-    c.create_comment(mf, "3-5. Surface Roughness", 7000, -1500, 4000, 4000)
+    c.create_comment(mf, "3-3. Streak Lifetime & Coverage", 7800, -5500, 3200, 3500)
+    c.create_comment(mf, "3-4. Detail Normal Sampling & Composition", 500, -1500, 6000, 4000)
+    c.create_comment(mf, "3-5. Surface Selection & Roughness", 7000, -1500, 4000, 4000)
 
     c.create_comment(mf, "4. Final Composition", 12500, -6000, 9500, 9000, parent=True)
     c.create_comment(mf, "4-1. Final Base Color", 13000, -5500, 3800, 3500)
@@ -97,7 +97,7 @@ def build() -> None:
         ("SurfaceWaterNormalUV", "vector2", (0.0, 0.0), "Repeated detail-normal mesh UV."),
         ("SurfaceTime", "scalar", (0.0,), "Surface-water lifetime and scroll time."),
         ("DropletUVTiling", "vector2", (1.0, 1.0), "Material-slot droplet detail tiling."),
-        ("RivuletUVTiling", "vector2", (1.0, 1.0), "Material-slot rivulet detail tiling."),
+        ("StreakUVTiling", "vector2", (1.0, 1.0), "Material-slot streak detail tiling."),
         ("SurfaceWaterTargetRoughness", "scalar", (0.05,), "Common visible surface-water target roughness."),
     ]
     for i, (name, kind, preview, desc) in enumerate(runtime_specs):
@@ -117,9 +117,9 @@ def build() -> None:
     c.try_connect(data_uv_use, ("", "Result"), profile_call, "DWCDataUV")
     profile_outputs = [
         "AbsorbedDarkeningStrength", "AbsorbedGlossinessStrength",
-        "DropletNormalSlice", "RivuletNormalSlice",
+        "DropletNormalSlice", "StreakNormalSlice",
         "SurfaceWaterNormalStrength", "SurfaceWaterRoughnessStrength",
-        "SurfaceVisibilityThreshold", "RivuletUVScrollSpeed",
+        "SurfaceVisibilityThreshold", "StreakDetailMotionSpeed",
     ]
     profile_declarations: dict[str, object] = {}
     for i, name in enumerate(profile_outputs):
@@ -226,28 +226,28 @@ return lerp(WetBaseColor, TransparencyColor, Weight);
 
     # 3-1 Surface State Sampling.
     rt_uv_droplet = c.named_usage(mf, declarations["DWCDataUV"], 750, -4700)
-    rt_uv_rivulet = c.named_usage(mf, declarations["DWCDataUV"], 750, -3100)
+    rt_uv_streak = c.named_usage(mf, declarations["DWCDataUV"], 750, -3100)
     droplet_rt = c.texture2d_parameter(
         mf, "DWC_SurfaceDropletRT", data_fallback, 1300, -4700,
         sampler_type=c.linear_color_sampler(), group="DWC Surface Water",
         description="Droplet state RT: R=amount, G=spawn time, B=lifetime."
     )
-    rivulet_rt = c.texture2d_parameter(
-        mf, "DWC_SurfaceRivuletRT", data_fallback, 1300, -3100,
+    streak_rt = c.texture2d_parameter(
+        mf, "DWC_SurfaceStreakRT", data_fallback, 1300, -3100,
         sampler_type=c.linear_color_sampler(), group="DWC Surface Water",
-        description="Rivulet state RT: R=amount, G=spawn time, B=lifetime, A=encoded flow angle."
+        description="Streak state RT: R=amount, G=spawn time, B=lifetime, A=encoded flow angle."
     )
     c.try_connect(rt_uv_droplet, ("", "Result"), droplet_rt, ("Coordinates", "UVs"))
-    c.try_connect(rt_uv_rivulet, ("", "Result"), rivulet_rt, ("Coordinates", "UVs"))
+    c.try_connect(rt_uv_streak, ("", "Result"), streak_rt, ("Coordinates", "UVs"))
 
     surface_decls: dict[str, object] = {}
     droplet_channels = [("DropletAmount", "R"), ("DropletSpawnTime", "G"), ("DropletLifetime", "B")]
     for i, (name, channel) in enumerate(droplet_channels):
         mask = c.component_mask(mf, droplet_rt, channel, channel, 2100, -5000 + i * 550)
         surface_decls[name] = c.named_declaration(mf, f"SURFACE_{name}", mask, ("", "Result"), 2950, -5000 + i * 550)
-    rivulet_channels = [("RivuletAmount", "R"), ("RivuletSpawnTime", "G"), ("RivuletLifetime", "B"), ("RivuletEncodedFlowAngle", "A")]
-    for i, (name, channel) in enumerate(rivulet_channels):
-        mask = c.component_mask(mf, rivulet_rt, channel, channel, 2100, -3200 + i * 500)
+    streak_channels = [("StreakAmount", "R"), ("StreakSpawnTime", "G"), ("StreakLifetime", "B"), ("StreakEncodedFlowAngle", "A")]
+    for i, (name, channel) in enumerate(streak_channels):
+        mask = c.component_mask(mf, streak_rt, channel, channel, 2100, -3200 + i * 500)
         surface_decls[name] = c.named_declaration(mf, f"SURFACE_{name}", mask, ("", "Result"), 2950, -3200 + i * 500)
 
     # Shared coverage helper builder.
@@ -286,24 +286,24 @@ return smoothstep(VisibilityThreshold, VisibilityThreshold + VisibilityFeather, 
     droplet_coverage_decl = create_coverage(
         "Droplet", 4500, -5150, "Compute droplet lifetime fade and visible coverage."
     )
-    rivulet_coverage_decl = create_coverage(
-        "Rivulet", 8000, -5150, "Compute rivulet lifetime fade and visible coverage."
+    streak_coverage_decl = create_coverage(
+        "Streak", 8000, -5150, "Compute streak lifetime fade and visible coverage."
     )
 
     # 3-4 Detail Normal Sampling & Weight.
     normal_call = c.function_call(
         mf, normal_function, 3200, -150,
-        "Sample raw droplet/rivulet detail normals using mesh UV and stored flow angle."
+        "Sample raw droplet/streak detail normals using mesh UV and stored flow angle."
     )
     normal_call_inputs = [
         ("SurfaceWaterNormalUV", declarations["SurfaceWaterNormalUV"]),
         ("SurfaceTime", declarations["SurfaceTime"]),
         ("DropletNormalSlice", profile_declarations["DropletNormalSlice"]),
-        ("RivuletNormalSlice", profile_declarations["RivuletNormalSlice"]),
+        ("StreakNormalSlice", profile_declarations["StreakNormalSlice"]),
         ("DropletUVTiling", declarations["DropletUVTiling"]),
-        ("RivuletUVTiling", declarations["RivuletUVTiling"]),
-        ("EncodedFlowAngle", surface_decls["RivuletEncodedFlowAngle"]),
-        ("RivuletUVScrollSpeed", profile_declarations["RivuletUVScrollSpeed"]),
+        ("StreakUVTiling", declarations["StreakUVTiling"]),
+        ("EncodedFlowAngle", surface_decls["StreakEncodedFlowAngle"]),
+        ("StreakDetailMotionSpeed", profile_declarations["StreakDetailMotionSpeed"]),
     ]
     for i, (input_name, declaration) in enumerate(normal_call_inputs):
         usage = c.named_usage(mf, declaration, 800 + (i % 2) * 1100, -900 + (i // 2) * 700)
@@ -312,32 +312,32 @@ return smoothstep(VisibilityThreshold, VisibilityThreshold + VisibilityFeather, 
     droplet_normal_decl = c.named_declaration(
         mf, "SURFACE_DropletNormal", normal_call, "DropletNormal", 4100, -750
     )
-    rivulet_normal_decl = c.named_declaration(
-        mf, "SURFACE_RivuletNormal", normal_call, "RivuletNormal", 4100, 50
+    streak_normal_decl = c.named_declaration(
+        mf, "SURFACE_StreakNormal", normal_call, "StreakNormal", 4100, 50
     )
     normal_strength_use1 = c.named_usage(mf, profile_declarations["SurfaceWaterNormalStrength"], 4600, -750)
     normal_strength_use2 = c.named_usage(mf, profile_declarations["SurfaceWaterNormalStrength"], 4600, 450)
     droplet_cov_use = c.named_usage(mf, droplet_coverage_decl, 4600, -250)
-    rivulet_cov_use = c.named_usage(mf, rivulet_coverage_decl, 4600, 950)
+    streak_cov_use = c.named_usage(mf, streak_coverage_decl, 4600, 950)
     droplet_weight = c.custom_expression(
         mf, "return saturate(Coverage * NormalStrength);",
         [("Coverage", droplet_cov_use, ("", "Result")), ("NormalStrength", normal_strength_use1, ("", "Result"))],
         "float1", 5350, -500, "Apply profile normal strength to droplet coverage."
     )
-    rivulet_weight = c.custom_expression(
+    streak_weight = c.custom_expression(
         mf, "return saturate(Coverage * NormalStrength);",
-        [("Coverage", rivulet_cov_use, ("", "Result")), ("NormalStrength", normal_strength_use2, ("", "Result"))],
-        "float1", 5350, 700, "Apply profile normal strength to rivulet coverage."
+        [("Coverage", streak_cov_use, ("", "Result")), ("NormalStrength", normal_strength_use2, ("", "Result"))],
+        "float1", 5350, 700, "Apply profile normal strength to streak coverage."
     )
     droplet_weight_decl = c.named_declaration(mf, "SURFACE_DropletNormalWeight", droplet_weight, ("", "Result"), 6100, -500)
-    rivulet_weight_decl = c.named_declaration(mf, "SURFACE_RivuletNormalWeight", rivulet_weight, ("", "Result"), 6100, 700)
+    streak_weight_decl = c.named_declaration(mf, "SURFACE_StreakNormalWeight", streak_weight, ("", "Result"), 6100, 700)
 
     # 3-5 Surface Roughness.
     droplet_cov_use2 = c.named_usage(mf, droplet_coverage_decl, 7350, -650)
-    rivulet_cov_use2 = c.named_usage(mf, rivulet_coverage_decl, 7350, 50)
+    streak_cov_use2 = c.named_usage(mf, streak_coverage_decl, 7350, 50)
     surface_coverage = c.custom_expression(
-        mf, "return max(DropletCoverage, RivuletCoverage);",
-        [("DropletCoverage", droplet_cov_use2, ("", "Result")), ("RivuletCoverage", rivulet_cov_use2, ("", "Result"))],
+        mf, "return max(DropletCoverage, StreakCoverage);",
+        [("DropletCoverage", droplet_cov_use2, ("", "Result")), ("StreakCoverage", streak_cov_use2, ("", "Result"))],
         "float1", 8200, -300, "Combine independent surface states without additive over-brightening."
     )
     surface_coverage_decl = c.named_declaration(mf, "SURFACE_Coverage", surface_coverage, ("", "Result"), 9000, -300)
@@ -348,8 +348,79 @@ return smoothstep(VisibilityThreshold, VisibilityThreshold + VisibilityFeather, 
         [("Coverage", surface_coverage_use, ("", "Result")), ("RoughnessStrength", rough_strength_use, ("", "Result"))],
         "float1", 8200, 1300, "Compute final surface-water roughness blend weight."
     )
+    surface_roughness_raw_decl = c.named_declaration(
+        mf, "SURFACE_RoughnessWeightRaw", surface_roughness_weight, ("", "Result"), 9300, 1300
+    )
+
+    # Compose both surface detail normals before the slot-level static feature gate.
+    droplet_normal_use2 = c.named_usage(mf, droplet_normal_decl, 7000, 2050)
+    streak_normal_use2 = c.named_usage(mf, streak_normal_decl, 7000, 2500)
+    droplet_weight_use2 = c.named_usage(mf, droplet_weight_decl, 7800, 2050)
+    streak_weight_use2 = c.named_usage(mf, streak_weight_decl, 7800, 2500)
+    flat_surface_use = c.named_usage(mf, shared_flat, 7800, 2950)
+    combined_surface_normal = c.custom_expression(
+        mf,
+        """
+float3 D = normalize(lerp(FlatNormal, DropletNormal, saturate(DropletWeight)));
+float3 S = normalize(lerp(FlatNormal, StreakNormal, saturate(StreakWeight)));
+return normalize(float3(D.xy + S.xy, D.z * S.z));
+""",
+        [
+            ("DropletNormal", droplet_normal_use2, ("", "Result")),
+            ("DropletWeight", droplet_weight_use2, ("", "Result")),
+            ("StreakNormal", streak_normal_use2, ("", "Result")),
+            ("StreakWeight", streak_weight_use2, ("", "Result")),
+            ("FlatNormal", flat_surface_use, ("", "Result")),
+        ],
+        "float3", 8800, 2350, "Combine visible droplet and streak detail normals."
+    )
+    combined_surface_decl = c.named_declaration(
+        mf, "SURFACE_CombinedNormalRaw", combined_surface_normal, ("", "Result"), 9800, 2350
+    )
+
+    # One shared static switch controls the entire Surface Water branch. Packing
+    # normal.xyz + roughness weight in A avoids duplicate static parameters and
+    # lets the compiler remove RT and Texture2DArray sampling for CPU/no-surface slots.
+    combined_surface_use = c.named_usage(mf, combined_surface_decl, 10100, 1700)
+    roughness_raw_use = c.named_usage(mf, surface_roughness_raw_decl, 10100, 2200)
+    enabled_surface_pack = c.append_vector(
+        mf, combined_surface_use, ("", "Result"), roughness_raw_use, ("", "Result"),
+        10700, 1900, "Pack Surface Water normal and roughness contribution."
+    )
+    disabled_flat_use = c.named_usage(mf, shared_flat, 10100, 2850)
+    disabled_zero = c.scalar_constant(mf, 0.0, 10100, 3300, "Disabled Surface Water roughness weight")
+    disabled_surface_pack = c.append_vector(
+        mf, disabled_flat_use, ("", "Result"), disabled_zero, ("", "Result"),
+        10700, 2950, "Flat normal and zero roughness when Surface Water is compiled out."
+    )
+    selected_surface_pack = c.static_switch_parameter(
+        mf, "DWC_UseSurfaceWater", False,
+        enabled_surface_pack, ("", "Result"),
+        disabled_surface_pack, ("", "Result"),
+        11300, 2400,
+        group="DWC Surface Water",
+        description="Compile Surface Water RT, coverage, detail-normal, and roughness work only for slots that use it.",
+    )
+    selected_surface_decl = c.named_declaration(
+        mf, "SURFACE_SelectedPack", selected_surface_pack, ("", "Result"), 12100, 2400
+    )
+    selected_surface_use1 = c.named_usage(mf, selected_surface_decl, 12600, 2050)
+    selected_surface_use2 = c.named_usage(mf, selected_surface_decl, 12600, 2850)
+    selected_surface_normal = c.custom_expression(
+        mf, "return Packed.rgb;",
+        [("Packed", selected_surface_use1, ("", "Result"))],
+        "float3", 13300, 2050, "Decode selected Surface Water tangent normal."
+    )
+    selected_surface_roughness = c.custom_expression(
+        mf, "return Packed.a;",
+        [("Packed", selected_surface_use2, ("", "Result"))],
+        "float1", 13300, 2850, "Decode selected Surface Water roughness weight."
+    )
+    surface_normal_decl = c.named_declaration(
+        mf, "SURFACE_Normal", selected_surface_normal, ("", "Result"), 14200, 2050
+    )
     surface_roughness_decl = c.named_declaration(
-        mf, "SURFACE_RoughnessWeight", surface_roughness_weight, ("", "Result"), 9300, 1300
+        mf, "SURFACE_RoughnessWeight", selected_surface_roughness, ("", "Result"), 14200, 2850
     )
 
     # 4-1 Final Base Color.
@@ -387,10 +458,7 @@ return smoothstep(VisibilityThreshold, VisibilityThreshold + VisibilityFeather, 
         ("BaseNormal", declarations["BaseNormal"]),
         ("WrinkleNormal", wrinkle_normal_decl),
         ("WrinkleWeight", wrinkle_weight_decl),
-        ("DropletNormal", droplet_normal_decl),
-        ("DropletWeight", droplet_weight_decl),
-        ("RivuletNormal", rivulet_normal_decl),
-        ("RivuletWeight", rivulet_weight_decl),
+        ("SurfaceNormal", surface_normal_decl),
         ("FlatNormal", shared_flat),
     ]
     normal_usages = []
@@ -402,16 +470,14 @@ return smoothstep(VisibilityThreshold, VisibilityThreshold + VisibilityFeather, 
         mf,
         """
 float3 W = normalize(lerp(FlatNormal, WrinkleNormal, saturate(WrinkleWeight)));
-float3 D = normalize(lerp(FlatNormal, DropletNormal, saturate(DropletWeight)));
-float3 R = normalize(lerp(FlatNormal, RivuletNormal, saturate(RivuletWeight)));
+float3 S = normalize(SurfaceNormal);
 float3 Result = normalize(BaseNormal);
 Result = normalize(float3(Result.xy + W.xy, Result.z * W.z));
-Result = normalize(float3(Result.xy + D.xy, Result.z * D.z));
-Result = normalize(float3(Result.xy + R.xy, Result.z * R.z));
+Result = normalize(float3(Result.xy + S.xy, Result.z * S.z));
 return Result;
 """,
         normal_usages,
-        "float3", 16300, 300, "Blend Base -> Wrinkle -> Droplet -> Rivulet tangent normals."
+        "float3", 16300, 300, "Blend Base -> Wrinkle -> selected Surface Water tangent normal."
     )
     out_normal_decl = c.named_declaration(
         mf, "OUT_Normal", final_normal, ("", "Result"), 17500, 300

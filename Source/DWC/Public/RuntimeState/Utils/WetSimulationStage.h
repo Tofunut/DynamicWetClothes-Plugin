@@ -15,7 +15,7 @@ WetSimulationStage 실행에 필요한 인자 묶음이다.
 
 현재는 멀티스레드 작업 요청이 아니라, DynamicWetClothesComponent가 동기식으로
 시뮬레이션 갱신을 호출할 때 필요한 상태와 helper 참조를 모은 내부용 인자다.
-AbsorbedWetness와 SurfaceWater를 하나의 stage에서 순서대로 갱신하는 방향을 목표로 한다.
+CPU Simulation의 Absorbed Wetness 확산과 건조만 갱신한다. Surface Water는 GPU Backend가 전담한다.
 */
 struct DWC_API FWetSimulationStageArgs
 {

@@ -390,11 +390,10 @@ namespace
             Surface.FlowLifetimeSeconds);
 
         const FString SurfaceKeyTail = FString::Printf(
-            TEXT("%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%s,%s}"),
+            TEXT("%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%s,%s}"),
             Surface.MinimumFlowSurfaceAmount,
             Surface.FlowWidthPixels,
             Surface.FlowLengthPixels,
-            Surface.MaterialTimeUpdateInterval,
             Surface.SurfaceWaterNormalStrength,
             Surface.SurfaceWaterRoughnessStrength,
             Surface.SurfaceVisibilityThreshold,
@@ -469,6 +468,35 @@ namespace
                 return false;
             }
 
+            const bool bUsesSurfaceWater = Asset.DoesMaterialSlotUseSurfaceWater(Slot.MaterialSlotIndex);
+            if (bUsesSurfaceWater)
+            {
+                const int32 ExpectedSurfaceResolution = Asset.GetSetupSettings().GetSurfaceWaterRTResolution();
+                const int64 ExpectedSurfaceTexelCount64 =
+                    static_cast<int64>(ExpectedSurfaceResolution) * ExpectedSurfaceResolution;
+                if (ExpectedSurfaceResolution <= 0 || ExpectedSurfaceTexelCount64 > MAX_int32)
+                {
+                    return false;
+                }
+                const int32 ExpectedSurfaceTexelCount = static_cast<int32>(ExpectedSurfaceTexelCount64);
+                if (Slot.SurfaceWaterResolution != ExpectedSurfaceResolution ||
+                    Slot.SurfaceTexelTriangleIDs.Num() != ExpectedSurfaceTexelCount ||
+                    Slot.SurfacePackedTexelBarycentricXY.Num() != ExpectedSurfaceTexelCount ||
+                    Slot.SurfaceRestTexelAreas.Num() != ExpectedSurfaceTexelCount ||
+                    Slot.SurfaceValidMask.Num() != ExpectedSurfaceTexelCount)
+                {
+                    return false;
+                }
+            }
+            else if (Slot.SurfaceWaterResolution != 0 ||
+                     !Slot.SurfaceTexelTriangleIDs.IsEmpty() ||
+                     !Slot.SurfacePackedTexelBarycentricXY.IsEmpty() ||
+                     !Slot.SurfaceRestTexelAreas.IsEmpty() ||
+                     !Slot.SurfaceValidMask.IsEmpty())
+            {
+                return false;
+            }
+
             SeenMaterialSlots.Add(Slot.MaterialSlotIndex);
         }
 
@@ -477,15 +505,9 @@ namespace
 
     FString MakeSourceDataSignature(
         const FWetClothingEditableWetPartData& WetPartData,
-        const FSurfaceWaterSimulationSettings& SurfaceWaterSettings,
         const bool bIncludeEditorDisplayFields)
     {
-        FString Signature = FString::Printf(
-            TEXT("DWC_SourceData_v2|SurfaceWater=%d|RT=%d"),
-            SurfaceWaterSettings.bEnabled ? 1 : 0,
-            (bIncludeEditorDisplayFields || SurfaceWaterSettings.bEnabled)
-                ? SurfaceWaterSettings.RenderTargetResolution
-                : 0);
+        FString Signature = TEXT("DWC_SourceData_v3");
 
         TArray<int32> SlotIndices;
         for (int32 SlotIndex = 0; SlotIndex < WetPartData.MaterialSlots.Num(); ++SlotIndex)
@@ -514,15 +536,9 @@ namespace
         {
             const FWetClothingAuthoredMaterialSlot& Slot = WetPartData.MaterialSlots[SlotIndex];
             Signature += FString::Printf(
-                TEXT("|Slot{%d,%d,Surface=%d,NormalUV=%d,DropletTiling=%.9g,%.9g,RivuletTiling=%.9g,%.9g"),
+                TEXT("|Slot{%d,%d"),
                 Slot.MaterialSlotIndex,
-                Slot.bIsWettableSlot ? 1 : 0,
-                Slot.SurfaceWater.bEnabled ? 1 : 0,
-                Slot.SurfaceWater.SurfaceWaterNormalUVChannel,
-                Slot.SurfaceWater.DropletUVTiling.X,
-                Slot.SurfaceWater.DropletUVTiling.Y,
-                Slot.SurfaceWater.RivuletUVTiling.X,
-                Slot.SurfaceWater.RivuletUVTiling.Y);
+                Slot.bIsWettableSlot ? 1 : 0);
 
             TArray<int32> EntryIndices;
             for (int32 EntryIndex = 0; EntryIndex < Slot.WetPartEntries.Num(); ++EntryIndex)
@@ -572,18 +588,14 @@ namespace
         return Signature;
     }
 
-    FString MakeSourceDataSignature(
-        const FWetClothingEditableWetPartData& WetPartData,
-        const FSurfaceWaterSimulationSettings& SurfaceWaterSettings)
+    FString MakeSourceDataSignature(const FWetClothingEditableWetPartData& WetPartData)
     {
-        return MakeSourceDataSignature(WetPartData, SurfaceWaterSettings, false);
+        return MakeSourceDataSignature(WetPartData, false);
     }
 
-    FString MakeLegacySourceDataSignature(
-        const FWetClothingEditableWetPartData& WetPartData,
-        const FSurfaceWaterSimulationSettings& SurfaceWaterSettings)
+    FString MakeLegacySourceDataSignature(const FWetClothingEditableWetPartData& WetPartData)
     {
-        return MakeSourceDataSignature(WetPartData, SurfaceWaterSettings, true);
+        return MakeSourceDataSignature(WetPartData, true);
     }
 
     void ResolveWetnessProfilesForDerivedInline(
@@ -831,8 +843,6 @@ namespace
         Ar << Vertex.WetPartID;
         Ar << Vertex.ProfileIndex;
         Ar << Vertex.MaterialSlotIndex;
-        Ar << Vertex.SurfaceWaterUV;
-        Ar << Vertex.bHasSurfaceWaterUV;
     }
 
     void SerializePrecomputedNeighbors(FArchive& Ar, FWetClothingPrecomputedVertexNeighbors& Neighbors)
@@ -1006,6 +1016,11 @@ namespace
         Ar << Slot.PackedTexelBarycentricXY;
         Ar << Slot.RestTexelAreas;
         Ar << Slot.ValidMask;
+        Ar << Slot.SurfaceWaterResolution;
+        Ar << Slot.SurfaceTexelTriangleIDs;
+        Ar << Slot.SurfacePackedTexelBarycentricXY;
+        Ar << Slot.SurfaceRestTexelAreas;
+        Ar << Slot.SurfaceValidMask;
         SerializeArray<FDWCGPUSeamDestination>(
             Ar,
             Slot.SeamDestinations,
@@ -1028,6 +1043,11 @@ namespace
         Ar << IntValue; // MaterialSlotIndex
         Ar << IntValue; // UVChannelIndex
         Ar << IntValue; // Resolution
+        SkipPODArray<int32>(Ar);
+        SkipPODArray<uint32>(Ar);
+        SkipPODArray<float>(Ar);
+        SkipPODArray<uint8>(Ar);
+        Ar << IntValue; // SurfaceWaterResolution
         SkipPODArray<int32>(Ar);
         SkipPODArray<uint32>(Ar);
         SkipPODArray<float>(Ar);
@@ -1558,6 +1578,44 @@ bool UWetClothingAsset::HasAnyWettableMaterialSlot() const
         });
 }
 
+bool UWetClothingAsset::DoesMaterialSlotUseSurfaceWater(const int32 MaterialSlotIndex) const
+{
+    const FWetClothingEditableWetPartData& WetPartData = Authored.PartData.EditableWetPartData;
+    const FWetClothingAuthoredMaterialSlot* Slot = WetPartData.FindMaterialSlot(MaterialSlotIndex);
+    if (Slot == nullptr || !Slot->bIsWettableSlot || Slot->MaterialSlotIndex == INDEX_NONE)
+    {
+        return false;
+    }
+
+    for (const FWetClothingWetPartEntry& Entry : Slot->WetPartEntries)
+    {
+        const int32 ProfileIndex = WetPartData.Profiles.IsValidIndex(Entry.ProfileIndex)
+            ? Entry.ProfileIndex
+            : 0;
+        const FWetnessProfileParameters* Parameters =
+            Derived.Inline.ResolvedWetnessProfileParameters.IsValidIndex(ProfileIndex)
+                ? &Derived.Inline.ResolvedWetnessProfileParameters[ProfileIndex]
+                : (WetPartData.Profiles.IsValidIndex(ProfileIndex)
+                       ? &WetPartData.Profiles[ProfileIndex].Parameters
+                       : nullptr);
+        if (Parameters != nullptr && Parameters->SupportsSurfaceWater())
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool UWetClothingAsset::UsesSurfaceWater() const
+{
+    return Authored.PartData.EditableWetPartData.MaterialSlots.ContainsByPredicate(
+        [this](const FWetClothingAuthoredMaterialSlot& Slot)
+        {
+            return DoesMaterialSlotUseSurfaceWater(Slot.MaterialSlotIndex);
+        });
+}
+
 bool UWetClothingAsset::HasWrinkleBakeContent() const
 {
     for (const FWetWrinklePatchPlacement& Patch : Authored.WrinkleData.EditablePatches)
@@ -1754,10 +1812,6 @@ void UWetClothingAsset::PostLoad()
     }
 
     Metadata.SetupSettings.NormalizeMapResolutions();
-    // Surface Water RT resolution is mirrored into setup settings so the
-    // consolidated Map Resolutions panel reflects the runtime value for old assets.
-    Metadata.SetupSettings.SurfaceWaterRTResolution = DWCMapResolution::ToInt(
-        DWCMapResolution::FromInt(Authored.SurfaceWaterSettings.RenderTargetResolution));
     Metadata.SetupSettings.SimulationLODIndex = RuntimeSimulationLODIndex;
     Metadata.SimulationLODIndex = RuntimeSimulationLODIndex;
     if (Metadata.DWCSkeletalMesh != nullptr && Metadata.DWCSkeletalMesh == Metadata.SourceSkeletalMesh)
@@ -1842,14 +1896,6 @@ void UWetClothingAsset::PostLoad()
 void UWetClothingAsset::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
 {
     Super::PostEditChangeProperty(PropertyChangedEvent);
-
-    const FName PropertyName = PropertyChangedEvent.GetPropertyName();
-    if (PropertyName == GET_MEMBER_NAME_CHECKED(FSurfaceWaterSimulationSettings, RenderTargetResolution) ||
-        PropertyName == GET_MEMBER_NAME_CHECKED(FWCAAuthoredData, SurfaceWaterSettings))
-    {
-        Metadata.SetupSettings.SurfaceWaterRTResolution = DWCMapResolution::ToInt(
-            DWCMapResolution::FromInt(Authored.SurfaceWaterSettings.RenderTargetResolution));
-    }
 }
 #endif
 
@@ -2271,7 +2317,6 @@ bool UWetClothingAsset::InitializeNewAsset(
     Metadata.DWCSkeletalMesh = nullptr;
     Authored.WrinkleData.BakeSettings.DefaultResolution = Metadata.SetupSettings.GetWrinkleMapResolution();
     Authored.TransparencyData.TransparencyBakeResolution = Metadata.SetupSettings.GetTransparencyMapResolution();
-    Authored.SurfaceWaterSettings.RenderTargetResolution = Metadata.SetupSettings.GetSurfaceWaterRTResolution();
     Metadata.OriginalUVChannelIndex = Metadata.SetupSettings.OriginalUVChannelIndex;
     Metadata.SetupSettings.SimulationLODIndex = RuntimeSimulationLODIndex;
     Metadata.SimulationLODIndex = RuntimeSimulationLODIndex;
@@ -2344,7 +2389,6 @@ bool UWetClothingAsset::ApplySetupSettings(
     Metadata.SimulationLODIndex = RuntimeSimulationLODIndex;
     Authored.WrinkleData.BakeSettings.DefaultResolution = Metadata.SetupSettings.GetWrinkleMapResolution();
     Authored.TransparencyData.TransparencyBakeResolution = Metadata.SetupSettings.GetTransparencyMapResolution();
-    Authored.SurfaceWaterSettings.RenderTargetResolution = Metadata.SetupSettings.GetSurfaceWaterRTResolution();
 
     if (bOriginalUVChanged)
     {
@@ -2384,10 +2428,10 @@ bool UWetClothingAsset::ApplySetupSettings(
     {
         MarkSimulationBakeOutOfDate();
     }
-    else if (bGPUResolutionChanged)
+    else if (bGPUResolutionChanged || (bSurfaceWaterRTResolutionChanged && UsesSurfaceWater()))
     {
-        // A resolution-only change does not invalidate CPU/GPU runtime topology.
-        // It invalidates only the generated GPU simulation maps.
+        // Resolution-only changes do not invalidate CPU/GPU runtime topology.
+        // They invalidate only the generated GPU simulation maps that own those RT lookups.
         Derived.Inline.BakeState.GPUMaps = Metadata.SetupSettings.bBuildGPUWetnessMapSimulationData
             ? (HasGPUMapDataPayload() ? EDWCBakeStatus::OutOfDate : EDWCBakeStatus::Required)
             : EDWCBakeStatus::Disabled;
@@ -2885,14 +2929,18 @@ bool UWetClothingAsset::BakeGPUWetnessMaps(FString* OutErrorMessage)
         return false;
     }
 
+    constexpr float PrepareWork = 0.5f;
+    constexpr float SaveWork = 0.5f;
+    const float MapBakeWork = FWetGPUMapBakeBuilder::GetLODMapBakeProgressWork(*this);
+
     FScopedSlowTask SlowTask(
-        7.25f,
+        PrepareWork + MapBakeWork + SaveWork,
         FText::FromString(FString::Printf(TEXT("Baking DWC GPU simulation maps for LOD%d..."), LODIndex)));
     SlowTask.MakeDialog(false);
 
     RemoveNonSimulationGPULODData(Derived.Bulk.GPURuntimeData);
     SlowTask.EnterProgressFrame(
-        0.5f,
+        PrepareWork,
         FText::FromString(FString::Printf(TEXT("Preparing LOD%d GPU simulation map bake inputs..."), LODIndex)));
 
     if (!FWetGPUMapBakeBuilder::BuildLODMaps(*this, LODIndex, OutErrorMessage, &SlowTask))
@@ -2904,7 +2952,7 @@ bool UWetClothingAsset::BakeGPUWetnessMaps(FString* OutErrorMessage)
     RemoveNonSimulationGPULODData(Derived.Bulk.GPURuntimeData);
 
     SlowTask.EnterProgressFrame(
-        0.5f,
+        SaveWork,
         FText::FromString(FString::Printf(TEXT("Saving LOD%d GPU simulation map data into the WCA runtime payload..."), LODIndex)));
 
     Derived.Inline.BakeState.GPUMaps = EDWCBakeStatus::Valid;
@@ -3162,7 +3210,7 @@ bool UWetClothingAsset::CanPrepareRuntimeDataForEditorSave(FString* OutSkipReaso
     }
 
     const bool bRequiresDWCDataUV = HasAnyWettableMaterialSlot() &&
-        (Metadata.SetupSettings.bBuildGPUWetnessMapSimulationData || Authored.SurfaceWaterSettings.bEnabled);
+        Metadata.SetupSettings.bBuildGPUWetnessMapSimulationData;
     if (bRequiresDWCDataUV)
     {
         const bool bHasMappedDataUV = DoesMappedLODRangeHavePayload(
@@ -3355,11 +3403,9 @@ bool UWetClothingAsset::IsPrecomputedSimulationDataValidForMesh(const USkeletalM
         : HasRuntimeBulkPayload();
 
     const FString ExpectedSourceSignature = MakeSourceDataSignature(
-        Authored.PartData.EditableWetPartData,
-        Authored.SurfaceWaterSettings);
+        Authored.PartData.EditableWetPartData);
     const FString LegacySourceSignature = MakeLegacySourceDataSignature(
-        Authored.PartData.EditableWetPartData,
-        Authored.SurfaceWaterSettings);
+        Authored.PartData.EditableWetPartData);
     return Data.DataVersion == CurrentPrecomputedSimulationDataVersion &&
            Data.LODIndex == LODIndex &&
            Data.VertexCount == LODData.GetNumVertices() &&
@@ -3382,8 +3428,7 @@ FString UWetClothingAsset::GetPrecomputedSimulationDataValidationSummary(const U
                                                ? FDWCMeshContentSignature::BuildStructure(SkeletalMesh, RenderData->LODRenderData[LODIndex], LODIndex)
                                                : FString();
     const FString ExpectedSourceSignature = MakeSourceDataSignature(
-        Authored.PartData.EditableWetPartData,
-        Authored.SurfaceWaterSettings);
+        Authored.PartData.EditableWetPartData);
 
     const bool bVersionMatches = Data.DataVersion == CurrentPrecomputedSimulationDataVersion;
     const bool bLODMatches = Data.LODIndex == LODIndex;
@@ -3393,8 +3438,7 @@ FString UWetClothingAsset::GetPrecomputedSimulationDataValidationSummary(const U
     const bool bHasRuntimePayload = bVertexPayloadMatches && bNeighborPayloadMatches;
     const bool bMeshSignatureMatches = !ExpectedMeshSignature.IsEmpty() && Data.MeshSignature == ExpectedMeshSignature;
     const FString LegacySourceSignature = MakeLegacySourceDataSignature(
-        Authored.PartData.EditableWetPartData,
-        Authored.SurfaceWaterSettings);
+        Authored.PartData.EditableWetPartData);
     const bool bSourceSignatureMatches =
         Data.SourceDataSignature == ExpectedSourceSignature ||
         Data.SourceDataSignature == LegacySourceSignature;
@@ -3581,8 +3625,7 @@ bool UWetClothingAsset::RebuildPrecomputedSimulationData(FString* OutErrorMessag
     Derived.Bulk.NeighborRuntimeData.VertexCount = LODData.GetNumVertices();
     Derived.Bulk.NeighborRuntimeData.MeshSignature = FDWCMeshContentSignature::BuildStructure(RuntimeMesh, LODData, LODIndex);
     Derived.Bulk.NeighborRuntimeData.SourceDataSignature = MakeSourceDataSignature(
-        Authored.PartData.EditableWetPartData,
-        Authored.SurfaceWaterSettings);
+        Authored.PartData.EditableWetPartData);
     Derived.Bulk.NeighborRuntimeData.DataVersion = CurrentPrecomputedSimulationDataVersion;
     Derived.Bulk.NeighborRuntimeData.Vertices.SetNum(Derived.Bulk.NeighborRuntimeData.VertexCount);
 
@@ -3686,36 +3729,6 @@ bool UWetClothingAsset::RebuildPrecomputedSimulationData(FString* OutErrorMessag
                 VertexData.ProfileIndex = EffectiveProfileIndex;
                 VertexData.MaterialSlotIndex = Slot.MaterialSlotIndex;
             }
-        }
-    }
-
-    if (Authored.SurfaceWaterSettings.bEnabled)
-    {
-        FDWCDataUVBufferView DataUVView;
-        FString DataUVError;
-        if (!DataUVView.Initialize(GetDWCSkeletalMesh(), LODIndex, Metadata.DWCDataUVChannelIndex, &DataUVError) ||
-            DataUVView.NumVertices() != static_cast<int32>(LODData.GetNumVertices()))
-        {
-            const FString ErrorMessage = FString::Printf(
-                TEXT("Surface Water requires valid DWC Data UV. Rebuild DWC Data UV before rebuilding runtime data. %s"),
-                *DataUVError);
-            DWC::Error::SetMessage(OutErrorMessage, *ErrorMessage);
-            ClearPrecomputedSimulationData();
-            return false;
-        }
-
-        for (int32 VertexIndex = 0; VertexIndex < Derived.Bulk.NeighborRuntimeData.Vertices.Num(); ++VertexIndex)
-        {
-            FWetClothingPrecomputedVertexData& Vertex = Derived.Bulk.NeighborRuntimeData.Vertices[VertexIndex];
-            if (!Vertex.IsWettable()) continue;
-            const FWetClothingAuthoredMaterialSlot* AuthoredSlot =
-                Authored.PartData.EditableWetPartData.FindMaterialSlot(Vertex.MaterialSlotIndex);
-            if (AuthoredSlot != nullptr && !AuthoredSlot->SurfaceWater.bEnabled) continue;
-            if (!DataUVView.IsValidVertexIndex(VertexIndex)) continue;
-            const FVector2f UV = DataUVView.GetUV(VertexIndex);
-            if (UV.ContainsNaN() || !FMath::IsFinite(UV.X) || !FMath::IsFinite(UV.Y) || UV.X < 0.f || UV.X > 1.f || UV.Y < 0.f || UV.Y > 1.f) continue;
-            Vertex.SurfaceWaterUV = FVector2D(UV);
-            Vertex.bHasSurfaceWaterUV = true;
         }
     }
 

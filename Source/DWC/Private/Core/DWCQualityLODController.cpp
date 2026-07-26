@@ -35,23 +35,12 @@ void FDWCQualityLODController::SetLOD(FDWCQualityLODRuntimeState& State, const i
     if (bLODChanged)
     {
         State.RenderUpdateAccumulator = 0.0f;
-        State.SurfaceWaterUpdateAccumulator = 0.0f;
     }
 }
 
 void FDWCQualityLODController::RefreshPolicy(FDWCQualityLODRuntimeState& State) const
 {
     State.ResolvedPolicy = ResolvePolicy(State.CurrentQualityLOD);
-}
-
-bool FDWCQualityLODController::ShouldRunSurfaceWater(FDWCQualityLODRuntimeState& State, const float BaseInterval) const
-{
-    if (bEnabled && !State.ResolvedPolicy.bUpdateSurfaceWater)
-    {
-        return false;
-    }
-
-    return ShouldRunInterval(State.SurfaceWaterUpdateAccumulator, BaseInterval, State.ResolvedPolicy.SurfaceWaterUpdateInterval);
 }
 
 bool FDWCQualityLODController::ShouldRunCPUWetnessRendering(FDWCQualityLODRuntimeState& State, const float BaseInterval) const

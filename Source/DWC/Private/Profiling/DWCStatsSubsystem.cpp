@@ -249,14 +249,11 @@ void UDWCStatsSubsystem::CollectBacklogStats(FDWCWorkloadStatsSnapshot& OutSnaps
             CPUSkinningPendingTasks += Receiver->bCpuSkinningTaskPending ? 1u : 0u;
             LODTransferPendingTasks += Receiver->bLODVertexColorTransferPending ? 1u : 0u;
             PendingLODDirtyVertices += Receiver->PendingLODVertexColorDirtySourceVertices.Num();
-
-            for (const TPair<int32, TUniquePtr<IDWCSurfaceWaterSimulationState>>& Pair : Receiver->SurfaceWaterStatesByMaterialSlot)
+            if (Receiver->GPUBackend.IsValid())
             {
-                if (Pair.Value.IsValid())
-                {
-                    SurfaceWaterPendingStamps += Pair.Value->GetPendingStampCount();
-                }
+                SurfaceWaterPendingStamps += Receiver->GPUBackend->GetStats().PendingSurfaceStampCount;
             }
+
         }
     }
 
@@ -319,7 +316,8 @@ void UDWCStatsSubsystem::CollectStats(FDWCStatsSnapshot& OutSnapshot)
             ++OutSnapshot.LODTotalReceiverCount;
 
             const FDWCQualityLODPolicy& LODPolicy = Receiver->QualityLODState.ResolvedPolicy;
-            if (LODPolicy.bUpdateSurfaceWater)
+            if (Component->GetActiveSimulationMode() == EDWCSimulationMode::WetnessMapGPU &&
+                LODPolicy.bUpdateSurfaceWater)
             {
                 ++OutSnapshot.LODSurfaceWaterEnabledReceiverCount;
             }
@@ -337,7 +335,6 @@ void UDWCStatsSubsystem::CollectStats(FDWCStatsSnapshot& OutSnapshot)
             }
 
             OutSnapshot.ReceiverMetadataCPUBytes += sizeof(*Receiver);
-            OutSnapshot.ReceiverMetadataCPUBytes += Receiver->SurfaceWaterProfilesByMaterialSlot.GetAllocatedSize();
             OutSnapshot.ReceiverMetadataCPUBytes += Receiver->LODVertexStaticDataByLOD.GetAllocatedSize();
             OutSnapshot.ReceiverMetadataCPUBytes += Receiver->LODVertexColorTransferMapsByLOD.GetAllocatedSize();
 
@@ -399,15 +396,6 @@ void UDWCStatsSubsystem::CollectStats(FDWCStatsSnapshot& OutSnapshot)
             OutSnapshot.PendingLODVertexColorDirtyCPUBytes +=
                 Receiver->PendingLODVertexColorDirtySourceVertices.GetAllocatedSize();
 
-            OutSnapshot.SurfaceWaterCPUBytes += Receiver->SurfaceWaterStatesByMaterialSlot.GetAllocatedSize();
-            for (const TPair<int32, TUniquePtr<IDWCSurfaceWaterSimulationState>>& Pair : Receiver->SurfaceWaterStatesByMaterialSlot)
-            {
-                if (Pair.Value.IsValid())
-                {
-                    ++OutSnapshot.SurfaceWaterStateCount;
-                    OutSnapshot.SurfaceWaterCPUBytes += Pair.Value->GetAllocatedMemoryBytes();
-                }
-            }
 
             if (Receiver->GPUBackend.IsValid())
             {
@@ -512,7 +500,6 @@ void UDWCStatsSubsystem::PublishStats(const FDWCStatsSnapshot& Snapshot) const
     SET_DWORD_STAT(STAT_DWC_SharedGPUStaticResourceCount, Snapshot.SharedGPUStaticResourceCount);
     SET_DWORD_STAT(STAT_DWC_RuntimeRenderProfileCount, Snapshot.RuntimeRenderProfileCount);
     SET_DWORD_STAT(STAT_DWC_AbsorbedStateCount, Snapshot.AbsorbedSimulationStateCount);
-    SET_DWORD_STAT(STAT_DWC_SurfaceWaterStateCount, Snapshot.SurfaceWaterStateCount);
     SET_DWORD_STAT(STAT_DWC_WrinkleMaterialBindingCount, Snapshot.WrinkleMaterialBindingCount);
     SET_DWORD_STAT(STAT_DWC_WrinkleTextureCount, Snapshot.WrinkleTextureCount);
     SET_DWORD_STAT(STAT_DWC_TransparencyMaterialBindingCount, Snapshot.TransparencyMaterialBindingCount);
@@ -532,7 +519,6 @@ void UDWCStatsSubsystem::PublishStats(const FDWCStatsSnapshot& Snapshot) const
     SET_MEMORY_STAT(STAT_DWC_RenderStageCPU, Snapshot.RenderStageCPUBytes);
     SET_MEMORY_STAT(STAT_DWC_LODVertexColorCacheCPU, Snapshot.LODVertexColorCacheCPUBytes);
     SET_MEMORY_STAT(STAT_DWC_PendingLODDirtyCPU, Snapshot.PendingLODVertexColorDirtyCPUBytes);
-    SET_MEMORY_STAT(STAT_DWC_SurfaceWaterCPU, Snapshot.SurfaceWaterCPUBytes);
     SET_MEMORY_STAT(STAT_DWC_GPUBackendCPU, Snapshot.GPUBackendCPUBytes);
     SET_MEMORY_STAT(STAT_DWC_GPUResourceSubsystemCPU, Snapshot.GPUResourceSubsystemCPUBytes);
     SET_MEMORY_STAT(STAT_DWC_ReceiverMetadataCPU, Snapshot.ReceiverMetadataCPUBytes);

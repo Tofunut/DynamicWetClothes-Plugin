@@ -22,7 +22,6 @@ struct DWC_API FDWCStatsSnapshot
     uint32 SharedGPUStaticResourceCount = 0;
     uint32 RuntimeRenderProfileCount = 0;
     uint32 AbsorbedSimulationStateCount = 0;
-    uint32 SurfaceWaterStateCount = 0;
     uint32 WrinkleMaterialBindingCount = 0;
     uint32 WrinkleTextureCount = 0;
     uint32 TransparencyMaterialBindingCount = 0;
@@ -44,7 +43,6 @@ struct DWC_API FDWCStatsSnapshot
     uint64 RenderStageCPUBytes = 0;
     uint64 LODVertexColorCacheCPUBytes = 0;
     uint64 PendingLODVertexColorDirtyCPUBytes = 0;
-    uint64 SurfaceWaterCPUBytes = 0;
     uint64 GPUBackendCPUBytes = 0;
     uint64 GPUResourceSubsystemCPUBytes = 0;
     uint64 ReceiverMetadataCPUBytes = 0;
@@ -69,7 +67,6 @@ struct DWC_API FDWCStatsSnapshot
                RenderStageCPUBytes +
                LODVertexColorCacheCPUBytes +
                PendingLODVertexColorDirtyCPUBytes +
-               SurfaceWaterCPUBytes +
                GPUBackendCPUBytes +
                GPUResourceSubsystemCPUBytes +
                ReceiverMetadataCPUBytes;
@@ -199,7 +196,6 @@ DECLARE_DWORD_ACCUMULATOR_STAT_EXTERN(TEXT("Shared LOD Transfer Maps"), STAT_DWC
 DECLARE_DWORD_ACCUMULATOR_STAT_EXTERN(TEXT("Shared GPU Resource Sets"), STAT_DWC_SharedGPUStaticResourceCount, STATGROUP_DWCInstances, DWC_API);
 DECLARE_DWORD_ACCUMULATOR_STAT_EXTERN(TEXT("Runtime Render Profiles"), STAT_DWC_RuntimeRenderProfileCount, STATGROUP_DWCInstances, DWC_API);
 DECLARE_DWORD_ACCUMULATOR_STAT_EXTERN(TEXT("Absorbed States"), STAT_DWC_AbsorbedStateCount, STATGROUP_DWCInstances, DWC_API);
-DECLARE_DWORD_ACCUMULATOR_STAT_EXTERN(TEXT("Surface Water States"), STAT_DWC_SurfaceWaterStateCount, STATGROUP_DWCInstances, DWC_API);
 DECLARE_DWORD_ACCUMULATOR_STAT_EXTERN(TEXT("Wrinkle Material Bindings"), STAT_DWC_WrinkleMaterialBindingCount, STATGROUP_DWCInstances, DWC_API);
 DECLARE_DWORD_ACCUMULATOR_STAT_EXTERN(TEXT("Unique Wrinkle Textures"), STAT_DWC_WrinkleTextureCount, STATGROUP_DWCInstances, DWC_API);
 DECLARE_DWORD_ACCUMULATOR_STAT_EXTERN(TEXT("Transparency Material Bindings"), STAT_DWC_TransparencyMaterialBindingCount, STATGROUP_DWCInstances, DWC_API);
@@ -220,7 +216,6 @@ DECLARE_MEMORY_STAT_POOL_EXTERN(TEXT("Mesh Samplers"), STAT_DWC_MeshSamplerCPU, 
 DECLARE_MEMORY_STAT_POOL_EXTERN(TEXT("Render Stages"), STAT_DWC_RenderStageCPU, STATGROUP_DWCCPUMemory, FPlatformMemory::MCR_Physical, DWC_API);
 DECLARE_MEMORY_STAT_POOL_EXTERN(TEXT("LOD Vertex Color Caches"), STAT_DWC_LODVertexColorCacheCPU, STATGROUP_DWCCPUMemory, FPlatformMemory::MCR_Physical, DWC_API);
 DECLARE_MEMORY_STAT_POOL_EXTERN(TEXT("Pending LOD Dirty Vertices"), STAT_DWC_PendingLODDirtyCPU, STATGROUP_DWCCPUMemory, FPlatformMemory::MCR_Physical, DWC_API);
-DECLARE_MEMORY_STAT_POOL_EXTERN(TEXT("Surface Water"), STAT_DWC_SurfaceWaterCPU, STATGROUP_DWCCPUMemory, FPlatformMemory::MCR_Physical, DWC_API);
 DECLARE_MEMORY_STAT_POOL_EXTERN(TEXT("GPU Backend Instances"), STAT_DWC_GPUBackendCPU, STATGROUP_DWCCPUMemory, FPlatformMemory::MCR_Physical, DWC_API);
 DECLARE_MEMORY_STAT_POOL_EXTERN(TEXT("GPU Resource Subsystem"), STAT_DWC_GPUResourceSubsystemCPU, STATGROUP_DWCCPUMemory, FPlatformMemory::MCR_Physical, DWC_API);
 DECLARE_MEMORY_STAT_POOL_EXTERN(TEXT("Receiver Metadata"), STAT_DWC_ReceiverMetadataCPU, STATGROUP_DWCCPUMemory, FPlatformMemory::MCR_Physical, DWC_API);

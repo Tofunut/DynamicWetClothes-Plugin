@@ -133,7 +133,7 @@ struct DWC_API FDWCGPUSeamDestination
     int32 IncomingCount = 0;
 };
 
-/** CPU-baked lookup payload for one material slot's independent absorbed-wetness map. */
+/** CPU-baked lookup payload for one material slot's absorbed-wetness map and optional GPU Surface Water maps. */
 USTRUCT(BlueprintType)
 struct DWC_API FDWCGPUMaterialSlotBakeData
 {
@@ -162,6 +162,23 @@ struct DWC_API FDWCGPUMaterialSlotBakeData
     UPROPERTY(VisibleAnywhere, Category = "GPU Wet Map")
     TArray<uint8> ValidMask;
 
+    /** Independent lookup resolution used by the GPU-only Droplet/Streak surface RTs. */
+    UPROPERTY(VisibleAnywhere, Category = "GPU Surface Water")
+    int32 SurfaceWaterResolution = 0;
+
+    /** Surface-water lookup payload. Empty when no Part in this slot enables Surface Water. */
+    UPROPERTY(VisibleAnywhere, Category = "GPU Surface Water")
+    TArray<int32> SurfaceTexelTriangleIDs;
+
+    UPROPERTY(VisibleAnywhere, Category = "GPU Surface Water")
+    TArray<uint32> SurfacePackedTexelBarycentricXY;
+
+    UPROPERTY(VisibleAnywhere, Category = "GPU Surface Water")
+    TArray<float> SurfaceRestTexelAreas;
+
+    UPROPERTY(VisibleAnywhere, Category = "GPU Surface Water")
+    TArray<uint8> SurfaceValidMask;
+
     /** Destination-oriented inverse mapping used by the separate seam gather pass. */
     UPROPERTY(VisibleAnywhere, Category = "GPU Wet Map")
     TArray<FDWCGPUSeamDestination> SeamDestinations;
@@ -176,8 +193,8 @@ struct DWC_API FDWCGPULODBakeData
     GENERATED_BODY()
 
     static constexpr int32 CurrentRuntimeDataVersion = 4;
-    static constexpr int32 CurrentMapBakeVersion = 5;
-    static constexpr int32 CurrentBulkDataVersion = 4;
+    static constexpr int32 CurrentMapBakeVersion = 6;
+    static constexpr int32 CurrentBulkDataVersion = 5;
 
     UPROPERTY(VisibleAnywhere, Category = "GPU Runtime Data")
     int32 RuntimeDataVersion = 0;
@@ -207,7 +224,7 @@ struct DWC_API FDWCGPULODBakeData
     UPROPERTY(VisibleAnywhere, Category = "GPU Runtime Data")
     FString RuntimeSignature;
 
-    /** Includes RuntimeSignature, GPU map resolution and map-bake version. */
+    /** Includes RuntimeSignature, absorbed/surface map resolutions and map-bake version. */
     UPROPERTY(VisibleAnywhere, Category = "GPU Map Bake")
     FString MapSignature;
 

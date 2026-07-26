@@ -9,7 +9,6 @@ class UDynamicWetClothesComponent;
 class USkeletalMeshComponent;
 class UWetClothingAsset;
 class UMaterialInstanceDynamic;
-class IDWCSurfaceWaterSimulationState;
 struct FWetClothingSettings;
 
 
@@ -48,6 +47,7 @@ struct DWC_API FDWCGPUBackendInitArgs
 struct DWC_API FDWCGPUBackendStats
 {
     uint32 ActiveMaterialCount = 0;
+    uint32 PendingSurfaceStampCount = 0;
     uint64 CPUBytes = 0;
     uint64 GPUBytes = 0;
 };
@@ -77,5 +77,4 @@ public:
     virtual ~IDWCGPUModule();
 
     virtual TUniquePtr<IDWCGPUBackend> CreateBackend() = 0;
-    virtual TUniquePtr<IDWCSurfaceWaterSimulationState> CreateSurfaceWaterSimulationState() = 0;
 };

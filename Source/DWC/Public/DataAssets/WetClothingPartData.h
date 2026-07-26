@@ -79,8 +79,8 @@ struct DWC_API FWetClothingAuthoredMaterialSlot
     UPROPERTY(EditAnywhere, Category = "Wet Part")
     bool bIsWettableSlot = false;
 
-    /** Slot-specific Surface Water simulation/render settings. */
-    UPROPERTY(EditAnywhere, Category = "Surface Water", meta = (ShowOnlyInnerProperties))
+    /** Slot-specific Surface Water detail-rendering UV settings. */
+    UPROPERTY(EditAnywhere, Category = "Surface Water", meta = (ShowOnlyInnerProperties, DisplayName = "Surface Water Rendering (GPU Simulation Only)", ToolTip = "Technical UV settings used only when a Part in this slot enables GPU Surface Water."))
     FSurfaceWaterMaterialSlotData SurfaceWater;
 
 #if WITH_EDITORONLY_DATA
@@ -420,12 +420,6 @@ struct DWC_API FWetClothingPrecomputedVertexData
     /** INDEX_NONE means this vertex is not part of a wettable material slot. */
     UPROPERTY(VisibleAnywhere, Category = "Precomputed Simulation Data")
     int32 MaterialSlotIndex = INDEX_NONE;
-
-    UPROPERTY(VisibleAnywhere, Category = "Precomputed Simulation Data")
-    FVector2D SurfaceWaterUV = FVector2D::ZeroVector;
-
-    UPROPERTY(VisibleAnywhere, Category = "Precomputed Simulation Data")
-    bool bHasSurfaceWaterUV = false;
 
     bool IsWettable() const
     {

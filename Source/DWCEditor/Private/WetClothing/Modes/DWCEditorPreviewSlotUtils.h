@@ -73,6 +73,9 @@ namespace DWCEditorPreviewSlotUtils
         TArray<TObjectPtr<UMaterialInstanceDynamic>> PreviewMIDs;
         PreviewMIDs.Init(nullptr, FMath::Max(MaterialSlotCount, MaterialSlotIndex + 1));
         PreviewMIDs[MaterialSlotIndex] = PreviewMID;
-        ResourceSubsystem->ApplyResourcesToMaterials(WetClothingAsset, PreviewMIDs);
+        ResourceSubsystem->ApplyResourcesToMaterials(
+            WetClothingAsset,
+            PreviewMIDs,
+            EDWCRenderResourceUsage::AbsorbedOnly);
     }
 }

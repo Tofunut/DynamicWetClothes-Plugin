@@ -432,13 +432,13 @@ void FWetnessProfileDetailsCustomization::CustomizeDetails(IDetailLayoutBuilder&
         RivuletsGroup,
         RivuletsEnabled,
         LOCTEXT("EnableStreaks", "Enable Streaks"),
-        LOCTEXT("EnableStreaksTooltip", "Allow flowing streak stamps and streak normal rendering for this profile."),
+        LOCTEXT("EnableStreaksTooltip", "Allow elongated, flow-aligned water stamps and streak normal rendering for this profile."),
         SurfaceSettingsEnabled);
     AddFloatProperty(
         RivuletsGroup,
         FindPropertyByPath(TEXT("Parameters.SurfaceWater.FlowSpawnProbability")),
         LOCTEXT("StreakSpawnChance", "Spawn Chance"),
-        LOCTEXT("StreakSpawnChanceTooltip", "Chance that eligible surface water produces a flowing streak stamp."),
+        LOCTEXT("StreakSpawnChanceTooltip", "Chance that eligible surface water produces a flow-aligned streak stamp."),
         0.0f, 1.0f, 0.0f, 1.0f, 0.01f, 100.0f, 1, LOCTEXT("PercentSuffix4", "%"),
         RivuletSettingsEnabled);
     AddMappedFloatProperty(
@@ -581,9 +581,9 @@ void FWetnessProfileDetailsCustomization::CustomizeDetails(IDetailLayoutBuilder&
     AddMappedFloatProperty(
         RivuletNormalGroup,
         FindPropertyByPath(TEXT("Parameters.SurfaceWater.RivuletUVScrollSpeed")),
-        LOCTEXT("FlowMotion", "Flow Motion"),
-        LOCTEXT("FlowMotionTooltip", "How strongly streak normals move along the flow direction."),
-        0.0f, 100.0f, 0.0f, 100.0f, 1.0f, 1, LOCTEXT("PercentSuffixFlowMotion", "%"),
+        LOCTEXT("DetailMotion", "Detail Motion"),
+        LOCTEXT("DetailMotionTooltip", "How quickly the streak detail normal moves along the flow direction. This does not move the streak stamp itself."),
+        0.0f, 100.0f, 0.0f, 100.0f, 1.0f, 1, LOCTEXT("PercentSuffixDetailMotion", "%"),
         MakeSquaredRawToPercent(2.0f), MakeSquaredPercentToRaw(2.0f), 0.0f, 10.0f,
         RivuletSettingsEnabled);
 }

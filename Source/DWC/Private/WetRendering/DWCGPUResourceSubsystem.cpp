@@ -9,6 +9,7 @@
 #include "Misc/SecureHash.h"
 #include "Rendering/Texture2DResource.h"
 #include "RHICommandList.h"
+#include "RHIResources.h"
 #include "UObject/Package.h"
 #include "WetRendering/WetMaterialParameters.h"
 #include "Utility/DWCLog.h"
@@ -16,6 +17,13 @@
 namespace
 {
     constexpr float GlobalTexelSize = 1.0f / static_cast<float>(UDWCGPUResourceSubsystem::GlobalLUTWidth);
+    constexpr int32 InitialTextureArrayCapacity = 16;
+
+    int32 ResolveTextureArrayCapacity(const int32 RequiredSlices)
+    {
+        const uint32 SafeRequired = static_cast<uint32>(FMath::Max(RequiredSlices, InitialTextureArrayCapacity));
+        return static_cast<int32>(FMath::RoundUpToPowerOfTwo(SafeRequired));
+    }
 
     UTexture2D* CreateFloatLUTTexture(
         UObject* Outer,
@@ -391,6 +399,7 @@ void UDWCGPUResourceSubsystem::FTextureArrayRegistry::SetNeutral(
     {
         SourceTextures.Add(Texture);
         SliceByPath.Add(Texture->GetPathName(), 0);
+        DirtySlices.Add(0);
         bOutChanged = true;
     }
     else if (SourceTextures[0] != Texture)
@@ -401,6 +410,7 @@ void UDWCGPUResourceSubsystem::FTextureArrayRegistry::SetNeutral(
         }
         SourceTextures[0] = Texture;
         SliceByPath.Add(Texture->GetPathName(), 0);
+        DirtySlices.Add(0);
         bOutChanged = true;
     }
 }
@@ -445,14 +455,15 @@ int32 UDWCGPUResourceSubsystem::FTextureArrayRegistry::FindOrAdd(
         return 0;
     }
 
-    // Slice 0 must be initialized by SetNeutral before real slices are registered.
     if (SourceTextures.IsEmpty())
     {
         UE_LOG(LogDWC, Warning, TEXT("DWC normal registry has no neutral slice; texture '%s' uses slice 0."), *Path);
         return 0;
     }
+
     const int32 NewSlice = SourceTextures.Add(Texture);
     SliceByPath.Add(Path, NewSlice);
+    DirtySlices.Add(NewSlice);
     bOutChanged = true;
     return NewSlice;
 }
@@ -461,9 +472,11 @@ void UDWCGPUResourceSubsystem::FTextureArrayRegistry::Reset()
 {
     SourceTextures.Reset();
     SliceByPath.Reset();
+    DirtySlices.Reset();
     SizeX = 0;
     SizeY = 0;
     PixelFormat = INDEX_NONE;
+    AllocatedCapacity = 0;
 }
 
 void UDWCGPUResourceSubsystem::Deinitialize()
@@ -474,6 +487,9 @@ void UDWCGPUResourceSubsystem::Deinitialize()
     RuntimeProfileIndexByKey.Reset();
     DropletNormalRegistry.Reset();
     RivuletNormalRegistry.Reset();
+    DirtyRuntimeProfileIndices.Reset();
+    RegisteredMaterialInstances.Reset();
+    GPUMaterialInstances.Reset();
     NeutralProfileIDTexture = nullptr;
     NeutralProfileRemapLUT = nullptr;
     GlobalRenderProfileLUT = nullptr;
@@ -535,6 +551,10 @@ FDWCGPUResourceSubsystemStats UDWCGPUResourceSubsystem::GetStats() const
         {
             Stats.StaticBufferGPUBytes += static_cast<uint64>(Resources->TexelCount) * Uint4GPUBytes;
         }
+        if (Resources->SurfaceTexelLookup.IsValid())
+        {
+            Stats.StaticBufferGPUBytes += static_cast<uint64>(Resources->SurfaceTexelCount) * Uint4GPUBytes;
+        }
         if (Resources->SeamDestinations.IsValid())
         {
             Stats.StaticBufferGPUBytes += static_cast<uint64>(Resources->SeamDestinationCount) * Uint4GPUBytes;
@@ -564,6 +584,9 @@ FDWCGPUResourceSubsystemStats UDWCGPUResourceSubsystem::GetStats() const
 
     Stats.CPUBytes += RuntimeProfiles.GetAllocatedSize() +
                       RuntimeProfileIndexByKey.GetAllocatedSize() +
+                      DirtyRuntimeProfileIndices.GetAllocatedSize() +
+                      RegisteredMaterialInstances.GetAllocatedSize() +
+                      GPUMaterialInstances.GetAllocatedSize() +
                       GetRegistryCPUBytes(DropletNormalRegistry) +
                       GetRegistryCPUBytes(RivuletNormalRegistry);
     for (const FRuntimeProfileRecord& Profile : RuntimeProfiles)
@@ -632,51 +655,76 @@ void UDWCGPUResourceSubsystem::EnsureNeutralResources()
 
 int32 UDWCGPUResourceSubsystem::FindOrAddRuntimeProfile(
     const FWetClothingLocalRenderProfile& LocalProfile,
-    bool& bOutChanged)
+    const EDWCRenderResourceUsage Usage)
 {
     const FString Key = ResolveProfileKey(LocalProfile);
+    int32 RuntimeIndex = INDEX_NONE;
+    FRuntimeProfileRecord* Record = nullptr;
+
     if (const int32* ExistingIndex = RuntimeProfileIndexByKey.Find(Key))
     {
-        return *ExistingIndex;
+        RuntimeIndex = *ExistingIndex;
+        Record = RuntimeProfiles.IsValidIndex(RuntimeIndex) ? &RuntimeProfiles[RuntimeIndex] : nullptr;
+        if (Record == nullptr)
+        {
+            return 0;
+        }
+        if (Usage == EDWCRenderResourceUsage::AbsorbedOnly || Record->bSurfaceResourcesResolved)
+        {
+            return RuntimeIndex;
+        }
     }
-
-    if (RuntimeProfiles.Num() >= MaxRuntimeProfileCount)
+    else
     {
-        UE_LOG(LogDWC, Error, TEXT("DWC Render Profile Registry exceeded %d profiles."), MaxRuntimeProfileCount);
-        return 0;
+        if (RuntimeProfiles.Num() >= MaxRuntimeProfileCount)
+        {
+            UE_LOG(LogDWC, Error, TEXT("DWC Render Profile Registry exceeded %d profiles."), MaxRuntimeProfileCount);
+            return 0;
+        }
+
+        Record = &RuntimeProfiles.AddDefaulted_GetRef();
+        Record->StableKey = Key;
+        Record->PackedTexels.SetNumZeroed(TexelsPerProfile);
+        RuntimeIndex = RuntimeProfiles.Num() - 1;
+        RuntimeProfileIndexByKey.Add(Key, RuntimeIndex);
+        Record->PackedTexels[0] = FLinearColor(
+            LocalProfile.Parameters.GetAbsorbedDarkeningStrength(),
+            LocalProfile.Parameters.GetAbsorbedGlossinessStrength(),
+            0.0f,
+            0.0f);
+        Record->PackedTexels[1] = FLinearColor::Black;
+        DirtyRuntimeProfileIndices.Add(RuntimeIndex);
     }
 
-    FRuntimeProfileRecord& Record = RuntimeProfiles.AddDefaulted_GetRef();
-    Record.StableKey = Key;
-    Record.PackedTexels.SetNumZeroed(TexelsPerProfile);
-    const int32 NewIndex = RuntimeProfiles.Num() - 1;
-    RuntimeProfileIndexByKey.Add(Key, NewIndex);
+    if (Usage == EDWCRenderResourceUsage::FullGPU && !Record->bSurfaceResourcesResolved)
+    {
+        const FSurfaceWaterProfileParameters& Surface = LocalProfile.Parameters.SurfaceWater;
+        bool bTextureArraysChanged = false;
+        const int32 DropletNormalSlice =
+            Surface.bEnabled && Surface.bEnableDroplets
+                ? DropletNormalRegistry.FindOrAdd(LocalProfile.NormalizedDropletNormal, bTextureArraysChanged)
+                : 0;
+        const int32 RivuletNormalSlice =
+            Surface.bEnabled && Surface.bEnableRivulets
+                ? RivuletNormalRegistry.FindOrAdd(LocalProfile.NormalizedRivuletNormal, bTextureArraysChanged)
+                : 0;
 
-    const FSurfaceWaterProfileParameters& Surface = LocalProfile.Parameters.SurfaceWater;
-    bool bTextureArraysChanged = false;
-    const int32 DropletNormalSlice =
-        Surface.bEnabled && Surface.bEnableDroplets
-            ? DropletNormalRegistry.FindOrAdd(LocalProfile.NormalizedDropletNormal, bTextureArraysChanged)
-            : 0;
-    const int32 RivuletNormalSlice =
-        Surface.bEnabled && Surface.bEnableRivulets
-            ? RivuletNormalRegistry.FindOrAdd(LocalProfile.NormalizedRivuletNormal, bTextureArraysChanged)
-            : 0;
+        Record->PackedTexels[0] = FLinearColor(
+            LocalProfile.Parameters.GetAbsorbedDarkeningStrength(),
+            LocalProfile.Parameters.GetAbsorbedGlossinessStrength(),
+            static_cast<float>(DropletNormalSlice),
+            static_cast<float>(RivuletNormalSlice));
+        Record->PackedTexels[1] = FLinearColor(
+            FMath::Max(0.0f, Surface.SurfaceWaterNormalStrength),
+            FMath::Clamp(Surface.SurfaceWaterRoughnessStrength, 0.0f, 1.0f),
+            FMath::Clamp(Surface.SurfaceVisibilityThreshold, 0.0f, 1.0f),
+            Surface.RivuletUVScrollSpeed);
+        Record->bSurfaceResourcesResolved = true;
+        DirtyRuntimeProfileIndices.Add(RuntimeIndex);
+        bTextureArraysDirty |= bTextureArraysChanged;
+    }
 
-    Record.PackedTexels[0] = FLinearColor(
-        LocalProfile.Parameters.GetAbsorbedDarkeningStrength(),
-        LocalProfile.Parameters.GetAbsorbedGlossinessStrength(),
-        static_cast<float>(DropletNormalSlice),
-        static_cast<float>(RivuletNormalSlice));
-    Record.PackedTexels[1] = FLinearColor(
-        FMath::Max(0.0f, Surface.SurfaceWaterNormalStrength),
-        FMath::Clamp(Surface.SurfaceWaterRoughnessStrength, 0.0f, 1.0f),
-        FMath::Clamp(Surface.SurfaceVisibilityThreshold, 0.0f, 1.0f),
-        Surface.RivuletUVScrollSpeed);
-
-    bOutChanged = true;
-    bTextureArraysDirty |= bTextureArraysChanged;
-    return NewIndex;
+    return RuntimeIndex;
 }
 
 
@@ -702,11 +750,102 @@ void UDWCGPUResourceSubsystem::RebuildGlobalRenderProfileLUT()
         TEXT("DWC_GlobalRenderProfileLUT"),
         GlobalLUTWidth,
         Pixels);
+    RebindGlobalRenderProfileLUT();
+}
+
+void UDWCGPUResourceSubsystem::RebindGlobalRenderProfileLUT()
+{
+    if (GlobalRenderProfileLUT == nullptr)
+    {
+        return;
+    }
+
+    for (auto It = RegisteredMaterialInstances.CreateIterator(); It; ++It)
+    {
+        UMaterialInstanceDynamic* MID = It->Get();
+        if (MID == nullptr)
+        {
+            It.RemoveCurrent();
+            continue;
+        }
+        MID->SetTextureParameterValue(
+            DWCWetMaterialParameters::GlobalRenderProfileLUT(),
+            GlobalRenderProfileLUT);
+    }
+}
+
+void UDWCGPUResourceSubsystem::UpdateGlobalRenderProfileLUT(const int32 RuntimeProfileIndex)
+{
+    if (GlobalRenderProfileLUT == nullptr || !RuntimeProfiles.IsValidIndex(RuntimeProfileIndex))
+    {
+        RebuildGlobalRenderProfileLUT();
+        return;
+    }
+
+    FTexture2DResource* DestinationResource =
+        static_cast<FTexture2DResource*>(GlobalRenderProfileLUT->GetResource());
+    const FTextureRHIRef DestinationTexture =
+        DestinationResource != nullptr
+            ? DestinationResource->TextureRHI
+            : FTextureRHIRef();
+    if (!DestinationTexture.IsValid())
+    {
+        RebuildGlobalRenderProfileLUT();
+        return;
+    }
+
+    TArray<FLinearColor> Texels;
+    Texels.Init(FLinearColor::Black, TexelsPerProfile);
+    const TArray<FLinearColor>& PackedTexels = RuntimeProfiles[RuntimeProfileIndex].PackedTexels;
+    for (int32 TexelIndex = 0; TexelIndex < TexelsPerProfile && PackedTexels.IsValidIndex(TexelIndex); ++TexelIndex)
+    {
+        Texels[TexelIndex] = PackedTexels[TexelIndex];
+    }
+    const int32 DestinationX = RuntimeProfileIndex * TexelsPerProfile;
+    ENQUEUE_RENDER_COMMAND(DWCUpdateRenderProfileLUT)(
+        [DestinationTexture, DestinationX, Texels = MoveTemp(Texels)](FRHICommandListImmediate& RHICmdList)
+        {
+            const FUpdateTextureRegion2D Region(
+                DestinationX,
+                0,
+                0,
+                0,
+                UDWCGPUResourceSubsystem::TexelsPerProfile,
+                1);
+            RHICmdList.UpdateTexture2D(
+                DestinationTexture.GetReference(),
+                0,
+                Region,
+                UDWCGPUResourceSubsystem::TexelsPerProfile * sizeof(FLinearColor),
+                reinterpret_cast<const uint8*>(Texels.GetData()));
+        });
+}
+
+void UDWCGPUResourceSubsystem::FlushDirtyRuntimeProfiles()
+{
+    if (DirtyRuntimeProfileIndices.IsEmpty())
+    {
+        return;
+    }
+
+    if (GlobalRenderProfileLUT == nullptr)
+    {
+        RebuildGlobalRenderProfileLUT();
+    }
+    else
+    {
+        for (const int32 RuntimeProfileIndex : DirtyRuntimeProfileIndices)
+        {
+            UpdateGlobalRenderProfileLUT(RuntimeProfileIndex);
+        }
+    }
+    DirtyRuntimeProfileIndices.Reset();
 }
 
 UTexture2DArray* UDWCGPUResourceSubsystem::BuildTextureArray(
     const TCHAR* DebugName,
     const TArray<TObjectPtr<UTexture2D>>& SourceTextures,
+    const int32 SliceCapacity,
     const bool bNormalArray)
 {
     UTexture2D* FirstValid = nullptr;
@@ -722,9 +861,9 @@ UTexture2DArray* UDWCGPUResourceSubsystem::BuildTextureArray(
     const int32 SizeX = FirstValid != nullptr ? FirstValid->GetSizeX() : 1;
     const int32 SizeY = FirstValid != nullptr ? FirstValid->GetSizeY() : 1;
     const EPixelFormat Format = FirstValid != nullptr ? FirstValid->GetPixelFormat() : PF_B8G8R8A8;
-    const int32 SliceCount = FMath::Max(SourceTextures.Num(), 1);
+    const int32 SafeCapacity = FMath::Max(SliceCapacity, 1);
 
-    UTexture2DArray* Array = UTexture2DArray::CreateTransient(SizeX, SizeY, SliceCount, Format, FName(DebugName));
+    UTexture2DArray* Array = UTexture2DArray::CreateTransient(SizeX, SizeY, SafeCapacity, Format, FName(DebugName));
     if (Array == nullptr)
     {
         return nullptr;
@@ -740,46 +879,55 @@ UTexture2DArray* UDWCGPUResourceSubsystem::BuildTextureArray(
     Array->NeverStream = true;
     Array->UpdateResource();
 
-    FTextureResource* DestinationResource = Array->GetResource();
-    if (DestinationResource == nullptr)
+    TSet<int32> InitialSlices;
+    for (int32 SliceIndex = 0; SliceIndex < SourceTextures.Num(); ++SliceIndex)
     {
-        return Array;
+        InitialSlices.Add(SliceIndex);
+    }
+    FTextureArrayRegistry TemporaryRegistry;
+    TemporaryRegistry.SourceTextures = SourceTextures;
+    TemporaryRegistry.SizeX = SizeX;
+    TemporaryRegistry.SizeY = SizeY;
+    TemporaryRegistry.PixelFormat = static_cast<int32>(Format);
+    UploadTextureArraySlices(Array, TemporaryRegistry, InitialSlices);
+    return Array;
+}
+
+void UDWCGPUResourceSubsystem::UploadTextureArraySlices(
+    UTexture2DArray* Array,
+    const FTextureArrayRegistry& Registry,
+    const TSet<int32>& SliceIndices)
+{
+    if (Array == nullptr || Array->GetResource() == nullptr || SliceIndices.IsEmpty())
+    {
+        return;
     }
 
     struct FCopySource
     {
         FTextureResource* Resource = nullptr;
-        int32 SourceSliceIndex = 0;
         int32 DestinationSliceIndex = 0;
     };
+
     TArray<FCopySource> CopySources;
-    for (int32 SliceIndex = 0; SliceIndex < SourceTextures.Num(); ++SliceIndex)
+    CopySources.Reserve(SliceIndices.Num());
+    for (const int32 SliceIndex : SliceIndices)
     {
-        UTexture2D* Source = SourceTextures[SliceIndex];
-        if (Source == nullptr ||
-            Source->GetResource() == nullptr ||
-            Source->GetSizeX() != SizeX ||
-            Source->GetSizeY() != SizeY ||
-            Source->GetPixelFormat() != Format)
+        if (!Registry.SourceTextures.IsValidIndex(SliceIndex))
         {
-            if (Source != nullptr)
-            {
-                UE_LOG(
-                    LogDWC,
-                    Warning,
-                    TEXT("DWC normalized texture '%s' does not match array '%s' (%dx%d format %d). Slice %d remains neutral."),
-                    *Source->GetPathName(),
-                    DebugName,
-                    SizeX,
-                    SizeY,
-                    static_cast<int32>(Format),
-                    SliceIndex);
-            }
             continue;
         }
-        CopySources.Add({Source->GetResource(), 0, SliceIndex});
+        UTexture2D* Source = Registry.SourceTextures[SliceIndex];
+        if (Source == nullptr || Source->GetResource() == nullptr ||
+            Source->GetSizeX() != Registry.SizeX || Source->GetSizeY() != Registry.SizeY ||
+            static_cast<int32>(Source->GetPixelFormat()) != Registry.PixelFormat)
+        {
+            continue;
+        }
+        CopySources.Add({Source->GetResource(), SliceIndex});
     }
 
+    FTextureResource* DestinationResource = Array->GetResource();
     ENQUEUE_RENDER_COMMAND(DWCCopyTextureArraySlices)(
         [DestinationResource, CopySources = MoveTemp(CopySources)](FRHICommandListImmediate& RHICmdList)
         {
@@ -794,27 +942,66 @@ UTexture2DArray* UDWCGPUResourceSubsystem::BuildTextureArray(
                     continue;
                 }
                 FRHICopyTextureInfo CopyInfo;
-                CopyInfo.SourceSliceIndex = Source.SourceSliceIndex;
+                CopyInfo.SourceSliceIndex = 0;
                 CopyInfo.DestSliceIndex = Source.DestinationSliceIndex;
                 CopyInfo.NumSlices = 1;
                 CopyInfo.NumMips = 1;
                 RHICmdList.CopyTexture(Source.Resource->TextureRHI, DestinationResource->TextureRHI, CopyInfo);
             }
         });
-
-    return Array;
 }
 
-void UDWCGPUResourceSubsystem::RebuildTextureArrays()
+bool UDWCGPUResourceSubsystem::EnsureTextureArray(
+    const TCHAR* DebugName,
+    FTextureArrayRegistry& Registry,
+    TObjectPtr<UTexture2DArray>& Array,
+    const bool bNormalArray)
 {
-    DropletNormalArray = BuildTextureArray(
+    const int32 RequiredSlices = FMath::Max(Registry.SourceTextures.Num(), 1);
+    if (Array == nullptr || Registry.AllocatedCapacity < RequiredSlices)
+    {
+        const int32 NewCapacity = ResolveTextureArrayCapacity(RequiredSlices);
+        Array = BuildTextureArray(DebugName, Registry.SourceTextures, NewCapacity, bNormalArray);
+        Registry.AllocatedCapacity = Array != nullptr ? NewCapacity : 0;
+        Registry.DirtySlices.Reset();
+        return Array != nullptr;
+    }
+
+    if (!Registry.DirtySlices.IsEmpty())
+    {
+        UploadTextureArraySlices(Array, Registry, Registry.DirtySlices);
+        Registry.DirtySlices.Reset();
+    }
+    return false;
+}
+
+bool UDWCGPUResourceSubsystem::EnsureTextureArraysUpToDate()
+{
+    const bool bDropletArrayReplaced = EnsureTextureArray(
         TEXT("DWC_DropletNormalArray"),
-        DropletNormalRegistry.SourceTextures,
+        DropletNormalRegistry,
+        DropletNormalArray,
         true);
-    RivuletNormalArray = BuildTextureArray(
-        TEXT("DWC_RivuletNormalArray"),
-        RivuletNormalRegistry.SourceTextures,
+    const bool bRivuletArrayReplaced = EnsureTextureArray(
+        TEXT("DWC_StreakNormalArray"),
+        RivuletNormalRegistry,
+        RivuletNormalArray,
         true);
+    return bDropletArrayReplaced || bRivuletArrayReplaced;
+}
+
+void UDWCGPUResourceSubsystem::RebindGPUTextureArrays()
+{
+    for (auto It = GPUMaterialInstances.CreateIterator(); It; ++It)
+    {
+        UMaterialInstanceDynamic* MID = It->Get();
+        if (MID == nullptr)
+        {
+            It.RemoveCurrent();
+            continue;
+        }
+        BindGlobalResources(*MID, EDWCRenderResourceUsage::FullGPU);
+    }
 }
 
 
@@ -838,7 +1025,9 @@ UTexture2D* UDWCGPUResourceSubsystem::BuildAssetRemapLUT(
         Pixels);
 }
 
-const FDWCAssetRenderProfileResources* UDWCGPUResourceSubsystem::AcquireAssetResources(UWetClothingAsset* Asset)
+const FDWCAssetRenderProfileResources* UDWCGPUResourceSubsystem::AcquireAssetResources(
+    UWetClothingAsset* Asset,
+    const EDWCRenderResourceUsage Usage)
 {
     EnsureNeutralResources();
     if (Asset == nullptr || !Asset->Derived.Inline.BakedProfileIDData.IsValid())
@@ -846,53 +1035,54 @@ const FDWCAssetRenderProfileResources* UDWCGPUResourceSubsystem::AcquireAssetRes
         return nullptr;
     }
 
-    if (FDWCAssetRenderProfileResources* Existing = AssetResources.Find(Asset))
+    FDWCAssetRenderProfileResources* Existing = AssetResources.Find(Asset);
+    const bool bExistingMappingValid =
+        Existing != nullptr &&
+        Existing->RegistryRevision == RegistryRevision &&
+        Existing->SourceBakeGuid == Asset->Derived.Inline.BakedProfileIDData.BakeGuid &&
+        Existing->IsValid();
+    if (bExistingMappingValid &&
+        (Usage == EDWCRenderResourceUsage::AbsorbedOnly || Existing->bSurfaceResourcesResolved))
     {
-        if (Existing->RegistryRevision == RegistryRevision &&
-            Existing->SourceBakeGuid == Asset->Derived.Inline.BakedProfileIDData.BakeGuid &&
-            Existing->IsValid())
-        {
-            return Existing;
-        }
+        return Existing;
     }
 
-
-    bool bRegistryChanged = false;
-    bool bNeutralRegistryChanged = false;
-    UTexture2D* NeutralNormal = Asset->Derived.Inline.BakedProfileIDData.NormalizedNeutralSurfaceNormal;
-    DropletNormalRegistry.SetNeutral(NeutralNormal, bNeutralRegistryChanged);
-    RivuletNormalRegistry.SetNeutral(NeutralNormal, bNeutralRegistryChanged);
-    bTextureArraysDirty |= bNeutralRegistryChanged;
+    if (Usage == EDWCRenderResourceUsage::FullGPU)
+    {
+        bool bNeutralRegistryChanged = false;
+        UTexture2D* NeutralNormal = Asset->Derived.Inline.BakedProfileIDData.NormalizedNeutralSurfaceNormal;
+        DropletNormalRegistry.SetNeutral(NeutralNormal, bNeutralRegistryChanged);
+        RivuletNormalRegistry.SetNeutral(NeutralNormal, bNeutralRegistryChanged);
+        bTextureArraysDirty |= bNeutralRegistryChanged;
+    }
 
     const TArray<FWetClothingLocalRenderProfile> ResolvedLocalProfiles =
         MakeResolvedLocalRenderProfiles(Asset, true);
     TArray<int32> LocalToRuntime;
     LocalToRuntime.Init(0, ResolvedLocalProfiles.Num() + 1);
-    for (int32 LocalProfileIndex = 0;
-         LocalProfileIndex < ResolvedLocalProfiles.Num();
-         ++LocalProfileIndex)
+    for (int32 LocalProfileIndex = 0; LocalProfileIndex < ResolvedLocalProfiles.Num(); ++LocalProfileIndex)
     {
         LocalToRuntime[LocalProfileIndex + 1] = FindOrAddRuntimeProfile(
             ResolvedLocalProfiles[LocalProfileIndex],
-            bRegistryChanged);
+            Usage);
     }
 
-    if (bTextureArraysDirty || DropletNormalArray == nullptr || RivuletNormalArray == nullptr)
+    if (Usage == EDWCRenderResourceUsage::FullGPU &&
+        (bTextureArraysDirty || DropletNormalArray == nullptr || RivuletNormalArray == nullptr))
     {
-        RebuildTextureArrays();
+        const bool bArrayResourceReplaced = EnsureTextureArraysUpToDate();
         bTextureArraysDirty = false;
-    }
-
-    if (bRegistryChanged || GlobalRenderProfileLUT == nullptr)
-    {
-        RebuildGlobalRenderProfileLUT();
-        ++RegistryRevision;
-        // Existing remap rows remain valid because runtime indices and texture
-        // slices are append-only. They only need their revision updated.
-        for (TPair<TObjectPtr<UWetClothingAsset>, FDWCAssetRenderProfileResources>& Pair : AssetResources)
+        if (bArrayResourceReplaced)
         {
-            Pair.Value.RegistryRevision = RegistryRevision;
+            RebindGPUTextureArrays();
         }
+    }
+    FlushDirtyRuntimeProfiles();
+
+    if (bExistingMappingValid)
+    {
+        Existing->bSurfaceResourcesResolved = Usage == EDWCRenderResourceUsage::FullGPU;
+        return Existing;
     }
 
     FDWCAssetRenderProfileResources& Resources = AssetResources.FindOrAdd(Asset);
@@ -927,6 +1117,7 @@ const FDWCAssetRenderProfileResources* UDWCGPUResourceSubsystem::AcquireAssetRes
     Resources.ProfileRemapLUT = BuildAssetRemapLUT(Asset, LocalToRuntime);
     Resources.SourceBakeGuid = Asset->Derived.Inline.BakedProfileIDData.BakeGuid;
     Resources.RegistryRevision = RegistryRevision;
+    Resources.bSurfaceResourcesResolved = Usage == EDWCRenderResourceUsage::FullGPU;
     return Resources.IsValid() ? &Resources : nullptr;
 }
 
@@ -955,11 +1146,17 @@ UDWCGPUResourceSubsystem::AcquireStaticSlotResources(
     const FString& BuildSignature,
     const FIntPoint LookupExtent,
     const uint32 TexelCount,
+    const FIntPoint SurfaceLookupExtent,
+    const uint32 SurfaceTexelCount,
     const uint32 TriangleCount,
     const int32 SectionCount)
 {
+    const bool bSurfaceMetadataValid =
+        (SurfaceTexelCount == 0 && SurfaceLookupExtent == FIntPoint::ZeroValue) ||
+        (SurfaceTexelCount > 0 && SurfaceLookupExtent.X > 0 && SurfaceLookupExtent.Y > 0);
     if (Asset == nullptr || MaterialSlotIndex == INDEX_NONE || BuildSignature.IsEmpty() ||
-        LookupExtent.X <= 0 || LookupExtent.Y <= 0 || TexelCount == 0 || SectionCount < 0)
+        LookupExtent.X <= 0 || LookupExtent.Y <= 0 || TexelCount == 0 ||
+        !bSurfaceMetadataValid || SectionCount < 0)
     {
         return nullptr;
     }
@@ -970,24 +1167,30 @@ UDWCGPUResourceSubsystem::AcquireStaticSlotResources(
         if (Existing->IsValid() &&
             ((*Existing)->LookupExtent != LookupExtent ||
              (*Existing)->TexelCount != TexelCount ||
+             (*Existing)->SurfaceLookupExtent != SurfaceLookupExtent ||
+             (*Existing)->SurfaceTexelCount != SurfaceTexelCount ||
              (*Existing)->TriangleCount != TriangleCount ||
              (*Existing)->Sections.Num() != SectionCount))
         {
             UE_LOG(
                 LogDWC,
                 Warning,
-                TEXT("DWC shared GPU resource metadata mismatch for '%s' slot %d signature '%s'. Cached=%dx%d/%u/%u Requested=%dx%d/%u/%u. Replacing the stale cache entry."),
+                TEXT("DWC shared GPU resource metadata mismatch for '%s' slot %d signature '%s'. CachedWet=%dx%d/%u CachedSurface=%dx%d/%u RequestedWet=%dx%d/%u RequestedSurface=%dx%d/%u. Replacing the stale cache entry."),
                 *GetNameSafe(Asset),
                 MaterialSlotIndex,
                 *BuildSignature,
                 (*Existing)->LookupExtent.X,
                 (*Existing)->LookupExtent.Y,
                 (*Existing)->TexelCount,
-                (*Existing)->TriangleCount,
+                (*Existing)->SurfaceLookupExtent.X,
+                (*Existing)->SurfaceLookupExtent.Y,
+                (*Existing)->SurfaceTexelCount,
                 LookupExtent.X,
                 LookupExtent.Y,
                 TexelCount,
-                TriangleCount);
+                SurfaceLookupExtent.X,
+                SurfaceLookupExtent.Y,
+                SurfaceTexelCount);
             StaticSlotResources.Remove(Key);
         }
         else
@@ -1001,6 +1204,8 @@ UDWCGPUResourceSubsystem::AcquireStaticSlotResources(
     Resources->Key = Key;
     Resources->LookupExtent = LookupExtent;
     Resources->TexelCount = TexelCount;
+    Resources->SurfaceLookupExtent = SurfaceLookupExtent;
+    Resources->SurfaceTexelCount = SurfaceTexelCount;
     Resources->TriangleCount = TriangleCount;
     Resources->Sections.SetNum(SectionCount);
     StaticSlotResources.Add(Key, Resources);
@@ -1024,20 +1229,25 @@ void UDWCGPUResourceSubsystem::InvalidateStaticResources(const UWetClothingAsset
     }
 }
 
-void UDWCGPUResourceSubsystem::BindGlobalResources(UMaterialInstanceDynamic& MID) const
+void UDWCGPUResourceSubsystem::BindGlobalResources(
+    UMaterialInstanceDynamic& MID,
+    const EDWCRenderResourceUsage Usage) const
 {
     if (GlobalRenderProfileLUT != nullptr)
     {
         MID.SetTextureParameterValue(DWCWetMaterialParameters::GlobalRenderProfileLUT(), GlobalRenderProfileLUT);
     }
     MID.SetScalarParameterValue(DWCWetMaterialParameters::GlobalRenderProfileTexelSize(), GlobalTexelSize);
-    if (DropletNormalArray != nullptr)
+    if (Usage == EDWCRenderResourceUsage::FullGPU)
     {
-        MID.SetTextureParameterValue(DWCWetMaterialParameters::DropletNormalTextureArray(), DropletNormalArray);
-    }
-    if (RivuletNormalArray != nullptr)
-    {
-        MID.SetTextureParameterValue(DWCWetMaterialParameters::RivuletNormalTextureArray(), RivuletNormalArray);
+        if (DropletNormalArray != nullptr)
+        {
+            MID.SetTextureParameterValue(DWCWetMaterialParameters::DropletNormalTextureArray(), DropletNormalArray);
+        }
+        if (RivuletNormalArray != nullptr)
+        {
+            MID.SetTextureParameterValue(DWCWetMaterialParameters::StreakNormalTextureArray(), RivuletNormalArray);
+        }
     }
 }
 
@@ -1045,7 +1255,8 @@ void UDWCGPUResourceSubsystem::ApplyFallbackRenderProfileParameters(
     UMaterialInstanceDynamic& MID,
     const UWetClothingAsset* WetClothingAsset,
     const int32 MaterialSlotIndex,
-    const FWetClothingLocalRenderProfile* CachedProfile)
+    const FWetClothingLocalRenderProfile* CachedProfile,
+    const EDWCRenderResourceUsage Usage)
 {
     FWetClothingLocalRenderProfile Profile;
     if (CachedProfile != nullptr)
@@ -1057,44 +1268,73 @@ void UDWCGPUResourceSubsystem::ApplyFallbackRenderProfileParameters(
         ResolveFallbackRenderProfile(WetClothingAsset, MaterialSlotIndex, Profile, false);
     }
 
-    bool bTextureArraysChanged = false;
-    if (WetClothingAsset != nullptr)
+    FFallbackRenderProfileSlices Slices;
+    if (Usage == EDWCRenderResourceUsage::FullGPU)
     {
-        UTexture2D* NeutralNormal =
-            WetClothingAsset->Derived.Inline.BakedProfileIDData.NormalizedNeutralSurfaceNormal;
-        DropletNormalRegistry.SetNeutral(NeutralNormal, bTextureArraysChanged);
-        RivuletNormalRegistry.SetNeutral(NeutralNormal, bTextureArraysChanged);
-    }
-    const FSurfaceWaterProfileParameters& Surface = Profile.Parameters.SurfaceWater;
-    const FFallbackRenderProfileSlices Slices{
-        Surface.bEnabled && Surface.bEnableDroplets
+        bool bTextureArraysChanged = false;
+        if (WetClothingAsset != nullptr)
+        {
+            UTexture2D* NeutralNormal =
+                WetClothingAsset->Derived.Inline.BakedProfileIDData.NormalizedNeutralSurfaceNormal;
+            DropletNormalRegistry.SetNeutral(NeutralNormal, bTextureArraysChanged);
+            RivuletNormalRegistry.SetNeutral(NeutralNormal, bTextureArraysChanged);
+        }
+        const FSurfaceWaterProfileParameters& Surface = Profile.Parameters.SurfaceWater;
+        Slices.DropletNormal = Surface.bEnabled && Surface.bEnableDroplets
             ? DropletNormalRegistry.FindOrAdd(Profile.NormalizedDropletNormal, bTextureArraysChanged)
-            : 0,
-        Surface.bEnabled && Surface.bEnableRivulets
+            : 0;
+        Slices.RivuletNormal = Surface.bEnabled && Surface.bEnableRivulets
             ? RivuletNormalRegistry.FindOrAdd(Profile.NormalizedRivuletNormal, bTextureArraysChanged)
-            : 0};
+            : 0;
 
-    if (bTextureArraysChanged)
-    {
-        bTextureArraysDirty = true;
-        RebuildTextureArrays();
-        bTextureArraysDirty = false;
+        if (bTextureArraysChanged)
+        {
+            bTextureArraysDirty = true;
+            const bool bArrayResourceReplaced = EnsureTextureArraysUpToDate();
+            bTextureArraysDirty = false;
+            if (bArrayResourceReplaced)
+            {
+                RebindGPUTextureArrays();
+            }
+        }
     }
 
     for (int32 TexelIndex = 0; TexelIndex < UDWCGPUResourceSubsystem::TexelsPerProfile; ++TexelIndex)
     {
+        const FLinearColor Texel = Usage == EDWCRenderResourceUsage::FullGPU
+            ? MakeFallbackRenderProfileTexel(Profile, Slices, TexelIndex)
+            : (TexelIndex == 0
+                ? FLinearColor(
+                    Profile.Parameters.GetAbsorbedDarkeningStrength(),
+                    Profile.Parameters.GetAbsorbedGlossinessStrength(),
+                    0.0f,
+                    0.0f)
+                : FLinearColor::Black);
         MID.SetVectorParameterValue(
             DWCWetMaterialParameters::FallbackRenderProfileTexel(TexelIndex),
-            MakeFallbackRenderProfileTexel(Profile, Slices, TexelIndex));
+            Texel);
     }
 }
 
 void UDWCGPUResourceSubsystem::ApplyResourcesToMaterials(
     UWetClothingAsset* Asset,
-    const TArray<TObjectPtr<UMaterialInstanceDynamic>>& MaterialInstances)
+    const TArray<TObjectPtr<UMaterialInstanceDynamic>>& MaterialInstances,
+    const EDWCRenderResourceUsage Usage)
 {
     EnsureNeutralResources();
-    const FDWCAssetRenderProfileResources* Resources = AcquireAssetResources(Asset);
+    for (UMaterialInstanceDynamic* MID : MaterialInstances)
+    {
+        if (MID != nullptr)
+        {
+            RegisteredMaterialInstances.Add(MID);
+            if (Usage == EDWCRenderResourceUsage::FullGPU)
+            {
+                GPUMaterialInstances.Add(MID);
+            }
+        }
+    }
+
+    const FDWCAssetRenderProfileResources* Resources = AcquireAssetResources(Asset, Usage);
     for (int32 MaterialSlotIndex = 0; MaterialSlotIndex < MaterialInstances.Num(); ++MaterialSlotIndex)
     {
         UMaterialInstanceDynamic* MID = MaterialInstances[MaterialSlotIndex];
@@ -1109,7 +1349,8 @@ void UDWCGPUResourceSubsystem::ApplyResourcesToMaterials(
             MaterialSlotIndex,
             Resources != nullptr
                 ? Resources->FallbackRenderProfilesByMaterialSlot.Find(MaterialSlotIndex)
-                : nullptr);
+                : nullptr,
+            Usage);
         const bool bUseRenderProfileLUT =
             Resources != nullptr &&
             Resources->ProfileRemapLUT != nullptr &&
@@ -1128,6 +1369,6 @@ void UDWCGPUResourceSubsystem::ApplyResourcesToMaterials(
             Resources != nullptr && Resources->ProfileRemapLUT != nullptr
                 ? Resources->ProfileRemapLUT.Get()
                 : NeutralProfileRemapLUT.Get());
-        BindGlobalResources(*MID);
+        BindGlobalResources(*MID, Usage);
     }
 }

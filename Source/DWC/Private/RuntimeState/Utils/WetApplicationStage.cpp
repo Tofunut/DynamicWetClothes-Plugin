@@ -6,7 +6,6 @@
 #include "Profiling/DWCStatsSubsystem.h"
 #include "Runtime/Engine/Classes/Components/SkeletalMeshComponent.h"
 #include "Utility/DWCLog.h"
-#include "GPU/DWCSurfaceWaterSimulationState.h"
 
 namespace
 {
@@ -17,11 +16,33 @@ namespace
 
     struct FGPUSurfaceWaterAccumulator
     {
+        int32 MaterialSlotIndex = INDEX_NONE;
         float TotalSurfaceAmount = 0.0f;
         float BestInfluence = -1.0f;
         FVector2f BestUV = FVector2f::ZeroVector;
         FSurfaceWaterProfileParameters Profile;
         bool bHasProfile = false;
+    };
+
+    struct FGPUSurfaceWaterAccumulatorKey
+    {
+        int32 MaterialSlotIndex = INDEX_NONE;
+        int32 WetPartID = INDEX_NONE;
+        uint16 ProfileIndex = FWetClothingRuntimeData::InvalidWetnessProfileIndex;
+
+        bool operator==(const FGPUSurfaceWaterAccumulatorKey& Other) const
+        {
+            return MaterialSlotIndex == Other.MaterialSlotIndex &&
+                   WetPartID == Other.WetPartID &&
+                   ProfileIndex == Other.ProfileIndex;
+        }
+
+        friend uint32 GetTypeHash(const FGPUSurfaceWaterAccumulatorKey& Key)
+        {
+            return HashCombine(
+                HashCombine(GetTypeHash(Key.MaterialSlotIndex), GetTypeHash(Key.WetPartID)),
+                GetTypeHash(Key.ProfileIndex));
+        }
     };
 
     int32 GetDominantTriangleVertexIndex(
@@ -47,7 +68,8 @@ namespace
         if (Asset == nullptr ||
             !Receiver.GPUBackend.IsValid() ||
             !Receiver.SharedRuntimeData.IsValid() ||
-            !Asset->Authored.SurfaceWaterSettings.bEnabled ||
+            !Receiver.QualityLODState.ResolvedPolicy.bUpdateSurfaceWater ||
+            !Asset->UsesSurfaceWater() ||
             Contacts.IsEmpty())
         {
             return false;
@@ -55,7 +77,7 @@ namespace
 
         const FDWCGPULODBakeData& GPUData =
             Asset->GetGPUWetMapRuntimeData(UWetClothingAsset::RuntimeSimulationLODIndex);
-        TMap<int32, FGPUSurfaceWaterAccumulator> Accumulators;
+        TMap<FGPUSurfaceWaterAccumulatorKey, FGPUSurfaceWaterAccumulator> Accumulators;
 
         for (const FDWCResolvedSurfaceContact& Contact : Contacts)
         {
@@ -72,11 +94,29 @@ namespace
                 continue;
             }
 
+            const FWetClothingAuthoredMaterialSlot* MaterialSlot =
+                Asset->Authored.PartData.EditableWetPartData.FindMaterialSlot(Contact.MaterialSlotIndex);
+            if (MaterialSlot == nullptr || !MaterialSlot->bIsWettableSlot)
+            {
+                continue;
+            }
+
             const int32 ProfileVertexIndex = GetDominantTriangleVertexIndex(Triangle, Contact.Barycentric);
+            if (!Receiver.SharedRuntimeData->VertexWetnessProfileIndices.IsValidIndex(ProfileVertexIndex) ||
+                !Receiver.SharedRuntimeData->VertexWetPartIDs.IsValidIndex(ProfileVertexIndex))
+            {
+                continue;
+            }
+
+            const uint16 ProfileIndex =
+                Receiver.SharedRuntimeData->VertexWetnessProfileIndices[ProfileVertexIndex];
+            const int32 WetPartID =
+                Receiver.SharedRuntimeData->VertexWetPartIDs[ProfileVertexIndex];
             const FWetnessProfileParameters* WetnessProfile =
                 Receiver.SharedRuntimeData->GetWetnessProfileParameters(ProfileVertexIndex);
-            if (WetnessProfile == nullptr ||
-                !Receiver.SharedRuntimeData->SupportsSurfaceWater(ProfileVertexIndex))
+            if (ProfileIndex == FWetClothingRuntimeData::InvalidWetnessProfileIndex ||
+                WetnessProfile == nullptr ||
+                !WetnessProfile->SupportsSurfaceWater())
             {
                 continue;
             }
@@ -91,7 +131,12 @@ namespace
                 continue;
             }
 
-            FGPUSurfaceWaterAccumulator& Accumulator = Accumulators.FindOrAdd(Contact.MaterialSlotIndex);
+            const FGPUSurfaceWaterAccumulatorKey AccumulatorKey{
+                Contact.MaterialSlotIndex,
+                WetPartID,
+                ProfileIndex};
+            FGPUSurfaceWaterAccumulator& Accumulator = Accumulators.FindOrAdd(AccumulatorKey);
+            Accumulator.MaterialSlotIndex = Contact.MaterialSlotIndex;
             Accumulator.TotalSurfaceAmount += SurfaceAmount;
             if (Contact.TriangleInfluence > Accumulator.BestInfluence)
             {
@@ -102,11 +147,11 @@ namespace
             }
         }
 
-        FRandomStream& RandomStream = Receiver.SurfaceWaterRandomStream;
+        FRandomStream& RandomStream = Receiver.GPUSurfaceWaterRandomStream;
         TArray<FDWCSurfaceStampRequest> Requests;
         Requests.Reserve(Accumulators.Num() * 2);
 
-        for (const TPair<int32, FGPUSurfaceWaterAccumulator>& Pair : Accumulators)
+        for (const TPair<FGPUSurfaceWaterAccumulatorKey, FGPUSurfaceWaterAccumulator>& Pair : Accumulators)
         {
             const FGPUSurfaceWaterAccumulator& Accumulator = Pair.Value;
             if (!Accumulator.bHasProfile)
@@ -122,7 +167,7 @@ namespace
             {
                 FDWCSurfaceStampRequest& Request = Requests.AddDefaulted_GetRef();
                 Request.Type = EDWCSurfaceStampType::Droplet;
-                Request.MaterialSlotIndex = Pair.Key;
+                Request.MaterialSlotIndex = Accumulator.MaterialSlotIndex;
                 Request.UV = Accumulator.BestUV;
                 Request.HalfSizePixels = FVector2f(FMath::Max(0.5f, Surface.DropletRadiusPixels));
                 Request.Amount = Accumulator.TotalSurfaceAmount *
@@ -139,7 +184,7 @@ namespace
             {
                 FDWCSurfaceStampRequest& Request = Requests.AddDefaulted_GetRef();
                 Request.Type = EDWCSurfaceStampType::Rivulet;
-                Request.MaterialSlotIndex = Pair.Key;
+                Request.MaterialSlotIndex = Accumulator.MaterialSlotIndex;
                 Request.UV = Accumulator.BestUV;
                 Request.HalfSizePixels = FVector2f(
                     FMath::Max(0.5f, Surface.FlowWidthPixels * 0.5f),
@@ -170,11 +215,6 @@ FWetInputStageArgs FWetApplicationStage::MakeWetInputStageArgs(
     Args.WetnessSettings = Context.WetnessSettings;
     Args.RuntimeData = Receiver.SharedRuntimeData.Get();
     Args.SimulationState = Receiver.SimulationState.Get();
-    Args.SurfaceWaterStatesByMaterialSlot = &Receiver.SurfaceWaterStatesByMaterialSlot;
-    Args.SurfaceWaterSettings = Receiver.WetClothingAsset.IsValid()
-        ? &Receiver.WetClothingAsset->Authored.SurfaceWaterSettings
-        : nullptr;
-    Args.SurfaceWaterRandomStream = &Receiver.SurfaceWaterRandomStream;
     Args.MeshSampler = Receiver.MeshSampler.Get();
     return Args;
 }

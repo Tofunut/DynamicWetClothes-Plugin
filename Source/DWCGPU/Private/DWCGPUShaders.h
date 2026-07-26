@@ -27,6 +27,26 @@ public:
     static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters);
 };
 
+/** Applies many positive wetness contacts in one destination-gather pass using tile-local contact bins. */
+class FDWCApplyBinnedAbsorptionCS final : public FGlobalShader
+{
+public:
+    DECLARE_GLOBAL_SHADER(FDWCApplyBinnedAbsorptionCS);
+    SHADER_USE_PARAMETER_STRUCT(FDWCApplyBinnedAbsorptionCS, FGlobalShader);
+
+    BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
+        SHADER_PARAMETER(FIntPoint, TextureSize)
+        SHADER_PARAMETER(FIntPoint, TileGridSize)
+        SHADER_PARAMETER(uint32, TileSize)
+        SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float4>, Contacts)
+        SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint2>, TileBins)
+        SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, TileContactIndices)
+        SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float>, PendingWetnessTexture)
+    END_SHADER_PARAMETER_STRUCT()
+
+    static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters);
+};
+
 /** Builds one dynamic gravity/area entry for every simulation-LOD triangle in a render section. */
 class FDWCUpdateTriangleFlowCS final : public FGlobalShader
 {

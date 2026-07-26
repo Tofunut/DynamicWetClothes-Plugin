@@ -164,6 +164,42 @@ float ResolveGPUAbsorptionMultiplier(
     return FMath::Max(0.0f, Profile ? Profile->GetAbsorptionMultiplier() : 1.0f);
 }
 
+uint64 MakeWetAreaTriangleMergeKey(const int32 MaterialSlotIndex, const int32 TriangleID)
+{
+    return (static_cast<uint64>(static_cast<uint32>(MaterialSlotIndex)) << 32) |
+           static_cast<uint32>(TriangleID);
+}
+
+void AccumulateWetAreaTriangleContact(
+    FDWCResolvedSurfaceContact& Existing,
+    const FVector& ContactWorldPosition,
+    const FVector3f& Barycentric,
+    const FVector2f& ContactUV,
+    const float Amount,
+    const float AbsorptionMultiplier)
+{
+    if (Amount <= 0.0f || Existing.Amount <= 0.0f)
+    {
+        return;
+    }
+
+    const float TotalAmount = Existing.Amount + Amount;
+    if (TotalAmount <= KINDA_SMALL_NUMBER)
+    {
+        return;
+    }
+
+    const float ExistingWeight = Existing.Amount / TotalAmount;
+    const float NewWeight = Amount / TotalAmount;
+    Existing.Barycentric = Existing.Barycentric * ExistingWeight + Barycentric * NewWeight;
+    Existing.ContactUV = Existing.ContactUV * ExistingWeight + ContactUV * NewWeight;
+    Existing.ContactWorldPosition = Existing.ContactWorldPosition * ExistingWeight + ContactWorldPosition * NewWeight;
+    Existing.ClosestWorldPosition = Existing.ContactWorldPosition;
+    Existing.AbsorptionMultiplier =
+        (Existing.AbsorptionMultiplier * Existing.Amount + AbsorptionMultiplier * Amount) / TotalAmount;
+    Existing.Amount = TotalAmount;
+}
+
 FVector OrientTriangleNormalForContact(const FVector& TriangleNormal, const FDWCWetContact& Contact)
 {
     if (TriangleNormal.IsNearlyZero())
@@ -730,6 +766,12 @@ bool FWetSurfaceContactResolver::ResolveWetArea(
         }
     }
 
+    TMap<uint64, int32> PositiveWetAreaTriangleContactIndices;
+    if (AreaData.Amount > 0.0f)
+    {
+        PositiveWetAreaTriangleContactIndices.Reserve(SelectedCandidates.Num());
+    }
+
     for (const FWetAreaCandidate& SelectedCandidate : SelectedCandidates)
     {
         const int32 VertexIndex = SelectedCandidate.VertexIndex;
@@ -777,13 +819,42 @@ bool FWetSurfaceContactResolver::ResolveWetArea(
             }
 
             const FVector3f Barycentric = ComputeTriangleBarycentric(VertexWorldPosition, P0, P1, P2);
+            const FVector2f ContactUV =
+                FVector2f(Triangle.UV0) * Barycentric.X +
+                FVector2f(Triangle.UV1) * Barycentric.Y +
+                FVector2f(Triangle.UV2) * Barycentric.Z;
+            const float AbsorptionMultiplier = ResolveGPUAbsorptionMultiplier(
+                Triangle,
+                Barycentric,
+                Args.RuntimeData,
+                EffectiveAmount);
+
+            if (EffectiveAmount > 0.0f)
+            {
+                const uint64 MergeKey = MakeWetAreaTriangleMergeKey(Triangle.MaterialSlotIndex, TriangleID);
+                if (const int32* ExistingContactIndex = PositiveWetAreaTriangleContactIndices.Find(MergeKey))
+                {
+                    if (OutContacts.IsValidIndex(*ExistingContactIndex))
+                    {
+                        AccumulateWetAreaTriangleContact(
+                            OutContacts[*ExistingContactIndex],
+                            VertexWorldPosition,
+                            Barycentric,
+                            ContactUV,
+                            EffectiveAmount,
+                            AbsorptionMultiplier);
+                    }
+                    continue;
+                }
+
+                PositiveWetAreaTriangleContactIndices.Add(MergeKey, OutContacts.Num());
+            }
+
             FDWCResolvedSurfaceContact& Resolved = OutContacts.AddDefaulted_GetRef();
             Resolved.TriangleID = TriangleID;
             Resolved.MaterialSlotIndex = Triangle.MaterialSlotIndex;
             Resolved.Barycentric = Barycentric;
-            Resolved.ContactUV = FVector2f(Triangle.UV0) * Barycentric.X +
-                                 FVector2f(Triangle.UV1) * Barycentric.Y +
-                                 FVector2f(Triangle.UV2) * Barycentric.Z;
+            Resolved.ContactUV = ContactUV;
             Resolved.ContactWorldPosition = VertexWorldPosition;
             Resolved.ClosestWorldPosition = VertexWorldPosition;
             Resolved.WorldTrianglePosition0 = P0;
@@ -794,11 +865,7 @@ bool FWetSurfaceContactResolver::ResolveWetArea(
             Resolved.TriangleInfluence = 1.0f;
             Resolved.Amount = EffectiveAmount;
             Resolved.Radius = ComputeWetAreaSampleRadius(P0, P1, P2);
-            Resolved.AbsorptionMultiplier = ResolveGPUAbsorptionMultiplier(
-                Triangle,
-                Barycentric,
-                Args.RuntimeData,
-                EffectiveAmount);
+            Resolved.AbsorptionMultiplier = AbsorptionMultiplier;
         }
     }
 

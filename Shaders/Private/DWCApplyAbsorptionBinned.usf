@@ -1,0 +1,94 @@
+#include "/Engine/Public/Platform.ush"
+
+RWTexture2D<float> PendingWetnessTexture;
+
+StructuredBuffer<float4> Contacts;
+StructuredBuffer<uint2> TileBins;
+StructuredBuffer<uint> TileContactIndices;
+
+int2 TextureSize;
+int2 TileGridSize;
+uint TileSize;
+
+static const uint DWCAbsorptionContactFloat4Count = 6u;
+
+bool ComputeBarycentricUV(float2 Point, float2 A, float2 B, float2 C, out float3 Barycentric)
+{
+    const float2 V0 = B - A;
+    const float2 V1 = C - A;
+    const float2 V2 = Point - A;
+    const float Denominator = V0.x * V1.y - V1.x * V0.y;
+    if (abs(Denominator) <= 1.0e-10)
+    {
+        Barycentric = 0.0;
+        return false;
+    }
+
+    const float WeightB = (V2.x * V1.y - V1.x * V2.y) / Denominator;
+    const float WeightC = (V0.x * V2.y - V2.x * V0.y) / Denominator;
+    const float WeightA = 1.0 - WeightB - WeightC;
+    Barycentric = float3(WeightA, WeightB, WeightC);
+
+    return all(Barycentric >= -1.0e-4) && all(Barycentric <= 1.0001);
+}
+
+float ComputeContactWetness(uint ContactIndex, float2 UV)
+{
+    const uint BaseIndex = ContactIndex * DWCAbsorptionContactFloat4Count;
+    const float4 UV01 = Contacts[BaseIndex + 0u];
+    const float4 UV2AndSettings = Contacts[BaseIndex + 1u];
+    const float4 ContactAndRadius = Contacts[BaseIndex + 2u];
+    const float4 P0AndAmount = Contacts[BaseIndex + 3u];
+    const float4 P1AndMaxWetness = Contacts[BaseIndex + 4u];
+    const float4 P2AndMode = Contacts[BaseIndex + 5u];
+
+    float3 Barycentric;
+    if (!ComputeBarycentricUV(UV, UV01.xy, UV01.zw, UV2AndSettings.xy, Barycentric))
+    {
+        return 0.0;
+    }
+
+    const float3 TexelWorldPosition =
+        P0AndAmount.xyz * Barycentric.x +
+        P1AndMaxWetness.xyz * Barycentric.y +
+        P2AndMode.xyz * Barycentric.z;
+
+    const float Radius = max(ContactAndRadius.w, 1.0e-4);
+    const float SurfaceDistance = length(TexelWorldPosition - ContactAndRadius.xyz);
+    const float ContactDepth = max(UV2AndSettings.z, 0.0);
+    const float Distance = sqrt(SurfaceDistance * SurfaceDistance + ContactDepth * ContactDepth);
+    const float Influence = saturate(1.0 - Distance / Radius);
+    return max(P0AndAmount.w, 0.0) * Influence;
+}
+
+[numthreads(8, 8, 1)]
+void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+    const int2 Texel = int2(DispatchThreadId.xy);
+    if (Texel.x < 0 || Texel.y < 0 || Texel.x >= TextureSize.x || Texel.y >= TextureSize.y)
+    {
+        return;
+    }
+
+    const int2 Tile = min(Texel / (int)TileSize, TileGridSize - 1);
+    const uint TileIndex = (uint)(Tile.y * TileGridSize.x + Tile.x);
+    const uint2 Bin = TileBins[TileIndex];
+
+    if (Bin.y == 0u)
+    {
+        return;
+    }
+
+    const float2 UV = (float2(Texel) + 0.5) / float2(TextureSize);
+    float PendingDelta = 0.0;
+
+    for (uint BinOffset = 0u; BinOffset < Bin.y; ++BinOffset)
+    {
+        PendingDelta += ComputeContactWetness(TileContactIndices[Bin.x + BinOffset], UV);
+    }
+
+    if (PendingDelta > 0.0 && isfinite(PendingDelta))
+    {
+        PendingWetnessTexture[Texel] = max(PendingWetnessTexture[Texel], 0.0) + PendingDelta;
+    }
+}

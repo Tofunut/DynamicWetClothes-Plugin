@@ -18,6 +18,8 @@
 #include "Materials/MaterialInterface.h"
 #include "Profiling/DWCStats.h"
 #include "Engine/World.h"
+#include "HAL/IConsoleManager.h"
+#include "ProfilingDebugging/RealtimeGPUProfiler.h"
 #include "RenderGraphBuilder.h"
 #include "RenderGraphUtils.h"
 #include "RenderTargetPool.h"
@@ -27,10 +29,25 @@
 
 DEFINE_LOG_CATEGORY_STATIC(LogDWCGPU, Log, All);
 
+DECLARE_GPU_STAT_NAMED(DWC_UpdateTriangleFlow, TEXT("DWC UpdateTriangleFlow"));
+DECLARE_GPU_STAT_NAMED(DWC_SurfaceStamp, TEXT("DWC SurfaceStamp"));
+DECLARE_GPU_STAT_NAMED(DWC_ApplyAbsorption, TEXT("DWC ApplyAbsorption"));
+DECLARE_GPU_STAT_NAMED(DWC_DiffuseDry, TEXT("DWC DiffuseDry"));
+DECLARE_GPU_STAT_NAMED(DWC_SeamGather, TEXT("DWC SeamGather"));
+
 namespace DWCGPUBackendPrivate
 {
 constexpr int32 DWCFullSimulationMapVersion = FDWCGPULODBakeData::CurrentMapBakeVersion;
 constexpr float DWCSeamTransferScale = 1.0f;
+constexpr int32 DWCAbsorptionBinTileSize = 16;
+constexpr int32 DWCAbsorptionBinMinDispatches = 32;
+constexpr int32 DWCAbsorptionContactFloat4Count = 6;
+
+static TAutoConsoleVariable<int32> CVarDWCGPUBinnedAbsorption(
+    TEXT("r.DWC.GPU.BinnedAbsorption"),
+    1,
+    TEXT("Use tile-binned GPU absorption for large positive wetness input batches. 0 disables the experimental path."),
+    ECVF_Default);
 
 uint32 FloatToBits(const float Value)
 {
@@ -188,7 +205,20 @@ struct alignas(16) FUint4GPU
     }
 };
 
+struct FUint2GPU
+{
+    uint32 X = 0;
+    uint32 Y = 0;
+
+    FUint2GPU() = default;
+    FUint2GPU(uint32 InX, uint32 InY)
+        : X(InX), Y(InY)
+    {
+    }
+};
+
 static_assert(sizeof(FUint4GPU) == 16, "FUint4GPU must match HLSL uint4.");
+static_assert(sizeof(FUint2GPU) == 8, "FUint2GPU must match HLSL uint2.");
 static_assert(sizeof(FVector4f) == 16, "FVector4f must match HLSL float4.");
 
 struct FTriangleAbsorptionDispatch
@@ -228,6 +258,10 @@ struct FSlotRenderDispatch
     FTextureRenderTargetResource* SurfaceDropletResource = nullptr;
     FTextureRenderTargetResource* SurfaceRivuletResource = nullptr;
     TArray<FTriangleAbsorptionDispatch> AbsorptionDispatches;
+    TArray<FVector4f> BinnedAbsorptionContacts;
+    TArray<FUint2GPU> BinnedAbsorptionTileBins;
+    TArray<uint32> BinnedAbsorptionTileContactIndices;
+    FIntPoint BinnedAbsorptionTileGridSize = FIntPoint::ZeroValue;
     TArray<FSurfaceStampDispatch> SurfaceStampDispatches;
 };
 
@@ -298,6 +332,108 @@ bool BuildDispatchBounds(
     OutMin = FIntPoint(MinX, MinY);
     OutSize = FIntPoint(MaxX - MinX + 1, MaxY - MinY + 1);
     return OutSize.X > 0 && OutSize.Y > 0;
+}
+
+bool CanUseBinnedAbsorption(const FTriangleAbsorptionDispatch& Dispatch)
+{
+    return Dispatch.P2AndMode.W < 0.5f &&
+           Dispatch.P0AndAmount.W > 0.0f &&
+           Dispatch.DispatchSize.X > 0 &&
+           Dispatch.DispatchSize.Y > 0;
+}
+
+void AppendBinnedAbsorptionContact(
+    const FTriangleAbsorptionDispatch& Dispatch,
+    TArray<FVector4f>& OutContacts)
+{
+    OutContacts.Add(Dispatch.UV01);
+    OutContacts.Add(Dispatch.UV2AndSettings);
+    OutContacts.Add(Dispatch.ContactAndRadius);
+    OutContacts.Add(Dispatch.P0AndAmount);
+    OutContacts.Add(Dispatch.P1AndMaxWetness);
+    OutContacts.Add(Dispatch.P2AndMode);
+}
+
+void BuildBinnedAbsorptionDispatches(FSlotRenderDispatch& SlotDispatch)
+{
+    if (SlotDispatch.Resolution <= 0 ||
+        CVarDWCGPUBinnedAbsorption.GetValueOnAnyThread() == 0 ||
+        SlotDispatch.AbsorptionDispatches.Num() < DWCAbsorptionBinMinDispatches)
+    {
+        return;
+    }
+
+    const FIntPoint TileGridSize(
+        FMath::DivideAndRoundUp(SlotDispatch.Resolution, DWCAbsorptionBinTileSize),
+        FMath::DivideAndRoundUp(SlotDispatch.Resolution, DWCAbsorptionBinTileSize));
+    const int32 TileCount = TileGridSize.X * TileGridSize.Y;
+    if (TileCount <= 0)
+    {
+        return;
+    }
+
+    TArray<TArray<uint32>> TileContactLists;
+    TileContactLists.SetNum(TileCount);
+
+    TArray<FVector4f> BinnedContacts;
+    BinnedContacts.Reserve(SlotDispatch.AbsorptionDispatches.Num() * DWCAbsorptionContactFloat4Count);
+
+    TArray<FTriangleAbsorptionDispatch> FallbackDispatches;
+    FallbackDispatches.Reserve(SlotDispatch.AbsorptionDispatches.Num());
+
+    for (const FTriangleAbsorptionDispatch& Dispatch : SlotDispatch.AbsorptionDispatches)
+    {
+        if (!CanUseBinnedAbsorption(Dispatch))
+        {
+            FallbackDispatches.Add(Dispatch);
+            continue;
+        }
+
+        const uint32 ContactIndex = static_cast<uint32>(BinnedContacts.Num() / DWCAbsorptionContactFloat4Count);
+        AppendBinnedAbsorptionContact(Dispatch, BinnedContacts);
+
+        const FIntPoint MaxTexel = Dispatch.DispatchMin + Dispatch.DispatchSize - FIntPoint(1, 1);
+        const int32 MinTileX = FMath::Clamp(Dispatch.DispatchMin.X / DWCAbsorptionBinTileSize, 0, TileGridSize.X - 1);
+        const int32 MinTileY = FMath::Clamp(Dispatch.DispatchMin.Y / DWCAbsorptionBinTileSize, 0, TileGridSize.Y - 1);
+        const int32 MaxTileX = FMath::Clamp(MaxTexel.X / DWCAbsorptionBinTileSize, 0, TileGridSize.X - 1);
+        const int32 MaxTileY = FMath::Clamp(MaxTexel.Y / DWCAbsorptionBinTileSize, 0, TileGridSize.Y - 1);
+
+        for (int32 TileY = MinTileY; TileY <= MaxTileY; ++TileY)
+        {
+            for (int32 TileX = MinTileX; TileX <= MaxTileX; ++TileX)
+            {
+                TileContactLists[TileY * TileGridSize.X + TileX].Add(ContactIndex);
+            }
+        }
+    }
+
+    if (BinnedContacts.IsEmpty())
+    {
+        return;
+    }
+
+    TArray<FUint2GPU> TileBins;
+    TileBins.SetNum(TileCount);
+    TArray<uint32> TileContactIndices;
+    for (int32 TileIndex = 0; TileIndex < TileCount; ++TileIndex)
+    {
+        const TArray<uint32>& ContactList = TileContactLists[TileIndex];
+        const uint32 Offset = static_cast<uint32>(TileContactIndices.Num());
+        const uint32 Count = static_cast<uint32>(ContactList.Num());
+        TileBins[TileIndex] = FUint2GPU(Offset, Count);
+        TileContactIndices.Append(ContactList);
+    }
+
+    if (TileContactIndices.IsEmpty())
+    {
+        return;
+    }
+
+    SlotDispatch.AbsorptionDispatches = MoveTemp(FallbackDispatches);
+    SlotDispatch.BinnedAbsorptionContacts = MoveTemp(BinnedContacts);
+    SlotDispatch.BinnedAbsorptionTileBins = MoveTemp(TileBins);
+    SlotDispatch.BinnedAbsorptionTileContactIndices = MoveTemp(TileContactIndices);
+    SlotDispatch.BinnedAbsorptionTileGridSize = TileGridSize;
 }
 
 FVector4f MakePositionAndValue(const FVector& Position, const float Value)
@@ -1409,6 +1545,7 @@ void FDWCGPUBackend::DispatchSimulation(
     const bool bHadWetInput = !Contacts.IsEmpty() || !FMath::IsNearlyZero(WetAllAmount);
     const bool bHadSurfaceInput = !SurfaceStamps.IsEmpty();
     int32 TotalAbsorptionDispatches = 0;
+    int32 TotalBinnedAbsorptionContacts = 0;
     int32 TotalSurfaceStampDispatches = 0;
 
     for (int32 SlotRuntimeIndex = 0; SlotRuntimeIndex < MaterialSlots.Num(); ++SlotRuntimeIndex)
@@ -1504,7 +1641,9 @@ void FDWCGPUBackend::DispatchSimulation(
                 }
             }
         }
+        BuildBinnedAbsorptionDispatches(SlotDispatch);
         TotalAbsorptionDispatches += SlotDispatch.AbsorptionDispatches.Num();
+        TotalBinnedAbsorptionContacts += SlotDispatch.BinnedAbsorptionContacts.Num() / DWCAbsorptionContactFloat4Count;
         TotalSurfaceStampDispatches += SlotDispatch.SurfaceStampDispatches.Num();
     }
 
@@ -1526,7 +1665,7 @@ void FDWCGPUBackend::DispatchSimulation(
         return;
     }
 
-    if (bHadWetInput && TotalAbsorptionDispatches <= 0)
+    if (bHadWetInput && TotalAbsorptionDispatches <= 0 && TotalBinnedAbsorptionContacts <= 0)
     {
         UE_LOG(
             LogDWCGPU,
@@ -1562,9 +1701,11 @@ void FDWCGPUBackend::DispatchSimulation(
                 ? MaterialSlots[SlotDispatch.SlotRuntimeIndex].MaterialSlotIndex
                 : INDEX_NONE;
             SlotSummaries.Add(FString::Printf(
-                TEXT("slot%d:absorb%d:surface%d:res%d"),
+                TEXT("slot%d:absorb%d:binned%d:bins%d:surface%d:res%d"),
                 MaterialSlotIndex,
                 SlotDispatch.AbsorptionDispatches.Num(),
+                SlotDispatch.BinnedAbsorptionContacts.Num() / DWCAbsorptionContactFloat4Count,
+                SlotDispatch.BinnedAbsorptionTileContactIndices.Num(),
                 SlotDispatch.SurfaceStampDispatches.Num(),
                 SlotDispatch.Resolution));
         }
@@ -1572,12 +1713,13 @@ void FDWCGPUBackend::DispatchSimulation(
         UE_LOG(
             LogDWCGPU,
             Log,
-            TEXT("DWCGPU: Built slot dispatches. contacts=%d, surfaceStamps=%d, wetAll=%.4f, slots=%d, absorptionDispatches=%d, surfaceDispatches=%d, [%s]."),
+            TEXT("DWCGPU: Built slot dispatches. contacts=%d, surfaceStamps=%d, wetAll=%.4f, slots=%d, absorptionDispatches=%d, binnedAbsorptionContacts=%d, surfaceDispatches=%d, [%s]."),
             Contacts.Num(),
             SurfaceStamps.Num(),
             WetAllAmount,
             SlotDispatches.Num(),
             TotalAbsorptionDispatches,
+            TotalBinnedAbsorptionContacts,
             TotalSurfaceStampDispatches,
             *FString::Join(SlotSummaries, TEXT(", ")));
     }
@@ -1769,6 +1911,7 @@ void FDWCGPUBackend::DispatchSimulation(
 
                     TShaderMapRef<FDWCUpdateTriangleFlowCS> Shader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
                     FDWCWorkloadStats::RecordGPUBackendDispatch();
+                    RDG_EVENT_SCOPE_STAT(GraphBuilder, DWC_UpdateTriangleFlow, "DWC UpdateTriangleFlow");
                     FComputeShaderUtils::AddPass(
                         GraphBuilder,
                         RDG_EVENT_NAME("DWC Update Triangle Flow Section %d", SectionIndex),
@@ -1786,6 +1929,7 @@ void FDWCGPUBackend::DispatchSimulation(
             FRDGBufferSRVRef FlowSRV = GraphBuilder.CreateSRV(TriangleFlowBuffer);
             FRDGBufferSRVRef MetricSRV = GraphBuilder.CreateSRV(TriangleMetricBuffer);
             TShaderMapRef<FDWCApplyTriangleAbsorptionCS> AbsorptionShader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
+            TShaderMapRef<FDWCApplyBinnedAbsorptionCS> BinnedAbsorptionShader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
             TShaderMapRef<FDWCDiffuseDryCS> DiffuseDry4Shader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
             TShaderMapRef<FDWCDiffuseDry8CS> DiffuseDry8Shader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
             TShaderMapRef<FDWCSeamGatherCS> SeamShader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
@@ -1882,6 +2026,7 @@ void FDWCGPUBackend::DispatchSimulation(
                         Parameters->TexelLookup = SurfaceLookupSRV;
                         Parameters->TargetSurface = DropletSurfaceUAV;
                         FDWCWorkloadStats::RecordGPUBackendDispatch();
+                        RDG_EVENT_SCOPE_STAT(GraphBuilder, DWC_SurfaceStamp, "DWC SurfaceStamp");
                         FComputeShaderUtils::AddPass(
                             GraphBuilder,
                             RDG_EVENT_NAME("DWC Surface Droplet Slot %d Stamp %d", StaticSlot.MaterialSlotIndex, StampIndex),
@@ -1912,6 +2057,7 @@ void FDWCGPUBackend::DispatchSimulation(
                             TriangleDataToNormalUVSRV;
                         Parameters->TargetSurface = RivuletSurfaceUAV;
                         FDWCWorkloadStats::RecordGPUBackendDispatch();
+                        RDG_EVENT_SCOPE_STAT(GraphBuilder, DWC_SurfaceStamp, "DWC SurfaceStamp");
                         FComputeShaderUtils::AddPass(
                             GraphBuilder,
                             RDG_EVENT_NAME("DWC Surface Rivulet Slot %d Stamp %d", StaticSlot.MaterialSlotIndex, StampIndex),
@@ -1946,6 +2092,48 @@ void FDWCGPUBackend::DispatchSimulation(
                 FRDGTextureUAVRef PendingInputUAV =
                     GraphBuilder.CreateUAV(CurrentPendingTexture);
 
+                if (!SlotDispatch.BinnedAbsorptionContacts.IsEmpty() &&
+                    !SlotDispatch.BinnedAbsorptionTileBins.IsEmpty() &&
+                    !SlotDispatch.BinnedAbsorptionTileContactIndices.IsEmpty())
+                {
+                    FRDGBufferRef BinnedContactsBuffer = CreateStructuredBuffer(
+                        GraphBuilder,
+                        TEXT("DWC.AbsorptionBinned.Contacts"),
+                        SlotDispatch.BinnedAbsorptionContacts);
+                    FRDGBufferRef BinnedTileBinsBuffer = CreateStructuredBuffer(
+                        GraphBuilder,
+                        TEXT("DWC.AbsorptionBinned.TileBins"),
+                        SlotDispatch.BinnedAbsorptionTileBins);
+                    FRDGBufferRef BinnedTileContactIndicesBuffer = CreateStructuredBuffer(
+                        GraphBuilder,
+                        TEXT("DWC.AbsorptionBinned.TileContactIndices"),
+                        SlotDispatch.BinnedAbsorptionTileContactIndices);
+
+                    FDWCApplyBinnedAbsorptionCS::FParameters* Parameters =
+                        GraphBuilder.AllocParameters<FDWCApplyBinnedAbsorptionCS::FParameters>();
+                    Parameters->TextureSize = FIntPoint(SlotDispatch.Resolution, SlotDispatch.Resolution);
+                    Parameters->TileGridSize = SlotDispatch.BinnedAbsorptionTileGridSize;
+                    Parameters->TileSize = static_cast<uint32>(DWCAbsorptionBinTileSize);
+                    Parameters->Contacts = GraphBuilder.CreateSRV(BinnedContactsBuffer);
+                    Parameters->TileBins = GraphBuilder.CreateSRV(BinnedTileBinsBuffer);
+                    Parameters->TileContactIndices = GraphBuilder.CreateSRV(BinnedTileContactIndicesBuffer);
+                    Parameters->PendingWetnessTexture = PendingInputUAV;
+                    FDWCWorkloadStats::RecordGPUBackendDispatch();
+                    RDG_EVENT_SCOPE_STAT(GraphBuilder, DWC_ApplyAbsorption, "DWC ApplyAbsorption");
+                    FComputeShaderUtils::AddPass(
+                        GraphBuilder,
+                        RDG_EVENT_NAME(
+                            "DWC Apply Binned Absorption Slot %d Contacts %d",
+                            StaticSlot.MaterialSlotIndex,
+                            SlotDispatch.BinnedAbsorptionContacts.Num() / DWCAbsorptionContactFloat4Count),
+                        BinnedAbsorptionShader,
+                        Parameters,
+                        FIntVector(
+                            FMath::DivideAndRoundUp(SlotDispatch.Resolution, 8),
+                            FMath::DivideAndRoundUp(SlotDispatch.Resolution, 8),
+                            1));
+                }
+
                 for (int32 DispatchIndex = 0; DispatchIndex < SlotDispatch.AbsorptionDispatches.Num(); ++DispatchIndex)
                 {
                     const FTriangleAbsorptionDispatch& Dispatch = SlotDispatch.AbsorptionDispatches[DispatchIndex];
@@ -1963,6 +2151,7 @@ void FDWCGPUBackend::DispatchSimulation(
                     Parameters->WetnessTexture = InputUAV;
                     Parameters->PendingWetnessTexture = PendingInputUAV;
                     FDWCWorkloadStats::RecordGPUBackendDispatch();
+                    RDG_EVENT_SCOPE_STAT(GraphBuilder, DWC_ApplyAbsorption, "DWC ApplyAbsorption");
                     FComputeShaderUtils::AddPass(
                         GraphBuilder,
                         RDG_EVENT_NAME("DWC Apply Absorption %d", DispatchIndex),
@@ -1993,6 +2182,7 @@ void FDWCGPUBackend::DispatchSimulation(
                     DiffuseParameters->Profiles = ProfileSRV;
                     DiffuseParameters->TriangleProfileIndices = TriangleProfileIndexSRV;
                     FDWCWorkloadStats::RecordGPUBackendDispatch();
+                    RDG_EVENT_SCOPE_STAT(GraphBuilder, DWC_DiffuseDry, "DWC DiffuseDry");
                     FComputeShaderUtils::AddPass(
                         GraphBuilder,
                         RDG_EVENT_NAME("DWC Diffuse Gravity Dry 8 Slot %d", StaticSlot.MaterialSlotIndex),
@@ -2022,6 +2212,7 @@ void FDWCGPUBackend::DispatchSimulation(
                     DiffuseParameters->Profiles = ProfileSRV;
                     DiffuseParameters->TriangleProfileIndices = TriangleProfileIndexSRV;
                     FDWCWorkloadStats::RecordGPUBackendDispatch();
+                    RDG_EVENT_SCOPE_STAT(GraphBuilder, DWC_DiffuseDry, "DWC DiffuseDry");
                     FComputeShaderUtils::AddPass(
                         GraphBuilder,
                         RDG_EVENT_NAME("DWC Diffuse Gravity Dry 4 Slot %d", StaticSlot.MaterialSlotIndex),
@@ -2070,6 +2261,7 @@ void FDWCGPUBackend::DispatchSimulation(
                         SeamParameters->Profiles = ProfileSRV;
                         SeamParameters->TriangleProfileIndices = TriangleProfileIndexSRV;
                         FDWCWorkloadStats::RecordGPUBackendDispatch();
+                        RDG_EVENT_SCOPE_STAT(GraphBuilder, DWC_SeamGather, "DWC SeamGather");
                         FComputeShaderUtils::AddPass(
                             GraphBuilder,
                             RDG_EVENT_NAME("DWC Seam Destination Gather Slot %d", StaticSlot.MaterialSlotIndex),

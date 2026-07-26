@@ -162,7 +162,7 @@ struct DWC_API FDWCGPUMaterialSlotBakeData
     UPROPERTY(VisibleAnywhere, Category = "GPU Wet Map")
     TArray<uint8> ValidMask;
 
-    /** Independent lookup resolution used by the GPU-only Droplet/Streak surface RTs. */
+    /** Independent lookup resolution used by the GPU-only Droplet/Rivulet surface RTs. */
     UPROPERTY(VisibleAnywhere, Category = "GPU Surface Water")
     int32 SurfaceWaterResolution = 0;
 

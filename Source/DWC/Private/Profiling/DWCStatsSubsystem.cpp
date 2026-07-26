@@ -275,7 +275,7 @@ void UDWCStatsSubsystem::CollectStats(FDWCStatsSnapshot& OutSnapshot)
             OutSnapshot.GPUResourceSubsystemCPUBytes = ResourceStats.CPUBytes;
             OutSnapshot.SharedGPUStaticBufferGPUBytes = ResourceStats.StaticBufferGPUBytes;
             OutSnapshot.SharedGPURenderProfileLUTGPUBytes = ResourceStats.RenderProfileLUTGPUBytes;
-            OutSnapshot.SharedGPUProfileIDRemapGPUBytes = ResourceStats.ProfileIDRemapGPUBytes;
+            OutSnapshot.SharedGPUWetPartDataRemapGPUBytes = ResourceStats.WetPartDataRemapGPUBytes;
             OutSnapshot.SharedGPUSurfaceNormalArrayGPUBytes = ResourceStats.SurfaceNormalArrayGPUBytes;
             OutSnapshot.SharedGPUResourceGPUBytes = ResourceStats.GetGPUBytes();
         }
@@ -526,7 +526,7 @@ void UDWCStatsSubsystem::PublishStats(const FDWCStatsSnapshot& Snapshot) const
     SET_MEMORY_STAT(STAT_DWC_GPUBackendGPU, Snapshot.GPUBackendGPUBytes);
     SET_MEMORY_STAT(STAT_DWC_SharedGPUStaticBufferGPU, Snapshot.SharedGPUStaticBufferGPUBytes);
     SET_MEMORY_STAT(STAT_DWC_SharedGPURenderProfileLUTGPU, Snapshot.SharedGPURenderProfileLUTGPUBytes);
-    SET_MEMORY_STAT(STAT_DWC_SharedGPUProfileIDRemapGPU, Snapshot.SharedGPUProfileIDRemapGPUBytes);
+    SET_MEMORY_STAT(STAT_DWC_SharedGPUWetPartDataRemapGPU, Snapshot.SharedGPUWetPartDataRemapGPUBytes);
     SET_MEMORY_STAT(STAT_DWC_SharedGPUSurfaceNormalArrayGPU, Snapshot.SharedGPUSurfaceNormalArrayGPUBytes);
     SET_MEMORY_STAT(STAT_DWC_SharedGPUResourceGPU, Snapshot.SharedGPUResourceGPUBytes);
     SET_MEMORY_STAT(STAT_DWC_WrinkleTextureGPU, Snapshot.WrinkleTextureGPUBytes);

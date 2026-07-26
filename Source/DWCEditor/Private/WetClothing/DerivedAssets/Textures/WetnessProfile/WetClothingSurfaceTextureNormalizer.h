@@ -10,7 +10,7 @@ struct FWetnessProfileParameters;
 namespace DWCSurfaceTextureNormalization
 {
     constexpr int32 Resolution = 256;
-    constexpr int32 Version = 2;
+    constexpr int32 Version = 4;
 }
 
 /**

@@ -123,19 +123,18 @@ bool DWCEditorUtils::SaveAsset(UObject* Asset)
             AddDirtyGeneratedPackage(MaterialOverride.GPUMaterialInstance.Get());
         }
 
-        for (const FWetClothingBakedProfileIDSlotTexture& SlotTexture :
-             WetClothingAsset->Derived.Inline.BakedProfileIDData.SlotTextures)
+        for (const FWetClothingBakedWetPartDataSlotTexture& SlotTexture :
+             WetClothingAsset->Derived.Inline.BakedWetPartData.SlotTextures)
         {
-            AddDirtyGeneratedPackage(SlotTexture.ProfileIDTexture.Get());
+            AddDirtyGeneratedPackage(SlotTexture.WetPartDataTexture.Get());
         }
         for (const FWetClothingLocalRenderProfile& LocalProfile :
-             WetClothingAsset->Derived.Inline.BakedProfileIDData.LocalProfiles)
+             WetClothingAsset->Derived.Inline.BakedWetPartData.LocalProfiles)
         {
             AddDirtyGeneratedPackage(LocalProfile.NormalizedDropletNormal.Get());
             AddDirtyGeneratedPackage(LocalProfile.NormalizedRivuletNormal.Get());
         }
 
-        // Deprecated RGB profile maps may still exist on assets that have not been rebaked.
         for (const FWetWrinkleBakedMapSet& WrinkleMap :
              WetClothingAsset->Authored.WrinkleData.BakedWrinkleMaps)
         {
@@ -172,7 +171,6 @@ bool DWCEditorUtils::SaveAsset(UObject* Asset)
     {
         if (WetClothingAsset != nullptr)
         {
-            WetClothingAsset->RefreshBakeState(false);
             ShowDWCEditorNotification(
                 FText::FromString(TEXT("Wet Clothing Asset saved.")),
                 SNotificationItem::CS_Success);

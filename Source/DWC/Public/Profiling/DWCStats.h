@@ -50,7 +50,7 @@ struct DWC_API FDWCStatsSnapshot
     uint64 GPUBackendGPUBytes = 0;
     uint64 SharedGPUStaticBufferGPUBytes = 0;
     uint64 SharedGPURenderProfileLUTGPUBytes = 0;
-    uint64 SharedGPUProfileIDRemapGPUBytes = 0;
+    uint64 SharedGPUWetPartDataRemapGPUBytes = 0;
     uint64 SharedGPUSurfaceNormalArrayGPUBytes = 0;
     uint64 SharedGPUResourceGPUBytes = 0;
     uint64 WrinkleTextureGPUBytes = 0;
@@ -243,8 +243,8 @@ DECLARE_MEMORY_STAT_POOL_EXTERN(
     DWC_API);
 
 DECLARE_MEMORY_STAT_POOL_EXTERN(
-    TEXT("Profile ID + Remap / Global"),
-    STAT_DWC_SharedGPUProfileIDRemapGPU,
+    TEXT("Wet Part Data + Profile Remap / Global"),
+    STAT_DWC_SharedGPUWetPartDataRemapGPU,
     STATGROUP_DWCGPUMemory,
     FPlatformMemory::MCR_GPU,
     DWC_API);

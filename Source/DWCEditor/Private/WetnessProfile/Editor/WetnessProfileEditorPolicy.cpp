@@ -31,15 +31,13 @@ namespace
         // Simulation | Surface Water
         { TEXT("Parameters.SurfaceWater.SurfaceRepresentationFraction"), 0.0, 1.0, 0.5 },
         { TEXT("Parameters.SurfaceWater.DropletSpawnProbability"), 0.0, 1.0, 0.5 },
-        { TEXT("Parameters.SurfaceWater.FlowSpawnProbability"), 0.0, 1.0, 0.2 },
-        { TEXT("Parameters.SurfaceWater.DropletIntensityMultiplier"), 0.0, 10.0, 1.0 },
-        { TEXT("Parameters.SurfaceWater.FlowIntensityMultiplier"), 0.0, 10.0, 1.0 },
+        { TEXT("Parameters.SurfaceWater.RivuletSpawnProbability"), 0.0, 1.0, 0.2 },
         { TEXT("Parameters.SurfaceWater.DropletLifetimeSeconds"), 0.01, 120.0, 5.0 },
         { TEXT("Parameters.SurfaceWater.DropletRadiusPixels"), 0.0, 256.0, 16.0 },
-        { TEXT("Parameters.SurfaceWater.FlowLifetimeSeconds"), 0.01, 120.0, 7.0 },
-        { TEXT("Parameters.SurfaceWater.MinimumFlowSurfaceAmount"), 0.0, 1.0, 0.2 },
-        { TEXT("Parameters.SurfaceWater.FlowWidthPixels"), 0.0, 256.0, 8.0 },
-        { TEXT("Parameters.SurfaceWater.FlowLengthPixels"), 0.0, 512.0, 48.0 },
+        { TEXT("Parameters.SurfaceWater.RivuletLifetimeSeconds"), 0.01, 120.0, 7.0 },
+        { TEXT("Parameters.SurfaceWater.MinimumRivuletSurfaceAmount"), 0.0, 1.0, 0.2 },
+        { TEXT("Parameters.SurfaceWater.RivuletWidthPixels"), 0.0, 256.0, 8.0 },
+        { TEXT("Parameters.SurfaceWater.RivuletLengthPixels"), 0.0, 512.0, 48.0 },
 
         // Rendering | Surface Water
         { TEXT("Parameters.SurfaceWater.SurfaceWaterNormalStrength"), 0.0, 8.0, 1.0 },
@@ -327,37 +325,4 @@ void FWetnessProfileEditorPolicy::FindProfileIssues(
         ParametersProperty->Struct,
         TEXT("Parameters"),
         OutIssues);
-}
-
-bool FWetnessProfileEditorPolicy::IsObsoleteEditorPropertyPath(const FString& PropertyPath)
-{
-    static const TSet<FString> ObsoletePropertyPaths = {
-        // FWetnessProfileParameters compatibility fields.
-        TEXT("Parameters.Absorption"),
-        TEXT("Parameters.SpreadRate"),
-        TEXT("Parameters.DryRate"),
-        TEXT("Parameters.GravityFlowStrength"),
-        TEXT("Parameters.WetVisualStrength"),
-        TEXT("Parameters.AbsorbedWetness.WetVisualStrength"),
-
-        // FSurfaceWaterProfileParameters legacy mask/rendering fields.
-        TEXT("Parameters.SurfaceWater.FlowMaskMin"),
-        TEXT("Parameters.SurfaceWater.FlowMaskMax"),
-        TEXT("Parameters.SurfaceWater.FlowMaskTexture"),
-        TEXT("Parameters.SurfaceWater.DropletMaskMin"),
-        TEXT("Parameters.SurfaceWater.DropletMaskMax"),
-        TEXT("Parameters.SurfaceWater.DropletMaskTexture"),
-        TEXT("Parameters.SurfaceWater.NormalStrength"),
-        TEXT("Parameters.SurfaceWater.SurfaceRoughness"),
-        TEXT("Parameters.SurfaceWater.FlowTiling"),
-        TEXT("Parameters.SurfaceWater.FlowPanningX"),
-        TEXT("Parameters.SurfaceWater.FlowPanningY"),
-        TEXT("Parameters.SurfaceWater.FlowNormalStrength"),
-        TEXT("Parameters.SurfaceWater.FlowRoughness"),
-        TEXT("Parameters.SurfaceWater.FlowNormalTexture"),
-        TEXT("Parameters.SurfaceWater.DropletTiling"),
-        TEXT("Parameters.SurfaceWater.SurfaceAmountThresholdMin"),
-        TEXT("Parameters.SurfaceWater.SurfaceAmountThresholdMax"),
-    };
-    return ObsoletePropertyPaths.Contains(PropertyPath);
 }

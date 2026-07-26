@@ -376,24 +376,22 @@ namespace
             Parameters.GetAbsorbedGlossinessStrength());
 
         const FString SurfaceKeyHead = FString::Printf(
-            TEXT("Surf{%d,%d,%d,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,"),
+            TEXT("Surf{%d,%d,%d,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,"),
             Surface.bEnabled ? 1 : 0,
             Surface.bEnableDroplets ? 1 : 0,
             Surface.bEnableRivulets ? 1 : 0,
             Surface.SurfaceRepresentationFraction,
             Surface.DropletSpawnProbability,
-            Surface.FlowSpawnProbability,
-            Surface.DropletIntensityMultiplier,
-            Surface.FlowIntensityMultiplier,
+            Surface.RivuletSpawnProbability,
             Surface.DropletLifetimeSeconds,
             Surface.DropletRadiusPixels,
-            Surface.FlowLifetimeSeconds);
+            Surface.RivuletLifetimeSeconds);
 
         const FString SurfaceKeyTail = FString::Printf(
             TEXT("%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%s,%s}"),
-            Surface.MinimumFlowSurfaceAmount,
-            Surface.FlowWidthPixels,
-            Surface.FlowLengthPixels,
+            Surface.MinimumRivuletSurfaceAmount,
+            Surface.RivuletWidthPixels,
+            Surface.RivuletLengthPixels,
             Surface.SurfaceWaterNormalStrength,
             Surface.SurfaceWaterRoughnessStrength,
             Surface.SurfaceVisibilityThreshold,
@@ -572,9 +570,12 @@ namespace
                         Profile != nullptr ? *Profile->GetDisplayName() : TEXT(""));
                 }
                 Signature += FString::Printf(
-                    TEXT(",Profile=%s,Blend=%d"),
+                    TEXT(",Profile=%s,Blend=%d,DropletRadiusScale=%.9g,DropletDetailSize=%.9g,RivuletDetailSize=%.9g"),
                     Profile != nullptr ? *Profile->SourceProfile.ToString() : TEXT(""),
-                    Profile != nullptr ? static_cast<int32>(Profile->BlendMode) : 0);
+                    Profile != nullptr ? static_cast<int32>(Profile->BlendMode) : 0,
+                    Entry.SurfaceWater.DropletRadiusScale,
+                    Entry.SurfaceWater.DropletDetailSize,
+                    Entry.SurfaceWater.RivuletDetailSize);
                 Signature += FString::Printf(TEXT(",Islands=%d"), AssignedIslandIDs.Num());
                 for (const int32 IslandID : AssignedIslandIDs)
                 {
@@ -593,10 +594,6 @@ namespace
         return MakeSourceDataSignature(WetPartData, false);
     }
 
-    FString MakeLegacySourceDataSignature(const FWetClothingEditableWetPartData& WetPartData)
-    {
-        return MakeSourceDataSignature(WetPartData, true);
-    }
 
     void ResolveWetnessProfilesForDerivedInline(
         const FWetClothingEditableWetPartData& WetPartData,
@@ -1728,25 +1725,11 @@ void UWetClothingAsset::PostLoad()
 {
     const double PostLoadStartTime = FPlatformTime::Seconds();
     Super::PostLoad();
-    const int32 LoadedAssetDataVersion = Metadata.AssetDataVersion;
 
-#if WITH_EDITORONLY_DATA
-    if (Derived.Inline.GeneratedEvaluateSurfaceAppearanceFunction == nullptr)
-    {
-        Derived.Inline.GeneratedEvaluateSurfaceAppearanceFunction =
-            Derived.Inline.GeneratedCPUApplyWetnessFunction_DEPRECATED != nullptr
-                ? Derived.Inline.GeneratedCPUApplyWetnessFunction_DEPRECATED
-                : Derived.Inline.GeneratedGPUApplyWetnessFunction_DEPRECATED;
-    }
-#endif
+
 
     FWetClothingEditableWetPartData& EditableWetPartData = Authored.PartData.EditableWetPartData;
     EditableWetPartData.EnsureDefaultProfile();
-    for (FWetPartProfileAssignment& Profile : EditableWetPartData.Profiles)
-    {
-        Profile.Parameters.MigrateLegacyAbsorbedWetness();
-        Profile.Parameters.MigrateLegacySurfaceWaterRendering();
-    }
     for (FWetClothingAuthoredMaterialSlot& Slot : EditableWetPartData.MaterialSlots)
     {
         for (FWetClothingWetPartEntry& Entry : Slot.WetPartEntries)
@@ -1754,59 +1737,6 @@ void UWetClothingAsset::PostLoad()
             if (!EditableWetPartData.Profiles.IsValidIndex(Entry.ProfileIndex))
             {
                 Entry.ProfileIndex = 0;
-            }
-        }
-    }
-    for (FWetClothingLocalRenderProfile& LocalProfile : Derived.Inline.BakedProfileIDData.LocalProfiles)
-    {
-        LocalProfile.Parameters.MigrateLegacyAbsorbedWetness();
-        LocalProfile.Parameters.MigrateLegacySurfaceWaterRendering();
-    }
-
-    if (LoadedAssetDataVersion < 7)
-    {
-        // Legacy UV tiling lived on each Wetness Profile. Move it to the WCA
-        // material-slot settings only when every profile in the slot agrees.
-        for (FWetClothingAuthoredMaterialSlot& WettableSlot : EditableWetPartData.MaterialSlots)
-        {
-            if (!WettableSlot.bIsWettableSlot || WettableSlot.MaterialSlotIndex == INDEX_NONE)
-            {
-                continue;
-            }
-
-            FSurfaceWaterMaterialSlotData* SlotSettings = &WettableSlot.SurfaceWater;
-
-            bool bFoundProfile = false;
-            bool bTilingConflict = false;
-            float DropletTiling = 1.0f;
-            float RivuletTiling = 1.0f;
-            for (const FWetClothingWetPartEntry& Entry : WettableSlot.WetPartEntries)
-            {
-                const FWetPartProfileAssignment* Profile = EditableWetPartData.FindProfile(Entry);
-                if (Profile == nullptr || !Profile->Parameters.SurfaceWater.bEnabled)
-                {
-                    continue;
-                }
-
-                const FSurfaceWaterProfileParameters& Surface = Profile->Parameters.SurfaceWater;
-                if (!bFoundProfile)
-                {
-                    DropletTiling = Surface.DropletTiling;
-                    RivuletTiling = Surface.FlowTiling;
-                    bFoundProfile = true;
-                }
-                else if (!FMath::IsNearlyEqual(DropletTiling, Surface.DropletTiling) ||
-                         !FMath::IsNearlyEqual(RivuletTiling, Surface.FlowTiling))
-                {
-                    bTilingConflict = true;
-                    break;
-                }
-            }
-
-            if (bFoundProfile && !bTilingConflict)
-            {
-                SlotSettings->DropletUVTiling = FVector2D(DropletTiling, DropletTiling);
-                SlotSettings->RivuletUVTiling = FVector2D(RivuletTiling, RivuletTiling);
             }
         }
     }
@@ -1826,8 +1756,7 @@ void UWetClothingAsset::PostLoad()
 #if WITH_EDITORONLY_DATA
     if (Metadata.AssetDataVersion != CurrentAssetDataVersion)
     {
-        // Legacy WCA layouts are intentionally unsupported. Do not allow an old saved
-        // Data-UV status to look valid after the persistent UV-coordinate array was removed.
+        // Unsupported asset schemas are invalidated and must be rebuilt with the current data contract.
         Derived.Inline.DataUVMetadata.Reset();
         Derived.Inline.BakeState.GeneratedDataUV = EDWCBakeStatus::Required;
         Derived.Inline.BakeState.OriginalUVTopology = EDWCBakeStatus::Required;
@@ -2140,7 +2069,6 @@ void UWetClothingAsset::StoreRuntimeDataToBulkData()
         MetadataOutputsBeingSaved |= DWCBakeOutput::TransparencyMaps;
     }
     Derived.Inline.BakeState.GeneratedOutputMask |= MetadataOutputsBeingSaved | RuntimeOutputsBeingSaved;
-    Derived.Inline.BakeState.SavedOutputMask &= ~RuntimeSavedOutputMask;
     Derived.Inline.BakeState.SavedOutputMask |= MetadataOutputsBeingSaved;
 #endif
 
@@ -2151,6 +2079,10 @@ void UWetClothingAsset::StoreRuntimeDataToBulkData()
 #endif
         return;
     }
+
+#if WITH_EDITORONLY_DATA
+    Derived.Inline.BakeState.SavedOutputMask &= ~RuntimeSavedOutputMask;
+#endif
 
     RemoveNonSimulationGPULODData(Derived.Bulk.GPURuntimeData);
 
@@ -3033,7 +2965,7 @@ bool UWetClothingAsset::RebuildRuntimeDataForSave(FString* OutErrorMessage)
         ClearGPUWetMapData();
         Derived.Inline.ResolvedWetnessProfileParameters.Reset();
         Derived.Inline.GeneratedWetMaterialOverrides.Reset();
-        Derived.Inline.BakedProfileIDData = FWetClothingBakedProfileIDData();
+        Derived.Inline.BakedWetPartData = FWetClothingBakedWetPartData();
         Authored.WrinkleData.BakedWrinkleMaps.Reset();
         for (FWetClothingTransparencyLayerData& Layer : Authored.TransparencyData.TransparencyLayers)
         {
@@ -3295,6 +3227,12 @@ bool UWetClothingAsset::IsBakeOutputSavePending(const int32 OutputMask) const
     return DWCBakeOutput::Has(PendingRuntimeSaveOutputMask, OutputMask);
 }
 
+void UWetClothingAsset::MarkRuntimeBakeOutputsDirty(const int32 OutputMask)
+{
+    MarkRuntimeBulkDataDirty(OutputMask);
+}
+
+
 FString UWetClothingAsset::BuildMeshContentSignature(
     const USkeletalMesh* SkeletalMesh,
     const int32 LODIndex,
@@ -3404,15 +3342,12 @@ bool UWetClothingAsset::IsPrecomputedSimulationDataValidForMesh(const USkeletalM
 
     const FString ExpectedSourceSignature = MakeSourceDataSignature(
         Authored.PartData.EditableWetPartData);
-    const FString LegacySourceSignature = MakeLegacySourceDataSignature(
-        Authored.PartData.EditableWetPartData);
     return Data.DataVersion == CurrentPrecomputedSimulationDataVersion &&
            Data.LODIndex == LODIndex &&
            Data.VertexCount == LODData.GetNumVertices() &&
            bPayloadAvailable &&
            Data.MeshSignature == FDWCMeshContentSignature::BuildStructure(SkeletalMesh, LODData, LODIndex) &&
-           (Data.SourceDataSignature == ExpectedSourceSignature ||
-            Data.SourceDataSignature == LegacySourceSignature);
+           Data.SourceDataSignature == ExpectedSourceSignature;
 }
 
 FString UWetClothingAsset::GetPrecomputedSimulationDataValidationSummary(const USkeletalMesh* SkeletalMesh) const
@@ -3437,11 +3372,8 @@ FString UWetClothingAsset::GetPrecomputedSimulationDataValidationSummary(const U
     const bool bNeighborPayloadMatches = ExpectedVertexCount != INDEX_NONE && Data.NeighborGraph.Num() == ExpectedVertexCount;
     const bool bHasRuntimePayload = bVertexPayloadMatches && bNeighborPayloadMatches;
     const bool bMeshSignatureMatches = !ExpectedMeshSignature.IsEmpty() && Data.MeshSignature == ExpectedMeshSignature;
-    const FString LegacySourceSignature = MakeLegacySourceDataSignature(
-        Authored.PartData.EditableWetPartData);
     const bool bSourceSignatureMatches =
-        Data.SourceDataSignature == ExpectedSourceSignature ||
-        Data.SourceDataSignature == LegacySourceSignature;
+        Data.SourceDataSignature == ExpectedSourceSignature;
 
     return FString::Printf(
         TEXT("CPUPrecomputed{validFlag=%s, hasMesh=%s, hasLOD=%s, dataVersion=%d/%d:%s, lod=%d/%d:%s, vertexCount=%d/%d:%s, vertices=%d:%s, neighborGraph=%d:%s, boneCache=%s, hasBulk=%s, bulkLoaded=%s, bulkLoadFailed=%s, hasPayload=%s, meshSignature=%s, sourceSignature=%s}"),
@@ -3608,16 +3540,16 @@ bool UWetClothingAsset::RebuildPrecomputedSimulationData(FString* OutErrorMessag
                    !IsWettableMaterialSlot(Authored.PartData.EditableWetPartData, MaterialOverride.MaterialSlotIndex);
         });
 
-    Derived.Inline.BakedProfileIDData.SlotTextures.RemoveAll(
-        [this](const FWetClothingBakedProfileIDSlotTexture& SlotTexture)
+    Derived.Inline.BakedWetPartData.SlotTextures.RemoveAll(
+        [this](const FWetClothingBakedWetPartDataSlotTexture& SlotTexture)
         {
             return !IsWettableMaterialSlot(
                 Authored.PartData.EditableWetPartData,
                 SlotTexture.MaterialSlotIndex);
         });
-    if (Derived.Inline.BakedProfileIDData.SlotTextures.IsEmpty())
+    if (Derived.Inline.BakedWetPartData.SlotTextures.IsEmpty())
     {
-        Derived.Inline.BakedProfileIDData = FWetClothingBakedProfileIDData();
+        Derived.Inline.BakedWetPartData = FWetClothingBakedWetPartData();
     }
 
     Derived.Bulk.NeighborRuntimeData.bIsValid = true;

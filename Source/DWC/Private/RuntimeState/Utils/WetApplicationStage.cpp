@@ -21,6 +21,7 @@ namespace
         float BestInfluence = -1.0f;
         FVector2f BestUV = FVector2f::ZeroVector;
         FSurfaceWaterProfileParameters Profile;
+        float DropletRadiusScale = 1.0f;
         bool bHasProfile = false;
     };
 
@@ -121,6 +122,12 @@ namespace
                 continue;
             }
 
+            const FWetClothingWetPartEntry* WetPart = MaterialSlot->FindPart(WetPartID);
+            if (WetPart == nullptr)
+            {
+                continue;
+            }
+
             const FSurfaceWaterProfileParameters& SurfaceProfile = WetnessProfile->SurfaceWater;
             const float SurfaceAmount = Contact.Amount *
                 FMath::Clamp(Contact.TriangleInfluence, 0.0f, 1.0f) *
@@ -143,6 +150,7 @@ namespace
                 Accumulator.BestInfluence = Contact.TriangleInfluence;
                 Accumulator.BestUV = Contact.ContactUV;
                 Accumulator.Profile = SurfaceProfile;
+                Accumulator.DropletRadiusScale = FMath::Clamp(WetPart->SurfaceWater.DropletRadiusScale, 0.25f, 4.0f);
                 Accumulator.bHasProfile = true;
             }
         }
@@ -161,7 +169,6 @@ namespace
 
             const FSurfaceWaterProfileParameters& Surface = Accumulator.Profile;
             if (Surface.bEnableDroplets &&
-                Surface.DropletIntensityMultiplier > 0.0f &&
                 Surface.DropletRadiusPixels > 0.0f &&
                 RandomStream.FRand() < FMath::Clamp(Surface.DropletSpawnProbability, 0.0f, 1.0f))
             {
@@ -169,29 +176,26 @@ namespace
                 Request.Type = EDWCSurfaceStampType::Droplet;
                 Request.MaterialSlotIndex = Accumulator.MaterialSlotIndex;
                 Request.UV = Accumulator.BestUV;
-                Request.HalfSizePixels = FVector2f(FMath::Max(0.5f, Surface.DropletRadiusPixels));
-                Request.Amount = Accumulator.TotalSurfaceAmount *
-                    FMath::Max(0.0f, Surface.DropletIntensityMultiplier);
+                Request.HalfSizePixels = FVector2f(FMath::Max(0.5f, Surface.DropletRadiusPixels * Accumulator.DropletRadiusScale));
+                Request.Amount = Accumulator.TotalSurfaceAmount;
                 Request.LifetimeSeconds = FMath::Max(0.01f, Surface.DropletLifetimeSeconds);
             }
 
             if (Surface.bEnableRivulets &&
-                Surface.FlowIntensityMultiplier > 0.0f &&
-                Surface.FlowWidthPixels > 0.0f &&
-                Surface.FlowLengthPixels > 0.0f &&
-                Accumulator.TotalSurfaceAmount >= FMath::Max(0.0f, Surface.MinimumFlowSurfaceAmount) &&
-                RandomStream.FRand() < FMath::Clamp(Surface.FlowSpawnProbability, 0.0f, 1.0f))
+                Surface.RivuletWidthPixels > 0.0f &&
+                Surface.RivuletLengthPixels > 0.0f &&
+                Accumulator.TotalSurfaceAmount >= FMath::Max(0.0f, Surface.MinimumRivuletSurfaceAmount) &&
+                RandomStream.FRand() < FMath::Clamp(Surface.RivuletSpawnProbability, 0.0f, 1.0f))
             {
                 FDWCSurfaceStampRequest& Request = Requests.AddDefaulted_GetRef();
                 Request.Type = EDWCSurfaceStampType::Rivulet;
                 Request.MaterialSlotIndex = Accumulator.MaterialSlotIndex;
                 Request.UV = Accumulator.BestUV;
                 Request.HalfSizePixels = FVector2f(
-                    FMath::Max(0.5f, Surface.FlowWidthPixels * 0.5f),
-                    FMath::Max(0.5f, Surface.FlowLengthPixels * 0.5f));
-                Request.Amount = Accumulator.TotalSurfaceAmount *
-                    FMath::Max(0.0f, Surface.FlowIntensityMultiplier);
-                Request.LifetimeSeconds = FMath::Max(0.01f, Surface.FlowLifetimeSeconds);
+                    FMath::Max(0.5f, Surface.RivuletWidthPixels * 0.5f),
+                    FMath::Max(0.5f, Surface.RivuletLengthPixels * 0.5f));
+                Request.Amount = Accumulator.TotalSurfaceAmount;
+                Request.LifetimeSeconds = FMath::Max(0.01f, Surface.RivuletLifetimeSeconds);
             }
         }
 

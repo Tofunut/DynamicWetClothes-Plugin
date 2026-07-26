@@ -71,7 +71,7 @@ void DWC_WriteDropletStamp(
         DWC_VisibleSurfaceAmount(Existing, StampTimeSeconds);
     const float NewAmount = saturate(max(ExistingVisibleAmount, Brush * StampAmount));
 
-    // Droplet A is reserved. Keep 1 for compatibility and debugging.
+    // Droplet A is reserved. Keep 1 as a validity/debug marker.
     TargetSurface[Pixel] = float4(
         NewAmount,
         StampTimeSeconds,

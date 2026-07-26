@@ -25,6 +25,11 @@ class FDWCTransparencyEditedMapBaker
         const FDWCTransparencyAutoBakeResult& AutoResult,
         FString& OutReason);
 
+    static bool IsLayerBakeCurrent(
+        const UWetClothingAsset& WetClothingAsset,
+        const FWetClothingTransparencyLayerData& Layer,
+        FString* OutReason = nullptr);
+
     static bool Bake(
         UWetClothingAsset& WetClothingAsset,
         FWetClothingTransparencyLayerData& Layer,

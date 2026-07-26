@@ -25,12 +25,12 @@ def build() -> None:
 
     c.create_comment(mf, "2. Detail Normal UV", -2800, -3200, 5000, 4200, parent=True)
     c.create_comment(mf, "2-1. Droplet Normal UV", -2400, -2750, 1800, 3200)
-    c.create_comment(mf, "2-2. Streak Flow-Aligned UV", -100, -2750, 1900, 3200)
+    c.create_comment(mf, "2-2. Rivulet Flow-Aligned UV", -100, -2750, 1900, 3200)
 
     c.create_comment(mf, "3. TextureArray Sampling", 2700, -3200, 7300, 4200, parent=True)
     c.create_comment(mf, "3-1. Droplet Normal Sampling", 3100, -2750, 1800, 3200)
-    c.create_comment(mf, "3-2. Streak Normal Sampling", 5400, -2750, 1800, 3200)
-    c.create_comment(mf, "3-3. Static Feature Selection", 7700, -2750, 1900, 3200)
+    c.create_comment(mf, "3-2. Rivulet Normal Sampling", 5400, -2750, 1800, 3200)
+    c.create_comment(mf, "3-3. Slice 0 Flat-Normal Fallback", 7700, -2750, 1900, 3200)
 
     c.create_comment(mf, "4. Function Outputs", 10500, -3200, 2800, 4200, parent=True)
     c.create_comment(mf, "4-1. Normal Outputs", 10900, -2750, 2000, 3200)
@@ -40,9 +40,9 @@ def build() -> None:
     declarations: dict[str, object] = {}
     specs = [
         ("SurfaceWaterNormalUV", "vector2", (0.0, 0.0), "Mesh UV used for repeating surface-water detail normals."),
-        ("SurfaceTime", "scalar", (0.0,), "Runtime surface-water time used for streak scrolling."),
-        ("DropletUVTiling", "vector2", (1.0, 1.0), "Droplet detail-normal repeat count in X/Y."),
-        ("StreakUVTiling", "vector2", (1.0, 1.0), "Streak repeat count across/along flow."),
+        ("SurfaceTime", "scalar", (0.0,), "Runtime surface-water time used for rivulet scrolling."),
+        ("DropletDetailSize", "scalar", (1.0,), "Part-local Droplet detail-pattern size."),
+        ("RivuletDetailSize", "scalar", (1.0,), "Part-local Rivulet detail-pattern size."),
     ]
     for i, (name, kind, preview, desc) in enumerate(specs):
         node = c.function_input(mf, name, kind, preview, i, -9800, -2250 + i * 650, desc)
@@ -54,20 +54,20 @@ def build() -> None:
     # 1-2 Profile Sampling Inputs
     profile_specs = [
         ("DropletNormalSlice", (0.0,), "Droplet normal Texture2DArray slice."),
-        ("StreakNormalSlice", (0.0,), "Streak normal Texture2DArray slice."),
-        ("EncodedFlowAngle", (0.75,), "SurfaceWaterNormalUV-space flow angle encoded to 0..1."),
-        ("StreakDetailMotionSpeed", (0.0,), "Streak scroll speed along the flow axis."),
+        ("RivuletNormalSlice", (0.0,), "Rivulet normal Texture2DArray slice."),
+        ("RivuletEncodedFlowAngle", (0.75,), "SurfaceWaterNormalUV-space flow angle encoded to 0..1."),
+        ("RivuletUVScrollSpeed", (0.0,), "Rivulet scroll speed along the flow axis."),
     ]
     for i, (name, preview, desc) in enumerate(profile_specs):
         node = c.function_input(mf, name, "scalar", preview, 4 + i, -7400, -2250 + i * 650, desc)
         inputs[name] = node
-        prefix = "PROFILE_" if name != "EncodedFlowAngle" else "SURFACE_"
+        prefix = "PROFILE_" if name != "RivuletEncodedFlowAngle" else "SURFACE_"
         declarations[name] = c.named_declaration(
             mf, f"{prefix}{name}", node, ("", "Result"), -6600, -2250 + i * 650
         )
 
     # 1-3 Flow Angle Decode
-    encoded_use = c.named_usage(mf, declarations["EncodedFlowAngle"], -5050, -2050)
+    encoded_use = c.named_usage(mf, declarations["RivuletEncodedFlowAngle"], -5050, -2050)
     flow_dir = c.custom_expression(
         mf,
         "float Angle = (EncodedAngle - 0.5) * 6.28318530718;\nreturn float2(cos(Angle), sin(Angle));",
@@ -88,43 +88,46 @@ def build() -> None:
 
     # 2-1 Droplet UV
     normal_uv_use = c.named_usage(mf, declarations["SurfaceWaterNormalUV"], -2150, -1750)
-    droplet_tiling_use = c.named_usage(mf, declarations["DropletUVTiling"], -2150, -1050)
-    droplet_uv = c.multiply(
-        mf, normal_uv_use, ("", "Result"), droplet_tiling_use, ("", "Result"),
-        -1450, -1450, "Apply material-slot droplet UV tiling."
+    droplet_size_use = c.named_usage(mf, declarations["DropletDetailSize"], -2150, -1050)
+    droplet_uv = c.custom_expression(
+        mf,
+        "return UV / max(DetailSize, 1.0e-4);",
+        [("UV", normal_uv_use, ("", "Result")), ("DetailSize", droplet_size_use, ("", "Result"))],
+        "float2", -1450, -1450,
+        "Scale the UV by the Part-local Droplet Detail Size. Droplets remain UV-fixed and do not rotate or scroll.",
     )
     droplet_uv_decl = c.named_declaration(
         mf, "SURFACE_DropletNormalUV", droplet_uv, ("", "Result"), -850, -1450
     )
 
-    # 2-2 Flow-aligned streak UV
-    streak_uv_use = c.named_usage(mf, declarations["SurfaceWaterNormalUV"], 100, -2350)
-    streak_tiling_use = c.named_usage(mf, declarations["StreakUVTiling"], 100, -1850)
+    # 2-2 Flow-aligned rivulet UV
+    rivulet_uv_use = c.named_usage(mf, declarations["SurfaceWaterNormalUV"], 100, -2350)
+    rivulet_size_use = c.named_usage(mf, declarations["RivuletDetailSize"], 100, -1850)
     time_use = c.named_usage(mf, declarations["SurfaceTime"], 100, -1350)
-    scroll_use = c.named_usage(mf, declarations["StreakDetailMotionSpeed"], 100, -850)
+    scroll_use = c.named_usage(mf, declarations["RivuletUVScrollSpeed"], 100, -850)
     flow_use2 = c.named_usage(mf, flow_decl, 100, -350)
     across_use2 = c.named_usage(mf, across_decl, 100, 100)
     aligned_uv = c.custom_expression(
         mf,
         """
 float2 Aligned = float2(dot(UV, AcrossDirection), dot(UV, FlowDirection));
-Aligned *= Tiling;
+Aligned /= max(DetailSize, 1.0e-4);
 Aligned.y += SurfaceTime * ScrollSpeed;
 return Aligned;
 """,
         [
-            ("UV", streak_uv_use, ("", "Result")),
-            ("Tiling", streak_tiling_use, ("", "Result")),
+            ("UV", rivulet_uv_use, ("", "Result")),
+            ("DetailSize", rivulet_size_use, ("", "Result")),
             ("SurfaceTime", time_use, ("", "Result")),
             ("ScrollSpeed", scroll_use, ("", "Result")),
             ("FlowDirection", flow_use2, ("", "Result")),
             ("AcrossDirection", across_use2, ("", "Result")),
         ],
         "float2", 850, -1450,
-        "Rotate UV into across/flow coordinates, then apply tiling and flow-axis scroll.",
+        "Rotate UV into across/flow coordinates, then apply Part-local size and flow-axis scroll.",
     )
-    streak_uv_decl = c.named_declaration(
-        mf, "SURFACE_StreakNormalUV", aligned_uv, ("", "Result"), 1450, -1450
+    rivulet_uv_decl = c.named_declaration(
+        mf, "SURFACE_RivuletNormalUV", aligned_uv, ("", "Result"), 1450, -1450
     )
 
     # 3-1 Droplet array sampling
@@ -143,57 +146,64 @@ return Aligned;
     droplet_raw_decl = c.named_declaration(
         mf, "SURFACE_DropletNormalRaw", droplet_sample, ("RGB", ""), 4700, -800
     )
-
-    # 3-2 Streak array sampling
-    streak_uv_use2 = c.named_usage(mf, streak_uv_decl, 5650, -1800)
-    streak_slice_use = c.named_usage(mf, declarations["StreakNormalSlice"], 5650, -1100)
-    streak_array_uv = c.append_vector(
-        mf, streak_uv_use2, ("", "Result"), streak_slice_use, ("", "Result"),
-        6200, -1450, "Append the runtime Texture2DArray slice to streak UV."
+    droplet_raw_for_decode = c.named_usage(mf, droplet_raw_decl, 7800, -2100)
+    droplet_decoded = c.custom_expression(
+        mf,
+        """
+return normalize(SampledNormal);
+""",
+        [("SampledNormal", droplet_raw_for_decode, ("", "Result"))],
+        "float3", 8500, -1850,
+        "Normalize the tangent-space droplet normal already decoded by the Normal sampler.",
     )
-    streak_sample = c.texture2d_array_parameter(
-        mf, "DWC_StreakNormalTextureArray", normal_array_fallback, 6750, -1450,
+
+    # 3-2 Rivulet array sampling
+    rivulet_uv_use2 = c.named_usage(mf, rivulet_uv_decl, 5650, -1800)
+    rivulet_slice_use = c.named_usage(mf, declarations["RivuletNormalSlice"], 5650, -1100)
+    rivulet_array_uv = c.append_vector(
+        mf, rivulet_uv_use2, ("", "Result"), rivulet_slice_use, ("", "Result"),
+        6200, -1450, "Append the runtime Texture2DArray slice to rivulet UV."
+    )
+    rivulet_sample = c.texture2d_array_parameter(
+        mf, "DWC_RivuletNormalTextureArray", normal_array_fallback, 6750, -1450,
         sampler_type=c.normal_sampler(), group="DWC Surface Water",
-        description="Global streak normal Texture2DArray. Slice 0 is flat normal.",
+        description="Global rivulet normal Texture2DArray. Slice 0 is flat normal.",
     )
-    c.try_connect(streak_array_uv, ("", "Result"), streak_sample, ("Coordinates", "UVs"))
-    streak_raw_decl = c.named_declaration(
-        mf, "SURFACE_StreakNormalRaw", streak_sample, ("RGB", ""), 7000, -800
+    c.try_connect(rivulet_array_uv, ("", "Result"), rivulet_sample, ("Coordinates", "UVs"))
+    rivulet_raw_decl = c.named_declaration(
+        mf, "SURFACE_RivuletNormalRaw", rivulet_sample, ("RGB", ""), 7000, -800
+    )
+    rivulet_raw_for_decode = c.named_usage(mf, rivulet_raw_decl, 7800, -1200)
+    rivulet_decoded = c.custom_expression(
+        mf,
+        """
+return normalize(SampledNormal);
+""",
+        [("SampledNormal", rivulet_raw_for_decode, ("", "Result"))],
+        "float3", 8500, -950,
+        "Normalize the tangent-space rivulet normal already decoded by the Normal sampler.",
     )
 
-    # 3-3 Static feature selection
-    flat_normal = c.vector_constant(mf, (0.0, 0.0, 1.0), 7950, -200, "Flat tangent-space normal")
-    droplet_raw_use = c.named_usage(mf, droplet_raw_decl, 7950, -1850)
-    streak_raw_use = c.named_usage(mf, streak_raw_decl, 7950, -950)
-    use_droplet = c.static_switch_parameter(
-        mf, "DWC_UseDropletNormal", False,
-        droplet_raw_use, ("", "Result"), flat_normal, ("", "Result"), 8500, -1850,
-        group="DWC Surface Water",
-        description="Compile droplet normal sampling only when this material slot needs it.",
-    )
-    use_streak = c.static_switch_parameter(
-        mf, "DWC_UseStreakNormal", False,
-        streak_raw_use, ("", "Result"), flat_normal, ("", "Result"), 8500, -950,
-        group="DWC Surface Water",
-        description="Compile streak normal sampling only when this material slot needs it.",
-    )
+    # 3-3 Profile-level enable is encoded by the render profile slice.
+    # Slice 0 is a flat normal, so profiles that do not use a given normal source
+    # still compile the same material permutation and simply sample slice 0.
     droplet_final_decl = c.named_declaration(
-        mf, "SURFACE_DropletNormal", use_droplet, ("", "Result"), 9200, -1850
+        mf, "SURFACE_DropletNormal", droplet_decoded, ("", "Result"), 9200, -1850
     )
-    streak_final_decl = c.named_declaration(
-        mf, "SURFACE_StreakNormal", use_streak, ("", "Result"), 9200, -950
+    rivulet_final_decl = c.named_declaration(
+        mf, "SURFACE_RivuletNormal", rivulet_decoded, ("", "Result"), 9200, -950
     )
 
     # 4-1 Outputs
     droplet_out_use = c.named_usage(mf, droplet_final_decl, 11200, -1650)
-    streak_out_use = c.named_usage(mf, streak_final_decl, 11200, -750)
+    rivulet_out_use = c.named_usage(mf, rivulet_final_decl, 11200, -750)
     c.function_output(
         mf, "DropletNormal", droplet_out_use, ("", "Result"), 0,
         12200, -1650, "Raw tangent-space droplet normal without coverage or strength."
     )
     c.function_output(
-        mf, "StreakNormal", streak_out_use, ("", "Result"), 1,
-        12200, -750, "Raw tangent-space streak normal aligned to the stored flow angle."
+        mf, "RivuletNormal", rivulet_out_use, ("", "Result"), 1,
+        12200, -750, "Raw tangent-space rivulet normal aligned to the stored flow angle."
     )
 
     c.finalize_material_function(mf)

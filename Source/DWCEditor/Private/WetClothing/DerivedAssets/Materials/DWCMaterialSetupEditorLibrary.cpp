@@ -18,9 +18,6 @@ bool UDWCMaterialSetupEditorLibrary::RepairGeneratedWetMaterials(
     TArray<FString> Messages;
     WetClothingAsset->Modify();
 
-    const FWCAMaterialGenerator::FOptions Options =
-        FWCAMaterialGenerator::MakeOptionsForAsset(WetClothingAsset, EDWCSimulationMode::VertexCPU);
-
     for (FWetClothingGeneratedWetMaterialOverride& MaterialOverride :
          WetClothingAsset->Derived.Inline.GeneratedWetMaterialOverrides)
     {
@@ -33,6 +30,11 @@ bool UDWCMaterialSetupEditorLibrary::RepairGeneratedWetMaterials(
             continue;
         }
 
+        const FWCAMaterialGenerator::FOptions Options =
+            FWCAMaterialGenerator::MakeOptionsForAsset(
+                WetClothingAsset,
+                EDWCSimulationMode::VertexCPU,
+                MaterialOverride.MaterialSlotIndex);
         const FWetClothingUnifiedMaterialSetupResult Result =
             FWCAMaterialGenerator::CreateOrUpdateUnifiedMaterialSet(SourceMaterial, Options);
         if (!Result.bSucceeded || !Result.GeneratedMaterial ||

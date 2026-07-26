@@ -5,6 +5,7 @@
 #include "Input/Reply.h"
 #include "Templates/Function.h"
 
+class IDetailCategoryBuilder;
 class IDetailGroup;
 class IPropertyHandle;
 class IPropertyUtilities;
@@ -30,10 +31,32 @@ private:
     TSharedPtr<IPropertyHandle> FindPropertyByPath(const TCHAR* PropertyPath) const;
 
     void AddDefaultProperty(
+        IDetailCategoryBuilder& Category,
+        const TSharedPtr<IPropertyHandle>& Handle,
+        const FText& DisplayName,
+        const FText& Tooltip,
+        TAttribute<bool> IsEnabled = TAttribute<bool>(true));
+
+    void AddDefaultProperty(
         IDetailGroup& Group,
         const TSharedPtr<IPropertyHandle>& Handle,
         const FText& DisplayName,
         const FText& Tooltip,
+        TAttribute<bool> IsEnabled = TAttribute<bool>(true));
+
+    void AddFloatProperty(
+        IDetailCategoryBuilder& Category,
+        const TSharedPtr<IPropertyHandle>& Handle,
+        const FText& DisplayName,
+        const FText& Tooltip,
+        float HardMin,
+        float HardMax,
+        float SliderMin,
+        float SliderMax,
+        float Delta,
+        float DisplayScale,
+        int32 MaxFractionalDigits,
+        const FText& Suffix,
         TAttribute<bool> IsEnabled = TAttribute<bool>(true));
 
     void AddFloatProperty(
@@ -49,6 +72,24 @@ private:
         float DisplayScale,
         int32 MaxFractionalDigits,
         const FText& Suffix,
+        TAttribute<bool> IsEnabled = TAttribute<bool>(true));
+
+    void AddMappedFloatProperty(
+        IDetailCategoryBuilder& Category,
+        const TSharedPtr<IPropertyHandle>& Handle,
+        const FText& DisplayName,
+        const FText& Tooltip,
+        float HardDisplayMin,
+        float HardDisplayMax,
+        float SliderDisplayMin,
+        float SliderDisplayMax,
+        float DisplayDelta,
+        int32 MaxFractionalDigits,
+        const FText& Suffix,
+        TFunction<float(float)> RawToDisplay,
+        TFunction<float(float)> DisplayToRaw,
+        float RawHardMin,
+        float RawHardMax,
         TAttribute<bool> IsEnabled = TAttribute<bool>(true));
 
     void AddMappedFloatProperty(

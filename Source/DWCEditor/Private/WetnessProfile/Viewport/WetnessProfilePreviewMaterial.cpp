@@ -27,7 +27,7 @@ namespace DWCWetnessProfilePreviewMaterial
 namespace
 {
     constexpr const TCHAR* DynamicWetClothesPluginName = TEXT("DynamicWetClothes");
-    constexpr const TCHAR* PreviewMaterialAssetName = TEXT("M_DWC_WetnessProfilePreviewV2");
+    constexpr const TCHAR* PreviewMaterialAssetName = TEXT("M_DWC_WetnessProfilePreviewV5");
 
     enum class EPreviewMaterialCreationState : uint8
     {
@@ -202,19 +202,23 @@ namespace
             Material, RivuletsEnabledParameter, 1.0f, -1250, 480);
         UMaterialExpressionScalarParameter* RivuletScrollSpeed = CreateScalarParameter(
             Material, RivuletScrollSpeedParameter, 0.0f, -1250, 580);
+        UMaterialExpressionScalarParameter* DropletDetailSize = CreateScalarParameter(
+            Material, DropletDetailSizeParameter, 1.0f, -1250, 680);
+        UMaterialExpressionScalarParameter* RivuletDetailSize = CreateScalarParameter(
+            Material, RivuletDetailSizeParameter, 1.0f, -1250, 780);
 
         UMaterialExpressionTextureCoordinate* TextureCoordinate = Cast<UMaterialExpressionTextureCoordinate>(
             UMaterialEditingLibrary::CreateMaterialExpression(
                 Material,
                 UMaterialExpressionTextureCoordinate::StaticClass(),
                 -1250,
-                620));
+                900));
         UMaterialExpressionTime* Time = Cast<UMaterialExpressionTime>(
             UMaterialEditingLibrary::CreateMaterialExpression(
                 Material,
                 UMaterialExpressionTime::StaticClass(),
                 -1250,
-                720));
+                1000));
 
         UTexture* DefaultNormalTexture = LoadDefaultNormalTexture();
         UMaterialExpressionTextureObjectParameter* DropletNormal = CreateNormalTextureParameter(
@@ -290,8 +294,8 @@ float EnabledSurface = saturate(SurfaceWater) * saturate(SurfaceEnabled);
 float Threshold = saturate(SurfaceVisibilityThreshold);
 float Surface = saturate((EnabledSurface - Threshold) / max(1.0 - Threshold, 0.001));
 
-float2 DropletUV = frac(UV * 5.0);
-float2 RivuletUV = frac(UV * float2(2.5, 1.5) + float2(0.0, TimeValue * RivuletScrollSpeed * 0.08));
+float2 DropletUV = frac(UV / max(DropletDetailSize, 1.0e-4));
+float2 RivuletUV = frac(UV / max(RivuletDetailSize, 1.0e-4) + float2(0.0, TimeValue * RivuletScrollSpeed * 0.08));
 float2 DropletXY = Texture2DSampleLevel(DropletNormalTex, DropletNormalTexSampler, DropletUV, 0).rg * 2.0 - 1.0;
 float2 RivuletXY = Texture2DSampleLevel(RivuletNormalTex, RivuletNormalTexSampler, RivuletUV, 0).rg * 2.0 - 1.0;
 
@@ -311,6 +315,8 @@ return normalize(float3(CombinedXY, 1.0));
                 TEXT("DropletsEnabled"),
                 TEXT("RivuletsEnabled"),
                 TEXT("RivuletScrollSpeed"),
+                TEXT("DropletDetailSize"),
+                TEXT("RivuletDetailSize"),
                 TEXT("DropletNormalTex"),
                 TEXT("RivuletNormalTex"),
             },
@@ -342,6 +348,8 @@ return normalize(float3(CombinedXY, 1.0));
         bConnected &= ConnectExpression(DropletsEnabled, NormalExpression, TEXT("DropletsEnabled"));
         bConnected &= ConnectExpression(RivuletsEnabled, NormalExpression, TEXT("RivuletsEnabled"));
         bConnected &= ConnectExpression(RivuletScrollSpeed, NormalExpression, TEXT("RivuletScrollSpeed"));
+        bConnected &= ConnectExpression(DropletDetailSize, NormalExpression, TEXT("DropletDetailSize"));
+        bConnected &= ConnectExpression(RivuletDetailSize, NormalExpression, TEXT("RivuletDetailSize"));
         bConnected &= ConnectExpression(DropletNormal, NormalExpression, TEXT("DropletNormalTex"));
         bConnected &= ConnectExpression(RivuletNormal, NormalExpression, TEXT("RivuletNormalTex"));
 

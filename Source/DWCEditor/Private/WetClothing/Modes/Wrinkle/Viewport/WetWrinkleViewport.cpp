@@ -22,6 +22,7 @@
 #include "WetClothing/Foundation/TextureAccess/WetClothingMaterialTextureResolver.h"
 #include "WetClothing/Foundation/TextureAccess/WetWrinkleTextureRasterUtils.h"
 #include "WetClothing/Modes/DWCEditorPreviewSlotUtils.h"
+#include "WetClothing/Modes/DWCPreviewViewportToolbarUtils.h"
 #include "WetClothing/Modes/Wrinkle/Material/WetWrinklePreviewMaterialBuilder.h"
 #include "WetClothing/Modes/Wrinkle/Stroke/WetProceduralRidgeRasterizer.h"
 #include "WetClothing/WCAEditor/UI/UVView/WCAUVPreviewTriangleReader.h"
@@ -1436,7 +1437,7 @@ TSharedPtr<SWidget> SWetWrinkleViewport::BuildViewportToolbar()
         FToolMenuSection& RightSection = ViewportToolbarMenu->AddSection(TEXT("Right"));
         RightSection.Alignment = EToolMenuSectionAlign::Last;
         RightSection.AddEntry(UE::UnrealEd::CreateCameraSubmenu(UE::UnrealEd::FViewportCameraMenuOptions().ShowAll()));
-        RightSection.AddEntry(UE::UnrealEd::CreateViewModesSubmenu());
+        RightSection.AddEntry(UE::DWCEditor::CreateDWCViewModesSubmenu());
     }
 
     FToolMenuContext ViewportToolbarContext;

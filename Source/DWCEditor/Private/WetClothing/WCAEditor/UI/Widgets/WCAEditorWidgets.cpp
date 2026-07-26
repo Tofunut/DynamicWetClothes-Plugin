@@ -635,7 +635,7 @@ TSharedRef<SWidget> FWCAEditorWidgets::BuildBakeMapsMenu(const FWCABakeMapsMenuA
     MenuBuilder.BeginSection(TEXT("BakeMapsRenderProfile"), NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeMapsRenderProfileMenuSection", "RENDER PROFILE"));
     MenuBuilder.AddMenuEntry(
         NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeRenderProfileDataMenuItem", "Bake Render Profile Data"),
-        NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeRenderProfileDataMenuItemTooltip", "Bake Profile ID textures, normalized surface textures, and wet material setup."),
+        NSLOCTEXT("WetClothingEditorCommonWidgets", "BakeRenderProfileDataMenuItemTooltip", "Bake Wet Part Data textures, normalized surface textures, and wet material setup."),
         FSlateIcon(),
         FUIAction(FExecuteAction::CreateLambda([OnBakeRenderProfileData = Args.OnBakeRenderProfileData]()
         {

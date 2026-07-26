@@ -1,4 +1,4 @@
-#include "WetClothing/DerivedAssets/Textures/WetnessProfile/WetClothingProfileIDTextureBaker.h"
+#include "WetClothing/DerivedAssets/Textures/WetnessProfile/WetClothingWetPartDataTextureBaker.h"
 #include "WetClothing/DerivedAssets/Textures/WetnessProfile/WetClothingSurfaceTextureNormalizer.h"
 #include "WetnessProfile/Editor/WetnessProfileEditorPolicy.h"
 
@@ -21,12 +21,13 @@ namespace
         }
 #if WITH_EDITORONLY_DATA
         return FString::Printf(
-            TEXT("%s@%s:%dx%d:%d"),
+            TEXT("%s@%s:%dx%d:%d:FlipG=%d"),
             *Texture->GetPathName(),
             *Texture->Source.GetId().ToString(),
             Texture->Source.GetSizeX(),
             Texture->Source.GetSizeY(),
-            static_cast<int32>(Texture->Source.GetFormat()));
+            static_cast<int32>(Texture->Source.GetFormat()),
+            Texture->bFlipGreenChannel ? 1 : 0);
 #else
         return Texture->GetPathName();
 #endif
@@ -103,13 +104,13 @@ namespace
     FString MakeSlotSignature(const FString& GlobalSignature, const int32 MaterialSlotIndex)
     {
         return FMD5::HashAnsiString(*FString::Printf(
-            TEXT("DWC.ProfileIDTexture.Slot.v5|Global=%s|Slot=%d"),
+            TEXT("DWC.WetPartDataTexture.Slot.v6|Global=%s|Slot=%d"),
             *GlobalSignature,
             MaterialSlotIndex));
     }
 }
 
-bool FWetClothingProfileIDTextureBaker::ResolveProfileParameters(
+bool FWetClothingWetPartDataTextureBaker::ResolveProfileParameters(
     const FWetPartProfileAssignment* ProfileAssignment,
     FWetnessProfileParameters& OutParameters)
 {
@@ -118,21 +119,17 @@ bool FWetClothingProfileIDTextureBaker::ResolveProfileParameters(
         if (const UWetnessProfile* Profile = Cast<UWetnessProfile>(ProfileAssignment->SourceProfile.TryLoad()))
         {
             OutParameters = Profile->GetParameters();
-            OutParameters.MigrateLegacyAbsorbedWetness();
-            OutParameters.MigrateLegacySurfaceWaterRendering();
             FWetnessProfileEditorPolicy::SanitizeParameters(OutParameters);
             return true;
         }
     }
 
     OutParameters = ProfileAssignment != nullptr ? ProfileAssignment->Parameters : FWetnessProfileParameters();
-    OutParameters.MigrateLegacyAbsorbedWetness();
-    OutParameters.MigrateLegacySurfaceWaterRendering();
     FWetnessProfileEditorPolicy::SanitizeParameters(OutParameters);
     return true;
 }
 
-FString FWetClothingProfileIDTextureBaker::MakeProfileStableKey(
+FString FWetClothingWetPartDataTextureBaker::MakeProfileStableKey(
     const FWetPartProfileAssignment* ProfileAssignment,
     const FWetnessProfileParameters& Parameters)
 {
@@ -153,7 +150,7 @@ FString FWetClothingProfileIDTextureBaker::MakeProfileStableKey(
     return FString::Printf(TEXT("Inline:%s"), *ParameterHash);
 }
 
-bool FWetClothingProfileIDTextureBaker::IsUVPointInsideTriangle(
+bool FWetClothingWetPartDataTextureBaker::IsUVPointInsideTriangle(
     const FVector2D& Point,
     const FVector2D& A,
     const FVector2D& B,
@@ -172,13 +169,13 @@ bool FWetClothingProfileIDTextureBaker::IsUVPointInsideTriangle(
     return !(bHasNegative && bHasPositive);
 }
 
-int32 FWetClothingProfileIDTextureBaker::PaintTriangle(
+int32 FWetClothingWetPartDataTextureBaker::PaintTriangle(
     TArray<FColor>& Pixels,
     TArray<bool>& PaintedMask,
     const int32 Width,
     const int32 Height,
     const FWetClothingAssetUVTriangle& Triangle,
-    const uint8 LocalProfileID)
+    const FColor& PackedPartData)
 {
     const FVector2D& A = Triangle.UVs[0];
     const FVector2D& B = Triangle.UVs[1];
@@ -204,7 +201,7 @@ int32 FWetClothingProfileIDTextureBaker::PaintTriangle(
 
             const int32 PixelIndex = Y * Width + X;
             PaintedPixelCount += PaintedMask[PixelIndex] ? 0 : 1;
-            Pixels[PixelIndex] = FColor(LocalProfileID, 0, 0, 255);
+            Pixels[PixelIndex] = PackedPartData;
             PaintedMask[PixelIndex] = true;
         }
     }
@@ -216,14 +213,14 @@ int32 FWetClothingProfileIDTextureBaker::PaintTriangle(
         const int32 Y = FMath::Clamp(FMath::FloorToInt(Center.Y * Height), 0, Height - 1);
         const int32 PixelIndex = Y * Width + X;
         PaintedPixelCount += PaintedMask[PixelIndex] ? 0 : 1;
-        Pixels[PixelIndex] = FColor(LocalProfileID, 0, 0, 255);
+        Pixels[PixelIndex] = PackedPartData;
         PaintedMask[PixelIndex] = true;
     }
 
     return PaintedPixelCount;
 }
 
-void FWetClothingProfileIDTextureBaker::DilatePaintedPixels(
+void FWetClothingWetPartDataTextureBaker::DilatePaintedPixels(
     TArray<FColor>& Pixels,
     TArray<bool>& PaintedMask,
     const int32 Width,
@@ -279,7 +276,7 @@ void FWetClothingProfileIDTextureBaker::DilatePaintedPixels(
     }
 }
 
-UTexture2D* FWetClothingProfileIDTextureBaker::CreateOrUpdateTextureAsset(
+UTexture2D* FWetClothingWetPartDataTextureBaker::CreateOrUpdateTextureAsset(
     UWetClothingAsset& WetClothingAsset,
     const int32 MaterialSlotIndex,
     const TArray<FColor>& Pixels,
@@ -297,7 +294,7 @@ UTexture2D* FWetClothingProfileIDTextureBaker::CreateOrUpdateTextureAsset(
     }
 
     const FString ObjectName = ObjectTools::SanitizeObjectName(
-        FString::Printf(TEXT("T_%s_Slot%d_ProfileID"), *WetClothingAsset.GetName(), MaterialSlotIndex));
+        FString::Printf(TEXT("T_%s_Slot%d_WetPartData"), *WetClothingAsset.GetName(), MaterialSlotIndex));
     const FString GeneratedFolder =
         WcaFolder / TEXT("Generated") / WetClothingAsset.GetName() / TEXT("LUT") / TEXT("Profiles");
     const FString PackageName = GeneratedFolder / ObjectName;
@@ -334,12 +331,12 @@ UTexture2D* FWetClothingProfileIDTextureBaker::CreateOrUpdateTextureAsset(
     OutErrorMessage.Reset();
     return Texture;
 #else
-    OutErrorMessage = TEXT("Profile ID Texture baking requires editor-only texture source data.");
+    OutErrorMessage = TEXT("Wet Part Data Texture baking requires editor-only texture source data.");
     return nullptr;
 #endif
 }
 
-FString FWetClothingProfileIDTextureBaker::MakeBuildSignature(const UWetClothingAsset* WetClothingAsset)
+FString FWetClothingWetPartDataTextureBaker::MakeBuildSignature(const UWetClothingAsset* WetClothingAsset)
 {
     if (WetClothingAsset == nullptr ||
         WetClothingAsset->GetRuntimeSkeletalMesh() == nullptr ||
@@ -353,7 +350,7 @@ FString FWetClothingProfileIDTextureBaker::MakeBuildSignature(const UWetClothing
     const FDWCEditorUVTopologyData* OriginalUVTopology = WetClothingAsset->FindOriginalUVTopologyForLOD(WetClothingAsset->GetSimulationLODIndex());
 #endif
     FString Canonical = FString::Printf(
-        TEXT("DWC.ProfileIDTexture.v5|Mesh=%s|DataUV=%d|DataUVInput=%s|DataUVOutput=%s|OriginalTopology=%s|")
+        TEXT("DWC.WetPartDataTexture.v6|Mesh=%s|DataUV=%d|DataUVInput=%s|DataUVOutput=%s|OriginalTopology=%s|")
         TEXT("Resolution=%d|Padding=%d|SurfaceTextureVersion=%d|SurfaceTextureResolution=%d"),
         *WetClothingAsset->GetRuntimeSkeletalMesh()->GetPathName(),
         WetClothingAsset->GetDWCDataUVChannelIndex(),
@@ -364,8 +361,8 @@ FString FWetClothingProfileIDTextureBaker::MakeBuildSignature(const UWetClothing
 #else
         TEXT("EditorOnly"),
 #endif
-        DWCProfileIDTextureBake::Resolution,
-        DWCProfileIDTextureBake::PaddingPixels,
+        DWCWetPartDataTextureBake::Resolution,
+        DWCWetPartDataTextureBake::PaddingPixels,
         DWCSurfaceTextureNormalization::Version,
         DWCSurfaceTextureNormalization::Resolution);
 
@@ -384,12 +381,15 @@ FString FWetClothingProfileIDTextureBaker::MakeBuildSignature(const UWetClothing
         TArray<int32> IslandIDs = BakeEntry.Entry->AssignedUVIslandIDs;
         IslandIDs.Sort();
         Canonical += FString::Printf(
-            TEXT("|Slot=%d;OriginalUV=%d;Part=%d;Profile=%s;Key=%s;Islands="),
+            TEXT("|Slot=%d;OriginalUV=%d;Part=%d;Profile=%s;Key=%s;DropletRadiusScale=%.9g;DropletDetailSize=%.9g;RivuletDetailSize=%.9g;Islands="),
             BakeEntry.MaterialSlotIndex,
             WetClothingAsset->GetOriginalUVChannelIndex(),
             BakeEntry.Entry->WetPartID,
             BakeEntry.Profile != nullptr ? *BakeEntry.Profile->SourceProfile.ToString() : TEXT("None"),
-            *MakeProfileStableKey(BakeEntry.Profile, Parameters));
+            *MakeProfileStableKey(BakeEntry.Profile, Parameters),
+            BakeEntry.Entry->SurfaceWater.DropletRadiusScale,
+            BakeEntry.Entry->SurfaceWater.DropletDetailSize,
+            BakeEntry.Entry->SurfaceWater.RivuletDetailSize);
         for (const int32 IslandID : IslandIDs)
         {
             Canonical += FString::Printf(TEXT("%d,"), IslandID);
@@ -399,21 +399,21 @@ FString FWetClothingProfileIDTextureBaker::MakeBuildSignature(const UWetClothing
     return FMD5::HashAnsiString(*Canonical);
 }
 
-bool FWetClothingProfileIDTextureBaker::Bake(
+bool FWetClothingWetPartDataTextureBaker::Bake(
     UWetClothingAsset* WetClothingAsset,
-    FWetClothingProfileIDTextureBakeResult& OutResult,
+    FWetClothingWetPartDataTextureBakeResult& OutResult,
     FString& OutErrorMessage)
 {
-    OutResult = FWetClothingProfileIDTextureBakeResult();
+    OutResult = FWetClothingWetPartDataTextureBakeResult();
 
     if (WetClothingAsset == nullptr || WetClothingAsset->GetRuntimeSkeletalMesh() == nullptr)
     {
-        OutErrorMessage = TEXT("Generate the prepared DWC Skeletal Mesh before baking Profile ID Textures.");
+        OutErrorMessage = TEXT("Generate the prepared DWC Skeletal Mesh before baking Wet Part Data Textures.");
         return false;
     }
     if (!WetClothingAsset->HasValidDataUVForLOD(WetClothingAsset->GetSimulationLODIndex()) || WetClothingAsset->GetDWCDataUVChannelIndex() == INDEX_NONE)
     {
-        OutErrorMessage = TEXT("Profile ID Textures require valid DWC Data UV. Rebuild DWC Data UV first.");
+        OutErrorMessage = TEXT("Wet Part Data Textures require valid DWC Data UV. Rebuild DWC Data UV first.");
         return false;
     }
 
@@ -422,7 +422,7 @@ bool FWetClothingProfileIDTextureBaker::Bake(
 
     if (Entries.IsEmpty())
     {
-        OutErrorMessage = TEXT("No wettable Wet Part entries are available for Profile ID Texture baking.");
+        OutErrorMessage = TEXT("No wettable Wet Part entries are available for Wet Part Data Texture baking.");
         return false;
     }
 
@@ -442,18 +442,18 @@ bool FWetClothingProfileIDTextureBaker::Bake(
         ResolveProfileParameters(BakeEntry.Profile, Parameters);
         const FString StableKey = MakeProfileStableKey(BakeEntry.Profile, Parameters);
 
-        uint8 LocalProfileID = DWCProfileIDTextureBake::NeutralProfileID;
+        uint8 LocalProfileID = DWCWetPartDataTextureBake::NeutralProfileID;
         if (const uint8* ExistingID = LocalIDByStableKey.Find(StableKey))
         {
             LocalProfileID = *ExistingID;
         }
         else
         {
-            if (LocalProfiles.Num() >= DWCProfileIDTextureBake::MaxLocalProfileCount)
+            if (LocalProfiles.Num() >= DWCWetPartDataTextureBake::MaxLocalProfileCount)
             {
                 OutErrorMessage = FString::Printf(
-                    TEXT("Profile ID Textures support at most %d WCA-local profiles."),
-                    DWCProfileIDTextureBake::MaxLocalProfileCount);
+                    TEXT("Wet Part Data Textures support at most %d WCA-local profiles."),
+                    DWCWetPartDataTextureBake::MaxLocalProfileCount);
                 return false;
             }
 
@@ -472,12 +472,9 @@ bool FWetClothingProfileIDTextureBaker::Bake(
                 return false;
             }
 
-            // The WCA retains only array-compatible Derived texture references.
-            // The authored source textures remain owned by the source profile asset.
-            LocalProfile.Parameters.SurfaceWater.DropletMaskTexture = nullptr;
+            // Runtime rows retain only normalized array-compatible texture references.
+            // Authored source textures remain owned by the Wetness Profile asset.
             LocalProfile.Parameters.SurfaceWater.DropletNormalTexture = nullptr;
-            LocalProfile.Parameters.SurfaceWater.FlowMaskTexture = nullptr;
-            LocalProfile.Parameters.SurfaceWater.FlowNormalTexture = nullptr;
             LocalProfile.Parameters.SurfaceWater.RivuletNormalTexture = nullptr;
             LocalIDByStableKey.Add(StableKey, LocalProfileID);
         }
@@ -497,14 +494,14 @@ bool FWetClothingProfileIDTextureBaker::Bake(
     EntriesBySlot.GetKeys(MaterialSlots);
     MaterialSlots.Sort();
 
-    const int32 Width = DWCProfileIDTextureBake::Resolution;
-    const int32 Height = DWCProfileIDTextureBake::Resolution;
-    TArray<FWetClothingBakedProfileIDSlotTexture> BakedSlotTextures;
+    const int32 Width = DWCWetPartDataTextureBake::Resolution;
+    const int32 Height = DWCWetPartDataTextureBake::Resolution;
+    TArray<FWetClothingBakedWetPartDataSlotTexture> BakedSlotTextures;
 
     for (const int32 MaterialSlotIndex : MaterialSlots)
     {
         const TArray<const FWetClothingWetPartEntry*>& SlotEntries = EntriesBySlot.FindChecked(MaterialSlotIndex);
-        TMap<int32, uint8> LocalIDByTriangleID;
+        TMap<int32, FColor> PackedPartDataByTriangleID;
 
         for (const FWetClothingWetPartEntry* Entry : SlotEntries)
         {
@@ -523,6 +520,11 @@ bool FWetClothingProfileIDTextureBaker::Bake(
             }
 
             const uint8 LocalProfileID = LocalIDByEntry.FindChecked(Entry);
+            const FColor PackedPartData(
+                LocalProfileID,
+                DWCWetPartDataTextureBake::EncodeDetailSize(Entry->SurfaceWater.DropletDetailSize),
+                DWCWetPartDataTextureBake::EncodeDetailSize(Entry->SurfaceWater.RivuletDetailSize),
+                0);
             for (const FWetClothingAssetUVIsland& Island : OriginalIslands)
             {
                 if (!Entry->AssignedUVIslandIDs.Contains(Island.UVIslandID))
@@ -531,12 +533,12 @@ bool FWetClothingProfileIDTextureBaker::Bake(
                 }
                 for (const int32 TriangleID : Island.TriangleIDs)
                 {
-                    if (const uint8* ExistingID = LocalIDByTriangleID.Find(TriangleID))
+                    if (const FColor* ExistingData = PackedPartDataByTriangleID.Find(TriangleID))
                     {
-                        if (*ExistingID != LocalProfileID)
+                        if (*ExistingData != PackedPartData)
                         {
                             OutErrorMessage = FString::Printf(
-                                TEXT("Material slot %d triangle %d belongs to Wet Parts with different profiles."),
+                                TEXT("Material slot %d triangle %d belongs to Wet Parts with different profile/detail data."),
                                 MaterialSlotIndex,
                                 TriangleID);
                             return false;
@@ -544,7 +546,7 @@ bool FWetClothingProfileIDTextureBaker::Bake(
                     }
                     else
                     {
-                        LocalIDByTriangleID.Add(TriangleID, LocalProfileID);
+                        PackedPartDataByTriangleID.Add(TriangleID, PackedPartData);
                     }
                 }
             }
@@ -565,7 +567,7 @@ bool FWetClothingProfileIDTextureBaker::Bake(
 
         TArray<FColor> Pixels;
         TArray<bool> PaintedMask;
-        Pixels.Init(FColor(DWCProfileIDTextureBake::NeutralProfileID, 0, 0, 255), Width * Height);
+        Pixels.Init(FColor(DWCWetPartDataTextureBake::NeutralProfileID, DWCWetPartDataTextureBake::EncodeDetailSize(1.0f), DWCWetPartDataTextureBake::EncodeDetailSize(1.0f), 0), Width * Height);
         PaintedMask.Init(false, Width * Height);
         int32 SlotPaintedPixelCount = 0;
 
@@ -573,8 +575,8 @@ bool FWetClothingProfileIDTextureBaker::Bake(
         {
             for (const FWetClothingAssetUVTriangle& Triangle : Island.UVTriangles)
             {
-                const uint8* LocalProfileID = LocalIDByTriangleID.Find(Triangle.TriangleID);
-                if (LocalProfileID == nullptr)
+                const FColor* PackedPartData = PackedPartDataByTriangleID.Find(Triangle.TriangleID);
+                if (PackedPartData == nullptr)
                 {
                     continue;
                 }
@@ -584,47 +586,47 @@ bool FWetClothingProfileIDTextureBaker::Bake(
                     Width,
                     Height,
                     Triangle,
-                    *LocalProfileID);
+                    *PackedPartData);
             }
         }
 
         if (SlotPaintedPixelCount <= 0)
         {
             OutErrorMessage = FString::Printf(
-                TEXT("Profile ID Texture slot %d did not rasterize any DWC Data UV pixels."),
+                TEXT("Wet Part Data Texture slot %d did not rasterize any DWC Data UV pixels."),
                 MaterialSlotIndex);
             return false;
         }
 
-        DilatePaintedPixels(Pixels, PaintedMask, Width, Height, DWCProfileIDTextureBake::PaddingPixels);
+        DilatePaintedPixels(Pixels, PaintedMask, Width, Height, DWCWetPartDataTextureBake::PaddingPixels);
 
-        UTexture2D* ProfileIDTexture = CreateOrUpdateTextureAsset(
+        UTexture2D* WetPartDataTexture = CreateOrUpdateTextureAsset(
             *WetClothingAsset,
             MaterialSlotIndex,
             Pixels,
             Width,
             Height,
             OutErrorMessage);
-        if (ProfileIDTexture == nullptr)
+        if (WetPartDataTexture == nullptr)
         {
             return false;
         }
 
-        FWetClothingBakedProfileIDSlotTexture& BakedSlot = BakedSlotTextures.AddDefaulted_GetRef();
+        FWetClothingBakedWetPartDataSlotTexture& BakedSlot = BakedSlotTextures.AddDefaulted_GetRef();
         BakedSlot.MaterialSlotIndex = MaterialSlotIndex;
-        BakedSlot.ProfileIDTexture = ProfileIDTexture;
+        BakedSlot.WetPartDataTexture = WetPartDataTexture;
         BakedSlot.BuildSignature = MakeSlotSignature(MakeBuildSignature(WetClothingAsset), MaterialSlotIndex);
         BakedSlot.BakeGuid = FGuid::NewGuid();
 
-        FWetClothingProfileIDSlotBakeResult& SlotResult = OutResult.SlotResults.AddDefaulted_GetRef();
+        FWetClothingWetPartDataSlotBakeResult& SlotResult = OutResult.SlotResults.AddDefaulted_GetRef();
         SlotResult.MaterialSlotIndex = MaterialSlotIndex;
-        SlotResult.ProfileIDTexture = ProfileIDTexture;
+        SlotResult.WetPartDataTexture = WetPartDataTexture;
         SlotResult.PaintedPixelCount = SlotPaintedPixelCount;
         OutResult.PaintedPixelCount += SlotPaintedPixelCount;
     }
 
     WetClothingAsset->Modify();
-    FWetClothingBakedProfileIDData& Baked = WetClothingAsset->Derived.Inline.BakedProfileIDData;
+    FWetClothingBakedWetPartData& Baked = WetClothingAsset->Derived.Inline.BakedWetPartData;
     Baked.NormalizedNeutralSurfaceNormal =
         FWetClothingSurfaceTextureNormalizer::GetOrCreateNeutralNormalTexture(
             *WetClothingAsset,
@@ -637,13 +639,11 @@ bool FWetClothingProfileIDTextureBaker::Bake(
     Baked.SlotTextures = MoveTemp(BakedSlotTextures);
     Baked.DataUVChannelIndex = WetClothingAsset->GetDWCDataUVChannelIndex();
     Baked.Resolution = Width;
-    Baked.PaddingPixels = DWCProfileIDTextureBake::PaddingPixels;
+    Baked.PaddingPixels = DWCWetPartDataTextureBake::PaddingPixels;
     Baked.SurfaceTextureResolution = DWCSurfaceTextureNormalization::Resolution;
     Baked.BuildSignature = MakeBuildSignature(WetClothingAsset);
     Baked.BakeGuid = FGuid::NewGuid();
 
-    // Legacy RGB maps are retained only as a migration fallback for old CPU
-    // materials. Newly repaired CPU/GPU functions consume this Profile ID data.
     WetClothingAsset->MarkPackageDirty();
 
     OutResult.LocalProfileCount = Baked.LocalProfiles.Num();

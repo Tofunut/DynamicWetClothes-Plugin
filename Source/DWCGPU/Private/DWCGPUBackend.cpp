@@ -1274,7 +1274,7 @@ bool FDWCGPUBackend::CreateSlotResources()
             Slot.SurfaceDropletRT = CreateSurfaceRenderTarget(
                 FName(*FString::Printf(TEXT("DWC_SurfaceDropletRT_Slot%d"), Slot.MaterialSlotIndex)));
             Slot.SurfaceRivuletRT = CreateSurfaceRenderTarget(
-                FName(*FString::Printf(TEXT("DWC_SurfaceStreakRT_Slot%d"), Slot.MaterialSlotIndex)));
+                FName(*FString::Printf(TEXT("DWC_SurfaceRivuletRT_Slot%d"), Slot.MaterialSlotIndex)));
         }
 
         if (Slot.MaterialSlotIndex >= 0 && Slot.MaterialSlotIndex < MeshComponent->GetNumMaterials())
@@ -1296,9 +1296,8 @@ bool FDWCGPUBackend::CreateSlotResources()
                 const bool bHasWetnessMapParameter = MaterialHasTextureParameter(MID, WetnessMapParameterName);
                 const bool bHasDropletRTParameter = MaterialHasTextureParameter(MID, DWCWetMaterialParameters::SurfaceDropletRT());
                 const bool bHasRivuletRTParameter =
-                    MaterialHasTextureParameter(MID, DWCWetMaterialParameters::SurfaceStreakRT()) ||
-                    MaterialHasTextureParameter(MID, DWCWetMaterialParameters::SurfaceFlowRT());
-                const bool bHasProfileIDParameter = MaterialHasTextureParameter(MID, DWCWetMaterialParameters::ProfileIDTexture());
+                    MaterialHasTextureParameter(MID, DWCWetMaterialParameters::SurfaceRivuletRT());
+                const bool bHasWetPartDataParameter = MaterialHasTextureParameter(MID, DWCWetMaterialParameters::WetPartDataTexture());
                 const bool bHasProfileRemapParameter = MaterialHasTextureParameter(MID, DWCWetMaterialParameters::ProfileRemapLUT());
                 const bool bHasGlobalProfileParameter = MaterialHasTextureParameter(MID, DWCWetMaterialParameters::GlobalRenderProfileLUT());
                 const bool bHasGlobalTexelSizeParameter = MaterialHasScalarParameter(MID, DWCWetMaterialParameters::GlobalRenderProfileTexelSize());
@@ -1313,9 +1312,9 @@ bool FDWCGPUBackend::CreateSlotResources()
                 }
                 if (Slot.bUsesSurfaceWater && !bHasRivuletRTParameter)
                 {
-                    MissingParameters.Add(DWCWetMaterialParameters::SurfaceStreakRT().ToString());
+                    MissingParameters.Add(DWCWetMaterialParameters::SurfaceRivuletRT().ToString());
                 }
-                if (!bHasProfileIDParameter) MissingParameters.Add(DWCWetMaterialParameters::ProfileIDTexture().ToString());
+                if (!bHasWetPartDataParameter) MissingParameters.Add(DWCWetMaterialParameters::WetPartDataTexture().ToString());
                 if (!bHasProfileRemapParameter) MissingParameters.Add(DWCWetMaterialParameters::ProfileRemapLUT().ToString());
                 if (!bHasGlobalProfileParameter) MissingParameters.Add(DWCWetMaterialParameters::GlobalRenderProfileLUT().ToString());
                 if (!bHasGlobalTexelSizeParameter) MissingParameters.Add(DWCWetMaterialParameters::GlobalRenderProfileTexelSize().ToString());
@@ -1338,7 +1337,7 @@ bool FDWCGPUBackend::CreateSlotResources()
                     UE_LOG(
                         LogDWCGPU,
                         Warning,
-                        TEXT("DWCGPU: Material '%s' on mesh '%s' slot %d does not satisfy the GPU wetness/profile contract. Missing parameters: %s. Run the three DWC material-function Python scripts, validate the functions, and regenerate the DWC material so Profile ID and all dynamic RTs use the WCA DWC Data UV channel."),
+                        TEXT("DWCGPU: Material '%s' on mesh '%s' slot %d does not satisfy the GPU wetness/profile contract. Missing parameters: %s. Run the three DWC material-function Python scripts, validate the functions, and regenerate the DWC material so Wet Part data and all dynamic RTs use the WCA DWC Data UV channel."),
                         *GetNameSafe(MID),
                         *GetNameSafe(MeshComponent),
                         Slot.MaterialSlotIndex,
@@ -1352,11 +1351,7 @@ bool FDWCGPUBackend::CreateSlotResources()
                     DWCWetMaterialParameters::SurfaceDropletRT(),
                     Slot.bUsesSurfaceWater ? Slot.SurfaceDropletRT.Get() : nullptr);
                 MID->SetTextureParameterValue(
-                    DWCWetMaterialParameters::SurfaceStreakRT(),
-                    Slot.bUsesSurfaceWater ? Slot.SurfaceRivuletRT.Get() : nullptr);
-                // Temporary compatibility for materials that still expose the old Flow RT name.
-                MID->SetTextureParameterValue(
-                    DWCWetMaterialParameters::SurfaceFlowRT(),
+                    DWCWetMaterialParameters::SurfaceRivuletRT(),
                     Slot.bUsesSurfaceWater ? Slot.SurfaceRivuletRT.Get() : nullptr);
                 MID->SetScalarParameterValue(
                     DWCWetMaterialParameters::SurfaceWaterTexelSize(),
@@ -2367,9 +2362,7 @@ void FDWCGPUBackend::Shutdown()
         {
             MID->SetTextureParameterValue(WetnessMapParameterName, nullptr);
             MID->SetTextureParameterValue(DWCWetMaterialParameters::SurfaceDropletRT(), nullptr);
-            MID->SetTextureParameterValue(DWCWetMaterialParameters::SurfaceStreakRT(), nullptr);
-            // Temporary compatibility alias while older material functions are migrated.
-            MID->SetTextureParameterValue(DWCWetMaterialParameters::SurfaceFlowRT(), nullptr);
+            MID->SetTextureParameterValue(DWCWetMaterialParameters::SurfaceRivuletRT(), nullptr);
         }
     }
 

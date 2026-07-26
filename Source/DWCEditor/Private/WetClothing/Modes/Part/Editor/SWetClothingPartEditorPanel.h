@@ -7,6 +7,7 @@
 #include "DataAssets/WetClothingAsset.h"
 #include "WetClothing/Foundation/MeshAnalysis/WetClothingAssetMeshAnalyzer.h"
 #include "WetClothing/Modes/Part/Partition/WetPartAutoPartitionTypes.h"
+#include "WetClothing/Modes/Part/Viewport/SDWCPartViewport.h"
 #include "WetClothing/WCAEditor/UI/UVView/SWCAUVView.h"
 #include "Widgets/SCompoundWidget.h"
 
@@ -14,8 +15,8 @@ class FAssetThumbnail;
 class FAssetThumbnailPool;
 class IDetailsView;
 class STableViewBase;
-class SDWCPartViewport;
 class SInlineEditableTextBlock;
+class SWindow;
 class UTexture;
 class UTexture2D;
 struct FSlateBrush;
@@ -154,6 +155,29 @@ class SWetClothingPartEditorPanel : public SCompoundWidget
     FText                                          GetAutoPartitionColorModeText() const;
     float                                          GetAutoPartitionTolerance() const;
     void                                           HandleAutoPartitionToleranceChanged(float InValue);
+    bool                                           IsSelectedWetPartSurfaceSettingsEnabled() const;
+    bool                                           IsSurfaceWaterTilingEnabled(FWetPartEntryPtr Item) const;
+    FReply                                         HandleOpenSurfaceWaterTilingClicked(FWetPartEntryPtr Item);
+    TSharedRef<SWidget>                            BuildSurfaceWaterTilingWindowContent();
+    void                                           RefreshSurfaceWaterTilingPreview();
+    void                                           HandleSurfaceWaterTilingWindowClosed(const TSharedRef<SWindow>& Window);
+    float                                          GetSelectedDropletRadiusScale() const;
+    float                                          GetSelectedDropletDetailSize() const;
+    float                                          GetSelectedRivuletDetailSize() const;
+    void                                           HandleSelectedDropletRadiusScaleChanged(float InValue);
+    void                                           HandleSelectedDropletDetailSizeChanged(float InValue);
+    void                                           HandleSelectedRivuletDetailSizeChanged(float InValue);
+    ECheckBoxState                                 GetSurfaceWaterPreviewCoverageModeState(EDWCSurfaceWaterTilingPreviewCoverageMode Mode) const;
+    void                                           HandleSurfaceWaterPreviewCoverageModeChanged(ECheckBoxState NewState, EDWCSurfaceWaterTilingPreviewCoverageMode Mode);
+    EVisibility                                    GetSingleCirclePreviewVisibility() const;
+    ECheckBoxState                                 GetShowPartColorsCheckState() const;
+    void                                           HandleShowPartColorsChanged(ECheckBoxState NewState);
+    float                                          GetPreviewAbsorbedWetness() const;
+    float                                          GetPreviewSurfaceWater() const;
+    FText                                          GetPreviewAbsorbedWetnessText() const;
+    FText                                          GetPreviewSurfaceWaterText() const;
+    void                                           HandlePreviewAbsorbedWetnessChanged(float InValue);
+    void                                           HandlePreviewSurfaceWaterChanged(float InValue);
     float                                          GetSelectionLineThicknessScale() const;
     void                                           HandleSelectionLineThicknessChanged(float InValue);
     FReply                                         HandleFocusPreviewClicked();
@@ -170,7 +194,8 @@ class SWetClothingPartEditorPanel : public SCompoundWidget
   private:
     TWeakObjectPtr<UWetClothingAsset>                  WetClothingAsset;
     TSharedPtr<IDetailsView>                           DetailsView;
-    TSharedPtr<SDWCPartViewport>              PreviewViewport;
+    TSharedPtr<SDWCPartViewport>                       PreviewViewport;
+    TSharedPtr<SDWCPartViewport>                       SurfaceWaterTilingPreviewViewport;
     TArray<FMaterialSlotItemPtr>                       MaterialSlotItems;
     TSharedPtr<FAssetThumbnailPool>                    MaterialThumbnailPool;
     TArray<TSharedPtr<FAssetThumbnail>>                MaterialSlotThumbnails;
@@ -209,5 +234,10 @@ class SWetClothingPartEditorPanel : public SCompoundWidget
     TMap<int32, TWeakPtr<SInlineEditableTextBlock>>    WetPartInlineRenameWidgets;
     int32                                              SelectedWetPartID = INDEX_NONE;
     int32                                              SelectedAssignWetPartID = INDEX_NONE;
+    bool                                               bShowPartColorsInPreview = true;
+    EDWCSurfaceWaterTilingPreviewCoverageMode           SurfaceWaterPreviewCoverageMode = EDWCSurfaceWaterTilingPreviewCoverageMode::FullPart;
+    float                                              PreviewAbsorbedWetness = 0.0f;
+    float                                              PreviewSurfaceWater = 1.0f;
+    TWeakPtr<SWindow>                                  SurfaceWaterTilingWindow;
     float                                              AutoPartitionTolerancePercent = 20.0f;
 };

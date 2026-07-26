@@ -11,6 +11,7 @@
 #include "WetClothing/WCAEditor/WCAGeneratedDataInvalidator.h"
 #include "WetClothing/DerivedAssets/Textures/Wrinkle/WetWrinkleBakeService.h"
 #include "WetClothing/Modes/Wrinkle/Editor/SWetWrinkleEditorPanel.h"
+#include "WetClothing/WCAEditor/WCAValidationReport.h"
 #include "WetClothing/WCAEditor/UI/Widgets/WCAEditorWidgets.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
@@ -200,6 +201,65 @@ namespace
 
         Sections.Add(FString::Printf(TEXT("%s\n%s"), Heading, *FString::Join(Messages, TEXT("\n"))));
     }
+
+    EWCAEditorStatusSeverity ToEditorSeverity(const EWCAValidationSeverity Severity)
+    {
+        switch (Severity)
+        {
+        case EWCAValidationSeverity::Error: return EWCAEditorStatusSeverity::Error;
+        case EWCAValidationSeverity::Warning: return EWCAEditorStatusSeverity::Warning;
+        default: return EWCAEditorStatusSeverity::Info;
+        }
+    }
+
+    FString BuildIssueStatusMessage(const FWCAValidationIssue& Issue)
+    {
+        FString Message = Issue.Detail.IsEmpty() ? Issue.Title.ToString() : Issue.Detail.ToString();
+        if (!Issue.RequiredAction.IsEmpty())
+        {
+            Message += FString::Printf(TEXT(" %s"), *Issue.RequiredAction.ToString());
+        }
+        return Message;
+    }
+
+    void AddReportIssueToStatus(FWCAEditorIssueStatus& Status, const FWCAValidationIssue& Issue)
+    {
+        RaiseIssueSeverity(Status, ToEditorSeverity(Issue.Severity));
+        TArray<FString>* TargetMessages = nullptr;
+        switch (Issue.Category)
+        {
+        case EWCAValidationIssueCategory::DataUV:
+            Status.bGeneratedDataUVIssue = true;
+            TargetMessages = &Status.GeneratedDataUVMessages;
+            break;
+
+        case EWCAValidationIssueCategory::Runtime:
+            Status.bRuntimeIssue = true;
+            TargetMessages = &Status.RuntimeMessages;
+            break;
+
+        case EWCAValidationIssueCategory::Material:
+            Status.bMaterialIssue = true;
+            TargetMessages = &Status.MaterialMessages;
+            break;
+
+        case EWCAValidationIssueCategory::Failure:
+            Status.bFailure = true;
+            TargetMessages = &Status.FailureMessages;
+            break;
+
+        case EWCAValidationIssueCategory::Map:
+        default:
+            Status.bMapIssue = true;
+            TargetMessages = &Status.MapMessages;
+            break;
+        }
+
+        if (TargetMessages != nullptr)
+        {
+            TargetMessages->Add(BuildIssueStatusMessage(Issue));
+        }
+    }
 }
 
 FString FWCAEditorIssueStatus::BuildSummary() const
@@ -357,191 +417,14 @@ FWCAEditorIssueStatus SWCAEditorPanel::CollectIssueStatus(
         return Result;
     }
 
-    if (bRefreshAssetState)
+    const FWCAValidationReport Report = BuildWCAValidationReport(
+        *Asset,
+        bRunDeepValidation ? EWCAValidationMode::Deep : EWCAValidationMode::Fast,
+        bRefreshAssetState);
+    for (const FWCAValidationIssue& Issue : Report.Issues)
     {
-        Asset->RefreshBakeState(bRunDeepValidation);
+        AddReportIssueToStatus(Result, Issue);
     }
-#if WITH_EDITORONLY_DATA
-    const FDWCAssetBakeState& State = Asset->GetBakeState();
-    const FDWCWetClothingAssetSetupSettings& Setup = Asset->GetSetupSettings();
-    const bool bAssetHasUnsavedChanges = Asset->GetOutermost() != nullptr && Asset->GetOutermost()->IsDirty();
-
-    if (State.GeneratedDataUV != EDWCBakeStatus::Valid)
-    {
-        Result.bGeneratedDataUVIssue = true;
-        RaiseIssueSeverity(Result, GetSeverityForStatus(State.GeneratedDataUV));
-        Result.GeneratedDataUVMessages.Add(FString::Printf(
-            TEXT("DWC Data UV: %s. Use DWC Data UV on the toolbar to rebuild it."),
-            *BakeStatusToString(State.GeneratedDataUV)));
-    }
-    if (State.OriginalUVTopology != EDWCBakeStatus::Valid)
-    {
-        Result.bGeneratedDataUVIssue = true;
-        RaiseIssueSeverity(Result, GetSeverityForStatus(State.OriginalUVTopology));
-        Result.GeneratedDataUVMessages.Add(FString::Printf(
-            TEXT("Original UV Topology: %s. Rebuild the DWC Data UV."),
-            *BakeStatusToString(State.OriginalUVTopology)));
-    }
-
-    const bool bCPURuntimeSavePending = Asset->IsBakeOutputSavePending(DWCBakeOutput::CPURuntimeData);
-    if ((Setup.bBuildCPUVertexSimulationData || Asset->HasCPURuntimeDataPayload()) &&
-        State.CPURuntimeData != EDWCBakeStatus::Disabled &&
-        (!DWCBuildStatus::IsUsable(State.CPURuntimeData) || bCPURuntimeSavePending))
-    {
-        Result.bRuntimeIssue = true;
-        const bool bHasPayload = Asset->HasCPURuntimeDataPayload();
-        const bool bWasEverGenerated = Asset->HasGeneratedBakeOutput(DWCBakeOutput::CPURuntimeData);
-        const bool bWasEverSaved = Asset->HasSavedBakeOutput(DWCBakeOutput::CPURuntimeData);
-        RaiseIssueSeverity(Result, GetRuntimeSeverity(State.CPURuntimeData, bHasPayload || bWasEverGenerated || bWasEverSaved));
-        Result.RuntimeMessages.Add(BuildRuntimeDataMessage(
-            TEXT("CPU Runtime Data"),
-            State.CPURuntimeData,
-            bHasPayload,
-            bWasEverGenerated,
-            bWasEverSaved,
-            bAssetHasUnsavedChanges,
-            bCPURuntimeSavePending,
-            State.LastFailure));
-    }
-    const bool bGPURuntimeSavePending = Asset->IsBakeOutputSavePending(DWCBakeOutput::GPURuntimeData);
-    if ((Setup.bBuildGPUWetnessMapSimulationData || Asset->HasGPURuntimeDataPayload()) &&
-        State.GPURuntimeData != EDWCBakeStatus::Disabled &&
-        (!DWCBuildStatus::IsUsable(State.GPURuntimeData) || bGPURuntimeSavePending))
-    {
-        Result.bRuntimeIssue = true;
-        const bool bHasPayload = Asset->HasGPURuntimeDataPayload();
-        const bool bWasEverGenerated = Asset->HasGeneratedBakeOutput(DWCBakeOutput::GPURuntimeData);
-        const bool bWasEverSaved = Asset->HasSavedBakeOutput(DWCBakeOutput::GPURuntimeData);
-        RaiseIssueSeverity(Result, GetRuntimeSeverity(State.GPURuntimeData, bHasPayload || bWasEverGenerated || bWasEverSaved));
-        Result.RuntimeMessages.Add(BuildRuntimeDataMessage(
-            TEXT("GPU Runtime Data"),
-            State.GPURuntimeData,
-            bHasPayload,
-            bWasEverGenerated,
-            bWasEverSaved,
-            bAssetHasUnsavedChanges,
-            bGPURuntimeSavePending,
-            State.LastFailure));
-    }
-
-    const bool bGPUMapSavePending = Asset->IsBakeOutputSavePending(DWCBakeOutput::GPUMaps);
-    if ((Setup.bBuildGPUWetnessMapSimulationData || Asset->HasGPUMapDataPayload()) &&
-        State.GPUMaps != EDWCBakeStatus::Disabled &&
-        (!DWCBuildStatus::IsUsable(State.GPUMaps) || bGPUMapSavePending))
-    {
-        Result.bMapIssue = true;
-        RaiseIssueSeverity(Result, GetSeverityForStatus(State.GPUMaps));
-        const bool bWasEverGenerated = Asset->HasGeneratedBakeOutput(DWCBakeOutput::GPUMaps);
-        const bool bWasEverSaved = Asset->HasGPUMapDataPayload() || Asset->HasSavedBakeOutput(DWCBakeOutput::GPUMaps);
-        Result.MapMessages.Add(BuildMapDataMessage(
-            TEXT("GPU Simulation Maps"),
-            State.GPUMaps,
-            bWasEverGenerated,
-            bWasEverSaved,
-            bAssetHasUnsavedChanges,
-            bGPUMapSavePending));
-    }
-
-    TArray<FString> GeneratedMaterialMessages;
-    if (Asset->HasAnyWettableMaterialSlot())
-    {
-        if (bRunDeepValidation)
-        {
-            FWCAMaterialGenerator::ValidateGeneratedMaterialOverrides(Asset, GeneratedMaterialMessages);
-        }
-        else
-        {
-            FWCAMaterialGenerator::ValidateGeneratedMaterialOverrideReferences(Asset, GeneratedMaterialMessages);
-        }
-    }
-    if (!GeneratedMaterialMessages.IsEmpty())
-    {
-        Result.bMaterialIssue = true;
-        RaiseIssueSeverity(Result, EWCAEditorStatusSeverity::Warning);
-        Result.MaterialMessages = MoveTemp(GeneratedMaterialMessages);
-    }
-
-    if (Asset->HasWrinkleBakeContent() && !DWCBuildStatus::IsUsable(State.WrinkleMaps))
-    {
-        Result.bMapIssue = true;
-        RaiseIssueSeverity(Result, GetSeverityForStatus(State.WrinkleMaps));
-        Result.MapMessages.Add(BuildMapDataMessage(
-            TEXT("Wrinkle Maps"),
-            State.WrinkleMaps,
-            Asset->HasGeneratedBakeOutput(DWCBakeOutput::WrinkleMaps),
-            Asset->HasSavedBakeOutput(DWCBakeOutput::WrinkleMaps),
-            bAssetHasUnsavedChanges,
-            false));
-    }
-    for (const FWetWrinkleRuntimeNormalSource& Source : Asset->Authored.WrinkleData.RuntimeNormalSources)
-    {
-        if (Source.Source != EDWCWrinkleNormalSource::CustomTexture ||
-            !Asset->IsMaterialSlotWettable(Source.MaterialSlotIndex))
-        {
-            continue;
-        }
-
-        if (Source.CustomWrinkleNormalMap == nullptr)
-        {
-            Result.bMapIssue = true;
-            RaiseIssueSeverity(Result, EWCAEditorStatusSeverity::Warning);
-            Result.MapMessages.Add(FString::Printf(
-                TEXT("Wrinkle Maps: Slot %d uses Custom Wrinkle Map but no texture is assigned."),
-                Source.MaterialSlotIndex));
-        }
-    }
-    if (Asset->HasTransparencyBakeContent() && !DWCBuildStatus::IsUsable(State.TransparencyMaps))
-    {
-        Result.bMapIssue = true;
-        RaiseIssueSeverity(Result, GetSeverityForStatus(State.TransparencyMaps));
-        Result.MapMessages.Add(BuildMapDataMessage(
-            TEXT("Transparency Maps"),
-            State.TransparencyMaps,
-            Asset->HasGeneratedBakeOutput(DWCBakeOutput::TransparencyMaps),
-            Asset->HasSavedBakeOutput(DWCBakeOutput::TransparencyMaps),
-            bAssetHasUnsavedChanges,
-            false));
-    }
-
-    FString VisualSummary;
-    if (Asset->HasAnyWettableMaterialSlot() && HasPendingVisualBakeTasks(&VisualSummary) && !VisualSummary.IsEmpty())
-    {
-        Result.bMapIssue = true;
-        RaiseIssueSeverity(Result, EWCAEditorStatusSeverity::Warning);
-        Result.MapMessages.Add(VisualSummary);
-    }
-
-    const bool bHasFailedState =
-        State.GeneratedDataUV == EDWCBakeStatus::Failed ||
-        State.OriginalUVTopology == EDWCBakeStatus::Failed ||
-        State.CPURuntimeData == EDWCBakeStatus::Failed ||
-        State.GPURuntimeData == EDWCBakeStatus::Failed ||
-        State.GPUMaps == EDWCBakeStatus::Failed ||
-        State.WrinkleMaps == EDWCBakeStatus::Failed ||
-        State.TransparencyMaps == EDWCBakeStatus::Failed;
-    if (bHasFailedState && !State.LastFailure.IsEmpty())
-    {
-        const auto ContainsFailureDetail = [&State](const TArray<FString>& Messages)
-        {
-            return Messages.ContainsByPredicate(
-                [&State](const FString& Message)
-                {
-                    return Message.Contains(State.LastFailure) || State.LastFailure.Contains(Message);
-                });
-        };
-        const bool bFailureAlreadyShown =
-            ContainsFailureDetail(Result.RuntimeMessages) ||
-            ContainsFailureDetail(Result.MapMessages) ||
-            ContainsFailureDetail(Result.MaterialMessages) ||
-            ContainsFailureDetail(Result.GeneratedDataUVMessages);
-        if (!bFailureAlreadyShown)
-        {
-            Result.bFailure = true;
-            RaiseIssueSeverity(Result, EWCAEditorStatusSeverity::Error);
-            Result.FailureMessages.Add(State.LastFailure);
-        }
-    }
-#endif
     return Result;
 }
 

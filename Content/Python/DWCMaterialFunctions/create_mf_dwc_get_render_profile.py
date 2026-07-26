@@ -40,21 +40,43 @@ def build() -> None:
     data_uv = c.function_input(
         mf, "DWCDataUV", "vector2", (0.0, 0.0), 0,
         -8350, -1450,
-        "DWC Data UV used to read the slot-local Profile ID Texture.",
+        "DWC Data UV used to read the slot-local Wet Part Data Texture.",
     )
     in_data_uv = c.named_declaration(mf, "IN_DWCDataUV", data_uv, ("", "Result"), -7700, -1450)
 
     # 1-2 Profile ID Sampling
     data_uv_use = c.named_usage(mf, in_data_uv, -6400, -1450)
     profile_id = c.texture2d_parameter(
-        mf, "DWC_ProfileIDTexture", data_fallback, -5950, -1450,
+        mf, "DWC_WetPartDataTexture", data_fallback, -5950, -1450,
         sampler_type=c.linear_color_sampler(), group="DWC Render Profile",
-        description="Slot-local profile ID texture. R stores Local Profile ID / 255.",
+        description="Slot-local Wet Part data. R=Local Profile ID, G=Droplet Detail Size, B=Rivulet Detail Size.",
     )
     c.try_connect(data_uv_use, ("", "Result"), profile_id, ("Coordinates", "UVs"))
     profile_id_r = c.component_mask(mf, profile_id, "R", "R", -5350, -1450)
     sampled_profile_id = c.named_declaration(
         mf, "PROFILE_SampledProfileID", profile_id_r, ("", "Result"), -5200, -1200
+    )
+    droplet_detail_encoded = c.component_mask(mf, profile_id, "G", "G", -5350, -850)
+    rivulet_detail_encoded = c.component_mask(mf, profile_id, "B", "B", -5350, -450)
+    droplet_detail = c.custom_expression(
+        mf,
+        "return lerp(0.25, 4.0, saturate(Encoded));",
+        [("Encoded", droplet_detail_encoded, ("", "Result"))],
+        "float1", -4700, -850,
+        "Decode the Part-local Droplet Detail Size from the G channel.",
+    )
+    rivulet_detail = c.custom_expression(
+        mf,
+        "return lerp(0.25, 4.0, saturate(Encoded));",
+        [("Encoded", rivulet_detail_encoded, ("", "Result"))],
+        "float1", -4700, -450,
+        "Decode the Part-local Rivulet Detail Size from the B channel.",
+    )
+    droplet_detail_decl = c.named_declaration(
+        mf, "PART_DropletDetailSize", droplet_detail, ("", "Result"), -4000, -850
+    )
+    rivulet_detail_decl = c.named_declaration(
+        mf, "PART_RivuletDetailSize", rivulet_detail, ("", "Result"), -4000, -450
     )
 
     # 1-3 Local Profile ID Decode
@@ -168,7 +190,7 @@ def build() -> None:
         ("AbsorbedDarkeningStrength", "R", "PROFILE_AbsorbedDarkeningStrength"),
         ("AbsorbedGlossinessStrength", "G", "PROFILE_AbsorbedGlossinessStrength"),
         ("DropletNormalSlice", "B", "PROFILE_DropletNormalSlice"),
-        ("StreakNormalSlice", "A", "PROFILE_StreakNormalSlice"),
+        ("RivuletNormalSlice", "A", "PROFILE_RivuletNormalSlice"),
     ]
     profile_decls: dict[str, object] = {}
     for i, (output_name, channel, reroute_name) in enumerate(texel0_names):
@@ -183,7 +205,7 @@ def build() -> None:
         ("SurfaceWaterNormalStrength", "R", "PROFILE_SurfaceWaterNormalStrength"),
         ("SurfaceWaterRoughnessStrength", "G", "PROFILE_SurfaceWaterRoughnessStrength"),
         ("SurfaceVisibilityThreshold", "B", "PROFILE_SurfaceVisibilityThreshold"),
-        ("StreakDetailMotionSpeed", "A", "PROFILE_StreakDetailMotionSpeed"),
+        ("RivuletUVScrollSpeed", "A", "PROFILE_RivuletUVScrollSpeed"),
     ]
     for i, (output_name, channel, reroute_name) in enumerate(texel1_names):
         mask = c.component_mask(mf, texel1_uses[i], ("", "Result"), channel, 7800, -1500 + i * 480)
@@ -191,22 +213,28 @@ def build() -> None:
             mf, reroute_name, mask, ("", "Result"), 8350, -1500 + i * 480
         )
 
+    profile_decls["DropletDetailSize"] = droplet_detail_decl
+    profile_decls["RivuletDetailSize"] = rivulet_detail_decl
+
     # 3-3 Function outputs use only local Named Reroute usages; no wires cross comments.
     ordered_outputs = [
         "AbsorbedDarkeningStrength", "AbsorbedGlossinessStrength",
-        "DropletNormalSlice", "StreakNormalSlice",
+        "DropletNormalSlice", "RivuletNormalSlice",
         "SurfaceWaterNormalStrength", "SurfaceWaterRoughnessStrength",
-        "SurfaceVisibilityThreshold", "StreakDetailMotionSpeed",
+        "SurfaceVisibilityThreshold", "RivuletUVScrollSpeed",
+        "DropletDetailSize", "RivuletDetailSize",
     ]
     descriptions = {
         "AbsorbedDarkeningStrength": "Absorbed wetness base-color darkening strength.",
         "AbsorbedGlossinessStrength": "Absorbed wetness roughness blend strength.",
         "DropletNormalSlice": "Droplet normal Texture2DArray slice.",
-        "StreakNormalSlice": "Streak normal Texture2DArray slice.",
+        "RivuletNormalSlice": "Rivulet normal Texture2DArray slice.",
         "SurfaceWaterNormalStrength": "Common surface-water detail-normal strength.",
         "SurfaceWaterRoughnessStrength": "Surface-water roughness blend strength.",
-        "SurfaceVisibilityThreshold": "Visible amount threshold for droplet/streak coverage.",
-        "StreakDetailMotionSpeed": "Flow-axis scroll speed for streak detail normals.",
+        "SurfaceVisibilityThreshold": "Visible amount threshold for droplet/rivulet coverage.",
+        "RivuletUVScrollSpeed": "Flow-axis scroll speed for rivulet detail normals.",
+        "DropletDetailSize": "Part-local physical-looking size of the Droplet detail pattern.",
+        "RivuletDetailSize": "Part-local physical-looking size of the Rivulet detail pattern.",
     }
     for i, name in enumerate(ordered_outputs):
         usage = c.named_usage(mf, profile_decls[name], 9650, -1700 + i * 240)

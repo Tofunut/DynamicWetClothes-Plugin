@@ -19,6 +19,7 @@
 #include "ToolMenus.h"
 #include "ViewportToolbar/UnrealEdViewportToolbar.h"
 #include "WetClothing/Modes/DWCEditorPreviewSlotUtils.h"
+#include "WetClothing/Modes/DWCPreviewViewportToolbarUtils.h"
 #include "WetClothing/Modes/Transparency/AutoMap/DWCTransparencyAutoMapGenerator.h"
 #include "WetClothing/Modes/Transparency/Brush/DWCTransparencyPaintIslandBuilder.h"
 #include "WetClothing/Modes/Transparency/Brush/DWCTransparencyBrushRasterizer.h"
@@ -82,7 +83,7 @@ namespace
             A.RevealColor.Equals(B.RevealColor);
     }
 
-    bool PassesTransparencyIslandClip(
+    bool PassesTransparencyPreviewIslandClip(
         const FDWCTransparencyAutoBakeResult& Result,
         const int32 PixelIndex,
         const int32 UVIslandID)
@@ -95,7 +96,7 @@ namespace
             Result.OuterIslandIDBuffer[PixelIndex] == UVIslandID;
     }
 
-    int32 ResolveTransparencySampleIslandID(
+    int32 ResolveTransparencyPreviewSampleIslandID(
         const FDWCTransparencyAutoBakeResult& Result,
         const FVector2D& PositionUV,
         const int32 UVIslandID,
@@ -765,7 +766,7 @@ TSharedPtr<SWidget> SWetClothingTransparencyPreviewViewport::BuildViewportToolba
         RightSection.Alignment = EToolMenuSectionAlign::Last;
         RightSection.AddEntry(UE::UnrealEd::CreateCameraSubmenu(
             UE::UnrealEd::FViewportCameraMenuOptions().ShowAll()));
-        RightSection.AddEntry(UE::UnrealEd::CreateViewModesSubmenu());
+        RightSection.AddEntry(UE::DWCEditor::CreateDWCViewModesSubmenu());
     }
 
     FToolMenuContext ViewportToolbarContext;
@@ -1837,7 +1838,7 @@ bool SWetClothingTransparencyPreviewViewport::RasterizeBrushSample(
     const int32 MaxX = FMath::CeilToInt(CenterPixels.X + RadiusPixelsX + 1.0f);
     const int32 MinY = FMath::FloorToInt(CenterPixels.Y - RadiusPixelsY - 1.0f);
     const int32 MaxY = FMath::CeilToInt(CenterPixels.Y + RadiusPixelsY + 1.0f);
-    const int32 ClipUVIslandID = ResolveTransparencySampleIslandID(
+    const int32 ClipUVIslandID = ResolveTransparencyPreviewSampleIslandID(
         *AutoBakePreviewResult,
         Sample.PositionUV,
         Sample.UVIslandID,
@@ -1947,7 +1948,7 @@ bool SWetClothingTransparencyPreviewViewport::RasterizeBrushSample(
             const int32 X = bWrap ? WrapIndex(UnwrappedX, Width) : UnwrappedX;
             const int32 Y = bWrap ? WrapIndex(UnwrappedY, Height) : UnwrappedY;
             const int32 PixelIndex = Y * Width + X;
-            if (!PassesTransparencyIslandClip(*AutoBakePreviewResult, PixelIndex, ClipUVIslandID))
+            if (!PassesTransparencyPreviewIslandClip(*AutoBakePreviewResult, PixelIndex, ClipUVIslandID))
             {
                 continue;
             }
@@ -1993,7 +1994,7 @@ bool SWetClothingTransparencyPreviewViewport::RasterizeBrushSample(
                                 NeighborY = FMath::Clamp(NeighborY, 0, Height - 1);
                             }
                             const int32 NeighborIndex = NeighborY * Width + NeighborX;
-                            if (PassesTransparencyIslandClip(*AutoBakePreviewResult, NeighborIndex, ClipUVIslandID))
+                            if (PassesTransparencyPreviewIslandClip(*AutoBakePreviewResult, NeighborIndex, ClipUVIslandID))
                             {
                                 Target += EditedAlphaAt(UnwrappedX + OffsetX, UnwrappedY + OffsetY);
                                 ++SmoothSampleCount;
@@ -2044,7 +2045,7 @@ bool SWetClothingTransparencyPreviewViewport::RasterizeRevealColorSample(
     const int32 MaxX = FMath::CeilToInt(Center.X + RadiusX + 1.0f);
     const int32 MinY = FMath::FloorToInt(Center.Y - RadiusY - 1.0f);
     const int32 MaxY = FMath::CeilToInt(Center.Y + RadiusY + 1.0f);
-    const int32 ClipUVIslandID = ResolveTransparencySampleIslandID(
+    const int32 ClipUVIslandID = ResolveTransparencyPreviewSampleIslandID(
         *AutoBakePreviewResult,
         Sample.PositionUV,
         Sample.UVIslandID,
@@ -2126,7 +2127,7 @@ bool SWetClothingTransparencyPreviewViewport::RasterizeRevealColorSample(
         const int32 Y = bWrap ? WrapIndex(RawY, Height) : RawY;
         const int32 Index = Y * Width + X;
         if (!AutoBakePreviewResult->OuterCoverageBuffer.IsValidIndex(Index) || AutoBakePreviewResult->OuterCoverageBuffer[Index] == 0) continue;
-        if (!PassesTransparencyIslandClip(*AutoBakePreviewResult, Index, ClipUVIslandID)) continue;
+        if (!PassesTransparencyPreviewIslandClip(*AutoBakePreviewResult, Index, ClipUVIslandID)) continue;
         FLinearColor TargetColor = PaintColor;
         if (Stroke.BrushMode == EDWCTransparencyRevealColorBrushMode::EraseToBase)
         {
@@ -2152,7 +2153,7 @@ bool SWetClothingTransparencyPreviewViewport::RasterizeRevealColorSample(
                         NeighborY = FMath::Clamp(NeighborY, 0, Height - 1);
                     }
                     const int32 NeighborIndex = NeighborY * Width + NeighborX;
-                    if (PassesTransparencyIslandClip(*AutoBakePreviewResult, NeighborIndex, ClipUVIslandID))
+                    if (PassesTransparencyPreviewIslandClip(*AutoBakePreviewResult, NeighborIndex, ClipUVIslandID))
                     {
                         TargetColor += ReadColorAt(RawX + OffsetX, RawY + OffsetY);
                     }
@@ -2526,7 +2527,7 @@ float SWetClothingTransparencyPreviewViewport::ApplyHoverToEditedAlpha(
     {
         return EditedAlpha;
     }
-    if (!PassesTransparencyIslandClip(*AutoBakePreviewResult, PixelIndex, CurrentSurfaceHit.UVIslandID))
+    if (!PassesTransparencyPreviewIslandClip(*AutoBakePreviewResult, PixelIndex, CurrentSurfaceHit.UVIslandID))
     {
         return EditedAlpha;
     }
@@ -2599,7 +2600,7 @@ float SWetClothingTransparencyPreviewViewport::ApplyHoverToEditedAlpha(
                     SampleY = FMath::Clamp(SampleY, 0, Height - 1);
                 }
                 const int32 NeighborIndex = SampleY * Width + SampleX;
-                TargetAlpha += PassesTransparencyIslandClip(*AutoBakePreviewResult, NeighborIndex, CurrentSurfaceHit.UVIslandID)
+                TargetAlpha += PassesTransparencyPreviewIslandClip(*AutoBakePreviewResult, NeighborIndex, CurrentSurfaceHit.UVIslandID)
                     ? GetStoredEditedAlpha(NeighborIndex)
                     : EditedAlpha;
             }

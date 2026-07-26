@@ -76,8 +76,8 @@ struct DWC_API FWCADerivedInlineData
     TArray<FWetClothingGeneratedWetMaterialOverride> GeneratedWetMaterialOverrides;
 
     /** Current render-profile lookup baked in DWC Data UV space. */
-    UPROPERTY(VisibleAnywhere, Category = "Wet Clothing|Profile ID Texture")
-    FWetClothingBakedProfileIDData BakedProfileIDData;
+    UPROPERTY(VisibleAnywhere, Category = "Wet Clothing|Wet Part Data Texture")
+    FWetClothingBakedWetPartData BakedWetPartData;
 
     /** Metadata only. UV coordinates live exclusively in the prepared mesh's DWC Data UV channel. */
     UPROPERTY(VisibleAnywhere, Category = "Wet Clothing|DWC Data UV")
@@ -86,13 +86,6 @@ struct DWC_API FWCADerivedInlineData
 #if WITH_EDITORONLY_DATA
     UPROPERTY(VisibleAnywhere, Category = "Wet Clothing|Generated Materials")
     TObjectPtr<UMaterialFunctionInterface> GeneratedEvaluateSurfaceAppearanceFunction = nullptr;
-
-    /** Legacy references kept only so existing WCA assets can migrate. */
-    UPROPERTY(meta = (DeprecatedProperty, DeprecationMessage = "Use GeneratedEvaluateSurfaceAppearanceFunction."))
-    TObjectPtr<UMaterialFunctionInterface> GeneratedCPUApplyWetnessFunction_DEPRECATED = nullptr;
-
-    UPROPERTY(meta = (DeprecatedProperty, DeprecationMessage = "Use GeneratedEvaluateSurfaceAppearanceFunction."))
-    TObjectPtr<UMaterialFunctionInterface> GeneratedGPUApplyWetnessFunction_DEPRECATED = nullptr;
 
     UPROPERTY(VisibleAnywhere, Category = "Wet Clothing|Editor Derived Data")
     TArray<FDWCEditorUVTopologyData> OriginalUVTopologies;
@@ -212,6 +205,9 @@ class DWC_API UWetClothingAsset : public UDataAsset
     void BeginRuntimeDataEditorSaveAttempt();
     void CompleteRuntimeDataEditorSaveAttempt(bool bSaveSucceeded);
     bool IsBakeOutputSavePending(int32 OutputMask) const;
+
+    /** Marks selected serialized runtime outputs dirty after editor-authored data changes. */
+    void MarkRuntimeBakeOutputsDirty(int32 OutputMask);
 
     static FString BuildMeshContentSignature(const USkeletalMesh* SkeletalMesh, int32 LODIndex, int32 UVChannelIndex = INDEX_NONE);
     static void ClearMeshContentSignatureCache();

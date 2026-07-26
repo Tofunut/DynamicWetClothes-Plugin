@@ -30,12 +30,8 @@ class FWCAMaterialGenerator
         int32 OriginalUVChannelIndex = 0;
         int32 MaterialSlotIndex = INDEX_NONE;
         int32 SurfaceWaterNormalUVChannelIndex = 0;
-        FVector2D DropletUVTiling = FVector2D(1.0, 1.0);
-        FVector2D StreakUVTiling = FVector2D(1.0, 1.0);
         float SurfaceWaterTargetRoughness = 0.05f;
         bool bUseSurfaceWater = false;
-        bool bUseDropletNormal = false;
-        bool bUseStreakNormal = false;
         bool bEnableDWCDataUVSampling = false;
         bool bConnectWetnessMapPath = false;
 

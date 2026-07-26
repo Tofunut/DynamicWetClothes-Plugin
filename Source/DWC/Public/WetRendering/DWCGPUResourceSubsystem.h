@@ -93,14 +93,14 @@ struct DWC_API FDWCGPUResourceSubsystemStats
     uint64 CPUBytes = 0;
     uint64 StaticBufferGPUBytes = 0;
     uint64 RenderProfileLUTGPUBytes = 0;
-    uint64 ProfileIDRemapGPUBytes = 0;
+    uint64 WetPartDataRemapGPUBytes = 0;
     uint64 SurfaceNormalArrayGPUBytes = 0;
 
     uint64 GetGPUBytes() const
     {
         return StaticBufferGPUBytes +
                RenderProfileLUTGPUBytes +
-               ProfileIDRemapGPUBytes +
+               WetPartDataRemapGPUBytes +
                SurfaceNormalArrayGPUBytes;
     }
 };
@@ -110,9 +110,9 @@ struct DWC_API FDWCAssetRenderProfileResources
 {
     GENERATED_BODY()
 
-    /** Slot-local Profile ID textures. Every texture is sampled with that slot's DWC Data UV. */
+    /** Slot-local Wet Part data textures sampled with each slot's DWC Data UV. */
     UPROPERTY(Transient)
-    TMap<int32, TObjectPtr<UTexture2D>> ProfileIDTexturesByMaterialSlot;
+    TMap<int32, TObjectPtr<UTexture2D>> WetPartDataTexturesByMaterialSlot;
 
     /** WCA-wide Local Profile ID -> global runtime profile row mapping. */
     UPROPERTY(Transient)
@@ -130,13 +130,13 @@ struct DWC_API FDWCAssetRenderProfileResources
 
     bool IsValid() const
     {
-        return !ProfileIDTexturesByMaterialSlot.IsEmpty() && ProfileRemapLUT != nullptr;
+        return !WetPartDataTexturesByMaterialSlot.IsEmpty() && ProfileRemapLUT != nullptr;
     }
 
 
-    UTexture2D* FindProfileIDTexture(const int32 MaterialSlotIndex) const
+    UTexture2D* FindWetPartDataTexture(const int32 MaterialSlotIndex) const
     {
-        if (const TObjectPtr<UTexture2D>* Found = ProfileIDTexturesByMaterialSlot.Find(MaterialSlotIndex))
+        if (const TObjectPtr<UTexture2D>* Found = WetPartDataTexturesByMaterialSlot.Find(MaterialSlotIndex))
         {
             return Found->Get();
         }
@@ -163,6 +163,7 @@ public:
     static constexpr int32 GlobalLUTWidth = MaxRuntimeProfileCount * TexelsPerProfile;
     static constexpr int32 LocalRemapWidth = 256;
 
+    virtual bool DoesSupportWorldType(EWorldType::Type WorldType) const override;
     virtual void Deinitialize() override;
 
     const FDWCAssetRenderProfileResources* AcquireAssetResources(
@@ -187,6 +188,12 @@ public:
         UWetClothingAsset* Asset,
         const TArray<TObjectPtr<UMaterialInstanceDynamic>>& MaterialInstances,
         EDWCRenderResourceUsage Usage);
+
+    bool ApplyPreviewRenderProfileFallback(
+        UWetClothingAsset* Asset,
+        int32 MaterialSlotIndex,
+        int32 LocalProfileID,
+        UMaterialInstanceDynamic& MID);
 
     UTexture2D* GetGlobalRenderProfileLUT() const { return GlobalRenderProfileLUT; }
     UTexture2DArray* GetDropletNormalArray() const { return DropletNormalArray; }
@@ -257,7 +264,7 @@ private:
     void BindGlobalResources(UMaterialInstanceDynamic& MID, EDWCRenderResourceUsage Usage) const;
 
     UPROPERTY(Transient)
-    TObjectPtr<UTexture2D> NeutralProfileIDTexture = nullptr;
+    TObjectPtr<UTexture2D> NeutralWetPartDataTexture = nullptr;
 
     UPROPERTY(Transient)
     TObjectPtr<UTexture2D> NeutralProfileRemapLUT = nullptr;

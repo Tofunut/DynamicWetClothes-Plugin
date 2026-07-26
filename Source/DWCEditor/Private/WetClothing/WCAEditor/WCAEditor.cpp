@@ -11,6 +11,7 @@
 #include "WetClothing/Modes/DWCEditorPreviewSlotUtils.h"
 #include "WetClothing/Modes/Transparency/AutoMap/DWCTransparencyAutoMapGenerator.h"
 #include "WetClothing/WCAEditor/WCAGeneratedDataInvalidator.h"
+#include "WetClothing/WCAEditor/WCAValidationReport.h"
 #include "WetClothing/Asset/Setup/DWCDataUVBuildService.h"
 #include "WetClothing/WCAEditor/UI/SWCAEditorPanel.h"
 #include "DetailsViewArgs.h"
@@ -360,100 +361,36 @@ namespace
         }
     }
 
-    TArray<FDWCValidationActionItem> GetValidationActionItems(const UWetClothingAsset& Asset)
+    TArray<FDWCValidationActionItem> GetValidationActionItems(
+        UWetClothingAsset& Asset,
+        const EWCAValidationMode Mode = EWCAValidationMode::Fast,
+        const bool bRefreshAssetState = false)
     {
         TArray<FDWCValidationActionItem> Result;
-#if WITH_EDITORONLY_DATA
-        const FDWCAssetBakeState& State = Asset.GetBakeState();
-        const FDWCWetClothingAssetSetupSettings& Setup = Asset.GetSetupSettings();
-
-        AddValidationActionIfRequired(
-            Result,
-            LOCTEXT("ValidationGeneratedDataUV", "DWC Data UV"),
-            State.GeneratedDataUV,
-            LOCTEXT("ValidationGeneratedDataUVAction", "Use Rebuild DWC Data UV on the toolbar to rebuild it."));
-        AddValidationActionIfRequired(
-            Result,
-            LOCTEXT("ValidationOriginalUVTopology", "Original UV Topology"),
-            State.OriginalUVTopology,
-            LOCTEXT("ValidationOriginalUVTopologyAction", "Rebuild DWC Data UV."));
-
-        if ((Setup.bBuildCPUVertexSimulationData || Asset.HasCPURuntimeDataPayload()) &&
-            State.CPURuntimeData != EDWCBakeStatus::Disabled)
-        {
-            AddValidationActionIfRequired(
-                Result,
-                LOCTEXT("ValidationCPURuntimeData", "CPU Runtime Data"),
-                State.CPURuntimeData,
-                LOCTEXT("ValidationSaveAssetAction", "Save the asset to rebuild it."),
-                Asset.IsBakeOutputSavePending(DWCBakeOutput::CPURuntimeData));
-        }
-        if ((Setup.bBuildGPUWetnessMapSimulationData || Asset.HasGPURuntimeDataPayload()) &&
-            State.GPURuntimeData != EDWCBakeStatus::Disabled)
-        {
-            AddValidationActionIfRequired(
-                Result,
-                LOCTEXT("ValidationGPURuntimeData", "GPU Runtime Data"),
-                State.GPURuntimeData,
-                LOCTEXT("ValidationSaveAssetAction", "Save the asset to rebuild it."),
-                Asset.IsBakeOutputSavePending(DWCBakeOutput::GPURuntimeData));
-        }
-        if ((Setup.bBuildGPUWetnessMapSimulationData || Asset.HasGPUMapDataPayload()) &&
-            State.GPUMaps != EDWCBakeStatus::Disabled)
-        {
-            AddValidationActionIfRequired(
-                Result,
-                LOCTEXT("ValidationGPUMaps", "GPU Simulation Maps"),
-                State.GPUMaps,
-                LOCTEXT("ValidationBakeMapsAction", "Use Bake Maps to rebuild them."),
-                Asset.IsBakeOutputSavePending(DWCBakeOutput::GPUMaps));
-        }
-        if (Asset.HasWrinkleBakeContent() && State.WrinkleMaps != EDWCBakeStatus::Disabled)
-        {
-            AddValidationActionIfRequired(
-                Result,
-                LOCTEXT("ValidationWrinkleMaps", "Wrinkle Maps"),
-                State.WrinkleMaps,
-                LOCTEXT("ValidationBakeMapsAction", "Use Bake Maps to rebuild them."));
-        }
-        if (Asset.HasTransparencyBakeContent() && State.TransparencyMaps != EDWCBakeStatus::Disabled)
-        {
-            AddValidationActionIfRequired(
-                Result,
-                LOCTEXT("ValidationTransparencyMaps", "Transparency Maps"),
-                State.TransparencyMaps,
-                LOCTEXT("ValidationBakeMapsAction", "Use Bake Maps to rebuild them."));
-        }
-
-        TArray<FString> GeneratedMaterialMessages;
-        if (Asset.HasAnyWettableMaterialSlot())
-        {
-            FWCAMaterialGenerator::ValidateGeneratedMaterialOverrides(&Asset, GeneratedMaterialMessages);
-        }
-        if (!GeneratedMaterialMessages.IsEmpty())
+        const FWCAValidationReport Report = BuildWCAValidationReport(Asset, Mode, bRefreshAssetState);
+        for (const FWCAValidationIssue& Issue : Report.Issues)
         {
             FDWCValidationActionItem Item;
-            Item.Name = LOCTEXT("ValidationGeneratedMaterials", "Generated Materials");
-            Item.Status = FText::Format(
-                LOCTEXT("ValidationGeneratedMaterialsStatus", "{0} issue(s)"),
-                FText::AsNumber(GeneratedMaterialMessages.Num()));
-            Item.Action = LOCTEXT("ValidationGeneratedMaterialsAction", "Use Generate Materials.");
+            Item.Name = Issue.Title;
+            Item.Status = Issue.Status.IsEmpty() ? Issue.Detail : Issue.Status;
+            Item.Action = Issue.RequiredAction;
+            Item.bFailed = Issue.bFailed;
             Result.Add(MoveTemp(Item));
         }
-#endif
         return Result;
     }
 
-    TArray<FString> GetValidationFailureDetails(const UWetClothingAsset& Asset)
+    TArray<FString> GetValidationFailureDetails(const FWCAValidationReport& Report)
     {
         TArray<FString> Result;
-#if WITH_EDITORONLY_DATA
-        const FDWCAssetBakeState& State = Asset.GetBakeState();
-        if (HasValidationFailedState(State) && !State.LastFailure.IsEmpty())
+        for (const FWCAValidationIssue& Issue : Report.Issues)
         {
-            Result.Add(State.LastFailure);
+            if (Issue.Category == EWCAValidationIssueCategory::Failure ||
+                Issue.Severity == EWCAValidationSeverity::Error)
+            {
+                Result.Add(Issue.Detail.ToString());
+            }
         }
-#endif
         return Result;
     }
 
@@ -2100,7 +2037,7 @@ void FWCAEditor::FillAssetToolbar(FToolBarBuilder& ToolbarBuilder)
     FText ValidationTooltip = LOCTEXT("ValidationToolbarTooltip", "Validation passed. Click to view the latest validation results.");
     FName ValidationIconName(TEXT("Icons.SuccessWithColor"));
 #if WITH_EDITORONLY_DATA
-    if (const UWetClothingAsset* Asset = WetClothingAsset.Get())
+    if (UWetClothingAsset* Asset = WetClothingAsset.Get())
     {
         const TArray<FDWCValidationActionItem> ActionItems = GetValidationActionItems(*Asset);
         const int32 ActionRequiredCount = ActionItems.Num();
@@ -2290,9 +2227,10 @@ void FWCAEditor::HandleValidationClicked()
     RegenerateMenusAndToolbars();
 
 #if WITH_EDITORONLY_DATA
-    const FDWCTriangleValidationSummary& Summary = Asset->GetValidationSummary();
-    const TArray<FDWCValidationActionItem> ActionItems = GetValidationActionItems(*Asset);
-    const TArray<FString> FailureDetails = GetValidationFailureDetails(*Asset);
+    const FWCAValidationReport ValidationReport = BuildWCAValidationReport(*Asset, EWCAValidationMode::Deep, false);
+    const FDWCTriangleValidationSummary& Summary = ValidationReport.Diagnostics;
+    const TArray<FDWCValidationActionItem> ActionItems = GetValidationActionItems(*Asset, EWCAValidationMode::Deep, false);
+    const TArray<FString> FailureDetails = GetValidationFailureDetails(ValidationReport);
     const bool bHasFailedState =
         HasValidationFailedState(Asset->GetBakeState()) ||
         ActionItems.ContainsByPredicate(
@@ -2631,7 +2569,7 @@ FReply FWCAEditor::HandleBakeRenderProfileDataClicked()
     SlowTask.MakeDialog(false);
     SlowTask.EnterProgressFrame(
         1.0f,
-        LOCTEXT("BakeRenderProfileDataBuildProgress", "Generating Profile ID textures..."));
+        LOCTEXT("BakeRenderProfileDataBuildProgress", "Generating Wet Part Data textures..."));
 
     FString Summary;
     bool    bHadWarnings = false;
@@ -3052,6 +2990,16 @@ bool FWCAEditor::ResolveIssuesAndSave(FString& OutFailure, FString* OutSuccessSu
 
     const FDWCWetClothingAssetSetupSettings& Setup = Asset->GetSetupSettings();
     FWCAEditorIssueStatus Status = EditorPanel->CollectIssueStatus(true, true);
+    const FWCAValidationReport InitialValidationReport =
+        BuildWCAValidationReport(*Asset, EWCAValidationMode::Deep, false);
+    if (InitialValidationReport.HasManualIssues())
+    {
+        const FString ManualSummary = InitialValidationReport.BuildManualIssueSummary();
+        OutFailure = ManualSummary.IsEmpty()
+            ? TEXT("Manual validation issues must be fixed before Resolve Issues can continue.")
+            : FString::Printf(TEXT("Manual validation issues must be fixed before Resolve Issues can continue.\n\n%s"), *ManualSummary);
+        return false;
+    }
 #if WITH_EDITORONLY_DATA
     const FDWCAssetBakeState InitialBakeState = Asset->GetBakeState();
     const bool bInitialGPUMapsRequireBake =

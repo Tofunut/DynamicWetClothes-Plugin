@@ -285,6 +285,105 @@ bool FDWCTransparencyEditedMapBaker::IsAutoResultCompatible(
     return true;
 }
 
+bool FDWCTransparencyEditedMapBaker::IsLayerBakeCurrent(
+    const UWetClothingAsset& WetClothingAsset,
+    const FWetClothingTransparencyLayerData& Layer,
+    FString* OutReason)
+{
+    if (OutReason != nullptr)
+    {
+        OutReason->Reset();
+    }
+
+    FDWCTransparencyAutoBakeResult AutoResult;
+    FString AutoSummary;
+    TArray<FString> AutoWarnings;
+    if (!FDWCTransparencyAutoMapGenerator::GenerateSameMesh(WetClothingAsset, Layer, AutoResult, AutoSummary, AutoWarnings))
+    {
+        if (OutReason != nullptr)
+        {
+            *OutReason = AutoSummary.IsEmpty()
+                ? TEXT("Transparency auto map could not be regenerated for validation.")
+                : AutoSummary;
+        }
+        return false;
+    }
+
+    FString CompatibilityReason;
+    if (!IsAutoResultCompatible(Layer, AutoResult, CompatibilityReason))
+    {
+        if (OutReason != nullptr)
+        {
+            *OutReason = CompatibilityReason;
+        }
+        return false;
+    }
+
+    const FWetClothingBakedTransparencyMap* BakedMap = Layer.BakedMaps.FindByPredicate(
+        [&AutoResult](const FWetClothingBakedTransparencyMap& Candidate)
+        {
+            return Candidate.MaterialSlotIndex == AutoResult.MaterialSlotIndex &&
+                   Candidate.UVChannelIndex == AutoResult.UVChannelIndex &&
+                   Candidate.LODIndex == AutoResult.LODIndex;
+        });
+    if (BakedMap == nullptr || !BakedMap->IsRuntimeUsable())
+    {
+        if (OutReason != nullptr)
+        {
+            *OutReason = TEXT("Transparency map is missing or not runtime-usable.");
+        }
+        return false;
+    }
+
+    const FWetClothingTransparencyData& TransparencyData = WetClothingAsset.Authored.TransparencyData;
+    const FDWCWrinkleSuppressionSource SuppressionSource =
+        FDWCWrinkleSuppressionProcessor::FindExactSource(
+            &WetClothingAsset,
+            AutoResult.MaterialSlotIndex,
+            AutoResult.UVChannelIndex,
+            AutoResult.LODIndex);
+    TArray<uint8> WrinkleSuppressionBuffer;
+    FString SuppressionWarning;
+    const bool bHasWrinkleSuppression = SuppressionSource.IsValid() &&
+        FDWCWrinkleSuppressionProcessor::BuildProcessedBuffer(
+            SuppressionSource,
+            AutoResult.Resolution,
+            TransparencyData.WrinkleSuppressionCoverageThreshold,
+            TransparencyData.WrinkleSuppressionMaskSoftness,
+            WrinkleSuppressionBuffer,
+            SuppressionWarning);
+    const FString SourceWrinkleMaskBuildSignature =
+        bHasWrinkleSuppression && SuppressionSource.BakedMap != nullptr
+            ? SuppressionSource.BakedMap->BuildSignature
+            : FString();
+    const FString SuppressionSettingsSignature =
+        FDWCWrinkleSuppressionProcessor::MakeSettingsSignature(
+            TransparencyData.WrinkleSuppressionCoverageThreshold,
+            TransparencyData.WrinkleSuppressionMaskSoftness,
+            TransparencyData.WrinkleSuppressionStrength,
+            TransparencyData.TransparencyPreviewStrength);
+    const FString ExpectedSignature = MakeFinalBuildSignature(
+        AutoResult,
+        Layer,
+        SourceWrinkleMaskBuildSignature,
+        SuppressionSettingsSignature,
+        TransparencyData.TransparencyPaddingPixels,
+        TransparencyData.TransparencyEdgeFeatherPixels);
+
+    const bool bCurrent =
+        BakedMap->Resolution == AutoResult.Resolution.X &&
+        BakedMap->PaddingPixels == TransparencyData.TransparencyPaddingPixels &&
+        BakedMap->SourceWrinkleMaskBuildSignature == SourceWrinkleMaskBuildSignature &&
+        BakedMap->WrinkleSuppressionSettingsSignature == SuppressionSettingsSignature &&
+        BakedMap->bWrinkleSuppressionBakedIntoAlpha == bHasWrinkleSuppression &&
+        BakedMap->BuildSignature == ExpectedSignature;
+    if (!bCurrent && OutReason != nullptr)
+    {
+        *OutReason = TEXT("Transparency map was built from old authored data or bake settings.");
+    }
+    return bCurrent;
+}
+
 bool FDWCTransparencyEditedMapBaker::Bake(
     UWetClothingAsset& WetClothingAsset,
     FWetClothingTransparencyLayerData& Layer,

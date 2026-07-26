@@ -9,7 +9,7 @@
 #include "Materials/MaterialInstanceConstant.h"
 #include "UObject/Package.h"
 #include "WetClothing/DerivedAssets/Materials/WCAMaterialGenerator.h"
-#include "WetClothing/DerivedAssets/Textures/WetnessProfile/WetClothingProfileIDTextureBaker.h"
+#include "WetClothing/DerivedAssets/Textures/WetnessProfile/WetClothingWetPartDataTextureBaker.h"
 #include "WetClothing/DerivedAssets/Textures/WetnessProfile/WetClothingSurfaceTextureNormalizer.h"
 
 namespace
@@ -95,7 +95,7 @@ bool FWetClothingRenderProfileBakeService::HasPendingVisualBakeTasks(
     }
     else if (!WetClothingAsset->HasValidDataUVForLOD(WetClothingAsset->GetSimulationLODIndex()))
     {
-        PendingLines.Add(TEXT("DWC Data UV must be rebuilt before the Profile ID Texture can be baked."));
+        PendingLines.Add(TEXT("DWC Data UV must be rebuilt before the Wet Part Data Texture can be baked."));
     }
     else
     {
@@ -133,25 +133,25 @@ bool FWetClothingRenderProfileBakeService::HasPendingVisualBakeTasks(
                 }
             }
 
-            const FWetClothingBakedProfileIDData& Baked = WetClothingAsset->Derived.Inline.BakedProfileIDData;
-            const FString ExpectedSignature = FWetClothingProfileIDTextureBaker::MakeBuildSignature(WetClothingAsset);
+            const FWetClothingBakedWetPartData& Baked = WetClothingAsset->Derived.Inline.BakedWetPartData;
+            const FString ExpectedSignature = FWetClothingWetPartDataTextureBaker::MakeBuildSignature(WetClothingAsset);
             if (!Baked.IsValid())
             {
-                PendingLines.Add(TEXT("Profile ID Texture bake is required."));
+                PendingLines.Add(TEXT("Wet Part Data Texture bake is required."));
             }
             else if (Baked.DataUVChannelIndex != WetClothingAsset->GetDWCDataUVChannelIndex())
             {
-                PendingLines.Add(TEXT("Profile ID Texture was built for an old DWC Data UV channel."));
+                PendingLines.Add(TEXT("Wet Part Data Texture was built for an old DWC Data UV channel."));
             }
-            else if (Baked.Resolution != DWCProfileIDTextureBake::Resolution ||
-                     Baked.PaddingPixels != DWCProfileIDTextureBake::PaddingPixels ||
+            else if (Baked.Resolution != DWCWetPartDataTextureBake::Resolution ||
+                     Baked.PaddingPixels != DWCWetPartDataTextureBake::PaddingPixels ||
                      Baked.SurfaceTextureResolution != DWCSurfaceTextureNormalization::Resolution)
             {
-                PendingLines.Add(TEXT("Profile ID Texture fixed bake settings are outdated."));
+                PendingLines.Add(TEXT("Wet Part Data Texture fixed bake settings are outdated."));
             }
             else if (Baked.BuildSignature != ExpectedSignature)
             {
-                PendingLines.Add(TEXT("Profile ID Texture data is out of date."));
+                PendingLines.Add(TEXT("Wet Part Data Texture data is out of date."));
             }
         }
     }
@@ -182,7 +182,7 @@ bool FWetClothingRenderProfileBakeService::BakeRenderProfileDataAndUpdateMateria
     }
     if (!WetClothingAsset->HasValidDataUVForLOD(WetClothingAsset->GetSimulationLODIndex()))
     {
-        OutSummary = TEXT("Rebuild DWC Data UV before baking the Profile ID Texture.");
+        OutSummary = TEXT("Rebuild DWC Data UV before baking the Wet Part Data Texture.");
         return false;
     }
 
@@ -266,37 +266,37 @@ bool FWetClothingRenderProfileBakeService::BakeRenderProfileDataAndUpdateMateria
             *GetNameSafe(MaterialSet.GPUMaterialInstance)));
     }
 
-    FWetClothingProfileIDTextureBakeResult ProfileIDResult;
-    FString ProfileIDError;
-    if (!FWetClothingProfileIDTextureBaker::Bake(WetClothingAsset, ProfileIDResult, ProfileIDError))
+    FWetClothingWetPartDataTextureBakeResult WetPartDataResult;
+    FString WetPartDataError;
+    if (!FWetClothingWetPartDataTextureBaker::Bake(WetClothingAsset, WetPartDataResult, WetPartDataError))
     {
-        OutSummary = FString::Printf(TEXT("Profile ID Texture bake failed: %s"), *ProfileIDError);
+        OutSummary = FString::Printf(TEXT("Wet Part Data Texture bake failed: %s"), *WetPartDataError);
         return false;
     }
-    if (!WetClothingAsset->Derived.Inline.BakedProfileIDData.IsValid())
+    if (!WetClothingAsset->Derived.Inline.BakedWetPartData.IsValid())
     {
-        OutSummary = TEXT("Profile ID Texture bake completed but did not produce runtime-usable profile data.");
+        OutSummary = TEXT("Wet Part Data Texture bake completed but did not produce runtime-usable profile data.");
         return false;
     }
 
     WetClothingAsset->MarkPackageDirty();
 
     TArray<FString> Sections;
-    TArray<FString> ProfileIDTextureLines;
-    for (const FWetClothingProfileIDSlotBakeResult& SlotResult : ProfileIDResult.SlotResults)
+    TArray<FString> WetPartDataTextureLines;
+    for (const FWetClothingWetPartDataSlotBakeResult& SlotResult : WetPartDataResult.SlotResults)
     {
-        ProfileIDTextureLines.Add(FString::Printf(
+        WetPartDataTextureLines.Add(FString::Printf(
             TEXT("Slot %d -> %s (%d painted pixels)"),
             SlotResult.MaterialSlotIndex,
-            *GetNameSafe(SlotResult.ProfileIDTexture.Get()),
+            *GetNameSafe(SlotResult.WetPartDataTexture.Get()),
             SlotResult.PaintedPixelCount));
     }
     Sections.Add(FString::Printf(
-        TEXT("Profile ID Textures:\n- %s\n- DWC Data UV channel %d\n- %d local profiles\n- %d total painted pixels"),
-        *FString::Join(ProfileIDTextureLines, TEXT("\n- ")),
+        TEXT("Wet Part Data Textures:\n- %s\n- DWC Data UV channel %d\n- %d local profiles\n- %d total painted pixels"),
+        *FString::Join(WetPartDataTextureLines, TEXT("\n- ")),
         WetClothingAsset->GetDWCDataUVChannelIndex(),
-        ProfileIDResult.LocalProfileCount,
-        ProfileIDResult.PaintedPixelCount));
+        WetPartDataResult.LocalProfileCount,
+        WetPartDataResult.PaintedPixelCount));
     if (!UpdatedMaterials.IsEmpty())
     {
         Sections.Add(FString::Printf(TEXT("Wet materials:\n- %s"), *FString::Join(UpdatedMaterials, TEXT("\n- "))));
@@ -323,13 +323,13 @@ bool FWetClothingRenderProfileBakeService::SaveBakedRenderProfileAssets(UWetClot
 
     TArray<UPackage*> PackagesToSave;
     AddRenderProfilePackageForObject(WetClothingAsset, PackagesToSave);
-    for (const FWetClothingBakedProfileIDSlotTexture& SlotTexture :
-         WetClothingAsset->Derived.Inline.BakedProfileIDData.SlotTextures)
+    for (const FWetClothingBakedWetPartDataSlotTexture& SlotTexture :
+         WetClothingAsset->Derived.Inline.BakedWetPartData.SlotTextures)
     {
-        AddRenderProfilePackageForObject(SlotTexture.ProfileIDTexture.Get(), PackagesToSave);
+        AddRenderProfilePackageForObject(SlotTexture.WetPartDataTexture.Get(), PackagesToSave);
     }
     for (const FWetClothingLocalRenderProfile& LocalProfile :
-         WetClothingAsset->Derived.Inline.BakedProfileIDData.LocalProfiles)
+         WetClothingAsset->Derived.Inline.BakedWetPartData.LocalProfiles)
     {
         AddRenderProfilePackageForObject(LocalProfile.NormalizedDropletNormal.Get(), PackagesToSave);
         AddRenderProfilePackageForObject(LocalProfile.NormalizedRivuletNormal.Get(), PackagesToSave);

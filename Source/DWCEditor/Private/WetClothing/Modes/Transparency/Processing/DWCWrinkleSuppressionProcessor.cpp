@@ -78,7 +78,28 @@ bool FDWCWrinkleSuppressionProcessor::BuildProcessedBuffer(
     TArray<uint8>& OutBuffer,
     FString& OutErrorMessage)
 {
-    OutBuffer.Reset();
+    TArray<uint16> Coverage;
+    if (!BuildResampledCoverageBuffer(Source, OutputSize, Coverage, OutErrorMessage))
+    {
+        OutBuffer.Reset();
+        return false;
+    }
+
+    return BuildProcessedBufferFromCoverage(
+        Coverage,
+        CoverageThreshold,
+        MaskSoftness,
+        OutBuffer,
+        OutErrorMessage);
+}
+
+bool FDWCWrinkleSuppressionProcessor::BuildResampledCoverageBuffer(
+    const FDWCWrinkleSuppressionSource& Source,
+    const FIntPoint OutputSize,
+    TArray<uint16>& OutCoverage,
+    FString& OutErrorMessage)
+{
+    OutCoverage.Reset();
     OutErrorMessage.Reset();
     if (!Source.IsValid())
     {
@@ -106,10 +127,7 @@ bool FDWCWrinkleSuppressionProcessor::BuildProcessedBuffer(
     }
 
     const int32 PixelCount = OutputSize.X * OutputSize.Y;
-    const float SafeThreshold = FMath::Clamp(CoverageThreshold, 0.0f, 1.0f);
-    const float SafeSoftness = FMath::Clamp(MaskSoftness, 0.0f, 1.0f);
-    const float TransitionEnd = FMath::Min(SafeThreshold + SafeSoftness, 1.0f);
-    OutBuffer.SetNumUninitialized(PixelCount);
+    OutCoverage.SetNumUninitialized(PixelCount);
     for (int32 Y = 0; Y < OutputSize.Y; ++Y)
     {
         const float V = (static_cast<float>(Y) + 0.5f) / static_cast<float>(OutputSize.Y);
@@ -117,12 +135,40 @@ bool FDWCWrinkleSuppressionProcessor::BuildProcessedBuffer(
         {
             const float U = (static_cast<float>(X) + 0.5f) / static_cast<float>(OutputSize.X);
             const int32 PixelIndex = Y * OutputSize.X + X;
-            const float MaskValue = SampleMaskBilinear(Readback, U, V);
-            const float ThresholdGate = SmoothStep(SafeThreshold, TransitionEnd, MaskValue);
-            const float Suppression = FMath::Clamp(MaskValue * ThresholdGate, 0.0f, 1.0f);
-            OutBuffer[PixelIndex] =
-                static_cast<uint8>(FMath::RoundToInt(Suppression * 255.0f));
+            OutCoverage[PixelIndex] = static_cast<uint16>(FMath::RoundToInt(
+                SampleMaskBilinear(Readback, U, V) * static_cast<float>(MAX_uint16)));
         }
+    }
+    return true;
+}
+
+bool FDWCWrinkleSuppressionProcessor::BuildProcessedBufferFromCoverage(
+    const TArray<uint16>& Coverage,
+    const float CoverageThreshold,
+    const float MaskSoftness,
+    TArray<uint8>& OutBuffer,
+    FString& OutErrorMessage)
+{
+    OutBuffer.Reset();
+    OutErrorMessage.Reset();
+    if (Coverage.IsEmpty())
+    {
+        OutErrorMessage = TEXT("The wrinkle suppression coverage buffer is empty.");
+        return false;
+    }
+
+    const int32 PixelCount = Coverage.Num();
+    const float SafeThreshold = FMath::Clamp(CoverageThreshold, 0.0f, 1.0f);
+    const float SafeSoftness = FMath::Clamp(MaskSoftness, 0.0f, 1.0f);
+    const float TransitionEnd = FMath::Min(SafeThreshold + SafeSoftness, 1.0f);
+    OutBuffer.SetNumUninitialized(PixelCount);
+    for (int32 PixelIndex = 0; PixelIndex < PixelCount; ++PixelIndex)
+    {
+        const float MaskValue = static_cast<float>(Coverage[PixelIndex]) / static_cast<float>(MAX_uint16);
+        const float ThresholdGate = SmoothStep(SafeThreshold, TransitionEnd, MaskValue);
+        const float Suppression = FMath::Clamp(MaskValue * ThresholdGate, 0.0f, 1.0f);
+        OutBuffer[PixelIndex] =
+            static_cast<uint8>(FMath::RoundToInt(Suppression * 255.0f));
     }
     return true;
 }

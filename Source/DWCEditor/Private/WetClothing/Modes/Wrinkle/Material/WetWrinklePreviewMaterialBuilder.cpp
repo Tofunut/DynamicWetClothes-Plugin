@@ -270,6 +270,23 @@ namespace
         return Parameter;
     }
 
+    UMaterialExpressionTextureObjectParameter* CreateColorTextureParameter(
+        UMaterial* Material,
+        const FName ParameterName,
+        const int32 NodeX,
+        const int32 NodeY)
+    {
+        UMaterialExpressionTextureObjectParameter* Parameter = Cast<UMaterialExpressionTextureObjectParameter>(
+            UMaterialEditingLibrary::CreateMaterialExpression(Material, UMaterialExpressionTextureObjectParameter::StaticClass(), NodeX, NodeY));
+        if (Parameter != nullptr)
+        {
+            Parameter->ParameterName = ParameterName;
+            Parameter->SamplerType = SAMPLERTYPE_Color;
+            Parameter->Texture = LoadObject<UTexture>(nullptr, TEXT("/Engine/EngineResources/DefaultTexture.DefaultTexture"));
+        }
+        return Parameter;
+    }
+
     UMaterialExpressionCustom* CreatePreviewBlendExpression(UMaterial* Material, const int32 NodeX, const int32 NodeY)
     {
         UMaterialExpressionCustom* Custom = Cast<UMaterialExpressionCustom>(
@@ -540,6 +557,144 @@ return CombinedTS;
         return true;
     }
 
+    bool ConnectTransparencyPreviewGraph(
+        UMaterial* Material,
+        const int32 UVChannelIndex,
+        UMaterialExpressionScalarParameter* PreviewWetness,
+        FString& OutError)
+    {
+        UMaterialExpressionCustom* Blend = Cast<UMaterialExpressionCustom>(
+            UMaterialEditingLibrary::CreateMaterialExpression(Material, UMaterialExpressionCustom::StaticClass(), -50, 2900));
+        UMaterialExpressionTextureObjectParameter* TransparencyMap = CreateColorTextureParameter(
+            Material, TEXT("DWC_TransparencyPreviewMap"), -650, 2900);
+        UMaterialExpressionScalarParameter* UseTransparencyMap = CreateWetWrinkleScalarParameter(
+            Material, TEXT("DWC_UseTransparencyPreviewMap"), 0.0f, -650, 3000);
+        UMaterialExpressionScalarParameter* TransparencyStrength = CreateWetWrinkleScalarParameter(
+            Material, TEXT("DWC_TransparencyPreviewStrength"), 1.0f, -650, 3050);
+        UMaterialExpressionTextureObjectParameter* WrinkleSuppressionMap = CreateColorTextureParameter(
+            Material, TEXT("DWC_TransparencyPreviewSuppressionMap"), -650, 3100);
+        UMaterialExpressionScalarParameter* UseWrinkleSuppressionMap = CreateWetWrinkleScalarParameter(
+            Material, TEXT("DWC_UseTransparencyPreviewSuppression"), 0.0f, -650, 3150);
+        UMaterialExpressionScalarParameter* WrinkleSuppressionStrength = CreateWetWrinkleScalarParameter(
+            Material, TEXT("DWC_TransparencyPreviewWrinkleSuppressionStrength"), 0.0f, -650, 3200);
+        UMaterialExpressionTextureCoordinate* UVCoordinate = Cast<UMaterialExpressionTextureCoordinate>(
+            UMaterialEditingLibrary::CreateMaterialExpression(Material, UMaterialExpressionTextureCoordinate::StaticClass(), -650, 3250));
+        if (Blend == nullptr || TransparencyMap == nullptr || UseTransparencyMap == nullptr ||
+            TransparencyStrength == nullptr || WrinkleSuppressionMap == nullptr ||
+            UseWrinkleSuppressionMap == nullptr || WrinkleSuppressionStrength == nullptr ||
+            PreviewWetness == nullptr || UVCoordinate == nullptr)
+        {
+            OutError = TEXT("Failed to create one or more transparency preview material expressions.");
+            return false;
+        }
+
+        UVCoordinate->CoordinateIndex = UVChannelIndex;
+        UVCoordinate->Desc = FString::Printf(TEXT("DWC Transparency Preview UV%d"), UVChannelIndex);
+        static const FName InputNames[] = {
+            TEXT("BaseColor"), TEXT("TransparencyMapTex"), TEXT("SelectedUV"),
+            TEXT("UseTransparencyMap"), TEXT("PreviewWetness"), TEXT("TransparencyStrength"),
+            TEXT("WrinkleSuppressionMapTex"), TEXT("UseWrinkleSuppressionMap"), TEXT("WrinkleSuppressionStrength")};
+        Blend->Inputs.Reset();
+        for (const FName InputName : InputNames)
+        {
+            FCustomInput& Input = Blend->Inputs.AddDefaulted_GetRef();
+            Input.InputName = InputName;
+        }
+        Blend->Code = TEXT(R"(
+float4 TransparencySample = Texture2DSampleLevel(TransparencyMapTex, TransparencyMapTexSampler, SelectedUV, 0);
+float Suppression = Texture2DSampleLevel(WrinkleSuppressionMapTex, WrinkleSuppressionMapTexSampler, SelectedUV, 0).r;
+float SuppressionWeight = saturate(Suppression * max(WrinkleSuppressionStrength, 0.0f)) * saturate(UseWrinkleSuppressionMap);
+float BlendWeight = saturate(TransparencySample.a) * max(TransparencyStrength, 0.0f) * saturate(UseTransparencyMap) * saturate(PreviewWetness) * (1.0f - SuppressionWeight);
+return lerp(BaseColor, TransparencySample.rgb, BlendWeight);
+)");
+        Blend->OutputType = CMOT_Float3;
+        Blend->Description = TEXT("DWC Transparency Preview BaseColor Blend");
+        Blend->RebuildOutputs();
+
+        UMaterialExpression* BaseColor = nullptr;
+        FString BaseColorOutput;
+        UMaterialExpressionGetMaterialAttributes* GetAttributes = nullptr;
+        UMaterialExpressionSetMaterialAttributes* SetAttributes = nullptr;
+        UMaterialExpression* MaterialAttributesInput = nullptr;
+        FString MaterialAttributesOutput;
+        if (Material->bUseMaterialAttributes)
+        {
+            MaterialAttributesInput = UMaterialEditingLibrary::GetMaterialPropertyInputNode(Material, MP_MaterialAttributes);
+            MaterialAttributesOutput = UMaterialEditingLibrary::GetMaterialPropertyInputNodeOutputName(Material, MP_MaterialAttributes);
+            if (MaterialAttributesInput == nullptr)
+            {
+                OutError = TEXT("Material Attributes are enabled, but the Material Attributes input is not connected.");
+                return false;
+            }
+            GetAttributes = Cast<UMaterialExpressionGetMaterialAttributes>(
+                UMaterialEditingLibrary::CreateMaterialExpression(Material, UMaterialExpressionGetMaterialAttributes::StaticClass(), -350, 2800));
+            SetAttributes = Cast<UMaterialExpressionSetMaterialAttributes>(
+                UMaterialEditingLibrary::CreateMaterialExpression(Material, UMaterialExpressionSetMaterialAttributes::StaticClass(), 180, 2900));
+            if (GetAttributes == nullptr || SetAttributes == nullptr)
+            {
+                OutError = TEXT("Failed to create Material Attributes transparency preview nodes.");
+                return false;
+            }
+            GetAttributes->CreateOrGetOutputAttribute(MP_BaseColor);
+            SetAttributes->CreateOrGetInputAttribute(MP_BaseColor);
+            BaseColor = GetAttributes;
+            BaseColorOutput = TEXT("BaseColor");
+        }
+        else
+        {
+            BaseColor = UMaterialEditingLibrary::GetMaterialPropertyInputNode(Material, MP_BaseColor);
+            BaseColorOutput = UMaterialEditingLibrary::GetMaterialPropertyInputNodeOutputName(Material, MP_BaseColor);
+            if (BaseColor == nullptr)
+            {
+                UMaterialExpressionConstant3Vector* Fallback = Cast<UMaterialExpressionConstant3Vector>(
+                    UMaterialEditingLibrary::CreateMaterialExpression(Material, UMaterialExpressionConstant3Vector::StaticClass(), -350, 2800));
+                if (Fallback == nullptr)
+                {
+                    OutError = TEXT("Failed to create the transparency preview fallback BaseColor.");
+                    return false;
+                }
+                Fallback->Constant = FLinearColor::White;
+                BaseColor = Fallback;
+                BaseColorOutput.Reset();
+            }
+        }
+
+        bool bConnected = ConnectExpression(BaseColor, BaseColorOutput, Blend, TEXT("BaseColor"), OutError);
+        bConnected &= ConnectExpression(TransparencyMap, FString(), Blend, TEXT("TransparencyMapTex"), OutError);
+        bConnected &= ConnectExpression(UVCoordinate, FString(), Blend, TEXT("SelectedUV"), OutError);
+        bConnected &= ConnectExpression(UseTransparencyMap, FString(), Blend, TEXT("UseTransparencyMap"), OutError);
+        bConnected &= ConnectExpression(PreviewWetness, FString(), Blend, TEXT("PreviewWetness"), OutError);
+        bConnected &= ConnectExpression(TransparencyStrength, FString(), Blend, TEXT("TransparencyStrength"), OutError);
+        bConnected &= ConnectExpression(WrinkleSuppressionMap, FString(), Blend, TEXT("WrinkleSuppressionMapTex"), OutError);
+        bConnected &= ConnectExpression(UseWrinkleSuppressionMap, FString(), Blend, TEXT("UseWrinkleSuppressionMap"), OutError);
+        bConnected &= ConnectExpression(WrinkleSuppressionStrength, FString(), Blend, TEXT("WrinkleSuppressionStrength"), OutError);
+        if (!bConnected)
+        {
+            return false;
+        }
+
+        if (Material->bUseMaterialAttributes)
+        {
+            bConnected &= ConnectExpression(MaterialAttributesInput, MaterialAttributesOutput, GetAttributes, TEXT("MaterialAttributes"), OutError);
+            bConnected &= ConnectExpression(MaterialAttributesInput, MaterialAttributesOutput, SetAttributes, TEXT("MaterialAttributes"), OutError);
+            bConnected &= ConnectExpression(Blend, FString(), SetAttributes, TEXT("BaseColor"), OutError);
+            if (!bConnected || !UMaterialEditingLibrary::ConnectMaterialProperty(SetAttributes, FString(), MP_MaterialAttributes))
+            {
+                if (OutError.IsEmpty())
+                {
+                    OutError = TEXT("Failed to connect the transparency preview Material Attributes output.");
+                }
+                return false;
+            }
+        }
+        else if (!UMaterialEditingLibrary::ConnectMaterialProperty(Blend, FString(), MP_BaseColor))
+        {
+            OutError = TEXT("Failed to connect the transparency preview output to Material Base Color.");
+            return false;
+        }
+        return true;
+    }
+
     UMaterialInterface* CreateTransientParentForSource(
         UMaterialInterface* SourceMaterial,
         UMaterial* TransientBaseMaterial,
@@ -694,6 +849,12 @@ FWetWrinklePreviewMaterialBuildResult FWetWrinklePreviewMaterialBuilder::Build(c
 
     if (Args.bBuildNormalOverlay &&
         !ConnectPreviewGraph(TransientMaterial, Args.UVChannelIndex, PreviewWetness, Result.ErrorMessage))
+    {
+        return Result;
+    }
+
+    if (Args.bBuildTransparencyPreviewOverlay &&
+        !ConnectTransparencyPreviewGraph(TransientMaterial, Args.UVChannelIndex, PreviewWetness, Result.ErrorMessage))
     {
         return Result;
     }

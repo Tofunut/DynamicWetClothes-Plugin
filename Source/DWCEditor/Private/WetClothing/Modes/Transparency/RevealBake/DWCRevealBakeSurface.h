@@ -9,6 +9,7 @@ struct FDWCRevealBakeSurfaceTriangle
 {
     int32 TriangleIndex = INDEX_NONE;
     int32 MaterialSlotIndex = INDEX_NONE;
+    int32 UVIslandID = INDEX_NONE;
     int32 VertexIndices[3] = { INDEX_NONE, INDEX_NONE, INDEX_NONE };
     FVector Positions[3];
     FVector Normals[3];

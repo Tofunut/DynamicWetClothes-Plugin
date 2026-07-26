@@ -22,6 +22,26 @@ struct FWetWrinkleNormalMapBakeResult
     TArray<UTexture2D*> BakedMasks;
 };
 
+class FWetWrinkleNormalMapBakeSession
+{
+  public:
+    struct FImpl;
+
+    FWetWrinkleNormalMapBakeSession();
+    ~FWetWrinkleNormalMapBakeSession();
+
+    FWetWrinkleNormalMapBakeSession(FWetWrinkleNormalMapBakeSession&&);
+    FWetWrinkleNormalMapBakeSession& operator=(FWetWrinkleNormalMapBakeSession&&);
+
+    FWetWrinkleNormalMapBakeSession(const FWetWrinkleNormalMapBakeSession&) = delete;
+    FWetWrinkleNormalMapBakeSession& operator=(const FWetWrinkleNormalMapBakeSession&) = delete;
+
+  private:
+    TUniquePtr<FImpl> Impl;
+
+    friend class FWetWrinkleNormalMapBaker;
+};
+
 class FWetWrinkleNormalMapBaker
 {
   public:
@@ -29,6 +49,14 @@ class FWetWrinkleNormalMapBaker
         UWetClothingAsset*                       WetClothingAsset,
         int32                                    MaterialSlotIndex,
         const FWetWrinkleNormalMapBakeSettings& Settings,
+        FWetWrinkleNormalMapBakeResult&         OutResult,
+        FString&                                OutErrorMessage);
+
+    static bool BakeMaterialSlot(
+        UWetClothingAsset*                       WetClothingAsset,
+        int32                                    MaterialSlotIndex,
+        const FWetWrinkleNormalMapBakeSettings& Settings,
+        FWetWrinkleNormalMapBakeSession&        Session,
         FWetWrinkleNormalMapBakeResult&         OutResult,
         FString&                                OutErrorMessage);
 
@@ -43,6 +71,7 @@ class FWetWrinkleNormalMapBaker
         UWetClothingAsset&                       WetClothingAsset,
         const FBakeGroup&                        Group,
         const FWetWrinkleNormalMapBakeSettings& Settings,
+        FWetWrinkleNormalMapBakeSession&        Session,
         FWetWrinkleNormalMapBakeResult&         InOutResult,
         FString&                                OutErrorMessage);
 

@@ -213,16 +213,6 @@ bool FWetClothingTransparencyDataHelpers::ValidateTransparencyLayer(
             *TargetSurface.OuterMaterialSlotName.ToString()));
     }
 
-    if (RaySettings.MinHitDistance >= RaySettings.MaxRayDistance)
-    {
-        OutErrors.Add(TEXT("Minimum Hit Distance must be smaller than Maximum Ray Distance."));
-    }
-
-    if (RaySettings.FullTransparencyDistance > RaySettings.NoTransparencyDistance)
-    {
-        OutErrors.Add(TEXT("Full Transparency Distance must not exceed No Transparency Distance."));
-    }
-
     const FSkeletalMeshRenderData* RenderData = TargetMesh->GetResourceForRendering();
     int32 NumTexCoords = 0;
     if (RenderData == nullptr || !RenderData->LODRenderData.IsValidIndex(LODIndex))
@@ -242,23 +232,29 @@ bool FWetClothingTransparencyDataHelpers::ValidateTransparencyLayer(
         }
     }
 
-    TSet<int32> SeenInnerSlots;
-    int32 EnabledInnerSlotCount = 0;
     if (Layer.SourceType != EDWCTransparencySourceType::SameMeshMaterialSlots)
     {
         return OutErrors.IsEmpty();
     }
 
+    if (RaySettings.MinHitDistance >= RaySettings.MaxRayDistance)
+    {
+        OutErrors.Add(TEXT("Minimum Hit Distance must be smaller than Maximum Ray Distance."));
+    }
+
+    if (RaySettings.FullTransparencyDistance > RaySettings.NoTransparencyDistance)
+    {
+        OutErrors.Add(TEXT("Full Transparency Distance must not exceed No Transparency Distance."));
+    }
+
+    TSet<int32> SeenInnerSlots;
+    int32 InnerSlotCount = 0;
+
     const TArray<FWetClothingTransparencyInnerSlot>& InnerSlotPriority = Layer.SameMeshSource.InnerSlotPriority;
     for (int32 PriorityIndex = 0; PriorityIndex < InnerSlotPriority.Num(); ++PriorityIndex)
     {
         const FWetClothingTransparencyInnerSlot& InnerSlot = InnerSlotPriority[PriorityIndex];
-        if (!InnerSlot.bEnabled)
-        {
-            continue;
-        }
-
-        ++EnabledInnerSlotCount;
+        ++InnerSlotCount;
         if (!IsMaterialSlotValid(*TargetMesh, InnerSlot.MaterialSlotIndex))
         {
             OutErrors.Add(FString::Printf(
@@ -300,17 +296,11 @@ bool FWetClothingTransparencyDataHelpers::ValidateTransparencyLayer(
                 LODIndex));
         }
 
-        if (InnerSlot.MaxHitDistance <= 0.0f)
-        {
-            OutErrors.Add(FString::Printf(
-                TEXT("Inner Material Slot %d must have a positive Maximum Hit Distance."),
-                InnerSlot.MaterialSlotIndex));
-        }
     }
 
-    if (EnabledInnerSlotCount == 0)
+    if (InnerSlotCount == 0)
     {
-        OutErrors.Add(TEXT("At least one enabled Inner Material Slot is required."));
+        OutErrors.Add(TEXT("At least one Inner Material Slot is required."));
     }
 
     return OutErrors.IsEmpty();

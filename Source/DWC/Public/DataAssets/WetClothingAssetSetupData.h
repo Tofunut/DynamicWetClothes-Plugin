@@ -217,6 +217,15 @@ struct DWC_API FDWCDataUVLODMetadata
     UPROPERTY(VisibleAnywhere, Category = "DWC Data UV")
     FString DataUVOutputSignature;
 
+    /**
+     * Generated Data-UV island membership indexed by render-buffer TriangleID.
+     * Editor surface hit tests use this compact lookup without rebuilding UV connectivity.
+     */
+#if WITH_EDITORONLY_DATA
+    UPROPERTY(VisibleAnywhere, Category = "DWC Data UV")
+    TArray<int32> DataUVIslandIDByTriangleID;
+#endif
+
     UPROPERTY(VisibleAnywhere, Category = "DWC Data UV")
     int32 GeneratorVersion = 1;
 };

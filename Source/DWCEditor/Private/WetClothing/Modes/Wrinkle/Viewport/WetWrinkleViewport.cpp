@@ -8,10 +8,12 @@
 #include "Engine/SkeletalMesh.h"
 #include "Engine/Texture.h"
 #include "Engine/Texture2D.h"
+#include "HAL/IConsoleManager.h"
 #include "Materials/Material.h"
 #include "Materials/MaterialInterface.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "PrimitiveDrawInterface.h"
+#include "ProfilingDebugging/CpuProfilerTrace.h"
 #include "Rendering/SkeletalMeshRenderData.h"
 #include "RHITypes.h"
 #include "Styling/AppStyle.h"
@@ -22,6 +24,7 @@
 #include "WetClothing/Modes/DWCEditorPreviewSlotUtils.h"
 #include "WetClothing/Modes/Wrinkle/Material/WetWrinklePreviewMaterialBuilder.h"
 #include "WetClothing/Modes/Wrinkle/Stroke/WetProceduralRidgeRasterizer.h"
+#include "WetClothing/WCAEditor/UI/UVView/WCAUVPreviewTriangleReader.h"
 #include "WetWrinkleViewportClient.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Text/SRichTextBlock.h"
@@ -35,6 +38,101 @@ namespace
     constexpr int32 WetWrinkleUVGridResolution = 64;
     constexpr int32 WetWrinkleBVHLeafTriangleCount = 8;
     constexpr int32 ForceRenderLOD0 = 1; // USkinnedMeshComponent forced LOD is 1-based; 0 means automatic.
+
+    TAutoConsoleVariable<int32> CVarWetWrinklePreviewCacheBudgetMB(
+        TEXT("DWC.WrinkleEditor.PreviewCacheBudgetMB"),
+        128,
+        TEXT("Maximum retained memory for wrinkle accumulated preview states, in MiB. ")
+        TEXT("The active state is protected and may exceed this budget by itself."),
+        ECVF_Default);
+
+    TAutoConsoleVariable<int32> CVarWetWrinkleHitCacheBudgetMB(
+        TEXT("DWC.WrinkleEditor.HitCacheBudgetMB"),
+        64,
+        TEXT("Maximum retained memory for wrinkle hit triangle and BVH caches, in MiB. ")
+        TEXT("The active cache is protected and may exceed this budget by itself."),
+        ECVF_Default);
+
+    uint64 ResolveCacheBudgetBytes(const TAutoConsoleVariable<int32>& BudgetCVar)
+    {
+        constexpr uint64 BytesPerMiB = 1024ull * 1024ull;
+        return static_cast<uint64>(FMath::Max(BudgetCVar.GetValueOnGameThread(), 1)) * BytesPerMiB;
+    }
+
+    uint64 EstimatePreviewTextureBytes(const UTexture2D* Texture)
+    {
+        if (Texture == nullptr)
+        {
+            return 0;
+        }
+
+        uint64 BulkDataBytes = 0;
+        if (const FTexturePlatformData* PlatformData = Texture->GetPlatformData())
+        {
+            for (const FTexture2DMipMap& Mip : PlatformData->Mips)
+            {
+                BulkDataBytes += static_cast<uint64>(FMath::Max<int64>(Mip.BulkData.GetBulkDataSize(), 0));
+            }
+        }
+
+        const uint64 MinimumTextureBytes =
+            static_cast<uint64>(FMath::Max(Texture->GetSizeX(), 0)) *
+            static_cast<uint64>(FMath::Max(Texture->GetSizeY(), 0)) *
+            sizeof(FColor);
+        const uint64 ResidentResourceBytes =
+            static_cast<uint64>(Texture->CalcTextureMemorySizeEnum(TMC_ResidentMips));
+        return BulkDataBytes + FMath::Max(ResidentResourceBytes, MinimumTextureBytes);
+    }
+
+    uint64 EstimateAccumulatedPreviewStateDynamicBytes(const FWetWrinkleAccumulatedPreviewState& State)
+    {
+        return static_cast<uint64>(State.Pixels.GetAllocatedSize()) +
+               static_cast<uint64>(State.WorkingPixels.GetAllocatedSize()) +
+               EstimatePreviewTextureBytes(State.AccumulatedNormalTexture);
+    }
+
+    uint64 EstimateAccumulatedPreviewCacheBytes(const TArray<FWetWrinkleAccumulatedPreviewState>& States)
+    {
+        uint64 TotalBytes = static_cast<uint64>(States.GetAllocatedSize());
+        for (const FWetWrinkleAccumulatedPreviewState& State : States)
+        {
+            TotalBytes += EstimateAccumulatedPreviewStateDynamicBytes(State);
+        }
+        return TotalBytes;
+    }
+
+    uint64 EstimateHitCacheDataBytes(
+        const TArray<FWetWrinkleCachedHitTriangle>& Triangles,
+        const TMap<uint64, int32>& TriangleLookup,
+        const TArray<int32>& BVHTriangleIndices,
+        const TArray<FWetWrinkleHitBVHNode>& BVHNodes,
+        const TArray<TArray<int32>>& UVTriangleGrid)
+    {
+        uint64 TotalBytes =
+            static_cast<uint64>(Triangles.GetAllocatedSize()) +
+            static_cast<uint64>(TriangleLookup.GetAllocatedSize()) +
+            static_cast<uint64>(BVHTriangleIndices.GetAllocatedSize()) +
+            static_cast<uint64>(BVHNodes.GetAllocatedSize()) +
+            static_cast<uint64>(UVTriangleGrid.GetAllocatedSize());
+        for (const TArray<int32>& GridCell : UVTriangleGrid)
+        {
+            TotalBytes += static_cast<uint64>(GridCell.GetAllocatedSize());
+        }
+        return TotalBytes;
+    }
+
+    uint64 EstimateHitCacheEntryDynamicBytes(
+        const FWetWrinkleHitCacheKey& Key,
+        const FWetWrinkleHitCacheEntry& Entry)
+    {
+        return static_cast<uint64>(Key.TopologySignature.GetAllocatedSize()) +
+               EstimateHitCacheDataBytes(
+                   Entry.Triangles,
+                   Entry.TriangleLookup,
+                   Entry.BVHTriangleIndices,
+                   Entry.BVHNodes,
+                   Entry.UVTriangleGrid);
+    }
 
     uint64 MakeWetWrinkleTriangleLookupKey(const int32 MaterialSlotIndex, const int32 TriangleID)
     {
@@ -94,83 +192,79 @@ namespace
         return Perpendicular.IsNearlyZero() ? FVector::ForwardVector : Perpendicular;
     }
 
-    FVector ComputeWetWrinkleBarycentric(const FVector& Point, const FVector& A, const FVector& B, const FVector& C)
+    FVector3f MakeWetWrinkleAnyPerpendicular(const FVector3f& Direction)
     {
-        const FVector V0 = B - A;
-        const FVector V1 = C - A;
-        const FVector V2 = Point - A;
-        const double D00 = FVector::DotProduct(V0, V0);
-        const double D01 = FVector::DotProduct(V0, V1);
-        const double D11 = FVector::DotProduct(V1, V1);
-        const double D20 = FVector::DotProduct(V2, V0);
-        const double D21 = FVector::DotProduct(V2, V1);
-        const double Denom = D00 * D11 - D01 * D01;
-        if (FMath::IsNearlyZero(Denom))
+        FVector3f Perpendicular = FVector3f::CrossProduct(Direction, FVector3f(0.0f, 0.0f, 1.0f)).GetSafeNormal();
+        if (Perpendicular.IsNearlyZero())
         {
-            return FVector(1.0, 0.0, 0.0);
+            Perpendicular = FVector3f::CrossProduct(Direction, FVector3f(0.0f, 1.0f, 0.0f)).GetSafeNormal();
         }
 
-        const double V = (D11 * D20 - D01 * D21) / Denom;
-        const double W = (D00 * D21 - D01 * D20) / Denom;
-        return FVector(1.0 - V - W, V, W);
+        return Perpendicular.IsNearlyZero() ? FVector3f(1.0f, 0.0f, 0.0f) : Perpendicular;
     }
 
-    FVector ComputeWetWrinkleBarycentric2D(const FVector2D& Point, const FVector2D& A, const FVector2D& B, const FVector2D& C)
+    FVector3f ComputeWetWrinkleBarycentric2D(
+        const FVector2f& Point,
+        const FVector2f& A,
+        const FVector2f& B,
+        const FVector2f& C)
     {
-        const FVector2D V0 = B - A;
-        const FVector2D V1 = C - A;
-        const FVector2D V2 = Point - A;
-        const double D00 = FVector2D::DotProduct(V0, V0);
-        const double D01 = FVector2D::DotProduct(V0, V1);
-        const double D11 = FVector2D::DotProduct(V1, V1);
-        const double D20 = FVector2D::DotProduct(V2, V0);
-        const double D21 = FVector2D::DotProduct(V2, V1);
-        const double Denom = D00 * D11 - D01 * D01;
+        const FVector2f V0 = B - A;
+        const FVector2f V1 = C - A;
+        const FVector2f V2 = Point - A;
+        const float D00 = FVector2f::DotProduct(V0, V0);
+        const float D01 = FVector2f::DotProduct(V0, V1);
+        const float D11 = FVector2f::DotProduct(V1, V1);
+        const float D20 = FVector2f::DotProduct(V2, V0);
+        const float D21 = FVector2f::DotProduct(V2, V1);
+        const float Denom = D00 * D11 - D01 * D01;
         if (FMath::IsNearlyZero(Denom))
         {
-            return FVector(-1.0, -1.0, -1.0);
+            return FVector3f(-1.0f, -1.0f, -1.0f);
         }
 
-        const double V = (D11 * D20 - D01 * D21) / Denom;
-        const double W = (D00 * D21 - D01 * D20) / Denom;
-        return FVector(1.0 - V - W, V, W);
+        const float V = (D11 * D20 - D01 * D21) / Denom;
+        const float W = (D00 * D21 - D01 * D20) / Denom;
+        return FVector3f(1.0f - V - W, V, W);
     }
 
-    bool IsWetWrinkleBarycentricInside(const FVector& Barycentric)
+    bool IsWetWrinkleBarycentricInside(const FVector3f& Barycentric)
     {
-        constexpr double Tolerance = 0.0001;
+        constexpr float Tolerance = 0.0001f;
         return Barycentric.X >= -Tolerance &&
                Barycentric.Y >= -Tolerance &&
                Barycentric.Z >= -Tolerance &&
-               Barycentric.X <= 1.0 + Tolerance &&
-               Barycentric.Y <= 1.0 + Tolerance &&
-               Barycentric.Z <= 1.0 + Tolerance;
+               Barycentric.X <= 1.0f + Tolerance &&
+               Barycentric.Y <= 1.0f + Tolerance &&
+               Barycentric.Z <= 1.0f + Tolerance;
     }
 
-
-    bool DoesWetWrinkleSegmentIntersectBox(const FBox& Box, const FVector& SegmentStart, const FVector& SegmentEnd)
+    bool DoesWetWrinkleSegmentIntersectBox(
+        const FBox3f& Box,
+        const FVector3f& SegmentStart,
+        const FVector3f& SegmentEnd)
     {
         if (!Box.IsValid)
         {
             return true;
         }
 
-        const FVector SegmentDelta = SegmentEnd - SegmentStart;
-        double TMin = 0.0;
-        double TMax = 1.0;
+        const FVector3f SegmentDelta = SegmentEnd - SegmentStart;
+        float TMin = 0.0f;
+        float TMax = 1.0f;
 
-        auto ClipAxis = [&TMin, &TMax](double Start, double Delta, double MinValue, double MaxValue) -> bool
+        auto ClipAxis = [&TMin, &TMax](float Start, float Delta, float MinValue, float MaxValue) -> bool
         {
             if (FMath::Abs(Delta) <= UE_SMALL_NUMBER)
             {
                 return Start >= MinValue && Start <= MaxValue;
             }
 
-            double AxisT0 = (MinValue - Start) / Delta;
-            double AxisT1 = (MaxValue - Start) / Delta;
+            float AxisT0 = (MinValue - Start) / Delta;
+            float AxisT1 = (MaxValue - Start) / Delta;
             if (AxisT0 > AxisT1)
             {
-                const double Temp = AxisT0;
+                const float Temp = AxisT0;
                 AxisT0 = AxisT1;
                 AxisT1 = Temp;
             }
@@ -183,6 +277,52 @@ namespace
         return ClipAxis(SegmentStart.X, SegmentDelta.X, Box.Min.X, Box.Max.X) &&
                ClipAxis(SegmentStart.Y, SegmentDelta.Y, Box.Min.Y, Box.Max.Y) &&
                ClipAxis(SegmentStart.Z, SegmentDelta.Z, Box.Min.Z, Box.Max.Z);
+    }
+
+    bool IntersectWetWrinkleLocalTriangle(
+        const FVector3f& SegmentStart,
+        const FVector3f& SegmentEnd,
+        const FVector3f& A,
+        const FVector3f& B,
+        const FVector3f& C,
+        float& OutSegmentT,
+        FVector3f& OutBarycentric)
+    {
+        const FVector3f SegmentDelta = SegmentEnd - SegmentStart;
+        const FVector3f EdgeAB = B - A;
+        const FVector3f EdgeAC = C - A;
+        const FVector3f P = FVector3f::CrossProduct(SegmentDelta, EdgeAC);
+        const float Determinant = FVector3f::DotProduct(EdgeAB, P);
+        if (FMath::Abs(Determinant) <= UE_SMALL_NUMBER)
+        {
+            return false;
+        }
+
+        const float InverseDeterminant = 1.0f / Determinant;
+        const FVector3f T = SegmentStart - A;
+        const float BarycentricB = FVector3f::DotProduct(T, P) * InverseDeterminant;
+        if (BarycentricB < -UE_KINDA_SMALL_NUMBER || BarycentricB > 1.0f + UE_KINDA_SMALL_NUMBER)
+        {
+            return false;
+        }
+
+        const FVector3f Q = FVector3f::CrossProduct(T, EdgeAB);
+        const float BarycentricC = FVector3f::DotProduct(SegmentDelta, Q) * InverseDeterminant;
+        if (BarycentricC < -UE_KINDA_SMALL_NUMBER ||
+            BarycentricB + BarycentricC > 1.0f + UE_KINDA_SMALL_NUMBER)
+        {
+            return false;
+        }
+
+        const float SegmentT = FVector3f::DotProduct(EdgeAC, Q) * InverseDeterminant;
+        if (SegmentT < 0.0f || SegmentT > 1.0f)
+        {
+            return false;
+        }
+
+        OutSegmentT = SegmentT;
+        OutBarycentric = FVector3f(1.0f - BarycentricB - BarycentricC, BarycentricB, BarycentricC);
+        return true;
     }
 
     bool IsWetWrinkleLinkedSurface(const FVector& PrimaryWorldPosition, const FVector& CandidateWorldPosition, float Radius)
@@ -602,7 +742,6 @@ void SWetWrinkleViewport::Construct(const FArguments& InArgs)
 {
     WetClothingAsset = InArgs._WetClothingAsset;
     bUseDefaultPreviewMaterial = InArgs._UseDefaultPreviewMaterial;
-    bUseOriginalMeshMaterialForPreview = InArgs._UseOriginalMeshMaterialForPreview;
     OnSurfaceHitChanged = InArgs._OnSurfaceHitChanged;
     OnPaintStrokeStarted = InArgs._OnPaintStrokeStarted;
     OnPaintStampRequested = InArgs._OnPaintStampRequested;
@@ -680,7 +819,13 @@ void SWetWrinkleViewport::RefreshPreviewMesh(const bool bForceMaterialRebuild)
     const bool bMeshChanged = PreviewMeshComponent->GetSkeletalMeshAsset() != TargetMesh;
     if (bMeshChanged)
     {
+        ClearAllHitCaches();
         PreviewMeshComponent->SetSkeletalMeshAsset(TargetMesh);
+    }
+    else if (bForceMaterialRebuild)
+    {
+        // A full asset refresh can regenerate UV metadata without replacing the mesh UObject.
+        ClearAllHitCaches();
     }
     PreviewMeshComponent->SetForcedLOD(ForceRenderLOD0);
 
@@ -690,7 +835,7 @@ void SWetWrinkleViewport::RefreshPreviewMesh(const bool bForceMaterialRebuild)
         RebuildPreviewMaterialSlots();
     }
     ApplyMaterialSlotVisibility();
-    if (bMeshChanged)
+    if (bMeshChanged || bForceMaterialRebuild)
     {
         RebuildHitTriangles();
     }
@@ -735,8 +880,10 @@ void SWetWrinkleViewport::RefreshPreviewMesh(const bool bForceMaterialRebuild)
     }
 }
 
-void SWetWrinkleViewport::SetBrushSettings(const FWetWrinkleBrushSettings& InBrushSettings)
+void SWetWrinkleViewport::SynchronizeBrushSettings(const FWetWrinkleBrushSettings& InBrushSettings)
 {
+    TRACE_CPUPROFILER_EVENT_SCOPE(SWetWrinkleViewport_SynchronizeBrushSettings);
+
     const bool bLeavingProceduralRidgeMode =
         BrushSettings.ToolMode == EWetWrinkleToolMode::ProceduralRidgeStroke &&
         InBrushSettings.ToolMode != EWetWrinkleToolMode::ProceduralRidgeStroke;
@@ -746,9 +893,9 @@ void SWetWrinkleViewport::SetBrushSettings(const FWetWrinkleBrushSettings& InBru
 
     if (bNeedsTriangleRebuild)
     {
-        // Preview canvases are editor caches for the active slot only. Keeping one full
-        // working canvas per visited slot makes memory scale with navigation history.
-        ReleaseAccumulatedPreviewStates();
+        PrepareAccumulatedPreviewStatesForSlot(
+            InBrushSettings.MaterialSlotIndex,
+            InBrushSettings.UVChannelIndex);
         ReleaseTransientProceduralPreviewState();
     }
     else if (bLeavingProceduralRidgeMode)
@@ -761,8 +908,9 @@ void SWetWrinkleViewport::SetBrushSettings(const FWetWrinkleBrushSettings& InBru
 
     if (bNeedsTriangleRebuild)
     {
+        CurrentSurfaceHit = FWetWrinkleSurfaceHit();
+        ClearBrushCursor();
         RebuildHitTriangles();
-        RefreshStoredStampOverlay(false);
     }
 
     if (BrushSettings.ToolMode == EWetWrinkleToolMode::ProceduralRidgeStroke && TransientProceduralStrokeHits.Num() >= 2)
@@ -778,27 +926,129 @@ void SWetWrinkleViewport::SetBrushSettings(const FWetWrinkleBrushSettings& InBru
     Invalidate();
 }
 
-void SWetWrinkleViewport::SetGeneratedNormalPreviewTexture(
+void SWetWrinkleViewport::SetBrushTopology(
     const int32 MaterialSlotIndex,
-    const int32 UVChannelIndex,
-    UTexture2D* GeneratedNormalTexture)
+    const int32 UVChannelIndex)
 {
-    GeneratedNormalPreviewMaterialSlotIndex = MaterialSlotIndex;
-    GeneratedNormalPreviewUVChannelIndex = UVChannelIndex;
-    GeneratedNormalPreviewTexture = GeneratedNormalTexture;
-    MarkPreviewMaterialsNeedReapply();
+    TRACE_CPUPROFILER_EVENT_SCOPE(SWetWrinkleViewport_SetBrushTopology);
+
+    if (BrushSettings.MaterialSlotIndex == MaterialSlotIndex &&
+        BrushSettings.UVChannelIndex == UVChannelIndex)
+    {
+        return;
+    }
+
+    PrepareAccumulatedPreviewStatesForSlot(MaterialSlotIndex, UVChannelIndex);
+    ReleaseTransientProceduralPreviewState();
+    BrushSettings.MaterialSlotIndex = MaterialSlotIndex;
+    BrushSettings.UVChannelIndex = UVChannelIndex;
+    ApplyMaterialSlotVisibility();
+
+    CurrentSurfaceHit = FWetWrinkleSurfaceHit();
+    ClearBrushCursor();
+    RebuildHitTriangles();
     RefreshWrinklePreviewMaterials();
     Invalidate();
 }
 
-void SWetWrinkleViewport::ClearGeneratedNormalPreviewTexture()
+void SWetWrinkleViewport::UpdateBrushPreviewSettings(
+    const FWetWrinkleBrushSettings& InBrushSettings)
 {
+    TRACE_CPUPROFILER_EVENT_SCOPE(SWetWrinkleViewport_UpdateBrushPreviewSettings);
+
+    ensureMsgf(
+        BrushSettings.MaterialSlotIndex == InBrushSettings.MaterialSlotIndex &&
+            BrushSettings.UVChannelIndex == InBrushSettings.UVChannelIndex,
+        TEXT("UpdateBrushPreviewSettings cannot change wrinkle topology. Use SetBrushTopology first."));
+
+    const int32 MaterialSlotIndex = BrushSettings.MaterialSlotIndex;
+    const int32 UVChannelIndex = BrushSettings.UVChannelIndex;
+    const float PreviewWetness = BrushSettings.PreviewWetness;
+    const bool bLeavingProceduralRidgeMode =
+        BrushSettings.ToolMode == EWetWrinkleToolMode::ProceduralRidgeStroke &&
+        InBrushSettings.ToolMode != EWetWrinkleToolMode::ProceduralRidgeStroke;
+
+    BrushSettings = InBrushSettings;
+    BrushSettings.MaterialSlotIndex = MaterialSlotIndex;
+    BrushSettings.UVChannelIndex = UVChannelIndex;
+    BrushSettings.PreviewWetness = PreviewWetness;
+
+    if (bLeavingProceduralRidgeMode)
+    {
+        ReleaseTransientProceduralPreviewState();
+        RefreshWrinklePreviewTransientParameters();
+    }
+    else if (BrushSettings.ToolMode == EWetWrinkleToolMode::ProceduralRidgeStroke &&
+             TransientProceduralStrokeHits.Num() >= 2)
+    {
+        SetTransientProceduralStroke(
+            TransientProceduralStrokeHits,
+            bTransientProceduralStartJunction,
+            bTransientProceduralEndJunction);
+    }
+
+    RefreshBrushCursor();
+    RefreshWrinklePreviewHoverParameters();
+    Invalidate();
+}
+
+void SWetWrinkleViewport::SetPreviewWetness(const float PreviewWetness)
+{
+    const float ClampedWetness = FMath::Clamp(PreviewWetness, 0.0f, 1.0f);
+    if (FMath::IsNearlyEqual(BrushSettings.PreviewWetness, ClampedWetness))
+    {
+        return;
+    }
+
+    BrushSettings.PreviewWetness = ClampedWetness;
+    RefreshWrinklePreviewWetnessParameter();
+    Invalidate();
+}
+
+void SWetWrinkleViewport::SetGeneratedNormalPreviewTexture(
+    const int32 MaterialSlotIndex,
+    const int32 UVChannelIndex,
+    UTexture2D* GeneratedNormalTexture,
+    const bool bRefreshPreview)
+{
+    if (bGeneratedNormalPreviewOverrideActive &&
+        GeneratedNormalPreviewMaterialSlotIndex == MaterialSlotIndex &&
+        GeneratedNormalPreviewUVChannelIndex == UVChannelIndex &&
+        GeneratedNormalPreviewTexture == GeneratedNormalTexture)
+    {
+        return;
+    }
+
+    bGeneratedNormalPreviewOverrideActive = true;
+    GeneratedNormalPreviewMaterialSlotIndex = MaterialSlotIndex;
+    GeneratedNormalPreviewUVChannelIndex = UVChannelIndex;
+    GeneratedNormalPreviewTexture = GeneratedNormalTexture;
+    if (bRefreshPreview)
+    {
+        RefreshWrinklePreviewAccumulatedParameters();
+        Invalidate();
+    }
+}
+
+void SWetWrinkleViewport::ClearGeneratedNormalPreviewTexture(const bool bRefreshPreview)
+{
+    if (!bGeneratedNormalPreviewOverrideActive &&
+        GeneratedNormalPreviewMaterialSlotIndex == INDEX_NONE &&
+        GeneratedNormalPreviewUVChannelIndex == INDEX_NONE &&
+        GeneratedNormalPreviewTexture == nullptr)
+    {
+        return;
+    }
+
+    bGeneratedNormalPreviewOverrideActive = false;
     GeneratedNormalPreviewMaterialSlotIndex = INDEX_NONE;
     GeneratedNormalPreviewUVChannelIndex = INDEX_NONE;
     GeneratedNormalPreviewTexture = nullptr;
-    MarkPreviewMaterialsNeedReapply();
-    RefreshWrinklePreviewMaterials();
-    Invalidate();
+    if (bRefreshPreview)
+    {
+        RefreshWrinklePreviewAccumulatedParameters();
+        Invalidate();
+    }
 }
 
 void SWetWrinkleViewport::RefreshStoredStampOverlay(bool bRebuildAccumulatedPreview)
@@ -808,18 +1058,7 @@ void SWetWrinkleViewport::RefreshStoredStampOverlay(bool bRebuildAccumulatedPrev
         MarkAccumulatedPreviewStatesDirty();
     }
 
-    RefreshWrinklePreviewMaterials();
-    Invalidate();
-}
-
-void SWetWrinkleViewport::SetSelectedStrokeGuid(const FGuid& InStrokeGuid)
-{
-    if (SelectedStrokeGuid == InStrokeGuid)
-    {
-        return;
-    }
-
-    SelectedStrokeGuid = InStrokeGuid;
+    RefreshWrinklePreviewAccumulatedParameters();
     Invalidate();
 }
 
@@ -852,32 +1091,46 @@ void SWetWrinkleViewport::SetTransientProceduralStroke(
     TransientProceduralStrokeHits = SurfaceHits;
     bTransientProceduralStartJunction = bStartJunction;
     bTransientProceduralEndJunction = bEndJunction;
+    EditedProceduralStrokePreview.Reset();
     PendingTransientProceduralStroke.Reset();
     if (bTransientProceduralPreviewBound)
     {
         bTransientProceduralPreviewBound = false;
-        RefreshWrinklePreviewMaterials();
+        RefreshWrinklePreviewTransientParameters();
     }
     Invalidate();
 }
 
 void SWetWrinkleViewport::PreviewEditedProceduralStroke(const FWetProceduralRidgeStroke& Stroke)
 {
+    EditedProceduralStrokePreview = Stroke;
     PendingTransientProceduralStroke = Stroke;
     Invalidate();
 }
 
-void SWetWrinkleViewport::SetEditingProceduralStrokeGuid(const FGuid& InStrokeGuid)
+bool SWetWrinkleViewport::SetEditingProceduralStrokeGuid(
+    const FGuid& InStrokeGuid,
+    const bool bRefreshPreview)
 {
     if (EditingProceduralStrokeGuid == InStrokeGuid)
     {
-        return;
+        return false;
     }
 
     EditingProceduralStrokeGuid = InStrokeGuid;
+    if (!EditingProceduralStrokeGuid.IsValid() ||
+        (EditedProceduralStrokePreview.IsSet() &&
+         EditedProceduralStrokePreview->StrokeGuid != EditingProceduralStrokeGuid))
+    {
+        EditedProceduralStrokePreview.Reset();
+    }
     MarkAccumulatedPreviewStatesDirty();
-    RefreshWrinklePreviewMaterials();
-    Invalidate();
+    if (bRefreshPreview)
+    {
+        RefreshWrinklePreviewAccumulatedParameters();
+        Invalidate();
+    }
+    return true;
 }
 
 int32 SWetWrinkleViewport::FindNearestProceduralStrokePoint(
@@ -910,90 +1163,29 @@ int32 SWetWrinkleViewport::FindNearestProceduralStrokePoint(
     return NearestPointIndex;
 }
 
-void SWetWrinkleViewport::ClearTransientProceduralStroke()
+bool SWetWrinkleViewport::ClearTransientProceduralStroke(const bool bRefreshPreview)
 {
-    if (TransientProceduralStrokeHits.IsEmpty() && TransientProceduralPreviewState.NormalTexture == nullptr)
+    const bool bHadVisibleTransientPreview =
+        !TransientProceduralStrokeHits.IsEmpty() ||
+        EditedProceduralStrokePreview.IsSet() ||
+        PendingTransientProceduralStroke.IsSet() ||
+        bTransientProceduralPreviewBound;
+    if (!bHadVisibleTransientPreview)
     {
-        return;
+        return false;
     }
 
     TransientProceduralStrokeHits.Reset();
     bTransientProceduralStartJunction = false;
     bTransientProceduralEndJunction = false;
     bTransientProceduralPreviewBound = false;
+    EditedProceduralStrokePreview.Reset();
     PendingTransientProceduralStroke.Reset();
-    RefreshWrinklePreviewMaterials();
-    Invalidate();
-}
-
-void SWetWrinkleViewport::PreviewBrushAtUV(int32 MaterialSlotIndex, int32 UVChannelIndex, const FVector2D& UV)
-{
-    TArray<FWetWrinkleProjectedSurface> ProjectedSurfaces;
-    FindProjectedSurfacesAtUV(MaterialSlotIndex, UVChannelIndex, UV, ProjectedSurfaces);
-    if (ProjectedSurfaces.Num() == 0)
+    if (bRefreshPreview)
     {
-        ClearBrushCursor();
+        RefreshWrinklePreviewTransientParameters();
         Invalidate();
-        return;
     }
-
-    const FWetWrinkleProjectedSurface& Surface = ProjectedSurfaces[0];
-    CurrentSurfaceHit = FWetWrinkleSurfaceHit();
-    CurrentSurfaceHit.bHit = true;
-    CurrentSurfaceHit.MaterialSlotIndex = Surface.MaterialSlotIndex;
-    CurrentSurfaceHit.TriangleID = Surface.TriangleID;
-    CurrentSurfaceHit.UVIslandID = Surface.UVIslandID;
-    CurrentSurfaceHit.UVChannelIndex = UVChannelIndex;
-    CurrentSurfaceHit.WorldPosition = Surface.WorldPosition;
-    CurrentSurfaceHit.WorldNormal = Surface.WorldNormal;
-    CurrentSurfaceHit.WorldTangent = Surface.WorldTangent;
-    CurrentSurfaceHit.WorldBitangent = Surface.WorldBitangent;
-    CurrentSurfaceHit.UV = UV;
-    RefreshBrushCursor();
-    RefreshWrinklePreviewMaterials();
-    Invalidate();
-}
-
-void SWetWrinkleViewport::ClearExternalBrushPreview()
-{
-    ClearBrushCursor();
-    CurrentSurfaceHit = FWetWrinkleSurfaceHit();
-    RefreshWrinklePreviewMaterials();
-    Invalidate();
-}
-
-bool SWetWrinkleViewport::TryBuildSurfaceHitAtUV(int32 MaterialSlotIndex, int32 UVChannelIndex, const FVector2D& UV, FWetWrinkleSurfaceHit& OutHit) const
-{
-    OutHit = FWetWrinkleSurfaceHit();
-    OutHit.UVChannelIndex = UVChannelIndex;
-    OutHit.UV = UV;
-
-    TArray<FWetWrinkleProjectedSurface> ProjectedSurfaces;
-    FindProjectedSurfacesAtUV(MaterialSlotIndex, UVChannelIndex, UV, ProjectedSurfaces);
-    if (ProjectedSurfaces.Num() == 0 || PreviewMeshComponent == nullptr)
-    {
-        return false;
-    }
-
-    const FWetWrinkleProjectedSurface& Surface = ProjectedSurfaces[0];
-    const FTransform ComponentTransform = PreviewMeshComponent->GetComponentTransform();
-
-    OutHit.bHit = true;
-    OutHit.MaterialSlotIndex = Surface.MaterialSlotIndex;
-    OutHit.TriangleID = Surface.TriangleID;
-    OutHit.UVIslandID = Surface.UVIslandID;
-    OutHit.UVChannelIndex = UVChannelIndex;
-    OutHit.WorldPosition = Surface.WorldPosition;
-    OutHit.WorldNormal = Surface.WorldNormal;
-    OutHit.WorldTangent = Surface.WorldTangent;
-    OutHit.WorldBitangent = Surface.WorldBitangent;
-    OutHit.LocalPosition = ComponentTransform.InverseTransformPosition(Surface.WorldPosition);
-    OutHit.LocalNormal = ComponentTransform.InverseTransformVectorNoScale(Surface.WorldNormal).GetSafeNormal(UE_SMALL_NUMBER, FVector::UpVector);
-    OutHit.LocalTangent = ComponentTransform.InverseTransformVectorNoScale(Surface.WorldTangent).GetSafeNormal(UE_SMALL_NUMBER, FVector::ForwardVector);
-    OutHit.LocalBitangent = ComponentTransform.InverseTransformVectorNoScale(Surface.WorldBitangent).GetSafeNormal(UE_SMALL_NUMBER, FVector::RightVector);
-    OutHit.UV = UV;
-    OutHit.Barycentric = Surface.Barycentric;
-    OutHit.DistanceSq = 0.0;
     return true;
 }
 
@@ -1052,7 +1244,11 @@ bool SWetWrinkleViewport::TraceSurface(const FVector& RayOrigin, const FVector& 
     OutHit = FWetWrinkleSurfaceHit();
     OutHit.UVChannelIndex = HitTriangleUVChannelIndex != INDEX_NONE ? HitTriangleUVChannelIndex : BrushSettings.UVChannelIndex;
 
-    if (PreviewMeshComponent == nullptr || PreviewMeshComponent->GetSkeletalMeshAsset() == nullptr || CachedHitTriangles.Num() == 0)
+    if (BrushSettings.MaterialSlotIndex == INDEX_NONE ||
+        BrushSettings.UVChannelIndex == INDEX_NONE ||
+        PreviewMeshComponent == nullptr ||
+        PreviewMeshComponent->GetSkeletalMeshAsset() == nullptr ||
+        CachedHitTriangles.Num() == 0)
     {
         return false;
     }
@@ -1064,39 +1260,49 @@ bool SWetWrinkleViewport::TraceSurface(const FVector& RayOrigin, const FVector& 
     }
 
     const FVector RayEnd = RayOrigin + SafeRayDirection * 1000000.0;
+    const FTransform ComponentTransform = PreviewMeshComponent->GetComponentTransform();
+    const FVector3f LocalRayOrigin(ComponentTransform.InverseTransformPosition(RayOrigin));
+    const FVector3f LocalRayEnd(ComponentTransform.InverseTransformPosition(RayEnd));
+    float BestSegmentT = TNumericLimits<float>::Max();
 
-    auto TestTriangle = [this, &OutHit, &RayOrigin, &RayEnd, &SafeRayDirection](const FWetWrinkleCachedHitTriangle& Triangle)
+    auto TestTriangle = [
+        this,
+        &OutHit,
+        &RayOrigin,
+        &SafeRayDirection,
+        &ComponentTransform,
+        &LocalRayOrigin,
+        &LocalRayEnd,
+        &BestSegmentT](const FWetWrinkleCachedHitTriangle& Triangle)
     {
-        if (Triangle.WorldBounds.IsValid && !DoesWetWrinkleSegmentIntersectBox(Triangle.WorldBounds.ExpandBy(0.1f), RayOrigin, RayEnd))
+        if (Triangle.LocalBounds.IsValid &&
+            !DoesWetWrinkleSegmentIntersectBox(Triangle.LocalBounds.ExpandBy(0.1f), LocalRayOrigin, LocalRayEnd))
         {
             return;
         }
 
-        FVector IntersectionPoint = FVector::ZeroVector;
-        FVector TriangleNormal = FVector::ZeroVector;
-        if (!FMath::SegmentTriangleIntersection(
-                RayOrigin,
-                RayEnd,
-                Triangle.WorldPositions[0],
-                Triangle.WorldPositions[1],
-                Triangle.WorldPositions[2],
-                IntersectionPoint,
-                TriangleNormal))
+        float SegmentT = 0.0f;
+        FVector3f Barycentric3f = FVector3f::ZeroVector;
+        if (!IntersectWetWrinkleLocalTriangle(
+                LocalRayOrigin,
+                LocalRayEnd,
+                Triangle.LocalPositions[0],
+                Triangle.LocalPositions[1],
+                Triangle.LocalPositions[2],
+                SegmentT,
+                Barycentric3f) ||
+            SegmentT >= BestSegmentT)
         {
             return;
         }
 
+        const FVector3f LocalIntersectionPoint =
+            Triangle.LocalPositions[0] * Barycentric3f.X +
+            Triangle.LocalPositions[1] * Barycentric3f.Y +
+            Triangle.LocalPositions[2] * Barycentric3f.Z;
+        const FVector IntersectionPoint = ComponentTransform.TransformPosition(FVector(LocalIntersectionPoint));
         const double DistanceSq = FVector::DistSquared(RayOrigin, IntersectionPoint);
-        if (DistanceSq >= OutHit.DistanceSq)
-        {
-            return;
-        }
-
-        FVector Normal = Triangle.WorldNormal;
-        if (Normal.IsNearlyZero())
-        {
-            Normal = TriangleNormal.GetSafeNormal();
-        }
+        FVector Normal = ComponentTransform.TransformVectorNoScale(FVector(Triangle.LocalNormal)).GetSafeNormal();
         if (Normal.IsNearlyZero())
         {
             Normal = FVector::UpVector;
@@ -1106,7 +1312,9 @@ bool SWetWrinkleViewport::TraceSurface(const FVector& RayOrigin, const FVector& 
             Normal *= -1.0;
         }
 
-        FVector Tangent = (Triangle.WorldTangent - Normal * FVector::DotProduct(Triangle.WorldTangent, Normal)).GetSafeNormal();
+        const FVector CachedWorldTangent =
+            ComponentTransform.TransformVectorNoScale(FVector(Triangle.LocalTangent)).GetSafeNormal();
+        FVector Tangent = (CachedWorldTangent - Normal * FVector::DotProduct(CachedWorldTangent, Normal)).GetSafeNormal();
         if (Tangent.IsNearlyZero())
         {
             Tangent = MakeWetWrinkleAnyPerpendicular(Normal);
@@ -1118,17 +1326,13 @@ bool SWetWrinkleViewport::TraceSurface(const FVector& RayOrigin, const FVector& 
             Bitangent = MakeWetWrinkleAnyPerpendicular(Normal);
         }
 
-        const FVector Barycentric = ComputeWetWrinkleBarycentric(
-            IntersectionPoint,
-            Triangle.WorldPositions[0],
-            Triangle.WorldPositions[1],
-            Triangle.WorldPositions[2]);
-        const FVector LocalPosition =
-            Triangle.LocalPositions[0] * Barycentric.X +
-            Triangle.LocalPositions[1] * Barycentric.Y +
-            Triangle.LocalPositions[2] * Barycentric.Z;
-        const FVector2D UV = Triangle.UVs[0] * Barycentric.X + Triangle.UVs[1] * Barycentric.Y + Triangle.UVs[2] * Barycentric.Z;
+        const FVector Barycentric(Barycentric3f);
+        const FVector2f UV2f =
+            Triangle.UVs[0] * Barycentric3f.X +
+            Triangle.UVs[1] * Barycentric3f.Y +
+            Triangle.UVs[2] * Barycentric3f.Z;
 
+        BestSegmentT = SegmentT;
         OutHit.bHit = true;
         OutHit.MaterialSlotIndex = Triangle.MaterialSlotIndex;
         OutHit.TriangleID = Triangle.TriangleID;
@@ -1138,11 +1342,11 @@ bool SWetWrinkleViewport::TraceSurface(const FVector& RayOrigin, const FVector& 
         OutHit.WorldNormal = Normal;
         OutHit.WorldTangent = Tangent;
         OutHit.WorldBitangent = Bitangent;
-        OutHit.LocalPosition = LocalPosition;
-        OutHit.LocalNormal = PreviewMeshComponent->GetComponentTransform().InverseTransformVectorNoScale(Normal).GetSafeNormal(UE_SMALL_NUMBER, FVector::UpVector);
-        OutHit.LocalTangent = PreviewMeshComponent->GetComponentTransform().InverseTransformVectorNoScale(Tangent).GetSafeNormal(UE_SMALL_NUMBER, FVector::ForwardVector);
-        OutHit.LocalBitangent = PreviewMeshComponent->GetComponentTransform().InverseTransformVectorNoScale(Bitangent).GetSafeNormal(UE_SMALL_NUMBER, FVector::RightVector);
-        OutHit.UV = UV;
+        OutHit.LocalPosition = FVector(LocalIntersectionPoint);
+        OutHit.LocalNormal = ComponentTransform.InverseTransformVectorNoScale(Normal).GetSafeNormal(UE_SMALL_NUMBER, FVector::UpVector);
+        OutHit.LocalTangent = ComponentTransform.InverseTransformVectorNoScale(Tangent).GetSafeNormal(UE_SMALL_NUMBER, FVector::ForwardVector);
+        OutHit.LocalBitangent = ComponentTransform.InverseTransformVectorNoScale(Bitangent).GetSafeNormal(UE_SMALL_NUMBER, FVector::RightVector);
+        OutHit.UV = FVector2D(UV2f);
         OutHit.Barycentric = Barycentric;
         OutHit.DistanceSq = DistanceSq;
     };
@@ -1160,7 +1364,8 @@ bool SWetWrinkleViewport::TraceSurface(const FVector& RayOrigin, const FVector& 
             }
 
             const FWetWrinkleHitBVHNode& Node = HitBVHNodes[NodeIndex];
-            if (!Node.Bounds.IsValid || !DoesWetWrinkleSegmentIntersectBox(Node.Bounds.ExpandBy(0.1f), RayOrigin, RayEnd))
+            if (!Node.Bounds.IsValid ||
+                !DoesWetWrinkleSegmentIntersectBox(Node.Bounds.ExpandBy(0.1f), LocalRayOrigin, LocalRayEnd))
             {
                 continue;
             }
@@ -1500,12 +1705,59 @@ void SWetWrinkleViewport::RefreshWrinklePreviewMaterials()
             bPreviewMaterialsNeedReapply = true;
         }
         ResetPreviewMaterialParameters(ActiveMaterialSlotIndex);
+    }
 
+    RefreshWrinklePreviewWetnessParameter();
+    RefreshWrinklePreviewAccumulatedParameters();
+    RefreshWrinklePreviewTransientParameters();
+    RefreshWrinklePreviewHoverParameters();
+}
+
+void SWetWrinkleViewport::RefreshWrinklePreviewWetnessParameter()
+{
+    const int32 ActiveMaterialSlotIndex = ResolveActivePreviewMaterialSlot();
+    if (ActiveMaterialSlotIndex != INDEX_NONE)
+    {
+        EnsurePreviewMaterialForSlot(ActiveMaterialSlotIndex);
         if (PreviewMaterialSlots.IsValidIndex(ActiveMaterialSlotIndex))
         {
             FWetWrinklePreviewMaterialSlotState& SlotState = PreviewMaterialSlots[ActiveMaterialSlotIndex];
             if (SlotState.PreviewStatus == EWetWrinklePreviewMaterialStatus::Ready && SlotState.PreviewMID != nullptr)
             {
+                SlotState.PreviewMID->SetScalarParameterValue(
+                    WetWrinklePreviewMaterialParameters::PreviewWetness,
+                    FMath::Clamp(BrushSettings.PreviewWetness, 0.0f, 1.0f));
+            }
+        }
+    }
+
+    if (bPreviewMaterialsNeedReapply || LastAppliedActivePreviewMaterialSlot != ActiveMaterialSlotIndex)
+    {
+        ApplyPreviewMaterialsToMesh();
+    }
+}
+
+void SWetWrinkleViewport::RefreshWrinklePreviewAccumulatedParameters()
+{
+    const int32 ActiveMaterialSlotIndex = ResolveActivePreviewMaterialSlot();
+    if (ActiveMaterialSlotIndex != INDEX_NONE)
+    {
+        EnsurePreviewMaterialForSlot(ActiveMaterialSlotIndex);
+        if (PreviewMaterialSlots.IsValidIndex(ActiveMaterialSlotIndex))
+        {
+            FWetWrinklePreviewMaterialSlotState& SlotState = PreviewMaterialSlots[ActiveMaterialSlotIndex];
+            if (SlotState.PreviewStatus == EWetWrinklePreviewMaterialStatus::Ready && SlotState.PreviewMID != nullptr)
+            {
+                SlotState.PreviewMID->SetTextureParameterValue(
+                    WetWrinklePreviewMaterialParameters::AccumulatedNormal,
+                    nullptr);
+                SlotState.PreviewMID->SetScalarParameterValue(
+                    WetWrinklePreviewMaterialParameters::AccumulatedEnabled,
+                    0.0f);
+                SlotState.PreviewMID->SetScalarParameterValue(
+                    WetWrinklePreviewMaterialParameters::AccumulatedStrength,
+                    1.0f);
+
                 UTexture2D* PreviewNormalTexture = nullptr;
                 if (GeneratedNormalPreviewTexture != nullptr &&
                     GeneratedNormalPreviewMaterialSlotIndex == ActiveMaterialSlotIndex &&
@@ -1524,12 +1776,40 @@ void SWetWrinkleViewport::RefreshWrinklePreviewMaterials()
                     SlotState.PreviewMID->SetTextureParameterValue(
                         WetWrinklePreviewMaterialParameters::AccumulatedNormal,
                         PreviewNormalTexture);
-                    SlotState.PreviewMID->SetScalarParameterValue(WetWrinklePreviewMaterialParameters::AccumulatedEnabled, 1.0f);
-                    SlotState.PreviewMID->SetScalarParameterValue(WetWrinklePreviewMaterialParameters::AccumulatedStrength, 1.0f);
+                    SlotState.PreviewMID->SetScalarParameterValue(
+                        WetWrinklePreviewMaterialParameters::AccumulatedEnabled,
+                        1.0f);
                 }
+            }
+        }
+    }
+
+    if (bPreviewMaterialsNeedReapply || LastAppliedActivePreviewMaterialSlot != ActiveMaterialSlotIndex)
+    {
+        ApplyPreviewMaterialsToMesh();
+    }
+}
+
+void SWetWrinkleViewport::RefreshWrinklePreviewTransientParameters()
+{
+    const int32 ActiveMaterialSlotIndex = ResolveActivePreviewMaterialSlot();
+    if (ActiveMaterialSlotIndex != INDEX_NONE)
+    {
+        EnsurePreviewMaterialForSlot(ActiveMaterialSlotIndex);
+        if (PreviewMaterialSlots.IsValidIndex(ActiveMaterialSlotIndex))
+        {
+            FWetWrinklePreviewMaterialSlotState& SlotState = PreviewMaterialSlots[ActiveMaterialSlotIndex];
+            if (SlotState.PreviewStatus == EWetWrinklePreviewMaterialStatus::Ready && SlotState.PreviewMID != nullptr)
+            {
+                SlotState.PreviewMID->SetTextureParameterValue(
+                    WetWrinklePreviewMaterialParameters::TransientRidgeNormal,
+                    nullptr);
+                SlotState.PreviewMID->SetScalarParameterValue(
+                    WetWrinklePreviewMaterialParameters::TransientRidgeEnabled,
+                    0.0f);
 
                 if (BrushSettings.ToolMode == EWetWrinkleToolMode::ProceduralRidgeStroke &&
-                    !TransientProceduralStrokeHits.IsEmpty() &&
+                    (!TransientProceduralStrokeHits.IsEmpty() || EditedProceduralStrokePreview.IsSet()) &&
                     TransientProceduralPreviewState.MaterialSlotIndex == ActiveMaterialSlotIndex &&
                     TransientProceduralPreviewState.UVChannelIndex == BrushSettings.UVChannelIndex &&
                     TransientProceduralPreviewState.NormalTexture != nullptr)
@@ -1540,35 +1820,6 @@ void SWetWrinkleViewport::RefreshWrinklePreviewMaterials()
                     SlotState.PreviewMID->SetScalarParameterValue(
                         WetWrinklePreviewMaterialParameters::TransientRidgeEnabled,
                         1.0f);
-                }
-
-                UTexture2D* HoverNormalTexture = BrushSettings.WrinkleNormalTexture;
-                if (BrushSettings.ToolMode == EWetWrinkleToolMode::Patch &&
-                    BrushSettings.bShowPreview && CurrentSurfaceHit.bHit && CurrentSurfaceHit.MaterialSlotIndex == ActiveMaterialSlotIndex &&
-                    CurrentSurfaceHit.UVChannelIndex == BrushSettings.UVChannelIndex && HoverNormalTexture != nullptr)
-                {
-                    SlotState.PreviewMID->SetTextureParameterValue(
-                        WetWrinklePreviewMaterialParameters::HoverNormal,
-                        HoverNormalTexture);
-                    SlotState.PreviewMID->SetScalarParameterValue(WetWrinklePreviewMaterialParameters::HoverEnabled, 1.0f);
-                    SlotState.PreviewMID->SetVectorParameterValue(
-                        WetWrinklePreviewMaterialParameters::HoverCenterUV,
-                        FLinearColor(CurrentSurfaceHit.UV.X, CurrentSurfaceHit.UV.Y, 0.0f, 0.0f));
-                    SlotState.PreviewMID->SetScalarParameterValue(
-                        WetWrinklePreviewMaterialParameters::HoverRadiusUV,
-                        FMath::Max(BrushSettings.BrushRadiusUV, UE_SMALL_NUMBER));
-                    SlotState.PreviewMID->SetScalarParameterValue(
-                        WetWrinklePreviewMaterialParameters::HoverRotation,
-                        BrushSettings.RotationRadians);
-                    SlotState.PreviewMID->SetVectorParameterValue(
-                        WetWrinklePreviewMaterialParameters::HoverScale,
-                        FLinearColor(1.0f, 1.0f, 0.0f, 0.0f));
-                    SlotState.PreviewMID->SetScalarParameterValue(
-                        WetWrinklePreviewMaterialParameters::HoverStrength,
-                        FMath::Clamp(BrushSettings.Strength, 0.0f, 4.0f));
-                    SlotState.PreviewMID->SetScalarParameterValue(
-                        WetWrinklePreviewMaterialParameters::HoverFalloff,
-                        FMath::Clamp(BrushSettings.Falloff, 0.0f, 1.0f));
                 }
             }
         }
@@ -1662,6 +1913,8 @@ void SWetWrinkleViewport::RefreshWrinklePreviewHoverParameters()
 
 bool SWetWrinkleViewport::EnsurePreviewMaterialForSlot(int32 MaterialSlotIndex)
 {
+    TRACE_CPUPROFILER_EVENT_SCOPE(SWetWrinkleViewport_EnsurePreviewMaterialForSlot);
+
     if (!PreviewMaterialSlots.IsValidIndex(MaterialSlotIndex))
     {
         return false;
@@ -1696,6 +1949,34 @@ bool SWetWrinkleViewport::EnsurePreviewMaterialForSlot(int32 MaterialSlotIndex)
         SlotState.PreviewStatus = EWetWrinklePreviewMaterialStatus::Unsupported;
         SlotState.PreviewBuildError = TEXT("Preview source material is not available.");
         return false;
+    }
+
+    const FWetWrinklePreviewMaterialSlotState* SharedParentState =
+        PreviewMaterialSlots.FindByPredicate(
+            [&SlotState, RequiredUVChannelIndex](const FWetWrinklePreviewMaterialSlotState& Candidate)
+            {
+                return &Candidate != &SlotState &&
+                       Candidate.PreviewStatus == EWetWrinklePreviewMaterialStatus::Ready &&
+                       Candidate.PreviewSourceMaterial == SlotState.PreviewSourceMaterial &&
+                       Candidate.PreviewUVChannelIndex == RequiredUVChannelIndex &&
+                       Candidate.bUsesDwcWetMaterial == SlotState.bUsesDwcWetMaterial &&
+                       Candidate.TransientPreviewParent != nullptr;
+            });
+    if (SharedParentState != nullptr)
+    {
+        SlotState.TransientPreviewMaterial = SharedParentState->TransientPreviewMaterial;
+        SlotState.TransientPreviewParent = SharedParentState->TransientPreviewParent;
+        SlotState.PreviewMID = UMaterialInstanceDynamic::Create(
+            SlotState.TransientPreviewParent,
+            GetTransientPackage());
+        if (SlotState.PreviewMID != nullptr)
+        {
+            SlotState.PreviewMID->SetFlags(RF_Transient);
+            SlotState.PreviewStatus = EWetWrinklePreviewMaterialStatus::Ready;
+            SlotState.PreviewBuildError.Reset();
+            ResetPreviewMaterialParameters(MaterialSlotIndex);
+            return true;
+        }
     }
 
     FWetWrinklePreviewMaterialBuildArgs BuildArgs;
@@ -1786,7 +2067,8 @@ void SWetWrinkleViewport::AppendAccumulatedPreviewStamp(const FWetWrinklePatchPl
         !PreviewState->AccumulatedNormalTexture->GetPlatformData()->Mips.IsValidIndex(0))
     {
         RebuildAccumulatedPreviewTexture(*PreviewState);
-        RefreshWrinklePreviewMaterials();
+        RefreshWrinklePreviewAccumulatedParameters();
+        PruneAccumulatedPreviewStates(Stamp.MaterialSlotIndex, Stamp.UVChannelIndex);
         return;
     }
 
@@ -1797,7 +2079,8 @@ void SWetWrinkleViewport::AppendAccumulatedPreviewStamp(const FWetWrinklePatchPl
         PreviewState->AccumulatedNormalTexture->GetSizeY() != PreviewState->TextureSize.Y)
     {
         RebuildAccumulatedPreviewTexture(*PreviewState);
-        RefreshWrinklePreviewMaterials();
+        RefreshWrinklePreviewAccumulatedParameters();
+        PruneAccumulatedPreviewStates(Stamp.MaterialSlotIndex, Stamp.UVChannelIndex);
         return;
     }
 
@@ -1805,7 +2088,8 @@ void SWetWrinkleViewport::AppendAccumulatedPreviewStamp(const FWetWrinklePatchPl
         PreviewState->WorkingPixels.Num() != PreviewState->WorkingTextureSize.X * PreviewState->WorkingTextureSize.Y)
     {
         RebuildAccumulatedPreviewTexture(*PreviewState);
-        RefreshWrinklePreviewMaterials();
+        RefreshWrinklePreviewAccumulatedParameters();
+        PruneAccumulatedPreviewStates(Stamp.MaterialSlotIndex, Stamp.UVChannelIndex);
         return;
     }
 
@@ -1834,6 +2118,7 @@ void SWetWrinkleViewport::AppendAccumulatedPreviewStamp(const FWetWrinklePatchPl
         PreviewState->Pixels,
         FinalDirtyRect);
     PreviewState->bDirty = false;
+    PruneAccumulatedPreviewStates(Stamp.MaterialSlotIndex, Stamp.UVChannelIndex);
 }
 
 void SWetWrinkleViewport::AppendAccumulatedPreviewProceduralStroke(const FWetProceduralRidgeStroke& Stroke)
@@ -1856,7 +2141,8 @@ void SWetWrinkleViewport::AppendAccumulatedPreviewProceduralStroke(const FWetPro
         PreviewState->WorkingPixels.Num() != PreviewState->WorkingTextureSize.X * PreviewState->WorkingTextureSize.Y)
     {
         RebuildAccumulatedPreviewTexture(*PreviewState);
-        RefreshWrinklePreviewMaterials();
+        RefreshWrinklePreviewAccumulatedParameters();
+        PruneAccumulatedPreviewStates(Stroke.MaterialSlotIndex, Stroke.UVChannelIndex);
         return;
     }
 
@@ -1883,17 +2169,120 @@ void SWetWrinkleViewport::AppendAccumulatedPreviewProceduralStroke(const FWetPro
             FinalDirtyRect);
     }
     PreviewState->bDirty = false;
+    PruneAccumulatedPreviewStates(Stroke.MaterialSlotIndex, Stroke.UVChannelIndex);
 }
 
 void SWetWrinkleViewport::ReleaseAccumulatedPreviewStates()
 {
+    for (FWetWrinkleAccumulatedPreviewState& PreviewState : AccumulatedPreviewStates)
+    {
+        ReleaseAccumulatedPreviewStateResources(PreviewState, true);
+    }
     AccumulatedPreviewStates.Reset();
+    AccumulatedPreviewUseSerial = 0;
+}
+
+void SWetWrinkleViewport::ReleaseAccumulatedPreviewStateResources(
+    FWetWrinkleAccumulatedPreviewState& PreviewState,
+    const bool bClearMaterialBinding)
+{
+    if (bClearMaterialBinding && PreviewMaterialSlots.IsValidIndex(PreviewState.MaterialSlotIndex))
+    {
+        FWetWrinklePreviewMaterialSlotState& SlotState = PreviewMaterialSlots[PreviewState.MaterialSlotIndex];
+        if (SlotState.PreviewMID != nullptr)
+        {
+            SlotState.PreviewMID->SetTextureParameterValue(
+                WetWrinklePreviewMaterialParameters::AccumulatedNormal,
+                nullptr);
+            SlotState.PreviewMID->SetScalarParameterValue(
+                WetWrinklePreviewMaterialParameters::AccumulatedEnabled,
+                0.0f);
+        }
+    }
+
+    PreviewState.AccumulatedNormalTexture = nullptr;
+    PreviewState.Pixels.Empty();
+    PreviewState.WorkingPixels.Empty();
+}
+
+void SWetWrinkleViewport::PrepareAccumulatedPreviewStatesForSlot(
+    const int32 MaterialSlotIndex,
+    const int32 UVChannelIndex)
+{
+    for (FWetWrinkleAccumulatedPreviewState& PreviewState : AccumulatedPreviewStates)
+    {
+        if (PreviewState.MaterialSlotIndex == MaterialSlotIndex &&
+            PreviewState.UVChannelIndex == UVChannelIndex)
+        {
+            PreviewState.LastUsedSerial = ++AccumulatedPreviewUseSerial;
+            continue;
+        }
+
+        // The high-resolution working buffer is only useful while editing this slot.
+        // Preserve the smaller final pixels/texture so revisiting a clean slot is instant.
+        PreviewState.WorkingPixels.Empty();
+    }
+
+    PruneAccumulatedPreviewStates(MaterialSlotIndex, UVChannelIndex);
+}
+
+void SWetWrinkleViewport::PruneAccumulatedPreviewStates(
+    const int32 MaterialSlotIndex,
+    const int32 UVChannelIndex)
+{
+    const uint64 BudgetBytes = ResolveCacheBudgetBytes(CVarWetWrinklePreviewCacheBudgetMB);
+    uint64 ResidentBytes = EstimateAccumulatedPreviewCacheBytes(AccumulatedPreviewStates);
+    while (ResidentBytes > BudgetBytes)
+    {
+        int32 OldestIndex = INDEX_NONE;
+        uint64 OldestSerial = MAX_uint64;
+        for (int32 StateIndex = 0; StateIndex < AccumulatedPreviewStates.Num(); ++StateIndex)
+        {
+            const FWetWrinkleAccumulatedPreviewState& PreviewState = AccumulatedPreviewStates[StateIndex];
+            if (PreviewState.MaterialSlotIndex == MaterialSlotIndex &&
+                PreviewState.UVChannelIndex == UVChannelIndex)
+            {
+                continue;
+            }
+
+            if (PreviewState.LastUsedSerial < OldestSerial)
+            {
+                OldestSerial = PreviewState.LastUsedSerial;
+                OldestIndex = StateIndex;
+            }
+        }
+
+        if (OldestIndex == INDEX_NONE)
+        {
+            break;
+        }
+
+        const FWetWrinkleAccumulatedPreviewState& EvictedState = AccumulatedPreviewStates[OldestIndex];
+        const uint64 EvictedBytes = EstimateAccumulatedPreviewStateDynamicBytes(EvictedState);
+        UE_LOG(
+            LogWetWrinklePreviewViewport,
+            VeryVerbose,
+            TEXT("Evicting accumulated preview cache for slot %d UV %d (%llu bytes, resident=%llu, budget=%llu)."),
+            EvictedState.MaterialSlotIndex,
+            EvictedState.UVChannelIndex,
+            EvictedBytes,
+            ResidentBytes,
+            BudgetBytes);
+        const bool bClearMaterialBinding =
+            EvictedState.MaterialSlotIndex != ResolveActivePreviewMaterialSlot();
+        ReleaseAccumulatedPreviewStateResources(
+            AccumulatedPreviewStates[OldestIndex],
+            bClearMaterialBinding);
+        AccumulatedPreviewStates.RemoveAtSwap(OldestIndex, 1, EAllowShrinking::No);
+        ResidentBytes = EstimateAccumulatedPreviewCacheBytes(AccumulatedPreviewStates);
+    }
 }
 
 void SWetWrinkleViewport::ReleaseTransientProceduralPreviewState()
 {
     TransientProceduralPreviewState = FWetProceduralRidgeTransientPreviewState();
     bTransientProceduralPreviewBound = false;
+    EditedProceduralStrokePreview.Reset();
     PendingTransientProceduralStroke.Reset();
     PendingTransientProceduralUploadRect = FIntRect();
     bHasPendingTransientProceduralUpload = false;
@@ -2106,8 +2495,8 @@ bool SWetWrinkleViewport::UpdateTransientProceduralPreview(const FWetProceduralR
     TransientProceduralPreviewState.PreviousNaturalVariation = Stroke.NaturalVariation;
     if (!bTransientProceduralPreviewBound)
     {
-        RefreshWrinklePreviewMaterials();
         bTransientProceduralPreviewBound = true;
+        RefreshWrinklePreviewTransientParameters();
     }
     return true;
 }
@@ -2134,6 +2523,7 @@ FWetWrinkleAccumulatedPreviewState* SWetWrinkleViewport::FindOrAddAccumulatedPre
     {
         if (PreviewState.MaterialSlotIndex == MaterialSlotIndex && PreviewState.UVChannelIndex == UVChannelIndex)
         {
+            PreviewState.LastUsedSerial = ++AccumulatedPreviewUseSerial;
             const FIntPoint ExpectedTextureSize = ComputeWetWrinklePreviewTextureSize(WetClothingAsset.Get());
             const FIntPoint ExpectedWorkingTextureSize =
                 WetWrinkleTextureRaster::ResolveWorkingTextureSize(ExpectedTextureSize);
@@ -2160,7 +2550,14 @@ FWetWrinkleAccumulatedPreviewState* SWetWrinkleViewport::FindOrAddAccumulatedPre
     NewState.TextureSize = ComputeWetWrinklePreviewTextureSize(WetClothingAsset.Get());
     NewState.WorkingTextureSize = WetWrinkleTextureRaster::ResolveWorkingTextureSize(NewState.TextureSize);
     NewState.bDirty = true;
-    return &NewState;
+    NewState.LastUsedSerial = ++AccumulatedPreviewUseSerial;
+    PruneAccumulatedPreviewStates(MaterialSlotIndex, UVChannelIndex);
+    return AccumulatedPreviewStates.FindByPredicate(
+        [MaterialSlotIndex, UVChannelIndex](const FWetWrinkleAccumulatedPreviewState& PreviewState)
+        {
+            return PreviewState.MaterialSlotIndex == MaterialSlotIndex &&
+                   PreviewState.UVChannelIndex == UVChannelIndex;
+        });
 }
 
 UTexture2D* SWetWrinkleViewport::ResolveAccumulatedPreviewTexture(UTexture* SourceTexture, int32 MaterialSlotIndex, int32 UVChannelIndex)
@@ -2173,14 +2570,19 @@ UTexture2D* SWetWrinkleViewport::ResolveAccumulatedPreviewTexture(UTexture* Sour
 
     if (PreviewState->bDirty && !RebuildAccumulatedPreviewTexture(*PreviewState))
     {
+        PruneAccumulatedPreviewStates(MaterialSlotIndex, UVChannelIndex);
         return nullptr;
     }
 
-    return PreviewState->AccumulatedNormalTexture;
+    UTexture2D* Result = PreviewState->AccumulatedNormalTexture;
+    PruneAccumulatedPreviewStates(MaterialSlotIndex, UVChannelIndex);
+    return Result;
 }
 
 bool SWetWrinkleViewport::RebuildAccumulatedPreviewTexture(FWetWrinkleAccumulatedPreviewState& PreviewState)
 {
+    TRACE_CPUPROFILER_EVENT_SCOPE(SWetWrinkleViewport_RebuildAccumulatedPreviewTexture);
+
     PreviewState.bDirty = false;
 
     if (PreviewState.MaterialSlotIndex == INDEX_NONE || PreviewState.UVChannelIndex < 0)
@@ -2304,7 +2706,110 @@ void SWetWrinkleViewport::ApplyMaterialSlotVisibility()
     }
 }
 
-void SWetWrinkleViewport::RebuildHitTriangles()
+void SWetWrinkleViewport::InvalidateAccumulatedPreviewTextures()
+{
+    MarkAccumulatedPreviewStatesDirty();
+}
+
+TOptional<FWetWrinkleHitCacheKey> SWetWrinkleViewport::MakeHitCacheKey(
+    const USkeletalMesh* Mesh,
+    const int32 LODIndex,
+    const int32 UVChannelIndex,
+    const int32 MaterialSlotIndex) const
+{
+    if (Mesh == nullptr || UVChannelIndex == INDEX_NONE)
+    {
+        return {};
+    }
+
+    const FSkeletalMeshRenderData* RenderData = Mesh->GetResourceForRendering();
+    if (RenderData == nullptr || !RenderData->LODRenderData.IsValidIndex(LODIndex))
+    {
+        return {};
+    }
+
+    FWetWrinkleHitCacheKey Key;
+    Key.Mesh = Mesh;
+    Key.LODRenderDataIdentity = &RenderData->LODRenderData[LODIndex];
+    Key.LODIndex = LODIndex;
+    Key.UVChannelIndex = UVChannelIndex;
+    Key.MaterialSlotIndex = MaterialSlotIndex;
+
+    const UWetClothingAsset* Asset = WetClothingAsset.Get();
+    if (Asset != nullptr)
+    {
+        if (const FDWCDataUVLODMetadata* DataUVMetadata = Asset->FindDataUVMetadataForLOD(LODIndex);
+            DataUVMetadata != nullptr && DataUVMetadata->UVChannelIndex == UVChannelIndex)
+        {
+            Key.TopologySignature = DataUVMetadata->DataUVOutputSignature;
+        }
+#if WITH_EDITORONLY_DATA
+        else if (const FDWCEditorUVTopologyData* OriginalUVTopology = Asset->FindOriginalUVTopologyForLOD(LODIndex);
+                 OriginalUVTopology != nullptr && OriginalUVTopology->UVChannelIndex == UVChannelIndex)
+        {
+            Key.TopologySignature = OriginalUVTopology->BuildSignature;
+        }
+#endif
+        else
+        {
+            Key.TopologySignature = Asset->GetSourceMeshSignature();
+        }
+    }
+
+    return Key;
+}
+
+bool SWetWrinkleViewport::RestoreHitCache(const FWetWrinkleHitCacheKey& Key)
+{
+    if (ActiveHitCacheKey.IsSet() && ActiveHitCacheKey.GetValue() == Key)
+    {
+        return true;
+    }
+
+    StoreActiveHitCache();
+
+    FWetWrinkleHitCacheEntry* Entry = InactiveHitCaches.Find(Key);
+    if (Entry == nullptr)
+    {
+        PruneInactiveHitCaches();
+        return false;
+    }
+
+    CachedHitTriangles = MoveTemp(Entry->Triangles);
+    CachedHitTriangleLookup = MoveTemp(Entry->TriangleLookup);
+    HitBVHTriangleIndices = MoveTemp(Entry->BVHTriangleIndices);
+    HitBVHNodes = MoveTemp(Entry->BVHNodes);
+    UVTriangleGrid = MoveTemp(Entry->UVTriangleGrid);
+    HitTriangleUVChannelIndex = Entry->UVChannelIndex;
+    InactiveHitCaches.Remove(Key);
+    ActiveHitCacheKey = Key;
+    ++HitCacheUseSerial;
+    PruneInactiveHitCaches();
+    return true;
+}
+
+void SWetWrinkleViewport::StoreActiveHitCache()
+{
+    if (!ActiveHitCacheKey.IsSet())
+    {
+        ClearActiveHitCache();
+        return;
+    }
+
+    FWetWrinkleHitCacheEntry Entry;
+    Entry.Triangles = MoveTemp(CachedHitTriangles);
+    Entry.TriangleLookup = MoveTemp(CachedHitTriangleLookup);
+    Entry.BVHTriangleIndices = MoveTemp(HitBVHTriangleIndices);
+    Entry.BVHNodes = MoveTemp(HitBVHNodes);
+    Entry.UVTriangleGrid = MoveTemp(UVTriangleGrid);
+    Entry.UVChannelIndex = HitTriangleUVChannelIndex;
+    Entry.LastUsedSerial = ++HitCacheUseSerial;
+    InactiveHitCaches.Add(ActiveHitCacheKey.GetValue(), MoveTemp(Entry));
+    ActiveHitCacheKey.Reset();
+    HitTriangleUVChannelIndex = INDEX_NONE;
+}
+
+void SWetWrinkleViewport::ClearActiveHitCache()
 {
     CachedHitTriangles.Reset();
     CachedHitTriangleLookup.Reset();
@@ -2312,94 +2817,270 @@ void SWetWrinkleViewport::RebuildHitTriangles()
     HitBVHNodes.Reset();
     UVTriangleGrid.Reset();
     HitTriangleUVChannelIndex = INDEX_NONE;
+    ActiveHitCacheKey.Reset();
+}
+
+void SWetWrinkleViewport::ClearAllHitCaches()
+{
+    ClearActiveHitCache();
+    InactiveHitCaches.Reset();
+    HitCacheUseSerial = 0;
+}
+
+void SWetWrinkleViewport::PruneInactiveHitCaches()
+{
+    const uint64 BudgetBytes = ResolveCacheBudgetBytes(CVarWetWrinkleHitCacheBudgetMB);
+    const auto EstimateResidentBytes = [this]()
+    {
+        uint64 TotalBytes = static_cast<uint64>(InactiveHitCaches.GetAllocatedSize());
+        if (ActiveHitCacheKey.IsSet())
+        {
+            TotalBytes += static_cast<uint64>(
+                ActiveHitCacheKey.GetValue().TopologySignature.GetAllocatedSize());
+        }
+        TotalBytes += EstimateHitCacheDataBytes(
+            CachedHitTriangles,
+            CachedHitTriangleLookup,
+            HitBVHTriangleIndices,
+            HitBVHNodes,
+            UVTriangleGrid);
+        for (const TPair<FWetWrinkleHitCacheKey, FWetWrinkleHitCacheEntry>& Pair : InactiveHitCaches)
+        {
+            TotalBytes += EstimateHitCacheEntryDynamicBytes(Pair.Key, Pair.Value);
+        }
+        return TotalBytes;
+    };
+
+    uint64 ResidentBytes = EstimateResidentBytes();
+    while (ResidentBytes > BudgetBytes && !InactiveHitCaches.IsEmpty())
+    {
+        TOptional<FWetWrinkleHitCacheKey> OldestKey;
+        uint64 OldestSerial = TNumericLimits<uint64>::Max();
+        for (const TPair<FWetWrinkleHitCacheKey, FWetWrinkleHitCacheEntry>& Pair : InactiveHitCaches)
+        {
+            if (Pair.Value.LastUsedSerial < OldestSerial)
+            {
+                OldestSerial = Pair.Value.LastUsedSerial;
+                OldestKey = Pair.Key;
+            }
+        }
+
+        if (!OldestKey.IsSet())
+        {
+            break;
+        }
+
+        const FWetWrinkleHitCacheEntry* EvictedEntry = InactiveHitCaches.Find(OldestKey.GetValue());
+        const uint64 EvictedBytes = EvictedEntry != nullptr
+            ? EstimateHitCacheEntryDynamicBytes(OldestKey.GetValue(), *EvictedEntry)
+            : 0;
+        UE_LOG(
+            LogWetWrinklePreviewViewport,
+            VeryVerbose,
+            TEXT("Evicting hit cache for slot %d UV %d (%llu bytes, resident=%llu, budget=%llu)."),
+            OldestKey.GetValue().MaterialSlotIndex,
+            OldestKey.GetValue().UVChannelIndex,
+            EvictedBytes,
+            ResidentBytes,
+            BudgetBytes);
+        InactiveHitCaches.Remove(OldestKey.GetValue());
+        ResidentBytes = EstimateResidentBytes();
+    }
+}
+
+void SWetWrinkleViewport::RebuildHitTriangles()
+{
+    if (BrushSettings.MaterialSlotIndex == INDEX_NONE)
+    {
+        // All Slots is an overview-only state. Preserve the previous slot cache, but do not
+        // build a combined all-section triangle set or BVH.
+        StoreActiveHitCache();
+        PruneInactiveHitCaches();
+        return;
+    }
 
     USkeletalMesh* TargetMesh = ResolveTargetMesh();
-    if (TargetMesh == nullptr || BrushSettings.UVChannelIndex == INDEX_NONE)
+    constexpr int32 HitTestLODIndex = UWetClothingAsset::RuntimeSimulationLODIndex;
+    const TOptional<FWetWrinkleHitCacheKey> RequestedKey = MakeHitCacheKey(
+        TargetMesh,
+        HitTestLODIndex,
+        BrushSettings.UVChannelIndex,
+        BrushSettings.MaterialSlotIndex);
+    if (!RequestedKey.IsSet())
+    {
+        StoreActiveHitCache();
+        PruneInactiveHitCaches();
+        return;
+    }
+    if (RestoreHitCache(RequestedKey.GetValue()))
     {
         return;
     }
 
-    TArray<FWetClothingAssetUVTriangle> BuiltHitTriangles;
-    auto AppendHitTrianglesForUVChannel = [this, TargetMesh, &BuiltHitTriangles](int32 UVChannelIndex)
+    ClearActiveHitCache();
+    ActiveHitCacheKey = RequestedKey;
+
+    TArray<int32> RequestedMaterialSlots;
+    const int32 MaterialCount = TargetMesh->GetMaterials().Num();
+    RequestedMaterialSlots.Reserve(BrushSettings.MaterialSlotIndex == INDEX_NONE ? MaterialCount : 1);
+    for (int32 MaterialSlotIndex = 0; MaterialSlotIndex < MaterialCount; ++MaterialSlotIndex)
     {
-        const int32 MaterialCount = TargetMesh->GetMaterials().Num();
-        for (int32 MaterialSlotIndex = 0; MaterialSlotIndex < MaterialCount; ++MaterialSlotIndex)
+        if (BrushSettings.MaterialSlotIndex == INDEX_NONE || BrushSettings.MaterialSlotIndex == MaterialSlotIndex)
         {
-            if (BrushSettings.MaterialSlotIndex != INDEX_NONE && BrushSettings.MaterialSlotIndex != MaterialSlotIndex)
+            RequestedMaterialSlots.Add(MaterialSlotIndex);
+        }
+    }
+
+    if (RequestedMaterialSlots.IsEmpty())
+    {
+        ClearActiveHitCache();
+        return;
+    }
+
+    HitTriangleUVChannelIndex = BrushSettings.UVChannelIndex;
+
+    auto AppendCachedTriangle = [this](
+        const int32 MaterialSlotIndex,
+        const int32 TriangleID,
+        const int32 UVIslandID,
+        const auto* LocalPositions,
+        const auto* UVs)
+    {
+        FWetWrinkleCachedHitTriangle& CachedTriangle = CachedHitTriangles.AddDefaulted_GetRef();
+        CachedTriangle.MaterialSlotIndex = MaterialSlotIndex;
+        CachedTriangle.TriangleID = TriangleID;
+        CachedTriangle.UVIslandID = UVIslandID;
+
+        CachedTriangle.LocalBounds = FBox3f(ForceInit);
+        CachedTriangle.UVBounds = FBox2f(ForceInit);
+        for (int32 VertexIndex = 0; VertexIndex < 3; ++VertexIndex)
+        {
+            CachedTriangle.LocalPositions[VertexIndex] = FVector3f(LocalPositions[VertexIndex]);
+            CachedTriangle.UVs[VertexIndex] = FVector2f(UVs[VertexIndex]);
+            CachedTriangle.LocalBounds += CachedTriangle.LocalPositions[VertexIndex];
+            CachedTriangle.UVBounds += CachedTriangle.UVs[VertexIndex];
+        }
+
+        CachedTriangle.LocalNormal = FVector3f::CrossProduct(
+            CachedTriangle.LocalPositions[1] - CachedTriangle.LocalPositions[0],
+            CachedTriangle.LocalPositions[2] - CachedTriangle.LocalPositions[0]).GetSafeNormal();
+        if (CachedTriangle.LocalNormal.IsNearlyZero())
+        {
+            CachedTriangle.LocalNormal = FVector3f(0.0f, 0.0f, 1.0f);
+        }
+
+        CachedTriangle.LocalTangent =
+            (CachedTriangle.LocalPositions[1] - CachedTriangle.LocalPositions[0]).GetSafeNormal();
+        CachedTriangle.LocalTangent =
+            (CachedTriangle.LocalTangent -
+             CachedTriangle.LocalNormal * FVector3f::DotProduct(CachedTriangle.LocalTangent, CachedTriangle.LocalNormal))
+                .GetSafeNormal();
+        if (CachedTriangle.LocalTangent.IsNearlyZero())
+        {
+            CachedTriangle.LocalTangent = MakeWetWrinkleAnyPerpendicular(CachedTriangle.LocalNormal);
+        }
+
+        CachedTriangle.LocalBitangent =
+            FVector3f::CrossProduct(CachedTriangle.LocalNormal, CachedTriangle.LocalTangent).GetSafeNormal();
+        if (CachedTriangle.LocalBitangent.IsNearlyZero())
+        {
+            CachedTriangle.LocalBitangent = MakeWetWrinkleAnyPerpendicular(CachedTriangle.LocalNormal);
+        }
+    };
+
+    const UWetClothingAsset* Asset = WetClothingAsset.Get();
+    const FDWCDataUVLODMetadata* DataUVMetadata =
+        Asset != nullptr ? Asset->FindDataUVMetadataForLOD(HitTestLODIndex) : nullptr;
+    const bool bHasDirectHitTopology =
+        Asset != nullptr &&
+        TargetMesh == Asset->GetDWCSkeletalMesh() &&
+        DataUVMetadata != nullptr &&
+        DataUVMetadata->bIsValid &&
+        DataUVMetadata->UVChannelIndex == BrushSettings.UVChannelIndex &&
+        !DataUVMetadata->DataUVIslandIDByTriangleID.IsEmpty();
+
+    bool bBuiltDirectly = false;
+    if (bHasDirectHitTopology)
+    {
+        TArray<FWCAUVPreviewSourceTriangle> SourceTriangles;
+        FString TriangleReadError;
+        if (FWCAUVPreviewTriangleReader::ReadFromSkeletalMesh(
+                TargetMesh,
+                HitTestLODIndex,
+                BrushSettings.UVChannelIndex,
+                RequestedMaterialSlots,
+                SourceTriangles,
+                &TriangleReadError))
+        {
+            bool bTopologyComplete = !SourceTriangles.IsEmpty();
+            for (const FWCAUVPreviewSourceTriangle& Triangle : SourceTriangles)
             {
-                continue;
+                if (!DataUVMetadata->DataUVIslandIDByTriangleID.IsValidIndex(Triangle.TriangleID) ||
+                    DataUVMetadata->DataUVIslandIDByTriangleID[Triangle.TriangleID] == INDEX_NONE)
+                {
+                    bTopologyComplete = false;
+                    break;
+                }
             }
 
+            if (bTopologyComplete)
+            {
+                CachedHitTriangles.Reserve(SourceTriangles.Num());
+                for (const FWCAUVPreviewSourceTriangle& Triangle : SourceTriangles)
+                {
+                    AppendCachedTriangle(
+                        Triangle.MaterialSlotIndex,
+                        Triangle.TriangleID,
+                        DataUVMetadata->DataUVIslandIDByTriangleID[Triangle.TriangleID],
+                        Triangle.LocalPositions,
+                        Triangle.UVs);
+                }
+                bBuiltDirectly = true;
+            }
+        }
+    }
+
+    if (!bBuiltDirectly)
+    {
+        for (const int32 MaterialSlotIndex : RequestedMaterialSlots)
+        {
             TArray<FWetClothingAssetUVIsland> Islands;
-            if (!FWetClothingAssetMeshAnalyzer::BuildMaterialSlotUVIslands(TargetMesh, 0, UVChannelIndex, MaterialSlotIndex, Islands, nullptr))
+            if (!FWetClothingAssetMeshAnalyzer::BuildMaterialSlotUVIslands(
+                    TargetMesh,
+                    HitTestLODIndex,
+                    BrushSettings.UVChannelIndex,
+                    MaterialSlotIndex,
+                    Islands,
+                    nullptr))
             {
                 continue;
             }
 
             for (const FWetClothingAssetUVIsland& Island : Islands)
             {
-                BuiltHitTriangles.Append(Island.UVTriangles);
+                CachedHitTriangles.Reserve(CachedHitTriangles.Num() + Island.UVTriangles.Num());
+                for (const FWetClothingAssetUVTriangle& Triangle : Island.UVTriangles)
+                {
+                    AppendCachedTriangle(
+                        Triangle.MaterialSlotIndex,
+                        Triangle.TriangleID,
+                        Triangle.UVIslandID,
+                        Triangle.LocalPositions,
+                        Triangle.UVs);
+                }
             }
         }
-    };
+    }
 
-    AppendHitTrianglesForUVChannel(BrushSettings.UVChannelIndex);
-    if (BuiltHitTriangles.Num() == 0)
+    if (CachedHitTriangles.IsEmpty())
     {
+        // Do not cache a failed/temporarily unavailable build. A later refresh should retry it.
+        ClearActiveHitCache();
         return;
     }
 
-    HitTriangleUVChannelIndex = BrushSettings.UVChannelIndex;
-
-    const FTransform ComponentTransform = PreviewMeshComponent != nullptr
-                                            ? PreviewMeshComponent->GetComponentTransform()
-                                            : FTransform::Identity;
-    CachedHitTriangles.Reserve(BuiltHitTriangles.Num());
-    for (const FWetClothingAssetUVTriangle& Triangle : BuiltHitTriangles)
-    {
-        FWetWrinkleCachedHitTriangle& CachedTriangle = CachedHitTriangles.AddDefaulted_GetRef();
-        CachedTriangle.MaterialSlotIndex = Triangle.MaterialSlotIndex;
-        CachedTriangle.TriangleID = Triangle.TriangleID;
-        CachedTriangle.UVIslandID = Triangle.UVIslandID;
-
-        CachedTriangle.WorldBounds = FBox(ForceInit);
-        CachedTriangle.UVBounds = FBox2D(ForceInit);
-        for (int32 VertexIndex = 0; VertexIndex < 3; ++VertexIndex)
-        {
-            CachedTriangle.LocalPositions[VertexIndex] = Triangle.LocalPositions[VertexIndex];
-            CachedTriangle.WorldPositions[VertexIndex] = ComponentTransform.TransformPosition(Triangle.LocalPositions[VertexIndex]);
-            CachedTriangle.UVs[VertexIndex] = Triangle.UVs[VertexIndex];
-            CachedTriangle.WorldBounds += CachedTriangle.WorldPositions[VertexIndex];
-            CachedTriangle.UVBounds += Triangle.UVs[VertexIndex];
-        }
-
-        CachedTriangle.WorldNormal = FVector::CrossProduct(
-            CachedTriangle.WorldPositions[1] - CachedTriangle.WorldPositions[0],
-            CachedTriangle.WorldPositions[2] - CachedTriangle.WorldPositions[0]).GetSafeNormal();
-        if (CachedTriangle.WorldNormal.IsNearlyZero())
-        {
-            CachedTriangle.WorldNormal = FVector::UpVector;
-        }
-
-        CachedTriangle.WorldTangent = (CachedTriangle.WorldPositions[1] - CachedTriangle.WorldPositions[0]).GetSafeNormal();
-        CachedTriangle.WorldTangent = (CachedTriangle.WorldTangent - CachedTriangle.WorldNormal * FVector::DotProduct(CachedTriangle.WorldTangent, CachedTriangle.WorldNormal)).GetSafeNormal();
-        if (CachedTriangle.WorldTangent.IsNearlyZero())
-        {
-            CachedTriangle.WorldTangent = MakeWetWrinkleAnyPerpendicular(CachedTriangle.WorldNormal);
-        }
-
-        CachedTriangle.WorldBitangent = FVector::CrossProduct(CachedTriangle.WorldNormal, CachedTriangle.WorldTangent).GetSafeNormal();
-        if (CachedTriangle.WorldBitangent.IsNearlyZero())
-        {
-            CachedTriangle.WorldBitangent = MakeWetWrinkleAnyPerpendicular(CachedTriangle.WorldNormal);
-        }
-
-        CachedTriangle.LocalNormal = ComponentTransform.InverseTransformVectorNoScale(CachedTriangle.WorldNormal).GetSafeNormal(UE_SMALL_NUMBER, FVector::UpVector);
-        CachedTriangle.LocalTangent = ComponentTransform.InverseTransformVectorNoScale(CachedTriangle.WorldTangent).GetSafeNormal(UE_SMALL_NUMBER, FVector::ForwardVector);
-        CachedTriangle.LocalBitangent = ComponentTransform.InverseTransformVectorNoScale(CachedTriangle.WorldBitangent).GetSafeNormal(UE_SMALL_NUMBER, FVector::RightVector);
-    }
-
     RebuildHitTriangleAccelerationStructures();
+    PruneInactiveHitCaches();
 }
 
 void SWetWrinkleViewport::RebuildHitTriangleAccelerationStructures()
@@ -2460,13 +3141,13 @@ void SWetWrinkleViewport::RebuildHitTriangleAccelerationStructures()
     BuildNode = [this, &BuildNode](const int32 FirstIndex, const int32 TriangleCount)
     {
         const int32 NodeIndex = HitBVHNodes.AddDefaulted();
-        FBox Bounds(ForceInit);
-        FBox CenterBounds(ForceInit);
+        FBox3f Bounds(ForceInit);
+        FBox3f CenterBounds(ForceInit);
         for (int32 Offset = 0; Offset < TriangleCount; ++Offset)
         {
             const FWetWrinkleCachedHitTriangle& Triangle = CachedHitTriangles[HitBVHTriangleIndices[FirstIndex + Offset]];
-            Bounds += Triangle.WorldBounds;
-            CenterBounds += Triangle.WorldBounds.GetCenter();
+            Bounds += Triangle.LocalBounds;
+            CenterBounds += Triangle.LocalBounds.GetCenter();
         }
 
         HitBVHNodes[NodeIndex].Bounds = Bounds;
@@ -2477,7 +3158,7 @@ void SWetWrinkleViewport::RebuildHitTriangleAccelerationStructures()
             return NodeIndex;
         }
 
-        const FVector Extent = CenterBounds.GetExtent();
+        const FVector3f Extent = CenterBounds.GetExtent();
         const int32 SplitAxis = Extent.Y > Extent.X
             ? (Extent.Z > Extent.Y ? 2 : 1)
             : (Extent.Z > Extent.X ? 2 : 0);
@@ -2486,8 +3167,8 @@ void SWetWrinkleViewport::RebuildHitTriangleAccelerationStructures()
             TriangleRange,
             [this, SplitAxis](const int32 A, const int32 B)
             {
-                return CachedHitTriangles[A].WorldBounds.GetCenter()[SplitAxis] <
-                    CachedHitTriangles[B].WorldBounds.GetCenter()[SplitAxis];
+                return CachedHitTriangles[A].LocalBounds.GetCenter()[SplitAxis] <
+                    CachedHitTriangles[B].LocalBounds.GetCenter()[SplitAxis];
             });
 
         const int32 LeftCount = TriangleCount / 2;
@@ -2724,8 +3405,15 @@ void SWetWrinkleViewport::FindProjectedSurfacesAtUV(
     const TArray<int32>* CandidateIndices = UVTriangleGrid.IsValidIndex(CellIndex)
         ? &UVTriangleGrid[CellIndex]
         : nullptr;
+    const FVector2f QueryUV2f(QueryUV);
+    const FTransform ComponentTransform = PreviewMeshComponent->GetComponentTransform();
 
-    auto TestTriangle = [&OutSurfaces, MaterialSlotIndex, &QueryUV](const FWetWrinkleCachedHitTriangle& Triangle)
+    auto TestTriangle = [
+        &OutSurfaces,
+        MaterialSlotIndex,
+        &QueryUV,
+        &QueryUV2f,
+        &ComponentTransform](const FWetWrinkleCachedHitTriangle& Triangle)
     {
         if (MaterialSlotIndex != INDEX_NONE && Triangle.MaterialSlotIndex != MaterialSlotIndex)
         {
@@ -2739,24 +3427,32 @@ void SWetWrinkleViewport::FindProjectedSurfacesAtUV(
             return;
         }
 
-        const FVector Barycentric = ComputeWetWrinkleBarycentric2D(QueryUV, Triangle.UVs[0], Triangle.UVs[1], Triangle.UVs[2]);
-        if (!IsWetWrinkleBarycentricInside(Barycentric))
+        const FVector3f Barycentric3f =
+            ComputeWetWrinkleBarycentric2D(QueryUV2f, Triangle.UVs[0], Triangle.UVs[1], Triangle.UVs[2]);
+        if (!IsWetWrinkleBarycentricInside(Barycentric3f))
         {
             return;
         }
 
+        const FVector3f LocalPosition =
+            Triangle.LocalPositions[0] * Barycentric3f.X +
+            Triangle.LocalPositions[1] * Barycentric3f.Y +
+            Triangle.LocalPositions[2] * Barycentric3f.Z;
         FWetWrinkleProjectedSurface ProjectedSurface;
         ProjectedSurface.MaterialSlotIndex = Triangle.MaterialSlotIndex;
         ProjectedSurface.TriangleID = Triangle.TriangleID;
         ProjectedSurface.UVIslandID = Triangle.UVIslandID;
-        ProjectedSurface.Barycentric = Barycentric;
-        ProjectedSurface.WorldPosition =
-            Triangle.WorldPositions[0] * Barycentric.X +
-            Triangle.WorldPositions[1] * Barycentric.Y +
-            Triangle.WorldPositions[2] * Barycentric.Z;
-        ProjectedSurface.WorldNormal = Triangle.WorldNormal;
-        ProjectedSurface.WorldTangent = Triangle.WorldTangent;
-        ProjectedSurface.WorldBitangent = Triangle.WorldBitangent;
+        ProjectedSurface.Barycentric = FVector(Barycentric3f);
+        ProjectedSurface.WorldPosition = ComponentTransform.TransformPosition(FVector(LocalPosition));
+        ProjectedSurface.WorldNormal =
+            ComponentTransform.TransformVectorNoScale(FVector(Triangle.LocalNormal))
+                .GetSafeNormal(UE_SMALL_NUMBER, FVector::UpVector);
+        ProjectedSurface.WorldTangent =
+            ComponentTransform.TransformVectorNoScale(FVector(Triangle.LocalTangent))
+                .GetSafeNormal(UE_SMALL_NUMBER, FVector::ForwardVector);
+        ProjectedSurface.WorldBitangent =
+            FVector::CrossProduct(ProjectedSurface.WorldNormal, ProjectedSurface.WorldTangent)
+                .GetSafeNormal(UE_SMALL_NUMBER, FVector::RightVector);
         OutSurfaces.Add(ProjectedSurface);
     };
 
@@ -2814,17 +3510,21 @@ bool SWetWrinkleViewport::ResolveProceduralStrokePointWorld(
         CachedTriangleIndex != nullptr && CachedHitTriangles.IsValidIndex(*CachedTriangleIndex)
             ? &CachedHitTriangles[*CachedTriangleIndex]
             : nullptr;
-    if (Triangle == nullptr)
+    if (Triangle == nullptr || PreviewMeshComponent == nullptr)
     {
         return false;
     }
 
-    const FVector Barycentric(Point.AnchorBarycentric);
-    OutWorldPosition =
-        Triangle->WorldPositions[0] * Barycentric.X +
-        Triangle->WorldPositions[1] * Barycentric.Y +
-        Triangle->WorldPositions[2] * Barycentric.Z;
-    OutWorldNormal = Triangle->WorldNormal.GetSafeNormal(UE_SMALL_NUMBER, FVector::UpVector);
+    const FVector3f Barycentric(Point.AnchorBarycentric);
+    const FVector3f LocalPosition =
+        Triangle->LocalPositions[0] * Barycentric.X +
+        Triangle->LocalPositions[1] * Barycentric.Y +
+        Triangle->LocalPositions[2] * Barycentric.Z;
+    const FTransform ComponentTransform = PreviewMeshComponent->GetComponentTransform();
+    OutWorldPosition = ComponentTransform.TransformPosition(FVector(LocalPosition));
+    OutWorldNormal =
+        ComponentTransform.TransformVectorNoScale(FVector(Triangle->LocalNormal))
+            .GetSafeNormal(UE_SMALL_NUMBER, FVector::UpVector);
     return true;
 }
 
@@ -2846,20 +3546,24 @@ bool SWetWrinkleViewport::TryBuildSurfaceHitFromProceduralStrokePoint(
         return false;
     }
 
-    const FVector Barycentric(Point.AnchorBarycentric);
-    FVector Normal = Triangle->WorldNormal.GetSafeNormal(UE_SMALL_NUMBER, FVector::UpVector);
-    FVector Tangent = (Triangle->WorldTangent - Normal * FVector::DotProduct(Triangle->WorldTangent, Normal))
+    const FVector3f Barycentric3f(Point.AnchorBarycentric);
+    const FTransform ComponentTransform = PreviewMeshComponent->GetComponentTransform();
+    FVector Normal =
+        ComponentTransform.TransformVectorNoScale(FVector(Triangle->LocalNormal))
+            .GetSafeNormal(UE_SMALL_NUMBER, FVector::UpVector);
+    const FVector CachedWorldTangent =
+        ComponentTransform.TransformVectorNoScale(FVector(Triangle->LocalTangent))
+            .GetSafeNormal(UE_SMALL_NUMBER, FVector::ForwardVector);
+    FVector Tangent = (CachedWorldTangent - Normal * FVector::DotProduct(CachedWorldTangent, Normal))
                           .GetSafeNormal(UE_SMALL_NUMBER, FVector::ForwardVector);
     FVector Bitangent = FVector::CrossProduct(Normal, Tangent).GetSafeNormal(UE_SMALL_NUMBER, FVector::RightVector);
-    const FVector WorldPosition =
-        Triangle->WorldPositions[0] * Barycentric.X +
-        Triangle->WorldPositions[1] * Barycentric.Y +
-        Triangle->WorldPositions[2] * Barycentric.Z;
-    const FVector LocalPosition =
-        Triangle->LocalPositions[0] * Barycentric.X +
-        Triangle->LocalPositions[1] * Barycentric.Y +
-        Triangle->LocalPositions[2] * Barycentric.Z;
-    const FTransform ComponentTransform = PreviewMeshComponent->GetComponentTransform();
+    const FVector3f LocalPosition3f =
+        Triangle->LocalPositions[0] * Barycentric3f.X +
+        Triangle->LocalPositions[1] * Barycentric3f.Y +
+        Triangle->LocalPositions[2] * Barycentric3f.Z;
+    const FVector LocalPosition(LocalPosition3f);
+    const FVector WorldPosition = ComponentTransform.TransformPosition(LocalPosition);
+    const FVector Barycentric(Barycentric3f);
 
     OutHit.bHit = true;
     OutHit.MaterialSlotIndex = MaterialSlotIndex;
@@ -2871,9 +3575,9 @@ bool SWetWrinkleViewport::TryBuildSurfaceHitFromProceduralStrokePoint(
     OutHit.WorldTangent = Tangent;
     OutHit.WorldBitangent = Bitangent;
     OutHit.LocalPosition = LocalPosition;
-    OutHit.LocalNormal = ComponentTransform.InverseTransformVectorNoScale(Normal).GetSafeNormal(UE_SMALL_NUMBER, FVector::UpVector);
-    OutHit.LocalTangent = ComponentTransform.InverseTransformVectorNoScale(Tangent).GetSafeNormal(UE_SMALL_NUMBER, FVector::ForwardVector);
-    OutHit.LocalBitangent = ComponentTransform.InverseTransformVectorNoScale(Bitangent).GetSafeNormal(UE_SMALL_NUMBER, FVector::RightVector);
+    OutHit.LocalNormal = FVector(Triangle->LocalNormal);
+    OutHit.LocalTangent = FVector(Triangle->LocalTangent);
+    OutHit.LocalBitangent = FVector(Triangle->LocalBitangent);
     OutHit.UV = Point.PositionUV;
     OutHit.Barycentric = Barycentric;
     OutHit.DistanceSq = 0.0;
@@ -2894,52 +3598,61 @@ void SWetWrinkleViewport::DrawProceduralStrokeGuides(FPrimitiveDrawInterface* PD
     const FLinearColor JunctionColor(1.0f, 0.72f, 0.05f, 1.0f);
     const FLinearColor FlaredColor(0.85f, 0.45f, 1.0f, 1.0f);
 
-    if (const UWetClothingAsset* Asset = WetClothingAsset.Get())
+    const FWetProceduralRidgeStroke* StrokeToDraw = nullptr;
+    if (EditedProceduralStrokePreview.IsSet() &&
+        EditedProceduralStrokePreview->StrokeGuid == SelectedProceduralStrokeGuid)
     {
-        if (const FWetProceduralRidgeStroke* Stroke = Asset->Authored.WrinkleData.EditableProceduralRidgeStrokes.FindByPredicate(
-                [this](const FWetProceduralRidgeStroke& Candidate)
-                {
-                    return Candidate.StrokeGuid == SelectedProceduralStrokeGuid;
-                }))
-        {
-            FVector Previous = FVector::ZeroVector;
-            bool bHasPrevious = false;
-            for (int32 PointIndex = 0; PointIndex < Stroke->Points.Num(); ++PointIndex)
+        StrokeToDraw = &EditedProceduralStrokePreview.GetValue();
+    }
+    else if (const UWetClothingAsset* Asset = WetClothingAsset.Get())
+    {
+        StrokeToDraw = Asset->Authored.WrinkleData.EditableProceduralRidgeStrokes.FindByPredicate(
+            [this](const FWetProceduralRidgeStroke& Candidate)
             {
-                const FWetProceduralRidgeStrokePoint& Point = Stroke->Points[PointIndex];
-                FVector Position = FVector::ZeroVector;
-                FVector Normal = FVector::UpVector;
-                if (!ResolveProceduralStrokePointWorld(Point, Stroke->MaterialSlotIndex, Position, Normal))
-                {
-                    bHasPrevious = false;
-                    continue;
-                }
+                return Candidate.StrokeGuid == SelectedProceduralStrokeGuid;
+            });
+    }
 
-                Position += Normal * GuideOffset;
-                if (bHasPrevious)
-                {
-                    PDI->DrawLine(Previous, Position, StoredColor, SDPG_Foreground, GuideThickness, 0.0f, true);
-                }
-                Previous = Position;
-                bHasPrevious = true;
-
-                const bool bStartJunction = PointIndex == 0 && Stroke->StartEndpoint.Mode == EWetProceduralRidgeEndpointMode::Junction;
-                const bool bEndJunction = PointIndex == Stroke->Points.Num() - 1 && Stroke->EndEndpoint.Mode == EWetProceduralRidgeEndpointMode::Junction;
-                const bool bJunction = bStartJunction || bEndJunction;
-                const bool bStartFlared = PointIndex == 0 && Stroke->StartEndpoint.Mode == EWetProceduralRidgeEndpointMode::Flared;
-                const bool bEndFlared = PointIndex == Stroke->Points.Num() - 1 && Stroke->EndEndpoint.Mode == EWetProceduralRidgeEndpointMode::Flared;
-                const bool bFlared = bStartFlared || bEndFlared;
-                const FLinearColor PointColor = bJunction
-                    ? JunctionColor
-                    : (bFlared
-                           ? FlaredColor
-                           : (PointIndex == SelectedProceduralStrokePointIndex ? FLinearColor::White : StoredColor));
-                PDI->DrawPoint(
-                    Position,
-                    PointColor,
-                    bJunction || bFlared || PointIndex == SelectedProceduralStrokePointIndex ? 10.0f : 6.0f,
-                    SDPG_Foreground);
+    if (StrokeToDraw != nullptr)
+    {
+        const FWetProceduralRidgeStroke* Stroke = StrokeToDraw;
+        FVector Previous = FVector::ZeroVector;
+        bool bHasPrevious = false;
+        for (int32 PointIndex = 0; PointIndex < Stroke->Points.Num(); ++PointIndex)
+        {
+            const FWetProceduralRidgeStrokePoint& Point = Stroke->Points[PointIndex];
+            FVector Position = FVector::ZeroVector;
+            FVector Normal = FVector::UpVector;
+            if (!ResolveProceduralStrokePointWorld(Point, Stroke->MaterialSlotIndex, Position, Normal))
+            {
+                bHasPrevious = false;
+                continue;
             }
+
+            Position += Normal * GuideOffset;
+            if (bHasPrevious)
+            {
+                PDI->DrawLine(Previous, Position, StoredColor, SDPG_Foreground, GuideThickness, 0.0f, true);
+            }
+            Previous = Position;
+            bHasPrevious = true;
+
+            const bool bStartJunction = PointIndex == 0 && Stroke->StartEndpoint.Mode == EWetProceduralRidgeEndpointMode::Junction;
+            const bool bEndJunction = PointIndex == Stroke->Points.Num() - 1 && Stroke->EndEndpoint.Mode == EWetProceduralRidgeEndpointMode::Junction;
+            const bool bJunction = bStartJunction || bEndJunction;
+            const bool bStartFlared = PointIndex == 0 && Stroke->StartEndpoint.Mode == EWetProceduralRidgeEndpointMode::Flared;
+            const bool bEndFlared = PointIndex == Stroke->Points.Num() - 1 && Stroke->EndEndpoint.Mode == EWetProceduralRidgeEndpointMode::Flared;
+            const bool bFlared = bStartFlared || bEndFlared;
+            const FLinearColor PointColor = bJunction
+                ? JunctionColor
+                : (bFlared
+                       ? FlaredColor
+                       : (PointIndex == SelectedProceduralStrokePointIndex ? FLinearColor::White : StoredColor));
+            PDI->DrawPoint(
+                Position,
+                PointColor,
+                bJunction || bFlared || PointIndex == SelectedProceduralStrokePointIndex ? 10.0f : 6.0f,
+                SDPG_Foreground);
         }
     }
 

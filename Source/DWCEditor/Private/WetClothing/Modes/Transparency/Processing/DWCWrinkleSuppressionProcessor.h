@@ -34,6 +34,22 @@ class FDWCWrinkleSuppressionProcessor
         TArray<uint8>& OutBuffer,
         FString& OutErrorMessage);
 
+    // The resampled coverage is independent from threshold and softness. Preview
+    // callers can retain it while tuning those settings instead of resampling the
+    // baked wrinkle mask every time.
+    static bool BuildResampledCoverageBuffer(
+        const FDWCWrinkleSuppressionSource& Source,
+        FIntPoint OutputSize,
+        TArray<uint16>& OutCoverage,
+        FString& OutErrorMessage);
+
+    static bool BuildProcessedBufferFromCoverage(
+        const TArray<uint16>& Coverage,
+        float CoverageThreshold,
+        float MaskSoftness,
+        TArray<uint8>& OutBuffer,
+        FString& OutErrorMessage);
+
     static FString MakeSettingsSignature(
         float CoverageThreshold,
         float MaskSoftness,

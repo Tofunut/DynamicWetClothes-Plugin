@@ -21,12 +21,15 @@ struct FDWCTransparencyAutoBakeResult;
 struct FDWCTransparencyPaintSettings
 {
     EDWCTransparencyBrushMode Mode = EDWCTransparencyBrushMode::Apply;
-    float RadiusUV = 0.025f;
+    EDWCTransparencyRevealColorBrushMode RevealColorMode = EDWCTransparencyRevealColorBrushMode::Paint;
+    float RadiusUV = 0.0677f;
     float Strength = 0.5f;
     float Falloff = 0.5f;
     float Spacing = 0.25f;
     float TargetAlpha = 1.0f;
     bool bEnabled = true;
+    bool bRevealColorPaint = false;
+    FLinearColor RevealColor = FLinearColor::White;
 };
 
 struct FDWCTransparencySurfaceHit
@@ -34,6 +37,7 @@ struct FDWCTransparencySurfaceHit
     bool bHit = false;
     int32 MaterialSlotIndex = INDEX_NONE;
     int32 TriangleID = INDEX_NONE;
+    int32 UVIslandID = INDEX_NONE;
     FVector WorldPosition = FVector::ZeroVector;
     FVector WorldNormal = FVector::UpVector;
     FVector WorldTangent = FVector::ForwardVector;
@@ -45,6 +49,7 @@ struct FDWCTransparencyCachedHitTriangle
 {
     int32 MaterialSlotIndex = INDEX_NONE;
     int32 TriangleID = INDEX_NONE;
+    int32 UVIslandID = INDEX_NONE;
     FVector LocalPositions[3];
     FVector WorldPositions[3];
     FVector2D UVs[3];
@@ -112,7 +117,10 @@ class SWetClothingTransparencyPreviewViewport : public SEditorViewport, public F
     float GetTransparencyPreviewStrength() const { return TransparencyPreviewStrength; }
     void SetWrinkleSuppressionStrength(float InStrength);
     void RefreshWrinkleSuppressionPreview();
+    void RefreshOuterEdgeFeatherPreview();
     void SetPaintSettings(const FDWCTransparencyPaintSettings& InSettings);
+    void SetTransparencyPaintingEnabled(bool bEnabled);
+    void SetRevealColorPaintingEnabled(bool bEnabled);
     void RebuildManualOverridesFromStrokes();
     void RefreshManualPreviewFromStrokes();
     bool TraceSurface(const FVector& RayOrigin, const FVector& RayDirection, FDWCTransparencySurfaceHit& OutHit) const;
@@ -123,7 +131,7 @@ class SWetClothingTransparencyPreviewViewport : public SEditorViewport, public F
     void EndPaintStrokeFromClient();
     void SetVisualizationMode(EDWCTransparencyVisualizationMode InMode);
     EDWCTransparencyVisualizationMode GetVisualizationMode() const { return VisualizationMode; }
-    void SetAutoBakePreviewResult(TSharedPtr<const FDWCTransparencyAutoBakeResult> InResult);
+    void SetAutoBakePreviewResult(TSharedPtr<FDWCTransparencyAutoBakeResult> InResult);
     void ClearAutoBakePreviewResult();
     void SetTransparencyEditContext(
         const FGuid& InLayerGuid,
@@ -142,23 +150,35 @@ class SWetClothingTransparencyPreviewViewport : public SEditorViewport, public F
     void BuildFullBlueprintPreview();
     void ConfigurePreviewMeshComponent(USkeletalMeshComponent* MeshComponent);
     void ApplyPreviewMaterials(USkeletalMeshComponent* MeshComponent);
-    void ApplyWetnessPreview(USkeletalMeshComponent* MeshComponent);
+    void ApplyRevealColorPaintTargetVisibility();
+    void RefreshExistingFullBlueprintPreviewMaterials(int32 PreviousMaterialSlotIndex);
+    void ApplyWetnessPreview();
     UMaterialInstanceDynamic* GetOrBuildSelectedPreviewMID(UMaterialInterface* SourceMaterial);
     void ApplyTransparencyPreviewParameters();
+    void DisableTransparencyPreviewParameters(UMaterialInstanceDynamic* MID) const;
     bool RebuildTransparencyPreviewTexture();
     bool RebuildWrinkleSuppressionBuffer();
+    bool UpdateWrinkleSuppressionPreviewTexture();
+    bool CanUseDynamicFinalPreviewComposition() const;
+    bool UsesFinalAlphaPreview() const;
+    bool UsesWrinkleSuppressionPreview() const;
+    void RefreshDeferredFinalPreviewBuffers();
+    void InvalidateWrinkleSuppressionSourceCache();
     bool RebuildOuterEdgeFeatherBuffer();
+    bool EnsureManualOverrideBuffers();
+    void ReleaseSmoothBrushScratch();
     void RebuildHitTriangles();
     void RebuildHitTriangleAccelerationStructures();
     void EnsureBrushCursor();
     void RefreshBrushCursor();
     void ClearBrushCursor();
     bool RasterizeBrushSample(const FDWCTransparencyBrushStroke& Stroke, const FDWCTransparencyBrushSample& Sample, FIntRect* OutDirtyRect = nullptr);
+    bool RasterizeRevealColorSample(const FDWCTransparencyRevealColorStroke& Stroke, const FDWCTransparencyBrushSample& Sample, FIntRect* OutDirtyRect = nullptr);
     FIntRect ComputeCurrentHoverDirtyRect() const;
     void RefreshHoverPreviewRegion();
     void UpdatePreviewTextureRegion(const FIntRect& DirtyRect);
     void UploadPreviewTextureRegion(const FIntRect& DirtyRect);
-    void AppendPaintSample(const FVector2D& PositionUV);
+    void AppendPaintSample(const FVector2D& PositionUV, int32 UVIslandID);
     FWetClothingTransparencyLayerData* GetSelectedLayer();
     float GetStoredEditedAlpha(int32 PixelIndex) const;
     float ApplyHoverToEditedAlpha(int32 PixelIndex, float EditedAlpha) const;
@@ -181,15 +201,26 @@ class SWetClothingTransparencyPreviewViewport : public SEditorViewport, public F
     TObjectPtr<UMaterial> CachedPreviewBaseMaterial = nullptr;
     TObjectPtr<UMaterialInterface> CachedPreviewMaterialParent = nullptr;
     TObjectPtr<UMaterialInstanceDynamic> CachedPreviewMID = nullptr;
+    TObjectPtr<UMaterialInstanceDynamic> ActiveTransparencyPreviewMID = nullptr;
     int32 CachedPreviewMaterialSlotIndex = INDEX_NONE;
     int32 CachedPreviewUVChannelIndex = INDEX_NONE;
+    int32 CachedPreviewMaterialGraphVersion = INDEX_NONE;
+    bool bActiveTransparencyPreviewEnabled = false;
     TObjectPtr<UTexture2D> TransparencyPreviewTexture = nullptr;
+    TObjectPtr<UTexture2D> WrinkleSuppressionPreviewTexture = nullptr;
     TObjectPtr<UProceduralMeshComponent> BrushCursorComponent = nullptr;
-    TSharedPtr<const FDWCTransparencyAutoBakeResult> AutoBakePreviewResult;
+    TSharedPtr<FDWCTransparencyAutoBakeResult> AutoBakePreviewResult;
     TArray<uint8> WrinkleSuppressionBuffer;
+    TObjectPtr<UTexture2D> CachedWrinkleSuppressionMaskTexture = nullptr;
+    FGuid CachedWrinkleSuppressionBakeGuid;
+    FIntPoint CachedWrinkleSuppressionResolution = FIntPoint::ZeroValue;
+    TArray<uint16> CachedWrinkleSuppressionCoverageBuffer;
     TArray<uint8> OuterEdgeFeatherBuffer;
     TArray<uint8> ManualPremultipliedBuffer;
     TArray<uint8> ManualWeightBuffer;
+    TArray<uint8> SmoothBrushPremultipliedScratch;
+    TArray<uint8> SmoothBrushWeightScratch;
+    TSharedPtr<TArray<FColor>, ESPMode::ThreadSafe> PreviewVisualizationPixels;
     TArray<FDWCTransparencyCachedHitTriangle> CachedHitTriangles;
     TArray<int32> HitBVHTriangleIndices;
     TArray<FDWCTransparencyHitBVHNode> HitBVHNodes;
@@ -199,14 +230,20 @@ class SWetClothingTransparencyPreviewViewport : public SEditorViewport, public F
     TUniquePtr<FScopedTransaction> ActivePaintTransaction;
     FGuid ActiveStrokeGuid;
     FVector2D LastPointerUV = FVector2D::ZeroVector;
+    int32 LastPointerUVIslandID = INDEX_NONE;
     float DistanceToNextStamp = 0.0f;
     FIntRect LastHoverDirtyRect;
-    FIntRect PendingPreviewDirtyRect;
+    TArray<FIntRect> PendingPreviewDirtyRects;
     EWetClothingTransparencyPreviewMode PreviewMode = EWetClothingTransparencyPreviewMode::TargetMeshOnly;
     EDWCTransparencyVisualizationMode VisualizationMode = EDWCTransparencyVisualizationMode::Final;
     float WetnessPreviewPercent = 100.0f;
     float TransparencyPreviewStrength = 0.4f;
     float WrinkleSuppressionStrength = 0.6f;
+    bool bWrinkleSuppressionPreviewDirty = false;
+    bool bOuterEdgeFeatherPreviewDirty = false;
+    bool bTransparencyPaintingEnabled = false;
+    bool bRevealColorPaintingEnabled = false;
+    bool bActiveRevealColorPaint = false;
     FGuid SelectedLayerGuid;
     int32 SelectedMaterialSlotIndex = INDEX_NONE;
     int32 SelectedUVChannelIndex = 0;

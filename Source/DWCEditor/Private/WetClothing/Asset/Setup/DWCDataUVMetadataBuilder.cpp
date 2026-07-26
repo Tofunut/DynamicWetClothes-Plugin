@@ -4,6 +4,7 @@
 #include "Engine/SkeletalMesh.h"
 #include "Rendering/SkeletalMeshLODRenderData.h"
 #include "Rendering/SkeletalMeshRenderData.h"
+#include "WetClothing/Foundation/MeshAnalysis/WetClothingAssetMeshAnalyzer.h"
 
 bool FDWCDataUVMetadataBuilder::BuildLOD(
     const UWetClothingAsset& Asset,
@@ -67,6 +68,62 @@ bool FDWCDataUVMetadataBuilder::BuildLOD(
     {
         if (OutErrorMessage) *OutErrorMessage = FString::Printf(TEXT("LOD%d DWC Data UV signature is empty."), LODIndex);
         return false;
+    }
+
+    if (LODIndex == UWetClothingAsset::RuntimeSimulationLODIndex)
+    {
+        int32 MaximumTriangleID = INDEX_NONE;
+        TArray<TArray<FWetClothingAssetUVIsland>> IslandsByMaterialSlot;
+        IslandsByMaterialSlot.SetNum(Mesh->GetMaterials().Num());
+        for (int32 MaterialSlotIndex = 0; MaterialSlotIndex < Mesh->GetMaterials().Num(); ++MaterialSlotIndex)
+        {
+            TArray<FWetClothingAssetUVIsland>& Islands = IslandsByMaterialSlot[MaterialSlotIndex];
+            FString TopologyError;
+            if (!FWetClothingAssetMeshAnalyzer::BuildMaterialSlotUVIslands(
+                    Mesh,
+                    LODIndex,
+                    DataUVChannelIndex,
+                    MaterialSlotIndex,
+                    Islands,
+                    &TopologyError))
+            {
+                if (OutErrorMessage)
+                {
+                    *OutErrorMessage = FString::Printf(
+                        TEXT("LOD%d DWC Data UV topology failed for material slot %d: %s"),
+                        LODIndex,
+                        MaterialSlotIndex,
+                        *TopologyError);
+                }
+                return false;
+            }
+
+            for (const FWetClothingAssetUVIsland& Island : Islands)
+            {
+                for (const int32 TriangleID : Island.TriangleIDs)
+                {
+                    MaximumTriangleID = FMath::Max(MaximumTriangleID, TriangleID);
+                }
+            }
+        }
+
+        if (MaximumTriangleID != INDEX_NONE)
+        {
+            OutMetadata.DataUVIslandIDByTriangleID.Init(INDEX_NONE, MaximumTriangleID + 1);
+            for (const TArray<FWetClothingAssetUVIsland>& Islands : IslandsByMaterialSlot)
+            {
+                for (const FWetClothingAssetUVIsland& Island : Islands)
+                {
+                    for (const int32 TriangleID : Island.TriangleIDs)
+                    {
+                        if (OutMetadata.DataUVIslandIDByTriangleID.IsValidIndex(TriangleID))
+                        {
+                            OutMetadata.DataUVIslandIDByTriangleID[TriangleID] = Island.UVIslandID;
+                        }
+                    }
+                }
+            }
+        }
     }
 
     if (OutErrorMessage) OutErrorMessage->Reset();

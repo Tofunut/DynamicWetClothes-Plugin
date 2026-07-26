@@ -9,6 +9,8 @@ class UMaterialInterface;
 namespace WetTransparencyPreviewMaterialParameters
 {
     static const FName PreviewWetness(TEXT("DWC_PreviewWetness"));
+    static const FName TransparencyMap(TEXT("DWC_TransparencyPreviewMap"));
+    static const FName UseTransparencyMap(TEXT("DWC_UseTransparencyPreviewMap"));
 }
 
 struct FWetTransparencyPreviewMaterialBuildArgs

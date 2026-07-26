@@ -18,9 +18,9 @@ void FWCAUVPreviewDataBuilder::BuildFromConnectivity(
         FDWCUVIslandBuildTriangle& BuildTriangle = BuildTriangles.AddDefaulted_GetRef();
         BuildTriangle.TriangleID = SourceTriangle.TriangleID;
         BuildTriangle.MaterialSlotIndex = SourceTriangle.MaterialSlotIndex;
-        BuildTriangle.UVs[0] = SourceTriangle.UVs[0];
-        BuildTriangle.UVs[1] = SourceTriangle.UVs[1];
-        BuildTriangle.UVs[2] = SourceTriangle.UVs[2];
+        BuildTriangle.UVs[0] = FVector2D(SourceTriangle.UVs[0]);
+        BuildTriangle.UVs[1] = FVector2D(SourceTriangle.UVs[1]);
+        BuildTriangle.UVs[2] = FVector2D(SourceTriangle.UVs[2]);
     }
 
     TArray<FDWCOriginalUVIslandBuildResult> BuiltIslands;
@@ -52,8 +52,8 @@ void FWCAUVPreviewDataBuilder::BuildFromConnectivity(
             Triangle.UVIslandID = Island.UVIslandID;
             for (int32 CornerIndex = 0; CornerIndex < 3; ++CornerIndex)
             {
-                Triangle.UVs[CornerIndex] = SourceTriangle.UVs[CornerIndex];
-                Triangle.LocalPositions[CornerIndex] = SourceTriangle.LocalPositions[CornerIndex];
+                Triangle.UVs[CornerIndex] = FVector2D(SourceTriangle.UVs[CornerIndex]);
+                Triangle.LocalPositions[CornerIndex] = FVector(SourceTriangle.LocalPositions[CornerIndex]);
             }
         }
     }
@@ -103,8 +103,8 @@ bool FWCAUVPreviewDataBuilder::BuildFromStoredTopology(
             Triangle.UVIslandID = Island.UVIslandID;
             for (int32 CornerIndex = 0; CornerIndex < 3; ++CornerIndex)
             {
-                Triangle.UVs[CornerIndex] = SourceTriangle.UVs[CornerIndex];
-                Triangle.LocalPositions[CornerIndex] = SourceTriangle.LocalPositions[CornerIndex];
+                Triangle.UVs[CornerIndex] = FVector2D(SourceTriangle.UVs[CornerIndex]);
+                Triangle.LocalPositions[CornerIndex] = FVector(SourceTriangle.LocalPositions[CornerIndex]);
             }
             Island.TriangleIDs.Add(Triangle.TriangleID);
         }

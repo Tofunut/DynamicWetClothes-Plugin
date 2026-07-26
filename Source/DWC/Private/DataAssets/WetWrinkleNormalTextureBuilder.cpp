@@ -113,7 +113,7 @@ namespace
         }
     }
 
-    bool ReadTextureSourcePixels(
+    bool ReadTextureSourcePixelsInternal(
         UTexture2D* Texture,
         TArray<FColor>& OutPixels,
         FIntPoint& OutSize,
@@ -626,7 +626,7 @@ bool FWetWrinkleNormalTextureBuilder::BuildTextureBuffers(
 
     TArray<FColor> SourcePixels;
     FIntPoint SourceSize = FIntPoint::ZeroValue;
-    if (!ReadTextureSourcePixels(SourceNormalTexture, SourcePixels, SourceSize, OutError))
+    if (!ReadTextureSourcePixelsInternal(SourceNormalTexture, SourcePixels, SourceSize, OutError))
     {
         return false;
     }
@@ -738,9 +738,8 @@ bool FWetWrinkleNormalTextureBuilder::BuildConvexSeparationBuffer(
     FWetWrinkleTextureScalarBuffer& OutBuffer,
     FString& OutError)
 {
-    TArray<FColor> CorrectedPixels;
-    FIntPoint Size = FIntPoint::ZeroValue;
-    if (!ReadTextureSourcePixels(CorrectedNormalTexture, CorrectedPixels, Size, OutError))
+    FWetWrinkleTexturePixelBuffer CorrectedNormal;
+    if (!ReadTextureSourcePixels(CorrectedNormalTexture, CorrectedNormal, OutError))
     {
         return false;
     }
@@ -751,9 +750,39 @@ bool FWetWrinkleNormalTextureBuilder::BuildConvexSeparationBuffer(
                         CorrectedNormalTexture->bFlipGreenChannel;
 #endif
 
+    return BuildConvexSeparationBufferFromPixels(
+        CorrectedNormal,
+        bFlipGreenChannel,
+        Settings,
+        OutBuffer,
+        OutError);
+}
+
+bool FWetWrinkleNormalTextureBuilder::ReadTextureSourcePixels(
+    UTexture2D* Texture,
+    FWetWrinkleTexturePixelBuffer& OutBuffer,
+    FString& OutError)
+{
+    OutBuffer = FWetWrinkleTexturePixelBuffer();
+    return ReadTextureSourcePixelsInternal(Texture, OutBuffer.Pixels, OutBuffer.Size, OutError);
+}
+
+bool FWetWrinkleNormalTextureBuilder::BuildConvexSeparationBufferFromPixels(
+    const FWetWrinkleTexturePixelBuffer& CorrectedNormal,
+    const bool bFlipGreenChannel,
+    const FWetWrinkleCoverageExtractionSettings& Settings,
+    FWetWrinkleTextureScalarBuffer& OutBuffer,
+    FString& OutError)
+{
+    if (!CorrectedNormal.IsValid())
+    {
+        OutError = TEXT("Corrected wrinkle normal pixels are unavailable.");
+        return false;
+    }
+
     return BuildConvexSeparationFromPixels(
-        CorrectedPixels,
-        Size,
+        CorrectedNormal.Pixels,
+        CorrectedNormal.Size,
         bFlipGreenChannel,
         Settings,
         OutBuffer,

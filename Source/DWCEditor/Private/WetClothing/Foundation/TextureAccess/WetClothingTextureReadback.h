@@ -32,5 +32,6 @@ class FWetClothingTextureReadbackUtils
         UTexture2D*                  Texture,
         FWetClothingTextureReadback& OutTextureData,
         FString&                     OutErrorMessage);
+    static void InvalidateTexture(UTexture2D* Texture);
     static void ClearCache();
 };

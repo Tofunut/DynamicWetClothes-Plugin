@@ -2027,6 +2027,11 @@ void FWCAEditor::HandleDWCEditorAssetSaveAttemptFinished(UObject* SavedAsset, co
     {
         Asset->RefreshBakeState(false);
     }
+
+    // The Validation toolbar button stores its label and icon when the toolbar
+    // is built. Refresh it after an asset save without rebuilding the active
+    // mode's preview resources.
+    RegenerateMenusAndToolbars();
 }
 
 void FWCAEditor::RefreshAssetStateAndEditor(
@@ -2279,6 +2284,9 @@ void FWCAEditor::HandleValidationClicked()
     {
         EditorPanel->RefreshStatusFromAsset();
     }
+
+    // Keep the toolbar badge in sync with the exact state used to build the
+    // Validation Results dialog below.
     RegenerateMenusAndToolbars();
 
 #if WITH_EDITORONLY_DATA

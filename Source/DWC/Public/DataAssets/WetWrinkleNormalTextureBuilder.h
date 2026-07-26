@@ -9,6 +9,11 @@ class UTexture2D;
 class DWC_API FWetWrinkleNormalTextureBuilder
 {
   public:
+    static bool ReadTextureSourcePixels(
+        UTexture2D* Texture,
+        FWetWrinkleTexturePixelBuffer& OutBuffer,
+        FString& OutError);
+
     static bool BuildTextureBuffers(
         UTexture2D* SourceNormalTexture,
         bool bUseCorrection,
@@ -20,6 +25,13 @@ class DWC_API FWetWrinkleNormalTextureBuilder
 
     static bool BuildConvexSeparationBuffer(
         UTexture2D* CorrectedNormalTexture,
+        const FWetWrinkleCoverageExtractionSettings& Settings,
+        FWetWrinkleTextureScalarBuffer& OutBuffer,
+        FString& OutError);
+
+    static bool BuildConvexSeparationBufferFromPixels(
+        const FWetWrinkleTexturePixelBuffer& CorrectedNormal,
+        bool bFlipGreenChannel,
         const FWetWrinkleCoverageExtractionSettings& Settings,
         FWetWrinkleTextureScalarBuffer& OutBuffer,
         FString& OutError);

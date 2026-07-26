@@ -11,6 +11,7 @@ FWetTransparencyPreviewMaterialBuildResult FWetTransparencyPreviewMaterialBuilde
     WetPreviewArgs.UVChannelIndex = Args.UVChannelIndex;
     WetPreviewArgs.bOverrideCpuWetnessInput = true;
     WetPreviewArgs.bBuildNormalOverlay = false;
+    WetPreviewArgs.bBuildTransparencyPreviewOverlay = true;
 
     const FWetWrinklePreviewMaterialBuildResult WetPreviewResult =
         FWetWrinklePreviewMaterialBuilder::Build(WetPreviewArgs);

@@ -139,12 +139,19 @@ bool FWetWrinkleBakeService::BakeAllWrinkleMaps(UWetClothingAsset* WetClothingAs
     TArray<FString> Failures;
     TArray<int32> SortedSlots = AuthoredMaterialSlots.Array();
     SortedSlots.Sort();
+    FWetWrinkleNormalMapBakeSession BakeSession;
 
     for (const int32 MaterialSlotIndex : SortedSlots)
     {
         FWetWrinkleNormalMapBakeResult Result;
         FString ErrorMessage;
-        if (!FWetWrinkleNormalMapBaker::BakeMaterialSlot(WetClothingAsset, MaterialSlotIndex, Settings, Result, ErrorMessage))
+        if (!FWetWrinkleNormalMapBaker::BakeMaterialSlot(
+                WetClothingAsset,
+                MaterialSlotIndex,
+                Settings,
+                BakeSession,
+                Result,
+                ErrorMessage))
         {
             Failures.Add(FString::Printf(TEXT("Slot %d: %s"), MaterialSlotIndex, *ErrorMessage));
             continue;

@@ -33,6 +33,14 @@ enum class EDWCTransparencyBrushMode : uint8
     ResetToAuto UMETA(DisplayName = "Reset to Auto")
 };
 
+UENUM(BlueprintType)
+enum class EDWCTransparencyRevealColorBrushMode : uint8
+{
+    Paint,
+    EraseToBase UMETA(DisplayName = "Erase to Base"),
+    Smooth UMETA(DisplayName = "Smooth")
+};
+
 UENUM()
 enum class EDWCTransparencyBakedMapMatch : uint8
 {
@@ -49,6 +57,9 @@ struct DWC_API FDWCTransparencyBrushSample
 
     UPROPERTY(EditAnywhere, Category = "Transparency Brush")
     FVector2D PositionUV = FVector2D::ZeroVector;
+
+    UPROPERTY(EditAnywhere, Category = "Transparency Brush")
+    int32 UVIslandID = INDEX_NONE;
 
     UPROPERTY(EditAnywhere, Category = "Transparency Brush", meta = (ClampMin = "0.0"))
     float RadiusUV = 0.01f;
@@ -96,12 +107,50 @@ struct DWC_API FDWCTransparencyBrushStroke
     TArray<FDWCTransparencyBrushSample> Samples;
 };
 
+/** RGB paint stored for the Type 3 procedural inner-mesh workflow. */
+USTRUCT(BlueprintType)
+struct DWC_API FDWCTransparencyRevealColorStroke
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, Category = "Transparency Reveal Color Paint")
+    FGuid StrokeGuid;
+
+    UPROPERTY(EditAnywhere, Category = "Transparency Reveal Color Paint")
+    bool bEnabled = true;
+
+    UPROPERTY(EditAnywhere, Category = "Transparency Reveal Color Paint")
+    int32 MaterialSlotIndex = INDEX_NONE;
+
+    UPROPERTY(EditAnywhere, Category = "Transparency Reveal Color Paint")
+    int32 UVChannelIndex = 0;
+
+    UPROPERTY(EditAnywhere, Category = "Transparency Reveal Color Paint")
+    EDWCTransparencyUVAddressMode UVAddressMode = EDWCTransparencyUVAddressMode::Clamp;
+
+    UPROPERTY(EditAnywhere, Category = "Transparency Reveal Color Paint")
+    FLinearColor PaintColor = FLinearColor::White;
+
+    UPROPERTY(EditAnywhere, Category = "Transparency Reveal Color Paint")
+    EDWCTransparencyRevealColorBrushMode BrushMode = EDWCTransparencyRevealColorBrushMode::Paint;
+
+    UPROPERTY(EditAnywhere, Category = "Transparency Reveal Color Paint", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float Falloff = 0.5f;
+
+    UPROPERTY(EditAnywhere, Category = "Transparency Reveal Color Paint", meta = (ClampMin = "0.01"))
+    float Spacing = 0.25f;
+
+    UPROPERTY(EditAnywhere, Category = "Transparency Reveal Color Paint")
+    TArray<FDWCTransparencyBrushSample> Samples;
+};
+
 USTRUCT(BlueprintType)
 struct DWC_API FWetClothingTransparencyInnerSlot
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, Category = "Transparency Inner Slot")
+    // Legacy per-slot enable state. Type 1 now treats every listed slot as an active priority source.
+    UPROPERTY(meta = (DeprecatedProperty, DeprecationMessage = "Inner Source Parts are always active. Remove the entry to exclude it."))
     bool bEnabled = true;
 
     UPROPERTY(EditAnywhere, Category = "Transparency Inner Slot")
@@ -113,7 +162,8 @@ struct DWC_API FWetClothingTransparencyInnerSlot
     UPROPERTY(EditAnywhere, Category = "Transparency Inner Slot", meta = (ClampMin = "0"))
     int32 SourceUVChannel = 0;
 
-    UPROPERTY(EditAnywhere, Category = "Transparency Inner Slot", meta = (ClampMin = "0.0"))
+    // Legacy per-slot ray limit. Type 1 now uses RaySettings.MaxRayDistance for every source slot.
+    UPROPERTY(meta = (DeprecatedProperty, DeprecationMessage = "Use the global Maximum Ray Distance in Ray Settings."))
     float MaxHitDistance = 10.0f;
 };
 
@@ -161,9 +211,22 @@ struct DWC_API FWetClothingTransparencySameMeshSource
 {
     GENERATED_BODY()
 
-    // Array order is the reveal-source priority. Distance only chooses among hits within the same slot.
+    // Array order is the reveal-source priority. All listed slots are active and share the global ray distance limit.
     UPROPERTY(EditAnywhere, Category = "Transparency Inner Slots")
     TArray<FWetClothingTransparencyInnerSlot> InnerSlotPriority;
+};
+
+USTRUCT(BlueprintType)
+struct DWC_API FWetClothingTransparencyManualColorSource
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, Category = "Transparency Manual Color")
+    FLinearColor BaseRevealColor = FLinearColor::White;
+
+    UPROPERTY(EditAnywhere, Category = "Transparency Manual Color", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float InitialTransparencyAlpha = 0.0f;
+
 };
 
 USTRUCT(BlueprintType)
@@ -216,6 +279,11 @@ struct DWC_API FWetClothingBakedTransparencyMap
     UPROPERTY(VisibleAnywhere, Category = "Baked Transparency")
     int32 PaddingPixels = 8;
 
+    // Number of editable strokes already flattened into this texture. Strokes
+    // after this index can be replayed when the baked texture is the baseline.
+    UPROPERTY(VisibleAnywhere, Category = "Baked Transparency")
+    int32 BakedStrokeCount = 0;
+
     UPROPERTY(VisibleAnywhere, Category = "Baked Transparency")
     FGuid BakeGuid;
 
@@ -264,6 +332,11 @@ struct DWC_API FWetClothingTransparencyLayerData
     UPROPERTY(EditAnywhere, Category = "Transparency Layer")
     EDWCTransparencySourceType SourceType = EDWCTransparencySourceType::SameMeshMaterialSlots;
 
+    // Distinguishes a newly-added target part from an existing layer that uses
+    // the default source type. The editor uses this to choose Stage 1 or Stage 2.
+    UPROPERTY()
+    bool bSourceTypeConfigured = false;
+
     UPROPERTY(EditAnywhere, Category = "Transparency Layer")
     FWetClothingTransparencyRaySettings RaySettings;
 
@@ -271,7 +344,13 @@ struct DWC_API FWetClothingTransparencyLayerData
     FWetClothingTransparencySameMeshSource SameMeshSource;
 
     UPROPERTY(EditAnywhere, Category = "Transparency Layer")
+    FWetClothingTransparencyManualColorSource ManualColorSource;
+
+    UPROPERTY(EditAnywhere, Category = "Transparency Layer")
     TArray<FDWCTransparencyBrushStroke> EditableStrokes;
+
+    UPROPERTY(EditAnywhere, Category = "Transparency Layer")
+    TArray<FDWCTransparencyRevealColorStroke> RevealColorPaintStrokes;
 
     UPROPERTY(VisibleAnywhere, Category = "Transparency Layer")
     FWetClothingTransparencyAutoBakeMetadata AutoBakeMetadata;
@@ -289,13 +368,21 @@ struct DWC_API FWetClothingTransparencyData
 {
     GENERATED_BODY()
 
-    static constexpr int32 CurrentDataVersion = 6;
+    static constexpr int32 CurrentDataVersion = 12;
 
     UPROPERTY(VisibleAnywhere, Category = "Transparency")
     int32 DataVersion = CurrentDataVersion;
 
     UPROPERTY(EditAnywhere, Category = "Transparency")
     TArray<FWetClothingTransparencyLayerData> TransparencyLayers;
+
+    // Character-level structure selection made in Transparency Editor Stage 1.
+    // Target Parts created in Stage 2 inherit this source type.
+    UPROPERTY(EditAnywhere, Category = "Transparency")
+    EDWCTransparencySourceType CharacterStructureType = EDWCTransparencySourceType::SameMeshMaterialSlots;
+
+    UPROPERTY()
+    bool bCharacterStructureTypeConfigured = false;
 
     UPROPERTY(EditAnywhere, Category = "Transparency", meta = (ClampMin = "16", UIMin = "128", UIMax = "4096"))
     int32 TransparencyBakeResolution = 1024;

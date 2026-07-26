@@ -37,17 +37,13 @@ struct FWetWrinkleCachedHitTriangle
     int32 MaterialSlotIndex = INDEX_NONE;
     int32 TriangleID = INDEX_NONE;
     int32 UVIslandID = INDEX_NONE;
-    FVector LocalPositions[3] = { FVector::ZeroVector, FVector::ZeroVector, FVector::ZeroVector };
-    FVector WorldPositions[3] = { FVector::ZeroVector, FVector::ZeroVector, FVector::ZeroVector };
-    FVector2D UVs[3] = { FVector2D::ZeroVector, FVector2D::ZeroVector, FVector2D::ZeroVector };
-    FVector WorldNormal = FVector::UpVector;
-    FVector WorldTangent = FVector::ForwardVector;
-    FVector WorldBitangent = FVector::RightVector;
-    FVector LocalNormal = FVector::UpVector;
-    FVector LocalTangent = FVector::ForwardVector;
-    FVector LocalBitangent = FVector::RightVector;
-    FBox WorldBounds = FBox(ForceInit);
-    FBox2D UVBounds = FBox2D(ForceInit);
+    FVector3f LocalPositions[3] = { FVector3f::ZeroVector, FVector3f::ZeroVector, FVector3f::ZeroVector };
+    FVector2f UVs[3] = { FVector2f::ZeroVector, FVector2f::ZeroVector, FVector2f::ZeroVector };
+    FVector3f LocalNormal = FVector3f(0.0f, 0.0f, 1.0f);
+    FVector3f LocalTangent = FVector3f(1.0f, 0.0f, 0.0f);
+    FVector3f LocalBitangent = FVector3f(0.0f, 1.0f, 0.0f);
+    FBox3f LocalBounds = FBox3f(ForceInit);
+    FBox2f UVBounds = FBox2f(ForceInit);
 };
 
 struct FWetWrinkleProjectedSurface
@@ -88,11 +84,12 @@ struct FWetWrinkleAccumulatedPreviewState
     TArray<FColor> Pixels;
     TArray<FColor> WorkingPixels;
     bool bDirty = true;
+    uint64 LastUsedSerial = 0;
 };
 
 struct FWetWrinkleHitBVHNode
 {
-    FBox Bounds = FBox(ForceInit);
+    FBox3f Bounds = FBox3f(ForceInit);
     int32 LeftChildIndex = INDEX_NONE;
     int32 RightChildIndex = INDEX_NONE;
     int32 FirstTriangleIndex = 0;
@@ -102,6 +99,47 @@ struct FWetWrinkleHitBVHNode
     {
         return LeftChildIndex == INDEX_NONE && RightChildIndex == INDEX_NONE;
     }
+};
+
+struct FWetWrinkleHitCacheKey
+{
+    const USkeletalMesh* Mesh = nullptr;
+    const void* LODRenderDataIdentity = nullptr;
+    int32 LODIndex = 0;
+    int32 UVChannelIndex = INDEX_NONE;
+    int32 MaterialSlotIndex = INDEX_NONE;
+    FString TopologySignature;
+
+    bool operator==(const FWetWrinkleHitCacheKey& Other) const
+    {
+        return Mesh == Other.Mesh &&
+               LODRenderDataIdentity == Other.LODRenderDataIdentity &&
+               LODIndex == Other.LODIndex &&
+               UVChannelIndex == Other.UVChannelIndex &&
+               MaterialSlotIndex == Other.MaterialSlotIndex &&
+               TopologySignature == Other.TopologySignature;
+    }
+
+    friend uint32 GetTypeHash(const FWetWrinkleHitCacheKey& Key)
+    {
+        uint32 Hash = GetTypeHash(Key.Mesh);
+        Hash = HashCombine(Hash, GetTypeHash(Key.LODRenderDataIdentity));
+        Hash = HashCombine(Hash, GetTypeHash(Key.LODIndex));
+        Hash = HashCombine(Hash, GetTypeHash(Key.UVChannelIndex));
+        Hash = HashCombine(Hash, GetTypeHash(Key.MaterialSlotIndex));
+        return HashCombine(Hash, GetTypeHash(Key.TopologySignature));
+    }
+};
+
+struct FWetWrinkleHitCacheEntry
+{
+    TArray<FWetWrinkleCachedHitTriangle> Triangles;
+    TMap<uint64, int32> TriangleLookup;
+    TArray<int32> BVHTriangleIndices;
+    TArray<FWetWrinkleHitBVHNode> BVHNodes;
+    TArray<TArray<int32>> UVTriangleGrid;
+    int32 UVChannelIndex = INDEX_NONE;
+    uint64 LastUsedSerial = 0;
 };
 
 struct FWetProceduralRidgeTransientPreviewState
@@ -136,7 +174,6 @@ class SWetWrinkleViewport : public SEditorViewport, public FGCObject
     SLATE_BEGIN_ARGS(SWetWrinkleViewport) {}
     SLATE_ARGUMENT(UWetClothingAsset*, WetClothingAsset)
     SLATE_ARGUMENT(bool, UseDefaultPreviewMaterial)
-    SLATE_ARGUMENT(bool, UseOriginalMeshMaterialForPreview)
     SLATE_EVENT(FOnWetWrinkleSurfaceHitChanged, OnSurfaceHitChanged)
     SLATE_EVENT(FOnWetWrinklePaintStrokeStarted, OnPaintStrokeStarted)
     SLATE_EVENT(FOnWetWrinklePaintStampRequested, OnPaintStampRequested)
@@ -155,13 +192,20 @@ class SWetWrinkleViewport : public SEditorViewport, public FGCObject
     }
 
     void RefreshPreviewMesh(bool bForceMaterialRebuild = false);
-    void SetBrushSettings(const FWetWrinkleBrushSettings& InBrushSettings);
+    void SynchronizeBrushSettings(const FWetWrinkleBrushSettings& InBrushSettings);
+    void SetBrushTopology(int32 MaterialSlotIndex, int32 UVChannelIndex);
+    void UpdateBrushPreviewSettings(const FWetWrinkleBrushSettings& InBrushSettings);
+    void SetPreviewWetness(float PreviewWetness);
     void RefreshStoredStampOverlay(bool bRebuildAccumulatedPreview = true);
+    void InvalidateAccumulatedPreviewTextures();
     void AppendAccumulatedPreviewStamp(const FWetWrinklePatchPlacement& Stamp);
     void AppendAccumulatedPreviewProceduralStroke(const FWetProceduralRidgeStroke& Stroke);
-    void SetGeneratedNormalPreviewTexture(int32 MaterialSlotIndex, int32 UVChannelIndex, UTexture2D* GeneratedNormalTexture);
-    void ClearGeneratedNormalPreviewTexture();
-    void SetSelectedStrokeGuid(const FGuid& InStrokeGuid);
+    void SetGeneratedNormalPreviewTexture(
+        int32 MaterialSlotIndex,
+        int32 UVChannelIndex,
+        UTexture2D* GeneratedNormalTexture,
+        bool bRefreshPreview = true);
+    void ClearGeneratedNormalPreviewTexture(bool bRefreshPreview = true);
     void SetSelectedProceduralStrokeGuid(const FGuid& InStrokeGuid);
     void SetSelectedProceduralStrokePointIndex(int32 InPointIndex);
     void SetTransientProceduralStroke(
@@ -169,7 +213,7 @@ class SWetWrinkleViewport : public SEditorViewport, public FGCObject
         bool bStartJunction = false,
         bool bEndJunction = false);
     void PreviewEditedProceduralStroke(const FWetProceduralRidgeStroke& Stroke);
-    void SetEditingProceduralStrokeGuid(const FGuid& InStrokeGuid);
+    bool SetEditingProceduralStrokeGuid(const FGuid& InStrokeGuid, bool bRefreshPreview = true);
     int32 FindNearestProceduralStrokePoint(
         const FWetProceduralRidgeStroke& Stroke,
         const FVector& WorldPosition,
@@ -184,10 +228,7 @@ class SWetWrinkleViewport : public SEditorViewport, public FGCObject
         int32 MaterialSlotIndex,
         int32 UVChannelIndex,
         FWetWrinkleSurfaceHit& OutHit) const;
-    void ClearTransientProceduralStroke();
-    void PreviewBrushAtUV(int32 MaterialSlotIndex, int32 UVChannelIndex, const FVector2D& UV);
-    void ClearExternalBrushPreview();
-    bool TryBuildSurfaceHitAtUV(int32 MaterialSlotIndex, int32 UVChannelIndex, const FVector2D& UV, FWetWrinkleSurfaceHit& OutHit) const;
+    bool ClearTransientProceduralStroke(bool bRefreshPreview = true);
     bool TryBuildSurfaceHitAtUVNearWorldPosition(int32 MaterialSlotIndex, int32 UVChannelIndex, const FVector2D& UV, const FVector& ReferenceWorldPosition, FWetWrinkleSurfaceHit& OutHit) const;
     bool TraceSurface(const FVector& RayOrigin, const FVector& RayDirection, FWetWrinkleSurfaceHit& OutHit) const;
     void FocusOnPreviewMesh(bool bInstant = false);
@@ -203,6 +244,16 @@ class SWetWrinkleViewport : public SEditorViewport, public FGCObject
     void ApplyMaterialSlotVisibility();
     void RebuildHitTriangles();
     void RebuildHitTriangleAccelerationStructures();
+    TOptional<FWetWrinkleHitCacheKey> MakeHitCacheKey(
+        const USkeletalMesh* Mesh,
+        int32 LODIndex,
+        int32 UVChannelIndex,
+        int32 MaterialSlotIndex) const;
+    bool RestoreHitCache(const FWetWrinkleHitCacheKey& Key);
+    void StoreActiveHitCache();
+    void ClearActiveHitCache();
+    void ClearAllHitCaches();
+    void PruneInactiveHitCaches();
     void FlushTransientProceduralPreviewUpload();
     void HandleSurfaceHitFromClient(const FWetWrinkleSurfaceHit& SurfaceHit);
     void BeginPaintStrokeFromClient(const FWetWrinkleSurfaceHit& SurfaceHit);
@@ -213,6 +264,9 @@ class SWetWrinkleViewport : public SEditorViewport, public FGCObject
     void ClearBrushCursor();
     void DrawBrushCursor(FPrimitiveDrawInterface* PDI) const;
     void RefreshWrinklePreviewHoverParameters();
+    void RefreshWrinklePreviewWetnessParameter();
+    void RefreshWrinklePreviewAccumulatedParameters();
+    void RefreshWrinklePreviewTransientParameters();
     float CalculateBrushCursorWorldRadius() const;
     FText GetViewportHintText() const;
     const UWetClothingAsset* ResolveSourceWetClothingAsset() const;
@@ -228,6 +282,11 @@ class SWetWrinkleViewport : public SEditorViewport, public FGCObject
     bool EnsurePreviewMaterialForSlot(int32 MaterialSlotIndex);
     void ResetPreviewMaterialParameters(int32 MaterialSlotIndex);
     void ReleaseAccumulatedPreviewStates();
+    void ReleaseAccumulatedPreviewStateResources(
+        FWetWrinkleAccumulatedPreviewState& PreviewState,
+        bool bClearMaterialBinding);
+    void PrepareAccumulatedPreviewStatesForSlot(int32 MaterialSlotIndex, int32 UVChannelIndex);
+    void PruneAccumulatedPreviewStates(int32 MaterialSlotIndex, int32 UVChannelIndex);
     void MarkAccumulatedPreviewStatesDirty();
     FWetWrinkleAccumulatedPreviewState* FindOrAddAccumulatedPreviewState(UTexture* SourceTexture, int32 MaterialSlotIndex, int32 UVChannelIndex);
     UTexture2D* ResolveAccumulatedPreviewTexture(UTexture* SourceTexture, int32 MaterialSlotIndex, int32 UVChannelIndex);
@@ -256,6 +315,7 @@ class SWetWrinkleViewport : public SEditorViewport, public FGCObject
     bool bGeneratedNormalPreviewOverrideActive = false;
     TArray<FWetWrinklePreviewMaterialSlotState> PreviewMaterialSlots;
     TArray<FWetWrinkleAccumulatedPreviewState> AccumulatedPreviewStates;
+    uint64 AccumulatedPreviewUseSerial = 0;
     FWetProceduralRidgeTransientPreviewState TransientProceduralPreviewState;
     TSharedPtr<SRichTextBlock> OverlayText;
     TArray<FWetWrinkleCachedHitTriangle> CachedHitTriangles;
@@ -264,14 +324,15 @@ class SWetWrinkleViewport : public SEditorViewport, public FGCObject
     TArray<FWetWrinkleHitBVHNode> HitBVHNodes;
     TArray<TArray<int32>> UVTriangleGrid;
     int32 HitTriangleUVChannelIndex = INDEX_NONE;
+    TOptional<FWetWrinkleHitCacheKey> ActiveHitCacheKey;
+    TMap<FWetWrinkleHitCacheKey, FWetWrinkleHitCacheEntry> InactiveHitCaches;
+    uint64 HitCacheUseSerial = 0;
     int32 LastAppliedActivePreviewMaterialSlot = INDEX_NONE;
     int32 LastHoverPreviewMaterialSlotIndex = INDEX_NONE;
     bool bPreviewMaterialsNeedReapply = true;
     bool bUseDefaultPreviewMaterial = false;
-    bool bUseOriginalMeshMaterialForPreview = false;
     FWetWrinkleBrushSettings BrushSettings;
     FWetWrinkleSurfaceHit CurrentSurfaceHit;
-    FGuid SelectedStrokeGuid;
     FGuid SelectedProceduralStrokeGuid;
     int32 SelectedProceduralStrokePointIndex = INDEX_NONE;
     FGuid EditingProceduralStrokeGuid;
@@ -279,6 +340,7 @@ class SWetWrinkleViewport : public SEditorViewport, public FGCObject
     bool bTransientProceduralStartJunction = false;
     bool bTransientProceduralEndJunction = false;
     bool bTransientProceduralPreviewBound = false;
+    TOptional<FWetProceduralRidgeStroke> EditedProceduralStrokePreview;
     TOptional<FWetProceduralRidgeStroke> PendingTransientProceduralStroke;
     FIntRect PendingTransientProceduralUploadRect;
     bool bHasPendingTransientProceduralUpload = false;

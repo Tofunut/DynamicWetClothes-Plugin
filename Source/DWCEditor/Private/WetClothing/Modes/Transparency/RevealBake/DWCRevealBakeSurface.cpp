@@ -3,6 +3,7 @@
 #include "Runtime/Engine/Classes/Engine/SkeletalMesh.h"
 #include "Runtime/Engine/Public/Rendering/SkeletalMeshLODRenderData.h"
 #include "Runtime/Engine/Public/Rendering/SkeletalMeshRenderData.h"
+#include "WetClothing/Modes/Transparency/Brush/DWCTransparencyPaintIslandBuilder.h"
 
 void FDWCRevealBakeSurface::Reset()
 {
@@ -83,7 +84,6 @@ bool FDWCRevealBakeSurfaceBuilder::BuildReferencePoseSurface(
     OutSurface.MaxRevealDistance = ResolvedLayer.MaxRevealDistance;
     OutSurface.Triangles.Reserve(IndexBuffer.Num() / 3);
 
-    int32 TriangleIndexInSurface = 0;
     for (const FSkelMeshRenderSection& Section : LODData.RenderSections)
     {
         if (!Section.IsValid())
@@ -110,7 +110,9 @@ bool FDWCRevealBakeSurfaceBuilder::BuildReferencePoseSurface(
             }
 
             FDWCRevealBakeSurfaceTriangle Triangle;
-            Triangle.TriangleIndex = TriangleIndexInSurface++;
+            // Keep this as the render-buffer triangle id. DWC Data UV metadata,
+            // island clip buffers, and editor hit tests all key by this id.
+            Triangle.TriangleIndex = Index / 3;
             Triangle.MaterialSlotIndex = Section.MaterialIndex;
             Triangle.Bounds = FBox(ForceInit);
 
@@ -138,6 +140,33 @@ bool FDWCRevealBakeSurfaceBuilder::BuildReferencePoseSurface(
     {
         SetError(OutErrorMessage, TEXT("No bake surface triangles were generated."));
         return false;
+    }
+
+    TArray<FDWCTransparencyPaintIslandTriangle> PaintIslandTriangles;
+    PaintIslandTriangles.Reserve(OutSurface.Triangles.Num());
+    for (const FDWCRevealBakeSurfaceTriangle& Triangle : OutSurface.Triangles)
+    {
+        FDWCTransparencyPaintIslandTriangle& PaintTriangle =
+            PaintIslandTriangles.AddDefaulted_GetRef();
+        PaintTriangle.TriangleID = Triangle.TriangleIndex;
+        PaintTriangle.MaterialSlotIndex = Triangle.MaterialSlotIndex;
+        for (int32 CornerIndex = 0; CornerIndex < 3; ++CornerIndex)
+        {
+            PaintTriangle.Positions[CornerIndex] = Triangle.Positions[CornerIndex];
+            PaintTriangle.UVs[CornerIndex] = Triangle.UVs[CornerIndex];
+        }
+    }
+
+    TMap<int32, int32> PaintIslandIDByTriangleID;
+    FDWCTransparencyPaintIslandBuilder::Build(
+        PaintIslandTriangles,
+        PaintIslandIDByTriangleID);
+    for (FDWCRevealBakeSurfaceTriangle& Triangle : OutSurface.Triangles)
+    {
+        const int32* PaintIslandID =
+            PaintIslandIDByTriangleID.Find(Triangle.TriangleIndex);
+        Triangle.UVIslandID =
+            PaintIslandID != nullptr ? *PaintIslandID : INDEX_NONE;
     }
 
     SetError(OutErrorMessage, TEXT(""));

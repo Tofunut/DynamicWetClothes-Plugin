@@ -11,6 +11,7 @@ struct FDWCRevealBakeTexelSample
     FVector Normal = FVector::UpVector;
     int32 TriangleIndex = INDEX_NONE;
     int32 MaterialSlotIndex = INDEX_NONE;
+    int32 UVIslandID = INDEX_NONE;
     FVector Barycentric = FVector::ZeroVector;
 };
 
@@ -89,7 +90,7 @@ class FDWCRevealBakeRayProjector
         const TArray<FDWCRevealBakeSurface>&          SourceSurfaces,
         const TArray<FDWCRevealBakeTexelSample>&      Samples,
         const FDWCRevealBakeRayProjectionSettings&    Settings,
-        TArray<FDWCRevealBakeRayHit>&                 OutHits,
+        TFunctionRef<void(const FDWCRevealBakeRayHit&)> ConsumeHit,
         FString*                                OutErrorMessage = nullptr);
 
   private:
@@ -101,8 +102,6 @@ class FDWCRevealBakeRayProjector
         const FDWCRevealBakeSurface* SourceSurface = nullptr;
         const FDWCRevealBakeSurfaceTriangle* Triangle = nullptr;
         FVector Barycentric = FVector::ZeroVector;
-        FVector Position = FVector::ZeroVector;
-        FVector Normal = FVector::UpVector;
         float Distance = 0.0f;
     };
 
@@ -133,13 +132,11 @@ class FDWCRevealBakeRayProjector
             const TArray<FDWCRevealBakeSurface>&      SourceSurfaces,
             const FDWCRevealBakeRayProjectionSettings& Settings);
 
-        void QueryRay(
+        void ForEachRayCandidate(
             const FVector& RayOrigin,
             const FVector& RayDirection,
             float          MaxDistance,
-            TArray<int32>& OutTriangleRefIndices) const;
-
-        const FBakeProjectionTriangleRef* GetTriangleRef(int32 TriangleRefIndex) const;
+            TFunctionRef<void(const FBakeProjectionTriangleRef&)> VisitTriangle) const;
 
       private:
         int32 BuildNode(TArray<int32>& TriangleRefIndices);

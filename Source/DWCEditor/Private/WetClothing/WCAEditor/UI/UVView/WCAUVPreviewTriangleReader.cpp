@@ -26,14 +26,14 @@ namespace DWCUVPreviewTriangleReaderPrivate
         const FSkeletalMeshLODRenderData& LODData,
         const TArray<uint32>& IndexBuffer,
         const int32 UVChannelIndex,
-        const int32 MaterialSlotIndex,
+        const TSet<int32>& MaterialSlotIndices,
         const FDWCDataUVBufferView* DataUVView,
         TArray<FWCAUVPreviewSourceTriangle>& OutTriangles)
     {
         const int32 VertexCount = static_cast<int32>(LODData.GetNumVertices());
         for (const FSkelMeshRenderSection& Section : LODData.RenderSections)
         {
-            if (!Section.IsValid() || Section.MaterialIndex != MaterialSlotIndex)
+            if (!Section.IsValid() || !MaterialSlotIndices.Contains(Section.MaterialIndex))
             {
                 continue;
             }
@@ -60,17 +60,17 @@ namespace DWCUVPreviewTriangleReaderPrivate
 
                 FWCAUVPreviewSourceTriangle& Triangle = OutTriangles.AddDefaulted_GetRef();
                 Triangle.TriangleID = TriangleIndex / 3;
-                Triangle.MaterialSlotIndex = MaterialSlotIndex;
+                Triangle.MaterialSlotIndex = Section.MaterialIndex;
                 for (int32 CornerIndex = 0; CornerIndex < 3; ++CornerIndex)
                 {
                     const uint32 VertexIndex = Indices[CornerIndex];
                     Triangle.UVs[CornerIndex] = DataUVView != nullptr
-                        ? FVector2D(DataUVView->GetUV(VertexIndex))
-                        : FVector2D(LODData.StaticVertexBuffers.StaticMeshVertexBuffer.GetVertexUV(
+                        ? DataUVView->GetUV(VertexIndex)
+                        : LODData.StaticVertexBuffers.StaticMeshVertexBuffer.GetVertexUV(
                             VertexIndex,
-                            UVChannelIndex));
-                    Triangle.LocalPositions[CornerIndex] = FVector(
-                        LODData.StaticVertexBuffers.PositionVertexBuffer.VertexPosition(VertexIndex));
+                            UVChannelIndex);
+                    Triangle.LocalPositions[CornerIndex] =
+                        LODData.StaticVertexBuffers.PositionVertexBuffer.VertexPosition(VertexIndex);
                 }
             }
         }
@@ -82,6 +82,24 @@ bool FWCAUVPreviewTriangleReader::ReadFromSkeletalMesh(
     const int32 LODIndex,
     const int32 UVChannelIndex,
     const int32 MaterialSlotIndex,
+    TArray<FWCAUVPreviewSourceTriangle>& OutTriangles,
+    FString* OutErrorMessage)
+{
+    const int32 MaterialSlotIndices[] = { MaterialSlotIndex };
+    return ReadFromSkeletalMesh(
+        SkeletalMesh,
+        LODIndex,
+        UVChannelIndex,
+        MakeArrayView(MaterialSlotIndices),
+        OutTriangles,
+        OutErrorMessage);
+}
+
+bool FWCAUVPreviewTriangleReader::ReadFromSkeletalMesh(
+    const USkeletalMesh* SkeletalMesh,
+    const int32 LODIndex,
+    const int32 UVChannelIndex,
+    const TConstArrayView<int32> MaterialSlotIndices,
     TArray<FWCAUVPreviewSourceTriangle>& OutTriangles,
     FString* OutErrorMessage)
 {
@@ -100,9 +118,21 @@ bool FWCAUVPreviewTriangleReader::ReadFromSkeletalMesh(
         DWC::Error::SetMessage(OutErrorMessage, TEXT("Requested Skeletal Mesh LOD render data is unavailable."));
         return false;
     }
-    if (!ValidateMaterialSlot(SkeletalMesh, MaterialSlotIndex, OutErrorMessage))
+    if (MaterialSlotIndices.IsEmpty())
     {
+        DWC::Error::SetMessage(OutErrorMessage, TEXT("No material slots were selected."));
         return false;
+    }
+
+    TSet<int32> RequestedMaterialSlots;
+    RequestedMaterialSlots.Reserve(MaterialSlotIndices.Num());
+    for (const int32 MaterialSlotIndex : MaterialSlotIndices)
+    {
+        if (!ValidateMaterialSlot(SkeletalMesh, MaterialSlotIndex, OutErrorMessage))
+        {
+            return false;
+        }
+        RequestedMaterialSlots.Add(MaterialSlotIndex);
     }
 
     const FSkeletalMeshLODRenderData& LODData = RenderData->LODRenderData[LODIndex];
@@ -125,7 +155,7 @@ bool FWCAUVPreviewTriangleReader::ReadFromSkeletalMesh(
         LODData,
         IndexBuffer,
         UVChannelIndex,
-        MaterialSlotIndex,
+        RequestedMaterialSlots,
         nullptr,
         OutTriangles);
     DWC::Error::SetMessage(OutErrorMessage, TEXT(""));
@@ -202,11 +232,13 @@ bool FWCAUVPreviewTriangleReader::ReadFromDataUV(
         return false;
     }
 
+    TSet<int32> RequestedMaterialSlots;
+    RequestedMaterialSlots.Add(MaterialSlotIndex);
     AddSectionTriangles(
         LODData,
         IndexBuffer,
         Asset.GetDWCDataUVChannelIndex(),
-        MaterialSlotIndex,
+        RequestedMaterialSlots,
         &DataUVView,
         OutTriangles);
     DWC::Error::SetMessage(OutErrorMessage, TEXT(""));

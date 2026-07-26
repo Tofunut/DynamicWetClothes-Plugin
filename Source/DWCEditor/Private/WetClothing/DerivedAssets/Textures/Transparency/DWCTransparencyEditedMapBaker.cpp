@@ -115,8 +115,13 @@ namespace
             *SuppressionSettingsSignature,
             PaddingPixels,
             EdgeFeatherPixels);
-        for (const FDWCTransparencyBrushStroke& Stroke : Layer.EditableStrokes)
+        const int32 FirstStrokeIndex = FMath::Clamp(
+            AutoResult.BaselineStrokeCount,
+            0,
+            Layer.EditableStrokes.Num());
+        for (int32 StrokeIndex = FirstStrokeIndex; StrokeIndex < Layer.EditableStrokes.Num(); ++StrokeIndex)
         {
+            const FDWCTransparencyBrushStroke& Stroke = Layer.EditableStrokes[StrokeIndex];
             Canonical += FString::Printf(
                 TEXT("|Stroke=%s,%d,%d,%d,%d,%.9g,%.9g,%.9g,%d"),
                 *Stroke.StrokeGuid.ToString(EGuidFormats::Digits),
@@ -309,15 +314,17 @@ bool FDWCTransparencyEditedMapBaker::Bake(
         ManualWeightBuffer);
 
     const FWetClothingTransparencyData& TransparencyData = WetClothingAsset.Authored.TransparencyData;
-    const FDWCWrinkleSuppressionSource SuppressionSource =
-        FDWCWrinkleSuppressionProcessor::FindExactSource(
+    const FDWCWrinkleSuppressionSource SuppressionSource = AutoResult.bIsFinalBakedBaseline
+        ? FDWCWrinkleSuppressionSource()
+        : FDWCWrinkleSuppressionProcessor::FindExactSource(
             &WetClothingAsset,
             AutoResult.MaterialSlotIndex,
             AutoResult.UVChannelIndex,
             AutoResult.LODIndex);
     TArray<uint8> WrinkleSuppressionBuffer;
     FString SuppressionWarning;
-    const bool bHasWrinkleSuppression = SuppressionSource.IsValid() &&
+    const bool bHasWrinkleSuppression = !AutoResult.bIsFinalBakedBaseline &&
+        SuppressionSource.IsValid() &&
         FDWCWrinkleSuppressionProcessor::BuildProcessedBuffer(
             SuppressionSource,
             AutoResult.Resolution,
@@ -325,7 +332,11 @@ bool FDWCTransparencyEditedMapBaker::Bake(
             TransparencyData.WrinkleSuppressionMaskSoftness,
             WrinkleSuppressionBuffer,
             SuppressionWarning);
-    if (!SuppressionSource.IsValid())
+    if (AutoResult.bIsFinalBakedBaseline)
+    {
+        SuppressionWarning.Reset();
+    }
+    else if (!SuppressionSource.IsValid())
     {
         SuppressionWarning =
             TEXT("No exact baked wrinkle mask matched this slot, UV channel, and LOD. Transparency was baked without wrinkle suppression.");
@@ -362,27 +373,38 @@ bool FDWCTransparencyEditedMapBaker::Bake(
             continue;
         }
 
-        const uint8 WrinkleSuppression = bHasWrinkleSuppression &&
-            WrinkleSuppressionBuffer.IsValidIndex(PixelIndex)
-            ? WrinkleSuppressionBuffer[PixelIndex]
-            : 0;
-        FinalPixels[PixelIndex].A = FDWCTransparencyComposite::ResolveFinalAlpha8(
-            EditedAlpha,
-            TransparencyStrength,
-            WrinkleSuppression,
-            SuppressionStrength);
+        if (AutoResult.bIsFinalBakedBaseline)
+        {
+            FinalPixels[PixelIndex].A = static_cast<uint8>(FMath::RoundToInt(
+                FMath::Clamp(EditedAlpha, 0.0f, 1.0f) * 255.0f));
+        }
+        else
+        {
+            const uint8 WrinkleSuppression = bHasWrinkleSuppression &&
+                WrinkleSuppressionBuffer.IsValidIndex(PixelIndex)
+                ? WrinkleSuppressionBuffer[PixelIndex]
+                : 0;
+            FinalPixels[PixelIndex].A = FDWCTransparencyComposite::ResolveFinalAlpha8(
+                EditedAlpha,
+                TransparencyStrength,
+                WrinkleSuppression,
+                SuppressionStrength);
+        }
     }
 
-    ApplyCoverageEdgeFeather(
-        AutoResult.Resolution,
-        AutoResult.OuterCoverageBuffer,
-        TransparencyData.TransparencyEdgeFeatherPixels,
-        FinalPixels);
-    DilateOutsideCoverage(
-        AutoResult.Resolution,
-        AutoResult.OuterCoverageBuffer,
-        TransparencyData.TransparencyPaddingPixels,
-        FinalPixels);
+    if (!AutoResult.bIsFinalBakedBaseline)
+    {
+        ApplyCoverageEdgeFeather(
+            AutoResult.Resolution,
+            AutoResult.OuterCoverageBuffer,
+            TransparencyData.TransparencyEdgeFeatherPixels,
+            FinalPixels);
+        DilateOutsideCoverage(
+            AutoResult.Resolution,
+            AutoResult.OuterCoverageBuffer,
+            TransparencyData.TransparencyPaddingPixels,
+            FinalPixels);
+    }
 
     UTexture2D* Texture = CreateOrUpdateTransparencyMapAsset(
         WetClothingAsset,
@@ -413,20 +435,25 @@ bool FDWCTransparencyEditedMapBaker::Bake(
     BakedMap->TransparencyMap = Texture;
     BakedMap->Resolution = AutoResult.Resolution.X;
     BakedMap->PaddingPixels = WetClothingAsset.Authored.TransparencyData.TransparencyPaddingPixels;
+    BakedMap->BakedStrokeCount = Layer.EditableStrokes.Num();
     BakedMap->BakeGuid = FGuid::NewGuid();
-    BakedMap->SourceWrinkleMaskBakeGuid = bHasWrinkleSuppression && SuppressionSource.BakedMap != nullptr
-        ? SuppressionSource.BakedMap->BakeGuid
-        : FGuid();
-    BakedMap->SourceWrinkleMaskBuildSignature =
-        bHasWrinkleSuppression && SuppressionSource.BakedMap != nullptr
+    if (!AutoResult.bIsFinalBakedBaseline)
+    {
+        BakedMap->SourceWrinkleMaskBakeGuid = bHasWrinkleSuppression && SuppressionSource.BakedMap != nullptr
+            ? SuppressionSource.BakedMap->BakeGuid
+            : FGuid();
+        BakedMap->SourceWrinkleMaskBuildSignature =
+            bHasWrinkleSuppression && SuppressionSource.BakedMap != nullptr
             ? SuppressionSource.BakedMap->BuildSignature
             : FString();
-    BakedMap->WrinkleSuppressionSettingsSignature =
-        FDWCWrinkleSuppressionProcessor::MakeSettingsSignature(
-            TransparencyData.WrinkleSuppressionCoverageThreshold,
-            TransparencyData.WrinkleSuppressionMaskSoftness,
-            TransparencyData.WrinkleSuppressionStrength,
-            TransparencyData.TransparencyPreviewStrength);
+        BakedMap->WrinkleSuppressionSettingsSignature =
+            FDWCWrinkleSuppressionProcessor::MakeSettingsSignature(
+                TransparencyData.WrinkleSuppressionCoverageThreshold,
+                TransparencyData.WrinkleSuppressionMaskSoftness,
+                TransparencyData.WrinkleSuppressionStrength,
+                TransparencyData.TransparencyPreviewStrength);
+        BakedMap->bWrinkleSuppressionBakedIntoAlpha = bHasWrinkleSuppression;
+    }
     BakedMap->BuildSignature = MakeFinalBuildSignature(
         AutoResult,
         Layer,
@@ -436,12 +463,16 @@ bool FDWCTransparencyEditedMapBaker::Bake(
         TransparencyData.TransparencyEdgeFeatherPixels);
     BakedMap->bContainsColorRGB = true;
     BakedMap->bContainsTransparencyAlpha = true;
-    BakedMap->bWrinkleSuppressionBakedIntoAlpha = bHasWrinkleSuppression;
 
     OutResult.TransparencyMap = Texture;
-    OutResult.AppliedStrokeCount = Layer.EditableStrokes.Num();
-    for (const FDWCTransparencyBrushStroke& Stroke : Layer.EditableStrokes)
+    const int32 FirstAppliedStrokeIndex = FMath::Clamp(
+        AutoResult.BaselineStrokeCount,
+        0,
+        Layer.EditableStrokes.Num());
+    OutResult.AppliedStrokeCount = Layer.EditableStrokes.Num() - FirstAppliedStrokeIndex;
+    for (int32 StrokeIndex = FirstAppliedStrokeIndex; StrokeIndex < Layer.EditableStrokes.Num(); ++StrokeIndex)
     {
+        const FDWCTransparencyBrushStroke& Stroke = Layer.EditableStrokes[StrokeIndex];
         if (Stroke.bEnabled)
         {
             OutResult.AppliedSampleCount += Stroke.Samples.Num();

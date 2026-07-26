@@ -52,64 +52,96 @@ bool FDWCTransparencyComposite::BuildCoverageEdgeFeatherBuffer(
         return true;
     }
 
-    TArray<uint8> RemainingCoverage = OuterCoverage;
-    TArray<int32> BoundaryPixels;
-    BoundaryPixels.Reserve(FMath::Max(Resolution.X, Resolution.Y) * 4);
-    const FIntPoint Neighbors[] =
-    {
-        FIntPoint(-1, 0),
-        FIntPoint(1, 0),
-        FIntPoint(0, -1),
-        FIntPoint(0, 1)
-    };
+    // The old erosion loop rescanned the full image once for every feather pixel.
+    // A two-pass Manhattan distance transform gives the same four-neighbor edge
+    // distance in O(width * height), regardless of the configured feather radius.
+    constexpr uint16 InfiniteDistance = MAX_uint16;
+    TArray<uint16> DistanceToCoverageEdge;
+    DistanceToCoverageEdge.Init(InfiniteDistance, PixelCount);
 
-    for (int32 Step = 0; Step < FeatherSteps; ++Step)
+    for (int32 Y = 0; Y < Resolution.Y; ++Y)
     {
-        BoundaryPixels.Reset();
-        for (int32 Y = 0; Y < Resolution.Y; ++Y)
+        for (int32 X = 0; X < Resolution.X; ++X)
         {
-            for (int32 X = 0; X < Resolution.X; ++X)
+            const int32 PixelIndex = Y * Resolution.X + X;
+            if (OuterCoverage[PixelIndex] == 0)
             {
-                const int32 PixelIndex = Y * Resolution.X + X;
-                if (RemainingCoverage[PixelIndex] == 0)
-                {
-                    continue;
-                }
+                DistanceToCoverageEdge[PixelIndex] = 0;
+                continue;
+            }
 
-                bool bBoundary = false;
-                for (const FIntPoint& Offset : Neighbors)
-                {
-                    const int32 NeighborX = X + Offset.X;
-                    const int32 NeighborY = Y + Offset.Y;
-                    if (NeighborX < 0 || NeighborY < 0 ||
-                        NeighborX >= Resolution.X || NeighborY >= Resolution.Y ||
-                        RemainingCoverage[NeighborY * Resolution.X + NeighborX] == 0)
-                    {
-                        bBoundary = true;
-                        break;
-                    }
-                }
-                if (bBoundary)
-                {
-                    BoundaryPixels.Add(PixelIndex);
-                }
+            // The virtual uncovered texels immediately outside the texture are
+            // distance zero, so covered border texels begin at distance one.
+            if (X == 0 || Y == 0 || X == Resolution.X - 1 || Y == Resolution.Y - 1)
+            {
+                DistanceToCoverageEdge[PixelIndex] = 1;
             }
         }
+    }
 
-        if (BoundaryPixels.IsEmpty())
+    auto RelaxDistance = [&DistanceToCoverageEdge](const int32 PixelIndex, const int32 NeighborIndex)
+    {
+        const uint16 NeighborDistance = DistanceToCoverageEdge[NeighborIndex];
+        if (NeighborDistance < InfiniteDistance)
         {
-            break;
+            DistanceToCoverageEdge[PixelIndex] = FMath::Min<uint16>(
+                DistanceToCoverageEdge[PixelIndex],
+                static_cast<uint16>(NeighborDistance + 1));
+        }
+    };
+
+    for (int32 Y = 0; Y < Resolution.Y; ++Y)
+    {
+        for (int32 X = 0; X < Resolution.X; ++X)
+        {
+            const int32 PixelIndex = Y * Resolution.X + X;
+            if (OuterCoverage[PixelIndex] == 0)
+            {
+                continue;
+            }
+            if (X > 0)
+            {
+                RelaxDistance(PixelIndex, PixelIndex - 1);
+            }
+            if (Y > 0)
+            {
+                RelaxDistance(PixelIndex, PixelIndex - Resolution.X);
+            }
+        }
+    }
+
+    for (int32 Y = Resolution.Y - 1; Y >= 0; --Y)
+    {
+        for (int32 X = Resolution.X - 1; X >= 0; --X)
+        {
+            const int32 PixelIndex = Y * Resolution.X + X;
+            if (OuterCoverage[PixelIndex] == 0)
+            {
+                continue;
+            }
+            if (X + 1 < Resolution.X)
+            {
+                RelaxDistance(PixelIndex, PixelIndex + 1);
+            }
+            if (Y + 1 < Resolution.Y)
+            {
+                RelaxDistance(PixelIndex, PixelIndex + Resolution.X);
+            }
+        }
+    }
+
+    for (int32 PixelIndex = 0; PixelIndex < PixelCount; ++PixelIndex)
+    {
+        const uint16 Distance = DistanceToCoverageEdge[PixelIndex];
+        if (OuterCoverage[PixelIndex] == 0 || Distance == InfiniteDistance || Distance > FeatherSteps)
+        {
+            continue;
         }
 
-        const uint8 EdgeWeight = static_cast<uint8>(FMath::RoundToInt(FMath::Clamp(
-            (static_cast<float>(Step) + 1.0f) / (static_cast<float>(FeatherSteps) + 1.0f),
+        OutBuffer[PixelIndex] = static_cast<uint8>(FMath::RoundToInt(FMath::Clamp(
+            static_cast<float>(Distance) / (static_cast<float>(FeatherSteps) + 1.0f),
             0.0f,
             1.0f) * 255.0f));
-        for (const int32 PixelIndex : BoundaryPixels)
-        {
-            OutBuffer[PixelIndex] = EdgeWeight;
-            RemainingCoverage[PixelIndex] = 0;
-        }
     }
     return true;
 }

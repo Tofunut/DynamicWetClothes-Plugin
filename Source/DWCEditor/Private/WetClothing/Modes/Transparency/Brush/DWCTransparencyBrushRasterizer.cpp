@@ -27,6 +27,54 @@ namespace
         return FMath::Clamp(AutoAlpha * (1.0f - ManualWeight) + ManualPremultiplied, 0.0f, 1.0f);
     }
 
+    bool PassesIslandClip(
+        const FDWCTransparencyAutoBakeResult& AutoResult,
+        const int32 PixelIndex,
+        const int32 UVIslandID)
+    {
+        if (UVIslandID == INDEX_NONE)
+        {
+            return true;
+        }
+        return AutoResult.OuterIslandIDBuffer.IsValidIndex(PixelIndex) &&
+            AutoResult.OuterIslandIDBuffer[PixelIndex] == UVIslandID;
+    }
+
+    int32 ResolveSampleIslandID(
+        const FDWCTransparencyAutoBakeResult& AutoResult,
+        const FDWCTransparencyBrushSample& Sample,
+        const int32 Width,
+        const int32 Height,
+        const bool bWrap)
+    {
+        if (Sample.UVIslandID != INDEX_NONE)
+        {
+            return Sample.UVIslandID;
+        }
+        if (AutoResult.OuterIslandIDBuffer.Num() != Width * Height)
+        {
+            return INDEX_NONE;
+        }
+
+        int32 X = FMath::FloorToInt(Sample.PositionUV.X * Width);
+        int32 Y = FMath::FloorToInt(Sample.PositionUV.Y * Height);
+        if (bWrap)
+        {
+            X = WrapIndex(X, Width);
+            Y = WrapIndex(Y, Height);
+        }
+        else if (X < 0 || X >= Width || Y < 0 || Y >= Height)
+        {
+            return INDEX_NONE;
+        }
+        else
+        {
+            X = FMath::Clamp(X, 0, Width - 1);
+            Y = FMath::Clamp(Y, 0, Height - 1);
+        }
+        return AutoResult.OuterIslandIDBuffer[Y * Width + X];
+    }
+
     void ApplySample(
         const FDWCTransparencyAutoBakeResult& AutoResult,
         const FDWCTransparencyBrushStroke& Stroke,
@@ -49,6 +97,12 @@ namespace
         const int32 MaxX = FMath::CeilToInt(CenterPixels.X + RadiusPixelsX + 1.0f);
         const int32 MinY = FMath::FloorToInt(CenterPixels.Y - RadiusPixelsY - 1.0f);
         const int32 MaxY = FMath::CeilToInt(CenterPixels.Y + RadiusPixelsY + 1.0f);
+        const int32 ClipUVIslandID = ResolveSampleIslandID(
+            AutoResult,
+            Sample,
+            Width,
+            Height,
+            bWrap);
 
         for (int32 UnwrappedY = MinY; UnwrappedY <= MaxY; ++UnwrappedY)
         {
@@ -80,6 +134,11 @@ namespace
                 const int32 X = bWrap ? WrapIndex(UnwrappedX, Width) : UnwrappedX;
                 const int32 Y = bWrap ? WrapIndex(UnwrappedY, Height) : UnwrappedY;
                 const int32 PixelIndex = Y * Width + X;
+                if (!PassesIslandClip(AutoResult, PixelIndex, ClipUVIslandID))
+                {
+                    continue;
+                }
+
                 const float OldPremultiplied = ManualPremultipliedBuffer[PixelIndex] / 255.0f;
                 const float OldWeight = ManualWeightBuffer[PixelIndex] / 255.0f;
                 float NewPremultiplied = OldPremultiplied;
@@ -104,6 +163,7 @@ namespace
                     else if (Stroke.BrushMode == EDWCTransparencyBrushMode::Smooth)
                     {
                         Target = 0.0f;
+                        int32 SmoothSampleCount = 0;
                         for (int32 OffsetY = -1; OffsetY <= 1; ++OffsetY)
                         {
                             for (int32 OffsetX = -1; OffsetX <= 1; ++OffsetX)
@@ -120,10 +180,17 @@ namespace
                                     SampleX = FMath::Clamp(SampleX, 0, Width - 1);
                                     SampleY = FMath::Clamp(SampleY, 0, Height - 1);
                                 }
-                                Target += ResolveEditedAlphaInternal(AutoResult, ManualPremultipliedBuffer, ManualWeightBuffer, SampleY * Width + SampleX);
+                                const int32 NeighborIndex = SampleY * Width + SampleX;
+                                if (PassesIslandClip(AutoResult, NeighborIndex, ClipUVIslandID))
+                                {
+                                    Target += ResolveEditedAlphaInternal(AutoResult, ManualPremultipliedBuffer, ManualWeightBuffer, NeighborIndex);
+                                    ++SmoothSampleCount;
+                                }
                             }
                         }
-                        Target /= 9.0f;
+                        Target = SmoothSampleCount > 0
+                            ? Target / static_cast<float>(SmoothSampleCount)
+                            : ResolveEditedAlphaInternal(AutoResult, ManualPremultipliedBuffer, ManualWeightBuffer, PixelIndex);
                     }
 
                     NewPremultiplied = Target * BrushWeight + OldPremultiplied * (1.0f - BrushWeight);
@@ -148,15 +215,40 @@ void FDWCTransparencyBrushRasterizer::RebuildFromStrokes(
     TArray<uint8>& OutManualWeightBuffer)
 {
     const int32 PixelCount = AutoResult.Resolution.X * AutoResult.Resolution.Y;
-    OutManualPremultipliedBuffer.Init(0, PixelCount);
-    OutManualWeightBuffer.Init(0, PixelCount);
     if (PixelCount <= 0)
     {
         return;
     }
 
-    for (const FDWCTransparencyBrushStroke& Stroke : Layer.EditableStrokes)
+    const int32 FirstStrokeIndex = FMath::Clamp(
+        AutoResult.BaselineStrokeCount,
+        0,
+        Layer.EditableStrokes.Num());
+
+    bool bHasRelevantStrokeSamples = false;
+    for (int32 StrokeIndex = FirstStrokeIndex; StrokeIndex < Layer.EditableStrokes.Num(); ++StrokeIndex)
     {
+        const FDWCTransparencyBrushStroke& Stroke = Layer.EditableStrokes[StrokeIndex];
+        if (Stroke.bEnabled &&
+            Stroke.MaterialSlotIndex == MaterialSlotIndex &&
+            Stroke.UVChannelIndex == UVChannelIndex &&
+            !Stroke.Samples.IsEmpty())
+        {
+            bHasRelevantStrokeSamples = true;
+            break;
+        }
+    }
+
+    if (!bHasRelevantStrokeSamples)
+    {
+        return;
+    }
+
+    OutManualPremultipliedBuffer.Init(0, PixelCount);
+    OutManualWeightBuffer.Init(0, PixelCount);
+    for (int32 StrokeIndex = FirstStrokeIndex; StrokeIndex < Layer.EditableStrokes.Num(); ++StrokeIndex)
+    {
+        const FDWCTransparencyBrushStroke& Stroke = Layer.EditableStrokes[StrokeIndex];
         if (!Stroke.bEnabled ||
             Stroke.MaterialSlotIndex != MaterialSlotIndex ||
             Stroke.UVChannelIndex != UVChannelIndex)

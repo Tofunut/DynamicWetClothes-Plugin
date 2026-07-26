@@ -137,20 +137,18 @@ bool FDWCRevealBakeRayProjector::FBakeProjectionBvh::Build(
     return Nodes.Num() > 0;
 }
 
-void FDWCRevealBakeRayProjector::FBakeProjectionBvh::QueryRay(
+void FDWCRevealBakeRayProjector::FBakeProjectionBvh::ForEachRayCandidate(
     const FVector& RayOrigin,
     const FVector& RayDirection,
     const float    MaxDistance,
-    TArray<int32>& OutTriangleRefIndices) const
+    TFunctionRef<void(const FBakeProjectionTriangleRef&)> VisitTriangle) const
 {
-    OutTriangleRefIndices.Reset();
     if (Nodes.Num() == 0)
     {
         return;
     }
 
-    TArray<int32> NodeStack;
-    NodeStack.Reserve(64);
+    TArray<int32, TInlineAllocator<64>> NodeStack;
     NodeStack.Add(0);
 
     while (NodeStack.Num() > 0)
@@ -174,7 +172,11 @@ void FDWCRevealBakeRayProjector::FBakeProjectionBvh::QueryRay(
                 const int32 LeafIndex = Node.FirstTriangleIndex + TriangleOffset;
                 if (LeafTriangleRefIndices.IsValidIndex(LeafIndex))
                 {
-                    OutTriangleRefIndices.Add(LeafTriangleRefIndices[LeafIndex]);
+                    const int32 TriangleRefIndex = LeafTriangleRefIndices[LeafIndex];
+                    if (TriangleRefs.IsValidIndex(TriangleRefIndex))
+                    {
+                        VisitTriangle(TriangleRefs[TriangleRefIndex]);
+                    }
                 }
             }
             continue;
@@ -189,12 +191,6 @@ void FDWCRevealBakeRayProjector::FBakeProjectionBvh::QueryRay(
             NodeStack.Add(Node.RightChildIndex);
         }
     }
-}
-
-const FDWCRevealBakeRayProjector::FBakeProjectionTriangleRef* FDWCRevealBakeRayProjector::FBakeProjectionBvh::GetTriangleRef(
-    const int32 TriangleRefIndex) const
-{
-    return TriangleRefs.IsValidIndex(TriangleRefIndex) ? &TriangleRefs[TriangleRefIndex] : nullptr;
 }
 
 int32 FDWCRevealBakeRayProjector::FBakeProjectionBvh::BuildNode(TArray<int32>& TriangleRefIndices)
@@ -330,6 +326,16 @@ bool FDWCRevealBakeTexelSampler::BuildOuterTexelSamples(
         {
             for (int32 X = PixelBounds.Min.X; X < PixelBounds.Max.X; ++X)
             {
+                const FVector2D UV(
+                    (static_cast<double>(X) + 0.5) / static_cast<double>(Settings.Resolution.X),
+                    (static_cast<double>(Y) + 0.5) / static_cast<double>(Settings.Resolution.Y));
+
+                FVector Barycentric;
+                if (!ComputeBarycentricInUV(UV, Triangle, Barycentric))
+                {
+                    continue;
+                }
+
                 const int32 PixelKey = MakePixelKey(X, Y, Settings.Resolution.X);
                 const int32 ExistingTriangleIndex = OccupiedPixelTriangles[PixelKey];
                 if (ExistingTriangleIndex != INDEX_NONE)
@@ -351,16 +357,6 @@ bool FDWCRevealBakeTexelSampler::BuildOuterTexelSamples(
                     continue;
                 }
 
-                const FVector2D UV(
-                    (static_cast<double>(X) + 0.5) / static_cast<double>(Settings.Resolution.X),
-                    (static_cast<double>(Y) + 0.5) / static_cast<double>(Settings.Resolution.Y));
-
-                FVector Barycentric;
-                if (!ComputeBarycentricInUV(UV, Triangle, Barycentric))
-                {
-                    continue;
-                }
-
                 FDWCRevealBakeTexelSample Sample;
                 Sample.Pixel = FIntPoint(X, Y);
                 Sample.UV = UV;
@@ -368,6 +364,7 @@ bool FDWCRevealBakeTexelSampler::BuildOuterTexelSamples(
                 Sample.Normal = InterpolateVector(Barycentric, Triangle.Normals).GetSafeNormal();
                 Sample.TriangleIndex = Triangle.TriangleIndex;
                 Sample.MaterialSlotIndex = Triangle.MaterialSlotIndex;
+                Sample.UVIslandID = Triangle.UVIslandID;
                 Sample.Barycentric = Barycentric;
 
                 OccupiedPixelTriangles[PixelKey] = SurfaceTriangleIndex;
@@ -431,11 +428,9 @@ bool FDWCRevealBakeRayProjector::ProjectSamplesToSources(
     const TArray<FDWCRevealBakeSurface>&       SourceSurfaces,
     const TArray<FDWCRevealBakeTexelSample>&   Samples,
     const FDWCRevealBakeRayProjectionSettings& Settings,
-    TArray<FDWCRevealBakeRayHit>&              OutHits,
+    TFunctionRef<void(const FDWCRevealBakeRayHit&)> ConsumeHit,
     FString*                             OutErrorMessage)
 {
-    OutHits.Reset();
-
     if (Samples.Num() == 0)
     {
         SetError(OutErrorMessage, TEXT("No texel samples were provided for ray projection."));
@@ -447,8 +442,6 @@ bool FDWCRevealBakeRayProjector::ProjectSamplesToSources(
         SetError(OutErrorMessage, TEXT("No source surfaces were provided for ray projection."));
         return false;
     }
-
-    OutHits.Reserve(Samples.Num());
 
     const float MaxRevealDistance = FMath::Max(0.0f, OuterSurface.MaxRevealDistance * FMath::Max(Settings.RayLengthScale, 0.0f));
     if (MaxRevealDistance <= 0.0f)
@@ -464,99 +457,113 @@ bool FDWCRevealBakeRayProjector::ProjectSamplesToSources(
         return false;
     }
 
-    TArray<int32> CandidateTriangleRefIndices;
     for (const FDWCRevealBakeTexelSample& Sample : Samples)
     {
         const FVector RayDirection = -Sample.Normal.GetSafeNormal();
         const FVector RayOrigin = Sample.Position + RayDirection * Settings.RayStartOffset;
 
-        // Most rays resolve to only a handful of BVH candidates. Keeping this inline avoids
-        // millions of transient heap allocations for a high-resolution transparency map.
-        TArray<FCandidateHit, TInlineAllocator<32>> CandidateHits;
-        ProjectionBvh.QueryRay(RayOrigin, RayDirection, MaxRevealDistance, CandidateTriangleRefIndices);
-        for (const int32 TriangleRefIndex : CandidateTriangleRefIndices)
+        FCandidateHit BestRevealCandidate;
+        FCandidateHit BestBlockerCandidate;
+        bool bHasRevealCandidate = false;
+        bool bHasBlockerCandidate = false;
+
+        const auto IsPreferredCandidate =
+            [&Settings](const FCandidateHit& Candidate, const FCandidateHit& Current)
         {
-            const FBakeProjectionTriangleRef* TriangleRef = ProjectionBvh.GetTriangleRef(TriangleRefIndex);
-            if (TriangleRef == nullptr || TriangleRef->SourceSurface == nullptr || TriangleRef->Triangle == nullptr)
+            if (Settings.bPreferLowerSourceLayerOrder &&
+                Candidate.SourceSurface != nullptr &&
+                Current.SourceSurface != nullptr &&
+                Candidate.SourceSurface->LayerOrder != Current.SourceSurface->LayerOrder)
             {
-                continue;
+                return Candidate.SourceSurface->LayerOrder < Current.SourceSurface->LayerOrder;
             }
+            return Candidate.Distance < Current.Distance;
+        };
 
-            float Distance = 0.0f;
-            FVector Barycentric;
-            if (!IntersectRayTriangle(
-                    RayOrigin,
-                    RayDirection,
-                    *TriangleRef->Triangle,
-                    MaxRevealDistance,
-                    Distance,
-                    Barycentric))
+        ProjectionBvh.ForEachRayCandidate(
+            RayOrigin,
+            RayDirection,
+            MaxRevealDistance,
+            [&](const FBakeProjectionTriangleRef& TriangleRef)
             {
-                continue;
-            }
-
-            if (Distance < FMath::Max(0.0f, Settings.MinHitDistance))
-            {
-                continue;
-            }
-
-            if (Settings.bRespectPerSourceMaxDistance &&
-                Distance > FMath::Max(0.0f, TriangleRef->SourceSurface->MaxRevealDistance))
-            {
-                continue;
-            }
-
-            FCandidateHit Candidate;
-            Candidate.SourceSurface = TriangleRef->SourceSurface;
-            Candidate.Triangle = TriangleRef->Triangle;
-            Candidate.Barycentric = Barycentric;
-            Candidate.Distance = Distance;
-            Candidate.Position = InterpolateVector(Barycentric, TriangleRef->Triangle->Positions);
-            Candidate.Normal = InterpolateVector(Barycentric, TriangleRef->Triangle->Normals).GetSafeNormal();
-            CandidateHits.Add(Candidate);
-        }
-
-        CandidateHits.Sort(
-            [&Settings](const FCandidateHit& Left, const FCandidateHit& Right)
-            {
-                if (Settings.bPreferLowerSourceLayerOrder && Left.SourceSurface != nullptr && Right.SourceSurface != nullptr &&
-                    Left.SourceSurface->LayerOrder != Right.SourceSurface->LayerOrder)
+                if (TriangleRef.SourceSurface == nullptr || TriangleRef.Triangle == nullptr)
                 {
-                    return Left.SourceSurface->LayerOrder < Right.SourceSurface->LayerOrder;
+                    return;
                 }
-                return Left.Distance < Right.Distance;
+
+                float Distance = 0.0f;
+                FVector Barycentric;
+                if (!IntersectRayTriangle(
+                        RayOrigin,
+                        RayDirection,
+                        *TriangleRef.Triangle,
+                        MaxRevealDistance,
+                        Distance,
+                        Barycentric))
+                {
+                    return;
+                }
+
+                if (Distance < FMath::Max(0.0f, Settings.MinHitDistance))
+                {
+                    return;
+                }
+
+                if (Settings.bRespectPerSourceMaxDistance &&
+                    Distance > FMath::Max(0.0f, TriangleRef.SourceSurface->MaxRevealDistance))
+                {
+                    return;
+                }
+
+                FCandidateHit Candidate;
+                Candidate.SourceSurface = TriangleRef.SourceSurface;
+                Candidate.Triangle = TriangleRef.Triangle;
+                Candidate.Barycentric = Barycentric;
+                Candidate.Distance = Distance;
+
+                if (TriangleRef.SourceSurface->bCanBeRevealSource)
+                {
+                    if (!bHasRevealCandidate ||
+                        IsPreferredCandidate(Candidate, BestRevealCandidate))
+                    {
+                        BestRevealCandidate = Candidate;
+                        bHasRevealCandidate = true;
+                    }
+                    return;
+                }
+
+                if (Settings.bRespectBlockers &&
+                    TriangleRef.SourceSurface->bBlocksReveal &&
+                    (!bHasBlockerCandidate ||
+                     IsPreferredCandidate(Candidate, BestBlockerCandidate)))
+                {
+                    BestBlockerCandidate = Candidate;
+                    bHasBlockerCandidate = true;
+                }
             });
 
         FDWCRevealBakeRayHit SelectedHit;
         SelectedHit.Pixel = Sample.Pixel;
 
-        for (const FCandidateHit& Candidate : CandidateHits)
+        const bool bBlocked =
+            bHasBlockerCandidate &&
+            (!bHasRevealCandidate ||
+             IsPreferredCandidate(BestBlockerCandidate, BestRevealCandidate));
+        if (bHasRevealCandidate && !bBlocked)
         {
-            if (Candidate.SourceSurface == nullptr)
+            SelectedHit = MakeRayHit(Sample, BestRevealCandidate, MaxRevealDistance);
+            if (Settings.bUseNormalAlignmentConfidence)
             {
-                continue;
-            }
-
-            if (Candidate.SourceSurface->bCanBeRevealSource)
-            {
-                SelectedHit = MakeRayHit(Sample, Candidate, MaxRevealDistance);
-                if (Settings.bUseNormalAlignmentConfidence)
-                {
-                    SelectedHit.Confidence = FMath::Clamp(
-                        static_cast<float>(FVector::DotProduct(Sample.Normal.GetSafeNormal(), Candidate.Normal.GetSafeNormal())),
-                        0.0f,
-                        1.0f);
-                }
-                break;
-            }
-
-            if (Settings.bRespectBlockers && Candidate.SourceSurface->bBlocksReveal)
-            {
-                break;
+                SelectedHit.Confidence = FMath::Clamp(
+                    static_cast<float>(FVector::DotProduct(
+                        Sample.Normal.GetSafeNormal(),
+                        SelectedHit.Normal.GetSafeNormal())),
+                    0.0f,
+                    1.0f);
             }
         }
 
-        OutHits.Add(SelectedHit);
+        ConsumeHit(SelectedHit);
     }
 
     SetError(OutErrorMessage, TEXT(""));
@@ -618,13 +625,13 @@ FDWCRevealBakeRayHit FDWCRevealBakeRayProjector::MakeRayHit(
     Hit.SourceLayerId = Candidate.SourceSurface != nullptr ? Candidate.SourceSurface->LayerId : NAME_None;
     Hit.SourceTriangleIndex = Candidate.Triangle != nullptr ? Candidate.Triangle->TriangleIndex : INDEX_NONE;
     Hit.SourceMaterialSlotIndex = Candidate.Triangle != nullptr ? Candidate.Triangle->MaterialSlotIndex : INDEX_NONE;
-    Hit.Position = Candidate.Position;
-    Hit.Normal = Candidate.Normal;
     Hit.Distance = Candidate.Distance;
     Hit.Confidence = MaxRevealDistance > 0.0f ? FMath::Clamp(1.0f - Candidate.Distance / MaxRevealDistance, 0.0f, 1.0f) : 0.0f;
 
     if (Candidate.Triangle != nullptr)
     {
+        Hit.Position = InterpolateVector(Candidate.Barycentric, Candidate.Triangle->Positions);
+        Hit.Normal = InterpolateVector(Candidate.Barycentric, Candidate.Triangle->Normals).GetSafeNormal();
         Hit.SourceUV = InterpolateVector2D(Candidate.Barycentric, Candidate.Triangle->UVs);
     }
 

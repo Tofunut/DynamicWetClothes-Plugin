@@ -30,6 +30,8 @@ struct FWetWrinklePreviewMaterialBuildArgs
     int32 UVChannelIndex = INDEX_NONE;
     bool bOverrideCpuWetnessInput = false;
     bool bBuildNormalOverlay = true;
+    // Adds an editor-only BaseColor overlay driven by a transient transparency map.
+    bool bBuildTransparencyPreviewOverlay = false;
 };
 
 struct FWetWrinklePreviewMaterialBuildResult

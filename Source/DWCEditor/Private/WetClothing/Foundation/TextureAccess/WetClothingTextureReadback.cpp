@@ -157,3 +157,11 @@ void FWetClothingTextureReadbackUtils::ClearCache()
 {
     GTextureReadbackCache.Reset();
 }
+
+void FWetClothingTextureReadbackUtils::InvalidateTexture(UTexture2D* Texture)
+{
+    if (Texture != nullptr)
+    {
+        GTextureReadbackCache.Remove(FObjectKey(Texture));
+    }
+}

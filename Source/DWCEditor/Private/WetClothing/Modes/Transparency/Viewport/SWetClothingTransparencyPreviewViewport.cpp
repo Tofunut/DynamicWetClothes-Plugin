@@ -694,7 +694,7 @@ void SWetClothingTransparencyPreviewViewport::SetVisualizationMode(const EDWCTra
 void SWetClothingTransparencyPreviewViewport::SetAutoBakePreviewResult(
     TSharedPtr<FDWCTransparencyAutoBakeResult> InResult)
 {
-    if (AutoBakePreviewResult == InResult)
+    if (AutoBakePreviewResult == InResult && TransparencyPreviewTexture != nullptr)
     {
         return;
     }

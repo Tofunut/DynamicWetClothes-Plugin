@@ -995,10 +995,7 @@ void SWetClothingTransparencyBakePanel::EnsureStageForSelectedLayer()
     }
 
     const FWetClothingBakedTransparencyMap* BakedMap = FindExactBakedTransparencyMap(Asset, Layer);
-    const bool bHasBakedMap = BakedMap != nullptr &&
-        ((BakedMap->BakeGuid.IsValid() && !BakedMap->BuildSignature.IsEmpty()) ||
-         (Layer->AutoBakeMetadata.AutoBakeGuid.IsValid() &&
-          !Layer->AutoBakeMetadata.BuildSignature.IsEmpty()));
+    const bool bHasBakedMap = BakedMap != nullptr;
     const bool bStructureConfigured = Asset != nullptr &&
         Asset->Authored.TransparencyData.bCharacterStructureTypeConfigured;
     StageByLayer.Add(
@@ -1041,6 +1038,15 @@ void SWetClothingTransparencyBakePanel::SetCurrentStage(const EDWCTransparencyEd
     StageByLayer.FindOrAdd(Layer != nullptr ? Layer->LayerGuid : FGuid()) = Stage;
     if (Stage == EDWCTransparencyEditorStage::FinalEditing)
     {
+        if (SelectedVisualizationMode != EDWCTransparencyVisualizationMode::Final &&
+            SelectedVisualizationMode != EDWCTransparencyVisualizationMode::AutoAlpha)
+        {
+            SelectedVisualizationMode = EDWCTransparencyVisualizationMode::Final;
+        }
+        if (PreviewViewport.IsValid())
+        {
+            PreviewViewport->SetPreviewMode(EWetClothingTransparencyPreviewMode::TargetMeshOnly);
+        }
         EnsureActiveWorkingMap();
     }
     RequestRefresh(
@@ -1285,12 +1291,7 @@ bool SWetClothingTransparencyBakePanel::EnsureActiveWorkingMap()
     }
 
     const FWetClothingBakedTransparencyMap* BakedMap = FindExactBakedTransparencyMap(Asset, Layer);
-    const bool bHasCurrentFinalBake = BakedMap != nullptr &&
-        BakedMap->BakeGuid.IsValid() &&
-        !BakedMap->BuildSignature.IsEmpty();
-    const bool bHasReusableAutoBaseline = Layer->AutoBakeMetadata.AutoBakeGuid.IsValid() &&
-        !Layer->AutoBakeMetadata.BuildSignature.IsEmpty();
-    if (BakedMap == nullptr || (!bHasCurrentFinalBake && !bHasReusableAutoBaseline))
+    if (BakedMap == nullptr)
     {
         return false;
     }
@@ -1403,7 +1404,8 @@ FReply SWetClothingTransparencyBakePanel::HandleGenerateTransparencyMapClicked()
             !bPreparingRevealColorPaintWorkingMap)
         {
             if (const TSharedPtr<FDWCTransparencyAutoBakeResult>* Existing = AutoBakeResults.Find(Layer->LayerGuid);
-                Existing != nullptr && Existing->IsValid())
+                Existing != nullptr && Existing->IsValid() &&
+                !(*Existing)->bIsFinalBakedBaseline)
             {
                 // Type 3 has already authored its source color in the Stage 2
                 // working map. Generate is a stage transition here, not a
@@ -3674,6 +3676,8 @@ void SWetClothingTransparencyBakePanel::RefreshViewportContext()
     if (!PreviewViewport.IsValid()) return;
     EnsureActiveWorkingMap();
     const FWetClothingTransparencyLayerData* Layer = GetSelectedLayer();
+    const bool bFinalEditing =
+        GetCurrentStage() == EDWCTransparencyEditorStage::FinalEditing;
     const bool bRevealColorPaintActive =
         GetCurrentStage() == EDWCTransparencyEditorStage::MapGeneration &&
         Layer != nullptr &&
@@ -3684,12 +3688,31 @@ void SWetClothingTransparencyBakePanel::RefreshViewportContext()
         SelectedVisualizationMode = EDWCTransparencyVisualizationMode::InnerColor;
         PreviewViewport->SetPreviewMode(EWetClothingTransparencyPreviewMode::TargetMeshOnly);
     }
+    else if (bFinalEditing &&
+             SelectedVisualizationMode != EDWCTransparencyVisualizationMode::Final &&
+             SelectedVisualizationMode != EDWCTransparencyVisualizationMode::AutoAlpha)
+    {
+        SelectedVisualizationMode = EDWCTransparencyVisualizationMode::Final;
+    }
     if (!CanUseFullBlueprintPreview() && PreviewViewport->GetPreviewMode() == EWetClothingTransparencyPreviewMode::FullBlueprint)
         PreviewViewport->SetPreviewMode(EWetClothingTransparencyPreviewMode::TargetMeshOnly);
     PreviewViewport->SetTransparencyEditContext(SelectedLayerGuid,
         Layer != nullptr ? Layer->TargetSurface.OuterMaterialSlotIndex : INDEX_NONE,
         Layer != nullptr ? Layer->TargetSurface.OuterUVChannel : 0,
         Layer != nullptr ? Layer->TargetSurface.UVAddressMode : EDWCTransparencyUVAddressMode::Clamp);
+
+    const TSharedPtr<FDWCTransparencyAutoBakeResult>* Result = Layer != nullptr
+        ? AutoBakeResults.Find(Layer->LayerGuid)
+        : nullptr;
+    if (Result != nullptr && Result->IsValid())
+    {
+        PreviewViewport->SetAutoBakePreviewResult(*Result);
+    }
+    else
+    {
+        PreviewViewport->ClearAutoBakePreviewResult();
+    }
+
     PreviewViewport->SetWetnessPreviewPercent(WetnessPreviewPercent);
     PreviewViewport->SetTransparencyPreviewStrength(TransparencyPreviewStrength);
     PreviewViewport->SetWrinkleSuppressionStrength(WrinkleSuppressionStrength);
@@ -3703,20 +3726,7 @@ void SWetClothingTransparencyBakePanel::RefreshViewportContext()
     {
         PreviewViewport->SetRevealColorPaintingEnabled(false);
         PushPaintSettingsToViewport();
-        PreviewViewport->SetTransparencyPaintingEnabled(
-            GetCurrentStage() == EDWCTransparencyEditorStage::FinalEditing);
-    }
-
-    const TSharedPtr<FDWCTransparencyAutoBakeResult>* Result = Layer != nullptr
-        ? AutoBakeResults.Find(Layer->LayerGuid)
-        : nullptr;
-    if (Result != nullptr && Result->IsValid())
-    {
-        PreviewViewport->SetAutoBakePreviewResult(*Result);
-    }
-    else
-    {
-        PreviewViewport->ClearAutoBakePreviewResult();
+        PreviewViewport->SetTransparencyPaintingEnabled(bFinalEditing);
     }
 }
 

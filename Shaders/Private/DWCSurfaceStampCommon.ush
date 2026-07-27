@@ -41,7 +41,7 @@ bool DWC_ResolveStampLookup(
 float DWC_StampBrush(float2 LocalPosition)
 {
     const float Radius = length(LocalPosition);
-    return 1.0 - smoothstep(0.82, 1.0, Radius);
+    return 1.0 - smoothstep(0.55, 1.0, Radius);
 }
 
 float DWC_VisibleSurfaceAmount(float4 State, float CurrentTimeSeconds)

@@ -13,7 +13,7 @@ namespace DWCWetPartDataTextureBake
     constexpr int32 PaddingPixels = 4;
     constexpr uint8 NeutralProfileID = 0;
     constexpr int32 MaxLocalProfileCount = 254;
-    constexpr float MinDetailSize = 0.25f;
+    constexpr float MinDetailSize = 0.0f;
     constexpr float MaxDetailSize = 4.0f;
 
     inline uint8 EncodeDetailSize(const float Value)

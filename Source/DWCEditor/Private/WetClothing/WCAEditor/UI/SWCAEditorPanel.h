@@ -48,6 +48,7 @@ public:
     SLATE_BEGIN_ARGS(SWCAEditorPanel) {}
     SLATE_ARGUMENT(UWetClothingAsset*, WetClothingAsset)
     SLATE_ARGUMENT(TSharedPtr<IDetailsView>, DetailsView)
+    SLATE_EVENT(FSimpleDelegate, OnStatusChanged)
     SLATE_END_ARGS()
 
     virtual ~SWCAEditorPanel() override;
@@ -69,6 +70,7 @@ public:
 private:
     TSharedRef<SWidget> EnsureModeWidget(EWCAEditorMode Mode);
     EActiveTimerReturnType HandleDeferredRefresh(double CurrentTime, float DeltaTime);
+    EActiveTimerReturnType HandleStatusRefreshTimer(double CurrentTime, float DeltaTime);
     void UpdateCachedStatus(bool bRefreshAssetState = true);
     EVisibility GetRuntimeReadyWarningVisibility() const;
     FText GetRuntimeReadyWarningText() const;
@@ -78,6 +80,7 @@ private:
 private:
     TWeakObjectPtr<UWetClothingAsset> WetClothingAsset;
     TSharedPtr<IDetailsView> DetailsView;
+    FSimpleDelegate OnStatusChanged;
     TSharedPtr<SBox> ModeContentBox;
     TSharedPtr<SWetClothingPartEditorPanel> PartEditorPanel;
     TSharedPtr<SWetWrinkleEditorPanel> WrinkleEditorPanel;
@@ -85,6 +88,7 @@ private:
     EWCAEditorMode ActiveMode = EWCAEditorMode::PartEdit;
     bool bRefreshPending = false;
     bool bPendingFullModeRefresh = false;
+    bool bSuppressStatusChangedNotification = false;
     bool bStatusWarningVisible = false;
     FText CachedStatusText;
     EWCAEditorStatusSeverity CachedStatusSeverity = EWCAEditorStatusSeverity::Info;

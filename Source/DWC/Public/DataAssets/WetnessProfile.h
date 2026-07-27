@@ -92,15 +92,15 @@ struct DWC_API FSurfaceWaterProfileParameters
 
     /** Shared strength applied to both droplet and rivulet normals. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rendering", meta=(ClampMin="0.0", ClampMax="8.0"))
-    float SurfaceWaterNormalStrength = 1.0f;
+    float SurfaceWaterNormalStrength = 3.0f;
 
     /** Strength of the Surface Water roughness blend toward the material-wide target roughness. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rendering", meta=(ClampMin="0.0", ClampMax="1.0"))
-    float SurfaceWaterRoughnessStrength = 0.5f;
+    float SurfaceWaterRoughnessStrength = 0.85f;
 
     /** Minimum visible RT amount before Surface Water rendering begins. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rendering", meta=(ClampMin="0.0", ClampMax="1.0"))
-    float SurfaceVisibilityThreshold = 0.2f;
+    float SurfaceVisibilityThreshold = 0.25f;
 
     /** UV scroll speed along the decoded rivulet flow direction. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rivulet|Rendering")
@@ -110,9 +110,17 @@ struct DWC_API FSurfaceWaterProfileParameters
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rivulet|Rendering")
     TObjectPtr<UTexture2D> RivuletNormalTexture = nullptr;
 
+    /** Optional mask used to localize the Rivulet normal detail. Null means no authored mask. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rivulet|Rendering")
+    TObjectPtr<UTexture2D> RivuletMaskTexture = nullptr;
+
     /** Optional profile override. Null disables the Droplet normal contribution. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet|Rendering")
     TObjectPtr<UTexture2D> DropletNormalTexture = nullptr;
+
+    /** Optional mask used to localize the Droplet normal detail. Null means no authored mask. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet|Rendering")
+    TObjectPtr<UTexture2D> DropletMaskTexture = nullptr;
 
 };
 

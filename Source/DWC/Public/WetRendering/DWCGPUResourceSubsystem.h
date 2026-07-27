@@ -159,7 +159,7 @@ class DWC_API UDWCGPUResourceSubsystem final : public UWorldSubsystem
 
 public:
     static constexpr int32 MaxRuntimeProfileCount = 255;
-    static constexpr int32 TexelsPerProfile = 2;
+    static constexpr int32 TexelsPerProfile = 3;
     static constexpr int32 GlobalLUTWidth = MaxRuntimeProfileCount * TexelsPerProfile;
     static constexpr int32 LocalRemapWidth = 256;
 
@@ -195,9 +195,17 @@ public:
         int32 LocalProfileID,
         UMaterialInstanceDynamic& MID);
 
+    bool ApplyPreviewRenderProfileFallbackProfile(
+        const UWetClothingAsset* Asset,
+        int32 MaterialSlotIndex,
+        const FWetClothingLocalRenderProfile& LocalProfile,
+        UMaterialInstanceDynamic& MID);
+
     UTexture2D* GetGlobalRenderProfileLUT() const { return GlobalRenderProfileLUT; }
     UTexture2DArray* GetDropletNormalArray() const { return DropletNormalArray; }
+    UTexture2DArray* GetDropletMaskArray() const { return DropletMaskArray; }
     UTexture2DArray* GetRivuletNormalArray() const { return RivuletNormalArray; }
+    UTexture2DArray* GetRivuletMaskArray() const { return RivuletMaskArray; }
     int32 GetRegistryRevision() const { return RegistryRevision; }
     FDWCGPUResourceSubsystemStats GetStats() const;
 
@@ -219,6 +227,7 @@ private:
         int32 AllocatedCapacity = 0;
         TSet<int32> DirtySlices;
 
+        void ReserveNeutralSlice(bool& bOutChanged);
         void SetNeutral(UTexture2D* Texture, bool& bOutChanged);
         int32 FindOrAdd(UTexture2D* Texture, bool& bOutChanged);
         void Reset();
@@ -229,6 +238,10 @@ private:
         EDWCRenderResourceUsage Usage);
 
     void EnsureNeutralResources();
+    void EnsureMaskRegistryNeutral(
+        FTextureArrayRegistry& Registry,
+        UTexture2D* ReferenceTexture,
+        bool& bOutChanged);
     void RebuildGlobalRenderProfileLUT();
     void UpdateGlobalRenderProfileLUT(int32 RuntimeProfileIndex);
     void FlushDirtyRuntimeProfiles();
@@ -273,7 +286,13 @@ private:
     TObjectPtr<UTexture2D> GlobalRenderProfileLUT = nullptr;
 
     UPROPERTY(Transient)
+    TObjectPtr<UTexture2DArray> DropletMaskArray = nullptr;
+
+    UPROPERTY(Transient)
     TObjectPtr<UTexture2DArray> DropletNormalArray = nullptr;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UTexture2DArray> RivuletMaskArray = nullptr;
 
     UPROPERTY(Transient)
     TObjectPtr<UTexture2DArray> RivuletNormalArray = nullptr;
@@ -285,7 +304,9 @@ private:
 
     TArray<FRuntimeProfileRecord> RuntimeProfiles;
     TMap<FString, int32> RuntimeProfileIndexByKey;
+    FTextureArrayRegistry DropletMaskRegistry;
     FTextureArrayRegistry DropletNormalRegistry;
+    FTextureArrayRegistry RivuletMaskRegistry;
     FTextureArrayRegistry RivuletNormalRegistry;
     TSet<int32> DirtyRuntimeProfileIndices;
     TSet<TWeakObjectPtr<UMaterialInstanceDynamic>> RegisteredMaterialInstances;

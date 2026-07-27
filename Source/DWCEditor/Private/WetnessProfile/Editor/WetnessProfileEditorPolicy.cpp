@@ -40,9 +40,9 @@ namespace
         { TEXT("Parameters.SurfaceWater.RivuletLengthPixels"), 0.0, 512.0, 48.0 },
 
         // Rendering | Surface Water
-        { TEXT("Parameters.SurfaceWater.SurfaceWaterNormalStrength"), 0.0, 8.0, 1.0 },
-        { TEXT("Parameters.SurfaceWater.SurfaceWaterRoughnessStrength"), 0.0, 1.0, 0.5 },
-        { TEXT("Parameters.SurfaceWater.SurfaceVisibilityThreshold"), 0.0, 1.0, 0.2 },
+        { TEXT("Parameters.SurfaceWater.SurfaceWaterNormalStrength"), 0.0, 8.0, 3.0 },
+        { TEXT("Parameters.SurfaceWater.SurfaceWaterRoughnessStrength"), 0.0, 1.0, 0.85 },
+        { TEXT("Parameters.SurfaceWater.SurfaceVisibilityThreshold"), 0.0, 1.0, 0.25 },
         { TEXT("Parameters.SurfaceWater.RivuletUVScrollSpeed"), 0.0, 10.0, 0.5 },
     };
 

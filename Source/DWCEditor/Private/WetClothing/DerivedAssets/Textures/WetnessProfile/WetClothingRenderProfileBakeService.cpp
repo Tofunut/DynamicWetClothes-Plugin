@@ -14,6 +14,46 @@
 
 namespace
 {
+    struct FExpectedWetPartRenderProfile
+    {
+        int32 MaterialSlotIndex = INDEX_NONE;
+        const FWetClothingWetPartEntry* Entry = nullptr;
+        const FWetPartProfileAssignment* Profile = nullptr;
+    };
+
+    bool IsWetPartRenderProfileBakeable(
+        const FWetClothingAuthoredMaterialSlot& SlotData,
+        const FWetClothingWetPartEntry& Entry)
+    {
+        return SlotData.bIsWettableSlot &&
+               SlotData.MaterialSlotIndex != INDEX_NONE &&
+               !Entry.AssignedUVIslandIDs.IsEmpty();
+    }
+
+    void CollectExpectedWetPartRenderProfiles(
+        const UWetClothingAsset& Asset,
+        TArray<FExpectedWetPartRenderProfile>& OutProfiles)
+    {
+        OutProfiles.Reset();
+
+        const FWetClothingEditableWetPartData& EditableData = Asset.Authored.PartData.EditableWetPartData;
+        for (const FWetClothingAuthoredMaterialSlot& SlotData : EditableData.MaterialSlots)
+        {
+            for (const FWetClothingWetPartEntry& Entry : SlotData.WetPartEntries)
+            {
+                if (!IsWetPartRenderProfileBakeable(SlotData, Entry))
+                {
+                    continue;
+                }
+
+                FExpectedWetPartRenderProfile& ExpectedProfile = OutProfiles.AddDefaulted_GetRef();
+                ExpectedProfile.MaterialSlotIndex = SlotData.MaterialSlotIndex;
+                ExpectedProfile.Entry = &Entry;
+                ExpectedProfile.Profile = EditableData.FindProfile(Entry);
+            }
+        }
+    }
+
     void CollectWetMaterialSlots(const UWetClothingAsset* Asset, TSet<int32>& OutSlots)
     {
         OutSlots.Reset();
@@ -22,21 +62,69 @@ namespace
             return;
         }
 
-        for (const FWetClothingAuthoredMaterialSlot& SlotData : Asset->Authored.PartData.EditableWetPartData.MaterialSlots)
+        TArray<FExpectedWetPartRenderProfile> ExpectedProfiles;
+        CollectExpectedWetPartRenderProfiles(*Asset, ExpectedProfiles);
+        for (const FExpectedWetPartRenderProfile& ExpectedProfile : ExpectedProfiles)
         {
-            if (!SlotData.bIsWettableSlot || SlotData.MaterialSlotIndex == INDEX_NONE)
+            OutSlots.Add(ExpectedProfile.MaterialSlotIndex);
+        }
+    }
+
+    void AppendMissingRenderProfileBakeData(
+        const UWetClothingAsset& Asset,
+        const FWetClothingBakedWetPartData& Baked,
+        TArray<FString>& PendingLines)
+    {
+        TArray<FExpectedWetPartRenderProfile> ExpectedProfiles;
+        CollectExpectedWetPartRenderProfiles(Asset, ExpectedProfiles);
+        if (ExpectedProfiles.IsEmpty())
+        {
+            return;
+        }
+
+        TSet<int32> CheckedMaterialSlots;
+        TSet<FString> CheckedProfileKeys;
+        TSet<FString> BakedProfileKeys;
+        for (const FWetClothingLocalRenderProfile& LocalProfile : Baked.LocalProfiles)
+        {
+            if (!LocalProfile.StableKey.IsEmpty())
+            {
+                BakedProfileKeys.Add(LocalProfile.StableKey);
+            }
+        }
+
+        for (const FExpectedWetPartRenderProfile& ExpectedProfile : ExpectedProfiles)
+        {
+            if (!CheckedMaterialSlots.Contains(ExpectedProfile.MaterialSlotIndex))
+            {
+                CheckedMaterialSlots.Add(ExpectedProfile.MaterialSlotIndex);
+                if (Baked.FindSlot(ExpectedProfile.MaterialSlotIndex) == nullptr)
+                {
+                    PendingLines.Add(FString::Printf(
+                        TEXT("Wet Part Data Texture is missing for slot %d."),
+                        ExpectedProfile.MaterialSlotIndex));
+                }
+            }
+
+            FWetnessProfileParameters Parameters;
+            FWetClothingWetPartDataTextureBaker::ResolveProfileParameters(ExpectedProfile.Profile, Parameters);
+            const FString StableKey =
+                FWetClothingWetPartDataTextureBaker::MakeProfileStableKey(ExpectedProfile.Profile, Parameters);
+            if (StableKey.IsEmpty() || CheckedProfileKeys.Contains(StableKey))
             {
                 continue;
             }
 
-            const bool bHasAssignedIslands = SlotData.WetPartEntries.ContainsByPredicate(
-                [](const FWetClothingWetPartEntry& Entry)
-                {
-                    return Entry.AssignedUVIslandIDs.Num() > 0;
-                });
-            if (bHasAssignedIslands)
+            CheckedProfileKeys.Add(StableKey);
+            if (!BakedProfileKeys.Contains(StableKey))
             {
-                OutSlots.Add(SlotData.MaterialSlotIndex);
+                const int32 WetPartID = ExpectedProfile.Entry != nullptr
+                    ? ExpectedProfile.Entry->WetPartID
+                    : INDEX_NONE;
+                PendingLines.Add(FString::Printf(
+                    TEXT("Wet Part %d in slot %d uses a profile that is missing from baked Render Profile Data."),
+                    WetPartID,
+                    ExpectedProfile.MaterialSlotIndex));
             }
         }
     }
@@ -52,10 +140,60 @@ namespace
         }
     }
 
+    UMaterialInterface* ResolveSourceMeshMaterialForSlot(
+        const UWetClothingAsset* Asset,
+        const int32              MaterialSlotIndex)
+    {
+        if (Asset == nullptr)
+        {
+            return nullptr;
+        }
+
+        USkeletalMesh* RuntimeMesh = Asset->GetRuntimeSkeletalMesh();
+        USkeletalMesh* SourceMesh = Asset->GetSourceSkeletalMesh();
+        if (RuntimeMesh == nullptr || SourceMesh == nullptr ||
+            !RuntimeMesh->GetMaterials().IsValidIndex(MaterialSlotIndex))
+        {
+            return nullptr;
+        }
+
+        const TArray<FSkeletalMaterial>& SourceMaterials = SourceMesh->GetMaterials();
+        if (SourceMaterials.IsValidIndex(MaterialSlotIndex) &&
+            SourceMaterials[MaterialSlotIndex].MaterialInterface != nullptr)
+        {
+            return SourceMaterials[MaterialSlotIndex].MaterialInterface;
+        }
+
+        const FSkeletalMaterial& RuntimeMaterial = RuntimeMesh->GetMaterials()[MaterialSlotIndex];
+        for (const FSkeletalMaterial& SourceMaterial : SourceMaterials)
+        {
+            const bool bSlotNameMatches =
+                !RuntimeMaterial.MaterialSlotName.IsNone() &&
+                (SourceMaterial.MaterialSlotName == RuntimeMaterial.MaterialSlotName ||
+                 SourceMaterial.ImportedMaterialSlotName == RuntimeMaterial.MaterialSlotName);
+            const bool bImportedNameMatches =
+                !RuntimeMaterial.ImportedMaterialSlotName.IsNone() &&
+                (SourceMaterial.MaterialSlotName == RuntimeMaterial.ImportedMaterialSlotName ||
+                 SourceMaterial.ImportedMaterialSlotName == RuntimeMaterial.ImportedMaterialSlotName);
+            if ((bSlotNameMatches || bImportedNameMatches) && SourceMaterial.MaterialInterface != nullptr)
+            {
+                return SourceMaterial.MaterialInterface;
+            }
+        }
+
+        return nullptr;
+    }
+
     UMaterialInterface* ResolveVisualBakeSourceMaterial(
         const UWetClothingAsset* Asset,
+        const int32              MaterialSlotIndex,
         UMaterialInterface*      CandidateMaterial)
     {
+        if (UMaterialInterface* SourceMeshMaterial = ResolveSourceMeshMaterialForSlot(Asset, MaterialSlotIndex))
+        {
+            return SourceMeshMaterial;
+        }
+
         if (Asset == nullptr || CandidateMaterial == nullptr)
         {
             return CandidateMaterial;
@@ -122,6 +260,7 @@ bool FWetClothingRenderProfileBakeService::HasPendingVisualBakeTasks(
 
                 UMaterialInterface* SourceMaterial = ResolveVisualBakeSourceMaterial(
                     WetClothingAsset,
+                    MaterialSlotIndex,
                     Materials[MaterialSlotIndex].MaterialInterface);
                 if (Override == nullptr ||
                     Override->GeneratedMaterial == nullptr ||
@@ -152,6 +291,11 @@ bool FWetClothingRenderProfileBakeService::HasPendingVisualBakeTasks(
             else if (Baked.BuildSignature != ExpectedSignature)
             {
                 PendingLines.Add(TEXT("Wet Part Data Texture data is out of date."));
+            }
+
+            if (Baked.IsValid())
+            {
+                AppendMissingRenderProfileBakeData(*WetClothingAsset, Baked, PendingLines);
             }
         }
     }
@@ -216,6 +360,7 @@ bool FWetClothingRenderProfileBakeService::BakeRenderProfileDataAndUpdateMateria
 
         UMaterialInterface* SourceMaterial = ResolveVisualBakeSourceMaterial(
             WetClothingAsset,
+            MaterialSlotIndex,
             Materials[MaterialSlotIndex].MaterialInterface);
         if (SourceMaterial == nullptr)
         {
@@ -332,7 +477,9 @@ bool FWetClothingRenderProfileBakeService::SaveBakedRenderProfileAssets(UWetClot
          WetClothingAsset->Derived.Inline.BakedWetPartData.LocalProfiles)
     {
         AddRenderProfilePackageForObject(LocalProfile.NormalizedDropletNormal.Get(), PackagesToSave);
+        AddRenderProfilePackageForObject(LocalProfile.NormalizedDropletMask.Get(), PackagesToSave);
         AddRenderProfilePackageForObject(LocalProfile.NormalizedRivuletNormal.Get(), PackagesToSave);
+        AddRenderProfilePackageForObject(LocalProfile.NormalizedRivuletMask.Get(), PackagesToSave);
     }
 
     for (const FWetClothingGeneratedWetMaterialOverride& Override : WetClothingAsset->Derived.Inline.GeneratedWetMaterialOverrides)

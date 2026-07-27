@@ -30,7 +30,7 @@ class FWCAMaterialGenerator
         int32 OriginalUVChannelIndex = 0;
         int32 MaterialSlotIndex = INDEX_NONE;
         int32 SurfaceWaterNormalUVChannelIndex = 0;
-        float SurfaceWaterTargetRoughness = 0.05f;
+        float SurfaceWaterTargetRoughness = 0.02f;
         bool bUseSurfaceWater = false;
         bool bEnableDWCDataUVSampling = false;
         bool bConnectWetnessMapPath = false;

@@ -164,6 +164,8 @@ class SWetClothingPartEditorPanel : public SCompoundWidget
     float                                          GetSelectedDropletRadiusScale() const;
     float                                          GetSelectedDropletDetailSize() const;
     float                                          GetSelectedRivuletDetailSize() const;
+    FText                                          GetSelectedDropletDetailSizeText() const;
+    FText                                          GetSelectedRivuletDetailSizeText() const;
     void                                           HandleSelectedDropletRadiusScaleChanged(float InValue);
     void                                           HandleSelectedDropletDetailSizeChanged(float InValue);
     void                                           HandleSelectedRivuletDetailSizeChanged(float InValue);
@@ -238,6 +240,7 @@ class SWetClothingPartEditorPanel : public SCompoundWidget
     EDWCSurfaceWaterTilingPreviewCoverageMode           SurfaceWaterPreviewCoverageMode = EDWCSurfaceWaterTilingPreviewCoverageMode::FullPart;
     float                                              PreviewAbsorbedWetness = 0.0f;
     float                                              PreviewSurfaceWater = 1.0f;
+    float                                              PreviewSurfaceWaterTargetRoughness = 0.02f;
     TWeakPtr<SWindow>                                  SurfaceWaterTilingWindow;
     float                                              AutoPartitionTolerancePercent = 20.0f;
 };

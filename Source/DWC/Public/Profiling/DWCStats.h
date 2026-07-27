@@ -171,9 +171,13 @@ public:
 #endif
 };
 
-// The subsystem mirrors the `stat dwc` controller state to both memory groups.
-// Convenience aliases for `stat dwc mem`, `stat dwc workload`, and `stat dwc lod`
-// are registered in DWCStats.cpp so they also appear in console autocomplete.
+namespace DWCStats
+{
+    DWC_API void RegisterStatCommands();
+    DWC_API void UnregisterStatCommands();
+}
+
+// `stat dwc mem` toggles all three memory sections together.
 DECLARE_STATS_GROUP(TEXT("DWC Memory"), STATGROUP_DWC, STATCAT_Advanced);
 DECLARE_STATS_GROUP(TEXT("DWC Instances"), STATGROUP_DWCInstances, STATCAT_Advanced);
 DECLARE_STATS_GROUP(TEXT("DWC LOD"), STATGROUP_DWCLOD, STATCAT_Advanced);

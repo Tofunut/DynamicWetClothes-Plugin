@@ -49,6 +49,20 @@ namespace
             nullptr,
             TEXT("/Engine/EngineMaterials/T_Default_Normal.T_Default_Normal"));
     }
+
+    UTexture* LoadDefaultMaskTexture()
+    {
+        if (UTexture* BlackTexture = LoadObject<UTexture>(
+                nullptr,
+                TEXT("/Engine/EngineResources/Black.Black")))
+        {
+            return BlackTexture;
+        }
+
+        return LoadObject<UTexture>(
+            nullptr,
+            TEXT("/Engine/EngineResources/DefaultTexture.DefaultTexture"));
+    }
 }
 
 void SWetnessProfileViewport::Construct(const FArguments& InArgs)
@@ -80,6 +94,7 @@ void SWetnessProfileViewport::AddReferencedObjects(FReferenceCollector& Collecto
     Collector.AddReferencedObject(PreviewBaseMaterial);
     Collector.AddReferencedObject(PreviewMaterialInstance);
     Collector.AddReferencedObject(PreviewDefaultNormalTexture);
+    Collector.AddReferencedObject(PreviewDefaultMaskTexture);
 }
 
 void SWetnessProfileViewport::RefreshFromProfile()
@@ -183,6 +198,7 @@ void SWetnessProfileViewport::InitializePreviewComponents()
     }
 
     PreviewDefaultNormalTexture = LoadDefaultNormalTexture();
+    PreviewDefaultMaskTexture = LoadDefaultMaskTexture();
     PreviewScene->AddComponent(PreviewMeshComponent, PreviewLiftTransform());
 
     if (ViewportClient.IsValid())
@@ -244,6 +260,16 @@ void SWetnessProfileViewport::RefreshPreviewMaterialParameters()
         Surface.RivuletNormalTexture != nullptr
             ? Surface.RivuletNormalTexture.Get()
             : PreviewDefaultNormalTexture.Get());
+    PreviewMaterialInstance->SetTextureParameterValue(
+        DropletMaskTextureParameter,
+        Surface.DropletMaskTexture != nullptr
+            ? Surface.DropletMaskTexture.Get()
+            : PreviewDefaultMaskTexture.Get());
+    PreviewMaterialInstance->SetTextureParameterValue(
+        RivuletMaskTextureParameter,
+        Surface.RivuletMaskTexture != nullptr
+            ? Surface.RivuletMaskTexture.Get()
+            : PreviewDefaultMaskTexture.Get());
 
     if (ViewportClient.IsValid())
     {

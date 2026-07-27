@@ -21,6 +21,8 @@
 
 namespace
 {
+    constexpr float SurfaceWaterSubchannelNameIndent = 16.0f;
+
     bool ReadBoolProperty(const TWeakPtr<IPropertyHandle> WeakHandle)
     {
         const TSharedPtr<IPropertyHandle> Handle = WeakHandle.Pin();
@@ -293,6 +295,20 @@ void FWetnessProfileDetailsCustomization::CustomizeDetails(IDetailLayoutBuilder&
         SurfaceEnabled,
         LOCTEXT("EnableSurfaceWater", "Surface Water"),
         LOCTEXT("EnableSurfaceWaterTooltip", "Enable water that remains visible on top of the material surface."));
+    AddDefaultProperty(
+        WaterChannelsCategory,
+        DropletsEnabled,
+        LOCTEXT("EnableDropletSurfaceWater", "Droplets"),
+        LOCTEXT("EnableDropletSurfaceWaterTooltip", "Enable round droplet stamps and droplet normal rendering for this profile."),
+        SurfaceSettingsEnabled,
+        SurfaceWaterSubchannelNameIndent);
+    AddDefaultProperty(
+        WaterChannelsCategory,
+        RivuletsEnabled,
+        LOCTEXT("EnableStreakSurfaceWater", "Streaks"),
+        LOCTEXT("EnableStreakSurfaceWaterTooltip", "Enable elongated, flow-aligned streak stamps and streak normal rendering for this profile."),
+        SurfaceSettingsEnabled,
+        SurfaceWaterSubchannelNameIndent);
 
     // ---------------------------------------------------------------------
     // Simulation | Absorbed Water
@@ -365,12 +381,6 @@ void FWetnessProfileDetailsCustomization::CustomizeDetails(IDetailLayoutBuilder&
         LOCTEXT("DropletsGroup", "Droplets"),
         false,
         true);
-    AddDefaultProperty(
-        DropletsGroup,
-        DropletsEnabled,
-        LOCTEXT("EnableDroplets", "Enabled"),
-        LOCTEXT("EnableDropletsTooltip", "Allow droplet stamps and droplet normal rendering for this profile."),
-        SurfaceSettingsEnabled);
     AddFloatProperty(
         DropletsGroup,
         FindPropertyByPath(TEXT("Parameters.SurfaceWater.DropletSpawnProbability")),
@@ -392,12 +402,6 @@ void FWetnessProfileDetailsCustomization::CustomizeDetails(IDetailLayoutBuilder&
         LOCTEXT("StreaksGroup", "Streaks"),
         false,
         true);
-    AddDefaultProperty(
-        StreaksGroup,
-        RivuletsEnabled,
-        LOCTEXT("EnableStreaks", "Enabled"),
-        LOCTEXT("EnableStreaksTooltip", "Allow elongated, flow-aligned water stamps and streak normal rendering for this profile."),
-        SurfaceSettingsEnabled);
     AddFloatProperty(
         StreaksGroup,
         FindPropertyByPath(TEXT("Parameters.SurfaceWater.RivuletSpawnProbability")),
@@ -523,9 +527,21 @@ void FWetnessProfileDetailsCustomization::CustomizeDetails(IDetailLayoutBuilder&
         DropletSettingsEnabled);
     AddDefaultProperty(
         SurfaceRenderingAdvancedGroup,
+        FindPropertyByPath(TEXT("Parameters.SurfaceWater.DropletMaskTexture")),
+        LOCTEXT("DropletMask", "Droplet Mask Texture"),
+        LOCTEXT("DropletMaskTooltip", "Mask texture used to localize droplet normal detail. Empty uses the unmasked droplet detail."),
+        DropletSettingsEnabled);
+    AddDefaultProperty(
+        SurfaceRenderingAdvancedGroup,
         FindPropertyByPath(TEXT("Parameters.SurfaceWater.RivuletNormalTexture")),
         LOCTEXT("StreakNormal", "Streak Normal Texture"),
         LOCTEXT("StreakNormalTooltip", "Normal texture used by streak rendering. Empty uses the DWC default."),
+        RivuletSettingsEnabled);
+    AddDefaultProperty(
+        SurfaceRenderingAdvancedGroup,
+        FindPropertyByPath(TEXT("Parameters.SurfaceWater.RivuletMaskTexture")),
+        LOCTEXT("StreakMask", "Streak Mask Texture"),
+        LOCTEXT("StreakMaskTooltip", "Mask texture used to localize streak normal detail. Empty uses the unmasked streak detail."),
         RivuletSettingsEnabled);
     AddMappedFloatProperty(
         SurfaceRenderingAdvancedGroup,
@@ -592,10 +608,33 @@ void FWetnessProfileDetailsCustomization::AddDefaultProperty(
     const TSharedPtr<IPropertyHandle>& Handle,
     const FText& DisplayName,
     const FText& Tooltip,
-    const TAttribute<bool> IsEnabled)
+    const TAttribute<bool> IsEnabled,
+    const float NameIndent)
 {
     if (!Handle.IsValid() || !Handle->IsValidHandle())
     {
+        return;
+    }
+
+    if (NameIndent > 0.0f)
+    {
+        Category.AddCustomRow(DisplayName)
+            .FilterString(DisplayName)
+            .IsEnabled(IsEnabled)
+            .NameContent()
+            [
+                SNew(SHorizontalBox)
+                + SHorizontalBox::Slot()
+                .FillWidth(1.0f)
+                .Padding(NameIndent, 0.0f, 0.0f, 0.0f)
+                [
+                    Handle->CreatePropertyNameWidget(DisplayName, Tooltip, true, true, false)
+                ]
+            ]
+            .ValueContent()
+            [
+                Handle->CreatePropertyValueWidget()
+            ];
         return;
     }
 

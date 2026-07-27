@@ -31,7 +31,7 @@ def build() -> None:
     c.create_comment(mf, "2-2. Global LUT Coordinates", 150, -1950, 1700, 1900)
     c.create_comment(mf, "2-3. Global Profile Sampling", 2300, -1950, 1800, 1900)
 
-    c.create_comment(mf, "3. Profile Decode & Outputs", 4500, -2400, 6900, 3000, parent=True)
+    c.create_comment(mf, "3. Profile Decode & Outputs", 4500, -2400, 7600, 3400, parent=True)
     c.create_comment(mf, "3-1. Profile Texel 0 Decode", 4900, -1950, 1800, 1900)
     c.create_comment(mf, "3-2. Profile Texel 1 Decode", 7150, -1950, 1800, 1900)
     c.create_comment(mf, "3-3. Function Outputs", 9400, -1950, 1600, 1900)
@@ -60,14 +60,14 @@ def build() -> None:
     rivulet_detail_encoded = c.component_mask(mf, profile_id, "B", "B", -5350, -450)
     droplet_detail = c.custom_expression(
         mf,
-        "return lerp(0.25, 4.0, saturate(Encoded));",
+        "return lerp(0.0, 4.0, saturate(Encoded));",
         [("Encoded", droplet_detail_encoded, ("", "Result"))],
         "float1", -4700, -850,
         "Decode the Part-local Droplet Detail Size from the G channel.",
     )
     rivulet_detail = c.custom_expression(
         mf,
-        "return lerp(0.25, 4.0, saturate(Encoded));",
+        "return lerp(0.0, 4.0, saturate(Encoded));",
         [("Encoded", rivulet_detail_encoded, ("", "Result"))],
         "float1", -4700, -450,
         "Decode the Part-local Rivulet Detail Size from the B channel.",
@@ -115,24 +115,32 @@ def build() -> None:
     # 2-2 Global LUT Coordinates
     start_u0 = c.named_usage(mf, global_start_decl, 400, -1550)
     start_u1 = c.named_usage(mf, global_start_decl, 400, -950)
+    start_u2 = c.named_usage(mf, global_start_decl, 400, -350)
     half0 = c.scalar_constant(mf, 0.5, 700, -1350, "LUT center V")
     half1 = c.scalar_constant(mf, 0.5, 700, -750, "LUT center V")
+    half2 = c.scalar_constant(mf, 0.5, 700, -150, "LUT center V")
     texel_size = c.scalar_parameter(
-        mf, "DWC_GlobalRenderProfileTexelSize", 1.0 / 510.0, 700, -1050,
+        mf, "DWC_GlobalRenderProfileTexelSize", 1.0 / 765.0, 700, -1050,
         group="DWC Render Profile",
         description="U width of one texel in the runtime global Render Profile LUT.",
     )
     one = c.scalar_constant(mf, 1.0, 700, -450)
+    two = c.scalar_constant(mf, 2.0, 700, 50)
     offset = c.multiply(mf, texel_size, ("", "Result"), one, ("", "Result"), 1050, -550)
+    offset2 = c.multiply(mf, texel_size, ("", "Result"), two, ("", "Result"), 1050, 50)
     profile1_u = c.add(mf, start_u1, ("", "Result"), offset, ("", "Result"), 1400, -950)
+    profile2_u = c.add(mf, start_u2, ("", "Result"), offset2, ("", "Result"), 1400, -350)
     profile0_uv = c.append_vector(mf, start_u0, ("", "Result"), half0, ("", "Result"), 1400, -1550)
     profile1_uv = c.append_vector(mf, profile1_u, ("", "Result"), half1, ("", "Result"), 1650, -950)
+    profile2_uv = c.append_vector(mf, profile2_u, ("", "Result"), half2, ("", "Result"), 1650, -350)
     profile0_uv_decl = c.named_declaration(mf, "PROFILE_Texel0UV", profile0_uv, ("", "Result"), 1700, -1550)
     profile1_uv_decl = c.named_declaration(mf, "PROFILE_Texel1UV", profile1_uv, ("", "Result"), 1700, -750)
+    profile2_uv_decl = c.named_declaration(mf, "PROFILE_Texel2UV", profile2_uv, ("", "Result"), 1700, -150)
 
     # 2-3 Global Profile Sampling and optional fallback.
     uv0_use = c.named_usage(mf, profile0_uv_decl, 2500, -1550)
     uv1_use = c.named_usage(mf, profile1_uv_decl, 2500, -850)
+    uv2_use = c.named_usage(mf, profile2_uv_decl, 2500, -150)
     lut0 = c.texture2d_parameter(
         mf, "DWC_GlobalRenderProfileLUT", data_fallback, 2850, -1550,
         sampler_type=c.linear_color_sampler(), group="DWC Render Profile",
@@ -143,12 +151,19 @@ def build() -> None:
         sampler_type=c.linear_color_sampler(), group="DWC Render Profile",
         description="Runtime global Render Profile LUT, sampled at profile texel 1.",
     )
+    lut2 = c.texture2d_parameter(
+        mf, "DWC_GlobalRenderProfileLUT", data_fallback, 2850, -150,
+        sampler_type=c.linear_color_sampler(), group="DWC Render Profile",
+        description="Runtime global Render Profile LUT, sampled at profile texel 2.",
+    )
     c.try_connect(uv0_use, ("", "Result"), lut0, ("Coordinates", "UVs"))
     c.try_connect(uv1_use, ("", "Result"), lut1, ("Coordinates", "UVs"))
+    c.try_connect(uv2_use, ("", "Result"), lut2, ("Coordinates", "UVs"))
     # Texture Sample's primary output is RGB, so append A explicitly to preserve
     # the packed fourth channels used by the render-profile data.
     lut0_rgba = c.append_vector(mf, lut0, "RGB", lut0, "A", 3150, -1650, "Reconstruct packed RGBA texel 0.")
     lut1_rgba = c.append_vector(mf, lut1, "RGB", lut1, "A", 3150, -950, "Reconstruct packed RGBA texel 1.")
+    lut2_rgba = c.append_vector(mf, lut2, "RGB", lut2, "A", 3150, -250, "Reconstruct packed RGBA texel 2.")
     fallback0 = c.vector_parameter(
         mf, "DWC_FallbackRenderProfile0", (0.5, 0.5, 0.0, 0.0), 3200, -1250,
         group="DWC Render Profile", description="Fallback packed profile texel 0.",
@@ -157,6 +172,10 @@ def build() -> None:
         mf, "DWC_FallbackRenderProfile1", (1.0, 0.5, 0.2, 0.5), 3200, -550,
         group="DWC Render Profile", description="Fallback packed profile texel 1.",
     )
+    fallback2 = c.vector_parameter(
+        mf, "DWC_FallbackRenderProfile2", (0.0, 0.0, 0.0, 0.0), 3200, 150,
+        group="DWC Render Profile", description="Fallback packed profile texel 2.",
+    )
     fallback0_rgba = c.append_vector(
         mf, fallback0, "RGB", fallback0, "A", 3500, -1250,
         "Reconstruct packed RGBA fallback profile texel 0.",
@@ -164,6 +183,10 @@ def build() -> None:
     fallback1_rgba = c.append_vector(
         mf, fallback1, "RGB", fallback1, "A", 3500, -550,
         "Reconstruct packed RGBA fallback profile texel 1.",
+    )
+    fallback2_rgba = c.append_vector(
+        mf, fallback2, "RGB", fallback2, "A", 3500, 150,
+        "Reconstruct packed RGBA fallback profile texel 2.",
     )
     # This must be a scalar parameter, not a Static Switch: the runtime resource
     # subsystem updates it on each MID with SetScalarParameterValue.
@@ -181,8 +204,14 @@ def build() -> None:
         use_runtime_lut, ("", "Result"), 3800, -850,
         "Select fallback or runtime packed profile texel 1.",
     )
+    profile2 = c.lerp(
+        mf, fallback2_rgba, ("", "Result"), lut2_rgba, ("", "Result"),
+        use_runtime_lut, ("", "Result"), 3800, -150,
+        "Select fallback or runtime packed profile texel 2.",
+    )
     texel0_decl = c.named_declaration(mf, "PROFILE_Texel0", profile0, ("", "Result"), 4100, -1350)
     texel1_decl = c.named_declaration(mf, "PROFILE_Texel1", profile1, ("", "Result"), 4100, -650)
+    texel2_decl = c.named_declaration(mf, "PROFILE_Texel2", profile2, ("", "Result"), 4100, 50)
 
     # 3-1 Decode packed texel 0.
     texel0_uses = [c.named_usage(mf, texel0_decl, 5150, -1600 + i * 380) for i in range(4)]
@@ -213,6 +242,18 @@ def build() -> None:
             mf, reroute_name, mask, ("", "Result"), 8350, -1500 + i * 480
         )
 
+    # 3-3 Decode packed texel 2.
+    texel2_uses = [c.named_usage(mf, texel2_decl, 7400, 500 + i * 360) for i in range(2)]
+    texel2_names = [
+        ("DropletMaskSlice", "R", "PROFILE_DropletMaskSlice"),
+        ("RivuletMaskSlice", "G", "PROFILE_RivuletMaskSlice"),
+    ]
+    for i, (output_name, channel, reroute_name) in enumerate(texel2_names):
+        mask = c.component_mask(mf, texel2_uses[i], ("", "Result"), channel, 7800, 500 + i * 360)
+        profile_decls[output_name] = c.named_declaration(
+            mf, reroute_name, mask, ("", "Result"), 8350, 500 + i * 360
+        )
+
     profile_decls["DropletDetailSize"] = droplet_detail_decl
     profile_decls["RivuletDetailSize"] = rivulet_detail_decl
 
@@ -222,6 +263,7 @@ def build() -> None:
         "DropletNormalSlice", "RivuletNormalSlice",
         "SurfaceWaterNormalStrength", "SurfaceWaterRoughnessStrength",
         "SurfaceVisibilityThreshold", "RivuletUVScrollSpeed",
+        "DropletMaskSlice", "RivuletMaskSlice",
         "DropletDetailSize", "RivuletDetailSize",
     ]
     descriptions = {
@@ -229,6 +271,8 @@ def build() -> None:
         "AbsorbedGlossinessStrength": "Absorbed wetness roughness blend strength.",
         "DropletNormalSlice": "Droplet normal Texture2DArray slice.",
         "RivuletNormalSlice": "Rivulet normal Texture2DArray slice.",
+        "DropletMaskSlice": "Droplet mask Texture2DArray slice.",
+        "RivuletMaskSlice": "Rivulet mask Texture2DArray slice.",
         "SurfaceWaterNormalStrength": "Common surface-water detail-normal strength.",
         "SurfaceWaterRoughnessStrength": "Surface-water roughness blend strength.",
         "SurfaceVisibilityThreshold": "Visible amount threshold for droplet/rivulet coverage.",

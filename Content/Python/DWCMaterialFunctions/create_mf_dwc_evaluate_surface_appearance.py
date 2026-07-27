@@ -96,7 +96,7 @@ def build() -> None:
         ("DWCDataUV", "vector2", (0.0, 0.0), "DWC Data UV used by Wet Part data and runtime state textures."),
         ("SurfaceWaterNormalUV", "vector2", (0.0, 0.0), "Repeated detail-normal mesh UV."),
         ("SurfaceTime", "scalar", (0.0,), "Surface-water lifetime and scroll time."),
-        ("SurfaceWaterTargetRoughness", "scalar", (0.05,), "Common visible surface-water target roughness."),
+        ("SurfaceWaterTargetRoughness", "scalar", (0.02,), "Common visible surface-water target roughness."),
     ]
     for i, (name, kind, preview, desc) in enumerate(runtime_specs):
         y = -5050 + i * 650
@@ -118,6 +118,7 @@ def build() -> None:
         "DropletNormalSlice", "RivuletNormalSlice",
         "SurfaceWaterNormalStrength", "SurfaceWaterRoughnessStrength",
         "SurfaceVisibilityThreshold", "RivuletUVScrollSpeed",
+        "DropletMaskSlice", "RivuletMaskSlice",
         "DropletDetailSize", "RivuletDetailSize",
     ]
     profile_declarations: dict[str, object] = {}
@@ -130,7 +131,7 @@ def build() -> None:
 
     # 1-4 Shared Constants.
     lifetime_epsilon = c.scalar_constant(mf, 0.01, -14800, 850, "Avoid zero lifetime division")
-    visibility_feather = c.scalar_constant(mf, 0.1, -14800, 1450, "Coverage smoothstep feather")
+    visibility_feather = c.scalar_constant(mf, 0.4, -14800, 1450, "CL145 default coverage smoothstep feather: Surface Water ramps from amount threshold 0.25 to 0.65.")
     flat_normal = c.vector_constant(mf, (0.0, 0.0, 1.0), -14800, 2050, "Flat tangent normal")
     shared_lifetime = c.named_declaration(mf, "SHARED_LifetimeEpsilon", lifetime_epsilon, ("", "Result"), -13700, 850)
     shared_feather = c.named_declaration(mf, "SHARED_VisibilityFeather", visibility_feather, ("", "Result"), -13700, 1450)
@@ -264,7 +265,9 @@ return lerp(WetBaseColor, TransparencyColor, Weight);
 float Age = max(SurfaceTime - SpawnTime, 0.0);
 float LifetimeFade = 1.0 - saturate(Age / max(Lifetime, LifetimeEpsilon));
 float VisibleAmount = Amount * LifetimeFade;
-return smoothstep(VisibilityThreshold, VisibilityThreshold + VisibilityFeather, VisibleAmount);
+float ThresholdMin = saturate(VisibilityThreshold);
+float ThresholdMax = min(ThresholdMin + max(VisibilityFeather, 1.0e-4), 1.0);
+return smoothstep(ThresholdMin, ThresholdMax, VisibleAmount);
 """,
             [
                 ("Amount", amount_use, ("", "Result")),
@@ -297,7 +300,9 @@ return smoothstep(VisibilityThreshold, VisibilityThreshold + VisibilityFeather, 
     normal_call_inputs = [
         ("SurfaceWaterNormalUV", declarations["SurfaceWaterNormalUV"]),
         ("SurfaceTime", declarations["SurfaceTime"]),
+        ("DropletMaskSlice", profile_declarations["DropletMaskSlice"]),
         ("DropletNormalSlice", profile_declarations["DropletNormalSlice"]),
+        ("RivuletMaskSlice", profile_declarations["RivuletMaskSlice"]),
         ("RivuletNormalSlice", profile_declarations["RivuletNormalSlice"]),
         ("DropletDetailSize", profile_declarations["DropletDetailSize"]),
         ("RivuletDetailSize", profile_declarations["RivuletDetailSize"]),
@@ -308,65 +313,39 @@ return smoothstep(VisibilityThreshold, VisibilityThreshold + VisibilityFeather, 
         usage = c.named_usage(mf, declaration, 800 + (i % 2) * 1100, -900 + (i // 2) * 700)
         c.try_connect(usage, ("", "Result"), normal_call, input_name)
 
+    droplet_mask_decl = c.named_declaration(
+        mf, "SURFACE_DropletMask", normal_call, "DropletMask", 4100, -1250
+    )
     droplet_normal_decl = c.named_declaration(
         mf, "SURFACE_DropletNormal", normal_call, "DropletNormal", 4100, -750
+    )
+    rivulet_mask_decl = c.named_declaration(
+        mf, "SURFACE_RivuletMask", normal_call, "RivuletMask", 4100, -450
     )
     rivulet_normal_decl = c.named_declaration(
         mf, "SURFACE_RivuletNormal", normal_call, "RivuletNormal", 4100, 50
     )
-    # Reference graph behavior:
-    # 1) Apply strength to sampled tangent-normal XY only.
-    # 2) Preserve sampled Z, then normalize.
-    # 3) Blend Droplet/Rivulet by their relative visible coverage.
-    # 4) Blend the combined detail from Flat Normal by total surface coverage.
-    normal_strength_use1 = c.named_usage(mf, profile_declarations["SurfaceWaterNormalStrength"], 4600, -750)
-    normal_strength_use2 = c.named_usage(mf, profile_declarations["SurfaceWaterNormalStrength"], 4600, 450)
-
-    droplet_normal_use_strength = c.named_usage(mf, droplet_normal_decl, 5000, -850)
-    rivulet_normal_use_strength = c.named_usage(mf, rivulet_normal_decl, 5000, 350)
-    strengthened_droplet = c.custom_expression(
-        mf,
-        """
-float3 N = normalize(DropletNormal);
-return normalize(float3(N.xy * clamp(NormalStrength, 0.0, 8.0), N.z));
-""",
-        [
-            ("DropletNormal", droplet_normal_use_strength, ("", "Result")),
-            ("NormalStrength", normal_strength_use1, ("", "Result")),
-        ],
-        "float3", 5800, -700,
-        "Reference: scale tangent-normal XY only, preserve Z, then normalize."
-    )
-    strengthened_rivulet = c.custom_expression(
-        mf,
-        """
-float3 N = normalize(RivuletNormal);
-return normalize(float3(N.xy * clamp(NormalStrength, 0.0, 8.0), N.z));
-""",
-        [
-            ("RivuletNormal", rivulet_normal_use_strength, ("", "Result")),
-            ("NormalStrength", normal_strength_use2, ("", "Result")),
-        ],
-        "float3", 5800, 500,
-        "Reference: scale tangent-normal XY only, preserve Z, then normalize."
-    )
-    strengthened_droplet_decl = c.named_declaration(
-        mf, "SURFACE_DropletNormalStrengthened", strengthened_droplet, ("", "Result"), 6800, -700
-    )
-    strengthened_rivulet_decl = c.named_declaration(
-        mf, "SURFACE_RivuletNormalStrengthened", strengthened_rivulet, ("", "Result"), 6800, 500
-    )
-
-    # 3-5 Surface selection and roughness. The reference graph treats Droplet
-    # and Flow as two visible normal layers, gates each layer by its surface
-    # coverage/mask weight, then combines the layers with angle-correct normal
-    # blending before the final Base/Wrinkle/Surface blend.
+    # 3-5 Surface selection and roughness. The reference graph gates visible
+    # detail by the authored mask instead of applying the whole RT stamp as one
+    # flat glossy/dark patch.
     droplet_cov_use2 = c.named_usage(mf, droplet_coverage_decl, 7350, -650)
     rivulet_cov_use2 = c.named_usage(mf, rivulet_coverage_decl, 7350, 50)
+    droplet_mask_use2 = c.named_usage(mf, droplet_mask_decl, 7350, 650)
+    rivulet_mask_use2 = c.named_usage(mf, rivulet_mask_decl, 7350, 950)
     surface_coverage = c.custom_expression(
-        mf, "return saturate(DropletCoverage + RivuletCoverage);",
-        [("DropletCoverage", droplet_cov_use2, ("", "Result")), ("RivuletCoverage", rivulet_cov_use2, ("", "Result"))],
-        "float1", 8200, -300, "Reference combined Surface Water coverage."
+        mf,
+        """
+float D = saturate(DropletCoverage) * saturate(DropletMask);
+float F = saturate(RivuletCoverage) * saturate(RivuletMask);
+return saturate(D + F - D * F);
+""",
+        [
+            ("DropletCoverage", droplet_cov_use2, ("", "Result")),
+            ("RivuletCoverage", rivulet_cov_use2, ("", "Result")),
+            ("DropletMask", droplet_mask_use2, ("", "Result")),
+            ("RivuletMask", rivulet_mask_use2, ("", "Result")),
+        ],
+        "float1", 8200, -300, "CL145-style Surface Water combined mask: D + F - D * F after authored mask gating."
     )
     surface_coverage_decl = c.named_declaration(mf, "SURFACE_Coverage", surface_coverage, ("", "Result"), 9000, -300)
     surface_coverage_use = c.named_usage(mf, surface_coverage_decl, 7350, 1000)
@@ -374,44 +353,49 @@ return normalize(float3(N.xy * clamp(NormalStrength, 0.0, 8.0), N.z));
     surface_roughness_weight = c.custom_expression(
         mf, "return saturate(Coverage * RoughnessStrength);",
         [("Coverage", surface_coverage_use, ("", "Result")), ("RoughnessStrength", rough_strength_use, ("", "Result"))],
-        "float1", 8200, 1300, "Compute Surface Water roughness blend weight."
+        "float1", 8200, 1300, "Reference-style Surface Water roughness weight: visible masked coverage scaled by the simplified profile strength."
     )
     surface_roughness_raw_decl = c.named_declaration(
         mf, "SURFACE_RoughnessWeightRaw", surface_roughness_weight, ("", "Result"), 9300, 1300
     )
 
-    droplet_normal_use2 = c.named_usage(mf, strengthened_droplet_decl, 7200, 2050)
-    rivulet_normal_use2 = c.named_usage(mf, strengthened_rivulet_decl, 7200, 2500)
+    droplet_normal_use2 = c.named_usage(mf, droplet_normal_decl, 7200, 2050)
+    rivulet_normal_use2 = c.named_usage(mf, rivulet_normal_decl, 7200, 2500)
     droplet_cov_use3 = c.named_usage(mf, droplet_coverage_decl, 8000, 2050)
     rivulet_cov_use3 = c.named_usage(mf, rivulet_coverage_decl, 8000, 2500)
-    flat_use_surface = c.named_usage(mf, shared_flat, 8000, 2950)
+    droplet_mask_use3 = c.named_usage(mf, droplet_mask_decl, 8400, 2050)
+    rivulet_mask_use3 = c.named_usage(mf, rivulet_mask_decl, 8400, 2500)
+    normal_strength_use3 = c.named_usage(mf, profile_declarations["SurfaceWaterNormalStrength"], 8000, 2950)
     combined_surface_normal = c.custom_expression(
         mf,
         """
-float3 DropletLayer = normalize(lerp(
-    FlatNormal,
-    normalize(DropletNormal),
-    saturate(DropletCoverage)
-));
-float3 RivuletLayer = normalize(lerp(
-    FlatNormal,
-    normalize(RivuletNormal),
-    saturate(RivuletCoverage)
-));
+float D = saturate(DropletCoverage) * saturate(DropletMask);
+float F = saturate(RivuletCoverage) * saturate(RivuletMask);
+float Strength = clamp(NormalStrength, 0.0, 8.0);
 
-float3 T = DropletLayer + float3(0.0, 0.0, 1.0);
-float3 U = RivuletLayer * float3(-1.0, -1.0, 1.0);
-return normalize(T * dot(T, U) - U * T.z);
+// CL145 strengthens only XY, preserves each texture normal's Z/B profile, then normalizes.
+float3 DropletN = normalize(DropletNormal);
+DropletN = normalize(float3(DropletN.xy * Strength, DropletN.z));
+
+float3 RivuletN = normalize(RivuletNormal);
+RivuletN = normalize(float3(RivuletN.xy * Strength, RivuletN.z));
+
+float FlowRatio = saturate(F / max(D + F, 0.001));
+float3 CombinedWaterNormal = normalize(lerp(DropletN, RivuletN, FlowRatio));
+float CombinedMask = saturate(D + F - D * F);
+return normalize(lerp(float3(0.0, 0.0, 1.0), CombinedWaterNormal, CombinedMask));
 """,
         [
             ("DropletNormal", droplet_normal_use2, ("", "Result")),
             ("RivuletNormal", rivulet_normal_use2, ("", "Result")),
             ("DropletCoverage", droplet_cov_use3, ("", "Result")),
             ("RivuletCoverage", rivulet_cov_use3, ("", "Result")),
-            ("FlatNormal", flat_use_surface, ("", "Result")),
+            ("DropletMask", droplet_mask_use3, ("", "Result")),
+            ("RivuletMask", rivulet_mask_use3, ("", "Result")),
+            ("NormalStrength", normal_strength_use3, ("", "Result")),
         ],
         "float3", 9000, 2400,
-        "Reference-style Surface Water normal selection: gate each visible layer, then angle-correct blend Droplet and Rivulet."
+        "CL145-style Surface Water normal: strengthen XY while preserving sampled Z, blend Droplet/Flow by F/(D+F), then lerp from flat by the combined mask."
     )
     combined_surface_decl = c.named_declaration(
         mf, "SURFACE_CombinedNormalRaw", combined_surface_normal, ("", "Result"), 10000, 2400
@@ -481,13 +465,9 @@ return normalize(T * dot(T, U) - U * T.z);
 float AbsorbedRoughness = lerp(
     BaseRoughness,
     WetRoughness,
-    saturate(Wetness * AbsorbedGlossinessStrength)
-);
-return lerp(
-    AbsorbedRoughness,
-    SurfaceWaterTargetRoughness,
-    saturate(SurfaceRoughnessWeight)
-);
+    saturate(Wetness * AbsorbedGlossinessStrength));
+float SafeSurfaceTarget = saturate(SurfaceWaterTargetRoughness);
+return lerp(AbsorbedRoughness, SafeSurfaceTarget, saturate(SurfaceRoughnessWeight));
 """,
         [
             ("BaseRoughness", base_rough_use, ("", "Result")),
@@ -498,7 +478,7 @@ return lerp(
             ("SurfaceRoughnessWeight", surface_rough_weight_use, ("", "Result")),
         ],
         "float1", 19400, -3300,
-        "Reference order: absorbed roughness first, then visible Surface Water roughness."
+        "Reference-style Surface Water roughness: absorbed wetness first, then visible masked Surface Water drives roughness toward the glossy target."
     )
     out_roughness_decl = c.named_declaration(
         mf, "OUT_Roughness", final_roughness, ("", "Result"), 20700, -3600
@@ -510,6 +490,7 @@ return lerp(
         ("WrinkleNormal", wrinkle_normal_decl),
         ("WrinkleWeight", wrinkle_weight_decl),
         ("SurfaceNormal", surface_normal_decl),
+        ("SurfaceCoverage", surface_coverage_decl),
         ("FlatNormal", shared_flat),
     ]
     normal_usages = []
@@ -522,13 +503,28 @@ return lerp(
         """
 float3 W = normalize(lerp(FlatNormal, WrinkleNormal, saturate(WrinkleWeight)));
 float3 S = normalize(SurfaceNormal);
+float SurfaceWeight = saturate(SurfaceCoverage);
 float3 Result = normalize(BaseNormal);
-Result = normalize(float3(Result.xy + W.xy, Result.z * W.z));
-Result = normalize(float3(Result.xy + S.xy, Result.z * S.z));
+
+if (saturate(WrinkleWeight) > 0.0001)
+{
+    float3 WrinkleBlended;
+    WrinkleBlended.xy = Result.xy * W.z + W.xy * Result.z;
+    WrinkleBlended.z = Result.z * W.z - dot(Result.xy, W.xy);
+    Result = normalize(WrinkleBlended);
+}
+
+if (SurfaceWeight > 0.001)
+{
+    float3 SurfaceBlended;
+    SurfaceBlended.xy = Result.xy * S.z + S.xy * Result.z;
+    SurfaceBlended.z = Result.z * S.z - dot(Result.xy, S.xy);
+    Result = normalize(SurfaceBlended);
+}
 return Result;
 """,
         normal_usages,
-        "float3", 16300, 300, "Reference two-stage BlendAngleCorrectedNormals equivalent: Base + Wrinkle, then Surface Water."
+        "float3", 16300, 300, "Surface-safe angle-correct normal blend: Base + Wrinkle, flatten cloth detail under visible water, then Surface Water."
     )
     out_normal_decl = c.named_declaration(
         mf, "OUT_Normal", final_normal, ("", "Result"), 17500, 300

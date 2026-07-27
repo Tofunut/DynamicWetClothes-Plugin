@@ -133,7 +133,7 @@ namespace
 
     UTexture2D* CreateOrUpdateNormalizedAsset(
         UWetClothingAsset& WetClothingAsset,
-        const FString& StableProfileKey,
+        UTexture2D& SourceTexture,
         const TCHAR* TextureRole,
         const bool bNormalMap,
         const TArray<FColor>& Pixels,
@@ -148,11 +148,13 @@ namespace
             return nullptr;
         }
 
-        const FString StableHash = FMD5::HashAnsiString(*FString::Printf(
-            TEXT("DWC.SurfaceTexture.v%d|%s|%s"),
+        const FString SourceBuildKey = FString::Printf(
+            TEXT("DWC.SurfaceTexture.v%d|Role=%s|Normal=%d|Texture=%s"),
             DWCSurfaceTextureNormalization::Version,
-            *StableProfileKey,
-            TextureRole));
+            TextureRole,
+            bNormalMap ? 1 : 0,
+            *SourceTexture.GetPathName());
+        const FString StableHash = FMD5::HashAnsiString(*SourceBuildKey);
         const FString ObjectName = ObjectTools::SanitizeObjectName(FString::Printf(
             TEXT("T_%s_%s_%s"),
             *WetClothingAsset.GetName(),
@@ -226,7 +228,6 @@ UTexture2D* FWetClothingSurfaceTextureNormalizer::GetOrCreateNeutralNormalTextur
 
 bool FWetClothingSurfaceTextureNormalizer::NormalizeTexture(
     UWetClothingAsset& WetClothingAsset,
-    const FString& StableProfileKey,
     UTexture2D* SourceTexture,
     const TCHAR* TextureRole,
     const bool bNormalMap,
@@ -281,7 +282,7 @@ bool FWetClothingSurfaceTextureNormalizer::NormalizeTexture(
 
     OutNormalizedTexture = CreateOrUpdateNormalizedAsset(
         WetClothingAsset,
-        StableProfileKey,
+        *SourceTexture,
         TextureRole,
         bNormalMap,
         Pixels,
@@ -291,18 +292,18 @@ bool FWetClothingSurfaceTextureNormalizer::NormalizeTexture(
 
 bool FWetClothingSurfaceTextureNormalizer::NormalizeProfileTextures(
     UWetClothingAsset& WetClothingAsset,
-    const FString& StableProfileKey,
     const FWetnessProfileParameters& SourceParameters,
     FWetClothingLocalRenderProfile& InOutLocalProfile,
     FString& OutErrorMessage)
 {
     const FSurfaceWaterProfileParameters& Surface = SourceParameters.SurfaceWater;
     UTexture2D* DropletNormal = nullptr;
+    UTexture2D* DropletMask = nullptr;
     UTexture2D* RivuletNormal = nullptr;
+    UTexture2D* RivuletMask = nullptr;
 
     if (!NormalizeTexture(
             WetClothingAsset,
-            StableProfileKey,
             Surface.DropletNormalTexture,
             TEXT("DropletNormal"),
             true,
@@ -310,18 +311,33 @@ bool FWetClothingSurfaceTextureNormalizer::NormalizeProfileTextures(
             OutErrorMessage) ||
         !NormalizeTexture(
             WetClothingAsset,
-            StableProfileKey,
+            Surface.DropletMaskTexture,
+            TEXT("DropletMask"),
+            false,
+            DropletMask,
+            OutErrorMessage) ||
+        !NormalizeTexture(
+            WetClothingAsset,
             Surface.RivuletNormalTexture,
             TEXT("RivuletNormal"),
             true,
             RivuletNormal,
+            OutErrorMessage) ||
+        !NormalizeTexture(
+            WetClothingAsset,
+            Surface.RivuletMaskTexture,
+            TEXT("RivuletMask"),
+            false,
+            RivuletMask,
             OutErrorMessage))
     {
         return false;
     }
 
     InOutLocalProfile.NormalizedDropletNormal = DropletNormal;
+    InOutLocalProfile.NormalizedDropletMask = DropletMask;
     InOutLocalProfile.NormalizedRivuletNormal = RivuletNormal;
+    InOutLocalProfile.NormalizedRivuletMask = RivuletMask;
     OutErrorMessage.Reset();
     return true;
 }

@@ -39,8 +39,8 @@ namespace
         return FString::Printf(
             TEXT("AbsorbedDarkening=%.9g|")
             TEXT("AbsorbedGlossiness=%.9g|")
-            TEXT("DropletsEnabled=%d|DropletNormal=%s|")
-            TEXT("RivuletsEnabled=%d|RivuletNormal=%s|")
+            TEXT("DropletsEnabled=%d|DropletNormal=%s|DropletMask=%s|")
+            TEXT("RivuletsEnabled=%d|RivuletNormal=%s|RivuletMask=%s|")
             TEXT("SurfaceWaterNormalStrength=%.9g|")
             TEXT("SurfaceWaterRoughnessStrength=%.9g|")
             TEXT("SurfaceVisibilityThreshold=%.9g|")
@@ -49,8 +49,10 @@ namespace
             Parameters.GetAbsorbedGlossinessStrength(),
             Surface.bEnabled && Surface.bEnableDroplets ? 1 : 0,
             *MakeTextureBuildKey(Surface.DropletNormalTexture),
+            *MakeTextureBuildKey(Surface.DropletMaskTexture),
             Surface.bEnabled && Surface.bEnableRivulets ? 1 : 0,
             *MakeTextureBuildKey(Surface.RivuletNormalTexture),
+            *MakeTextureBuildKey(Surface.RivuletMaskTexture),
             Surface.SurfaceWaterNormalStrength,
             Surface.SurfaceWaterRoughnessStrength,
             Surface.SurfaceVisibilityThreshold,
@@ -104,7 +106,7 @@ namespace
     FString MakeSlotSignature(const FString& GlobalSignature, const int32 MaterialSlotIndex)
     {
         return FMD5::HashAnsiString(*FString::Printf(
-            TEXT("DWC.WetPartDataTexture.Slot.v6|Global=%s|Slot=%d"),
+            TEXT("DWC.WetPartDataTexture.Slot.v7|Global=%s|Slot=%d"),
             *GlobalSignature,
             MaterialSlotIndex));
     }
@@ -134,7 +136,7 @@ FString FWetClothingWetPartDataTextureBaker::MakeProfileStableKey(
     const FWetnessProfileParameters& Parameters)
 {
     const FString ParameterHash = FMD5::HashAnsiString(*FString::Printf(
-        TEXT("DWC.RenderProfile.v4|SurfaceTextureNormalization=%d|%s"),
+        TEXT("DWC.RenderProfile.v5|SurfaceTextureNormalization=%d|%s"),
         DWCSurfaceTextureNormalization::Version,
         *MakeParametersKey(Parameters)));
     if (ProfileAssignment != nullptr && ProfileAssignment->SourceProfile.IsValid())
@@ -350,7 +352,7 @@ FString FWetClothingWetPartDataTextureBaker::MakeBuildSignature(const UWetClothi
     const FDWCEditorUVTopologyData* OriginalUVTopology = WetClothingAsset->FindOriginalUVTopologyForLOD(WetClothingAsset->GetSimulationLODIndex());
 #endif
     FString Canonical = FString::Printf(
-        TEXT("DWC.WetPartDataTexture.v6|Mesh=%s|DataUV=%d|DataUVInput=%s|DataUVOutput=%s|OriginalTopology=%s|")
+        TEXT("DWC.WetPartDataTexture.v7|Mesh=%s|DataUV=%d|DataUVInput=%s|DataUVOutput=%s|OriginalTopology=%s|")
         TEXT("Resolution=%d|Padding=%d|SurfaceTextureVersion=%d|SurfaceTextureResolution=%d"),
         *WetClothingAsset->GetRuntimeSkeletalMesh()->GetPathName(),
         WetClothingAsset->GetDWCDataUVChannelIndex(),
@@ -464,7 +466,6 @@ bool FWetClothingWetPartDataTextureBaker::Bake(
             LocalProfile.StableKey = StableKey;
             if (!FWetClothingSurfaceTextureNormalizer::NormalizeProfileTextures(
                     *WetClothingAsset,
-                    StableKey,
                     Parameters,
                     LocalProfile,
                     OutErrorMessage))
@@ -475,7 +476,9 @@ bool FWetClothingWetPartDataTextureBaker::Bake(
             // Runtime rows retain only normalized array-compatible texture references.
             // Authored source textures remain owned by the Wetness Profile asset.
             LocalProfile.Parameters.SurfaceWater.DropletNormalTexture = nullptr;
+            LocalProfile.Parameters.SurfaceWater.DropletMaskTexture = nullptr;
             LocalProfile.Parameters.SurfaceWater.RivuletNormalTexture = nullptr;
+            LocalProfile.Parameters.SurfaceWater.RivuletMaskTexture = nullptr;
             LocalIDByStableKey.Add(StableKey, LocalProfileID);
         }
         LocalIDByEntry.Add(Entry, LocalProfileID);

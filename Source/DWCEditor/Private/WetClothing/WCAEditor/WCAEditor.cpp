@@ -1971,6 +1971,11 @@ void FWCAEditor::HandleDWCEditorAssetSaveAttemptFinished(UObject* SavedAsset, co
     RegenerateMenusAndToolbars();
 }
 
+void FWCAEditor::HandleEditorPanelStatusChanged()
+{
+    RegenerateMenusAndToolbars();
+}
+
 void FWCAEditor::RefreshAssetStateAndEditor(
     const bool bRunDeepValidation,
     const bool bRebuildActiveModePreview)
@@ -1998,7 +2003,8 @@ TSharedRef<SDockTab> FWCAEditor::SpawnMainTab(const FSpawnTabArgs& Args)
         .Label(LOCTEXT("MainTabLabel", "Wet Clothing Asset Editor"))
             [SAssignNew(EditorPanel, SWCAEditorPanel)
                  .DetailsView(DetailsView)
-                 .WetClothingAsset(WetClothingAsset.Get())];
+                 .WetClothingAsset(WetClothingAsset.Get())
+                 .OnStatusChanged(FSimpleDelegate::CreateSP(this, &FWCAEditor::HandleEditorPanelStatusChanged))];
 }
 
 void FWCAEditor::PostRegenerateMenusAndToolbars()
@@ -3005,6 +3011,18 @@ bool FWCAEditor::ResolveIssuesAndSave(FString& OutFailure, FString* OutSuccessSu
     const bool bInitialGPUMapsRequireBake =
         Setup.bBuildGPUWetnessMapSimulationData &&
         IsValidationActionRequiredStatus(InitialBakeState.GPUMaps);
+    const bool bInitialWrinkleMapsRequireBake =
+        InitialValidationReport.Issues.ContainsByPredicate(
+            [](const FWCAValidationIssue& Issue)
+            {
+                return Issue.FixKind == EWCAValidationFixKind::BakeWrinkleMaps;
+            });
+    const bool bInitialTransparencyMapsRequireBake =
+        InitialValidationReport.Issues.ContainsByPredicate(
+            [](const FWCAValidationIssue& Issue)
+            {
+                return Issue.FixKind == EWCAValidationFixKind::BakeTransparencyMaps;
+            });
 #endif
     bool bPreparedRuntimePrerequisites = false;
     TArray<FString> ResolveSummaries;
@@ -3121,7 +3139,9 @@ bool FWCAEditor::ResolveIssuesAndSave(FString& OutFailure, FString* OutSuccessSu
     const bool bHasWrinkleContent = !Asset->Authored.WrinkleData.BakedWrinkleMaps.IsEmpty() ||
                                     !Asset->Authored.WrinkleData.EditablePatches.IsEmpty() ||
                                     !Asset->Authored.WrinkleData.EditableProceduralRidgeStrokes.IsEmpty();
-    if (bHasWrinkleContent && !DWCBuildStatus::IsUsable(Asset->GetBakeState().WrinkleMaps))
+    if (bHasWrinkleContent &&
+        (bInitialWrinkleMapsRequireBake ||
+         !DWCBuildStatus::IsUsable(Asset->GetBakeState().WrinkleMaps)))
     {
         SlowTask.EnterProgressFrame(
             1.0f,
@@ -3137,7 +3157,8 @@ bool FWCAEditor::ResolveIssuesAndSave(FString& OutFailure, FString* OutSuccessSu
     }
 
     if (Asset->HasTransparencyBakeContent() &&
-        !DWCBuildStatus::IsUsable(Asset->GetBakeState().TransparencyMaps))
+        (bInitialTransparencyMapsRequireBake ||
+         !DWCBuildStatus::IsUsable(Asset->GetBakeState().TransparencyMaps)))
     {
         SlowTask.EnterProgressFrame(
             1.0f,

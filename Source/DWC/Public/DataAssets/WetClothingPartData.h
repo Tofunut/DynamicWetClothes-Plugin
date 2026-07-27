@@ -52,11 +52,11 @@ struct DWC_API FWetPartSurfaceWaterSettings
     float DropletRadiusScale = 1.0f;
 
     /** Physical-looking size of the repeating Droplet detail-normal pattern. */
-    UPROPERTY(EditAnywhere, Category = "Surface Water", meta = (ClampMin = "0.25", ClampMax = "4.0", UIMin = "0.25", UIMax = "4.0"))
+    UPROPERTY(EditAnywhere, Category = "Surface Water", meta = (ClampMin = "0.0", ClampMax = "4.0", UIMin = "0.0", UIMax = "4.0"))
     float DropletDetailSize = 1.0f;
 
     /** Physical-looking size of the repeating Rivulet detail-normal pattern. */
-    UPROPERTY(EditAnywhere, Category = "Surface Water", meta = (ClampMin = "0.25", ClampMax = "4.0", UIMin = "0.25", UIMax = "4.0"))
+    UPROPERTY(EditAnywhere, Category = "Surface Water", meta = (ClampMin = "0.0", ClampMax = "4.0", UIMin = "0.0", UIMax = "4.0"))
     float RivuletDetailSize = 1.0f;
 };
 
@@ -323,7 +323,13 @@ struct DWC_API FWetClothingLocalRenderProfile
     TObjectPtr<UTexture2D> NormalizedDropletNormal = nullptr;
 
     UPROPERTY(VisibleAnywhere, Category = "Wet Part Data Texture|Surface Texture")
+    TObjectPtr<UTexture2D> NormalizedDropletMask = nullptr;
+
+    UPROPERTY(VisibleAnywhere, Category = "Wet Part Data Texture|Surface Texture")
     TObjectPtr<UTexture2D> NormalizedRivuletNormal = nullptr;
+
+    UPROPERTY(VisibleAnywhere, Category = "Wet Part Data Texture|Surface Texture")
+    TObjectPtr<UTexture2D> NormalizedRivuletMask = nullptr;
 };
 
 USTRUCT(BlueprintType)

@@ -19,6 +19,7 @@ RESOURCE_DIR = os.path.join(SCRIPT_DIR, "Resources")
 
 DATA_FALLBACK_NAME = "T_DWC_DefaultProfileData"
 NORMAL_FALLBACK_NAME = "T_DWC_DefaultSurfaceNormal"
+MASK_ARRAY_FALLBACK_NAME = "TA_DWC_DefaultSurfaceMask"
 NORMAL_ARRAY_FALLBACK_NAME = "TA_DWC_DefaultSurfaceNormal"
 
 MEL = unreal.MaterialEditingLibrary
@@ -909,6 +910,58 @@ def ensure_default_textures() -> tuple[Any, Any]:
     return data_texture, normal_array
 
 
+def ensure_default_texture_arrays() -> tuple[Any, Any, Any]:
+    data_texture, normal_array = ensure_default_textures()
+
+    array_path = asset_path(MASK_ARRAY_FALLBACK_NAME, DEFAULT_ROOT)
+    mask_array = load_asset(array_path)
+    if mask_array is None:
+        factory_class = getattr(unreal, "Texture2DArrayFactory", None)
+        texture_array_class = getattr(unreal, "Texture2DArray", None)
+        if factory_class is None or texture_array_class is None:
+            fail("Texture2DArrayFactory/Texture2DArray is unavailable in this editor build.")
+        factory = factory_class()
+        set_first_property(
+            factory,
+            ("initial_textures", "source_textures"),
+            [data_texture],
+            required=False,
+        )
+        mask_array = unreal.AssetToolsHelpers.get_asset_tools().create_asset(
+            MASK_ARRAY_FALLBACK_NAME,
+            DEFAULT_ROOT,
+            texture_array_class,
+            factory,
+        )
+        if mask_array is None:
+            fail(f"Could not create fallback Texture2DArray: {array_path}")
+
+    array_changed = False
+    current_sources = get_property(mask_array, "source_textures", [])
+    if list(current_sources or []) != [data_texture]:
+        array_changed |= set_first_property(
+            mask_array,
+            ("source_textures",),
+            [data_texture],
+            required=False,
+        ) is not None
+    if array_changed:
+        update_source = getattr(mask_array, "update_source_from_source_textures", None)
+        if callable(update_source):
+            try:
+                update_source(False)
+            except TypeError:
+                update_source()
+    array_changed |= set_property_if_changed(mask_array, "srgb", False)
+    compression_enum = getattr(unreal, "TextureCompressionSettings", None)
+    if compression_enum is not None and hasattr(compression_enum, "TC_MASKS"):
+        array_changed |= set_property_if_changed(mask_array, "compression_settings", compression_enum.TC_MASKS)
+    if array_changed:
+        mask_array.modify()
+        save_asset(array_path)
+    return data_texture, normal_array, mask_array
+
+
 def linear_color_sampler() -> Any:
     return enum_value(
         unreal.MaterialSamplerType,
@@ -922,6 +975,16 @@ def normal_sampler() -> Any:
         unreal.MaterialSamplerType,
         "SAMPLERTYPE_NORMAL",
         "NORMAL",
+    )
+
+
+def mask_sampler() -> Any:
+    return enum_value(
+        unreal.MaterialSamplerType,
+        "SAMPLERTYPE_MASKS",
+        "MASKS",
+        "SAMPLERTYPE_LINEAR_COLOR",
+        "LINEAR_COLOR",
     )
 
 

@@ -17,7 +17,7 @@ uint StampType;
 float AccumulationBrush(float2 LocalPosition)
 {
     const float Radius = length(LocalPosition);
-    return 1.0 - smoothstep(0.82, 1.0, Radius);
+    return 1.0 - smoothstep(0.55, 1.0, Radius);
 }
 
 float VisibleSurfaceAmount(float4 State)

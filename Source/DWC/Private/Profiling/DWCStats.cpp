@@ -2,8 +2,14 @@
 
 #include <atomic>
 
+#include "Engine/Console.h"
 #include "Engine/Engine.h"
+#include "Engine/GameViewportClient.h"
+#include "ConsoleSettings.h"
 #include "HAL/IConsoleManager.h"
+#include "Stats/StatsCommand.h"
+#include "Utility/DWCLog.h"
+#include "ViewportClient.h"
 
 #if STATS
 namespace
@@ -208,24 +214,184 @@ DEFINE_STAT(STAT_DWC_GPUBackendDispatchesRate);
 
 namespace
 {
-    void ExecuteDWCStatAlias(UWorld* World, const TCHAR* GroupName)
+    bool bDWCStatCommandsRegistered = false;
+    FDelegateHandle DWCStatAutocompleteHandle;
+
+    struct FDWCStatAlias
     {
-        if (World == nullptr || GEngine == nullptr)
+        const TCHAR* Command;
+        const TCHAR* Description;
+    };
+
+    const FDWCStatAlias GDWCStatAliases[] =
+    {
+        {TEXT("stat dwc"), TEXT("Toggle DWC memory summary stats.")},
+        {TEXT("stat dwc mem"), TEXT("Toggle DWC CPU and GPU memory stats.")},
+        {TEXT("stat dwc memory"), TEXT("Toggle DWC CPU and GPU memory stats.")},
+        {TEXT("stat dwc workload"), TEXT("Toggle DWC workload rate stats.")},
+        {TEXT("stat dwc lod"), TEXT("Toggle DWC LOD stats.")},
+        {TEXT("stat dwc instances"), TEXT("Toggle DWC instance/resource count stats.")},
+        {TEXT("stat dwc cpu"), TEXT("Toggle DWC CPU memory stats.")},
+        {TEXT("stat dwc gpu"), TEXT("Toggle DWC GPU memory stats.")},
+        {TEXT("stat dwc help"), TEXT("Print DWC stat command help.")}
+    };
+
+    FCommonViewportClient* ResolveDWCViewportClient(UWorld* World)
+    {
+        return World != nullptr ? World->GetGameViewport() : nullptr;
+    }
+
+    void ExecuteDWCStatCommand(UWorld* World, FCommonViewportClient* ViewportClient, const TCHAR* GroupName)
+    {
+        if (GEngine != nullptr && World != nullptr && ViewportClient != nullptr)
         {
+            GEngine->ExecEngineStat(World, ViewportClient, GroupName);
             return;
         }
 
-        GEngine->Exec(World, *FString::Printf(TEXT("stat %s"), GroupName));
+        UE::Stats::DirectStatsCommand(*FString::Printf(TEXT("stat %s"), GroupName), true);
+    }
+
+    void ExecuteDWCStatCommand(UWorld* World, const TCHAR* GroupName)
+    {
+        ExecuteDWCStatCommand(World, ResolveDWCViewportClient(World), GroupName);
+    }
+
+    bool IsDWCStatGroupEnabled(const FCommonViewportClient* ViewportClient, const TCHAR* GroupName, bool& bOutEnabled)
+    {
+        if (ViewportClient == nullptr)
+        {
+            return false;
+        }
+
+        bOutEnabled = ViewportClient->IsStatEnabled(FString(GroupName));
+        return true;
+    }
+
+    void SetDWCStatGroupEnabled(UWorld* World, FCommonViewportClient* ViewportClient, const TCHAR* GroupName, const bool bEnabled)
+    {
+        bool bCurrentEnabled = false;
+        if (!IsDWCStatGroupEnabled(ViewportClient, GroupName, bCurrentEnabled) || bCurrentEnabled != bEnabled)
+        {
+            ExecuteDWCStatCommand(World, ViewportClient, GroupName);
+        }
+    }
+
+    void ToggleDWCMemoryStats(UWorld* World, FCommonViewportClient* ViewportClient)
+    {
+        bool bDWCEnabled = false;
+        if (IsDWCStatGroupEnabled(ViewportClient, TEXT("DWC"), bDWCEnabled))
+        {
+            const bool bEnable = !bDWCEnabled;
+            SetDWCStatGroupEnabled(World, ViewportClient, TEXT("DWC"), bEnable);
+            SetDWCStatGroupEnabled(World, ViewportClient, TEXT("DWCCPUMemory"), bEnable);
+            SetDWCStatGroupEnabled(World, ViewportClient, TEXT("DWCGPUMemory"), bEnable);
+            return;
+        }
+
+        ExecuteDWCStatCommand(World, ViewportClient, TEXT("DWC"));
+        ExecuteDWCStatCommand(World, ViewportClient, TEXT("DWCCPUMemory"));
+        ExecuteDWCStatCommand(World, ViewportClient, TEXT("DWCGPUMemory"));
+    }
+
+    void ToggleDWCMemoryStats(UWorld* World)
+    {
+        ToggleDWCMemoryStats(World, ResolveDWCViewportClient(World));
+    }
+
+    void LogDWCStatHelp()
+    {
+        UE_LOG(LogDWC, Display, TEXT("DWC stat commands:"));
+        UE_LOG(LogDWC, Display, TEXT("  stat dwc"));
+        UE_LOG(LogDWC, Display, TEXT("  stat dwc mem"));
+        UE_LOG(LogDWC, Display, TEXT("  stat dwc workload"));
+        UE_LOG(LogDWC, Display, TEXT("  stat dwc lod"));
+        UE_LOG(LogDWC, Display, TEXT("  stat dwc instances"));
+        UE_LOG(LogDWC, Display, TEXT("  stat dwc cpu"));
+        UE_LOG(LogDWC, Display, TEXT("  stat dwc gpu"));
+    }
+
+    void AppendDWCStatAutocomplete(TArray<FAutoCompleteCommand>& AutoCompleteList)
+    {
+        const UConsoleSettings* ConsoleSettings = GetDefault<UConsoleSettings>();
+        for (const FDWCStatAlias& Alias : GDWCStatAliases)
+        {
+            FAutoCompleteCommand& AutoCompleteCommand = AutoCompleteList.AddDefaulted_GetRef();
+            AutoCompleteCommand.Command = Alias.Command;
+            AutoCompleteCommand.Desc = Alias.Description;
+            if (ConsoleSettings != nullptr)
+            {
+                AutoCompleteCommand.Color = ConsoleSettings->AutoCompleteCommandColor;
+            }
+        }
+    }
+
+    bool ToggleDWCStatCommand(UWorld* World, FCommonViewportClient* ViewportClient, const TCHAR* Stream)
+    {
+        const TCHAR* Cmd = Stream != nullptr ? Stream : TEXT("");
+
+        if (FParse::Command(&Cmd, TEXT("MEM")) || FParse::Command(&Cmd, TEXT("MEMORY")))
+        {
+            ToggleDWCMemoryStats(World, ViewportClient);
+            return true;
+        }
+
+        if (FParse::Command(&Cmd, TEXT("WORKLOAD")))
+        {
+            ExecuteDWCStatCommand(World, ViewportClient, TEXT("DWCWorkload"));
+            return true;
+        }
+
+        if (FParse::Command(&Cmd, TEXT("LOD")))
+        {
+            ExecuteDWCStatCommand(World, ViewportClient, TEXT("DWCLOD"));
+            return true;
+        }
+
+        if (FParse::Command(&Cmd, TEXT("INSTANCES")) || FParse::Command(&Cmd, TEXT("INSTANCE")))
+        {
+            ExecuteDWCStatCommand(World, ViewportClient, TEXT("DWCInstances"));
+            return true;
+        }
+
+        if (FParse::Command(&Cmd, TEXT("CPU")))
+        {
+            ToggleDWCMemoryStats(World, ViewportClient);
+            return true;
+        }
+
+        if (FParse::Command(&Cmd, TEXT("GPU")))
+        {
+            ToggleDWCMemoryStats(World, ViewportClient);
+            return true;
+        }
+
+        if (FParse::Command(&Cmd, TEXT("HELP")) || FParse::Command(&Cmd, TEXT("?")))
+        {
+            LogDWCStatHelp();
+            return true;
+        }
+
+        if (FString(Cmd).TrimStartAndEnd().IsEmpty())
+        {
+            ToggleDWCMemoryStats(World, ViewportClient);
+            return true;
+        }
+
+        LogDWCStatHelp();
+        return true;
     }
 
     FAutoConsoleCommandWithWorld GDWCMemoryStatAlias(
         TEXT("stat dwc mem"),
         TEXT("Toggle DWC memory statistics."),
-        FConsoleCommandWithWorldDelegate::CreateLambda(
-            [](UWorld* World)
-            {
-                ExecuteDWCStatAlias(World, TEXT("DWC"));
-            }),
+        FConsoleCommandWithWorldDelegate::CreateStatic(&ToggleDWCMemoryStats),
+        ECVF_Default);
+
+    FAutoConsoleCommandWithWorld GDWCMemoryLongStatAlias(
+        TEXT("stat dwc memory"),
+        TEXT("Toggle DWC memory statistics."),
+        FConsoleCommandWithWorldDelegate::CreateStatic(&ToggleDWCMemoryStats),
         ECVF_Default);
 
     FAutoConsoleCommandWithWorld GDWCWorkloadStatAlias(
@@ -234,7 +400,7 @@ namespace
         FConsoleCommandWithWorldDelegate::CreateLambda(
             [](UWorld* World)
             {
-                ExecuteDWCStatAlias(World, TEXT("DWCWorkload"));
+                ExecuteDWCStatCommand(World, TEXT("DWCWorkload"));
             }),
         ECVF_Default);
 
@@ -244,7 +410,55 @@ namespace
         FConsoleCommandWithWorldDelegate::CreateLambda(
             [](UWorld* World)
             {
-                ExecuteDWCStatAlias(World, TEXT("DWCLOD"));
+                ExecuteDWCStatCommand(World, TEXT("DWCLOD"));
             }),
         ECVF_Default);
+
+    FAutoConsoleCommandWithWorld GDWCInstancesStatAlias(
+        TEXT("stat dwc instances"),
+        TEXT("Toggle DWC instance/resource count statistics."),
+        FConsoleCommandWithWorldDelegate::CreateLambda(
+            [](UWorld* World)
+            {
+                ExecuteDWCStatCommand(World, TEXT("DWCInstances"));
+            }),
+        ECVF_Default);
+}
+
+void DWCStats::RegisterStatCommands()
+{
+    if (GEngine == nullptr || bDWCStatCommandsRegistered)
+    {
+        return;
+    }
+
+    GEngine->AddEngineStat(
+        TEXT("STAT_DWC"),
+        TEXT("STATCAT_Advanced"),
+        FText::FromString(TEXT("Toggle DWC stats. Supports: mem, workload, lod, instances, cpu, gpu.")),
+        UEngine::FEngineStatRender(),
+        UEngine::FEngineStatToggle::CreateStatic(&ToggleDWCStatCommand));
+
+    if (!DWCStatAutocompleteHandle.IsValid())
+    {
+        DWCStatAutocompleteHandle = UConsole::RegisterConsoleAutoCompleteEntries.AddStatic(&AppendDWCStatAutocomplete);
+    }
+
+    bDWCStatCommandsRegistered = true;
+}
+
+void DWCStats::UnregisterStatCommands()
+{
+    if (DWCStatAutocompleteHandle.IsValid())
+    {
+        UConsole::RegisterConsoleAutoCompleteEntries.Remove(DWCStatAutocompleteHandle);
+        DWCStatAutocompleteHandle.Reset();
+    }
+
+    if (GEngine != nullptr && bDWCStatCommandsRegistered)
+    {
+        GEngine->RemoveEngineStat(TEXT("STAT_DWC"));
+    }
+
+    bDWCStatCommandsRegistered = false;
 }

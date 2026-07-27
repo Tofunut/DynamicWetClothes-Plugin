@@ -278,6 +278,49 @@ FWCAValidationReport BuildWCAValidationReport(
     const FDWCAssetBakeState& State = Asset.GetBakeState();
     const FDWCWetClothingAssetSetupSettings& Setup = Asset.GetSetupSettings();
     const bool bAssetHasUnsavedChanges = Asset.GetOutermost() != nullptr && Asset.GetOutermost()->IsDirty();
+    FString RuntimePreparationReason;
+    const bool bCanPrepareRuntimeDataForSave =
+        Asset.CanPrepareRuntimeDataForEditorSave(&RuntimePreparationReason);
+
+    auto BuildRuntimeValidationDetail = [&RuntimePreparationReason, bCanPrepareRuntimeDataForSave](
+        const FString& BaseDetail,
+        const EDWCBakeStatus Status)
+    {
+        if (bCanPrepareRuntimeDataForSave || DWCBuildStatus::IsUsable(Status) || RuntimePreparationReason.IsEmpty())
+        {
+            return BaseDetail;
+        }
+        return FString::Printf(
+            TEXT("%s Runtime data cannot be prepared on save: %s"),
+            *BaseDetail,
+            *RuntimePreparationReason);
+    };
+
+    auto GetRuntimeFixKind = [bCanPrepareRuntimeDataForSave](
+        const EDWCBakeStatus Status,
+        const bool bSavePending)
+    {
+        if (bSavePending && DWCBuildStatus::IsUsable(Status))
+        {
+            return EWCAValidationFixKind::Save;
+        }
+        return bCanPrepareRuntimeDataForSave
+            ? EWCAValidationFixKind::PrepareRuntimeData
+            : EWCAValidationFixKind::Manual;
+    };
+
+    auto GetRuntimeRequiredAction = [bCanPrepareRuntimeDataForSave](
+        const EDWCBakeStatus Status,
+        const bool bSavePending)
+    {
+        if (bSavePending && DWCBuildStatus::IsUsable(Status))
+        {
+            return NSLOCTEXT("WCAValidationReport", "RuntimeDataSaveAction", "Save the asset to persist it.");
+        }
+        return bCanPrepareRuntimeDataForSave
+            ? NSLOCTEXT("WCAValidationReport", "RuntimeDataAction", "Save the asset to rebuild or persist it.")
+            : NSLOCTEXT("WCAValidationReport", "RuntimeDataPrerequisiteAction", "Resolve the runtime-data prerequisite, then save the asset.");
+    };
 
     AddBakeStatusIssueIfRequired(
         Report,
@@ -311,11 +354,13 @@ FWCAValidationReport BuildWCAValidationReport(
                 TEXT("CPURuntimeData"),
                 RuntimeSeverity(State.CPURuntimeData, bHasPayload || Asset.HasGeneratedBakeOutput(DWCBakeOutput::CPURuntimeData) || Asset.HasSavedBakeOutput(DWCBakeOutput::CPURuntimeData)),
                 EWCAValidationIssueCategory::Runtime,
-                bSavePending && DWCBuildStatus::IsUsable(State.CPURuntimeData) ? EWCAValidationFixKind::Save : EWCAValidationFixKind::PrepareRuntimeData,
+                GetRuntimeFixKind(State.CPURuntimeData, bSavePending),
                 NSLOCTEXT("WCAValidationReport", "CPURuntimeDataTitle", "CPU Runtime Data"),
                 bSavePending && DWCBuildStatus::IsUsable(State.CPURuntimeData) ? NSLOCTEXT("WCAValidationReport", "CPURuntimeSaveRequired", "Save Required") : FText::FromString(BakeStatusToString(State.CPURuntimeData)),
-                FText::FromString(BuildRuntimeDetail(TEXT("CPU Runtime Data"), State.CPURuntimeData, bHasPayload, Asset.HasGeneratedBakeOutput(DWCBakeOutput::CPURuntimeData), Asset.HasSavedBakeOutput(DWCBakeOutput::CPURuntimeData), bAssetHasUnsavedChanges, bSavePending, State.LastFailure)),
-                NSLOCTEXT("WCAValidationReport", "RuntimeDataAction", "Save the asset to rebuild or persist it."),
+                FText::FromString(BuildRuntimeValidationDetail(
+                    BuildRuntimeDetail(TEXT("CPU Runtime Data"), State.CPURuntimeData, bHasPayload, Asset.HasGeneratedBakeOutput(DWCBakeOutput::CPURuntimeData), Asset.HasSavedBakeOutput(DWCBakeOutput::CPURuntimeData), bAssetHasUnsavedChanges, bSavePending, State.LastFailure),
+                    State.CPURuntimeData)),
+                GetRuntimeRequiredAction(State.CPURuntimeData, bSavePending),
                 State.CPURuntimeData == EDWCBakeStatus::Failed);
         }
     }
@@ -332,11 +377,13 @@ FWCAValidationReport BuildWCAValidationReport(
                 TEXT("GPURuntimeData"),
                 RuntimeSeverity(State.GPURuntimeData, bHasPayload || Asset.HasGeneratedBakeOutput(DWCBakeOutput::GPURuntimeData) || Asset.HasSavedBakeOutput(DWCBakeOutput::GPURuntimeData)),
                 EWCAValidationIssueCategory::Runtime,
-                bSavePending && DWCBuildStatus::IsUsable(State.GPURuntimeData) ? EWCAValidationFixKind::Save : EWCAValidationFixKind::PrepareRuntimeData,
+                GetRuntimeFixKind(State.GPURuntimeData, bSavePending),
                 NSLOCTEXT("WCAValidationReport", "GPURuntimeDataTitle", "GPU Runtime Data"),
                 bSavePending && DWCBuildStatus::IsUsable(State.GPURuntimeData) ? NSLOCTEXT("WCAValidationReport", "GPURuntimeSaveRequired", "Save Required") : FText::FromString(BakeStatusToString(State.GPURuntimeData)),
-                FText::FromString(BuildRuntimeDetail(TEXT("GPU Runtime Data"), State.GPURuntimeData, bHasPayload, Asset.HasGeneratedBakeOutput(DWCBakeOutput::GPURuntimeData), Asset.HasSavedBakeOutput(DWCBakeOutput::GPURuntimeData), bAssetHasUnsavedChanges, bSavePending, State.LastFailure)),
-                NSLOCTEXT("WCAValidationReport", "RuntimeDataAction", "Save the asset to rebuild or persist it."),
+                FText::FromString(BuildRuntimeValidationDetail(
+                    BuildRuntimeDetail(TEXT("GPU Runtime Data"), State.GPURuntimeData, bHasPayload, Asset.HasGeneratedBakeOutput(DWCBakeOutput::GPURuntimeData), Asset.HasSavedBakeOutput(DWCBakeOutput::GPURuntimeData), bAssetHasUnsavedChanges, bSavePending, State.LastFailure),
+                    State.GPURuntimeData)),
+                GetRuntimeRequiredAction(State.GPURuntimeData, bSavePending),
                 State.GPURuntimeData == EDWCBakeStatus::Failed);
         }
     }

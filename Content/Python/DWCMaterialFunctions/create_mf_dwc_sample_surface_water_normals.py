@@ -15,7 +15,7 @@ ASSET_NAME = "MF_DWC_SampleSurfaceWaterNormals"
 
 
 def build() -> None:
-    _, normal_array_fallback = c.ensure_default_textures()
+    _, normal_array_fallback, mask_array_fallback = c.ensure_default_texture_arrays()
     mf = c.create_or_replace_material_function(ASSET_NAME, OVERWRITE_EXISTING)
 
     c.create_comment(mf, "1. Inputs & Shared Flow Data", -10500, -3200, 7200, 4200, parent=True)
@@ -27,9 +27,9 @@ def build() -> None:
     c.create_comment(mf, "2-1. Droplet Normal UV", -2400, -2750, 1800, 3200)
     c.create_comment(mf, "2-2. Rivulet Flow-Aligned UV", -100, -2750, 1900, 3200)
 
-    c.create_comment(mf, "3. TextureArray Sampling", 2700, -3200, 7300, 4200, parent=True)
-    c.create_comment(mf, "3-1. Droplet Normal Sampling", 3100, -2750, 1800, 3200)
-    c.create_comment(mf, "3-2. Rivulet Normal Sampling", 5400, -2750, 1800, 3200)
+    c.create_comment(mf, "3. TextureArray Sampling", 2700, -3200, 8200, 4200, parent=True)
+    c.create_comment(mf, "3-1. Droplet Mask & Normal Sampling", 3100, -2750, 2200, 3200)
+    c.create_comment(mf, "3-2. Rivulet Mask & Normal Sampling", 5700, -2750, 2200, 3200)
     c.create_comment(mf, "3-3. Slice 0 Flat-Normal Fallback", 7700, -2750, 1900, 3200)
 
     c.create_comment(mf, "4. Function Outputs", 10500, -3200, 2800, 4200, parent=True)
@@ -53,7 +53,9 @@ def build() -> None:
 
     # 1-2 Profile Sampling Inputs
     profile_specs = [
+        ("DropletMaskSlice", (0.0,), "Droplet mask Texture2DArray slice."),
         ("DropletNormalSlice", (0.0,), "Droplet normal Texture2DArray slice."),
+        ("RivuletMaskSlice", (0.0,), "Rivulet mask Texture2DArray slice."),
         ("RivuletNormalSlice", (0.0,), "Rivulet normal Texture2DArray slice."),
         ("RivuletEncodedFlowAngle", (0.75,), "SurfaceWaterNormalUV-space flow angle encoded to 0..1."),
         ("RivuletUVScrollSpeed", (0.0,), "Rivulet scroll speed along the flow axis."),
@@ -132,78 +134,164 @@ return Aligned;
 
     # 3-1 Droplet array sampling
     droplet_uv_use2 = c.named_usage(mf, droplet_uv_decl, 3350, -1800)
-    droplet_slice_use = c.named_usage(mf, declarations["DropletNormalSlice"], 3350, -1100)
-    droplet_array_uv = c.append_vector(
-        mf, droplet_uv_use2, ("", "Result"), droplet_slice_use, ("", "Result"),
-        3900, -1450, "Append the runtime Texture2DArray slice to droplet UV."
+    droplet_mask_slice_use = c.named_usage(mf, declarations["DropletMaskSlice"], 3350, -1250)
+    droplet_normal_slice_use = c.named_usage(mf, declarations["DropletNormalSlice"], 3350, -850)
+    droplet_mask_array_uv = c.append_vector(
+        mf, droplet_uv_use2, ("", "Result"), droplet_mask_slice_use, ("", "Result"),
+        3900, -1650, "Append the runtime Texture2DArray slice to droplet mask UV."
     )
+    droplet_normal_array_uv = c.append_vector(
+        mf, droplet_uv_use2, ("", "Result"), droplet_normal_slice_use, ("", "Result"),
+        3900, -1200, "Append the runtime Texture2DArray slice to droplet normal UV."
+    )
+    droplet_mask_sample = c.texture2d_array_parameter(
+        mf, "DWC_DropletMaskTextureArray", mask_array_fallback, 4450, -1850,
+        sampler_type=c.mask_sampler(), group="DWC Surface Water",
+        description="Global droplet mask Texture2DArray. Slice 0 is treated as no mask.",
+    )
+    c.try_connect(droplet_mask_array_uv, ("", "Result"), droplet_mask_sample, ("Coordinates", "UVs"))
     droplet_sample = c.texture2d_array_parameter(
-        mf, "DWC_DropletNormalTextureArray", normal_array_fallback, 4450, -1450,
+        mf, "DWC_DropletNormalTextureArray", normal_array_fallback, 4450, -1050,
         sampler_type=c.normal_sampler(), group="DWC Surface Water",
         description="Global droplet normal Texture2DArray. Slice 0 is flat normal.",
     )
-    c.try_connect(droplet_array_uv, ("", "Result"), droplet_sample, ("Coordinates", "UVs"))
-    droplet_raw_decl = c.named_declaration(
-        mf, "SURFACE_DropletNormalRaw", droplet_sample, ("RGB", ""), 4700, -800
+    c.try_connect(droplet_normal_array_uv, ("", "Result"), droplet_sample, ("Coordinates", "UVs"))
+    droplet_mask_raw_decl = c.named_declaration(
+        mf, "SURFACE_DropletMaskRaw", droplet_mask_sample, ("R", ""), 4700, -2100
     )
-    droplet_raw_for_decode = c.named_usage(mf, droplet_raw_decl, 7800, -2100)
+    droplet_raw_decl = c.named_declaration(
+        mf, "SURFACE_DropletNormalRaw", droplet_sample, ("RGB", ""), 4700, -500
+    )
+    droplet_mask_raw_use = c.named_usage(mf, droplet_mask_raw_decl, 7950, -2500)
+    droplet_mask_slice_use2 = c.named_usage(mf, declarations["DropletMaskSlice"], 7950, -2100)
+    droplet_mask_safe = c.custom_expression(
+        mf,
+        "return DropletMaskSlice > 0.5 ? saturate(MaskValue) : 0.0;",
+        [
+            ("MaskValue", droplet_mask_raw_use, ("", "Result")),
+            ("DropletMaskSlice", droplet_mask_slice_use2, ("", "Result")),
+        ],
+        "float1", 8500, -2300,
+        "Reference-style droplet mask: use the authored/baked mask slice; slice 0 means no droplet-shaped contribution.",
+    )
+    droplet_raw_for_decode = c.named_usage(mf, droplet_raw_decl, 7950, -1500)
+    droplet_normal_slice_use2 = c.named_usage(mf, declarations["DropletNormalSlice"], 7950, -1100)
     droplet_decoded = c.custom_expression(
         mf,
         """
-return normalize(SampledNormal);
+if (DropletNormalSlice <= 0.5)
+{
+    return float3(0.0, 0.0, 1.0);
+}
+float3 N = normalize(SampledNormal);
+return normalize(float3(-N.xy, N.z));
 """,
-        [("SampledNormal", droplet_raw_for_decode, ("", "Result"))],
-        "float3", 8500, -1850,
-        "Normalize the tangent-space droplet normal already decoded by the Normal sampler.",
+        [
+            ("SampledNormal", droplet_raw_for_decode, ("", "Result")),
+            ("DropletNormalSlice", droplet_normal_slice_use2, ("", "Result")),
+        ],
+        "float3", 8500, -1400,
+        "Normalize the tangent-space droplet normal already decoded by the Normal sampler, flip XY to match DWC convex-water convention, or return flat for slice 0.",
     )
 
     # 3-2 Rivulet array sampling
-    rivulet_uv_use2 = c.named_usage(mf, rivulet_uv_decl, 5650, -1800)
-    rivulet_slice_use = c.named_usage(mf, declarations["RivuletNormalSlice"], 5650, -1100)
-    rivulet_array_uv = c.append_vector(
-        mf, rivulet_uv_use2, ("", "Result"), rivulet_slice_use, ("", "Result"),
-        6200, -1450, "Append the runtime Texture2DArray slice to rivulet UV."
+    rivulet_uv_use2 = c.named_usage(mf, rivulet_uv_decl, 5950, -1800)
+    rivulet_mask_slice_use = c.named_usage(mf, declarations["RivuletMaskSlice"], 5950, -1250)
+    rivulet_normal_slice_use = c.named_usage(mf, declarations["RivuletNormalSlice"], 5950, -850)
+    rivulet_mask_array_uv = c.append_vector(
+        mf, rivulet_uv_use2, ("", "Result"), rivulet_mask_slice_use, ("", "Result"),
+        6500, -1650, "Append the runtime Texture2DArray slice to rivulet mask UV."
     )
+    rivulet_normal_array_uv = c.append_vector(
+        mf, rivulet_uv_use2, ("", "Result"), rivulet_normal_slice_use, ("", "Result"),
+        6500, -1200, "Append the runtime Texture2DArray slice to rivulet normal UV."
+    )
+    rivulet_mask_sample = c.texture2d_array_parameter(
+        mf, "DWC_RivuletMaskTextureArray", mask_array_fallback, 7050, -1850,
+        sampler_type=c.mask_sampler(), group="DWC Surface Water",
+        description="Global rivulet mask Texture2DArray. Slice 0 is treated as no mask.",
+    )
+    c.try_connect(rivulet_mask_array_uv, ("", "Result"), rivulet_mask_sample, ("Coordinates", "UVs"))
     rivulet_sample = c.texture2d_array_parameter(
-        mf, "DWC_RivuletNormalTextureArray", normal_array_fallback, 6750, -1450,
+        mf, "DWC_RivuletNormalTextureArray", normal_array_fallback, 7050, -1050,
         sampler_type=c.normal_sampler(), group="DWC Surface Water",
         description="Global rivulet normal Texture2DArray. Slice 0 is flat normal.",
     )
-    c.try_connect(rivulet_array_uv, ("", "Result"), rivulet_sample, ("Coordinates", "UVs"))
-    rivulet_raw_decl = c.named_declaration(
-        mf, "SURFACE_RivuletNormalRaw", rivulet_sample, ("RGB", ""), 7000, -800
+    c.try_connect(rivulet_normal_array_uv, ("", "Result"), rivulet_sample, ("Coordinates", "UVs"))
+    rivulet_mask_raw_decl = c.named_declaration(
+        mf, "SURFACE_RivuletMaskRaw", rivulet_mask_sample, ("R", ""), 7300, -2100
     )
-    rivulet_raw_for_decode = c.named_usage(mf, rivulet_raw_decl, 7800, -1200)
+    rivulet_raw_decl = c.named_declaration(
+        mf, "SURFACE_RivuletNormalRaw", rivulet_sample, ("RGB", ""), 7300, -500
+    )
+    rivulet_mask_raw_use = c.named_usage(mf, rivulet_mask_raw_decl, 7950, -300)
+    rivulet_mask_slice_use2 = c.named_usage(mf, declarations["RivuletMaskSlice"], 7950, 100)
+    rivulet_mask_safe = c.custom_expression(
+        mf,
+        "return RivuletMaskSlice > 0.5 ? saturate(MaskValue) : 0.0;",
+        [
+            ("MaskValue", rivulet_mask_raw_use, ("", "Result")),
+            ("RivuletMaskSlice", rivulet_mask_slice_use2, ("", "Result")),
+        ],
+        "float1", 8500, -100,
+        "Reference-style rivulet mask: use the authored/baked mask slice; slice 0 means no rivulet-shaped contribution.",
+    )
+    rivulet_raw_for_decode = c.named_usage(mf, rivulet_raw_decl, 7950, 550)
+    rivulet_normal_slice_use2 = c.named_usage(mf, declarations["RivuletNormalSlice"], 7950, 950)
     rivulet_decoded = c.custom_expression(
         mf,
         """
-return normalize(SampledNormal);
+if (RivuletNormalSlice <= 0.5)
+{
+    return float3(0.0, 0.0, 1.0);
+}
+float3 N = normalize(SampledNormal);
+return normalize(float3(-N.xy, N.z));
 """,
-        [("SampledNormal", rivulet_raw_for_decode, ("", "Result"))],
-        "float3", 8500, -950,
-        "Normalize the tangent-space rivulet normal already decoded by the Normal sampler.",
+        [
+            ("SampledNormal", rivulet_raw_for_decode, ("", "Result")),
+            ("RivuletNormalSlice", rivulet_normal_slice_use2, ("", "Result")),
+        ],
+        "float3", 8500, 750,
+        "Normalize the tangent-space rivulet normal already decoded by the Normal sampler, flip XY to match DWC convex-water convention, or return flat for slice 0.",
     )
 
     # 3-3 Profile-level enable is encoded by the render profile slice.
     # Slice 0 is a flat normal, so profiles that do not use a given normal source
     # still compile the same material permutation and simply sample slice 0.
+    droplet_mask_final_decl = c.named_declaration(
+        mf, "SURFACE_DropletMask", droplet_mask_safe, ("", "Result"), 9200, -2300
+    )
     droplet_final_decl = c.named_declaration(
-        mf, "SURFACE_DropletNormal", droplet_decoded, ("", "Result"), 9200, -1850
+        mf, "SURFACE_DropletNormal", droplet_decoded, ("", "Result"), 9200, -1400
+    )
+    rivulet_mask_final_decl = c.named_declaration(
+        mf, "SURFACE_RivuletMask", rivulet_mask_safe, ("", "Result"), 9200, -100
     )
     rivulet_final_decl = c.named_declaration(
-        mf, "SURFACE_RivuletNormal", rivulet_decoded, ("", "Result"), 9200, -950
+        mf, "SURFACE_RivuletNormal", rivulet_decoded, ("", "Result"), 9200, 750
     )
 
     # 4-1 Outputs
+    droplet_mask_out_use = c.named_usage(mf, droplet_mask_final_decl, 11200, -2450)
     droplet_out_use = c.named_usage(mf, droplet_final_decl, 11200, -1650)
-    rivulet_out_use = c.named_usage(mf, rivulet_final_decl, 11200, -750)
+    rivulet_mask_out_use = c.named_usage(mf, rivulet_mask_final_decl, 11200, -850)
+    rivulet_out_use = c.named_usage(mf, rivulet_final_decl, 11200, -50)
     c.function_output(
-        mf, "DropletNormal", droplet_out_use, ("", "Result"), 0,
+        mf, "DropletMask", droplet_mask_out_use, ("", "Result"), 0,
+        12200, -2450, "Sampled droplet mask, or zero when the profile has no droplet mask slice."
+    )
+    c.function_output(
+        mf, "DropletNormal", droplet_out_use, ("", "Result"), 1,
         12200, -1650, "Raw tangent-space droplet normal without coverage or strength."
     )
     c.function_output(
-        mf, "RivuletNormal", rivulet_out_use, ("", "Result"), 1,
-        12200, -750, "Raw tangent-space rivulet normal aligned to the stored flow angle."
+        mf, "RivuletMask", rivulet_mask_out_use, ("", "Result"), 2,
+        12200, -850, "Sampled rivulet mask, or zero when the profile has no rivulet mask slice."
+    )
+    c.function_output(
+        mf, "RivuletNormal", rivulet_out_use, ("", "Result"), 3,
+        12200, -50, "Raw tangent-space rivulet normal aligned to the stored flow angle."
     )
 
     c.finalize_material_function(mf)

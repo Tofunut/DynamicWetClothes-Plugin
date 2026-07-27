@@ -235,7 +235,9 @@ namespace
         static const TArray<FName> RenderProfileOutputs = {
             TEXT("AbsorbedDarkeningStrength"),
             TEXT("AbsorbedGlossinessStrength"),
+            TEXT("DropletMaskSlice"),
             TEXT("DropletNormalSlice"),
+            TEXT("RivuletMaskSlice"),
             TEXT("RivuletNormalSlice"),
             TEXT("SurfaceWaterNormalStrength"),
             TEXT("SurfaceWaterRoughnessStrength"),
@@ -246,12 +248,14 @@ namespace
         };
         static const TArray<FName> SurfaceNormalInputs = {
             TEXT("SurfaceWaterNormalUV"), TEXT("SurfaceTime"),
-            TEXT("DropletNormalSlice"), TEXT("RivuletNormalSlice"),
+            TEXT("DropletMaskSlice"), TEXT("DropletNormalSlice"),
+            TEXT("RivuletMaskSlice"), TEXT("RivuletNormalSlice"),
             TEXT("DropletDetailSize"), TEXT("RivuletDetailSize"),
             TEXT("RivuletEncodedFlowAngle"), TEXT("RivuletUVScrollSpeed")
         };
         static const TArray<FName> SurfaceNormalOutputs = {
-            TEXT("DropletNormal"), TEXT("RivuletNormal")
+            TEXT("DropletMask"), TEXT("DropletNormal"),
+            TEXT("RivuletMask"), TEXT("RivuletNormal")
         };
         static const TArray<FName> DebugWetPartInputs = {
             TEXT("BaseColor"), TEXT("VertexColorRGB"), TEXT("VertexColorAlpha"),
@@ -1003,6 +1007,22 @@ namespace
             if (!MaterialInterfaceHasTextureParameter(MaterialInterface, DWCWetMaterialParameters::SurfaceRivuletRT()))
             {
                 OutMissingParameters.Add(DWCWetMaterialParameters::SurfaceRivuletRT().ToString());
+            }
+            if (!MaterialInterfaceHasTextureParameter(MaterialInterface, DWCWetMaterialParameters::DropletMaskTextureArray()))
+            {
+                OutMissingParameters.Add(DWCWetMaterialParameters::DropletMaskTextureArray().ToString());
+            }
+            if (!MaterialInterfaceHasTextureParameter(MaterialInterface, DWCWetMaterialParameters::DropletNormalTextureArray()))
+            {
+                OutMissingParameters.Add(DWCWetMaterialParameters::DropletNormalTextureArray().ToString());
+            }
+            if (!MaterialInterfaceHasTextureParameter(MaterialInterface, DWCWetMaterialParameters::RivuletMaskTextureArray()))
+            {
+                OutMissingParameters.Add(DWCWetMaterialParameters::RivuletMaskTextureArray().ToString());
+            }
+            if (!MaterialInterfaceHasTextureParameter(MaterialInterface, DWCWetMaterialParameters::RivuletNormalTextureArray()))
+            {
+                OutMissingParameters.Add(DWCWetMaterialParameters::RivuletNormalTextureArray().ToString());
             }
         }
         if (!MaterialInterfaceHasTextureParameter(MaterialInterface, DWCWetMaterialParameters::WetPartDataTexture()))

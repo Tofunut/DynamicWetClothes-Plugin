@@ -56,6 +56,7 @@ class SWetnessProfileViewport : public SEditorViewport, public FGCObject
     TObjectPtr<UMaterialInterface> PreviewBaseMaterial = nullptr;
     TObjectPtr<UMaterialInstanceDynamic> PreviewMaterialInstance = nullptr;
     TObjectPtr<UTexture> PreviewDefaultNormalTexture = nullptr;
+    TObjectPtr<UTexture> PreviewDefaultMaskTexture = nullptr;
     TSharedPtr<SRichTextBlock> OverlayText;
 
     float PreviewAbsorbedWater = 0.5f;

@@ -285,6 +285,7 @@ void SWCAEditorPanel::Construct(const FArguments& InArgs)
 {
     WetClothingAsset = InArgs._WetClothingAsset;
     DetailsView = InArgs._DetailsView;
+    OnStatusChanged = InArgs._OnStatusChanged;
     CachedStatusText = FText::GetEmpty();
 
     ChildSlot
@@ -310,7 +311,13 @@ void SWCAEditorPanel::Construct(const FArguments& InArgs)
         [SAssignNew(ModeContentBox, SBox)]
     ];
 
-    SetEditorMode(EWCAEditorMode::PartEdit);
+    {
+        TGuardValue<bool> SuppressStatusChangedNotification(bSuppressStatusChangedNotification, true);
+        SetEditorMode(EWCAEditorMode::PartEdit);
+    }
+    RegisterActiveTimer(
+        0.5,
+        FWidgetActiveTimerDelegate::CreateSP(this, &SWCAEditorPanel::HandleStatusRefreshTimer));
 }
 
 TSharedRef<SWidget> SWCAEditorPanel::EnsureModeWidget(const EWCAEditorMode Mode)
@@ -406,6 +413,12 @@ EActiveTimerReturnType SWCAEditorPanel::HandleDeferredRefresh(double CurrentTime
     return EActiveTimerReturnType::Stop;
 }
 
+EActiveTimerReturnType SWCAEditorPanel::HandleStatusRefreshTimer(double CurrentTime, float DeltaTime)
+{
+    UpdateCachedStatus(false);
+    return EActiveTimerReturnType::Continue;
+}
+
 FWCAEditorIssueStatus SWCAEditorPanel::CollectIssueStatus(
     const bool bRefreshAssetState,
     const bool bRunDeepValidation) const
@@ -430,12 +443,25 @@ FWCAEditorIssueStatus SWCAEditorPanel::CollectIssueStatus(
 
 void SWCAEditorPanel::UpdateCachedStatus(const bool bRefreshAssetState)
 {
+    const bool bPreviousStatusWarningVisible = bStatusWarningVisible;
+    const EWCAEditorStatusSeverity PreviousStatusSeverity = CachedStatusSeverity;
+    const FText PreviousStatusText = CachedStatusText;
+
     const FWCAEditorIssueStatus Status = CollectIssueStatus(bRefreshAssetState, false);
     bStatusWarningVisible = Status.HasIssues();
     CachedStatusSeverity = NormalizeIssueSeverity(Status);
     CachedStatusText = bStatusWarningVisible
         ? FText::FromString(Status.BuildSummary())
         : FText::GetEmpty();
+
+    if (!bSuppressStatusChangedNotification &&
+        OnStatusChanged.IsBound() &&
+        (bPreviousStatusWarningVisible != bStatusWarningVisible ||
+         PreviousStatusSeverity != CachedStatusSeverity ||
+         !PreviousStatusText.EqualTo(CachedStatusText)))
+    {
+        OnStatusChanged.Execute();
+    }
 }
 
 bool SWCAEditorPanel::HasPendingVisualBakeTasks(FString* OutSummary) const

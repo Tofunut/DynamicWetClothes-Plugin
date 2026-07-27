@@ -41,6 +41,7 @@ class FWCAEditor : public FAssetEditorToolkit
     void                 HandleFinishedChangingProperties(const FPropertyChangedEvent& PropertyChangedEvent);
     void                 HandleObjectPropertyChanged(UObject* ObjectBeingModified, FPropertyChangedEvent& PropertyChangedEvent);
     void                 HandleDWCEditorAssetSaveAttemptFinished(UObject* SavedAsset, bool bSaveSucceeded);
+    void                 HandleEditorPanelStatusChanged();
     TSharedRef<SDockTab> SpawnMainTab(const FSpawnTabArgs& Args);
     void                 FillAssetToolbar(FToolBarBuilder& ToolbarBuilder);
     void                 HandleAssetSetupClicked();

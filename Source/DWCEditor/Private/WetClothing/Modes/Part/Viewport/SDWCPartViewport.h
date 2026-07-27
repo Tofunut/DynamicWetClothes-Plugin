@@ -7,7 +7,7 @@
 
 class FAdvancedPreviewScene;
 class FDWCPartViewportClient;
-class SRichTextBlock;
+class STextBlock;
 class UWetClothingAsset;
 class UMaterial;
 class UMaterialInterface;
@@ -64,11 +64,15 @@ class SDWCPartViewport : public SEditorViewport, public FGCObject
     void  SetShowWetPartColors(bool bInShowWetPartColors);
     void  SetPreviewWetPart(int32 MaterialSlotIndex, int32 WetPartID);
     void  SetPreviewWetness(float AbsorbedWetness, float SurfaceWater);
+    void  SetSurfaceWaterTargetRoughness(float InTargetRoughness);
     void  SetSurfaceWaterTilingPreviewCoverageMode(EDWCSurfaceWaterTilingPreviewCoverageMode InMode);
+    void  RefreshSurfaceWaterPreviewDynamicTextures();
+    void  RefreshSurfaceWaterPreviewMaterial();
     void  FocusOnPreviewMesh(bool bInstant = false);
     void  SetSelectionOverlayThicknessScale(float InThicknessScale);
     float GetSelectionOverlayThicknessScale() const { return SelectionOverlayThicknessScale; }
     FText GetSurfaceWaterPreviewStatusText() const;
+    FSlateColor GetSurfaceWaterPreviewStatusColor() const;
 
   protected:
     virtual TSharedRef<FEditorViewportClient> MakeEditorViewportClient() override;
@@ -81,13 +85,15 @@ class SDWCPartViewport : public SEditorViewport, public FGCObject
     void                RefreshWetPartOverlayMesh();
     void                RefreshSelectionOverlayMesh();
     void                RefreshMaterialSectionVisibility();
-    void                RefreshSurfaceWaterPreviewMaterial();
     bool                BuildSurfaceWaterPreviewTextures(FString& OutErrorMessage);
+    void                InvalidateSurfaceWaterPreviewLayoutCache();
+    void                ApplySurfaceWaterPreviewTextureParameters();
     void                RequestViewportRedraw();
     void                CacheOriginalMaterials();
     void                RestoreOriginalMaterials();
     UMaterialInterface* ResolveWetPartOverlayMaterial();
     FText               GetViewportHintText() const;
+    FSlateColor         GetViewportHintTextColor() const;
 
   private:
     TWeakObjectPtr<UWetClothingAsset>           WetClothingAsset;
@@ -106,6 +112,15 @@ class SDWCPartViewport : public SEditorViewport, public FGCObject
     TObjectPtr<UTexture2D>                      SurfacePreviewWetPartDataTexture = nullptr;
     TObjectPtr<UTexture2D>                      SurfacePreviewDropletRT = nullptr;
     TObjectPtr<UTexture2D>                      SurfacePreviewRivuletRT = nullptr;
+    TArray<FColor>                              SurfacePreviewCachedSourcePartDataPixels;
+    TArray<uint8>                               SurfacePreviewCachedSelectedMask;
+    FVector2D                                   SurfacePreviewCachedSingleCircleCenter = FVector2D::ZeroVector;
+    int32                                       SurfacePreviewCachedWidth = 0;
+    int32                                       SurfacePreviewCachedHeight = 0;
+    int32                                       SurfacePreviewCachedLocalProfileID = 0;
+    int32                                       SurfacePreviewCachedMaterialSlotIndex = INDEX_NONE;
+    int32                                       SurfacePreviewCachedWetPartID = INDEX_NONE;
+    bool                                        bSurfacePreviewLayoutCacheValid = false;
     TArray<TObjectPtr<UMaterialInterface>>       OriginalPreviewMaterials;
     TArray<FWetClothingAssetUVIsland>            CurrentSelectableIslands;
     TSet<int32>                                  CurrentHighlightedUVIslandIDs;
@@ -122,7 +137,9 @@ class SDWCPartViewport : public SEditorViewport, public FGCObject
     EDWCSurfaceWaterTilingPreviewCoverageMode    SurfaceWaterPreviewCoverageMode = EDWCSurfaceWaterTilingPreviewCoverageMode::FullPart;
     float                                        PreviewAbsorbedWetness = 0.0f;
     float                                        PreviewSurfaceWater = 1.0f;
+    float                                        SurfaceWaterTargetRoughness = 0.02f;
     float                                        SelectionOverlayThicknessScale = 1.0f;
     FString                                      SurfaceWaterPreviewStatus;
-    TSharedPtr<SRichTextBlock>                   OverlayText;
+    bool                                         bSurfaceWaterPreviewStatusIsError = false;
+    TSharedPtr<STextBlock>                       OverlayText;
 };

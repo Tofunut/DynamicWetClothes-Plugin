@@ -7,6 +7,7 @@
 #include "Engine/Texture2DArray.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Misc/SecureHash.h"
+#include "PixelFormat.h"
 #include "Rendering/Texture2DResource.h"
 #include "RHICommandList.h"
 #include "RHIResources.h"
@@ -68,8 +69,8 @@ namespace
         const FSurfaceWaterProfileParameters& Surface = LocalProfile.Parameters.SurfaceWater;
         const FString ParameterState = FString::Printf(
             TEXT("AbsorbedDarkening=%.9g|AbsorbedGlossiness=%.9g|")
-            TEXT("DropletsEnabled=%d|DropletNormal=%s|")
-            TEXT("RivuletsEnabled=%d|RivuletNormal=%s|")
+            TEXT("DropletsEnabled=%d|DropletNormal=%s|DropletMask=%s|")
+            TEXT("RivuletsEnabled=%d|RivuletNormal=%s|RivuletMask=%s|")
             TEXT("NormalStrength=%.9g|RoughnessStrength=%.9g|")
             TEXT("VisibilityThreshold=%.9g|RivuletScrollSpeed=%.9g"),
             LocalProfile.Parameters.GetAbsorbedDarkeningStrength(),
@@ -78,9 +79,15 @@ namespace
             LocalProfile.NormalizedDropletNormal != nullptr
                 ? *LocalProfile.NormalizedDropletNormal->GetPathName()
                 : TEXT("None"),
+            LocalProfile.NormalizedDropletMask != nullptr
+                ? *LocalProfile.NormalizedDropletMask->GetPathName()
+                : TEXT("None"),
             Surface.bEnabled && Surface.bEnableRivulets ? 1 : 0,
             LocalProfile.NormalizedRivuletNormal != nullptr
                 ? *LocalProfile.NormalizedRivuletNormal->GetPathName()
+                : TEXT("None"),
+            LocalProfile.NormalizedRivuletMask != nullptr
+                ? *LocalProfile.NormalizedRivuletMask->GetPathName()
                 : TEXT("None"),
             Surface.SurfaceWaterNormalStrength,
             Surface.SurfaceWaterRoughnessStrength,
@@ -98,16 +105,18 @@ namespace
     {
         const FSurfaceWaterProfileParameters& Surface = Parameters.SurfaceWater;
         return FString::Printf(
-            TEXT("AbsorbedDarkening=%.9g|AbsorbedGlossiness=%.9g|DropletsEnabled=%d|DropletNormal=%s|")
-            TEXT("RivuletsEnabled=%d|RivuletNormal=%s|")
+            TEXT("AbsorbedDarkening=%.9g|AbsorbedGlossiness=%.9g|DropletsEnabled=%d|DropletNormal=%s|DropletMask=%s|")
+            TEXT("RivuletsEnabled=%d|RivuletNormal=%s|RivuletMask=%s|")
             TEXT("NormalStrength=%.9g|RoughnessStrength=%.9g|")
             TEXT("VisibilityThreshold=%.9g|RivuletScrollSpeed=%.9g"),
             Parameters.GetAbsorbedDarkeningStrength(),
             Parameters.GetAbsorbedGlossinessStrength(),
             Surface.bEnabled && Surface.bEnableDroplets ? 1 : 0,
             *GetPathNameSafe(Surface.DropletNormalTexture),
+            *GetPathNameSafe(Surface.DropletMaskTexture),
             Surface.bEnabled && Surface.bEnableRivulets ? 1 : 0,
             *GetPathNameSafe(Surface.RivuletNormalTexture),
+            *GetPathNameSafe(Surface.RivuletMaskTexture),
             Surface.SurfaceWaterNormalStrength,
             Surface.SurfaceWaterRoughnessStrength,
             Surface.SurfaceVisibilityThreshold,
@@ -293,7 +302,9 @@ namespace
 
     struct FFallbackRenderProfileSlices
     {
+        int32 DropletMask = 0;
         int32 DropletNormal = 0;
+        int32 RivuletMask = 0;
         int32 RivuletNormal = 0;
     };
 
@@ -320,6 +331,13 @@ namespace
                 FMath::Clamp(Surface.SurfaceVisibilityThreshold, 0.0f, 1.0f),
                 Surface.RivuletUVScrollSpeed);
 
+        case 2:
+            return FLinearColor(
+                static_cast<float>(Surface.bEnabled && Surface.bEnableDroplets ? Slices.DropletMask : 0),
+                static_cast<float>(Surface.bEnabled && Surface.bEnableRivulets ? Slices.RivuletMask : 0),
+                0.0f,
+                0.0f);
+
         default:
             return FLinearColor::Black;
         }
@@ -328,8 +346,8 @@ namespace
 
     UTexture2D* CreateNeutralWetPartDataTexture(UObject* Outer)
     {
-        // The encoded size range is 0.25..4.0, so authored size 1.0 maps to 51/255.
-        constexpr uint8 DefaultDetailSizeEncoded = 51u;
+        // The encoded size range is 0.0..4.0, so authored size 1.0 maps to 64/255.
+        constexpr uint8 DefaultDetailSizeEncoded = 64u;
         UTexture2D* Texture = UTexture2D::CreateTransient(1, 1, PF_B8G8R8A8, TEXT("DWC_NeutralWetPartData"));
         if (Texture == nullptr || Texture->GetPlatformData() == nullptr || Texture->GetPlatformData()->Mips.IsEmpty())
         {
@@ -393,7 +411,7 @@ void UDWCGPUResourceSubsystem::FTextureArrayRegistry::SetNeutral(
         UE_LOG(
             LogDWC,
             Warning,
-            TEXT("DWC neutral normal '%s' does not match the existing Texture2DArray registry format."),
+            TEXT("DWC neutral texture '%s' does not match the existing Texture2DArray registry format."),
             *Texture->GetPathName());
         return;
     }
@@ -416,6 +434,17 @@ void UDWCGPUResourceSubsystem::FTextureArrayRegistry::SetNeutral(
         DirtySlices.Add(0);
         bOutChanged = true;
     }
+}
+
+void UDWCGPUResourceSubsystem::FTextureArrayRegistry::ReserveNeutralSlice(bool& bOutChanged)
+{
+    if (!SourceTextures.IsEmpty())
+    {
+        return;
+    }
+
+    SourceTextures.Add(nullptr);
+    bOutChanged = true;
 }
 
 int32 UDWCGPUResourceSubsystem::FTextureArrayRegistry::FindOrAdd(
@@ -460,7 +489,7 @@ int32 UDWCGPUResourceSubsystem::FTextureArrayRegistry::FindOrAdd(
 
     if (SourceTextures.IsEmpty())
     {
-        UE_LOG(LogDWC, Warning, TEXT("DWC normal registry has no neutral slice; texture '%s' uses slice 0."), *Path);
+        UE_LOG(LogDWC, Warning, TEXT("DWC texture-array registry has no neutral slice; texture '%s' uses slice 0."), *Path);
         return 0;
     }
 
@@ -496,7 +525,9 @@ void UDWCGPUResourceSubsystem::Deinitialize()
     StaticSlotResources.Reset();
     RuntimeProfiles.Reset();
     RuntimeProfileIndexByKey.Reset();
+    DropletMaskRegistry.Reset();
     DropletNormalRegistry.Reset();
+    RivuletMaskRegistry.Reset();
     RivuletNormalRegistry.Reset();
     DirtyRuntimeProfileIndices.Reset();
     RegisteredMaterialInstances.Reset();
@@ -504,7 +535,9 @@ void UDWCGPUResourceSubsystem::Deinitialize()
     NeutralWetPartDataTexture = nullptr;
     NeutralProfileRemapLUT = nullptr;
     GlobalRenderProfileLUT = nullptr;
+    DropletMaskArray = nullptr;
     DropletNormalArray = nullptr;
+    RivuletMaskArray = nullptr;
     RivuletNormalArray = nullptr;
     bTextureArraysDirty = false;
     RegistryRevision = 0;
@@ -598,7 +631,9 @@ FDWCGPUResourceSubsystemStats UDWCGPUResourceSubsystem::GetStats() const
                       DirtyRuntimeProfileIndices.GetAllocatedSize() +
                       RegisteredMaterialInstances.GetAllocatedSize() +
                       GPUMaterialInstances.GetAllocatedSize() +
+                      GetRegistryCPUBytes(DropletMaskRegistry) +
                       GetRegistryCPUBytes(DropletNormalRegistry) +
+                      GetRegistryCPUBytes(RivuletMaskRegistry) +
                       GetRegistryCPUBytes(RivuletNormalRegistry);
     for (const FRuntimeProfileRecord& Profile : RuntimeProfiles)
     {
@@ -614,9 +649,13 @@ FDWCGPUResourceSubsystemStats UDWCGPUResourceSubsystem::GetStats() const
     AddUniqueTextureGPUBytes(GlobalRenderProfileLUT, SeenTextures, Stats.RenderProfileLUTGPUBytes);
     AddUniqueTextureGPUBytes(NeutralWetPartDataTexture, SeenTextures, Stats.WetPartDataRemapGPUBytes);
     AddUniqueTextureGPUBytes(NeutralProfileRemapLUT, SeenTextures, Stats.WetPartDataRemapGPUBytes);
+    AddUniqueTextureGPUBytes(DropletMaskArray, SeenTextures, Stats.SurfaceNormalArrayGPUBytes);
     AddUniqueTextureGPUBytes(DropletNormalArray, SeenTextures, Stats.SurfaceNormalArrayGPUBytes);
+    AddUniqueTextureGPUBytes(RivuletMaskArray, SeenTextures, Stats.SurfaceNormalArrayGPUBytes);
     AddUniqueTextureGPUBytes(RivuletNormalArray, SeenTextures, Stats.SurfaceNormalArrayGPUBytes);
+    Stats.TextureArrayCount += DropletMaskArray != nullptr ? 1u : 0u;
     Stats.TextureArrayCount += DropletNormalArray != nullptr ? 1u : 0u;
+    Stats.TextureArrayCount += RivuletMaskArray != nullptr ? 1u : 0u;
     Stats.TextureArrayCount += RivuletNormalArray != nullptr ? 1u : 0u;
 
     for (const TPair<TObjectPtr<UWetClothingAsset>, FDWCAssetRenderProfileResources>& Pair : AssetResources)
@@ -662,6 +701,19 @@ void UDWCGPUResourceSubsystem::EnsureNeutralResources()
         RebuildGlobalRenderProfileLUT();
     }
 
+}
+
+void UDWCGPUResourceSubsystem::EnsureMaskRegistryNeutral(
+    FTextureArrayRegistry& Registry,
+    UTexture2D* ReferenceTexture,
+    bool& bOutChanged)
+{
+    if (ReferenceTexture == nullptr)
+    {
+        return;
+    }
+
+    Registry.ReserveNeutralSlice(bOutChanged);
 }
 
 int32 UDWCGPUResourceSubsystem::FindOrAddRuntimeProfile(
@@ -711,12 +763,30 @@ int32 UDWCGPUResourceSubsystem::FindOrAddRuntimeProfile(
     {
         const FSurfaceWaterProfileParameters& Surface = LocalProfile.Parameters.SurfaceWater;
         bool bTextureArraysChanged = false;
+        const bool bDropletRequested = Surface.bEnabled && Surface.bEnableDroplets;
+        const bool bRivuletRequested = Surface.bEnabled && Surface.bEnableRivulets;
+        EnsureMaskRegistryNeutral(
+            DropletMaskRegistry,
+            bDropletRequested ? LocalProfile.NormalizedDropletMask : nullptr,
+            bTextureArraysChanged);
+        EnsureMaskRegistryNeutral(
+            RivuletMaskRegistry,
+            bRivuletRequested ? LocalProfile.NormalizedRivuletMask : nullptr,
+            bTextureArraysChanged);
+        const int32 DropletMaskSlice =
+            bDropletRequested
+                ? DropletMaskRegistry.FindOrAdd(LocalProfile.NormalizedDropletMask, bTextureArraysChanged)
+                : 0;
         const int32 DropletNormalSlice =
-            Surface.bEnabled && Surface.bEnableDroplets
+            bDropletRequested
                 ? DropletNormalRegistry.FindOrAdd(LocalProfile.NormalizedDropletNormal, bTextureArraysChanged)
                 : 0;
+        const int32 RivuletMaskSlice =
+            bRivuletRequested
+                ? RivuletMaskRegistry.FindOrAdd(LocalProfile.NormalizedRivuletMask, bTextureArraysChanged)
+                : 0;
         const int32 RivuletNormalSlice =
-            Surface.bEnabled && Surface.bEnableRivulets
+            bRivuletRequested
                 ? RivuletNormalRegistry.FindOrAdd(LocalProfile.NormalizedRivuletNormal, bTextureArraysChanged)
                 : 0;
 
@@ -730,6 +800,11 @@ int32 UDWCGPUResourceSubsystem::FindOrAddRuntimeProfile(
             FMath::Clamp(Surface.SurfaceWaterRoughnessStrength, 0.0f, 1.0f),
             FMath::Clamp(Surface.SurfaceVisibilityThreshold, 0.0f, 1.0f),
             Surface.RivuletUVScrollSpeed);
+        Record->PackedTexels[2] = FLinearColor(
+            static_cast<float>(DropletMaskSlice),
+            static_cast<float>(RivuletMaskSlice),
+            0.0f,
+            0.0f);
         Record->bSurfaceResourcesResolved = true;
         DirtyRuntimeProfileIndices.Add(RuntimeIndex);
         bTextureArraysDirty |= bTextureArraysChanged;
@@ -914,14 +989,17 @@ void UDWCGPUResourceSubsystem::UploadTextureArraySlices(
         return;
     }
 
-    struct FCopySource
+    struct FSliceUpload
     {
-        FTextureResource* Resource = nullptr;
+        TArray<uint8> Bytes;
+        FString SourceName;
         int32 DestinationSliceIndex = 0;
+        uint32 SourceRowPitch = 0;
+        uint32 SourceRowCount = 0;
     };
 
-    TArray<FCopySource> CopySources;
-    CopySources.Reserve(SliceIndices.Num());
+    TArray<FSliceUpload> SliceUploads;
+    SliceUploads.Reserve(SliceIndices.Num());
     for (const int32 SliceIndex : SliceIndices)
     {
         if (!Registry.SourceTextures.IsValidIndex(SliceIndex))
@@ -935,29 +1013,115 @@ void UDWCGPUResourceSubsystem::UploadTextureArraySlices(
         {
             continue;
         }
-        CopySources.Add({Source->GetResource(), SliceIndex});
+
+        FTexturePlatformData* PlatformData = Source->GetPlatformData();
+        if (PlatformData == nullptr || PlatformData->Mips.IsEmpty())
+        {
+            UE_LOG(
+                LogDWC,
+                Warning,
+                TEXT("DWC could not upload texture-array slice %d from '%s' because it has no CPU mip data."),
+                SliceIndex,
+                *Source->GetPathName());
+            continue;
+        }
+
+        const EPixelFormat SourceFormat = Source->GetPixelFormat();
+        const FPixelFormatInfo& FormatInfo = GPixelFormats[SourceFormat];
+        const uint32 BlockSizeX = FMath::Max<uint32>(FormatInfo.BlockSizeX, 1u);
+        const uint32 BlockSizeY = FMath::Max<uint32>(FormatInfo.BlockSizeY, 1u);
+        const uint32 BlockBytes = FMath::Max<uint32>(FormatInfo.BlockBytes, 1u);
+        const uint32 SourceBlockCountX = FMath::DivideAndRoundUp<uint32>(
+            static_cast<uint32>(Source->GetSizeX()),
+            BlockSizeX);
+        const uint32 SourceBlockCountY = FMath::DivideAndRoundUp<uint32>(
+            static_cast<uint32>(Source->GetSizeY()),
+            BlockSizeY);
+        const uint32 SourceRowPitch = SourceBlockCountX * BlockBytes;
+        const uint64 ExpectedByteCount = static_cast<uint64>(SourceRowPitch) * SourceBlockCountY;
+
+        FTexture2DMipMap& Mip = PlatformData->Mips[0];
+        const int64 BulkByteCount = Mip.BulkData.GetBulkDataSize();
+        if (BulkByteCount < static_cast<int64>(ExpectedByteCount))
+        {
+            UE_LOG(
+                LogDWC,
+                Warning,
+                TEXT("DWC could not upload texture-array slice %d from '%s' because mip bulk is %lld bytes but %llu bytes are required."),
+                SliceIndex,
+                *Source->GetPathName(),
+                BulkByteCount,
+                ExpectedByteCount);
+            continue;
+        }
+
+        const void* MipBytes = Mip.BulkData.LockReadOnly();
+        if (MipBytes == nullptr)
+        {
+            UE_LOG(
+                LogDWC,
+                Warning,
+                TEXT("DWC could not lock CPU mip data while uploading texture-array slice %d from '%s'."),
+                SliceIndex,
+                *Source->GetPathName());
+            continue;
+        }
+
+        FSliceUpload& Upload = SliceUploads.AddDefaulted_GetRef();
+        Upload.Bytes.SetNumUninitialized(static_cast<int32>(ExpectedByteCount));
+        FMemory::Memcpy(Upload.Bytes.GetData(), MipBytes, static_cast<SIZE_T>(ExpectedByteCount));
+        Upload.SourceName = Source->GetPathName();
+        Upload.DestinationSliceIndex = SliceIndex;
+        Upload.SourceRowPitch = SourceRowPitch;
+        Upload.SourceRowCount = SourceBlockCountY;
+        Mip.BulkData.Unlock();
     }
 
     FTextureResource* DestinationResource = Array->GetResource();
-    ENQUEUE_RENDER_COMMAND(DWCCopyTextureArraySlices)(
-        [DestinationResource, CopySources = MoveTemp(CopySources)](FRHICommandListImmediate& RHICmdList)
+    ENQUEUE_RENDER_COMMAND(DWCUploadTextureArraySlices)(
+        [DestinationResource, SliceUploads = MoveTemp(SliceUploads)](FRHICommandListImmediate& RHICmdList)
         {
             if (DestinationResource == nullptr || DestinationResource->TextureRHI == nullptr)
             {
                 return;
             }
-            for (const FCopySource& Source : CopySources)
+            for (const FSliceUpload& Upload : SliceUploads)
             {
-                if (Source.Resource == nullptr || Source.Resource->TextureRHI == nullptr)
+                if (Upload.Bytes.IsEmpty() || Upload.SourceRowPitch == 0 || Upload.SourceRowCount == 0)
                 {
                     continue;
                 }
-                FRHICopyTextureInfo CopyInfo;
-                CopyInfo.SourceSliceIndex = 0;
-                CopyInfo.DestSliceIndex = Source.DestinationSliceIndex;
-                CopyInfo.NumSlices = 1;
-                CopyInfo.NumMips = 1;
-                RHICmdList.CopyTexture(Source.Resource->TextureRHI, DestinationResource->TextureRHI, CopyInfo);
+
+                uint32 DestinationStride = 0;
+                void* DestinationBytes = RHICmdList.LockTexture2DArray(
+                    DestinationResource->TextureRHI,
+                    Upload.DestinationSliceIndex,
+                    0,
+                    RLM_WriteOnly,
+                    DestinationStride,
+                    false);
+                if (DestinationBytes == nullptr)
+                {
+                    continue;
+                }
+
+                if (DestinationStride >= Upload.SourceRowPitch)
+                {
+                    const uint8* SourceRow = Upload.Bytes.GetData();
+                    uint8* DestinationRow = static_cast<uint8*>(DestinationBytes);
+                    for (uint32 RowIndex = 0; RowIndex < Upload.SourceRowCount; ++RowIndex)
+                    {
+                        FMemory::Memcpy(DestinationRow, SourceRow, Upload.SourceRowPitch);
+                        SourceRow += Upload.SourceRowPitch;
+                        DestinationRow += DestinationStride;
+                    }
+                }
+
+                RHICmdList.UnlockTexture2DArray(
+                    DestinationResource->TextureRHI,
+                    Upload.DestinationSliceIndex,
+                    0,
+                    false);
             }
         });
 }
@@ -988,17 +1152,27 @@ bool UDWCGPUResourceSubsystem::EnsureTextureArray(
 
 bool UDWCGPUResourceSubsystem::EnsureTextureArraysUpToDate()
 {
+    const bool bDropletMaskArrayReplaced = EnsureTextureArray(
+        TEXT("DWC_DropletMaskArray"),
+        DropletMaskRegistry,
+        DropletMaskArray,
+        false);
     const bool bDropletArrayReplaced = EnsureTextureArray(
         TEXT("DWC_DropletNormalArray"),
         DropletNormalRegistry,
         DropletNormalArray,
         true);
+    const bool bRivuletMaskArrayReplaced = EnsureTextureArray(
+        TEXT("DWC_RivuletMaskArray"),
+        RivuletMaskRegistry,
+        RivuletMaskArray,
+        false);
     const bool bRivuletArrayReplaced = EnsureTextureArray(
         TEXT("DWC_RivuletNormalArray"),
         RivuletNormalRegistry,
         RivuletNormalArray,
         true);
-    return bDropletArrayReplaced || bRivuletArrayReplaced;
+    return bDropletMaskArrayReplaced || bDropletArrayReplaced || bRivuletMaskArrayReplaced || bRivuletArrayReplaced;
 }
 
 void UDWCGPUResourceSubsystem::RebindGPUTextureArrays()
@@ -1079,7 +1253,11 @@ const FDWCAssetRenderProfileResources* UDWCGPUResourceSubsystem::AcquireAssetRes
     }
 
     if (Usage == EDWCRenderResourceUsage::FullGPU &&
-        (bTextureArraysDirty || DropletNormalArray == nullptr || RivuletNormalArray == nullptr))
+        (bTextureArraysDirty ||
+         DropletMaskArray == nullptr ||
+         DropletNormalArray == nullptr ||
+         RivuletMaskArray == nullptr ||
+         RivuletNormalArray == nullptr))
     {
         const bool bArrayResourceReplaced = EnsureTextureArraysUpToDate();
         bTextureArraysDirty = false;
@@ -1251,9 +1429,17 @@ void UDWCGPUResourceSubsystem::BindGlobalResources(
     MID.SetScalarParameterValue(DWCWetMaterialParameters::GlobalRenderProfileTexelSize(), GlobalTexelSize);
     if (Usage == EDWCRenderResourceUsage::FullGPU)
     {
+        if (DropletMaskArray != nullptr)
+        {
+            MID.SetTextureParameterValue(DWCWetMaterialParameters::DropletMaskTextureArray(), DropletMaskArray);
+        }
         if (DropletNormalArray != nullptr)
         {
             MID.SetTextureParameterValue(DWCWetMaterialParameters::DropletNormalTextureArray(), DropletNormalArray);
+        }
+        if (RivuletMaskArray != nullptr)
+        {
+            MID.SetTextureParameterValue(DWCWetMaterialParameters::RivuletMaskTextureArray(), RivuletMaskArray);
         }
         if (RivuletNormalArray != nullptr)
         {
@@ -1293,8 +1479,22 @@ void UDWCGPUResourceSubsystem::ApplyFallbackRenderProfileParameters(
         const FSurfaceWaterProfileParameters& Surface = Profile.Parameters.SurfaceWater;
         const bool bDropletRequested = Surface.bEnabled && Surface.bEnableDroplets;
         const bool bRivuletRequested = Surface.bEnabled && Surface.bEnableRivulets;
+        EnsureMaskRegistryNeutral(
+            DropletMaskRegistry,
+            bDropletRequested ? Profile.NormalizedDropletMask : nullptr,
+            bTextureArraysChanged);
+        EnsureMaskRegistryNeutral(
+            RivuletMaskRegistry,
+            bRivuletRequested ? Profile.NormalizedRivuletMask : nullptr,
+            bTextureArraysChanged);
+        Slices.DropletMask = bDropletRequested
+            ? DropletMaskRegistry.FindOrAdd(Profile.NormalizedDropletMask, bTextureArraysChanged)
+            : 0;
         Slices.DropletNormal = bDropletRequested
             ? DropletNormalRegistry.FindOrAdd(Profile.NormalizedDropletNormal, bTextureArraysChanged)
+            : 0;
+        Slices.RivuletMask = bRivuletRequested
+            ? RivuletMaskRegistry.FindOrAdd(Profile.NormalizedRivuletMask, bTextureArraysChanged)
             : 0;
         Slices.RivuletNormal = bRivuletRequested
             ? RivuletNormalRegistry.FindOrAdd(Profile.NormalizedRivuletNormal, bTextureArraysChanged)
@@ -1384,6 +1584,39 @@ void UDWCGPUResourceSubsystem::ApplyFallbackRenderProfileParameters(
             TEXT("Rivulet"),
             Profile.NormalizedRivuletNormal,
             Slices.RivuletNormal,
+            bRivuletRequested);
+
+        const auto LogMaskSliceZero =
+            [WetClothingAsset, MaterialSlotIndex, &Profile, &DescribeNormalTexture](
+                const TCHAR* MaskKind,
+                UTexture2D* SourceTexture,
+                const int32 ResolvedSlice,
+                const bool bRequested)
+            {
+                if (!bRequested || ResolvedSlice != 0)
+                {
+                    return;
+                }
+
+                UE_LOG(
+                    LogDWC,
+                    Warning,
+                    TEXT("DWC %s mask resolved to Texture2DArray slice 0 for asset '%s' slot %d profile '%s'. Reference-style Surface Water is mask-gated, so this contribution resolves to zero. Source texture: %s."),
+                    MaskKind,
+                    *GetPathNameSafe(WetClothingAsset),
+                    MaterialSlotIndex,
+                    *ResolveProfileKey(Profile),
+                    *DescribeNormalTexture(SourceTexture));
+            };
+        LogMaskSliceZero(
+            TEXT("Droplet"),
+            Profile.NormalizedDropletMask,
+            Slices.DropletMask,
+            bDropletRequested);
+        LogMaskSliceZero(
+            TEXT("Rivulet"),
+            Profile.NormalizedRivuletMask,
+            Slices.RivuletMask,
             bRivuletRequested);
 
         if (bTextureArraysChanged)
@@ -1497,6 +1730,29 @@ bool UDWCGPUResourceSubsystem::ApplyPreviewRenderProfileFallback(
         Asset,
         MaterialSlotIndex,
         &ResolvedLocalProfiles[LocalProfileIndex],
+        EDWCRenderResourceUsage::FullGPU);
+    BindGlobalResources(MID, EDWCRenderResourceUsage::FullGPU);
+    MID.SetScalarParameterValue(DWCWetMaterialParameters::UseRenderProfileLUT(), 0.0f);
+    return true;
+}
+
+bool UDWCGPUResourceSubsystem::ApplyPreviewRenderProfileFallbackProfile(
+    const UWetClothingAsset* Asset,
+    const int32 MaterialSlotIndex,
+    const FWetClothingLocalRenderProfile& LocalProfile,
+    UMaterialInstanceDynamic& MID)
+{
+    EnsureNeutralResources();
+    if (Asset == nullptr || MaterialSlotIndex == INDEX_NONE)
+    {
+        return false;
+    }
+
+    ApplyFallbackRenderProfileParameters(
+        MID,
+        Asset,
+        MaterialSlotIndex,
+        &LocalProfile,
         EDWCRenderResourceUsage::FullGPU);
     BindGlobalResources(MID, EDWCRenderResourceUsage::FullGPU);
     MID.SetScalarParameterValue(DWCWetMaterialParameters::UseRenderProfileLUT(), 0.0f);

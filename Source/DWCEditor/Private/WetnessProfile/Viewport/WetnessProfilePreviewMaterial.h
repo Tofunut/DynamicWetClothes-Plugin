@@ -22,6 +22,8 @@ namespace DWCWetnessProfilePreviewMaterial
     inline const FName RivuletDetailSizeParameter(TEXT("DWCPreview_RivuletDetailSize"));
     inline const FName DropletNormalTextureParameter(TEXT("DWCPreview_DropletNormal"));
     inline const FName RivuletNormalTextureParameter(TEXT("DWCPreview_RivuletNormal"));
+    inline const FName DropletMaskTextureParameter(TEXT("DWCPreview_DropletMask"));
+    inline const FName RivuletMaskTextureParameter(TEXT("DWCPreview_RivuletMask"));
 
     /** Loads the persistent, precompiled preview material without creating it. */
     UMaterialInterface* LoadBaseMaterial();

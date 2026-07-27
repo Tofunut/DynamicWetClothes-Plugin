@@ -19,6 +19,7 @@ public class DWC : ModuleRules
 		PrivateDependencyModuleNames.AddRange(
 			new string[]
 			{
+				"EngineSettings",
 				"PhysicsCore",
 				"Renderer",
 				"Projects"

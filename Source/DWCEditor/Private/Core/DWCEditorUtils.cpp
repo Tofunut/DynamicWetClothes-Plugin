@@ -29,6 +29,19 @@ namespace
             Notification->SetCompletionState(CompletionState);
         }
     }
+
+    bool HasRuntimeDataIssueForSave(const UWetClothingAsset& WetClothingAsset)
+    {
+        const FDWCWetClothingAssetSetupSettings& Setup = WetClothingAsset.GetSetupSettings();
+        const FDWCAssetBakeState& BakeState = WetClothingAsset.GetBakeState();
+        return WetClothingAsset.HasAnyWettableMaterialSlot() &&
+               ((Setup.bBuildCPUVertexSimulationData &&
+                 (!DWCBuildStatus::IsUsable(BakeState.CPURuntimeData) ||
+                  WetClothingAsset.IsBakeOutputSavePending(DWCBakeOutput::CPURuntimeData))) ||
+                (Setup.bBuildGPUWetnessMapSimulationData &&
+                 (!DWCBuildStatus::IsUsable(BakeState.GPURuntimeData) ||
+                  WetClothingAsset.IsBakeOutputSavePending(DWCBakeOutput::GPURuntimeData))));
+    }
 }
 
 FOnDWCEditorAssetSaved& DWCEditorUtils::OnAssetSaved()
@@ -56,7 +69,7 @@ bool DWCEditorUtils::SaveAsset(UObject* Asset)
         WetClothingAsset->BeginRuntimeDataEditorSaveAttempt();
 
         FString RuntimePreparationError;
-        if (WetClothingAsset->CanPrepareRuntimeDataForEditorSave())
+        if (WetClothingAsset->CanPrepareRuntimeDataForEditorSave(&RuntimePreparationError))
         {
             if (!WetClothingAsset->PrepareRuntimeDataForEditorSave(&RuntimePreparationError))
             {
@@ -69,6 +82,17 @@ bool DWCEditorUtils::SaveAsset(UObject* Asset)
                 GDWCEditorAssetSaveAttemptFinished.Broadcast(Asset, false);
                 return false;
             }
+        }
+        else if (HasRuntimeDataIssueForSave(*WetClothingAsset))
+        {
+            WetClothingAsset->CompleteRuntimeDataEditorSaveAttempt(false);
+            ShowDWCEditorNotification(
+                FText::FromString(RuntimePreparationError.IsEmpty()
+                    ? TEXT("DWC runtime data cannot be prepared for save.")
+                    : RuntimePreparationError),
+                SNotificationItem::CS_Fail);
+            GDWCEditorAssetSaveAttemptFinished.Broadcast(Asset, false);
+            return false;
         }
     }
     const double RuntimePreparationEndTime = FPlatformTime::Seconds();
@@ -132,8 +156,11 @@ bool DWCEditorUtils::SaveAsset(UObject* Asset)
              WetClothingAsset->Derived.Inline.BakedWetPartData.LocalProfiles)
         {
             AddDirtyGeneratedPackage(LocalProfile.NormalizedDropletNormal.Get());
+            AddDirtyGeneratedPackage(LocalProfile.NormalizedDropletMask.Get());
             AddDirtyGeneratedPackage(LocalProfile.NormalizedRivuletNormal.Get());
+            AddDirtyGeneratedPackage(LocalProfile.NormalizedRivuletMask.Get());
         }
+        AddDirtyGeneratedPackage(WetClothingAsset->Derived.Inline.BakedWetPartData.NormalizedNeutralSurfaceNormal.Get());
 
         for (const FWetWrinkleBakedMapSet& WrinkleMap :
              WetClothingAsset->Authored.WrinkleData.BakedWrinkleMaps)
@@ -151,6 +178,10 @@ bool DWCEditorUtils::SaveAsset(UObject* Asset)
             }
         }
 
+#if WITH_EDITORONLY_DATA
+        AddDirtyGeneratedPackage(WetClothingAsset->Derived.Inline.GeneratedEvaluateSurfaceAppearanceFunction.Get());
+#endif
+
     }
     const double PackageCollectionEndTime = FPlatformTime::Seconds();
 
@@ -166,6 +197,7 @@ bool DWCEditorUtils::SaveAsset(UObject* Asset)
     if (WetClothingAsset != nullptr)
     {
         WetClothingAsset->CompleteRuntimeDataEditorSaveAttempt(bSaved);
+        WetClothingAsset->RefreshBakeState(false);
     }
     if (bSaved)
     {

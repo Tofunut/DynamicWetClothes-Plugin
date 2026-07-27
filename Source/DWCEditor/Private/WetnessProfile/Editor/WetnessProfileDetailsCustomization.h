@@ -35,7 +35,8 @@ private:
         const TSharedPtr<IPropertyHandle>& Handle,
         const FText& DisplayName,
         const FText& Tooltip,
-        TAttribute<bool> IsEnabled = TAttribute<bool>(true));
+        TAttribute<bool> IsEnabled = TAttribute<bool>(true),
+        float NameIndent = 0.0f);
 
     void AddDefaultProperty(
         IDetailGroup& Group,

@@ -2221,6 +2221,30 @@ void UWetClothingAsset::PreSave(FObjectPreSaveContext SaveContext)
     if (bSkipNextPreSaveRuntimeDataRebuild)
     {
         bSkipNextPreSaveRuntimeDataRebuild = false;
+        return;
+    }
+
+    FString RuntimePreparationMessage;
+    if (CanPrepareRuntimeDataForEditorSave(&RuntimePreparationMessage))
+    {
+        if (!RebuildRuntimeDataForSave(&RuntimePreparationMessage))
+        {
+            UE_LOG(
+                LogDWC,
+                Error,
+                TEXT("WetClothingAsset: Failed to prepare runtime data before saving '%s'. %s"),
+                *GetNameSafe(this),
+                *RuntimePreparationMessage);
+        }
+    }
+    else if (!RuntimePreparationMessage.IsEmpty())
+    {
+        UE_LOG(
+            LogDWC,
+            Warning,
+            TEXT("WetClothingAsset: Runtime data preparation skipped before saving '%s'. %s"),
+            *GetNameSafe(this),
+            *RuntimePreparationMessage);
     }
 }
 

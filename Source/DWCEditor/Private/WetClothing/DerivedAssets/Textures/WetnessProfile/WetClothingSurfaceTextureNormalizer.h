@@ -27,7 +27,6 @@ public:
 
     static bool NormalizeProfileTextures(
         UWetClothingAsset& WetClothingAsset,
-        const FString& StableProfileKey,
         const FWetnessProfileParameters& SourceParameters,
         FWetClothingLocalRenderProfile& InOutLocalProfile,
         FString& OutErrorMessage);
@@ -35,7 +34,6 @@ public:
 private:
     static bool NormalizeTexture(
         UWetClothingAsset& WetClothingAsset,
-        const FString& StableProfileKey,
         UTexture2D* SourceTexture,
         const TCHAR* TextureRole,
         bool bNormalMap,

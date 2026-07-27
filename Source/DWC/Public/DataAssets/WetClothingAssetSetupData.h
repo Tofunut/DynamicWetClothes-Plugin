@@ -112,7 +112,7 @@ struct DWC_API FDWCWetClothingAssetSetupSettings
     UPROPERTY(VisibleAnywhere, Category = "Mesh")
     int32 OriginalUVChannelIndex = 0;
 
-    UPROPERTY(EditAnywhere, Category = "Mesh", meta = (ClampMin = "0", ClampMax = "7"))
+    UPROPERTY(EditAnywhere, Category = "Mesh", meta = (ClampMin = "0", ClampMax = "3"))
     int32 PreferredDWCDataUVChannelIndex = 1;
 
     UPROPERTY(EditAnywhere, Category = "Mesh|LOD Mapping Range", meta = (DisplayName = "First Mapped LOD", ClampMin = "0"))
@@ -137,7 +137,7 @@ struct DWC_API FDWCWetClothingAssetSetupSettings
         WrinkleMapResolution = DWCMapResolution::ToInt(DWCMapResolution::FromInt(WrinkleMapResolution));
         TransparencyMapResolution = DWCMapResolution::ToInt(DWCMapResolution::FromInt(TransparencyMapResolution));
         OriginalUVChannelIndex = FMath::Clamp(OriginalUVChannelIndex, 0, 7);
-        PreferredDWCDataUVChannelIndex = FMath::Clamp(PreferredDWCDataUVChannelIndex, 0, 7);
+        PreferredDWCDataUVChannelIndex = FMath::Clamp(PreferredDWCDataUVChannelIndex, 0, 3);
         FirstGeneratedLODIndex = FMath::Max(0, FirstGeneratedLODIndex);
         LastGeneratedLODIndex = FMath::Max(FirstGeneratedLODIndex, LastGeneratedLODIndex);
         SimulationLODIndex = 0;

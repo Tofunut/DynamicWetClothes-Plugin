@@ -36,6 +36,7 @@ namespace
     constexpr float CreateDialogWidth = 720.0f;
     constexpr uint32 SourceMeshThumbnailSize = 112;
     constexpr int32 RecommendedDWCDataUVSelection = INDEX_NONE;
+    constexpr int32 MaxDWCDataUVChannelIndex = 3;
 
     int32 GetSkeletalMeshUVChannelCount(const USkeletalMesh* Mesh, const int32 LODIndex)
     {
@@ -87,7 +88,23 @@ namespace
     int32 GetDefaultDWCDataUVChannelIndex(const USkeletalMesh* Mesh, const int32 OriginalUVChannelIndex)
     {
         const int32 UVChannelCount = GetSkeletalMeshUVChannelCount(Mesh, 0);
-        return UVChannelCount > 0 ? FMath::Clamp(UVChannelCount, 0, 7) : FMath::Clamp(OriginalUVChannelIndex + 1, 0, 7);
+        const int32 PreferredChannel = UVChannelCount > 0
+            ? FMath::Clamp(UVChannelCount, 0, MaxDWCDataUVChannelIndex)
+            : FMath::Clamp(OriginalUVChannelIndex + 1, 0, MaxDWCDataUVChannelIndex);
+        if (PreferredChannel != OriginalUVChannelIndex)
+        {
+            return PreferredChannel;
+        }
+
+        for (int32 UVChannelIndex = 0; UVChannelIndex <= MaxDWCDataUVChannelIndex; ++UVChannelIndex)
+        {
+            if (UVChannelIndex != OriginalUVChannelIndex)
+            {
+                return UVChannelIndex;
+            }
+        }
+
+        return PreferredChannel;
     }
 
     FText BuildCreateDWCDataUVTargetText()
@@ -156,7 +173,7 @@ namespace
             ? GetDefaultDWCDataUVChannelIndex(Mesh, OriginalUVChannelIndex)
             : SelectedUVChannelIndex;
         return EffectiveUVChannelIndex >= 0 &&
-               EffectiveUVChannelIndex <= 7 &&
+               EffectiveUVChannelIndex <= MaxDWCDataUVChannelIndex &&
                EffectiveUVChannelIndex != OriginalUVChannelIndex;
     }
 
@@ -285,7 +302,7 @@ void UWetClothingAssetCreationSettings::PostEditChangeProperty(FPropertyChangedE
         LastGeneratedLODIndex = FMath::Max(0, GetSkeletalMeshLODCount(SourceSkeletalMesh) - 1);
     }
     OriginalUVChannelIndex = FMath::Clamp(OriginalUVChannelIndex, 0, 7);
-    PreferredDWCDataUVChannelIndex = FMath::Clamp(PreferredDWCDataUVChannelIndex, 0, 7);
+    PreferredDWCDataUVChannelIndex = FMath::Clamp(PreferredDWCDataUVChannelIndex, 0, MaxDWCDataUVChannelIndex);
     ClampLODRangeForMesh(SourceSkeletalMesh, FirstGeneratedLODIndex, LastGeneratedLODIndex);
 }
 #endif
@@ -322,7 +339,7 @@ bool UWetClothingAssetFactory::ConfigureProperties()
 
     TArray<TSharedPtr<int32>> DWCDataUVChannelOptions;
     DWCDataUVChannelOptions.Add(MakeShared<int32>(RecommendedDWCDataUVSelection));
-    for (int32 UVChannelIndex = 0; UVChannelIndex <= 7; ++UVChannelIndex)
+    for (int32 UVChannelIndex = 0; UVChannelIndex <= MaxDWCDataUVChannelIndex; ++UVChannelIndex)
     {
         DWCDataUVChannelOptions.Add(MakeShared<int32>(UVChannelIndex));
     }
@@ -547,7 +564,8 @@ bool UWetClothingAssetFactory::ConfigureProperties()
                                     }
                                     else
                                     {
-                                        PendingCreationSettings->PreferredDWCDataUVChannelIndex = FMath::Clamp(Selection, 0, 7);
+                                        PendingCreationSettings->PreferredDWCDataUVChannelIndex =
+                                            FMath::Clamp(Selection, 0, MaxDWCDataUVChannelIndex);
                                     }
                                 })
                                 [

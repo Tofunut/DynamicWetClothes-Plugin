@@ -55,6 +55,8 @@
 
 namespace
 {
+    constexpr int32 MaxDWCDataUVChannelIndex = 3;
+
     const FCheckBoxStyle& GetWetClothingModeToggleStyle()
     {
         static const FSlateRoundedBoxBrush UncheckedBrush(FStyleColors::Header, 4.0f);
@@ -176,7 +178,23 @@ namespace
     int32 GetAssetSetupDefaultDWCDataUVChannelIndex(const USkeletalMesh* Mesh, const int32 OriginalUVChannelIndex)
     {
         const int32 UVChannelCount = GetAssetSetupSkeletalMeshUVChannelCount(Mesh, 0);
-        return UVChannelCount > 0 ? FMath::Clamp(UVChannelCount, 0, 7) : FMath::Clamp(OriginalUVChannelIndex + 1, 0, 7);
+        const int32 PreferredChannel = UVChannelCount > 0
+            ? FMath::Clamp(UVChannelCount, 0, MaxDWCDataUVChannelIndex)
+            : FMath::Clamp(OriginalUVChannelIndex + 1, 0, MaxDWCDataUVChannelIndex);
+        if (PreferredChannel != OriginalUVChannelIndex)
+        {
+            return PreferredChannel;
+        }
+
+        for (int32 UVChannelIndex = 0; UVChannelIndex <= MaxDWCDataUVChannelIndex; ++UVChannelIndex)
+        {
+            if (UVChannelIndex != OriginalUVChannelIndex)
+            {
+                return UVChannelIndex;
+            }
+        }
+
+        return PreferredChannel;
     }
 
     constexpr int32 RecommendedAssetSetupDataUVSelection = INDEX_NONE;
@@ -236,7 +254,7 @@ namespace
         return OriginalUVChannelIndex >= 0 &&
                OriginalUVChannelIndex < UVChannelCount &&
                DataUVChannelIndex >= 0 &&
-               DataUVChannelIndex <= 7 &&
+               DataUVChannelIndex <= MaxDWCDataUVChannelIndex &&
                DataUVChannelIndex != OriginalUVChannelIndex;
     }
 
@@ -878,6 +896,14 @@ namespace
         TStrongObjectPtr<UWetClothingAssetSetupSettingsObject> SetupObject(
             NewObject<UWetClothingAssetSetupSettingsObject>(GetTransientPackage()));
         SetupObject->InitializeFromSettings(Asset.GetSetupSettings());
+        SetupObject->PreferredDWCDataUVChannelIndex =
+            FMath::Clamp(SetupObject->PreferredDWCDataUVChannelIndex, 0, MaxDWCDataUVChannelIndex);
+        if (SetupObject->PreferredDWCDataUVChannelIndex == SetupObject->OriginalUVChannelIndex)
+        {
+            SetupObject->PreferredDWCDataUVChannelIndex = GetAssetSetupDefaultDWCDataUVChannelIndex(
+                Asset.GetSourceSkeletalMesh(),
+                SetupObject->OriginalUVChannelIndex);
+        }
         ClampAssetSetupLODRangeForMesh(
             Asset.GetSourceSkeletalMesh(),
             SetupObject->FirstGeneratedLODIndex,
@@ -901,7 +927,7 @@ namespace
 
         TArray<TSharedPtr<int32>> DataUVChannelOptions;
         DataUVChannelOptions.Add(MakeShared<int32>(RecommendedAssetSetupDataUVSelection));
-        for (int32 UVChannelIndex = 0; UVChannelIndex <= 7; ++UVChannelIndex)
+        for (int32 UVChannelIndex = 0; UVChannelIndex <= MaxDWCDataUVChannelIndex; ++UVChannelIndex)
         {
             DataUVChannelOptions.Add(MakeShared<int32>(UVChannelIndex));
         }
@@ -930,7 +956,7 @@ namespace
                 ? GetAssetSetupDefaultDWCDataUVChannelIndex(
                     Asset.GetSourceSkeletalMesh(),
                     SetupObject->OriginalUVChannelIndex)
-                : FMath::Clamp(SetupObject->PreferredDWCDataUVChannelIndex, 0, 7);
+                : FMath::Clamp(SetupObject->PreferredDWCDataUVChannelIndex, 0, MaxDWCDataUVChannelIndex);
         };
 
         EWCASetupDialogResult Result = EWCASetupDialogResult::Closed;
@@ -1054,7 +1080,8 @@ namespace
                                             Selection == RecommendedAssetSetupDataUVSelection;
                                         if (!bUseRecommendedDataUVChannel)
                                         {
-                                            SetupObject->PreferredDWCDataUVChannelIndex = FMath::Clamp(Selection, 0, 7);
+                                            SetupObject->PreferredDWCDataUVChannelIndex =
+                                                FMath::Clamp(Selection, 0, MaxDWCDataUVChannelIndex);
                                         }
                                     })
                                     [

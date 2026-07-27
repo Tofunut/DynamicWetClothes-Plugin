@@ -652,9 +652,9 @@ namespace
                     UVChannelCount));
             return false;
         }
-        if (Settings.PreferredDWCDataUVChannelIndex < 0 || Settings.PreferredDWCDataUVChannelIndex > 7)
+        if (Settings.PreferredDWCDataUVChannelIndex < 0 || Settings.PreferredDWCDataUVChannelIndex > 3)
         {
-            DWC::Error::SetMessage(OutErrorMessage, TEXT("DWC Data UV Channel must be between UV0 and UV7."));
+            DWC::Error::SetMessage(OutErrorMessage, TEXT("DWC Data UV Channel must be between UV0 and UV3."));
             return false;
         }
         if (Settings.PreferredDWCDataUVChannelIndex == Settings.OriginalUVChannelIndex)

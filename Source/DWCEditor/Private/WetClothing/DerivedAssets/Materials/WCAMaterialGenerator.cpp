@@ -1659,6 +1659,9 @@ namespace
         FString              BaseNormalOutputName;
         UMaterialExpression* BaseNormalInput = ResolveMaterialPropertyInputOrFallback(
             Material, MP_Normal, FVector2D(-2600.0f, 200.0f), BaseNormalOutputName);
+        FString              SpecularOutputName;
+        UMaterialExpression* SpecularInput = ResolveMaterialPropertyInputOrFallback(
+            Material, MP_Specular, FVector2D(-2600.0f, 440.0f), SpecularOutputName);
 
         UMaterialExpressionMaterialFunctionCall* Evaluate =
             CreateFunctionCall(Material, EvaluateFunction, -620, -100);
@@ -1724,6 +1727,7 @@ namespace
             1540);
 
         if (BaseColorInput == nullptr || RoughnessInput == nullptr || BaseNormalInput == nullptr ||
+            SpecularInput == nullptr ||
             Evaluate == nullptr || DebugWetPart == nullptr || VertexColor == nullptr || DWCDataUV == nullptr ||
             SurfaceWaterNormalUV == nullptr || WetnessMap == nullptr || WetnessSourceSwitch == nullptr ||
             WetDarkeningStrength == nullptr || WetRoughness == nullptr ||
@@ -1842,6 +1846,11 @@ namespace
         if (!UMaterialEditingLibrary::ConnectMaterialProperty(Evaluate, NormalResultOutput, MP_Normal))
         {
             FailureReasons.Add(TEXT("Failed to connect unified DWC Normal output."));
+            bConnected = false;
+        }
+        if (!UMaterialEditingLibrary::ConnectMaterialProperty(SpecularInput, SpecularOutputName, MP_Specular))
+        {
+            FailureReasons.Add(TEXT("Failed to preserve the source material Specular output."));
             bConnected = false;
         }
 

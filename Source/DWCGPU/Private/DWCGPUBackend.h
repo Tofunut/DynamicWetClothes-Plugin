@@ -76,6 +76,7 @@ private:
     float DryRateScale = 1.0f;
     float GravityFlowStrengthScale = 1.0f;
     float CapillaryImmediateAbsorptionFraction = 0.65f;
+    int32 ReceiverGPUId = 0;
     int32 LODIndex = 0;
     int32 DebugDispatchLogCount = 0;
     bool bUseEightDirectionDiffusion = false;

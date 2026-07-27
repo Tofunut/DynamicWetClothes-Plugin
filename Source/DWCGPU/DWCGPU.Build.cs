@@ -10,16 +10,18 @@ public class DWCGPU : ModuleRules
             new string[]
             {
                 "Core",
-                "DWC"
+                "CoreUObject",
+                "DWC",
+                "Engine",
+                "Niagara",
+                "NiagaraCore",
+                "RenderCore"
             });
 
         PrivateDependencyModuleNames.AddRange(
             new string[]
             {
-                "CoreUObject",
-                "Engine",
                 "RHI",
-                "RenderCore",
                 "Renderer",
                 "Projects"
             });

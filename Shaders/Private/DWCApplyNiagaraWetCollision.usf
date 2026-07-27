@@ -1,0 +1,104 @@
+#include "/Engine/Public/Platform.ush"
+
+RWTexture2D<float> PendingWetnessTexture;
+
+Buffer<float4> Contacts;
+Buffer<int> ContactCount;
+StructuredBuffer<uint4> TexelLookup;
+StructuredBuffer<float4> TrianglePositions;
+
+int2 TextureSize;
+int MaxContacts;
+float3 ReceiverBoundsMin;
+float3 ReceiverBoundsMax;
+
+static const uint DWCWetCollisionContactFloat4Count = 2u;
+
+uint Flatten(int2 Texel)
+{
+    return (uint)(Texel.y * TextureSize.x + Texel.x);
+}
+
+bool IsInside(int2 Texel)
+{
+    return Texel.x >= 0 &&
+           Texel.y >= 0 &&
+           Texel.x < TextureSize.x &&
+           Texel.y < TextureSize.y;
+}
+
+bool IsValidLookup(uint4 Lookup)
+{
+    return Lookup.w != 0u && Lookup.x != 0xffffffffu;
+}
+
+float3 UnpackBarycentricXY(uint Packed)
+{
+    const float X = (float)(Packed & 0xffffu) / 65535.0;
+    const float Y = (float)((Packed >> 16u) & 0xffffu) / 65535.0;
+    return float3(X, Y, 1.0 - X - Y);
+}
+
+float3 ComputeTexelWorldPosition(uint4 Lookup)
+{
+    const uint Base = Lookup.x * 3u;
+    const float3 Barycentric = UnpackBarycentricXY(Lookup.y);
+    return TrianglePositions[Base + 0u].xyz * Barycentric.x +
+           TrianglePositions[Base + 1u].xyz * Barycentric.y +
+           TrianglePositions[Base + 2u].xyz * Barycentric.z;
+}
+
+bool IsInsideExpandedReceiverBounds(float3 Position, float Radius)
+{
+    const float3 Expansion = Radius.xxx;
+    return all(Position >= ReceiverBoundsMin - Expansion) &&
+           all(Position <= ReceiverBoundsMax + Expansion);
+}
+
+[numthreads(8, 8, 1)]
+void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+    const int2 Texel = int2(DispatchThreadId.xy);
+    if (!IsInside(Texel))
+    {
+        return;
+    }
+
+    const uint4 Lookup = TexelLookup[Flatten(Texel)];
+    if (!IsValidLookup(Lookup))
+    {
+        return;
+    }
+
+    const float3 TexelWorldPosition = ComputeTexelWorldPosition(Lookup);
+    const uint ClampedContactCount = (uint)min(max(ContactCount[0], 0), MaxContacts);
+    float PendingDelta = 0.0;
+
+    for (uint ContactIndex = 0u; ContactIndex < ClampedContactCount; ++ContactIndex)
+    {
+        const uint Base = ContactIndex * DWCWetCollisionContactFloat4Count;
+        const float4 ContactAndRadius = Contacts[Base + 0u];
+        const float4 AmountData = Contacts[Base + 1u];
+
+        const float Radius = max(ContactAndRadius.w, 1.0e-4);
+        if (!IsInsideExpandedReceiverBounds(ContactAndRadius.xyz, Radius))
+        {
+            continue;
+        }
+
+        const float Amount = max(AmountData.w, 0.0);
+        if (Amount <= 0.0)
+        {
+            continue;
+        }
+
+        const float Distance = length(TexelWorldPosition - ContactAndRadius.xyz);
+        const float Influence = saturate(1.0 - Distance / Radius);
+        PendingDelta += Amount * Influence;
+    }
+
+    if (PendingDelta > 0.0 && isfinite(PendingDelta))
+    {
+        PendingWetnessTexture[Texel] = max(PendingWetnessTexture[Texel], 0.0) + PendingDelta;
+    }
+}

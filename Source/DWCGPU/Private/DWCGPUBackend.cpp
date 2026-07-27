@@ -6,6 +6,7 @@
 #include "WetRendering/DWCGPUResourceSubsystem.h"
 
 #include "DWCGPUShaders.h"
+#include "Niagara/DWCGPUNiagaraWetCollisionBridge.h"
 #include "CachedGeometry.h"
 #include "Components/DynamicWetClothesComponent.h"
 #include "Components/SkeletalMeshComponent.h"
@@ -24,6 +25,7 @@
 #include "RenderGraphUtils.h"
 #include "RenderTargetPool.h"
 #include "RenderingThread.h"
+#include "Rendering/SkeletalMeshRenderData.h"
 #include "SkeletalRenderPublic.h"
 #include "UObject/Package.h"
 
@@ -551,6 +553,7 @@ struct FDWCGPUBackend::FStaticSimulationData
         TArray<FUint4GPU> TriangleIndices;
         TArray<FVector4f> TriangleUV01;
         TArray<FVector4f> TriangleUV2RestArea;
+        TArray<FVector4f> RestPositions;
     };
 
     struct FSlotData
@@ -583,7 +586,8 @@ struct FDWCGPUBackend::FRenderState
     /** Per-character buffers updated from the current skinned pose. */
     TRefCountPtr<FRDGPooledBuffer> TriangleFlow;
     TRefCountPtr<FRDGPooledBuffer> TriangleMetric;
-    bool bWarnedMissingCachedGeometry = false;
+    TRefCountPtr<FRDGPooledBuffer> TrianglePositions;
+    TArray<TRefCountPtr<FRDGPooledBuffer>> RestPositionBuffers;
 
 };
 
@@ -655,6 +659,7 @@ bool FDWCGPUBackend::Initialize(const FDWCGPUBackendInitArgs& Args)
     GravityFlowStrengthScale = FMath::Max(0.0f, Args.GravityFlowStrengthScale);
     CapillaryImmediateAbsorptionFraction =
         FMath::Max(0.0f, Args.CapillaryImmediateAbsorptionFraction);
+    ReceiverGPUId = Args.ReceiverGPUId;
     bUseEightDirectionDiffusion = Args.bUseEightDirectionDiffusion;
 
     if (UE_LOG_ACTIVE(LogDWCGPU, VeryVerbose))
@@ -701,7 +706,9 @@ bool FDWCGPUBackend::Initialize(const FDWCGPUBackendInitArgs& Args)
 bool FDWCGPUBackend::BuildStaticSimulationData()
 {
     const UWetClothingAsset* Asset = WetClothingAsset.Get();
-    if (!Asset)
+    const USkeletalMeshComponent* MeshComponent = TargetSkeletalMesh.Get();
+    const USkeletalMesh* SkeletalMesh = MeshComponent ? MeshComponent->GetSkeletalMeshAsset() : nullptr;
+    if (!Asset || !SkeletalMesh)
     {
         return false;
     }
@@ -764,6 +771,16 @@ bool FDWCGPUBackend::BuildStaticSimulationData()
     }
     Data->Sections.SetNum(FMath::Max(0, MaxSectionIndex + 1));
 
+    const FSkeletalMeshRenderData* RenderData = SkeletalMesh->GetResourceForRendering();
+    const FSkeletalMeshLODRenderData* LODData =
+        RenderData && RenderData->LODRenderData.IsValidIndex(LODIndex)
+            ? &RenderData->LODRenderData[LODIndex]
+            : nullptr;
+    const int32 VertexCount = LODData
+        ? static_cast<int32>(LODData->StaticVertexBuffers.PositionVertexBuffer.GetNumVertices())
+        : 0;
+    TBitArray<> UsedSections(false, Data->Sections.Num());
+
     for (const FDWCGPUBakedTriangle& Triangle : Baked.Triangles)
     {
         if (Triangle.TriangleID == INDEX_NONE || !Data->TriangleProfileIndices.IsValidIndex(Triangle.TriangleID) ||
@@ -825,6 +842,7 @@ bool FDWCGPUBackend::BuildStaticSimulationData()
             static_cast<float>(Triangle.DataToSurfaceWaterNormalUV.W));
 
         FStaticSimulationData::FSectionData& Section = Data->Sections[Triangle.RenderSectionIndex];
+        UsedSections[Triangle.RenderSectionIndex] = true;
         Section.TriangleIndices.Add(FUint4GPU(
             static_cast<uint32>(Triangle.VertexIndices.X),
             static_cast<uint32>(Triangle.VertexIndices.Y),
@@ -836,6 +854,25 @@ bool FDWCGPUBackend::BuildStaticSimulationData()
         Section.TriangleUV2RestArea.Add(FVector4f(
             static_cast<float>(Triangle.UV2.X), static_cast<float>(Triangle.UV2.Y),
             Triangle.RestSurfaceArea, 0.0f));
+    }
+    if (LODData && VertexCount > 0)
+    {
+        const FPositionVertexBuffer& PositionBuffer = LODData->StaticVertexBuffers.PositionVertexBuffer;
+        for (int32 SectionIndex = 0; SectionIndex < Data->Sections.Num(); ++SectionIndex)
+        {
+            if (!UsedSections[SectionIndex])
+            {
+                continue;
+            }
+
+            FStaticSimulationData::FSectionData& Section = Data->Sections[SectionIndex];
+            Section.RestPositions.SetNumUninitialized(VertexCount);
+            for (int32 VertexIndex = 0; VertexIndex < VertexCount; ++VertexIndex)
+            {
+                const FVector3f Position = PositionBuffer.VertexPosition(VertexIndex);
+                Section.RestPositions[VertexIndex] = FVector4f(Position.X, Position.Y, Position.Z, 1.0f);
+            }
+        }
     }
     if (Data->Profiles.IsEmpty())
     {
@@ -1554,6 +1591,11 @@ void FDWCGPUBackend::DispatchSimulation(
         {
             continue;
         }
+        if (!StaticSimulationData->Slots.IsValidIndex(Slot.StaticSlotIndex))
+        {
+            continue;
+        }
+        const FStaticSimulationData::FSlotData& StaticSlot = StaticSimulationData->Slots[Slot.StaticSlotIndex];
 
         FSlotRenderDispatch& SlotDispatch = SlotDispatches.AddDefaulted_GetRef();
         SlotDispatch.SlotRuntimeIndex = SlotRuntimeIndex;
@@ -1734,6 +1776,10 @@ void FDWCGPUBackend::DispatchSimulation(
         static_cast<float>(GravityDirection.Y),
         static_cast<float>(GravityDirection.Z),
         0.0f);
+    const FBox ReceiverWorldBounds = MeshComponent->Bounds.GetBox();
+    const FVector3f ReceiverBoundsMinValue(ReceiverWorldBounds.Min);
+    const FVector3f ReceiverBoundsMaxValue(ReceiverWorldBounds.Max);
+    const FMatrix44f ReceiverLocalToWorldValue(MeshComponent->GetComponentTransform().ToMatrixWithScale());
 
     const TSharedPtr<const FStaticSimulationData, ESPMode::ThreadSafe> StaticData = StaticSimulationData;
     const TSharedPtr<FRenderState, ESPMode::ThreadSafe> RTState = RenderState;
@@ -1784,7 +1830,7 @@ void FDWCGPUBackend::DispatchSimulation(
 
     FDWCWorkloadStats::RecordGPUBackendUpdateSubmitted();
     ENQUEUE_RENDER_COMMAND(DWCFullWetMapSimulation)(
-        [MeshObject, StaticData, RTState, SharedStaticResources, SlotDispatches = MoveTemp(SlotDispatches), DeltaSeconds, MaxWetnessValue, CapillaryImmediateAbsorptionFractionValue, SurfaceTimeSeconds, WorldGravityDirection, SimulationLODIndex, bUseEightDirectionDiffusion = bUseEightDirectionDiffusion](FRHICommandListImmediate& RHICmdList) mutable
+        [MeshObject, StaticData, RTState, SharedStaticResources, SlotDispatches = MoveTemp(SlotDispatches), DeltaSeconds, MaxWetnessValue, CapillaryImmediateAbsorptionFractionValue, SurfaceTimeSeconds, WorldGravityDirection, ReceiverBoundsMinValue, ReceiverBoundsMaxValue, ReceiverLocalToWorldValue, SimulationLODIndex, ReceiverGPUIdValue = ReceiverGPUId, bUseEightDirectionDiffusion = bUseEightDirectionDiffusion](FRHICommandListImmediate& RHICmdList) mutable
         {
             if (!StaticData.IsValid() || !RTState.IsValid())
             {
@@ -1847,6 +1893,19 @@ void FDWCGPUBackend::DispatchSimulation(
                 GraphBuilder.QueueBufferExtraction(TriangleMetricBuffer, &RTState->TriangleMetric);
             }
 
+            FRDGBufferRef TrianglePositionsBuffer = nullptr;
+            if (RTState->TrianglePositions.IsValid())
+            {
+                TrianglePositionsBuffer = GraphBuilder.RegisterExternalBuffer(RTState->TrianglePositions, TEXT("DWC.TrianglePositions"));
+            }
+            else
+            {
+                TArray<FVector4f> DefaultPositions;
+                DefaultPositions.Init(FVector4f::Zero(), FMath::Max(StaticData->TriangleCount * 3, 1));
+                TrianglePositionsBuffer = CreateStructuredBuffer(GraphBuilder, TEXT("DWC.TrianglePositions"), DefaultPositions);
+                GraphBuilder.QueueBufferExtraction(TrianglePositionsBuffer, &RTState->TrianglePositions);
+            }
+
             FCachedGeometry CachedGeometry;
             const bool bHasCachedGeometry =
                 MeshObject &&
@@ -1856,6 +1915,7 @@ void FDWCGPUBackend::DispatchSimulation(
             {
                 FRDGBufferUAVRef FlowUAV = GraphBuilder.CreateUAV(TriangleFlowBuffer);
                 FRDGBufferUAVRef MetricUAV = GraphBuilder.CreateUAV(TriangleMetricBuffer);
+                FRDGBufferUAVRef PositionsUAV = GraphBuilder.CreateUAV(TrianglePositionsBuffer);
                 for (const FCachedGeometry::Section& CachedSection : CachedGeometry.Sections)
                 {
                     const int32 SectionIndex = static_cast<int32>(CachedSection.SectionIndex);
@@ -1895,7 +1955,7 @@ void FDWCGPUBackend::DispatchSimulation(
                         (CachedSection.TotalVertexCount == CachedSection.NumVertices && CachedSection.VertexBaseIndex > 0)
                             ? CachedSection.VertexBaseIndex
                             : 0u;
-                    Parameters->LocalToWorld = FMatrix44f(CachedGeometry.LocalToWorld.ToMatrixWithScale());
+                    Parameters->LocalToWorld = ReceiverLocalToWorldValue;
                     Parameters->WorldGravityDirection = WorldGravityDirection;
                     Parameters->PositionBuffer = CachedSection.PositionBuffer;
                     Parameters->TriangleIndices = GraphBuilder.CreateSRV(IndicesBuffer);
@@ -1903,6 +1963,7 @@ void FDWCGPUBackend::DispatchSimulation(
                     Parameters->TriangleUV2RestArea = GraphBuilder.CreateSRV(UV2Buffer);
                     Parameters->TriangleFlow = FlowUAV;
                     Parameters->TriangleMetric = MetricUAV;
+                    Parameters->TrianglePositions = PositionsUAV;
 
                     TShaderMapRef<FDWCUpdateTriangleFlowCS> Shader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
                     FDWCWorkloadStats::RecordGPUBackendDispatch();
@@ -1915,21 +1976,88 @@ void FDWCGPUBackend::DispatchSimulation(
                         FIntVector(FMath::DivideAndRoundUp(SectionData.TriangleIndices.Num(), 64), 1, 1));
                 }
             }
-            else if (!RTState->bWarnedMissingCachedGeometry)
+            else
             {
-                UE_LOG(LogDWCGPU, Warning, TEXT("DWCGPU: Compute Skin Cache geometry for simulation LOD%d is unavailable. Wetness input/spread/dry still runs, but gravity flow reuses the last valid triangle-flow buffer until the target skeletal mesh provides skin-cache geometry for this LOD."), SimulationLODIndex);
-                RTState->bWarnedMissingCachedGeometry = true;
+                FRDGBufferUAVRef FlowUAV = GraphBuilder.CreateUAV(TriangleFlowBuffer);
+                FRDGBufferUAVRef MetricUAV = GraphBuilder.CreateUAV(TriangleMetricBuffer);
+                FRDGBufferUAVRef PositionsUAV = GraphBuilder.CreateUAV(TrianglePositionsBuffer);
+                if (RTState->RestPositionBuffers.Num() < StaticData->Sections.Num())
+                {
+                    RTState->RestPositionBuffers.SetNum(StaticData->Sections.Num());
+                }
+
+                for (int32 SectionIndex = 0; SectionIndex < StaticData->Sections.Num(); ++SectionIndex)
+                {
+                    const FStaticSimulationData::FSectionData& SectionData = StaticData->Sections[SectionIndex];
+                    if (SectionData.TriangleIndices.IsEmpty() || SectionData.RestPositions.IsEmpty())
+                    {
+                        continue;
+                    }
+
+                    if (!SharedStaticResources[0]->Sections.IsValidIndex(SectionIndex))
+                    {
+                        continue;
+                    }
+
+                    FDWCGPUStaticSectionResources& SectionBuffers =
+                        SharedStaticResources[0]->Sections[SectionIndex];
+                    FRDGBufferRef IndicesBuffer = RegisterOrUploadStructuredBuffer(
+                        GraphBuilder, SectionBuffers.TriangleIndices, TEXT("DWC.SharedRestTriangleIndices"), SectionData.TriangleIndices);
+                    FRDGBufferRef UV01Buffer = RegisterOrUploadStructuredBuffer(
+                        GraphBuilder, SectionBuffers.TriangleUV01, TEXT("DWC.SharedRestTriangleUV01"), SectionData.TriangleUV01);
+                    FRDGBufferRef UV2Buffer = RegisterOrUploadStructuredBuffer(
+                        GraphBuilder, SectionBuffers.TriangleUV2RestArea, TEXT("DWC.SharedRestTriangleUV2Rest"), SectionData.TriangleUV2RestArea);
+                    FRDGBufferRef RestPositionsBuffer = RegisterOrUploadStructuredBuffer(
+                        GraphBuilder,
+                        RTState->RestPositionBuffers[SectionIndex],
+                        TEXT("DWC.RestPositions"),
+                        SectionData.RestPositions);
+                    if (!IndicesBuffer || !UV01Buffer || !UV2Buffer || !RestPositionsBuffer)
+                    {
+                        continue;
+                    }
+
+                    FDWCUpdateRestTriangleFlowCS::FParameters* Parameters =
+                        GraphBuilder.AllocParameters<FDWCUpdateRestTriangleFlowCS::FParameters>();
+                    Parameters->TriangleCount = static_cast<uint32>(SectionData.TriangleIndices.Num());
+                    Parameters->PositionCount = static_cast<uint32>(SectionData.RestPositions.Num());
+                    Parameters->LocalToWorld = ReceiverLocalToWorldValue;
+                    Parameters->WorldGravityDirection = WorldGravityDirection;
+                    Parameters->RestPositions = GraphBuilder.CreateSRV(RestPositionsBuffer);
+                    Parameters->TriangleIndices = GraphBuilder.CreateSRV(IndicesBuffer);
+                    Parameters->TriangleUV01 = GraphBuilder.CreateSRV(UV01Buffer);
+                    Parameters->TriangleUV2RestArea = GraphBuilder.CreateSRV(UV2Buffer);
+                    Parameters->TriangleFlow = FlowUAV;
+                    Parameters->TriangleMetric = MetricUAV;
+                    Parameters->TrianglePositions = PositionsUAV;
+
+                    TShaderMapRef<FDWCUpdateRestTriangleFlowCS> Shader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
+                    FDWCWorkloadStats::RecordGPUBackendDispatch();
+                    RDG_EVENT_SCOPE_STAT(GraphBuilder, DWC_UpdateTriangleFlow, "DWC UpdateRestTriangleFlow");
+                    FComputeShaderUtils::AddPass(
+                        GraphBuilder,
+                        RDG_EVENT_NAME("DWC Update Rest Triangle Flow Section %d", SectionIndex),
+                        Shader,
+                        Parameters,
+                        FIntVector(FMath::DivideAndRoundUp(SectionData.TriangleIndices.Num(), 64), 1, 1));
+                }
+
             }
 
             FRDGBufferSRVRef FlowSRV = GraphBuilder.CreateSRV(TriangleFlowBuffer);
             FRDGBufferSRVRef MetricSRV = GraphBuilder.CreateSRV(TriangleMetricBuffer);
+            FRDGBufferSRVRef TrianglePositionsSRV = GraphBuilder.CreateSRV(TrianglePositionsBuffer);
             TShaderMapRef<FDWCApplyTriangleAbsorptionCS> AbsorptionShader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
             TShaderMapRef<FDWCApplyBinnedAbsorptionCS> BinnedAbsorptionShader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
+            TShaderMapRef<FDWCApplyNiagaraWetCollisionCS> NiagaraWetCollisionShader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
             TShaderMapRef<FDWCDiffuseDryCS> DiffuseDry4Shader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
             TShaderMapRef<FDWCDiffuseDry8CS> DiffuseDry8Shader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
             TShaderMapRef<FDWCSeamGatherCS> SeamShader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
             TShaderMapRef<FDWCSurfaceDropletStampCS> DropletStampShader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
             TShaderMapRef<FDWCSurfaceRivuletStampCS> RivuletStampShader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
+
+            TArray<FDWCGPUNiagaraWetCollisionBuffer> NiagaraWetCollisionBuffers;
+            DWCGPUNiagaraWetCollisionBridge::CollectBuffers_RenderThread(NiagaraWetCollisionBuffers);
 
             for (FSlotRenderDispatch& SlotDispatch : SlotDispatches)
             {
@@ -2157,6 +2285,56 @@ void FDWCGPUBackend::DispatchSimulation(
                             FMath::DivideAndRoundUp(Dispatch.DispatchSize.Y, 8), 1));
                 }
 
+                if (ReceiverGPUIdValue != 0 && !NiagaraWetCollisionBuffers.IsEmpty())
+                {
+                    for (const FDWCGPUNiagaraWetCollisionBuffer& CollisionBuffer : NiagaraWetCollisionBuffers)
+                    {
+                        if (!CollisionBuffer.ContactBuffer.IsValid() ||
+                            !CollisionBuffer.ContactCountBuffer.IsValid() ||
+                            CollisionBuffer.MaxContacts <= 0)
+                        {
+                            continue;
+                        }
+
+                        if (CollisionBuffer.bRestrictToTargetReceiverGPUIds &&
+                            !CollisionBuffer.TargetReceiverGPUIds.Contains(ReceiverGPUIdValue))
+                        {
+                            continue;
+                        }
+
+                        FRDGBufferRef ContactBuffer = GraphBuilder.RegisterExternalBuffer(
+                            CollisionBuffer.ContactBuffer,
+                            TEXT("DWC.NiagaraWetCollision.Contacts.External"));
+                        FRDGBufferRef ContactCountBuffer = GraphBuilder.RegisterExternalBuffer(
+                            CollisionBuffer.ContactCountBuffer,
+                            TEXT("DWC.NiagaraWetCollision.ContactCount.External"));
+
+                        FDWCApplyNiagaraWetCollisionCS::FParameters* Parameters =
+                            GraphBuilder.AllocParameters<FDWCApplyNiagaraWetCollisionCS::FParameters>();
+                        Parameters->TextureSize = FIntPoint(SlotDispatch.Resolution, SlotDispatch.Resolution);
+                        Parameters->MaxContacts = CollisionBuffer.MaxContacts;
+                        Parameters->ReceiverBoundsMin = ReceiverBoundsMinValue;
+                        Parameters->ReceiverBoundsMax = ReceiverBoundsMaxValue;
+                        Parameters->Contacts = GraphBuilder.CreateSRV(ContactBuffer, PF_A32B32G32R32F);
+                        Parameters->ContactCount = GraphBuilder.CreateSRV(ContactCountBuffer, PF_R32_SINT);
+                        Parameters->TexelLookup = LookupSRV;
+                        Parameters->TrianglePositions = TrianglePositionsSRV;
+                        Parameters->PendingWetnessTexture = PendingInputUAV;
+                        FComputeShaderUtils::AddPass(
+                            GraphBuilder,
+                            RDG_EVENT_NAME(
+                                "DWC Apply Niagara Wet Collision Slot %d MaxContacts %d",
+                                StaticSlot.MaterialSlotIndex,
+                                CollisionBuffer.MaxContacts),
+                            NiagaraWetCollisionShader,
+                            Parameters,
+                            FIntVector(
+                                FMath::DivideAndRoundUp(SlotDispatch.Resolution, 8),
+                                FMath::DivideAndRoundUp(SlotDispatch.Resolution, 8),
+                                1));
+                    }
+                }
+
                 if (bUseEightDirectionDiffusion)
                 {
                     FDWCDiffuseDry8CS::FParameters* DiffuseParameters =
@@ -2328,7 +2506,8 @@ FDWCGPUBackendStats FDWCGPUBackend::GetStats() const
         {
             Stats.CPUBytes += Section.TriangleIndices.GetAllocatedSize() +
                               Section.TriangleUV01.GetAllocatedSize() +
-                              Section.TriangleUV2RestArea.GetAllocatedSize();
+                              Section.TriangleUV2RestArea.GetAllocatedSize() +
+                              Section.RestPositions.GetAllocatedSize();
         }
 
         for (const FStaticSimulationData::FSlotData& Slot : Data.Slots)

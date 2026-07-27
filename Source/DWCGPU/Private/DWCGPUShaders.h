@@ -65,6 +65,53 @@ public:
         SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float4>, TriangleUV2RestArea)
         SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<float4>, TriangleFlow)
         SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<float4>, TriangleMetric)
+        SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<float4>, TrianglePositions)
+    END_SHADER_PARAMETER_STRUCT()
+
+    static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters);
+};
+
+/** Fallback pose update used when Compute Skin Cache geometry is unavailable for the receiver. */
+class FDWCUpdateRestTriangleFlowCS final : public FGlobalShader
+{
+public:
+    DECLARE_GLOBAL_SHADER(FDWCUpdateRestTriangleFlowCS);
+    SHADER_USE_PARAMETER_STRUCT(FDWCUpdateRestTriangleFlowCS, FGlobalShader);
+
+    BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
+        SHADER_PARAMETER(uint32, TriangleCount)
+        SHADER_PARAMETER(uint32, PositionCount)
+        SHADER_PARAMETER(FMatrix44f, LocalToWorld)
+        SHADER_PARAMETER(FVector4f, WorldGravityDirection)
+        SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float4>, RestPositions)
+        SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint4>, TriangleIndices)
+        SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float4>, TriangleUV01)
+        SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float4>, TriangleUV2RestArea)
+        SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<float4>, TriangleFlow)
+        SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<float4>, TriangleMetric)
+        SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<float4>, TrianglePositions)
+    END_SHADER_PARAMETER_STRUCT()
+
+    static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters);
+};
+
+/** Applies Niagara GPU-written wet contact candidates directly to wet-map texels. */
+class FDWCApplyNiagaraWetCollisionCS final : public FGlobalShader
+{
+public:
+    DECLARE_GLOBAL_SHADER(FDWCApplyNiagaraWetCollisionCS);
+    SHADER_USE_PARAMETER_STRUCT(FDWCApplyNiagaraWetCollisionCS, FGlobalShader);
+
+    BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
+        SHADER_PARAMETER(FIntPoint, TextureSize)
+        SHADER_PARAMETER(int32, MaxContacts)
+        SHADER_PARAMETER(FVector3f, ReceiverBoundsMin)
+        SHADER_PARAMETER(FVector3f, ReceiverBoundsMax)
+        SHADER_PARAMETER_RDG_BUFFER_SRV(Buffer<float4>, Contacts)
+        SHADER_PARAMETER_RDG_BUFFER_SRV(Buffer<int>, ContactCount)
+        SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint4>, TexelLookup)
+        SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float4>, TrianglePositions)
+        SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float>, PendingWetnessTexture)
     END_SHADER_PARAMETER_STRUCT()
 
     static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters);

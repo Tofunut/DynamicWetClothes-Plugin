@@ -1,6 +1,6 @@
 #include "/Engine/Public/Platform.ush"
 
-Buffer<float> PositionBuffer;
+StructuredBuffer<float4> RestPositions;
 StructuredBuffer<uint4> TriangleIndices;
 StructuredBuffer<float4> TriangleUV01;
 StructuredBuffer<float4> TriangleUV2RestArea;
@@ -9,19 +9,9 @@ RWStructuredBuffer<float4> TriangleMetric;
 RWStructuredBuffer<float4> TrianglePositions;
 
 uint TriangleCount;
-uint PositionIndexBase;
+uint PositionCount;
 float4x4 LocalToWorld;
 float4 WorldGravityDirection;
-
-float3 LoadPosition(uint GlobalVertexIndex)
-{
-    const uint VertexIndex = GlobalVertexIndex - PositionIndexBase;
-    const uint FloatIndex = VertexIndex * 3u;
-    return float3(
-        PositionBuffer[FloatIndex + 0u],
-        PositionBuffer[FloatIndex + 1u],
-        PositionBuffer[FloatIndex + 2u]);
-}
 
 [numthreads(64, 1, 1)]
 void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
@@ -34,12 +24,17 @@ void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 
     const uint4 Indices = TriangleIndices[LocalTriangleIndex];
     const uint TriangleID = Indices.w;
+    if (Indices.x >= PositionCount || Indices.y >= PositionCount || Indices.z >= PositionCount)
+    {
+        return;
+    }
+
     const float4 UV01 = TriangleUV01[LocalTriangleIndex];
     const float4 UV2RestArea = TriangleUV2RestArea[LocalTriangleIndex];
 
-    const float3 P0 = mul(float4(LoadPosition(Indices.x), 1.0), LocalToWorld).xyz;
-    const float3 P1 = mul(float4(LoadPosition(Indices.y), 1.0), LocalToWorld).xyz;
-    const float3 P2 = mul(float4(LoadPosition(Indices.z), 1.0), LocalToWorld).xyz;
+    const float3 P0 = mul(float4(RestPositions[Indices.x].xyz, 1.0), LocalToWorld).xyz;
+    const float3 P1 = mul(float4(RestPositions[Indices.y].xyz, 1.0), LocalToWorld).xyz;
+    const float3 P2 = mul(float4(RestPositions[Indices.z].xyz, 1.0), LocalToWorld).xyz;
     const uint PositionBase = TriangleID * 3u;
     TrianglePositions[PositionBase + 0u] = float4(P0, 1.0);
     TrianglePositions[PositionBase + 1u] = float4(P1, 1.0);

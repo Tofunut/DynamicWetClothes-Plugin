@@ -13,12 +13,8 @@ public class DWCDemo : ModuleRules
 				"CoreUObject",
 				"Engine",
 				"DWC",
+				"DWCGPU",
 				"Niagara"
-			});
-
-		PrivateDependencyModuleNames.AddRange(
-			new string[]
-			{
 			});
 	}
 }

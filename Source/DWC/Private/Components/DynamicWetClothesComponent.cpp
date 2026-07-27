@@ -49,6 +49,13 @@ namespace
         return Mode == EDWCSimulationMode::WetnessMapGPU;
     }
 
+    int32 MakeDWCReceiverGPUId(const FName ReceiverId)
+    {
+        const uint32 Hash = GetTypeHash(ReceiverId);
+        const int32 PositiveHash = static_cast<int32>(Hash & 0x7fffffffu);
+        return PositiveHash != 0 ? PositiveHash : 1;
+    }
+
     void ShutdownGPUBackend(FDWCWetMeshReceiverRuntime& Receiver)
     {
         if (Receiver.GPUBackend.IsValid())
@@ -522,6 +529,7 @@ bool UDynamicWetClothesComponent::InitializeGPUBackend(FDWCWetMeshReceiverRuntim
     InitArgs.DryRateScale = GPUDryRateScale;
     InitArgs.GravityFlowStrengthScale = GPUGravityFlowStrengthScale;
     InitArgs.CapillaryImmediateAbsorptionFraction = GPUImmediateAbsorptionFraction;
+    InitArgs.ReceiverGPUId = MakeDWCReceiverGPUId(Receiver.ReceiverId);
     InitArgs.bUseEightDirectionDiffusion =
         GPUDiffusionNeighborMode == EDWCGPUDiffusionNeighborMode::EightDirections;
 
@@ -642,6 +650,39 @@ bool UDynamicWetClothesComponent::GetWetnessWorldBounds(FBox& OutBounds) const
     }
 
     return OutBounds.IsValid && !OutBounds.GetExtent().IsNearlyZero();
+}
+
+int32 UDynamicWetClothesComponent::GetDWCReceiverGPUId(const FName ReceiverId) const
+{
+    for (const TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver : Receivers)
+    {
+        if (!Receiver.IsValid())
+        {
+            continue;
+        }
+        if (ReceiverId.IsNone() || Receiver->ReceiverId == ReceiverId)
+        {
+            return MakeDWCReceiverGPUId(Receiver->ReceiverId);
+        }
+    }
+    return 0;
+}
+
+void UDynamicWetClothesComponent::GetDWCReceiverGPUIds(TArray<int32>& OutReceiverGPUIds) const
+{
+    for (const TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver : Receivers)
+    {
+        if (!Receiver.IsValid())
+        {
+            continue;
+        }
+
+        const int32 ReceiverGPUId = MakeDWCReceiverGPUId(Receiver->ReceiverId);
+        if (ReceiverGPUId != 0)
+        {
+            OutReceiverGPUIds.AddUnique(ReceiverGPUId);
+        }
+    }
 }
 
 int32 UDynamicWetClothesComponent::GetWetSurfaceSampleResolution() const

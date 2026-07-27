@@ -28,6 +28,18 @@ bool FDWCUpdateTriangleFlowCS::ShouldCompilePermutation(const FGlobalShaderPermu
     return ShouldCompileDWC(Parameters);
 }
 
+IMPLEMENT_GLOBAL_SHADER(FDWCUpdateRestTriangleFlowCS, "/DWCGPU/DWCUpdateRestTriangleFlow.usf", "MainCS", SF_Compute);
+bool FDWCUpdateRestTriangleFlowCS::ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
+{
+    return ShouldCompileDWC(Parameters);
+}
+
+IMPLEMENT_GLOBAL_SHADER(FDWCApplyNiagaraWetCollisionCS, "/DWCGPU/DWCApplyNiagaraWetCollision.usf", "MainCS", SF_Compute);
+bool FDWCApplyNiagaraWetCollisionCS::ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
+{
+    return ShouldCompileDWC(Parameters);
+}
+
 IMPLEMENT_GLOBAL_SHADER(FDWCDiffuseDryCS, "/DWCGPU/DWCDiffuseDry.usf", "MainCS", SF_Compute);
 bool FDWCDiffuseDryCS::ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
 {

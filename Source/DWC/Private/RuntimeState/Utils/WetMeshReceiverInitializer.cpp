@@ -310,7 +310,7 @@ bool FWetMeshReceiverInitializer::RebuildReceivers(FWetMeshReceiverInitializerCo
         TUniquePtr<FDWCWetMeshReceiverRuntime> Receiver = MakeUnique<FDWCWetMeshReceiverRuntime>();
         Receiver->ReceiverId = FName(*FString::Printf(
             TEXT("%s__%s"),
-            *Mesh->GetFName().ToString(),
+            *Mesh->GetPathName(),
             *Asset->GetFName().ToString()));
         Receiver->MeshComponent = Mesh;
         Receiver->WetClothingAsset = Asset;

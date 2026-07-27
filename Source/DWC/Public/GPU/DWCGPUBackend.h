@@ -41,6 +41,7 @@ struct DWC_API FDWCGPUBackendInitArgs
     float DryRateScale = 1.0f;
     float GravityFlowStrengthScale = 1.0f;
     float CapillaryImmediateAbsorptionFraction = 0.65f;
+    int32 ReceiverGPUId = 0;
     bool bUseEightDirectionDiffusion = false;
 };
 

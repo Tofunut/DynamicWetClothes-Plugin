@@ -1,4 +1,4 @@
-#include "WetClothing/DerivedAssets/Materials/WCAMaterialGenerator.h"
+﻿#include "WetClothing/DerivedAssets/Materials/WCAMaterialGenerator.h"
 
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetToolsModule.h"
@@ -240,7 +240,9 @@ namespace
             TEXT("RivuletMaskSlice"),
             TEXT("RivuletNormalSlice"),
             TEXT("SurfaceWaterNormalStrength"),
-            TEXT("SurfaceWaterRoughnessStrength"),
+            TEXT("SurfaceWaterRoughnessBlend"),
+            TEXT("SurfaceWaterTargetRoughness"),
+            TEXT("OriginalSurfaceDetail"),
             TEXT("SurfaceVisibilityThreshold"),
             TEXT("RivuletUVScrollSpeed"),
             TEXT("DropletDetailSize"),
@@ -268,10 +270,9 @@ namespace
             TEXT("BaseColor"), TEXT("DebugColor"), TEXT("DebugAlpha")
         };
         static const TArray<FName> EvaluateInputs = {
-            TEXT("BaseColor"), TEXT("BaseRoughness"), TEXT("BaseNormal"),
+            TEXT("BaseColor"), TEXT("BaseRoughness"), TEXT("BaseMetallic"), TEXT("BaseNormal"),
             TEXT("Wetness"), TEXT("DWCDataUV"), TEXT("SurfaceWaterNormalUV"), TEXT("SurfaceTime"),
             TEXT("WetDarkeningStrength"), TEXT("WetRoughness"),
-            TEXT("SurfaceWaterTargetRoughness"),
             TEXT("WrinkleNormal"), TEXT("UseWrinkleNormalMap"), TEXT("WrinkleStrength"),
             TEXT("WrinkleWetnessMin"), TEXT("WrinkleWetnessMax"),
             TEXT("TransparencyColor"), TEXT("TransparencyAlpha"), TEXT("UseTransparencyMap"),
@@ -279,7 +280,7 @@ namespace
         };
         static const TArray<FName> EvaluateOutputs = {
             TEXT("BaseColor"), TEXT("Roughness"), TEXT("Normal"),
-            TEXT("DropletCoverage"), TEXT("RivuletCoverage")
+            TEXT("SurfaceCoverage"), TEXT("DropletCoverage"), TEXT("RivuletCoverage")
         };
 
         bool bValid = true;
@@ -446,7 +447,7 @@ namespace
         const TArray<FString> InputNames =
             UMaterialEditingLibrary::GetMaterialExpressionInputNames(Expression);
 
-        // ?대쫫 ?녿뒗 ?⑥씪 湲곕낯 ?낅젰???ъ슜?섎뒗 ?몃뱶
+        // ??已???용뮉 ??μ뵬 疫꿸퀡????낆젾???????롫뮉 ?紐껊굡
         if (InputName.IsEmpty())
         {
             return InputNames.IsEmpty();
@@ -814,6 +815,38 @@ namespace
         }
 
         return CreateScalarParameter(Material, ParameterName, DefaultValue, NodePosX, NodePosY);
+    }
+
+    UMaterialExpressionCustom* CreateCustomExpression(
+        UMaterial* Material,
+        const TCHAR* Description,
+        const TCHAR* Code,
+        const ECustomMaterialOutputType OutputType,
+        const TArray<FName>& InputNames,
+        const int32 NodePosX,
+        const int32 NodePosY)
+    {
+        UMaterialExpressionCustom* Custom = Cast<UMaterialExpressionCustom>(
+            UMaterialEditingLibrary::CreateMaterialExpression(
+                Material,
+                UMaterialExpressionCustom::StaticClass(),
+                NodePosX,
+                NodePosY));
+        if (Custom == nullptr)
+        {
+            return nullptr;
+        }
+
+        Custom->Description = Description;
+        Custom->Code = Code;
+        Custom->OutputType = OutputType;
+        Custom->Inputs.Reset();
+        for (const FName InputName : InputNames)
+        {
+            FCustomInput& Input = Custom->Inputs.AddDefaulted_GetRef();
+            Input.InputName = InputName;
+        }
+        return Custom;
     }
 
     bool MaterialInterfaceHasTextureParameter(UMaterialInterface* MaterialInterface, const FName ParameterName)
@@ -1659,14 +1692,26 @@ namespace
         FString              BaseNormalOutputName;
         UMaterialExpression* BaseNormalInput = ResolveMaterialPropertyInputOrFallback(
             Material, MP_Normal, FVector2D(-2600.0f, 200.0f), BaseNormalOutputName);
+        FString              MetallicOutputName;
+        UMaterialExpression* MetallicInput = ResolveMaterialPropertyInputOrFallback(
+            Material, MP_Metallic, FVector2D(-2600.0f, 440.0f), MetallicOutputName);
         FString              SpecularOutputName;
         UMaterialExpression* SpecularInput = ResolveMaterialPropertyInputOrFallback(
-            Material, MP_Specular, FVector2D(-2600.0f, 440.0f), SpecularOutputName);
+            Material, MP_Specular, FVector2D(-2600.0f, 680.0f), SpecularOutputName);
 
         UMaterialExpressionMaterialFunctionCall* Evaluate =
             CreateFunctionCall(Material, EvaluateFunction, -620, -100);
         UMaterialExpressionMaterialFunctionCall* DebugWetPart =
             CreateFunctionCall(Material, DebugWetPartFunction, 360, -120);
+        UMaterialExpressionCustom* MetallicLayer =
+            CreateCustomExpression(
+                Material,
+                TEXT("DWC Surface Water Metallic Layer"),
+                TEXT("return saturate(BaseMetallic) * (1.0 - saturate(SurfaceCoverage));"),
+                CMOT_Float1,
+                { TEXT("BaseMetallic"), TEXT("SurfaceCoverage") },
+                1120,
+                180);
         UMaterialExpressionVertexColor*       VertexColor = FindOrCreateVertexColor(Material, -2600, -520);
         UMaterialExpressionTextureCoordinate* DWCDataUV = FindOrCreateDWCDataTextureCoordinate(
             Material, Options.DWCDataUVChannelIndex, -2140, 820);
@@ -1685,12 +1730,6 @@ namespace
             Material, TEXT("DWC_WetDarkeningStrength"), 0.35f, -2140, -420);
         UMaterialExpressionScalarParameter* WetRoughness = CreateScalarParameter(
             Material, TEXT("DWC_WetRoughness"), 0.12f, -2140, -320);
-        UMaterialExpressionScalarParameter* SurfaceWaterTargetRoughness = FindOrCreateScalarParameter(
-            Material,
-            DWCWetMaterialParameters::SurfaceWaterTargetRoughness(),
-            Options.SurfaceWaterTargetRoughness,
-            -1900,
-            1240);
         UMaterialExpressionScalarParameter* SurfaceTime = FindOrCreateScalarParameter(
             Material,
             DWCWetMaterialParameters::SurfaceWaterTime(),
@@ -1727,11 +1766,11 @@ namespace
             1540);
 
         if (BaseColorInput == nullptr || RoughnessInput == nullptr || BaseNormalInput == nullptr ||
-            SpecularInput == nullptr ||
+            MetallicInput == nullptr || SpecularInput == nullptr || MetallicLayer == nullptr ||
             Evaluate == nullptr || DebugWetPart == nullptr || VertexColor == nullptr || DWCDataUV == nullptr ||
             SurfaceWaterNormalUV == nullptr || WetnessMap == nullptr || WetnessSourceSwitch == nullptr ||
             WetDarkeningStrength == nullptr || WetRoughness == nullptr ||
-            SurfaceWaterTargetRoughness == nullptr || SurfaceTime == nullptr || WrinkleNormalMap == nullptr ||
+            SurfaceTime == nullptr || WrinkleNormalMap == nullptr ||
             UseWrinkleNormalMap == nullptr || WrinkleStrength == nullptr ||
             WrinkleWetnessMin == nullptr || WrinkleWetnessMax == nullptr ||
             TransparencyMap == nullptr || UseTransparencyMap == nullptr ||
@@ -1751,6 +1790,7 @@ namespace
 
         bConnected &= ConnectChecked(BaseColorInput, BaseColorOutputName, Evaluate, TEXT("BaseColor"), FailureReasons);
         bConnected &= ConnectChecked(RoughnessInput, RoughnessOutputName, Evaluate, TEXT("BaseRoughness"), FailureReasons);
+        bConnected &= ConnectChecked(MetallicInput, MetallicOutputName, Evaluate, TEXT("BaseMetallic"), FailureReasons);
         bConnected &= ConnectChecked(BaseNormalInput, BaseNormalOutputName, Evaluate, TEXT("BaseNormal"), FailureReasons);
         bConnected &= ConnectChecked(WetnessSourceSwitch, FString(), Evaluate, TEXT("Wetness"), FailureReasons);
         bConnected &= ConnectChecked(WetDarkeningStrength, FString(), Evaluate, TEXT("WetDarkeningStrength"), FailureReasons);
@@ -1758,7 +1798,6 @@ namespace
         bConnected &= ConnectChecked(DWCDataUV, FString(), Evaluate, TEXT("DWCDataUV"), FailureReasons);
         bConnected &= ConnectChecked(SurfaceWaterNormalUV, FString(), Evaluate, TEXT("SurfaceWaterNormalUV"), FailureReasons);
         bConnected &= ConnectChecked(SurfaceTime, FString(), Evaluate, TEXT("SurfaceTime"), FailureReasons);
-        bConnected &= ConnectChecked(SurfaceWaterTargetRoughness, FString(), Evaluate, TEXT("SurfaceWaterTargetRoughness"), FailureReasons);
 
         bConnected &= ConnectChecked(WrinkleNormalMap, TEXT("RGB"), Evaluate, TEXT("WrinkleNormal"), FailureReasons);
         bConnected &= ConnectChecked(UseWrinkleNormalMap, FString(), Evaluate, TEXT("UseWrinkleNormalMap"), FailureReasons);
@@ -1775,11 +1814,13 @@ namespace
         FString BaseColorResultOutput;
         FString RoughnessResultOutput;
         FString NormalResultOutput;
+        FString SurfaceCoverageOutput;
         FString DropletCoverageOutput;
         FString RivuletCoverageOutput;
         bConnected &= ResolveRequiredOutputName(Evaluate, TEXT("BaseColor"), BaseColorResultOutput);
         bConnected &= ResolveRequiredOutputName(Evaluate, TEXT("Roughness"), RoughnessResultOutput);
         bConnected &= ResolveRequiredOutputName(Evaluate, TEXT("Normal"), NormalResultOutput);
+        bConnected &= ResolveRequiredOutputName(Evaluate, TEXT("SurfaceCoverage"), SurfaceCoverageOutput);
         bConnected &= ResolveRequiredOutputName(Evaluate, TEXT("DropletCoverage"), DropletCoverageOutput);
         bConnected &= ResolveRequiredOutputName(Evaluate, TEXT("RivuletCoverage"), RivuletCoverageOutput);
         if (!bConnected)
@@ -1829,6 +1870,8 @@ namespace
         bConnected &= ConnectChecked(SurfaceWaterDebugStrength, FString(), DebugWetPart, TEXT("SurfaceWaterDebugStrength"), FailureReasons);
         bConnected &= ConnectChecked(DropletDebugColor, FString(), DebugWetPart, TEXT("DropletDebugColor"), FailureReasons);
         bConnected &= ConnectChecked(RivuletDebugColor, FString(), DebugWetPart, TEXT("RivuletDebugColor"), FailureReasons);
+        bConnected &= ConnectChecked(MetallicInput, MetallicOutputName, MetallicLayer, TEXT("BaseMetallic"), FailureReasons);
+        bConnected &= ConnectChecked(Evaluate, SurfaceCoverageOutput, MetallicLayer, TEXT("SurfaceCoverage"), FailureReasons);
 
         FString DebugBaseColorOutput;
         bConnected &= ResolveRequiredOutputName(DebugWetPart, TEXT("BaseColor"), DebugBaseColorOutput);
@@ -1851,6 +1894,11 @@ namespace
         if (!UMaterialEditingLibrary::ConnectMaterialProperty(SpecularInput, SpecularOutputName, MP_Specular))
         {
             FailureReasons.Add(TEXT("Failed to preserve the source material Specular output."));
+            bConnected = false;
+        }
+        if (!UMaterialEditingLibrary::ConnectMaterialProperty(MetallicLayer, FString(), MP_Metallic))
+        {
+            FailureReasons.Add(TEXT("Failed to connect mask-gated DWC Metallic output."));
             bConnected = false;
         }
 
@@ -2340,6 +2388,139 @@ FWetClothingUnifiedMaterialSetupResult FWCAMaterialGenerator::CreateOrUpdateUnif
     return Result;
 }
 
+FWetClothingUnifiedMaterialSetupResult FWCAMaterialGenerator::CreateTransientUnifiedPreviewMaterial(
+    UMaterialInterface* SourceMaterial,
+    const FOptions&     Options)
+{
+    FWetClothingUnifiedMaterialSetupResult Result;
+    if (SourceMaterial == nullptr)
+    {
+        Result.Message = TEXT("No source material is assigned.");
+        return Result;
+    }
+
+    SourceMaterial = ResolveOriginalSourceMaterial(SourceMaterial, Options);
+    if (SourceMaterial == nullptr)
+    {
+        Result.Message = TEXT("Could not resolve the original source material for DWC preview generation.");
+        return Result;
+    }
+
+    FOptions PreviewOptions = Options;
+    PreviewOptions.SimulationMode = EDWCSimulationMode::WetnessMapGPU;
+    PreviewOptions.bUseSurfaceWater = true;
+    PreviewOptions.bEnableDWCDataUVSampling = true;
+    PreviewOptions.bConnectWetnessMapPath = true;
+    PreviewOptions.OwningWetClothingAsset = nullptr;
+    if (PreviewOptions.DWCDataUVChannelIndex < 0 || PreviewOptions.DWCDataUVChannelIndex > 7)
+    {
+        PreviewOptions.DWCDataUVChannelIndex = 0;
+    }
+    if (PreviewOptions.SurfaceWaterNormalUVChannelIndex < 0 || PreviewOptions.SurfaceWaterNormalUVChannelIndex > 7)
+    {
+        PreviewOptions.SurfaceWaterNormalUVChannelIndex = PreviewOptions.OriginalUVChannelIndex >= 0
+                                                              ? PreviewOptions.OriginalUVChannelIndex
+                                                              : 0;
+    }
+
+    TArray<FString> FunctionFailures;
+    UMaterialFunctionInterface* EvaluateFunction = nullptr;
+    if (!ValidateDwcMaterialFunctionSet(FunctionFailures, &EvaluateFunction))
+    {
+        Result.Message = TEXT("The DWC material-function set is missing or does not match the required contract.\n") +
+                         FString::Join(FunctionFailures, TEXT("\n"));
+        return Result;
+    }
+    Result.EvaluateSurfaceAppearanceFunction = EvaluateFunction;
+
+    UMaterial* SourceBaseMaterial = const_cast<UMaterial*>(SourceMaterial->GetMaterial());
+    if (SourceBaseMaterial == nullptr)
+    {
+        Result.Message = FString::Printf(TEXT("'%s' has no editable base material."), *GetNameSafe(SourceMaterial));
+        return Result;
+    }
+    if (IsUnifiedDwcMaterial(SourceBaseMaterial))
+    {
+        Result.Message = FString::Printf(
+            TEXT("'%s' is already a generated DWC material. Select the original source material for preview generation."),
+            *GetNameSafe(SourceMaterial));
+        return Result;
+    }
+
+    UMaterial* PreviewMaterial = DuplicateObject<UMaterial>(
+        SourceBaseMaterial,
+        GetTransientPackage(),
+        MakeUniqueObjectName(GetTransientPackage(), UMaterial::StaticClass(), TEXT("DWC_WetnessProfilePreviewMaterial")));
+    if (PreviewMaterial == nullptr)
+    {
+        Result.Message = FString::Printf(TEXT("Failed to duplicate '%s' for DWC preview generation."), *GetNameSafe(SourceBaseMaterial));
+        return Result;
+    }
+
+    PreviewMaterial->SetFlags(RF_Transient);
+    PreviewMaterial->Modify();
+    ReplaceMissingTextureSamplesWithFallbacks(PreviewMaterial);
+
+    TArray<FString> FailureReasons;
+    if (!CreateUnifiedDwcMaterialGraph(PreviewMaterial, PreviewOptions, FailureReasons))
+    {
+        Result.Message = TEXT("Could not create the transient DWC preview material graph.\n") +
+                         FString::Join(FailureReasons, TEXT("\n"));
+        PreviewMaterial->MarkAsGarbage();
+        return Result;
+    }
+
+    PreviewMaterial->UpdateCachedExpressionData();
+    PreviewMaterial->PostEditChange();
+
+    UMaterialInstanceConstant* PreviewInstance = NewObject<UMaterialInstanceConstant>(
+        GetTransientPackage(),
+        MakeUniqueObjectName(GetTransientPackage(), UMaterialInstanceConstant::StaticClass(), TEXT("DWC_WetnessProfilePreviewMIC")),
+        RF_Transient);
+    if (PreviewInstance == nullptr)
+    {
+        Result.Message = TEXT("Could not create the transient DWC preview material instance.");
+        PreviewMaterial->MarkAsGarbage();
+        return Result;
+    }
+
+    if (const UMaterialInstance* SourceInstance = Cast<UMaterialInstance>(SourceMaterial))
+    {
+        CopyMaterialInstanceOverrides(SourceInstance, PreviewInstance, PreviewMaterial);
+    }
+    else
+    {
+        PreviewInstance->SetParentEditorOnly(PreviewMaterial);
+    }
+
+    FString StaticSwitchError;
+    if (!SetDwcStaticSwitchOverrides(
+            PreviewInstance,
+            PreviewMaterial,
+            true,
+            true,
+            StaticSwitchError))
+    {
+        Result.Message = FString::Printf(
+            TEXT("Could not set DWC preview static switches. %s"),
+            *StaticSwitchError);
+        PreviewInstance->MarkAsGarbage();
+        PreviewMaterial->MarkAsGarbage();
+        return Result;
+    }
+
+    UMaterialEditingLibrary::UpdateMaterialInstance(PreviewInstance);
+    PreviewInstance->PostEditChange();
+
+    Result.bSucceeded = true;
+    Result.GeneratedMaterial = PreviewMaterial;
+    Result.GPUMaterialInstance = PreviewInstance;
+    Result.Message = FString::Printf(
+        TEXT("Created transient DWC preview material for '%s'."),
+        *GetNameSafe(SourceMaterial));
+    return Result;
+}
+
 bool FWCAMaterialGenerator::IsMaterialConfiguredForDwc(UMaterialInterface* MaterialInterface)
 {
     return MaterialInterface != nullptr && IsUnifiedDwcMaterial(MaterialInterface->GetMaterial());
@@ -2372,7 +2553,6 @@ bool FWCAMaterialGenerator::IsMaterialConfiguredForDwc(
         FindVectorParameter(Material, DWCWetMaterialParameters::SurfaceWaterDebugDropletColor()) == nullptr ||
         FindVectorParameter(Material, DWCWetMaterialParameters::SurfaceWaterDebugRivuletColor()) == nullptr ||
         FindScalarParameter(Material, TEXT("DWC_WetRoughness")) == nullptr ||
-        FindScalarParameter(Material, DWCWetMaterialParameters::SurfaceWaterTargetRoughness()) == nullptr ||
         !IsFunctionInputConnected(Evaluate, TEXT("Wetness")) ||
         !IsFunctionInputConnected(Evaluate, TEXT("DWCDataUV")) ||
         !IsFunctionInputConnected(Evaluate, TEXT("SurfaceWaterNormalUV")))

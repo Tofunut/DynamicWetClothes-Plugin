@@ -12,8 +12,10 @@ namespace DWCWetnessProfilePreviewMaterial
     inline const FName SurfaceEnabledParameter(TEXT("DWCPreview_SurfaceEnabled"));
     inline const FName AbsorbedDarkeningStrengthParameter(TEXT("DWCPreview_AbsorbedDarkeningStrength"));
     inline const FName AbsorbedGlossinessStrengthParameter(TEXT("DWCPreview_AbsorbedGlossinessStrength"));
+    inline const FName SurfaceTargetRoughnessParameter(TEXT("DWCPreview_SurfaceTargetRoughness"));
     inline const FName SurfaceNormalStrengthParameter(TEXT("DWCPreview_SurfaceNormalStrength"));
-    inline const FName SurfaceRoughnessStrengthParameter(TEXT("DWCPreview_SurfaceRoughnessStrength"));
+    inline const FName SurfaceRoughnessBlendParameter(TEXT("DWCPreview_SurfaceRoughnessBlend"));
+    inline const FName OriginalSurfaceDetailParameter(TEXT("DWCPreview_OriginalSurfaceDetail"));
     inline const FName SurfaceVisibilityThresholdParameter(TEXT("DWCPreview_SurfaceVisibilityThreshold"));
     inline const FName DropletsEnabledParameter(TEXT("DWCPreview_DropletsEnabled"));
     inline const FName RivuletsEnabledParameter(TEXT("DWCPreview_RivuletsEnabled"));

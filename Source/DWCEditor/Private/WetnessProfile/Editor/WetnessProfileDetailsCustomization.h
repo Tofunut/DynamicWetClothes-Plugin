@@ -11,10 +11,21 @@ class IPropertyHandle;
 class IPropertyUtilities;
 class UWetnessProfile;
 
+enum class EWetnessProfileDetailsMode : uint8
+{
+    Combined,
+    AbsorbedWater,
+    SurfaceWater
+};
+
 class FWetnessProfileDetailsCustomization : public IDetailCustomization
 {
 public:
+    explicit FWetnessProfileDetailsCustomization(
+        EWetnessProfileDetailsMode InMode = EWetnessProfileDetailsMode::Combined);
+
     static TSharedRef<IDetailCustomization> MakeInstance();
+    static TSharedRef<IDetailCustomization> MakeInstance(EWetnessProfileDetailsMode InMode);
     virtual void CustomizeDetails(IDetailLayoutBuilder& DetailBuilder) override;
 
 private:
@@ -135,6 +146,7 @@ private:
     void RefreshValidationIssues();
 
 private:
+    EWetnessProfileDetailsMode Mode = EWetnessProfileDetailsMode::Combined;
     TWeakObjectPtr<UWetnessProfile> Profile;
     TWeakPtr<IPropertyUtilities> PropertyUtilities;
     TArray<FCollectedProperty> CollectedProperties;

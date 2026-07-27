@@ -5,6 +5,7 @@
 #include "WetnessProfile.generated.h"
 
 class UTexture2D;
+class USkeletalMesh;
 
 USTRUCT(BlueprintType)
 struct DWC_API FAbsorbedWetnessProfileParameters
@@ -90,13 +91,21 @@ struct DWC_API FSurfaceWaterProfileParameters
     float RivuletLengthPixels = 48.0f;
 
 
+    /** Roughness reached by fully visible surface water. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rendering", meta=(ClampMin="0.0", ClampMax="1.0", DisplayName="Wet Surface Roughness"))
+    float SurfaceWaterTargetRoughness = 0.02f;
+
     /** Shared strength applied to both droplet and rivulet normals. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rendering", meta=(ClampMin="0.0", ClampMax="8.0"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rendering", meta=(ClampMin="0.0", ClampMax="8.0", DisplayName="Water Detail Strength"))
     float SurfaceWaterNormalStrength = 3.0f;
 
-    /** Strength of the Surface Water roughness blend toward the material-wide target roughness. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rendering", meta=(ClampMin="0.0", ClampMax="1.0"))
-    float SurfaceWaterRoughnessStrength = 0.85f;
+    /** Strength of the Surface Water roughness blend toward Wet Surface Roughness. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rendering", meta=(ClampMin="0.0", ClampMax="1.0", DisplayName="Wet Roughness Blend"))
+    float SurfaceWaterRoughnessBlend = 0.85f;
+
+    /** Amount of original material normal detail retained under visible surface water. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rendering", meta=(ClampMin="0.0", ClampMax="1.0", DisplayName="Original Surface Detail"))
+    float OriginalSurfaceDetail = 1.0f;
 
     /** Minimum visible RT amount before Surface Water rendering begins. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rendering", meta=(ClampMin="0.0", ClampMax="1.0"))
@@ -224,5 +233,9 @@ class DWC_API UWetnessProfile : public UDataAsset
 #if WITH_EDITORONLY_DATA
     UPROPERTY(EditAnywhere, Category = "Wetness Profile")
     FString PreferredSaveDirectory = TEXT("/Game/WetnessProfiles");
+
+    /** Editor preview mesh shown by default when this Wetness Profile is opened. */
+    UPROPERTY(EditAnywhere, Category = "Wetness Profile|Preview")
+    TObjectPtr<USkeletalMesh> PreviewSkeletalMesh = nullptr;
 #endif
 };

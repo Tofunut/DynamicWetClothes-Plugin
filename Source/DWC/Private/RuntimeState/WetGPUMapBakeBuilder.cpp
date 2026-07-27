@@ -1339,6 +1339,7 @@ void AddAuthoredWetPartDataToSignature(
     const UWetClothingAsset& Asset)
 {
     const FWetClothingEditableWetPartData& WetPartData = Asset.Authored.PartData.EditableWetPartData;
+    const FResolvedProfileParameterCache ProfileCache(Asset);
     TArray<int32> SlotIndices;
     for (int32 SlotIndex = 0; SlotIndex < WetPartData.MaterialSlots.Num(); ++SlotIndex)
     {
@@ -1376,8 +1377,13 @@ void AddAuthoredWetPartDataToSignature(
             const FWetClothingWetPartEntry& Entry = Slot.WetPartEntries[EntryIndex];
             Builder.AddValue(Entry.WetPartID);
             Builder.AddValue(Entry.ProfileIndex);
-            const FWetPartProfileAssignment* Profile = WetPartData.FindProfile(Entry);
-            Builder.AddValue(Profile != nullptr && Profile->Parameters.SupportsSurfaceWater() ? 1 : 0);
+            const FWetnessProfileParameters& ResolvedParameters = ProfileCache.Resolve(Entry.ProfileIndex);
+            const FDWCGPUProfileParameters GPUProfile = MakeGPUProfile(ResolvedParameters);
+            Builder.AddValue(ResolvedParameters.SupportsSurfaceWater() ? 1 : 0);
+            Builder.AddValue(GPUProfile.AbsorptionMultiplier);
+            Builder.AddValue(GPUProfile.SpreadRatePerSecond);
+            Builder.AddValue(GPUProfile.DryRatePerSecond);
+            Builder.AddValue(GPUProfile.GravityFlowStrength);
 
             TArray<int32> SortedIslandIDs = Entry.AssignedUVIslandIDs;
             SortedIslandIDs.Sort();

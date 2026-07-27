@@ -13,6 +13,45 @@
 
 namespace
 {
+    constexpr float MaskEdgeBlurRadiusTexels = 1.25f;
+    constexpr float MaskEdgeBlendGain = 4.0f;
+
+    int32 WrapTexelIndex(const int32 Index, const int32 Size)
+    {
+        return Size > 0 ? (Index % Size + Size) % Size : 0;
+    }
+
+    int32 MirrorTexelIndex(const int32 Index, const int32 Size)
+    {
+        if (Size <= 1)
+        {
+            return 0;
+        }
+
+        const int32 Period = Size * 2;
+        const int32 Wrapped = WrapTexelIndex(Index, Period);
+        return Wrapped < Size ? Wrapped : Period - Wrapped - 1;
+    }
+
+    int32 ResolveTexelIndex(
+        const int32 Index,
+        const int32 Size,
+        const TextureAddress AddressMode)
+    {
+        switch (AddressMode)
+        {
+        case TA_Wrap:
+            return WrapTexelIndex(Index, Size);
+
+        case TA_Mirror:
+            return MirrorTexelIndex(Index, Size);
+
+        case TA_Clamp:
+        default:
+            return FMath::Clamp(Index, 0, Size - 1);
+        }
+    }
+
     FLinearColor SampleBilinear(
         const FWetClothingTextureReadback& Source,
         const float U,
@@ -29,14 +68,62 @@ namespace
         const float TX = FMath::Clamp(SourceX - static_cast<float>(X0), 0.0f, 1.0f);
         const float TY = FMath::Clamp(SourceY - static_cast<float>(Y0), 0.0f, 1.0f);
 
-        const FLinearColor C00 = Source.GetLinearColor(X0, Y0);
-        const FLinearColor C10 = Source.GetLinearColor(X1, Y0);
-        const FLinearColor C01 = Source.GetLinearColor(X0, Y1);
-        const FLinearColor C11 = Source.GetLinearColor(X1, Y1);
+        const int32 AddressedX0 = ResolveTexelIndex(X0, Source.Width, Source.AddressX);
+        const int32 AddressedX1 = ResolveTexelIndex(X1, Source.Width, Source.AddressX);
+        const int32 AddressedY0 = ResolveTexelIndex(Y0, Source.Height, Source.AddressY);
+        const int32 AddressedY1 = ResolveTexelIndex(Y1, Source.Height, Source.AddressY);
+
+        const FLinearColor C00 = Source.GetLinearColor(AddressedX0, AddressedY0);
+        const FLinearColor C10 = Source.GetLinearColor(AddressedX1, AddressedY0);
+        const FLinearColor C01 = Source.GetLinearColor(AddressedX0, AddressedY1);
+        const FLinearColor C11 = Source.GetLinearColor(AddressedX1, AddressedY1);
         return FMath::Lerp(
             FMath::Lerp(C00, C10, TX),
             FMath::Lerp(C01, C11, TX),
             TY);
+    }
+
+    float SampleMask(
+        const FWetClothingTextureReadback& Source,
+        const float U,
+        const float V)
+    {
+        return FMath::Clamp(SampleBilinear(Source, U, V).R, 0.0f, 1.0f);
+    }
+
+    FLinearColor SampleEdgeSoftenedMask(
+        const FWetClothingTextureReadback& Source,
+        const float U,
+        const float V)
+    {
+        const float Center = SampleMask(Source, U, V);
+        const float BlurStep = MaskEdgeBlurRadiusTexels /
+            static_cast<float>(DWCSurfaceTextureNormalization::Resolution);
+
+        float WeightedSum = 0.0f;
+        float WeightSum = 0.0f;
+        for (int32 OffsetY = -1; OffsetY <= 1; ++OffsetY)
+        {
+            const float WeightY = OffsetY == 0 ? 2.0f : 1.0f;
+            for (int32 OffsetX = -1; OffsetX <= 1; ++OffsetX)
+            {
+                const float WeightX = OffsetX == 0 ? 2.0f : 1.0f;
+                const float Weight = WeightX * WeightY;
+                WeightedSum += SampleMask(
+                    Source,
+                    U + static_cast<float>(OffsetX) * BlurStep,
+                    V + static_cast<float>(OffsetY) * BlurStep) * Weight;
+                WeightSum += Weight;
+            }
+        }
+
+        const float Blurred = WeightSum > 0.0f ? WeightedSum / WeightSum : Center;
+        const float EdgeBlend = FMath::Clamp(
+            FMath::Abs(Blurred - Center) * MaskEdgeBlendGain,
+            0.0f,
+            1.0f);
+        const float Softened = FMath::Lerp(Center, Blurred, EdgeBlend);
+        return FLinearColor(Softened, Softened, Softened, 1.0f);
     }
 
     FColor EncodeMask(const FLinearColor& Sample)
@@ -276,7 +363,7 @@ bool FWetClothingSurfaceTextureNormalizer::NormalizeTexture(
             const FLinearColor Sample = SampleBilinear(SourceData, U, V);
             Pixels[Y * DWCSurfaceTextureNormalization::Resolution + X] = bNormalMap
                 ? EncodeNormal(Sample, SourceTexture->bFlipGreenChannel)
-                : EncodeMask(Sample);
+                : EncodeMask(SampleEdgeSoftenedMask(SourceData, U, V));
         }
     }
 

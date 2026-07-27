@@ -5,7 +5,7 @@
 
 class FAdvancedPreviewScene;
 class SWetnessProfileViewport;
-class UStaticMeshComponent;
+class UPrimitiveComponent;
 
 class FWetnessProfileViewportClient : public FEditorViewportClient
 {
@@ -14,10 +14,10 @@ class FWetnessProfileViewportClient : public FEditorViewportClient
 
     virtual void Tick(float DeltaSeconds) override;
 
-    void FocusOnPreviewMesh(const UStaticMeshComponent* InPreviewMeshComponent, bool bInstant = false);
-    void SetPreviewMeshComponent(const UStaticMeshComponent* InPreviewMeshComponent);
+    void FocusOnPreviewMesh(const UPrimitiveComponent* InPreviewMeshComponent, bool bInstant = false);
+    void SetPreviewMeshComponent(const UPrimitiveComponent* InPreviewMeshComponent);
 
   private:
     FAdvancedPreviewScene*                     PreviewScene = nullptr;
-    TWeakObjectPtr<const UStaticMeshComponent> PreviewMeshComponent;
+    TWeakObjectPtr<const UPrimitiveComponent> PreviewMeshComponent;
 };

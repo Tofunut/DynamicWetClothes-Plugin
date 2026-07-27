@@ -388,12 +388,14 @@ namespace
             Surface.RivuletLifetimeSeconds);
 
         const FString SurfaceKeyTail = FString::Printf(
-            TEXT("%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%s,%s}"),
+            TEXT("%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%s,%s}"),
             Surface.MinimumRivuletSurfaceAmount,
             Surface.RivuletWidthPixels,
             Surface.RivuletLengthPixels,
+            Surface.SurfaceWaterTargetRoughness,
             Surface.SurfaceWaterNormalStrength,
-            Surface.SurfaceWaterRoughnessStrength,
+            Surface.SurfaceWaterRoughnessBlend,
+            Surface.OriginalSurfaceDetail,
             Surface.SurfaceVisibilityThreshold,
             Surface.RivuletUVScrollSpeed,
             *GetPathNameSafe(Surface.DropletNormalTexture.Get()),
@@ -1467,6 +1469,12 @@ namespace
 
 void UWetClothingAsset::ClearPrecomputedSimulationData()
 {
+    // RuntimeBulkData stores CPU and GPU payloads together. Load it before mutating
+    // one segment so saving the change cannot discard the still-valid other segment.
+    if (!LoadRuntimeBulkData())
+    {
+        return;
+    }
 #if WITH_EDITOR
     ClearMeshContentSignatureCache();
 #endif
@@ -1476,6 +1484,12 @@ void UWetClothingAsset::ClearPrecomputedSimulationData()
 
 void UWetClothingAsset::ClearGPUWetMapData()
 {
+    // RuntimeBulkData stores CPU and GPU payloads together. Load it before mutating
+    // one segment so saving the change cannot discard the still-valid other segment.
+    if (!LoadRuntimeBulkData())
+    {
+        return;
+    }
 #if WITH_EDITOR
     ClearMeshContentSignatureCache();
 #endif
@@ -1485,10 +1499,13 @@ void UWetClothingAsset::ClearGPUWetMapData()
 
 void UWetClothingAsset::ClearGPUMapData()
 {
+    if (!LoadRuntimeBulkData())
+    {
+        return;
+    }
 #if WITH_EDITOR
     ClearMeshContentSignatureCache();
 #endif
-    EnsureRuntimeBulkDataLoaded();
     for (FDWCGPULODBakeData& Data : Derived.Bulk.GPURuntimeData)
     {
         Data.bMapDataValid = false;
@@ -1671,18 +1688,41 @@ const FDWCDataUVLODMetadata* UWetClothingAsset::FindDataUVMetadataForLOD(const i
 bool UWetClothingAsset::HasValidDataUVForLOD(const int32 LODIndex) const
 {
     const FDWCDataUVLODMetadata* DataUVMetadata = FindDataUVMetadataForLOD(LODIndex);
-    if (DataUVMetadata == nullptr || !DataUVMetadata->bIsValid || DataUVMetadata->UVChannelIndex != Metadata.DWCDataUVChannelIndex)
+    if (DataUVMetadata == nullptr ||
+        !DataUVMetadata->bIsValid ||
+        DataUVMetadata->UVChannelIndex != Metadata.DWCDataUVChannelIndex ||
+        DataUVMetadata->GeneratorVersion != DWCGeneratedDataVersion::DataUV)
     {
         return false;
     }
 
+    USkeletalMesh* RuntimeMesh = GetDWCSkeletalMesh();
     FDWCDataUVBufferView View;
-    if (!View.Initialize(GetDWCSkeletalMesh(), LODIndex, Metadata.DWCDataUVChannelIndex))
+    if (!View.Initialize(RuntimeMesh, LODIndex, Metadata.DWCDataUVChannelIndex) ||
+        DataUVMetadata->RenderVertexCount != View.NumVertices())
     {
         return false;
     }
 
-    return DataUVMetadata->RenderVertexCount == View.NumVertices();
+#if WITH_EDITOR
+    const FString CurrentOriginalUVSignature = BuildMeshContentSignature(
+        RuntimeMesh,
+        LODIndex,
+        Metadata.OriginalUVChannelIndex);
+    const FString CurrentDataUVSignature = BuildMeshContentSignature(
+        RuntimeMesh,
+        LODIndex,
+        Metadata.DWCDataUVChannelIndex);
+    if (CurrentOriginalUVSignature.IsEmpty() ||
+        CurrentDataUVSignature.IsEmpty() ||
+        DataUVMetadata->MeshInputSignature != CurrentOriginalUVSignature ||
+        DataUVMetadata->DataUVOutputSignature != CurrentDataUVSignature)
+    {
+        return false;
+    }
+#endif
+
+    return true;
 }
 
 void UWetClothingAsset::Serialize(FArchive& Ar)
@@ -1873,14 +1913,14 @@ bool UWetClothingAsset::LoadRuntimeBulkData(const bool bForceProgressDialog) con
 {
     if (bRuntimeBulkDataLoaded)
     {
-        return true;
+        return !bRuntimeBulkDataLoadFailed;
     }
 
     if (RuntimeBulkData.GetBulkDataSize() <= 0)
     {
         bRuntimeBulkDataLoaded = true;
         bRuntimeBulkDataLoadFailed = false;
-        return false;
+        return true;
     }
 
     const int64 BulkSize = RuntimeBulkData.GetBulkDataSize();
@@ -2139,10 +2179,6 @@ void UWetClothingAsset::StoreRuntimeDataToBulkData()
         return;
     }
 
-#if WITH_EDITORONLY_DATA
-    Derived.Inline.BakeState.SavedOutputMask |= RuntimeOutputsBeingSaved;
-#endif
-
     if (SlowTask.IsValid())
     {
         SlowTask->EnterProgressFrame(
@@ -2170,6 +2206,9 @@ void UWetClothingAsset::StoreRuntimeDataToBulkData()
     bRuntimeBulkDataLoaded = true;
     bRuntimeBulkDataLoadFailed = false;
     bRuntimeBulkDataDirty = false;
+#if WITH_EDITORONLY_DATA
+    Derived.Inline.BakeState.SavedOutputMask |= RuntimeOutputsBeingSaved;
+#endif
 #if WITH_EDITOR
     PendingRuntimeSaveOutputMask &= ~RuntimeSavedOutputMask;
 #endif
@@ -2185,8 +2224,16 @@ void UWetClothingAsset::MarkRuntimeBulkDataDirty(const int32 OutputMask)
 #if WITH_EDITOR
     ClearMeshContentSignatureCache();
 #endif
-    bRuntimeBulkDataLoaded = true;
-    bRuntimeBulkDataLoadFailed = false;
+    // Callers must load the aggregate payload before mutating one of its segments.
+    // Setting bRuntimeBulkDataLoaded=true without deserializing the payload creates a
+    // false "loaded but empty" state and can erase valid data during the next save.
+    if (!ensureMsgf(
+            bRuntimeBulkDataLoaded && !bRuntimeBulkDataLoadFailed,
+            TEXT("WetClothingAsset '%s' modified runtime bulk data before loading the existing payload."),
+            *GetNameSafe(this)))
+    {
+        return;
+    }
     bRuntimeBulkDataDirty = true;
     Metadata.AssetDataVersion = CurrentAssetDataVersion;
 #if WITH_EDITOR
@@ -2810,6 +2857,12 @@ void UWetClothingAsset::RefreshBakeStateInternal(const bool bRunDeepValidation)
 
 bool UWetClothingAsset::RebuildGPURuntimeData(FString* OutErrorMessage)
 {
+    if (!LoadRuntimeBulkData(true))
+    {
+        DWC::Error::SetMessage(OutErrorMessage, TEXT("Existing WCA runtime bulk data could not be loaded."));
+        return false;
+    }
+
     if (!HasAnyWettableMaterialSlot())
     {
         ClearGPUWetMapData();
@@ -2945,12 +2998,18 @@ bool UWetClothingAsset::RebuildRuntimeDataForSave(FString* OutErrorMessage)
         DWCBakeOutput::CPURuntimeData |
         DWCBakeOutput::GPURuntimeData |
         DWCBakeOutput::GPUMaps;
-    const bool bCPUDataCurrent =
-        !Metadata.SetupSettings.bBuildCPUVertexSimulationData ||
-        DWCBuildStatus::IsUsable(Derived.Inline.BakeState.CPURuntimeData);
-    const bool bGPUDataCurrent =
-        !Metadata.SetupSettings.bBuildGPUWetnessMapSimulationData ||
-        DWCBuildStatus::IsUsable(Derived.Inline.BakeState.GPURuntimeData);
+    const bool bCPUDataCurrent = Metadata.SetupSettings.bBuildCPUVertexSimulationData
+        ? (DWCBuildStatus::IsUsable(Derived.Inline.BakeState.CPURuntimeData) &&
+           IsPrecomputedSimulationDataValidForMesh(RuntimeMesh))
+        : (Derived.Inline.BakeState.CPURuntimeData == EDWCBakeStatus::Disabled &&
+           !HasCPURuntimeDataPayload());
+    const bool bGPUDataCurrent = Metadata.SetupSettings.bBuildGPUWetnessMapSimulationData
+        ? (DWCBuildStatus::IsUsable(Derived.Inline.BakeState.GPURuntimeData) &&
+           IsGPURuntimeDataValidForMesh(RuntimeMesh, RuntimeSimulationLODIndex))
+        : (Derived.Inline.BakeState.GPURuntimeData == EDWCBakeStatus::Disabled &&
+           Derived.Inline.BakeState.GPUMaps == EDWCBakeStatus::Disabled &&
+           !HasGPURuntimeDataPayload() &&
+           !HasGPUMapDataPayload());
     const bool bLODVertexColorDataCurrent = FWCALODVertexColorBuilder::IsCurrent(
         RuntimeMesh,
         Metadata.SetupSettings.FirstGeneratedLODIndex,
@@ -2967,6 +3026,34 @@ bool UWetClothingAsset::RebuildRuntimeDataForSave(FString* OutErrorMessage)
     {
         DWC::Error::SetMessage(OutErrorMessage, TEXT(""));
         return true;
+    }
+
+    const bool bCPUBackendEnabled = Metadata.SetupSettings.bBuildCPUVertexSimulationData;
+    const bool bGPUBackendEnabled = Metadata.SetupSettings.bBuildGPUWetnessMapSimulationData;
+    if (!bCPUBackendEnabled && !bGPUBackendEnabled)
+    {
+        // No runtime backend needs either segment. Clear the aggregate payload directly;
+        // loading a stale or corrupt payload first would only prevent a valid cleanup.
+        Derived.Bulk.NeighborRuntimeData = FWetClothingPrecomputedSimulationData();
+        Derived.Bulk.GPURuntimeData.Reset();
+        ClearRuntimeBulkData();
+        Derived.Inline.BakeState.CPURuntimeData = EDWCBakeStatus::Disabled;
+        Derived.Inline.BakeState.GPURuntimeData = EDWCBakeStatus::Disabled;
+        Derived.Inline.BakeState.GPUMaps = EDWCBakeStatus::Disabled;
+        Derived.Inline.BakeState.GeneratedOutputMask &= ~RuntimeOutputMask;
+        Derived.Inline.BakeState.SavedOutputMask &= ~RuntimeOutputMask;
+        PendingRuntimeSaveOutputMask &= ~RuntimeOutputMask;
+        Derived.Inline.BakeState.LastFailure.Reset();
+        DWC::Error::SetMessage(OutErrorMessage, TEXT(""));
+        return true;
+    }
+
+    if (!LoadRuntimeBulkData(true))
+    {
+        DWC::Error::SetMessage(
+            OutErrorMessage,
+            TEXT("Existing WCA runtime bulk data could not be loaded. Rebuild was aborted to avoid discarding valid runtime payloads."));
+        return false;
     }
 
     TGuardValue<bool> RebuildGuard(bRuntimeDataRebuildInProgress, true);
@@ -3039,7 +3126,8 @@ bool UWetClothingAsset::RebuildRuntimeDataForSave(FString* OutErrorMessage)
 
     if (Metadata.SetupSettings.bBuildCPUVertexSimulationData)
     {
-        if (IsPrecomputedSimulationDataValidForMesh(RuntimeMesh))
+        if (DWCBuildStatus::IsUsable(Derived.Inline.BakeState.CPURuntimeData) &&
+            IsPrecomputedSimulationDataValidForMesh(RuntimeMesh))
         {
             SlowTask.EnterProgressFrame(
                 1.25f,
@@ -3080,7 +3168,9 @@ bool UWetClothingAsset::RebuildRuntimeDataForSave(FString* OutErrorMessage)
 
     if (Metadata.SetupSettings.bBuildGPUWetnessMapSimulationData)
     {
-        const bool bRuntimeGPUDataValid = IsGPURuntimeDataValidForMesh(RuntimeMesh, RuntimeLODIndex);
+        const bool bRuntimeGPUDataValid =
+            DWCBuildStatus::IsUsable(Derived.Inline.BakeState.GPURuntimeData) &&
+            IsGPURuntimeDataValidForMesh(RuntimeMesh, RuntimeLODIndex);
         if (bRuntimeGPUDataValid)
         {
             SlowTask.EnterProgressFrame(
@@ -3151,12 +3241,6 @@ bool UWetClothingAsset::CanPrepareRuntimeDataForEditorSave(FString* OutSkipReaso
     {
         DWC::Error::SetMessage(OutSkipReason, TEXT(""));
         return true;
-    }
-
-    if (!Metadata.SetupSettings.bBuildCPUVertexSimulationData && !Metadata.SetupSettings.bBuildGPUWetnessMapSimulationData)
-    {
-        DWC::Error::SetMessage(OutSkipReason, TEXT("No DWC runtime data backend is enabled."));
-        return false;
     }
 
     if (GetRuntimeSkeletalMesh() == nullptr)
@@ -3253,7 +3337,55 @@ bool UWetClothingAsset::IsBakeOutputSavePending(const int32 OutputMask) const
 
 void UWetClothingAsset::MarkRuntimeBakeOutputsDirty(const int32 OutputMask)
 {
-    MarkRuntimeBulkDataDirty(OutputMask);
+    ClearMeshContentSignatureCache();
+
+    const auto InvalidateOutput = [this, OutputMask](
+        const int32 Output,
+        EDWCBakeStatus& Status,
+        const bool bEnabled,
+        const bool bHasPayload)
+    {
+        if (!DWCBakeOutput::Has(OutputMask, Output))
+        {
+            return;
+        }
+
+        if (!bEnabled || !HasAnyWettableMaterialSlot())
+        {
+            Status = EDWCBakeStatus::Disabled;
+        }
+        else
+        {
+            const bool bHasPriorOutput =
+                bHasPayload ||
+                HasGeneratedBakeOutput(Output) ||
+                HasSavedBakeOutput(Output);
+            Status = bHasPriorOutput ? EDWCBakeStatus::OutOfDate : EDWCBakeStatus::Required;
+        }
+
+        // The previous payload is stale, not newly generated. Do not present it as
+        // "Save Required"; it must be rebuilt (or explicitly baked) first.
+        PendingRuntimeSaveOutputMask &= ~Output;
+    };
+
+    InvalidateOutput(
+        DWCBakeOutput::CPURuntimeData,
+        Derived.Inline.BakeState.CPURuntimeData,
+        Metadata.SetupSettings.bBuildCPUVertexSimulationData,
+        HasCPURuntimeDataPayload());
+    InvalidateOutput(
+        DWCBakeOutput::GPURuntimeData,
+        Derived.Inline.BakeState.GPURuntimeData,
+        Metadata.SetupSettings.bBuildGPUWetnessMapSimulationData,
+        HasGPURuntimeDataPayload());
+    InvalidateOutput(
+        DWCBakeOutput::GPUMaps,
+        Derived.Inline.BakeState.GPUMaps,
+        Metadata.SetupSettings.bBuildGPUWetnessMapSimulationData,
+        HasGPUMapDataPayload());
+
+    Derived.Inline.BakeState.LastFailure.Reset();
+    MarkPackageDirty();
 }
 
 
@@ -3467,6 +3599,11 @@ bool UWetClothingAsset::IsGPURuntimeDataValidForMesh(const USkeletalMesh* Skelet
         SkeletalMesh,
         LODIndex,
         GetDWCDataUVChannelIndex());
+    const bool bRuntimePayloadAvailable = bRuntimeBulkDataLoaded
+        ? Data->Profiles.Num() == Data->ProfileCount &&
+          Data->Triangles.Num() == Data->TriangleCount &&
+          Data->VertexIncidentTriangles.Num() == Data->VertexIncidentRecordCount
+        : (!bRuntimeBulkDataLoadFailed && HasRuntimeBulkPayload());
     if (Data->RuntimeDataVersion != FDWCGPULODBakeData::CurrentRuntimeDataVersion ||
         Data->BulkDataVersion != FDWCGPULODBakeData::CurrentBulkDataVersion ||
         Data->LODIndex != LODIndex ||
@@ -3475,10 +3612,23 @@ bool UWetClothingAsset::IsGPURuntimeDataValidForMesh(const USkeletalMesh* Skelet
         Data->ProfileCount <= 0 ||
         Data->TriangleCount <= 0 ||
         Data->VertexIncidentRecordCount <= 0 ||
-        (Data->Triangles.Num() == 0 && !HasRuntimeBulkPayload()))
+        !bRuntimePayloadAvailable)
     {
         return false;
     }
+
+#if WITH_EDITOR
+    FString ExpectedRuntimeSignature;
+    if (!FWetGPUMapBakeBuilder::BuildLODRuntimeSignature(
+            *this,
+            LODIndex,
+            ExpectedRuntimeSignature) ||
+        ExpectedRuntimeSignature.IsEmpty() ||
+        Data->RuntimeSignature != ExpectedRuntimeSignature)
+    {
+        return false;
+    }
+#endif
 
     return true;
 }
@@ -3505,19 +3655,42 @@ bool UWetClothingAsset::IsGPUWetMapDataValidForMesh(const USkeletalMesh* Skeleta
         return false;
     }
 
+    const bool bMapPayloadAvailable = bRuntimeBulkDataLoaded
+        ? Data->MaterialSlots.Num() == Data->MaterialSlotMapCount
+        : (!bRuntimeBulkDataLoadFailed && HasRuntimeBulkPayload());
     if (Data->MapBakeVersion != FDWCGPULODBakeData::CurrentMapBakeVersion ||
         Data->MaterialSlotMapCount <= 0 ||
         !IsGPUMapPayloadCompatibleWithCurrentSetup(*this, *Data) ||
-        (Data->MaterialSlots.Num() == 0 && !HasRuntimeBulkPayload()))
+        !bMapPayloadAvailable)
     {
         return false;
     }
+
+#if WITH_EDITOR
+    FString ExpectedMapSignature;
+    if (!FWetGPUMapBakeBuilder::BuildLODMapSignature(
+            *this,
+            LODIndex,
+            ExpectedMapSignature) ||
+        ExpectedMapSignature.IsEmpty() ||
+        Data->MapSignature != ExpectedMapSignature)
+    {
+        return false;
+    }
+#endif
+
     return true;
 }
 
 #if WITH_EDITOR
 bool UWetClothingAsset::RebuildPrecomputedSimulationData(FString* OutErrorMessage)
 {
+    if (!LoadRuntimeBulkData(true))
+    {
+        DWC::Error::SetMessage(OutErrorMessage, TEXT("Existing WCA runtime bulk data could not be loaded."));
+        return false;
+    }
+
     const int32 LODIndex = RuntimeSimulationLODIndex;
     ClearPrecomputedSimulationData();
 

@@ -206,7 +206,7 @@ class DWC_API UWetClothingAsset : public UDataAsset
     void CompleteRuntimeDataEditorSaveAttempt(bool bSaveSucceeded);
     bool IsBakeOutputSavePending(int32 OutputMask) const;
 
-    /** Marks selected serialized runtime outputs dirty after editor-authored data changes. */
+    /** Invalidates selected derived outputs after editor-authored data changes without marking stale payloads as save-pending. */
     void MarkRuntimeBakeOutputsDirty(int32 OutputMask);
 
     static FString BuildMeshContentSignature(const USkeletalMesh* SkeletalMesh, int32 LODIndex, int32 UVChannelIndex = INDEX_NONE);

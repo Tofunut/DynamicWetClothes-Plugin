@@ -78,8 +78,8 @@ namespace
         const bool bSavePending,
         const FString& FailureDetails)
     {
+        (void)bAssetHasUnsavedChanges;
         const bool bHasPriorOutput = bHasPayload || bWasEverGenerated || bWasEverSaved;
-        const bool bHasSavedOutput = bHasPayload || bWasEverSaved;
         if (DWCBuildStatus::IsUsable(Status) && bSavePending)
         {
             return FString::Printf(TEXT("%s: Generated and current, but not saved yet. Save the asset to persist it."), Label);
@@ -87,10 +87,6 @@ namespace
         if (Status == EDWCBakeStatus::Required && !bHasPriorOutput)
         {
             return FString::Printf(TEXT("%s: Not generated yet. Save the asset to generate it."), Label);
-        }
-        if (Status == EDWCBakeStatus::Required && !bHasSavedOutput && bAssetHasUnsavedChanges)
-        {
-            return FString::Printf(TEXT("%s: Generated but not saved yet. Save the asset to persist it."), Label);
         }
         if (Status == EDWCBakeStatus::Required)
         {

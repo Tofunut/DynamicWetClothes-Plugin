@@ -49,6 +49,11 @@ class FWCAMaterialGenerator
         UMaterialInterface* SourceMaterial,
         const FOptions& Options = FOptions());
 
+    /** Creates a transient GPU preview permutation from the source material without writing generated assets. */
+    static FWetClothingUnifiedMaterialSetupResult CreateTransientUnifiedPreviewMaterial(
+        UMaterialInterface* SourceMaterial,
+        const FOptions& Options = FOptions());
+
     static bool IsMaterialConfiguredForDwc(UMaterialInterface* MaterialInterface);
     static bool IsMaterialConfiguredForDwc(UMaterialInterface* MaterialInterface, const FOptions& Options);
     /** Fast reference-only validation used by routine editor status refreshes. */

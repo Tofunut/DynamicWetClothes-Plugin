@@ -1,7 +1,7 @@
 #include "WetnessProfileViewportClient.h"
 
 #include "AdvancedPreviewScene.h"
-#include "Components/StaticMeshComponent.h"
+#include "Components/PrimitiveComponent.h"
 #include "SEditorViewport.h"
 #include "SWetnessProfileViewport.h"
 
@@ -26,9 +26,9 @@ void FWetnessProfileViewportClient::Tick(float DeltaSeconds)
     FEditorViewportClient::Tick(DeltaSeconds);
 }
 
-void FWetnessProfileViewportClient::FocusOnPreviewMesh(const UStaticMeshComponent* InPreviewMeshComponent, bool bInstant)
+void FWetnessProfileViewportClient::FocusOnPreviewMesh(const UPrimitiveComponent* InPreviewMeshComponent, bool bInstant)
 {
-    if (InPreviewMeshComponent == nullptr || InPreviewMeshComponent->GetStaticMesh() == nullptr)
+    if (InPreviewMeshComponent == nullptr)
     {
         return;
     }
@@ -37,7 +37,7 @@ void FWetnessProfileViewportClient::FocusOnPreviewMesh(const UStaticMeshComponen
     FocusViewportOnBox(Bounds.GetBox(), bInstant);
 }
 
-void FWetnessProfileViewportClient::SetPreviewMeshComponent(const UStaticMeshComponent* InPreviewMeshComponent)
+void FWetnessProfileViewportClient::SetPreviewMeshComponent(const UPrimitiveComponent* InPreviewMeshComponent)
 {
     PreviewMeshComponent = InPreviewMeshComponent;
 }

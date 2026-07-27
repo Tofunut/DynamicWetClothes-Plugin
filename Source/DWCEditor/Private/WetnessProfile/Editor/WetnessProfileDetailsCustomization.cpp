@@ -12,6 +12,7 @@
 #include "WetnessProfile/Editor/WetnessProfileEditorPolicy.h"
 #include "Widgets/Images/SImage.h"
 #include "Widgets/Input/SButton.h"
+#include "Widgets/Input/SCheckBox.h"
 #include "Widgets/Input/SNumericEntryBox.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/SBoxPanel.h"
@@ -21,8 +22,6 @@
 
 namespace
 {
-    constexpr float SurfaceWaterSubchannelNameIndent = 16.0f;
-
     bool ReadBoolProperty(const TWeakPtr<IPropertyHandle> WeakHandle)
     {
         const TSharedPtr<IPropertyHandle> Handle = WeakHandle.Pin();
@@ -144,20 +143,100 @@ namespace
         };
     }
 
-    float ThresholdToVisibilityPercent(const float RawThreshold)
+    ECheckBoxState GetBoolCheckState(const TWeakPtr<IPropertyHandle> WeakHandle)
     {
-        return (1.0f - FMath::Clamp(RawThreshold, 0.0f, 1.0f)) * 100.0f;
+        return ReadBoolProperty(WeakHandle)
+            ? ECheckBoxState::Checked
+            : ECheckBoxState::Unchecked;
     }
 
-    float VisibilityPercentToThreshold(const float DisplayValue)
+    void SetBoolProperty(const TWeakPtr<IPropertyHandle> WeakHandle, const ECheckBoxState NewState)
     {
-        return 1.0f - FMath::Clamp(DisplayValue, 0.0f, 100.0f) * 0.01f;
+        if (const TSharedPtr<IPropertyHandle> Handle = WeakHandle.Pin())
+        {
+            Handle->SetValue(NewState == ECheckBoxState::Checked);
+        }
     }
+
+    void ConfigureSurfaceTypeGroupHeader(
+        IDetailGroup& Group,
+        const TSharedPtr<IPropertyHandle>& EnabledHandle,
+        const FText& Title,
+        const FText& Description,
+        const TAttribute<bool>& ParentEnabled,
+        const FLinearColor& HeaderTint)
+    {
+        Group.HeaderRow()
+            .WholeRowContent()
+            [
+                SNew(SBorder)
+                .Padding(FMargin(8.0f, 5.0f))
+                .BorderImage(FAppStyle::GetBrush(TEXT("ToolPanel.GroupBorder")))
+                .BorderBackgroundColor(HeaderTint)
+                [
+                    SNew(SHorizontalBox)
+                    + SHorizontalBox::Slot()
+                    .FillWidth(1.0f)
+                    .VAlign(VAlign_Center)
+                    [
+                        SNew(SVerticalBox)
+                        + SVerticalBox::Slot()
+                        .AutoHeight()
+                        [
+                            SNew(STextBlock)
+                            .Text(Title)
+                            .Font(FAppStyle::GetFontStyle(TEXT("PropertyWindow.BoldFont")))
+                        ]
+                        + SVerticalBox::Slot()
+                        .AutoHeight()
+                        .Padding(0.0f, 2.0f, 0.0f, 0.0f)
+                        [
+                            SNew(STextBlock)
+                            .Text(Description)
+                            .ColorAndOpacity(FSlateColor::UseSubduedForeground())
+                        ]
+                    ]
+                    + SHorizontalBox::Slot()
+                    .AutoWidth()
+                    .VAlign(VAlign_Center)
+                    .Padding(12.0f, 0.0f, 0.0f, 0.0f)
+                    [
+                        SNew(SCheckBox)
+                        .IsEnabled(ParentEnabled)
+                        .IsChecked_Lambda([WeakHandle = TWeakPtr<IPropertyHandle>(EnabledHandle)]()
+                        {
+                            return GetBoolCheckState(WeakHandle);
+                        })
+                        .OnCheckStateChanged_Lambda([WeakHandle = TWeakPtr<IPropertyHandle>(EnabledHandle)](const ECheckBoxState NewState)
+                        {
+                            SetBoolProperty(WeakHandle, NewState);
+                        })
+                        [
+                            SNew(STextBlock)
+                            .Text(LOCTEXT("SurfaceTypeEnabled", "Enabled"))
+                        ]
+                    ]
+                ]
+            ];
+    }
+
+}
+
+FWetnessProfileDetailsCustomization::FWetnessProfileDetailsCustomization(
+    const EWetnessProfileDetailsMode InMode)
+    : Mode(InMode)
+{
 }
 
 TSharedRef<IDetailCustomization> FWetnessProfileDetailsCustomization::MakeInstance()
 {
-    return MakeShared<FWetnessProfileDetailsCustomization>();
+    return MakeShared<FWetnessProfileDetailsCustomization>(EWetnessProfileDetailsMode::Combined);
+}
+
+TSharedRef<IDetailCustomization> FWetnessProfileDetailsCustomization::MakeInstance(
+    const EWetnessProfileDetailsMode InMode)
+{
+    return MakeShared<FWetnessProfileDetailsCustomization>(InMode);
 }
 
 void FWetnessProfileDetailsCustomization::CustomizeDetails(IDetailLayoutBuilder& DetailBuilder)
@@ -190,6 +269,13 @@ void FWetnessProfileDetailsCustomization::CustomizeDetails(IDetailLayoutBuilder&
     DetailBuilder.HideCategory(TEXT("Surface Water"));
     DetailBuilder.HideCategory(TEXT("SurfaceWater"));
 
+    // These asset-level categories are redundant in the dedicated editor.
+    // Channel parameters are rebuilt below, while preview mesh controls live
+    // exclusively in the separate Preview tab.
+    DetailBuilder.HideCategory(TEXT("Wetness Profile"));
+    DetailBuilder.HideCategory(TEXT("WetnessProfile"));
+    DetailBuilder.HideCategory(TEXT("Preview"));
+
     const TSharedPtr<IPropertyHandle> AbsorbedStructHandle =
         ParametersHandle->GetChildHandle(TEXT("AbsorbedWetness"));
     const TSharedPtr<IPropertyHandle> SurfaceStructHandle =
@@ -211,6 +297,14 @@ void FWetnessProfileDetailsCustomization::CustomizeDetails(IDetailLayoutBuilder&
     if (PreferredDirectoryHandle->IsValidHandle())
     {
         DetailBuilder.HideProperty(PreferredDirectoryHandle);
+    }
+
+    const TSharedRef<IPropertyHandle> PreviewSkeletalMeshHandle = DetailBuilder.GetProperty(
+        TEXT("PreviewSkeletalMesh"),
+        UWetnessProfile::StaticClass());
+    if (PreviewSkeletalMeshHandle->IsValidHandle())
+    {
+        DetailBuilder.HideProperty(PreviewSkeletalMeshHandle);
     }
 
     CollectPropertiesRecursive(ParametersHandle, TEXT("Parameters"));
@@ -267,290 +361,250 @@ void FWetnessProfileDetailsCustomization::CustomizeDetails(IDetailLayoutBuilder&
         FindPropertyByPath(TEXT("Parameters.SurfaceWater.bEnabled"));
     const TSharedPtr<IPropertyHandle> DropletsEnabled =
         FindPropertyByPath(TEXT("Parameters.SurfaceWater.bEnableDroplets"));
-    const TSharedPtr<IPropertyHandle> RivuletsEnabled =
-        FindPropertyByPath(TEXT("Parameters.SurfaceWater.bEnableRivulets"));
 
     const TAttribute<bool> AbsorbedSettingsEnabled = EnabledWhen(AbsorbedEnabled);
     const TAttribute<bool> SurfaceSettingsEnabled = EnabledWhen(SurfaceEnabled);
     const TAttribute<bool> DropletSettingsEnabled = EnabledWhenBoth(SurfaceEnabled, DropletsEnabled);
-    const TAttribute<bool> RivuletSettingsEnabled = EnabledWhenBoth(SurfaceEnabled, RivuletsEnabled);
 
-    // ---------------------------------------------------------------------
-    // Water Channels
-    // ---------------------------------------------------------------------
+    const bool bShowAbsorbed = Mode != EWetnessProfileDetailsMode::SurfaceWater;
+    const bool bShowSurface = Mode != EWetnessProfileDetailsMode::AbsorbedWater;
+    const bool bSingleChannel = Mode != EWetnessProfileDetailsMode::Combined;
 
-    IDetailCategoryBuilder& WaterChannelsCategory = DetailBuilder.EditCategory(
-        TEXT("DWCWaterChannels"),
-        LOCTEXT("WaterChannelsCategory", "Water Channels"),
-        ECategoryPriority::Important);
-    ConfigurePrimaryCategory(WaterChannelsCategory, 5);
+    if (bShowAbsorbed)
+    {
+        if (!bSingleChannel)
+        {
+            IDetailCategoryBuilder& GeneralCategory = DetailBuilder.EditCategory(
+                TEXT("DWCAbsorbedGeneral"),
+                LOCTEXT("AbsorbedWaterCategory", "Absorbed Water"),
+                ECategoryPriority::Important);
+            ConfigurePrimaryCategory(GeneralCategory, 5);
+            AddDefaultProperty(
+                GeneralCategory,
+                AbsorbedEnabled,
+                LOCTEXT("EnableAbsorbedWater", "Enabled"),
+                LOCTEXT("EnableAbsorbedWaterTooltip", "Enable absorbed water, including spreading, drying, and appearance changes."));
+        }
 
-    AddDefaultProperty(
-        WaterChannelsCategory,
-        AbsorbedEnabled,
-        LOCTEXT("EnableAbsorbedWater", "Absorbed Water"),
-        LOCTEXT("EnableAbsorbedWaterTooltip", "Enable absorbed water, including spreading, drying, and appearance changes."));
-    AddDefaultProperty(
-        WaterChannelsCategory,
-        SurfaceEnabled,
-        LOCTEXT("EnableSurfaceWater", "Surface Water"),
-        LOCTEXT("EnableSurfaceWaterTooltip", "Enable water that remains visible on top of the material surface."));
-    AddDefaultProperty(
-        WaterChannelsCategory,
-        DropletsEnabled,
-        LOCTEXT("EnableDropletSurfaceWater", "Droplets"),
-        LOCTEXT("EnableDropletSurfaceWaterTooltip", "Enable round droplet stamps and droplet normal rendering for this profile."),
-        SurfaceSettingsEnabled,
-        SurfaceWaterSubchannelNameIndent);
-    AddDefaultProperty(
-        WaterChannelsCategory,
-        RivuletsEnabled,
-        LOCTEXT("EnableStreakSurfaceWater", "Streaks"),
-        LOCTEXT("EnableStreakSurfaceWaterTooltip", "Enable elongated, flow-aligned streak stamps and streak normal rendering for this profile."),
-        SurfaceSettingsEnabled,
-        SurfaceWaterSubchannelNameIndent);
+        IDetailCategoryBuilder& SimulationCategory = DetailBuilder.EditCategory(
+            TEXT("DWCAbsorbedSimulation"),
+            bSingleChannel
+                ? LOCTEXT("AbsorbedSimulationCategory", "Simulation")
+                : LOCTEXT("CombinedAbsorbedSimulationCategory", "Absorbed Water | Simulation"),
+            ECategoryPriority::Important);
+        ConfigurePrimaryCategory(SimulationCategory, bSingleChannel ? 5 : 10);
 
-    // ---------------------------------------------------------------------
-    // Simulation | Absorbed Water
-    // ---------------------------------------------------------------------
+        AddFloatProperty(
+            SimulationCategory,
+            FindPropertyByPath(TEXT("Parameters.AbsorbedWetness.AbsorptionFraction")),
+            LOCTEXT("Absorption", "Absorption"),
+            LOCTEXT("AbsorptionTooltip", "Amount of incoming water routed to absorbed water. Lower values leave more water available for surface effects."),
+            0.0f, 1.0f, 0.0f, 1.0f, 0.01f, 100.0f, 1, LOCTEXT("PercentSuffix1", "%"),
+            AbsorbedSettingsEnabled);
+        AddMappedFloatProperty(
+            SimulationCategory,
+            FindPropertyByPath(TEXT("Parameters.AbsorbedWetness.SpreadRate")),
+            LOCTEXT("SpreadSpeed", "Spread Speed"),
+            LOCTEXT("SpreadSpeedTooltip", "How quickly absorbed water spreads across connected surface samples."),
+            0.0f, 100.0f, 0.0f, 100.0f, 1.0f, 1, LOCTEXT("PercentSuffixSpread", "%"),
+            MakeMidpointRawToPercent(6.5f, 10.0f), MakeMidpointPercentToRaw(6.5f, 10.0f), 0.0f, 10.0f,
+            AbsorbedSettingsEnabled);
+        AddMappedFloatProperty(
+            SimulationCategory,
+            FindPropertyByPath(TEXT("Parameters.AbsorbedWetness.DryRate")),
+            LOCTEXT("DryingSpeed", "Drying Speed"),
+            LOCTEXT("DryingSpeedTooltip", "How quickly absorbed water fades over time."),
+            0.0f, 100.0f, 0.0f, 100.0f, 1.0f, 1, LOCTEXT("PercentSuffixDrying", "%"),
+            MakeMidpointRawToPercent(20.0f, 40.0f), MakeMidpointPercentToRaw(20.0f, 40.0f), 0.0f, 100.0f,
+            AbsorbedSettingsEnabled);
+        AddMappedFloatProperty(
+            SimulationCategory,
+            FindPropertyByPath(TEXT("Parameters.AbsorbedWetness.GravityFlowStrength")),
+            LOCTEXT("GravityInfluence", "Gravity Influence"),
+            LOCTEXT("GravityInfluenceTooltip", "How much absorbed water prefers to spread downward instead of evenly in all directions."),
+            0.0f, 100.0f, 0.0f, 100.0f, 1.0f, 1, LOCTEXT("PercentSuffixGravity", "%"),
+            MakeLinearRawToPercent(2.0f), MakeLinearPercentToRaw(2.0f), 0.0f, 10.0f,
+            AbsorbedSettingsEnabled);
 
-    IDetailCategoryBuilder& AbsorbedSimulationCategory = DetailBuilder.EditCategory(
-        TEXT("DWCSimulationAbsorbedWater"),
-        LOCTEXT("AbsorbedSimulationCategory", "Simulation | Absorbed Water"),
-        ECategoryPriority::Important);
-    ConfigurePrimaryCategory(AbsorbedSimulationCategory, 10);
+        IDetailCategoryBuilder& RenderingCategory = DetailBuilder.EditCategory(
+            TEXT("DWCAbsorbedRendering"),
+            bSingleChannel
+                ? LOCTEXT("AbsorbedRenderingCategory", "Rendering")
+                : LOCTEXT("CombinedAbsorbedRenderingCategory", "Absorbed Water | Rendering"),
+            ECategoryPriority::Important);
+        ConfigurePrimaryCategory(RenderingCategory, bSingleChannel ? 10 : 20);
 
-    AddFloatProperty(
-        AbsorbedSimulationCategory,
-        FindPropertyByPath(TEXT("Parameters.AbsorbedWetness.AbsorptionFraction")),
-        LOCTEXT("Absorption", "Absorption"),
-        LOCTEXT("AbsorptionTooltip", "Amount of incoming water routed to absorbed water. Lower values leave more water available for surface effects."),
-        0.0f, 1.0f, 0.0f, 1.0f, 0.01f, 100.0f, 1, LOCTEXT("PercentSuffix1", "%"),
-        AbsorbedSettingsEnabled);
-    AddMappedFloatProperty(
-        AbsorbedSimulationCategory,
-        FindPropertyByPath(TEXT("Parameters.AbsorbedWetness.SpreadRate")),
-        LOCTEXT("SpreadSpeed", "Spread Speed"),
-        LOCTEXT("SpreadSpeedTooltip", "How quickly absorbed water spreads across connected surface samples."),
-        0.0f, 100.0f, 0.0f, 100.0f, 1.0f, 1, LOCTEXT("PercentSuffixSpread", "%"),
-        MakeMidpointRawToPercent(6.5f, 10.0f), MakeMidpointPercentToRaw(6.5f, 10.0f), 0.0f, 10.0f,
-        AbsorbedSettingsEnabled);
-    AddMappedFloatProperty(
-        AbsorbedSimulationCategory,
-        FindPropertyByPath(TEXT("Parameters.AbsorbedWetness.DryRate")),
-        LOCTEXT("DryingSpeed", "Drying Speed"),
-        LOCTEXT("DryingSpeedTooltip", "How quickly absorbed water fades over time."),
-        0.0f, 100.0f, 0.0f, 100.0f, 1.0f, 1, LOCTEXT("PercentSuffixDrying", "%"),
-        MakeMidpointRawToPercent(20.0f, 40.0f), MakeMidpointPercentToRaw(20.0f, 40.0f), 0.0f, 100.0f,
-        AbsorbedSettingsEnabled);
+        AddFloatProperty(
+            RenderingCategory,
+            FindPropertyByPath(TEXT("Parameters.AbsorbedWetness.AbsorbedDarkeningStrength")),
+            LOCTEXT("Darkening", "Darkening"),
+            LOCTEXT("DarkeningTooltip", "How strongly absorbed water darkens the base color."),
+            0.0f, 1.0f, 0.0f, 1.0f, 0.01f, 100.0f, 1, LOCTEXT("PercentSuffix6", "%"),
+            AbsorbedSettingsEnabled);
+        AddFloatProperty(
+            RenderingCategory,
+            FindPropertyByPath(TEXT("Parameters.AbsorbedWetness.AbsorbedGlossinessStrength")),
+            LOCTEXT("AbsorbedGlossiness", "Glossiness"),
+            LOCTEXT("AbsorbedGlossinessTooltip", "How strongly absorbed water blends roughness toward the wet roughness target."),
+            0.0f, 1.0f, 0.0f, 1.0f, 0.01f, 100.0f, 1, LOCTEXT("PercentSuffixAbsorbedGlossiness", "%"),
+            AbsorbedSettingsEnabled);
+    }
 
-    IDetailGroup& AbsorbedAdvancedGroup = AbsorbedSimulationCategory.AddGroup(
-        TEXT("DWCAbsorbedAdvanced"),
-        LOCTEXT("AbsorbedAdvancedGroup", "Advanced"),
-        false,
-        false);
-    AddMappedFloatProperty(
-        AbsorbedAdvancedGroup,
-        FindPropertyByPath(TEXT("Parameters.AbsorbedWetness.GravityFlowStrength")),
-        LOCTEXT("GravityInfluence", "Gravity Influence"),
-        LOCTEXT("GravityInfluenceTooltip", "How much absorbed water prefers to spread downward instead of evenly in all directions."),
-        0.0f, 100.0f, 0.0f, 100.0f, 1.0f, 1, LOCTEXT("PercentSuffixGravity", "%"),
-        MakeLinearRawToPercent(2.0f), MakeLinearPercentToRaw(2.0f), 0.0f, 10.0f,
-        AbsorbedSettingsEnabled);
+    if (bShowSurface)
+    {
+        const int32 BaseSortOrder = bSingleChannel ? 5 : 30;
 
-    // ---------------------------------------------------------------------
-    // Simulation | Surface Water
-    // ---------------------------------------------------------------------
+        IDetailCategoryBuilder& GeneralCategory = DetailBuilder.EditCategory(
+            TEXT("DWCSurfaceAmount"),
+            bSingleChannel
+                ? LOCTEXT("SurfaceAmountCategory", "Amount")
+                : LOCTEXT("SurfaceWaterCategory", "Surface Water"),
+            ECategoryPriority::Important);
+        ConfigurePrimaryCategory(GeneralCategory, BaseSortOrder);
 
-    IDetailCategoryBuilder& SurfaceSimulationCategory = DetailBuilder.EditCategory(
-        TEXT("DWCSimulationSurfaceWater"),
-        LOCTEXT("SurfaceSimulationCategory", "Simulation | Surface Water"),
-        ECategoryPriority::Important);
-    ConfigurePrimaryCategory(SurfaceSimulationCategory, 20);
+        if (!bSingleChannel)
+        {
+            AddDefaultProperty(
+                GeneralCategory,
+                SurfaceEnabled,
+                LOCTEXT("EnableSurfaceWater", "Enabled"),
+                LOCTEXT("EnableSurfaceWaterTooltip", "Enable water that remains visible on top of the material surface."));
+        }
 
-    AddFloatProperty(
-        SurfaceSimulationCategory,
-        FindPropertyByPath(TEXT("Parameters.SurfaceWater.SurfaceRepresentationFraction")),
-        LOCTEXT("SurfaceWaterAmount", "Amount"),
-        LOCTEXT("SurfaceWaterAmountTooltip", "Amount of non-absorbed water represented as visible surface water."),
-        0.0f, 1.0f, 0.0f, 1.0f, 0.01f, 100.0f, 1, LOCTEXT("PercentSuffix2", "%"),
-        SurfaceSettingsEnabled);
+        AddFloatProperty(
+            GeneralCategory,
+            FindPropertyByPath(TEXT("Parameters.SurfaceWater.SurfaceRepresentationFraction")),
+            LOCTEXT("SurfaceWaterAmount", "Amount"),
+            LOCTEXT("SurfaceWaterAmountTooltip", "Amount of non-absorbed water represented as visible surface water."),
+            0.0f, 1.0f, 0.0f, 1.0f, 0.01f, 100.0f, 1, LOCTEXT("PercentSuffix2", "%"),
+            SurfaceSettingsEnabled);
 
-    IDetailGroup& DropletsGroup = SurfaceSimulationCategory.AddGroup(
-        TEXT("DWCDroplets"),
-        LOCTEXT("DropletsGroup", "Droplets"),
-        false,
-        true);
-    AddFloatProperty(
-        DropletsGroup,
-        FindPropertyByPath(TEXT("Parameters.SurfaceWater.DropletSpawnProbability")),
-        LOCTEXT("DropletSpawnChance", "Spawn Chance"),
-        LOCTEXT("DropletSpawnChanceTooltip", "Chance that eligible surface water produces a droplet stamp."),
-        0.0f, 1.0f, 0.0f, 1.0f, 0.01f, 100.0f, 1, LOCTEXT("PercentSuffix3", "%"),
-        DropletSettingsEnabled);
-    AddMappedFloatProperty(
-        DropletsGroup,
-        FindPropertyByPath(TEXT("Parameters.SurfaceWater.DropletRadiusPixels")),
-        LOCTEXT("DropletSize", "Size"),
-        LOCTEXT("DropletSizeTooltip", "Visible droplet size. 0% creates no droplet stamps."),
-        0.0f, 100.0f, 0.0f, 100.0f, 1.0f, 1, LOCTEXT("PercentSuffixDropletSize", "%"),
-        MakeSquaredRawToPercent(64.0f), MakeSquaredPercentToRaw(64.0f), 0.0f, 256.0f,
-        DropletSettingsEnabled);
+        IDetailCategoryBuilder& SimulationCategory = DetailBuilder.EditCategory(
+            TEXT("DWCSurfaceSimulation"),
+            bSingleChannel
+                ? LOCTEXT("SurfaceSimulationCategory", "Simulation")
+                : LOCTEXT("CombinedSurfaceSimulationCategory", "Surface Water | Simulation"),
+            ECategoryPriority::Important);
+        ConfigurePrimaryCategory(SimulationCategory, BaseSortOrder + 5);
 
-    IDetailGroup& StreaksGroup = SurfaceSimulationCategory.AddGroup(
-        TEXT("DWCStreaks"),
-        LOCTEXT("StreaksGroup", "Streaks"),
-        false,
-        true);
-    AddFloatProperty(
-        StreaksGroup,
-        FindPropertyByPath(TEXT("Parameters.SurfaceWater.RivuletSpawnProbability")),
-        LOCTEXT("StreakSpawnChance", "Spawn Chance"),
-        LOCTEXT("StreakSpawnChanceTooltip", "Chance that eligible surface water produces a flow-aligned streak stamp."),
-        0.0f, 1.0f, 0.0f, 1.0f, 0.01f, 100.0f, 1, LOCTEXT("PercentSuffix4", "%"),
-        RivuletSettingsEnabled);
-    AddMappedFloatProperty(
-        StreaksGroup,
-        FindPropertyByPath(TEXT("Parameters.SurfaceWater.RivuletWidthPixels")),
-        LOCTEXT("StreakWidth", "Width"),
-        LOCTEXT("StreakWidthTooltip", "Visible streak width. 0% creates no streak stamps."),
-        0.0f, 100.0f, 0.0f, 100.0f, 1.0f, 1, LOCTEXT("PercentSuffixStreakWidth", "%"),
-        MakeSquaredRawToPercent(32.0f), MakeSquaredPercentToRaw(32.0f), 0.0f, 256.0f,
-        RivuletSettingsEnabled);
-    AddMappedFloatProperty(
-        StreaksGroup,
-        FindPropertyByPath(TEXT("Parameters.SurfaceWater.RivuletLengthPixels")),
-        LOCTEXT("StreakLength", "Length"),
-        LOCTEXT("StreakLengthTooltip", "Visible streak length. 0% creates no streak stamps."),
-        0.0f, 100.0f, 0.0f, 100.0f, 1.0f, 1, LOCTEXT("PercentSuffixStreakLength", "%"),
-        MakeSquaredRawToPercent(192.0f), MakeSquaredPercentToRaw(192.0f), 0.0f, 512.0f,
-        RivuletSettingsEnabled);
+        IDetailGroup& DropletsGroup = SimulationCategory.AddGroup(
+            TEXT("DWCDroplets"),
+            LOCTEXT("DropletsGroup", "Droplets"),
+            false,
+            true);
+        ConfigureSurfaceTypeGroupHeader(
+            DropletsGroup,
+            DropletsEnabled,
+            LOCTEXT("DropletsGroupTitle", "Droplets"),
+            LOCTEXT("DropletsGroupDescription", "Round, scattered surface-water stamps"),
+            SurfaceSettingsEnabled,
+            FLinearColor(0.06f, 0.13f, 0.18f, 1.0f));
+        AddFloatProperty(
+            DropletsGroup,
+            FindPropertyByPath(TEXT("Parameters.SurfaceWater.DropletSpawnProbability")),
+            LOCTEXT("DropletSpawnChance", "Spawn Chance"),
+            LOCTEXT("DropletSpawnChanceTooltip", "Chance that eligible surface water produces a droplet stamp."),
+            0.0f, 1.0f, 0.0f, 1.0f, 0.01f, 100.0f, 1, LOCTEXT("PercentSuffix3", "%"),
+            DropletSettingsEnabled);
+        AddMappedFloatProperty(
+            DropletsGroup,
+            FindPropertyByPath(TEXT("Parameters.SurfaceWater.DropletRadiusPixels")),
+            LOCTEXT("DropletSize", "Size"),
+            LOCTEXT("DropletSizeTooltip", "Visible droplet size. 0% creates no droplet stamps."),
+            0.0f, 100.0f, 0.0f, 100.0f, 1.0f, 1, LOCTEXT("PercentSuffixDropletSize", "%"),
+            MakeSquaredRawToPercent(64.0f), MakeSquaredPercentToRaw(64.0f), 0.0f, 256.0f,
+            DropletSettingsEnabled);
+        AddFloatProperty(
+            DropletsGroup,
+            FindPropertyByPath(TEXT("Parameters.SurfaceWater.DropletLifetimeSeconds")),
+            LOCTEXT("DropletLifetime", "Lifetime"),
+            LOCTEXT("DropletLifetimeTooltip", "Time before a droplet stamp fully fades."),
+            0.01f, 120.0f, 0.1f, 30.0f, 0.1f, 1.0f, 2, LOCTEXT("SecondsSuffix1", "s"),
+            DropletSettingsEnabled);
 
-    IDetailGroup& SurfaceSimulationAdvancedGroup = SurfaceSimulationCategory.AddGroup(
-        TEXT("DWCSurfaceSimulationAdvanced"),
-        LOCTEXT("SurfaceSimulationAdvancedGroup", "Advanced"),
-        false,
-        false);
-    AddFloatProperty(
-        SurfaceSimulationAdvancedGroup,
-        FindPropertyByPath(TEXT("Parameters.SurfaceWater.DropletLifetimeSeconds")),
-        LOCTEXT("DropletLifetime", "Droplet Lifetime"),
-        LOCTEXT("DropletLifetimeTooltip", "Time before a droplet stamp fully fades."),
-        0.01f, 120.0f, 0.1f, 30.0f, 0.1f, 1.0f, 2, LOCTEXT("SecondsSuffix1", "s"),
-        DropletSettingsEnabled);
-    AddFloatProperty(
-        SurfaceSimulationAdvancedGroup,
-        FindPropertyByPath(TEXT("Parameters.SurfaceWater.RivuletLifetimeSeconds")),
-        LOCTEXT("StreakLifetime", "Streak Lifetime"),
-        LOCTEXT("StreakLifetimeTooltip", "Time before a streak stamp fully fades."),
-        0.01f, 120.0f, 0.1f, 30.0f, 0.1f, 1.0f, 2, LOCTEXT("SecondsSuffix2", "s"),
-        RivuletSettingsEnabled);
-    AddFloatProperty(
-        SurfaceSimulationAdvancedGroup,
-        FindPropertyByPath(TEXT("Parameters.SurfaceWater.MinimumRivuletSurfaceAmount")),
-        LOCTEXT("FormationThreshold", "Formation Threshold"),
-        LOCTEXT("FormationThresholdTooltip", "How much surface water must build up before streaks can appear."),
-        0.0f, 1.0f, 0.0f, 1.0f, 0.01f, 100.0f, 1, LOCTEXT("PercentSuffix5", "%"),
-        RivuletSettingsEnabled);
+        IDetailCategoryBuilder& RenderingCategory = DetailBuilder.EditCategory(
+            TEXT("DWCSurfaceRendering"),
+            bSingleChannel
+                ? LOCTEXT("SurfaceRenderingCategory", "Rendering")
+                : LOCTEXT("CombinedSurfaceRenderingCategory", "Surface Water | Rendering"),
+            ECategoryPriority::Important);
+        ConfigurePrimaryCategory(RenderingCategory, BaseSortOrder + 10);
+        RenderingCategory.AddCustomRow(LOCTEXT("SharedSurfaceAppearanceFilter", "Shared Surface Water Appearance"))
+            .WholeRowContent()
+            [
+                SNew(STextBlock)
+                .Text(LOCTEXT("SharedSurfaceAppearanceHint", "Surface-water appearance settings applied to Droplets."))
+                .AutoWrapText(true)
+                .ColorAndOpacity(FSlateColor::UseSubduedForeground())
+            ];
 
-    // ---------------------------------------------------------------------
-    // Rendering | Absorbed Water
-    // ---------------------------------------------------------------------
+        AddFloatProperty(
+            RenderingCategory,
+            FindPropertyByPath(TEXT("Parameters.SurfaceWater.SurfaceWaterTargetRoughness")),
+            LOCTEXT("WetSurfaceRoughness", "Wet Surface Roughness"),
+            LOCTEXT("WetSurfaceRoughnessTooltip", "Roughness reached when surface water is fully visible on this material profile."),
+            0.0f, 1.0f, 0.0f, 1.0f, 0.01f, 100.0f, 1, LOCTEXT("PercentSuffixWetSurfaceRoughness", "%"),
+            SurfaceSettingsEnabled);
+        AddFloatProperty(
+            RenderingCategory,
+            FindPropertyByPath(TEXT("Parameters.SurfaceWater.SurfaceWaterRoughnessBlend")),
+            LOCTEXT("WetRoughnessBlend", "Wet Roughness Blend"),
+            LOCTEXT("WetRoughnessBlendTooltip", "How strongly visible surface water blends from the original roughness to Wet Surface Roughness."),
+            0.0f, 1.0f, 0.0f, 1.0f, 0.01f, 100.0f, 1, LOCTEXT("PercentSuffix8", "%"),
+            SurfaceSettingsEnabled);
+        AddMappedFloatProperty(
+            RenderingCategory,
+            FindPropertyByPath(TEXT("Parameters.SurfaceWater.SurfaceWaterNormalStrength")),
+            LOCTEXT("SurfaceNormalStrength", "Water Detail Strength"),
+            LOCTEXT("SurfaceNormalStrengthTooltip", "How strongly droplets affect the final surface normal."),
+            0.0f, 100.0f, 0.0f, 100.0f, 1.0f, 1, LOCTEXT("PercentSuffix7", "%"),
+            MakeLinearRawToPercent(2.0f), MakeLinearPercentToRaw(2.0f), 0.0f, 8.0f,
+            SurfaceSettingsEnabled);
+        AddFloatProperty(
+            RenderingCategory,
+            FindPropertyByPath(TEXT("Parameters.SurfaceWater.OriginalSurfaceDetail")),
+            LOCTEXT("OriginalSurfaceDetail", "Original Surface Detail"),
+            LOCTEXT("OriginalSurfaceDetailTooltip", "Determines how much of the original material normal detail remains visible under surface water."),
+            0.0f, 1.0f, 0.0f, 1.0f, 0.01f, 100.0f, 1, LOCTEXT("PercentSuffixOriginalSurfaceDetail", "%"),
+            SurfaceSettingsEnabled);
+        AddMappedFloatProperty(
+            RenderingCategory,
+            FindPropertyByPath(TEXT("Parameters.SurfaceWater.SurfaceVisibilityThreshold")),
+            LOCTEXT("MinimumVisibleWater", "Minimum Visible Water"),
+            LOCTEXT("MinimumVisibleWaterTooltip", "Minimum surface-water amount required before droplets become visible."),
+            0.0f, 100.0f, 0.0f, 100.0f, 1.0f, 1, LOCTEXT("PercentSuffix9", "%"),
+            [](const float RawValue) { return FMath::Clamp(RawValue, 0.0f, 1.0f) * 100.0f; },
+            [](const float DisplayValue) { return FMath::Clamp(DisplayValue, 0.0f, 100.0f) * 0.01f; },
+            0.0f, 1.0f,
+            SurfaceSettingsEnabled);
 
-    IDetailCategoryBuilder& AbsorbedRenderingCategory = DetailBuilder.EditCategory(
-        TEXT("DWCRenderingAbsorbedWater"),
-        LOCTEXT("AbsorbedRenderingCategory", "Rendering | Absorbed Water"),
-        ECategoryPriority::Important);
-    ConfigurePrimaryCategory(AbsorbedRenderingCategory, 30);
+        IDetailCategoryBuilder& DetailTexturesCategory = DetailBuilder.EditCategory(
+            TEXT("DWCSurfaceDetailTextures"),
+            bSingleChannel
+                ? LOCTEXT("DetailTexturesCategory", "Detail Textures")
+                : LOCTEXT("CombinedDetailTexturesCategory", "Surface Water | Detail Textures"),
+            ECategoryPriority::Important);
+        ConfigurePrimaryCategory(DetailTexturesCategory, BaseSortOrder + 15);
 
-    AddFloatProperty(
-        AbsorbedRenderingCategory,
-        FindPropertyByPath(TEXT("Parameters.AbsorbedWetness.AbsorbedDarkeningStrength")),
-        LOCTEXT("Darkening", "Darkening"),
-        LOCTEXT("DarkeningTooltip", "How strongly absorbed water darkens the base color."),
-        0.0f, 1.0f, 0.0f, 1.0f, 0.01f, 100.0f, 1, LOCTEXT("PercentSuffix6", "%"),
-        AbsorbedSettingsEnabled);
-    AddFloatProperty(
-        AbsorbedRenderingCategory,
-        FindPropertyByPath(TEXT("Parameters.AbsorbedWetness.AbsorbedGlossinessStrength")),
-        LOCTEXT("AbsorbedGlossiness", "Glossiness"),
-        LOCTEXT("AbsorbedGlossinessTooltip", "How strongly absorbed water blends roughness toward the wet roughness target."),
-        0.0f, 1.0f, 0.0f, 1.0f, 0.01f, 100.0f, 1, LOCTEXT("PercentSuffixAbsorbedGlossiness", "%"),
-        AbsorbedSettingsEnabled);
+        IDetailGroup& DropletTexturesGroup = DetailTexturesCategory.AddGroup(
+            TEXT("DWCDropletTextures"),
+            LOCTEXT("DropletTexturesGroup", "Droplets"),
+            false,
+            true);
+        AddDefaultProperty(
+            DropletTexturesGroup,
+            FindPropertyByPath(TEXT("Parameters.SurfaceWater.DropletNormalTexture")),
+            LOCTEXT("DropletNormal", "Normal Texture"),
+            LOCTEXT("DropletNormalTooltip", "Normal texture used by droplet rendering. Empty uses the DWC default."),
+            DropletSettingsEnabled);
+        AddDefaultProperty(
+            DropletTexturesGroup,
+            FindPropertyByPath(TEXT("Parameters.SurfaceWater.DropletMaskTexture")),
+            LOCTEXT("DropletMask", "Mask Texture"),
+            LOCTEXT("DropletMaskTooltip", "Mask texture used to localize droplet normal detail. Empty uses the unmasked droplet detail."),
+            DropletSettingsEnabled);
 
-    // ---------------------------------------------------------------------
-    // Rendering | Surface Water
-    // ---------------------------------------------------------------------
-
-    IDetailCategoryBuilder& SurfaceRenderingCategory = DetailBuilder.EditCategory(
-        TEXT("DWCRenderingSurfaceWater"),
-        LOCTEXT("SurfaceRenderingCategory", "Rendering | Surface Water"),
-        ECategoryPriority::Important);
-    ConfigurePrimaryCategory(SurfaceRenderingCategory, 40);
-
-    AddMappedFloatProperty(
-        SurfaceRenderingCategory,
-        FindPropertyByPath(TEXT("Parameters.SurfaceWater.SurfaceWaterNormalStrength")),
-        LOCTEXT("SurfaceNormalStrength", "Normal Strength"),
-        LOCTEXT("SurfaceNormalStrengthTooltip", "How strongly droplets and streaks affect the final surface normal."),
-        0.0f, 100.0f, 0.0f, 100.0f, 1.0f, 1, LOCTEXT("PercentSuffix7", "%"),
-        MakeLinearRawToPercent(2.0f), MakeLinearPercentToRaw(2.0f), 0.0f, 8.0f,
-        SurfaceSettingsEnabled);
-    AddFloatProperty(
-        SurfaceRenderingCategory,
-        FindPropertyByPath(TEXT("Parameters.SurfaceWater.SurfaceWaterRoughnessStrength")),
-        LOCTEXT("SurfaceRoughnessStrength", "Roughness Strength"),
-        LOCTEXT("SurfaceRoughnessStrengthTooltip", "How strongly surface water blends the material toward the wet surface roughness target."),
-        0.0f, 1.0f, 0.0f, 1.0f, 0.01f, 100.0f, 1, LOCTEXT("PercentSuffix8", "%"),
-        SurfaceSettingsEnabled);
-
-    IDetailGroup& SurfaceRenderingAdvancedGroup = SurfaceRenderingCategory.AddGroup(
-        TEXT("DWCSurfaceRenderingAdvanced"),
-        LOCTEXT("SurfaceRenderingAdvancedGroup", "Advanced"),
-        false,
-        false);
-    AddMappedFloatProperty(
-        SurfaceRenderingAdvancedGroup,
-        FindPropertyByPath(TEXT("Parameters.SurfaceWater.SurfaceVisibilityThreshold")),
-        LOCTEXT("SurfaceVisibility", "Visibility"),
-        LOCTEXT("SurfaceVisibilityTooltip", "How easily surface water becomes visible. Higher values show weaker surface water."),
-        0.0f, 100.0f, 0.0f, 100.0f, 1.0f, 1, LOCTEXT("PercentSuffix9", "%"),
-        [](const float RawValue) { return ThresholdToVisibilityPercent(RawValue); },
-        [](const float DisplayValue) { return VisibilityPercentToThreshold(DisplayValue); },
-        0.0f, 1.0f,
-        SurfaceSettingsEnabled);
-    AddDefaultProperty(
-        SurfaceRenderingAdvancedGroup,
-        FindPropertyByPath(TEXT("Parameters.SurfaceWater.DropletNormalTexture")),
-        LOCTEXT("DropletNormal", "Droplet Normal Texture"),
-        LOCTEXT("DropletNormalTooltip", "Normal texture used by droplet rendering. Empty uses the DWC default."),
-        DropletSettingsEnabled);
-    AddDefaultProperty(
-        SurfaceRenderingAdvancedGroup,
-        FindPropertyByPath(TEXT("Parameters.SurfaceWater.DropletMaskTexture")),
-        LOCTEXT("DropletMask", "Droplet Mask Texture"),
-        LOCTEXT("DropletMaskTooltip", "Mask texture used to localize droplet normal detail. Empty uses the unmasked droplet detail."),
-        DropletSettingsEnabled);
-    AddDefaultProperty(
-        SurfaceRenderingAdvancedGroup,
-        FindPropertyByPath(TEXT("Parameters.SurfaceWater.RivuletNormalTexture")),
-        LOCTEXT("StreakNormal", "Streak Normal Texture"),
-        LOCTEXT("StreakNormalTooltip", "Normal texture used by streak rendering. Empty uses the DWC default."),
-        RivuletSettingsEnabled);
-    AddDefaultProperty(
-        SurfaceRenderingAdvancedGroup,
-        FindPropertyByPath(TEXT("Parameters.SurfaceWater.RivuletMaskTexture")),
-        LOCTEXT("StreakMask", "Streak Mask Texture"),
-        LOCTEXT("StreakMaskTooltip", "Mask texture used to localize streak normal detail. Empty uses the unmasked streak detail."),
-        RivuletSettingsEnabled);
-    AddMappedFloatProperty(
-        SurfaceRenderingAdvancedGroup,
-        FindPropertyByPath(TEXT("Parameters.SurfaceWater.RivuletUVScrollSpeed")),
-        LOCTEXT("DetailMotion", "Detail Motion"),
-        LOCTEXT("DetailMotionTooltip", "How quickly the streak detail normal moves along the flow direction. This does not move the streak stamp itself."),
-        0.0f, 100.0f, 0.0f, 100.0f, 1.0f, 1, LOCTEXT("PercentSuffixDetailMotion", "%"),
-        MakeSquaredRawToPercent(2.0f), MakeSquaredPercentToRaw(2.0f), 0.0f, 10.0f,
-        RivuletSettingsEnabled);
+    }
 }
 
 void FWetnessProfileDetailsCustomization::CollectPropertiesRecursive(

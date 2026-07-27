@@ -41,8 +41,10 @@ namespace
             TEXT("AbsorbedGlossiness=%.9g|")
             TEXT("DropletsEnabled=%d|DropletNormal=%s|DropletMask=%s|")
             TEXT("RivuletsEnabled=%d|RivuletNormal=%s|RivuletMask=%s|")
+            TEXT("SurfaceWaterTargetRoughness=%.9g|")
             TEXT("SurfaceWaterNormalStrength=%.9g|")
-            TEXT("SurfaceWaterRoughnessStrength=%.9g|")
+            TEXT("SurfaceWaterRoughnessBlend=%.9g|")
+            TEXT("OriginalSurfaceDetail=%.9g|")
             TEXT("SurfaceVisibilityThreshold=%.9g|")
             TEXT("RivuletUVScrollSpeed=%.9g"),
             Parameters.GetAbsorbedDarkeningStrength(),
@@ -53,8 +55,10 @@ namespace
             Surface.bEnabled && Surface.bEnableRivulets ? 1 : 0,
             *MakeTextureBuildKey(Surface.RivuletNormalTexture),
             *MakeTextureBuildKey(Surface.RivuletMaskTexture),
+            Surface.SurfaceWaterTargetRoughness,
             Surface.SurfaceWaterNormalStrength,
-            Surface.SurfaceWaterRoughnessStrength,
+            Surface.SurfaceWaterRoughnessBlend,
+            Surface.OriginalSurfaceDetail,
             Surface.SurfaceVisibilityThreshold,
             Surface.RivuletUVScrollSpeed);
     }
@@ -136,7 +140,7 @@ FString FWetClothingWetPartDataTextureBaker::MakeProfileStableKey(
     const FWetnessProfileParameters& Parameters)
 {
     const FString ParameterHash = FMD5::HashAnsiString(*FString::Printf(
-        TEXT("DWC.RenderProfile.v5|SurfaceTextureNormalization=%d|%s"),
+        TEXT("DWC.RenderProfile.v6|SurfaceTextureNormalization=%d|%s"),
         DWCSurfaceTextureNormalization::Version,
         *MakeParametersKey(Parameters)));
     if (ProfileAssignment != nullptr && ProfileAssignment->SourceProfile.IsValid())

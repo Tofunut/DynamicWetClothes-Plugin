@@ -71,7 +71,8 @@ namespace
             TEXT("AbsorbedDarkening=%.9g|AbsorbedGlossiness=%.9g|")
             TEXT("DropletsEnabled=%d|DropletNormal=%s|DropletMask=%s|")
             TEXT("RivuletsEnabled=%d|RivuletNormal=%s|RivuletMask=%s|")
-            TEXT("NormalStrength=%.9g|RoughnessStrength=%.9g|")
+            TEXT("TargetRoughness=%.9g|NormalStrength=%.9g|RoughnessBlend=%.9g|")
+            TEXT("OriginalSurfaceDetail=%.9g|")
             TEXT("VisibilityThreshold=%.9g|RivuletScrollSpeed=%.9g"),
             LocalProfile.Parameters.GetAbsorbedDarkeningStrength(),
             LocalProfile.Parameters.GetAbsorbedGlossinessStrength(),
@@ -89,8 +90,10 @@ namespace
             LocalProfile.NormalizedRivuletMask != nullptr
                 ? *LocalProfile.NormalizedRivuletMask->GetPathName()
                 : TEXT("None"),
+            Surface.SurfaceWaterTargetRoughness,
             Surface.SurfaceWaterNormalStrength,
-            Surface.SurfaceWaterRoughnessStrength,
+            Surface.SurfaceWaterRoughnessBlend,
+            Surface.OriginalSurfaceDetail,
             Surface.SurfaceVisibilityThreshold,
             Surface.RivuletUVScrollSpeed);
         const FString ParameterHash = FMD5::HashAnsiString(*ParameterState);
@@ -107,7 +110,8 @@ namespace
         return FString::Printf(
             TEXT("AbsorbedDarkening=%.9g|AbsorbedGlossiness=%.9g|DropletsEnabled=%d|DropletNormal=%s|DropletMask=%s|")
             TEXT("RivuletsEnabled=%d|RivuletNormal=%s|RivuletMask=%s|")
-            TEXT("NormalStrength=%.9g|RoughnessStrength=%.9g|")
+            TEXT("TargetRoughness=%.9g|NormalStrength=%.9g|RoughnessBlend=%.9g|")
+            TEXT("OriginalSurfaceDetail=%.9g|")
             TEXT("VisibilityThreshold=%.9g|RivuletScrollSpeed=%.9g"),
             Parameters.GetAbsorbedDarkeningStrength(),
             Parameters.GetAbsorbedGlossinessStrength(),
@@ -117,8 +121,10 @@ namespace
             Surface.bEnabled && Surface.bEnableRivulets ? 1 : 0,
             *GetPathNameSafe(Surface.RivuletNormalTexture),
             *GetPathNameSafe(Surface.RivuletMaskTexture),
+            Surface.SurfaceWaterTargetRoughness,
             Surface.SurfaceWaterNormalStrength,
-            Surface.SurfaceWaterRoughnessStrength,
+            Surface.SurfaceWaterRoughnessBlend,
+            Surface.OriginalSurfaceDetail,
             Surface.SurfaceVisibilityThreshold,
             Surface.RivuletUVScrollSpeed);
     }
@@ -327,7 +333,7 @@ namespace
         case 1:
             return FLinearColor(
                 FMath::Max(0.0f, Surface.SurfaceWaterNormalStrength),
-                FMath::Clamp(Surface.SurfaceWaterRoughnessStrength, 0.0f, 1.0f),
+                FMath::Clamp(Surface.SurfaceWaterRoughnessBlend, 0.0f, 1.0f),
                 FMath::Clamp(Surface.SurfaceVisibilityThreshold, 0.0f, 1.0f),
                 Surface.RivuletUVScrollSpeed);
 
@@ -335,8 +341,8 @@ namespace
             return FLinearColor(
                 static_cast<float>(Surface.bEnabled && Surface.bEnableDroplets ? Slices.DropletMask : 0),
                 static_cast<float>(Surface.bEnabled && Surface.bEnableRivulets ? Slices.RivuletMask : 0),
-                0.0f,
-                0.0f);
+                FMath::Clamp(Surface.SurfaceWaterTargetRoughness, 0.0f, 1.0f),
+                FMath::Clamp(Surface.OriginalSurfaceDetail, 0.0f, 1.0f));
 
         default:
             return FLinearColor::Black;
@@ -797,14 +803,14 @@ int32 UDWCGPUResourceSubsystem::FindOrAddRuntimeProfile(
             static_cast<float>(RivuletNormalSlice));
         Record->PackedTexels[1] = FLinearColor(
             FMath::Max(0.0f, Surface.SurfaceWaterNormalStrength),
-            FMath::Clamp(Surface.SurfaceWaterRoughnessStrength, 0.0f, 1.0f),
+            FMath::Clamp(Surface.SurfaceWaterRoughnessBlend, 0.0f, 1.0f),
             FMath::Clamp(Surface.SurfaceVisibilityThreshold, 0.0f, 1.0f),
             Surface.RivuletUVScrollSpeed);
         Record->PackedTexels[2] = FLinearColor(
             static_cast<float>(DropletMaskSlice),
             static_cast<float>(RivuletMaskSlice),
-            0.0f,
-            0.0f);
+            FMath::Clamp(Surface.SurfaceWaterTargetRoughness, 0.0f, 1.0f),
+            FMath::Clamp(Surface.OriginalSurfaceDetail, 0.0f, 1.0f));
         Record->bSurfaceResourcesResolved = true;
         DirtyRuntimeProfileIndices.Add(RuntimeIndex);
         bTextureArraysDirty |= bTextureArraysChanged;
@@ -1476,6 +1482,11 @@ void UDWCGPUResourceSubsystem::ApplyFallbackRenderProfileParameters(
             DropletNormalRegistry.SetNeutral(NeutralNormal, bTextureArraysChanged);
             RivuletNormalRegistry.SetNeutral(NeutralNormal, bTextureArraysChanged);
         }
+        else
+        {
+            DropletNormalRegistry.ReserveNeutralSlice(bTextureArraysChanged);
+            RivuletNormalRegistry.ReserveNeutralSlice(bTextureArraysChanged);
+        }
         const FSurfaceWaterProfileParameters& Surface = Profile.Parameters.SurfaceWater;
         const bool bDropletRequested = Surface.bEnabled && Surface.bEnableDroplets;
         const bool bRivuletRequested = Surface.bEnabled && Surface.bEnableRivulets;
@@ -1743,7 +1754,7 @@ bool UDWCGPUResourceSubsystem::ApplyPreviewRenderProfileFallbackProfile(
     UMaterialInstanceDynamic& MID)
 {
     EnsureNeutralResources();
-    if (Asset == nullptr || MaterialSlotIndex == INDEX_NONE)
+    if (MaterialSlotIndex == INDEX_NONE)
     {
         return false;
     }

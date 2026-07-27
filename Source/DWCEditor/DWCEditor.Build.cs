@@ -16,6 +16,7 @@ public class DWCEditor : ModuleRules
 				"AssetTools",
 				"Core",
 				"CoreUObject",
+				"ContentBrowser",
 				"DWC",
 				"Engine",
 				"InputCore",

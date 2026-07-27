@@ -192,7 +192,7 @@ struct DWC_API FDWCGPULODBakeData
 {
     GENERATED_BODY()
 
-    static constexpr int32 CurrentRuntimeDataVersion = 4;
+    static constexpr int32 CurrentRuntimeDataVersion = 5;
     static constexpr int32 CurrentMapBakeVersion = 6;
     static constexpr int32 CurrentBulkDataVersion = 5;
 

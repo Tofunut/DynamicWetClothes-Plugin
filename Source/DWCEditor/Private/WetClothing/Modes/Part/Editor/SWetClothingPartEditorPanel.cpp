@@ -20,6 +20,7 @@
 #include "WetClothing/WCAEditor/UI/UVView/WCAUVIslandViewCache.h"
 #include "WetClothing/Modes/Part/Viewport/SDWCPartViewport.h"
 #include "DataAssets/WetnessProfile.h"
+#include "WetRendering/WetMaterialParameters.h"
 #include "Engine/SkeletalMesh.h"
 #include "Engine/Texture.h"
 #include "Engine/Texture2D.h"
@@ -1028,6 +1029,12 @@ void SWetClothingPartEditorPanel::RefreshSurfaceWaterTilingPreview()
         PreviewAbsorbedWetness,
         PreviewSurfaceWater);
     SurfaceWaterTilingPreviewViewport->SetSurfaceWaterTargetRoughness(PreviewSurfaceWaterTargetRoughness);
+    SurfaceWaterTilingPreviewViewport->SetSurfaceWaterPreviewFeatureToggles(
+        bSurfaceWaterPreviewDropletsEnabled,
+        bSurfaceWaterPreviewStreaksEnabled);
+    SurfaceWaterTilingPreviewViewport->SetSurfaceWaterPreviewNormalFlip(
+        bSurfaceWaterPreviewFlipNormalX,
+        bSurfaceWaterPreviewFlipNormalY);
 
     // The tiling popup renders only the actual material result. Editor Part
     // boundaries remain exclusive to the main Part-edit viewport.
@@ -3092,6 +3099,7 @@ FReply SWetClothingPartEditorPanel::HandleOpenSurfaceWaterTilingClicked(FWetPart
     }
 
     HandleWetPartSelectionChanged(Item, ESelectInfo::Direct);
+    ResetSurfaceWaterTilingPreviewRenderParameters();
     if (const TSharedPtr<SWindow> ExistingWindow = SurfaceWaterTilingWindow.Pin())
     {
         RefreshSurfaceWaterTilingPreview();
@@ -3125,6 +3133,50 @@ FReply SWetClothingPartEditorPanel::HandleOpenSurfaceWaterTilingClicked(FWetPart
         SurfaceWaterTilingPreviewViewport->FocusOnPreviewMesh(true);
     }
     return FReply::Handled();
+}
+
+void SWetClothingPartEditorPanel::ResetSurfaceWaterTilingPreviewRenderParameters()
+{
+    PreviewSurfaceWaterTargetRoughness = ResolveSurfaceWaterTargetRoughnessForPreview();
+    bSurfaceWaterPreviewDropletsEnabled = true;
+    bSurfaceWaterPreviewStreaksEnabled = true;
+    bSurfaceWaterPreviewFlipNormalX = false;
+    bSurfaceWaterPreviewFlipNormalY = false;
+}
+
+float SWetClothingPartEditorPanel::ResolveSurfaceWaterTargetRoughnessForPreview() const
+{
+    float TargetRoughness = FWCAMaterialGenerator::FOptions().SurfaceWaterTargetRoughness;
+
+    const UWetClothingAsset* Asset = WetClothingAsset.Get();
+    if (Asset == nullptr || SelectedMaterialSlotIndex == INDEX_NONE)
+    {
+        return FMath::Clamp(TargetRoughness, 0.0f, 1.0f);
+    }
+
+    const FWetClothingGeneratedWetMaterialOverride* MaterialOverride =
+        Asset->Derived.Inline.GeneratedWetMaterialOverrides.FindByPredicate(
+            [this](const FWetClothingGeneratedWetMaterialOverride& Candidate)
+            {
+                return Candidate.MaterialSlotIndex == SelectedMaterialSlotIndex;
+            });
+    const UMaterialInstanceConstant* GPUMaterial = MaterialOverride != nullptr
+        ? MaterialOverride->GPUMaterialInstance.Get()
+        : nullptr;
+    if (GPUMaterial == nullptr)
+    {
+        return FMath::Clamp(TargetRoughness, 0.0f, 1.0f);
+    }
+
+    float MaterialTargetRoughness = TargetRoughness;
+    if (GPUMaterial->GetScalarParameterValue(
+            FHashedMaterialParameterInfo(FMaterialParameterInfo(DWCWetMaterialParameters::SurfaceWaterTargetRoughness())),
+            MaterialTargetRoughness))
+    {
+        TargetRoughness = MaterialTargetRoughness;
+    }
+
+    return FMath::Clamp(TargetRoughness, 0.0f, 1.0f);
 }
 
 TSharedRef<SWidget> SWetClothingPartEditorPanel::BuildSurfaceWaterTilingWindowContent()
@@ -3330,6 +3382,19 @@ TSharedRef<SWidget> SWetClothingPartEditorPanel::BuildSurfaceWaterTilingWindowCo
             [SNew(STextBlock).Text(Label)];
     };
 
+    const auto BuildPreviewToggle = [](
+        const FText& Label,
+        const FText& ToolTip,
+        TAttribute<ECheckBoxState> CheckState,
+        FOnCheckStateChanged OnChanged) -> TSharedRef<SWidget>
+    {
+        return SNew(SCheckBox)
+            .ToolTipText(ToolTip)
+            .IsChecked(CheckState)
+            .OnCheckStateChanged(OnChanged)
+            [SNew(STextBlock).Text(Label)];
+    };
+
     return SNew(SBorder)
         .Padding(10.0f)
         .BorderImage(FAppStyle::Get().GetBrush(TEXT("ToolPanel.GroupBorder")))
@@ -3471,10 +3536,10 @@ TSharedRef<SWidget> SWetClothingPartEditorPanel::BuildSurfaceWaterTilingWindowCo
                                                               LOCTEXT("PopupProfileRoughnessStrength", "Roughness Strength"),
                                                               0.0f,
                                                               1.0f,
-                                                              [](const FSurfaceWaterProfileParameters& Surface) { return Surface.SurfaceWaterRoughnessStrength; },
+                                                              [](const FSurfaceWaterProfileParameters& Surface) { return Surface.SurfaceWaterRoughnessBlend; },
                                                               [](FSurfaceWaterProfileParameters& Surface, const float NewValue)
                                                               {
-                                                                  Surface.SurfaceWaterRoughnessStrength = FMath::Clamp(NewValue, 0.0f, 1.0f);
+                                                                  Surface.SurfaceWaterRoughnessBlend = FMath::Clamp(NewValue, 0.0f, 1.0f);
                                                               })]
                                                     + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 3.0f)
                                                           [BuildProfileSlider(
@@ -3486,16 +3551,38 @@ TSharedRef<SWidget> SWetClothingPartEditorPanel::BuildSurfaceWaterTilingWindowCo
                                                               {
                                                                   Surface.SurfaceVisibilityThreshold = FMath::Clamp(NewValue, 0.0f, 1.0f);
                                                               })]
+                                                    + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 10.0f, 0.0f, 3.0f)
+                                                          [SNew(STextBlock)
+                                                               .Text(LOCTEXT("SurfaceWaterPreviewLayersHeader", "Preview Layers"))
+                                                               .Font(FAppStyle::GetFontStyle(TEXT("PropertyWindow.NormalFont")))]
                                                     + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 3.0f)
-                                                          [BuildProfileSlider(
-                                                              LOCTEXT("PopupProfileRivuletScrollSpeed", "Rivulet Scroll Speed"),
-                                                              0.0f,
-                                                              2.0f,
-                                                              [](const FSurfaceWaterProfileParameters& Surface) { return Surface.RivuletUVScrollSpeed; },
-                                                              [](FSurfaceWaterProfileParameters& Surface, const float NewValue)
-                                                              {
-                                                                  Surface.RivuletUVScrollSpeed = FMath::Clamp(NewValue, 0.0f, 2.0f);
-                                                              })]
+                                                          [BuildPreviewToggle(
+                                                              LOCTEXT("PopupPreviewDroplets", "Droplets"),
+                                                              LOCTEXT("PopupPreviewDropletsTooltip", "Show or hide droplet normal/mask contribution in this Water Tiling preview only."),
+                                                              TAttribute<ECheckBoxState>::Create(TAttribute<ECheckBoxState>::FGetter::CreateSP(this, &SWetClothingPartEditorPanel::GetSurfaceWaterPreviewDropletsCheckState)),
+                                                              FOnCheckStateChanged::CreateSP(this, &SWetClothingPartEditorPanel::HandleSurfaceWaterPreviewDropletsChanged))]
+                                                    + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 3.0f)
+                                                          [BuildPreviewToggle(
+                                                              LOCTEXT("PopupPreviewStreaks", "Streaks"),
+                                                              LOCTEXT("PopupPreviewStreaksTooltip", "Show or hide streak/rivulet normal and mask contribution in this Water Tiling preview only."),
+                                                              TAttribute<ECheckBoxState>::Create(TAttribute<ECheckBoxState>::FGetter::CreateSP(this, &SWetClothingPartEditorPanel::GetSurfaceWaterPreviewStreaksCheckState)),
+                                                              FOnCheckStateChanged::CreateSP(this, &SWetClothingPartEditorPanel::HandleSurfaceWaterPreviewStreaksChanged))]
+                                                    + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 10.0f, 0.0f, 3.0f)
+                                                          [SNew(STextBlock)
+                                                               .Text(LOCTEXT("SurfaceWaterPreviewNormalFixHeader", "Normal Debug"))
+                                                               .Font(FAppStyle::GetFontStyle(TEXT("PropertyWindow.NormalFont")))]
+                                                    + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 3.0f)
+                                                          [BuildPreviewToggle(
+                                                              LOCTEXT("PopupPreviewFlipNormalX", "Flip Normal X"),
+                                                              LOCTEXT("PopupPreviewFlipNormalXTooltip", "Invert the surface-water tangent-normal X channel in this Water Tiling preview only."),
+                                                              TAttribute<ECheckBoxState>::Create(TAttribute<ECheckBoxState>::FGetter::CreateSP(this, &SWetClothingPartEditorPanel::GetSurfaceWaterPreviewFlipNormalXCheckState)),
+                                                              FOnCheckStateChanged::CreateSP(this, &SWetClothingPartEditorPanel::HandleSurfaceWaterPreviewFlipNormalXChanged))]
+                                                    + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 3.0f)
+                                                          [BuildPreviewToggle(
+                                                              LOCTEXT("PopupPreviewFlipNormalY", "Flip Normal Y"),
+                                                              LOCTEXT("PopupPreviewFlipNormalYTooltip", "Invert the surface-water tangent-normal Y channel in this Water Tiling preview only."),
+                                                              TAttribute<ECheckBoxState>::Create(TAttribute<ECheckBoxState>::FGetter::CreateSP(this, &SWetClothingPartEditorPanel::GetSurfaceWaterPreviewFlipNormalYCheckState)),
+                                                              FOnCheckStateChanged::CreateSP(this, &SWetClothingPartEditorPanel::HandleSurfaceWaterPreviewFlipNormalYChanged))]
                                                     + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 12.0f, 0.0f, 0.0f)
                                                           [SNew(STextBlock)
                                                                .Text_Lambda([this]()
@@ -3695,6 +3782,70 @@ EVisibility SWetClothingPartEditorPanel::GetSingleCirclePreviewVisibility() cons
     return SurfaceWaterPreviewCoverageMode == EDWCSurfaceWaterTilingPreviewCoverageMode::SingleCircle
         ? EVisibility::Visible
         : EVisibility::Collapsed;
+}
+
+ECheckBoxState SWetClothingPartEditorPanel::GetSurfaceWaterPreviewDropletsCheckState() const
+{
+    return bSurfaceWaterPreviewDropletsEnabled ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+}
+
+ECheckBoxState SWetClothingPartEditorPanel::GetSurfaceWaterPreviewStreaksCheckState() const
+{
+    return bSurfaceWaterPreviewStreaksEnabled ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+}
+
+ECheckBoxState SWetClothingPartEditorPanel::GetSurfaceWaterPreviewFlipNormalXCheckState() const
+{
+    return bSurfaceWaterPreviewFlipNormalX ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+}
+
+ECheckBoxState SWetClothingPartEditorPanel::GetSurfaceWaterPreviewFlipNormalYCheckState() const
+{
+    return bSurfaceWaterPreviewFlipNormalY ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+}
+
+void SWetClothingPartEditorPanel::HandleSurfaceWaterPreviewDropletsChanged(const ECheckBoxState NewState)
+{
+    bSurfaceWaterPreviewDropletsEnabled = NewState == ECheckBoxState::Checked;
+    if (SurfaceWaterTilingPreviewViewport.IsValid())
+    {
+        SurfaceWaterTilingPreviewViewport->SetSurfaceWaterPreviewFeatureToggles(
+            bSurfaceWaterPreviewDropletsEnabled,
+            bSurfaceWaterPreviewStreaksEnabled);
+    }
+}
+
+void SWetClothingPartEditorPanel::HandleSurfaceWaterPreviewStreaksChanged(const ECheckBoxState NewState)
+{
+    bSurfaceWaterPreviewStreaksEnabled = NewState == ECheckBoxState::Checked;
+    if (SurfaceWaterTilingPreviewViewport.IsValid())
+    {
+        SurfaceWaterTilingPreviewViewport->SetSurfaceWaterPreviewFeatureToggles(
+            bSurfaceWaterPreviewDropletsEnabled,
+            bSurfaceWaterPreviewStreaksEnabled);
+    }
+}
+
+void SWetClothingPartEditorPanel::HandleSurfaceWaterPreviewFlipNormalXChanged(const ECheckBoxState NewState)
+{
+    bSurfaceWaterPreviewFlipNormalX = NewState == ECheckBoxState::Checked;
+    if (SurfaceWaterTilingPreviewViewport.IsValid())
+    {
+        SurfaceWaterTilingPreviewViewport->SetSurfaceWaterPreviewNormalFlip(
+            bSurfaceWaterPreviewFlipNormalX,
+            bSurfaceWaterPreviewFlipNormalY);
+    }
+}
+
+void SWetClothingPartEditorPanel::HandleSurfaceWaterPreviewFlipNormalYChanged(const ECheckBoxState NewState)
+{
+    bSurfaceWaterPreviewFlipNormalY = NewState == ECheckBoxState::Checked;
+    if (SurfaceWaterTilingPreviewViewport.IsValid())
+    {
+        SurfaceWaterTilingPreviewViewport->SetSurfaceWaterPreviewNormalFlip(
+            bSurfaceWaterPreviewFlipNormalX,
+            bSurfaceWaterPreviewFlipNormalY);
+    }
 }
 
 ECheckBoxState SWetClothingPartEditorPanel::GetShowPartColorsCheckState() const

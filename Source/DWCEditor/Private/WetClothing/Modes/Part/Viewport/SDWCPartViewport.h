@@ -65,6 +65,8 @@ class SDWCPartViewport : public SEditorViewport, public FGCObject
     void  SetPreviewWetPart(int32 MaterialSlotIndex, int32 WetPartID);
     void  SetPreviewWetness(float AbsorbedWetness, float SurfaceWater);
     void  SetSurfaceWaterTargetRoughness(float InTargetRoughness);
+    void  SetSurfaceWaterPreviewFeatureToggles(bool bInDropletsEnabled, bool bInStreaksEnabled);
+    void  SetSurfaceWaterPreviewNormalFlip(bool bInFlipX, bool bInFlipY);
     void  SetSurfaceWaterTilingPreviewCoverageMode(EDWCSurfaceWaterTilingPreviewCoverageMode InMode);
     void  RefreshSurfaceWaterPreviewDynamicTextures();
     void  RefreshSurfaceWaterPreviewMaterial();
@@ -88,6 +90,7 @@ class SDWCPartViewport : public SEditorViewport, public FGCObject
     bool                BuildSurfaceWaterPreviewTextures(FString& OutErrorMessage);
     void                InvalidateSurfaceWaterPreviewLayoutCache();
     void                ApplySurfaceWaterPreviewTextureParameters();
+    void                ApplySurfaceWaterPreviewRenderOverrides();
     void                RequestViewportRedraw();
     void                CacheOriginalMaterials();
     void                RestoreOriginalMaterials();
@@ -121,6 +124,10 @@ class SDWCPartViewport : public SEditorViewport, public FGCObject
     int32                                       SurfacePreviewCachedMaterialSlotIndex = INDEX_NONE;
     int32                                       SurfacePreviewCachedWetPartID = INDEX_NONE;
     bool                                        bSurfacePreviewLayoutCacheValid = false;
+    bool                                        bSurfaceWaterPreviewFallbackProfileCacheValid = false;
+    FLinearColor                                SurfaceWaterPreviewBaseFallbackProfile0 = FLinearColor::Black;
+    FLinearColor                                SurfaceWaterPreviewBaseFallbackProfile1 = FLinearColor::Black;
+    FLinearColor                                SurfaceWaterPreviewBaseFallbackProfile2 = FLinearColor::Black;
     TArray<TObjectPtr<UMaterialInterface>>       OriginalPreviewMaterials;
     TArray<FWetClothingAssetUVIsland>            CurrentSelectableIslands;
     TSet<int32>                                  CurrentHighlightedUVIslandIDs;
@@ -138,6 +145,10 @@ class SDWCPartViewport : public SEditorViewport, public FGCObject
     float                                        PreviewAbsorbedWetness = 0.0f;
     float                                        PreviewSurfaceWater = 1.0f;
     float                                        SurfaceWaterTargetRoughness = 0.02f;
+    bool                                         bSurfaceWaterPreviewDropletsEnabled = true;
+    bool                                         bSurfaceWaterPreviewStreaksEnabled = true;
+    bool                                         bSurfaceWaterPreviewFlipNormalX = false;
+    bool                                         bSurfaceWaterPreviewFlipNormalY = false;
     float                                        SelectionOverlayThicknessScale = 1.0f;
     FString                                      SurfaceWaterPreviewStatus;
     bool                                         bSurfaceWaterPreviewStatusIsError = false;

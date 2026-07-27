@@ -160,6 +160,8 @@ class SWetClothingPartEditorPanel : public SCompoundWidget
     FReply                                         HandleOpenSurfaceWaterTilingClicked(FWetPartEntryPtr Item);
     TSharedRef<SWidget>                            BuildSurfaceWaterTilingWindowContent();
     void                                           RefreshSurfaceWaterTilingPreview();
+    void                                           ResetSurfaceWaterTilingPreviewRenderParameters();
+    float                                          ResolveSurfaceWaterTargetRoughnessForPreview() const;
     void                                           HandleSurfaceWaterTilingWindowClosed(const TSharedRef<SWindow>& Window);
     float                                          GetSelectedDropletRadiusScale() const;
     float                                          GetSelectedDropletDetailSize() const;
@@ -172,6 +174,14 @@ class SWetClothingPartEditorPanel : public SCompoundWidget
     ECheckBoxState                                 GetSurfaceWaterPreviewCoverageModeState(EDWCSurfaceWaterTilingPreviewCoverageMode Mode) const;
     void                                           HandleSurfaceWaterPreviewCoverageModeChanged(ECheckBoxState NewState, EDWCSurfaceWaterTilingPreviewCoverageMode Mode);
     EVisibility                                    GetSingleCirclePreviewVisibility() const;
+    ECheckBoxState                                 GetSurfaceWaterPreviewDropletsCheckState() const;
+    ECheckBoxState                                 GetSurfaceWaterPreviewStreaksCheckState() const;
+    ECheckBoxState                                 GetSurfaceWaterPreviewFlipNormalXCheckState() const;
+    ECheckBoxState                                 GetSurfaceWaterPreviewFlipNormalYCheckState() const;
+    void                                           HandleSurfaceWaterPreviewDropletsChanged(ECheckBoxState NewState);
+    void                                           HandleSurfaceWaterPreviewStreaksChanged(ECheckBoxState NewState);
+    void                                           HandleSurfaceWaterPreviewFlipNormalXChanged(ECheckBoxState NewState);
+    void                                           HandleSurfaceWaterPreviewFlipNormalYChanged(ECheckBoxState NewState);
     ECheckBoxState                                 GetShowPartColorsCheckState() const;
     void                                           HandleShowPartColorsChanged(ECheckBoxState NewState);
     float                                          GetPreviewAbsorbedWetness() const;
@@ -241,6 +251,10 @@ class SWetClothingPartEditorPanel : public SCompoundWidget
     float                                              PreviewAbsorbedWetness = 0.0f;
     float                                              PreviewSurfaceWater = 1.0f;
     float                                              PreviewSurfaceWaterTargetRoughness = 0.02f;
+    bool                                               bSurfaceWaterPreviewDropletsEnabled = true;
+    bool                                               bSurfaceWaterPreviewStreaksEnabled = true;
+    bool                                               bSurfaceWaterPreviewFlipNormalX = false;
+    bool                                               bSurfaceWaterPreviewFlipNormalY = false;
     TWeakPtr<SWindow>                                  SurfaceWaterTilingWindow;
     float                                              AutoPartitionTolerancePercent = 20.0f;
 };

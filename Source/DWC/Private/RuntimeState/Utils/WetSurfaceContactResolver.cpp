@@ -20,7 +20,7 @@ struct FNearestVertex
 
 struct FWetAreaCandidate
 {
-    int32 VertexIndex = INDEX_NONE;
+    int32 TriangleID = INDEX_NONE;
     float Exposure = 1.0f;
     float PickWeight = 1.0f;
 };
@@ -164,42 +164,6 @@ float ResolveGPUAbsorptionMultiplier(
     return FMath::Max(0.0f, Profile ? Profile->GetAbsorptionMultiplier() : 1.0f);
 }
 
-uint64 MakeWetAreaTriangleMergeKey(const int32 MaterialSlotIndex, const int32 TriangleID)
-{
-    return (static_cast<uint64>(static_cast<uint32>(MaterialSlotIndex)) << 32) |
-           static_cast<uint32>(TriangleID);
-}
-
-void AccumulateWetAreaTriangleContact(
-    FDWCResolvedSurfaceContact& Existing,
-    const FVector& ContactWorldPosition,
-    const FVector3f& Barycentric,
-    const FVector2f& ContactUV,
-    const float Amount,
-    const float AbsorptionMultiplier)
-{
-    if (Amount <= 0.0f || Existing.Amount <= 0.0f)
-    {
-        return;
-    }
-
-    const float TotalAmount = Existing.Amount + Amount;
-    if (TotalAmount <= KINDA_SMALL_NUMBER)
-    {
-        return;
-    }
-
-    const float ExistingWeight = Existing.Amount / TotalAmount;
-    const float NewWeight = Amount / TotalAmount;
-    Existing.Barycentric = Existing.Barycentric * ExistingWeight + Barycentric * NewWeight;
-    Existing.ContactUV = Existing.ContactUV * ExistingWeight + ContactUV * NewWeight;
-    Existing.ContactWorldPosition = Existing.ContactWorldPosition * ExistingWeight + ContactWorldPosition * NewWeight;
-    Existing.ClosestWorldPosition = Existing.ContactWorldPosition;
-    Existing.AbsorptionMultiplier =
-        (Existing.AbsorptionMultiplier * Existing.Amount + AbsorptionMultiplier * Amount) / TotalAmount;
-    Existing.Amount = TotalAmount;
-}
-
 FVector OrientTriangleNormalForContact(const FVector& TriangleNormal, const FDWCWetContact& Contact)
 {
     if (TriangleNormal.IsNearlyZero())
@@ -336,7 +300,7 @@ bool FWetSurfaceContactResolver::ResolveContact(
     }
 
     const FDWCGPULODBakeData& GPUData = Args.WetClothingAsset->GetGPUWetMapRuntimeData(Args.LODIndex);
-    if (!GPUData.bRuntimeDataValid || GPUData.Triangles.IsEmpty() || GPUData.VertexIncidentTriangles.IsEmpty())
+    if (!GPUData.bRuntimeDataValid || GPUData.Triangles.IsEmpty())
     {
         return false;
     }
@@ -572,7 +536,7 @@ bool FWetSurfaceContactResolver::ResolveWetArea(
     }
 
     const FDWCGPULODBakeData& GPUData = Args.WetClothingAsset->GetGPUWetMapRuntimeData(Args.LODIndex);
-    if (!GPUData.bRuntimeDataValid || GPUData.Triangles.IsEmpty() || GPUData.VertexIncidentTriangles.IsEmpty())
+    if (!GPUData.bRuntimeDataValid || GPUData.Triangles.IsEmpty())
     {
         return false;
     }
@@ -586,30 +550,6 @@ bool FWetSurfaceContactResolver::ResolveWetArea(
         return false;
     }
 
-    const int32 VertexCount = static_cast<int32>(LODData->GetNumVertices());
-    if (VertexCount <= 0)
-    {
-        return false;
-    }
-
-    TMap<int32, const FDWCGPUVertexIncidentTriangles*> IncidentByVertex;
-    IncidentByVertex.Reserve(GPUData.VertexIncidentTriangles.Num());
-    TArray<int32> WettableVertices;
-    WettableVertices.Reserve(GPUData.VertexIncidentTriangles.Num());
-    for (const FDWCGPUVertexIncidentTriangles& Incident : GPUData.VertexIncidentTriangles)
-    {
-        if (Incident.SourceVertexIndex >= 0 && Incident.SourceVertexIndex < VertexCount && !Incident.TriangleIDs.IsEmpty())
-        {
-            IncidentByVertex.Add(Incident.SourceVertexIndex, &Incident);
-            WettableVertices.Add(Incident.SourceVertexIndex);
-        }
-    }
-
-    if (WettableVertices.IsEmpty())
-    {
-        return false;
-    }
-
     const bool bWantsNormalExposure = AreaData.bUseNormalExposure && !AreaData.Direction.IsNearlyZero();
     const FVector SafeDirection =
         AreaData.Direction.IsNearlyZero()
@@ -618,7 +558,23 @@ bool FWetSurfaceContactResolver::ResolveWetArea(
     const FVector SafeNormal = -SafeDirection;
     const FTransform ComponentTransform = Args.TargetSkeletalMesh->GetComponentTransform();
 
-    const int32 SamplesToProcess = FMath::Min(AreaData.SampleCount, WettableVertices.Num());
+    TArray<int32> WettableTriangleIDs;
+    WettableTriangleIDs.Reserve(GPUData.Triangles.Num());
+    for (int32 TriangleID = 0; TriangleID < GPUData.Triangles.Num(); ++TriangleID)
+    {
+        const FDWCGPUBakedTriangle& Triangle = GPUData.Triangles[TriangleID];
+        if (Triangle.IsValid())
+        {
+            WettableTriangleIDs.Add(TriangleID);
+        }
+    }
+
+    if (WettableTriangleIDs.IsEmpty())
+    {
+        return false;
+    }
+
+    const int32 SamplesToProcess = FMath::Min(AreaData.SampleCount, WettableTriangleIDs.Num());
 
     FRandomStream RandomStream;
     if (AreaData.bOverrideRandomSeed)
@@ -650,223 +606,200 @@ bool FWetSurfaceContactResolver::ResolveWetArea(
         return true;
     };
 
+    TMap<int32, FVector> WorldNormalCache;
     auto GetWorldNormal = [&](const int32 VertexIndex, FVector& OutWorldNormal) -> bool
     {
+        if (const FVector* Cached = WorldNormalCache.Find(VertexIndex))
+        {
+            OutWorldNormal = *Cached;
+            return true;
+        }
+
         FVector3f ComponentNormal;
         if (AreaData.bUseSkinnedNormalsForExposure &&
             Args.MeshSampler->ComputeSkinnedNormal(*LODData, *SkinWeightBuffer, VertexIndex, ComponentNormal))
         {
             OutWorldNormal = ComponentTransform.TransformVectorNoScale(FVector(ComponentNormal)).GetSafeNormal();
-            return !OutWorldNormal.IsNearlyZero();
         }
-
-        if (VertexIndex >= 0 &&
-            VertexIndex < static_cast<int32>(LODData->StaticVertexBuffers.StaticMeshVertexBuffer.GetNumVertices()))
+        else if (VertexIndex >= 0 &&
+                 VertexIndex < static_cast<int32>(LODData->StaticVertexBuffers.StaticMeshVertexBuffer.GetNumVertices()))
         {
             OutWorldNormal =
                 ComponentTransform.TransformVectorNoScale(
                     FVector(LODData->StaticVertexBuffers.StaticMeshVertexBuffer.VertexTangentZ(VertexIndex)))
                 .GetSafeNormal();
-            return !OutWorldNormal.IsNearlyZero();
+        }
+        else
+        {
+            return false;
         }
 
-        return false;
+        if (OutWorldNormal.IsNearlyZero())
+        {
+            return false;
+        }
+
+        WorldNormalCache.Add(VertexIndex, OutWorldNormal);
+        return true;
+    };
+
+    auto GetAverageWorldNormal = [&](const FDWCGPUBakedTriangle& Triangle, FVector& OutWorldNormal) -> bool
+    {
+        FVector N0;
+        FVector N1;
+        FVector N2;
+        if (!GetWorldNormal(Triangle.VertexIndices.X, N0) ||
+            !GetWorldNormal(Triangle.VertexIndices.Y, N1) ||
+            !GetWorldNormal(Triangle.VertexIndices.Z, N2))
+        {
+            return false;
+        }
+
+        OutWorldNormal = (N0 + N1 + N2).GetSafeNormal();
+        return !OutWorldNormal.IsNearlyZero();
     };
 
     TArray<FWetAreaCandidate> SelectedCandidates;
     SelectedCandidates.Reserve(SamplesToProcess);
-    if (!bWantsNormalExposure)
+
+    const int32 CandidateCount =
+        bWantsNormalExposure
+            ? FMath::Min(
+                  WettableTriangleIDs.Num(),
+                  FMath::Max(
+                      SamplesToProcess * GPUWetAreaNormalExposureCandidateMultiplier,
+                      GPUWetAreaNormalExposureMinCandidateCount))
+            : SamplesToProcess;
+
+    TSet<int32> CandidateTriangleIDs;
+    CandidateTriangleIDs.Reserve(CandidateCount);
+    if (CandidateCount == WettableTriangleIDs.Num())
     {
-        if (SamplesToProcess == WettableVertices.Num())
+        for (const int32 TriangleID : WettableTriangleIDs)
         {
-            for (const int32 VertexIndex : WettableVertices)
-            {
-                SelectedCandidates.Add({VertexIndex, 1.0f, 1.0f});
-            }
-        }
-        else
-        {
-            TSet<int32> SelectedSet;
-            SelectedSet.Reserve(SamplesToProcess);
-            int32 Attempts = 0;
-            const int32 MaxAttempts = SamplesToProcess * 8;
-            while (SelectedSet.Num() < SamplesToProcess && Attempts < MaxAttempts)
-            {
-                ++Attempts;
-                SelectedSet.Add(WettableVertices[RandomStream.RandRange(0, WettableVertices.Num() - 1)]);
-            }
-            for (const int32 VertexIndex : SelectedSet)
-            {
-                SelectedCandidates.Add({VertexIndex, 1.0f, 1.0f});
-            }
+            CandidateTriangleIDs.Add(TriangleID);
         }
     }
     else
     {
-        const int32 CandidateCount =
-            FMath::Min(
-                WettableVertices.Num(),
-                FMath::Max(
-                    SamplesToProcess * GPUWetAreaNormalExposureCandidateMultiplier,
-                    GPUWetAreaNormalExposureMinCandidateCount));
-
-        TSet<int32> CandidateVertexIndices;
-        CandidateVertexIndices.Reserve(CandidateCount);
-        if (CandidateCount == WettableVertices.Num())
+        int32 Attempts = 0;
+        const int32 MaxAttempts = CandidateCount * 8;
+        while (CandidateTriangleIDs.Num() < CandidateCount && Attempts < MaxAttempts)
         {
-            for (const int32 VertexIndex : WettableVertices)
-            {
-                CandidateVertexIndices.Add(VertexIndex);
-            }
-        }
-        else
-        {
-            int32 Attempts = 0;
-            const int32 MaxAttempts = CandidateCount * 8;
-            while (CandidateVertexIndices.Num() < CandidateCount && Attempts < MaxAttempts)
-            {
-                ++Attempts;
-                CandidateVertexIndices.Add(WettableVertices[RandomStream.RandRange(0, WettableVertices.Num() - 1)]);
-            }
-        }
-
-        TArray<FWetAreaCandidate> Candidates;
-        Candidates.Reserve(CandidateVertexIndices.Num());
-        for (const int32 VertexIndex : CandidateVertexIndices)
-        {
-            float RawExposure = 0.0f;
-            FVector WorldNormal = FVector::ZeroVector;
-            if (GetWorldNormal(VertexIndex, WorldNormal))
-            {
-                RawExposure = FWetInputStage::CalculateContactExposure(
-                    WorldNormal,
-                    SafeDirection,
-                    SafeNormal,
-                    *Args.WetnessSettings);
-            }
-
-            const float EffectiveExposure = FMath::Clamp(RawExposure, GPUWetAreaNormalExposureMinInfluence, 1.0f);
-            Candidates.Add({
-                VertexIndex,
-                EffectiveExposure,
-                FMath::Pow(EffectiveExposure, GPUWetAreaNormalExposurePickPower)});
-        }
-
-        const int32 PickCount = FMath::Min(SamplesToProcess, Candidates.Num());
-        for (int32 PickIndex = 0; PickIndex < PickCount; ++PickIndex)
-        {
-            const int32 SelectedCandidateIndex = SelectWetAreaCandidateIndex(Candidates, RandomStream);
-            if (SelectedCandidateIndex == INDEX_NONE)
-            {
-                break;
-            }
-
-            SelectedCandidates.Add(Candidates[SelectedCandidateIndex]);
-            Candidates.RemoveAtSwap(SelectedCandidateIndex, 1, EAllowShrinking::No);
+            ++Attempts;
+            CandidateTriangleIDs.Add(WettableTriangleIDs[RandomStream.RandRange(0, WettableTriangleIDs.Num() - 1)]);
         }
     }
 
-    TMap<uint64, int32> PositiveWetAreaTriangleContactIndices;
-    if (AreaData.Amount > 0.0f)
+    TArray<FWetAreaCandidate> Candidates;
+    Candidates.Reserve(CandidateTriangleIDs.Num());
+    for (const int32 TriangleID : CandidateTriangleIDs)
     {
-        PositiveWetAreaTriangleContactIndices.Reserve(SelectedCandidates.Num());
+        if (!GPUData.Triangles.IsValidIndex(TriangleID))
+        {
+            continue;
+        }
+
+        const FDWCGPUBakedTriangle& Triangle = GPUData.Triangles[TriangleID];
+        if (!Triangle.IsValid())
+        {
+            continue;
+        }
+
+        float RawExposure = 1.0f;
+        if (bWantsNormalExposure)
+        {
+            FVector AverageWorldNormal;
+            if (!GetAverageWorldNormal(Triangle, AverageWorldNormal))
+            {
+                continue;
+            }
+
+            RawExposure = FWetInputStage::CalculateContactExposure(
+                AverageWorldNormal,
+                SafeDirection,
+                SafeNormal,
+                *Args.WetnessSettings);
+        }
+
+        const float EffectiveExposure = FMath::Clamp(RawExposure, GPUWetAreaNormalExposureMinInfluence, 1.0f);
+        Candidates.Add({
+            TriangleID,
+            EffectiveExposure,
+            FMath::Pow(EffectiveExposure, GPUWetAreaNormalExposurePickPower)});
+    }
+
+    const int32 PickCount = FMath::Min(SamplesToProcess, Candidates.Num());
+    for (int32 PickIndex = 0; PickIndex < PickCount; ++PickIndex)
+    {
+        const int32 SelectedCandidateIndex = SelectWetAreaCandidateIndex(Candidates, RandomStream);
+        if (SelectedCandidateIndex == INDEX_NONE)
+        {
+            break;
+        }
+
+        SelectedCandidates.Add(Candidates[SelectedCandidateIndex]);
+        Candidates.RemoveAtSwap(SelectedCandidateIndex, 1, EAllowShrinking::No);
     }
 
     for (const FWetAreaCandidate& SelectedCandidate : SelectedCandidates)
     {
-        const int32 VertexIndex = SelectedCandidate.VertexIndex;
-        const FDWCGPUVertexIncidentTriangles* const* Incident = IncidentByVertex.Find(VertexIndex);
-        if (Incident == nullptr || *Incident == nullptr)
+        const int32 TriangleID = SelectedCandidate.TriangleID;
+        if (!GPUData.Triangles.IsValidIndex(TriangleID))
         {
             continue;
         }
 
-        FVector VertexWorldPosition;
-        if (!GetWorldPosition(VertexIndex, VertexWorldPosition))
+        const FDWCGPUBakedTriangle& Triangle = GPUData.Triangles[TriangleID];
+        if (!Triangle.IsValid())
         {
             continue;
         }
 
+        FVector P0;
+        FVector P1;
+        FVector P2;
+        if (!GetWorldPosition(Triangle.VertexIndices.X, P0) ||
+            !GetWorldPosition(Triangle.VertexIndices.Y, P1) ||
+            !GetWorldPosition(Triangle.VertexIndices.Z, P2))
+        {
+            continue;
+        }
+
+        const FVector3f Barycentric(1.0f / 3.0f, 1.0f / 3.0f, 1.0f / 3.0f);
+        const FVector ContactWorldPosition = (P0 + P1 + P2) / 3.0;
+        FVector AverageWorldNormal;
+        if (!GetAverageWorldNormal(Triangle, AverageWorldNormal))
+        {
+            AverageWorldNormal = FVector::CrossProduct(P1 - P0, P2 - P0).GetSafeNormal();
+        }
+
+        const FVector2f ContactUV =
+            FVector2f(Triangle.UV0) * Barycentric.X +
+            FVector2f(Triangle.UV1) * Barycentric.Y +
+            FVector2f(Triangle.UV2) * Barycentric.Z;
         const float EffectiveAmount = AreaData.Amount * SelectedCandidate.Exposure;
-        TSet<int32> AddedTriangleIDs;
-        for (const int32 TriangleID : (*Incident)->TriangleIDs)
-        {
-            if (AddedTriangleIDs.Contains(TriangleID))
-            {
-                continue;
-            }
-            AddedTriangleIDs.Add(TriangleID);
 
-            if (!GPUData.Triangles.IsValidIndex(TriangleID))
-            {
-                continue;
-            }
-
-            const FDWCGPUBakedTriangle& Triangle = GPUData.Triangles[TriangleID];
-            if (!Triangle.IsValid())
-            {
-                continue;
-            }
-
-            FVector P0;
-            FVector P1;
-            FVector P2;
-            if (!GetWorldPosition(Triangle.VertexIndices.X, P0) ||
-                !GetWorldPosition(Triangle.VertexIndices.Y, P1) ||
-                !GetWorldPosition(Triangle.VertexIndices.Z, P2))
-            {
-                continue;
-            }
-
-            const FVector3f Barycentric = ComputeTriangleBarycentric(VertexWorldPosition, P0, P1, P2);
-            const FVector2f ContactUV =
-                FVector2f(Triangle.UV0) * Barycentric.X +
-                FVector2f(Triangle.UV1) * Barycentric.Y +
-                FVector2f(Triangle.UV2) * Barycentric.Z;
-            const float AbsorptionMultiplier = ResolveGPUAbsorptionMultiplier(
-                Triangle,
-                Barycentric,
-                Args.RuntimeData,
-                EffectiveAmount);
-
-            if (EffectiveAmount > 0.0f)
-            {
-                const uint64 MergeKey = MakeWetAreaTriangleMergeKey(Triangle.MaterialSlotIndex, TriangleID);
-                if (const int32* ExistingContactIndex = PositiveWetAreaTriangleContactIndices.Find(MergeKey))
-                {
-                    if (OutContacts.IsValidIndex(*ExistingContactIndex))
-                    {
-                        AccumulateWetAreaTriangleContact(
-                            OutContacts[*ExistingContactIndex],
-                            VertexWorldPosition,
-                            Barycentric,
-                            ContactUV,
-                            EffectiveAmount,
-                            AbsorptionMultiplier);
-                    }
-                    continue;
-                }
-
-                PositiveWetAreaTriangleContactIndices.Add(MergeKey, OutContacts.Num());
-            }
-
-            FDWCResolvedSurfaceContact& Resolved = OutContacts.AddDefaulted_GetRef();
-            Resolved.TriangleID = TriangleID;
-            Resolved.MaterialSlotIndex = Triangle.MaterialSlotIndex;
-            Resolved.Barycentric = Barycentric;
-            Resolved.ContactUV = ContactUV;
-            Resolved.ContactWorldPosition = VertexWorldPosition;
-            Resolved.ClosestWorldPosition = VertexWorldPosition;
-            Resolved.WorldTrianglePosition0 = P0;
-            Resolved.WorldTrianglePosition1 = P1;
-            Resolved.WorldTrianglePosition2 = P2;
-            Resolved.WorldTriangleNormal = FVector::CrossProduct(P1 - P0, P2 - P0).GetSafeNormal();
-            Resolved.DistanceToSurface = 0.0f;
-            Resolved.TriangleInfluence = 1.0f;
-            Resolved.Amount = EffectiveAmount;
-            Resolved.Radius = ComputeWetAreaSampleRadius(P0, P1, P2);
-            Resolved.AbsorptionMultiplier = AbsorptionMultiplier;
-        }
+        FDWCResolvedSurfaceContact& Resolved = OutContacts.AddDefaulted_GetRef();
+        Resolved.TriangleID = TriangleID;
+        Resolved.MaterialSlotIndex = Triangle.MaterialSlotIndex;
+        Resolved.Barycentric = Barycentric;
+        Resolved.ContactUV = ContactUV;
+        Resolved.ContactWorldPosition = ContactWorldPosition;
+        Resolved.ClosestWorldPosition = ContactWorldPosition;
+        Resolved.WorldTrianglePosition0 = P0;
+        Resolved.WorldTrianglePosition1 = P1;
+        Resolved.WorldTrianglePosition2 = P2;
+        Resolved.WorldTriangleNormal = AverageWorldNormal;
+        Resolved.DistanceToSurface = 0.0f;
+        Resolved.TriangleInfluence = 1.0f;
+        Resolved.Amount = EffectiveAmount;
+        Resolved.Radius = ComputeWetAreaSampleRadius(P0, P1, P2);
+        Resolved.AbsorptionMultiplier = ResolveGPUAbsorptionMultiplier(
+            Triangle,
+            Barycentric,
+            Args.RuntimeData,
+            EffectiveAmount);
     }
 
     return !OutContacts.IsEmpty();

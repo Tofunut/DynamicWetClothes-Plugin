@@ -8,7 +8,6 @@
 
 class UBoxComponent;
 class UDynamicWetClothesComponent;
-class UDWCGPUNiagaraWetCollisionBridgeComponent;
 class UPrimitiveComponent;
 class UNiagaraComponent;
 
@@ -34,7 +33,6 @@ class DWCDEMO_API ADWCDemoRainWetAreaSource : public AActor
     bool IsReceiverInsideRainBounds(const UDynamicWetClothesComponent& Receiver) const;
     void ApplyRainToReceiver(UDynamicWetClothesComponent& Receiver) const;
     void ApplyRainNiagaraParameters() const;
-    TArray<UDynamicWetClothesComponent*> ResolveRainNiagaraReceivers() const;
     bool ShouldLogDebug() const;
 
     UFUNCTION()
@@ -59,25 +57,22 @@ class DWCDEMO_API ADWCDemoRainWetAreaSource : public AActor
     UPROPERTY(VisibleAnywhere)
     UNiagaraComponent* RainNiagara;
 
-    UPROPERTY(VisibleAnywhere)
-    UDWCGPUNiagaraWetCollisionBridgeComponent* RainNiagaraWetCollisionBridge;
-
     UPROPERTY(EditAnywhere, Category = "DWC Demo|Rain Wet Area Source", meta = (ClampMin = "0.0"))
     float WetAmountPerSecond = 0.5f;
 
     UPROPERTY(EditAnywhere, Category = "DWC Demo|Rain Wet Area Source", meta = (ClampMin = "0.01"))
     float UpdateInterval = 0.1f;
 
-    UPROPERTY(EditAnywhere, Category = "DWC Demo|Rain Wet Area Source|CPU")
-    bool bApplyCPUWetArea = true;
+    UPROPERTY(EditAnywhere, Category = "DWC Demo|Rain Wet Area Source")
+    bool bApplyWetArea = true;
 
-    UPROPERTY(EditAnywhere, Category = "DWC Demo|Rain Wet Area Source|CPU", meta = (ClampMin = "1"))
+    UPROPERTY(EditAnywhere, Category = "DWC Demo|Rain Wet Area Source", meta = (ClampMin = "1"))
     int32 RainSamplesPerTick = 300;
 
-    UPROPERTY(EditAnywhere, Category = "DWC Demo|Rain Wet Area Source|CPU")
+    UPROPERTY(EditAnywhere, Category = "DWC Demo|Rain Wet Area Source")
     bool bUseNormalExposure = true;
 
-    UPROPERTY(EditAnywhere, Category = "DWC Demo|Rain Wet Area Source|CPU", meta = (EditCondition = "bUseNormalExposure"))
+    UPROPERTY(EditAnywhere, Category = "DWC Demo|Rain Wet Area Source", meta = (EditCondition = "bUseNormalExposure"))
     bool bUseSkinnedNormalsForExposure = true;
 
     UPROPERTY(EditAnywhere, Category = "DWC Demo|Rain Wet Area Source")
@@ -91,12 +86,6 @@ class DWCDEMO_API ADWCDemoRainWetAreaSource : public AActor
 
     UPROPERTY(EditAnywhere, Category = "DWC Demo|Rain Wet Area Source")
     FName RainIntensityParameterName = TEXT("User.RainIntensity");
-
-    UPROPERTY(EditAnywhere, Category = "DWC Demo|Rain Wet Area Source|GPU Niagara", meta = (ClampMin = "0.0"))
-    float RainParticleWetAmount = 0.1f;
-
-    UPROPERTY(EditAnywhere, Category = "DWC Demo|Rain Wet Area Source|GPU Niagara", meta = (ClampMin = "0.0"))
-    float RainParticleWetRadius = 10.0f;
 
     UPROPERTY(EditAnywhere, Category = "DWC Demo|Rain Wet Area Source|Debug")
     bool bEnableDebugLogging = true;

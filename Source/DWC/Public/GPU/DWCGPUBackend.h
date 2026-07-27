@@ -12,16 +12,9 @@ class UMaterialInstanceDynamic;
 struct FWetClothingSettings;
 
 
-enum class EDWCSurfaceStampType : uint8
-{
-    Droplet,
-    Rivulet
-};
-
 /** CPU-side routing request. TriangleID is intentionally resolved from UV through TexelLookup on GPU. */
 struct DWC_API FDWCSurfaceStampRequest
 {
-    EDWCSurfaceStampType Type = EDWCSurfaceStampType::Droplet;
     FVector2f UV = FVector2f::ZeroVector;
     FVector2f HalfSizePixels = FVector2f::ZeroVector;
     float Amount = 0.0f;

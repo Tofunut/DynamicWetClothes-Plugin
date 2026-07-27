@@ -497,7 +497,7 @@ void SWetnessProfileEditorPanel::ApplyPreviewSettingsToViewport()
         return;
     }
 
-    PreviewViewport->SetPreviewDetailSizes(PreviewDropletDetailSize, 1.0f);
+    PreviewViewport->SetPreviewDropletDetailSize(PreviewDropletDetailSize);
     PreviewViewport->SetPreviewAnimationEnabled(false);
     PreviewViewport->SetPreviewAnimationSpeed(0.0f);
 }

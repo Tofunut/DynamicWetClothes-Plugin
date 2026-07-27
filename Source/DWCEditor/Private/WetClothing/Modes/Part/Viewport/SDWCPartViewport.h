@@ -30,7 +30,7 @@ enum class EDWCSurfaceWaterTilingPreviewCoverageMode : uint8
  *
  * Normal instances render the source skeletal mesh plus editor-only procedural
  * overlays. Surface Water Tiling instances render the selected slot through a
- * transient dedicated preview material and transient preview state textures. Procedural
+ * transient DWC preview material and transient preview state textures. Procedural
  * geometry remains exclusive to the normal Part-edit viewport.
  */
 class SDWCPartViewport : public SEditorViewport, public FGCObject
@@ -65,7 +65,7 @@ class SDWCPartViewport : public SEditorViewport, public FGCObject
     void  SetPreviewWetPart(int32 MaterialSlotIndex, int32 WetPartID);
     void  SetPreviewWetness(float AbsorbedWetness, float SurfaceWater);
     void  SetSurfaceWaterTargetRoughness(float InTargetRoughness);
-    void  SetSurfaceWaterPreviewFeatureToggles(bool bInDropletsEnabled, bool bInStreaksEnabled);
+    void  SetSurfaceWaterPreviewDropletsEnabled(bool bInDropletsEnabled);
     void  SetSurfaceWaterPreviewNormalFlip(bool bInFlipX, bool bInFlipY);
     void  SetSurfaceWaterTilingPreviewCoverageMode(EDWCSurfaceWaterTilingPreviewCoverageMode InMode);
     void  RefreshSurfaceWaterPreviewDynamicTextures();
@@ -114,7 +114,6 @@ class SDWCPartViewport : public SEditorViewport, public FGCObject
     TObjectPtr<UTexture2D>                      SurfacePreviewWetnessMap = nullptr;
     TObjectPtr<UTexture2D>                      SurfacePreviewWetPartDataTexture = nullptr;
     TObjectPtr<UTexture2D>                      SurfacePreviewDropletRT = nullptr;
-    TObjectPtr<UTexture2D>                      SurfacePreviewRivuletRT = nullptr;
     TArray<FColor>                              SurfacePreviewCachedSourcePartDataPixels;
     TArray<uint8>                               SurfacePreviewCachedSelectedMask;
     FVector2D                                   SurfacePreviewCachedSingleCircleCenter = FVector2D::ZeroVector;
@@ -137,6 +136,7 @@ class SDWCPartViewport : public SEditorViewport, public FGCObject
     int32                                        PreviewMaterialSlotIndex = INDEX_NONE;
     int32                                        PreviewWetPartID = INDEX_NONE;
     int32                                        SurfacePreviewLocalProfileID = 0;
+    int32                                        SurfaceWaterPreviewMaterialSlotIndex = INDEX_NONE;
     int32                                        SurfaceWaterPreviewDataUVChannel = INDEX_NONE;
     int32                                        SurfaceWaterPreviewNormalUVChannel = INDEX_NONE;
     bool                                         bSurfaceWaterTilingPreview = false;
@@ -146,7 +146,6 @@ class SDWCPartViewport : public SEditorViewport, public FGCObject
     float                                        PreviewSurfaceWater = 1.0f;
     float                                        SurfaceWaterTargetRoughness = 0.02f;
     bool                                         bSurfaceWaterPreviewDropletsEnabled = true;
-    bool                                         bSurfaceWaterPreviewStreaksEnabled = true;
     bool                                         bSurfaceWaterPreviewFlipNormalX = false;
     bool                                         bSurfaceWaterPreviewFlipNormalY = false;
     float                                        SelectionOverlayThicknessScale = 1.0f;

@@ -157,7 +157,7 @@ namespace
 
         FRandomStream& RandomStream = Receiver.GPUSurfaceWaterRandomStream;
         TArray<FDWCSurfaceStampRequest> Requests;
-        Requests.Reserve(Accumulators.Num() * 2);
+        Requests.Reserve(Accumulators.Num());
 
         for (const TPair<FGPUSurfaceWaterAccumulatorKey, FGPUSurfaceWaterAccumulator>& Pair : Accumulators)
         {
@@ -168,12 +168,10 @@ namespace
             }
 
             const FSurfaceWaterProfileParameters& Surface = Accumulator.Profile;
-            if (Surface.bEnableDroplets &&
-                Surface.DropletRadiusPixels > 0.0f &&
+            if (Surface.DropletRadiusPixels > 0.0f &&
                 RandomStream.FRand() < FMath::Clamp(Surface.DropletSpawnProbability, 0.0f, 1.0f))
             {
                 FDWCSurfaceStampRequest& Request = Requests.AddDefaulted_GetRef();
-                Request.Type = EDWCSurfaceStampType::Droplet;
                 Request.MaterialSlotIndex = Accumulator.MaterialSlotIndex;
                 Request.UV = Accumulator.BestUV;
                 Request.HalfSizePixels = FVector2f(FMath::Max(0.5f, Surface.DropletRadiusPixels * Accumulator.DropletRadiusScale));
@@ -181,22 +179,6 @@ namespace
                 Request.LifetimeSeconds = FMath::Max(0.01f, Surface.DropletLifetimeSeconds);
             }
 
-            if (Surface.bEnableRivulets &&
-                Surface.RivuletWidthPixels > 0.0f &&
-                Surface.RivuletLengthPixels > 0.0f &&
-                Accumulator.TotalSurfaceAmount >= FMath::Max(0.0f, Surface.MinimumRivuletSurfaceAmount) &&
-                RandomStream.FRand() < FMath::Clamp(Surface.RivuletSpawnProbability, 0.0f, 1.0f))
-            {
-                FDWCSurfaceStampRequest& Request = Requests.AddDefaulted_GetRef();
-                Request.Type = EDWCSurfaceStampType::Rivulet;
-                Request.MaterialSlotIndex = Accumulator.MaterialSlotIndex;
-                Request.UV = Accumulator.BestUV;
-                Request.HalfSizePixels = FVector2f(
-                    FMath::Max(0.5f, Surface.RivuletWidthPixels * 0.5f),
-                    FMath::Max(0.5f, Surface.RivuletLengthPixels * 0.5f));
-                Request.Amount = Accumulator.TotalSurfaceAmount;
-                Request.LifetimeSeconds = FMath::Max(0.01f, Surface.RivuletLifetimeSeconds);
-            }
         }
 
         return !Requests.IsEmpty() && Receiver.GPUBackend->EnqueueSurfaceStamps(Requests);

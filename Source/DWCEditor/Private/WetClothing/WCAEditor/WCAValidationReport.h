@@ -38,6 +38,7 @@ enum class EWCAValidationFixKind : uint8
     BakeWrinkleMaps,
     BakeTransparencyMaps,
     GenerateMaterials,
+    FixSurfaceWaterProfile,
     Manual
 };
 

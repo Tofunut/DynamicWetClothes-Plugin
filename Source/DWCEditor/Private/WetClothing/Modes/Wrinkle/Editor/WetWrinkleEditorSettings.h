@@ -10,7 +10,7 @@ class UWetWrinkleEditorSettings : public UObject
     GENERATED_BODY()
 
   public:
-    static constexpr const TCHAR* DefaultNormalTexturePath = TEXT("/DynamicWetClothes/Presets/WrinkleTextures");
+    static constexpr const TCHAR* DefaultNormalTexturePath = TEXT("/DynamicWetClothes/Textures/Wrinkles");
 
     void GetNormalTextureSearchPaths(TArray<FString>& OutPaths) const;
     bool AddNormalTextureSearchPath(const FString& InPath);

@@ -58,10 +58,6 @@ struct DWC_API FSurfaceWaterProfileParameters
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet")
     bool bEnableDroplets = true;
 
-    /** Enables rivulet stamp generation for this profile. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rivulet")
-    bool bEnableRivulets = true;
-
     /** Fraction of water rejected by absorption that is represented visually. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float SurfaceRepresentationFraction = 0.5f;
@@ -69,33 +65,18 @@ struct DWC_API FSurfaceWaterProfileParameters
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float DropletSpawnProbability = 0.5f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rivulet", meta = (ClampMin = "0.0", ClampMax = "1.0", DisplayName = "Rivulet Spawn Probability"))
-    float RivuletSpawnProbability = 0.2f;
-
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet", meta = (ClampMin = "0.01", Units = "s"))
     float DropletLifetimeSeconds = 5.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet", meta = (ClampMin="0.0", ClampMax="256.0", DisplayName="Base Radius (RT Pixels)"))
     float DropletRadiusPixels = 16.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rivulet", meta = (ClampMin = "0.01", Units = "s", DisplayName = "Rivulet Lifetime"))
-    float RivuletLifetimeSeconds = 7.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rivulet", meta = (ClampMin = "0.0", DisplayName = "Minimum Rivulet Surface Amount"))
-    float MinimumRivuletSurfaceAmount = 0.2f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rivulet", meta = (ClampMin="0.0", ClampMax="256.0", DisplayName="Rivulet Base Width (RT Pixels)"))
-    float RivuletWidthPixels = 8.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rivulet", meta = (ClampMin="0.0", ClampMax="512.0", DisplayName="Rivulet Base Length (RT Pixels)"))
-    float RivuletLengthPixels = 48.0f;
-
 
     /** Roughness reached by fully visible surface water. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rendering", meta=(ClampMin="0.0", ClampMax="1.0", DisplayName="Wet Surface Roughness"))
     float SurfaceWaterTargetRoughness = 0.02f;
 
-    /** Shared strength applied to both droplet and rivulet normals. */
+    /** Strength applied to the droplet detail normal. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rendering", meta=(ClampMin="0.0", ClampMax="8.0", DisplayName="Water Detail Strength"))
     float SurfaceWaterNormalStrength = 3.0f;
 
@@ -110,18 +91,6 @@ struct DWC_API FSurfaceWaterProfileParameters
     /** Minimum visible RT amount before Surface Water rendering begins. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rendering", meta=(ClampMin="0.0", ClampMax="1.0"))
     float SurfaceVisibilityThreshold = 0.25f;
-
-    /** UV scroll speed along the decoded rivulet flow direction. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rivulet|Rendering")
-    float RivuletUVScrollSpeed = 0.5f;
-
-    /** Optional profile override. Null disables the Rivulet normal contribution. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rivulet|Rendering")
-    TObjectPtr<UTexture2D> RivuletNormalTexture = nullptr;
-
-    /** Optional mask used to localize the Rivulet normal detail. Null means no authored mask. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rivulet|Rendering")
-    TObjectPtr<UTexture2D> RivuletMaskTexture = nullptr;
 
     /** Optional profile override. Null disables the Droplet normal contribution. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet|Rendering")
@@ -161,7 +130,8 @@ struct DWC_API FWetnessProfileParameters
 
     bool SupportsSurfaceWater() const
     {
-        return SurfaceWater.bEnabled && SurfaceWater.SurfaceRepresentationFraction > 0.0f;
+        return SurfaceWater.bEnabled && SurfaceWater.bEnableDroplets &&
+               SurfaceWater.SurfaceRepresentationFraction > 0.0f;
     }
 
     float GetAbsorptionMultiplier() const
@@ -202,7 +172,7 @@ struct DWC_API FWetnessProfileParameters
                    : 0.0f;
     }
 
-    float GetSurfaceWaterStrength() const { return SurfaceWater.bEnabled ? 1.0f : 0.0f; }
+    float GetSurfaceWaterStrength() const { return SupportsSurfaceWater() ? 1.0f : 0.0f; }
 };
 
 UCLASS(BlueprintType)

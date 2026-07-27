@@ -38,7 +38,7 @@ namespace
 {
     constexpr int32 WetWrinkleUVGridResolution = 64;
     constexpr int32 WetWrinkleBVHLeafTriangleCount = 8;
-    constexpr int32 ForceRenderLOD0 = 1; // USkinnedMeshComponent forced LOD is 1-based; 0 means automatic.
+    constexpr int32 WrinkleViewportForceRenderLOD0 = 1; // USkinnedMeshComponent forced LOD is 1-based; 0 means automatic.
 
     TAutoConsoleVariable<int32> CVarWetWrinklePreviewCacheBudgetMB(
         TEXT("DWC.WrinkleEditor.PreviewCacheBudgetMB"),
@@ -755,7 +755,7 @@ void SWetWrinkleViewport::Construct(const FArguments& InArgs)
     PreviewMeshComponent = NewObject<USkeletalMeshComponent>(GetTransientPackage(), NAME_None, RF_Transient);
     PreviewMeshComponent->SetMobility(EComponentMobility::Movable);
     PreviewMeshComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-    PreviewMeshComponent->SetForcedLOD(ForceRenderLOD0);
+    PreviewMeshComponent->SetForcedLOD(WrinkleViewportForceRenderLOD0);
     PreviewScene->AddComponent(PreviewMeshComponent, FTransform::Identity);
 
     RefreshPreviewMesh();
@@ -828,7 +828,7 @@ void SWetWrinkleViewport::RefreshPreviewMesh(const bool bForceMaterialRebuild)
         // A full asset refresh can regenerate UV metadata without replacing the mesh UObject.
         ClearAllHitCaches();
     }
-    PreviewMeshComponent->SetForcedLOD(ForceRenderLOD0);
+    PreviewMeshComponent->SetForcedLOD(WrinkleViewportForceRenderLOD0);
 
     const bool bMaterialSourcesChanged = bMeshChanged || !ArePreviewMaterialSlotsCurrent();
     if (bForceMaterialRebuild || bMaterialSourcesChanged)

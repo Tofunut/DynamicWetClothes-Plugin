@@ -31,13 +31,8 @@ namespace
         // Simulation | Surface Water
         { TEXT("Parameters.SurfaceWater.SurfaceRepresentationFraction"), 0.0, 1.0, 0.5 },
         { TEXT("Parameters.SurfaceWater.DropletSpawnProbability"), 0.0, 1.0, 0.5 },
-        { TEXT("Parameters.SurfaceWater.RivuletSpawnProbability"), 0.0, 1.0, 0.2 },
         { TEXT("Parameters.SurfaceWater.DropletLifetimeSeconds"), 0.01, 120.0, 5.0 },
         { TEXT("Parameters.SurfaceWater.DropletRadiusPixels"), 0.0, 256.0, 16.0 },
-        { TEXT("Parameters.SurfaceWater.RivuletLifetimeSeconds"), 0.01, 120.0, 7.0 },
-        { TEXT("Parameters.SurfaceWater.MinimumRivuletSurfaceAmount"), 0.0, 1.0, 0.2 },
-        { TEXT("Parameters.SurfaceWater.RivuletWidthPixels"), 0.0, 256.0, 8.0 },
-        { TEXT("Parameters.SurfaceWater.RivuletLengthPixels"), 0.0, 512.0, 48.0 },
 
         // Rendering | Surface Water
         { TEXT("Parameters.SurfaceWater.SurfaceWaterTargetRoughness"), 0.0, 1.0, 0.02 },
@@ -45,7 +40,6 @@ namespace
         { TEXT("Parameters.SurfaceWater.SurfaceWaterRoughnessBlend"), 0.0, 1.0, 0.85 },
         { TEXT("Parameters.SurfaceWater.OriginalSurfaceDetail"), 0.0, 1.0, 1.0 },
         { TEXT("Parameters.SurfaceWater.SurfaceVisibilityThreshold"), 0.0, 1.0, 0.25 },
-        { TEXT("Parameters.SurfaceWater.RivuletUVScrollSpeed"), 0.0, 10.0, 0.5 },
     };
 
     const FNumericRule* FindNumericRule(const FString& PropertyPath)

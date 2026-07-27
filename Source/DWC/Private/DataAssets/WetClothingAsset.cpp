@@ -376,30 +376,23 @@ namespace
             Parameters.GetAbsorbedGlossinessStrength());
 
         const FString SurfaceKeyHead = FString::Printf(
-            TEXT("Surf{%d,%d,%d,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,"),
+            TEXT("Surf{%d,%d,%.9g,%.9g,%.9g,%.9g,"),
             Surface.bEnabled ? 1 : 0,
             Surface.bEnableDroplets ? 1 : 0,
-            Surface.bEnableRivulets ? 1 : 0,
             Surface.SurfaceRepresentationFraction,
             Surface.DropletSpawnProbability,
-            Surface.RivuletSpawnProbability,
             Surface.DropletLifetimeSeconds,
-            Surface.DropletRadiusPixels,
-            Surface.RivuletLifetimeSeconds);
+            Surface.DropletRadiusPixels);
 
         const FString SurfaceKeyTail = FString::Printf(
-            TEXT("%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%s,%s}"),
-            Surface.MinimumRivuletSurfaceAmount,
-            Surface.RivuletWidthPixels,
-            Surface.RivuletLengthPixels,
+            TEXT("%.9g,%.9g,%.9g,%.9g,%.9g,%s,%s}"),
             Surface.SurfaceWaterTargetRoughness,
             Surface.SurfaceWaterNormalStrength,
             Surface.SurfaceWaterRoughnessBlend,
             Surface.OriginalSurfaceDetail,
             Surface.SurfaceVisibilityThreshold,
-            Surface.RivuletUVScrollSpeed,
             *GetPathNameSafe(Surface.DropletNormalTexture.Get()),
-            *GetPathNameSafe(Surface.RivuletNormalTexture.Get()));
+            *GetPathNameSafe(Surface.DropletMaskTexture.Get()));
 
         const FString ParameterKey = AbsorbedKey + TEXT("|") + SurfaceKeyHead + SurfaceKeyTail;
         return FMD5::HashAnsiString(*ParameterKey);
@@ -572,12 +565,11 @@ namespace
                         Profile != nullptr ? *Profile->GetDisplayName() : TEXT(""));
                 }
                 Signature += FString::Printf(
-                    TEXT(",Profile=%s,Blend=%d,DropletRadiusScale=%.9g,DropletDetailSize=%.9g,RivuletDetailSize=%.9g"),
+                    TEXT(",Profile=%s,Blend=%d,DropletRadiusScale=%.9g,DropletDetailSize=%.9g"),
                     Profile != nullptr ? *Profile->SourceProfile.ToString() : TEXT(""),
                     Profile != nullptr ? static_cast<int32>(Profile->BlendMode) : 0,
                     Entry.SurfaceWater.DropletRadiusScale,
-                    Entry.SurfaceWater.DropletDetailSize,
-                    Entry.SurfaceWater.RivuletDetailSize);
+                    Entry.SurfaceWater.DropletDetailSize);
                 Signature += FString::Printf(TEXT(",Islands=%d"), AssignedIslandIDs.Num());
                 for (const int32 IslandID : AssignedIslandIDs)
                 {

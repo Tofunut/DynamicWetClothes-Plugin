@@ -158,12 +158,6 @@ void FWetRenderStage::ApplyWetMaterialParameters(FWetRenderStageArgs& Receiver)
                     DWCWetMaterialParameters::SurfaceWaterDebugDropletColor(),
                     FLinearColor(1.0f, 1.0f, 0.0f, 1.0f));
             }
-            if (!DWCWetMaterialParameters::SurfaceWaterDebugRivuletColor().IsNone())
-            {
-                MID->SetVectorParameterValue(
-                    DWCWetMaterialParameters::SurfaceWaterDebugRivuletColor(),
-                    FLinearColor(0.78f, 0.58f, 1.0f, 1.0f));
-            }
             if (!DWCWetMaterialParameters::SurfaceWaterTime().IsNone())
             {
                 MID->SetScalarParameterValue(

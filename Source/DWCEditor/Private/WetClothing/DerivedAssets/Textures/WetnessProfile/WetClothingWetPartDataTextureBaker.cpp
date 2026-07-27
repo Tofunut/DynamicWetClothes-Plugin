@@ -40,27 +40,21 @@ namespace
             TEXT("AbsorbedDarkening=%.9g|")
             TEXT("AbsorbedGlossiness=%.9g|")
             TEXT("DropletsEnabled=%d|DropletNormal=%s|DropletMask=%s|")
-            TEXT("RivuletsEnabled=%d|RivuletNormal=%s|RivuletMask=%s|")
             TEXT("SurfaceWaterTargetRoughness=%.9g|")
             TEXT("SurfaceWaterNormalStrength=%.9g|")
             TEXT("SurfaceWaterRoughnessBlend=%.9g|")
             TEXT("OriginalSurfaceDetail=%.9g|")
-            TEXT("SurfaceVisibilityThreshold=%.9g|")
-            TEXT("RivuletUVScrollSpeed=%.9g"),
+            TEXT("SurfaceVisibilityThreshold=%.9g"),
             Parameters.GetAbsorbedDarkeningStrength(),
             Parameters.GetAbsorbedGlossinessStrength(),
             Surface.bEnabled && Surface.bEnableDroplets ? 1 : 0,
             *MakeTextureBuildKey(Surface.DropletNormalTexture),
             *MakeTextureBuildKey(Surface.DropletMaskTexture),
-            Surface.bEnabled && Surface.bEnableRivulets ? 1 : 0,
-            *MakeTextureBuildKey(Surface.RivuletNormalTexture),
-            *MakeTextureBuildKey(Surface.RivuletMaskTexture),
             Surface.SurfaceWaterTargetRoughness,
             Surface.SurfaceWaterNormalStrength,
             Surface.SurfaceWaterRoughnessBlend,
             Surface.OriginalSurfaceDetail,
-            Surface.SurfaceVisibilityThreshold,
-            Surface.RivuletUVScrollSpeed);
+            Surface.SurfaceVisibilityThreshold);
     }
 
     struct FProfileBakeEntry
@@ -387,15 +381,14 @@ FString FWetClothingWetPartDataTextureBaker::MakeBuildSignature(const UWetClothi
         TArray<int32> IslandIDs = BakeEntry.Entry->AssignedUVIslandIDs;
         IslandIDs.Sort();
         Canonical += FString::Printf(
-            TEXT("|Slot=%d;OriginalUV=%d;Part=%d;Profile=%s;Key=%s;DropletRadiusScale=%.9g;DropletDetailSize=%.9g;RivuletDetailSize=%.9g;Islands="),
+            TEXT("|Slot=%d;OriginalUV=%d;Part=%d;Profile=%s;Key=%s;DropletRadiusScale=%.9g;DropletDetailSize=%.9g;Islands="),
             BakeEntry.MaterialSlotIndex,
             WetClothingAsset->GetOriginalUVChannelIndex(),
             BakeEntry.Entry->WetPartID,
             BakeEntry.Profile != nullptr ? *BakeEntry.Profile->SourceProfile.ToString() : TEXT("None"),
             *MakeProfileStableKey(BakeEntry.Profile, Parameters),
             BakeEntry.Entry->SurfaceWater.DropletRadiusScale,
-            BakeEntry.Entry->SurfaceWater.DropletDetailSize,
-            BakeEntry.Entry->SurfaceWater.RivuletDetailSize);
+            BakeEntry.Entry->SurfaceWater.DropletDetailSize);
         for (const int32 IslandID : IslandIDs)
         {
             Canonical += FString::Printf(TEXT("%d,"), IslandID);
@@ -481,8 +474,6 @@ bool FWetClothingWetPartDataTextureBaker::Bake(
             // Authored source textures remain owned by the Wetness Profile asset.
             LocalProfile.Parameters.SurfaceWater.DropletNormalTexture = nullptr;
             LocalProfile.Parameters.SurfaceWater.DropletMaskTexture = nullptr;
-            LocalProfile.Parameters.SurfaceWater.RivuletNormalTexture = nullptr;
-            LocalProfile.Parameters.SurfaceWater.RivuletMaskTexture = nullptr;
             LocalIDByStableKey.Add(StableKey, LocalProfileID);
         }
         LocalIDByEntry.Add(Entry, LocalProfileID);
@@ -530,7 +521,7 @@ bool FWetClothingWetPartDataTextureBaker::Bake(
             const FColor PackedPartData(
                 LocalProfileID,
                 DWCWetPartDataTextureBake::EncodeDetailSize(Entry->SurfaceWater.DropletDetailSize),
-                DWCWetPartDataTextureBake::EncodeDetailSize(Entry->SurfaceWater.RivuletDetailSize),
+                0,
                 0);
             for (const FWetClothingAssetUVIsland& Island : OriginalIslands)
             {

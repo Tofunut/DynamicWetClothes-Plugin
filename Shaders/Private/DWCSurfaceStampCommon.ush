@@ -71,42 +71,13 @@ void DWC_WriteDropletStamp(
         DWC_VisibleSurfaceAmount(Existing, StampTimeSeconds);
     const float NewAmount = saturate(max(ExistingVisibleAmount, Brush * StampAmount));
 
-    // Droplet A is reserved. Keep 1 as a validity/debug marker.
+    // Droplet A stores brush falloff for debug visualization.
     TargetSurface[Pixel] = float4(
         NewAmount,
         StampTimeSeconds,
         StampLifetimeSeconds,
-        1.0);
+        saturate(Brush));
 }
 
-void DWC_WriteRivuletStamp(
-    int2 Pixel,
-    float Brush,
-    float StampAmount,
-    float StampTimeSeconds,
-    float StampLifetimeSeconds,
-    float EncodedFlowAngle,
-    RWTexture2D<float4> TargetSurface)
-{
-    if (Brush <= 0.0) return;
-
-    const float NewVisibleAmount = saturate(Brush * StampAmount);
-    const float4 Existing = TargetSurface[Pixel];
-    const float ExistingVisibleAmount =
-        DWC_VisibleSurfaceAmount(Existing, StampTimeSeconds);
-
-    // One channel cannot hold a circular average safely. Keep the direction of
-    // the dominant visible rivulet instead of averaging encoded angles.
-    if (NewVisibleAmount < ExistingVisibleAmount)
-    {
-        return;
-    }
-
-    TargetSurface[Pixel] = float4(
-        NewVisibleAmount,
-        StampTimeSeconds,
-        StampLifetimeSeconds,
-        saturate(EncodedFlowAngle));
-}
 
 #endif

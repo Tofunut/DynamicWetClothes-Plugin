@@ -13,6 +13,7 @@
 #include "RHIResources.h"
 #include "UObject/Package.h"
 #include "WetRendering/WetMaterialParameters.h"
+#include "WetRendering/DWCSurfaceTextureSharedAsset.h"
 #include "Utility/DWCLog.h"
 
 namespace
@@ -59,6 +60,82 @@ namespace
         return Texture;
     }
 
+    UTexture2D* ResolveSharedNormalizedSurfaceTexture(
+        const FWetClothingLocalRenderProfile& LocalProfile,
+        UTexture2D* BakedNormalizedTexture,
+        UTexture2D* AuthoredSourceTexture,
+        const FSoftObjectPath& AuthoredSourcePath,
+        const TCHAR* TextureRole,
+        const bool bNormalMap)
+    {
+        if (BakedNormalizedTexture != nullptr)
+        {
+            return BakedNormalizedTexture;
+        }
+        const FString SourceTexturePath = AuthoredSourceTexture != nullptr
+            ? AuthoredSourceTexture->GetPathName()
+            : AuthoredSourcePath.ToString();
+        if (SourceTexturePath.IsEmpty())
+        {
+            return nullptr;
+        }
+
+        const FString ObjectPath = DWCSurfaceTextureSharedAsset::MakeNormalizedTextureObjectPath(
+            SourceTexturePath,
+            TextureRole,
+            bNormalMap);
+        if (ObjectPath.IsEmpty())
+        {
+            return nullptr;
+        }
+
+        UTexture2D* SharedTexture = LoadObject<UTexture2D>(nullptr, *ObjectPath);
+        const FString ProfileIdentity = !LocalProfile.StableKey.IsEmpty()
+            ? LocalProfile.StableKey
+            : LocalProfile.SourceProfile.ToString();
+        if (SharedTexture != nullptr)
+        {
+            UE_LOG(
+                LogDWC,
+                Display,
+                TEXT("DWC recovered missing baked %s reference from the global Surface Water texture cache: profile='%s', source='%s', normalized='%s'."),
+                TextureRole,
+                *ProfileIdentity,
+                *SourceTexturePath,
+                *SharedTexture->GetPathName());
+        }
+        else
+        {
+            UE_LOG(
+                LogDWC,
+                Warning,
+                TEXT("DWC could not resolve the global normalized %s asset '%s' for profile '%s' from source '%s'. Re-bake Render Profile Data to generate the shared Surface Water texture."),
+                TextureRole,
+                *ObjectPath,
+                *ProfileIdentity,
+                *SourceTexturePath);
+        }
+        return SharedTexture;
+    }
+
+    FString ResolveProfileTextureIdentity(
+        UTexture2D* BakedNormalizedTexture,
+        UTexture2D* AuthoredSourceTexture,
+        const FSoftObjectPath& AuthoredSourcePath)
+    {
+        if (BakedNormalizedTexture != nullptr)
+        {
+            return BakedNormalizedTexture->GetPathName();
+        }
+        if (AuthoredSourceTexture != nullptr)
+        {
+            return FString::Printf(TEXT("Source:%s"), *AuthoredSourceTexture->GetPathName());
+        }
+        return AuthoredSourcePath.IsValid()
+            ? FString::Printf(TEXT("Source:%s"), *AuthoredSourcePath.ToString())
+            : FString(TEXT("None"));
+    }
+
     FString ResolveProfileKey(const FWetClothingLocalRenderProfile& LocalProfile)
     {
         if (!LocalProfile.StableKey.IsEmpty())
@@ -70,32 +147,24 @@ namespace
         const FString ParameterState = FString::Printf(
             TEXT("AbsorbedDarkening=%.9g|AbsorbedGlossiness=%.9g|")
             TEXT("DropletsEnabled=%d|DropletNormal=%s|DropletMask=%s|")
-            TEXT("RivuletsEnabled=%d|RivuletNormal=%s|RivuletMask=%s|")
             TEXT("TargetRoughness=%.9g|NormalStrength=%.9g|RoughnessBlend=%.9g|")
-            TEXT("OriginalSurfaceDetail=%.9g|")
-            TEXT("VisibilityThreshold=%.9g|RivuletScrollSpeed=%.9g"),
+            TEXT("OriginalSurfaceDetail=%.9g|VisibilityThreshold=%.9g"),
             LocalProfile.Parameters.GetAbsorbedDarkeningStrength(),
             LocalProfile.Parameters.GetAbsorbedGlossinessStrength(),
             Surface.bEnabled && Surface.bEnableDroplets ? 1 : 0,
-            LocalProfile.NormalizedDropletNormal != nullptr
-                ? *LocalProfile.NormalizedDropletNormal->GetPathName()
-                : TEXT("None"),
-            LocalProfile.NormalizedDropletMask != nullptr
-                ? *LocalProfile.NormalizedDropletMask->GetPathName()
-                : TEXT("None"),
-            Surface.bEnabled && Surface.bEnableRivulets ? 1 : 0,
-            LocalProfile.NormalizedRivuletNormal != nullptr
-                ? *LocalProfile.NormalizedRivuletNormal->GetPathName()
-                : TEXT("None"),
-            LocalProfile.NormalizedRivuletMask != nullptr
-                ? *LocalProfile.NormalizedRivuletMask->GetPathName()
-                : TEXT("None"),
+            *ResolveProfileTextureIdentity(
+                LocalProfile.NormalizedDropletNormal,
+                Surface.DropletNormalTexture,
+                LocalProfile.SourceDropletNormal),
+            *ResolveProfileTextureIdentity(
+                LocalProfile.NormalizedDropletMask,
+                Surface.DropletMaskTexture,
+                LocalProfile.SourceDropletMask),
             Surface.SurfaceWaterTargetRoughness,
             Surface.SurfaceWaterNormalStrength,
             Surface.SurfaceWaterRoughnessBlend,
             Surface.OriginalSurfaceDetail,
-            Surface.SurfaceVisibilityThreshold,
-            Surface.RivuletUVScrollSpeed);
+            Surface.SurfaceVisibilityThreshold);
         const FString ParameterHash = FMD5::HashAnsiString(*ParameterState);
         if (LocalProfile.SourceProfile.IsValid())
         {
@@ -109,24 +178,18 @@ namespace
         const FSurfaceWaterProfileParameters& Surface = Parameters.SurfaceWater;
         return FString::Printf(
             TEXT("AbsorbedDarkening=%.9g|AbsorbedGlossiness=%.9g|DropletsEnabled=%d|DropletNormal=%s|DropletMask=%s|")
-            TEXT("RivuletsEnabled=%d|RivuletNormal=%s|RivuletMask=%s|")
             TEXT("TargetRoughness=%.9g|NormalStrength=%.9g|RoughnessBlend=%.9g|")
-            TEXT("OriginalSurfaceDetail=%.9g|")
-            TEXT("VisibilityThreshold=%.9g|RivuletScrollSpeed=%.9g"),
+            TEXT("OriginalSurfaceDetail=%.9g|VisibilityThreshold=%.9g"),
             Parameters.GetAbsorbedDarkeningStrength(),
             Parameters.GetAbsorbedGlossinessStrength(),
             Surface.bEnabled && Surface.bEnableDroplets ? 1 : 0,
             *GetPathNameSafe(Surface.DropletNormalTexture),
             *GetPathNameSafe(Surface.DropletMaskTexture),
-            Surface.bEnabled && Surface.bEnableRivulets ? 1 : 0,
-            *GetPathNameSafe(Surface.RivuletNormalTexture),
-            *GetPathNameSafe(Surface.RivuletMaskTexture),
             Surface.SurfaceWaterTargetRoughness,
             Surface.SurfaceWaterNormalStrength,
             Surface.SurfaceWaterRoughnessBlend,
             Surface.OriginalSurfaceDetail,
-            Surface.SurfaceVisibilityThreshold,
-            Surface.RivuletUVScrollSpeed);
+            Surface.SurfaceVisibilityThreshold);
     }
 
     bool ResolveSourceProfileParameters(
@@ -310,8 +373,6 @@ namespace
     {
         int32 DropletMask = 0;
         int32 DropletNormal = 0;
-        int32 RivuletMask = 0;
-        int32 RivuletNormal = 0;
     };
 
     FLinearColor MakeFallbackRenderProfileTexel(
@@ -328,19 +389,19 @@ namespace
                 Parameters.GetAbsorbedDarkeningStrength(),
                 Parameters.GetAbsorbedGlossinessStrength(),
                 static_cast<float>(Surface.bEnabled && Surface.bEnableDroplets ? Slices.DropletNormal : 0),
-                static_cast<float>(Surface.bEnabled && Surface.bEnableRivulets ? Slices.RivuletNormal : 0));
+                0.0f);
 
         case 1:
             return FLinearColor(
                 FMath::Max(0.0f, Surface.SurfaceWaterNormalStrength),
                 FMath::Clamp(Surface.SurfaceWaterRoughnessBlend, 0.0f, 1.0f),
                 FMath::Clamp(Surface.SurfaceVisibilityThreshold, 0.0f, 1.0f),
-                Surface.RivuletUVScrollSpeed);
+                0.0f);
 
         case 2:
             return FLinearColor(
                 static_cast<float>(Surface.bEnabled && Surface.bEnableDroplets ? Slices.DropletMask : 0),
-                static_cast<float>(Surface.bEnabled && Surface.bEnableRivulets ? Slices.RivuletMask : 0),
+                0.0f,
                 FMath::Clamp(Surface.SurfaceWaterTargetRoughness, 0.0f, 1.0f),
                 FMath::Clamp(Surface.OriginalSurfaceDetail, 0.0f, 1.0f));
 
@@ -533,8 +594,6 @@ void UDWCGPUResourceSubsystem::Deinitialize()
     RuntimeProfileIndexByKey.Reset();
     DropletMaskRegistry.Reset();
     DropletNormalRegistry.Reset();
-    RivuletMaskRegistry.Reset();
-    RivuletNormalRegistry.Reset();
     DirtyRuntimeProfileIndices.Reset();
     RegisteredMaterialInstances.Reset();
     GPUMaterialInstances.Reset();
@@ -543,8 +602,6 @@ void UDWCGPUResourceSubsystem::Deinitialize()
     GlobalRenderProfileLUT = nullptr;
     DropletMaskArray = nullptr;
     DropletNormalArray = nullptr;
-    RivuletMaskArray = nullptr;
-    RivuletNormalArray = nullptr;
     bTextureArraysDirty = false;
     RegistryRevision = 0;
     Super::Deinitialize();
@@ -638,9 +695,7 @@ FDWCGPUResourceSubsystemStats UDWCGPUResourceSubsystem::GetStats() const
                       RegisteredMaterialInstances.GetAllocatedSize() +
                       GPUMaterialInstances.GetAllocatedSize() +
                       GetRegistryCPUBytes(DropletMaskRegistry) +
-                      GetRegistryCPUBytes(DropletNormalRegistry) +
-                      GetRegistryCPUBytes(RivuletMaskRegistry) +
-                      GetRegistryCPUBytes(RivuletNormalRegistry);
+                      GetRegistryCPUBytes(DropletNormalRegistry);
     for (const FRuntimeProfileRecord& Profile : RuntimeProfiles)
     {
         Stats.CPUBytes += Profile.StableKey.GetAllocatedSize() +
@@ -657,12 +712,8 @@ FDWCGPUResourceSubsystemStats UDWCGPUResourceSubsystem::GetStats() const
     AddUniqueTextureGPUBytes(NeutralProfileRemapLUT, SeenTextures, Stats.WetPartDataRemapGPUBytes);
     AddUniqueTextureGPUBytes(DropletMaskArray, SeenTextures, Stats.SurfaceNormalArrayGPUBytes);
     AddUniqueTextureGPUBytes(DropletNormalArray, SeenTextures, Stats.SurfaceNormalArrayGPUBytes);
-    AddUniqueTextureGPUBytes(RivuletMaskArray, SeenTextures, Stats.SurfaceNormalArrayGPUBytes);
-    AddUniqueTextureGPUBytes(RivuletNormalArray, SeenTextures, Stats.SurfaceNormalArrayGPUBytes);
     Stats.TextureArrayCount += DropletMaskArray != nullptr ? 1u : 0u;
     Stats.TextureArrayCount += DropletNormalArray != nullptr ? 1u : 0u;
-    Stats.TextureArrayCount += RivuletMaskArray != nullptr ? 1u : 0u;
-    Stats.TextureArrayCount += RivuletNormalArray != nullptr ? 1u : 0u;
 
     for (const TPair<TObjectPtr<UWetClothingAsset>, FDWCAssetRenderProfileResources>& Pair : AssetResources)
     {
@@ -770,45 +821,48 @@ int32 UDWCGPUResourceSubsystem::FindOrAddRuntimeProfile(
         const FSurfaceWaterProfileParameters& Surface = LocalProfile.Parameters.SurfaceWater;
         bool bTextureArraysChanged = false;
         const bool bDropletRequested = Surface.bEnabled && Surface.bEnableDroplets;
-        const bool bRivuletRequested = Surface.bEnabled && Surface.bEnableRivulets;
+        UTexture2D* ResolvedDropletNormal = bDropletRequested
+            ? ResolveSharedNormalizedSurfaceTexture(
+                LocalProfile,
+                LocalProfile.NormalizedDropletNormal,
+                Surface.DropletNormalTexture,
+                LocalProfile.SourceDropletNormal,
+                TEXT("DropletNormal"),
+                true)
+            : nullptr;
+        UTexture2D* ResolvedDropletMask = bDropletRequested
+            ? ResolveSharedNormalizedSurfaceTexture(
+                LocalProfile,
+                LocalProfile.NormalizedDropletMask,
+                Surface.DropletMaskTexture,
+                LocalProfile.SourceDropletMask,
+                TEXT("DropletMask"),
+                false)
+            : nullptr;
         EnsureMaskRegistryNeutral(
             DropletMaskRegistry,
-            bDropletRequested ? LocalProfile.NormalizedDropletMask : nullptr,
+            ResolvedDropletMask,
             bTextureArraysChanged);
-        EnsureMaskRegistryNeutral(
-            RivuletMaskRegistry,
-            bRivuletRequested ? LocalProfile.NormalizedRivuletMask : nullptr,
-            bTextureArraysChanged);
-        const int32 DropletMaskSlice =
-            bDropletRequested
-                ? DropletMaskRegistry.FindOrAdd(LocalProfile.NormalizedDropletMask, bTextureArraysChanged)
-                : 0;
-        const int32 DropletNormalSlice =
-            bDropletRequested
-                ? DropletNormalRegistry.FindOrAdd(LocalProfile.NormalizedDropletNormal, bTextureArraysChanged)
-                : 0;
-        const int32 RivuletMaskSlice =
-            bRivuletRequested
-                ? RivuletMaskRegistry.FindOrAdd(LocalProfile.NormalizedRivuletMask, bTextureArraysChanged)
-                : 0;
-        const int32 RivuletNormalSlice =
-            bRivuletRequested
-                ? RivuletNormalRegistry.FindOrAdd(LocalProfile.NormalizedRivuletNormal, bTextureArraysChanged)
-                : 0;
+        const int32 DropletMaskSlice = bDropletRequested
+            ? DropletMaskRegistry.FindOrAdd(ResolvedDropletMask, bTextureArraysChanged)
+            : 0;
+        const int32 DropletNormalSlice = bDropletRequested
+            ? DropletNormalRegistry.FindOrAdd(ResolvedDropletNormal, bTextureArraysChanged)
+            : 0;
 
         Record->PackedTexels[0] = FLinearColor(
             LocalProfile.Parameters.GetAbsorbedDarkeningStrength(),
             LocalProfile.Parameters.GetAbsorbedGlossinessStrength(),
             static_cast<float>(DropletNormalSlice),
-            static_cast<float>(RivuletNormalSlice));
+            0.0f);
         Record->PackedTexels[1] = FLinearColor(
             FMath::Max(0.0f, Surface.SurfaceWaterNormalStrength),
             FMath::Clamp(Surface.SurfaceWaterRoughnessBlend, 0.0f, 1.0f),
             FMath::Clamp(Surface.SurfaceVisibilityThreshold, 0.0f, 1.0f),
-            Surface.RivuletUVScrollSpeed);
+            0.0f);
         Record->PackedTexels[2] = FLinearColor(
             static_cast<float>(DropletMaskSlice),
-            static_cast<float>(RivuletMaskSlice),
+            0.0f,
             FMath::Clamp(Surface.SurfaceWaterTargetRoughness, 0.0f, 1.0f),
             FMath::Clamp(Surface.OriginalSurfaceDetail, 0.0f, 1.0f));
         Record->bSurfaceResourcesResolved = true;
@@ -1168,17 +1222,7 @@ bool UDWCGPUResourceSubsystem::EnsureTextureArraysUpToDate()
         DropletNormalRegistry,
         DropletNormalArray,
         true);
-    const bool bRivuletMaskArrayReplaced = EnsureTextureArray(
-        TEXT("DWC_RivuletMaskArray"),
-        RivuletMaskRegistry,
-        RivuletMaskArray,
-        false);
-    const bool bRivuletArrayReplaced = EnsureTextureArray(
-        TEXT("DWC_RivuletNormalArray"),
-        RivuletNormalRegistry,
-        RivuletNormalArray,
-        true);
-    return bDropletMaskArrayReplaced || bDropletArrayReplaced || bRivuletMaskArrayReplaced || bRivuletArrayReplaced;
+    return bDropletMaskArrayReplaced || bDropletArrayReplaced;
 }
 
 void UDWCGPUResourceSubsystem::RebindGPUTextureArrays()
@@ -1243,7 +1287,6 @@ const FDWCAssetRenderProfileResources* UDWCGPUResourceSubsystem::AcquireAssetRes
         bool bNeutralRegistryChanged = false;
         UTexture2D* NeutralNormal = Asset->Derived.Inline.BakedWetPartData.NormalizedNeutralSurfaceNormal;
         DropletNormalRegistry.SetNeutral(NeutralNormal, bNeutralRegistryChanged);
-        RivuletNormalRegistry.SetNeutral(NeutralNormal, bNeutralRegistryChanged);
         bTextureArraysDirty |= bNeutralRegistryChanged;
     }
 
@@ -1261,9 +1304,7 @@ const FDWCAssetRenderProfileResources* UDWCGPUResourceSubsystem::AcquireAssetRes
     if (Usage == EDWCRenderResourceUsage::FullGPU &&
         (bTextureArraysDirty ||
          DropletMaskArray == nullptr ||
-         DropletNormalArray == nullptr ||
-         RivuletMaskArray == nullptr ||
-         RivuletNormalArray == nullptr))
+         DropletNormalArray == nullptr))
     {
         const bool bArrayResourceReplaced = EnsureTextureArraysUpToDate();
         bTextureArraysDirty = false;
@@ -1443,14 +1484,6 @@ void UDWCGPUResourceSubsystem::BindGlobalResources(
         {
             MID.SetTextureParameterValue(DWCWetMaterialParameters::DropletNormalTextureArray(), DropletNormalArray);
         }
-        if (RivuletMaskArray != nullptr)
-        {
-            MID.SetTextureParameterValue(DWCWetMaterialParameters::RivuletMaskTextureArray(), RivuletMaskArray);
-        }
-        if (RivuletNormalArray != nullptr)
-        {
-            MID.SetTextureParameterValue(DWCWetMaterialParameters::RivuletNormalTextureArray(), RivuletNormalArray);
-        }
     }
 }
 
@@ -1480,54 +1513,59 @@ void UDWCGPUResourceSubsystem::ApplyFallbackRenderProfileParameters(
             UTexture2D* NeutralNormal =
                 WetClothingAsset->Derived.Inline.BakedWetPartData.NormalizedNeutralSurfaceNormal;
             DropletNormalRegistry.SetNeutral(NeutralNormal, bTextureArraysChanged);
-            RivuletNormalRegistry.SetNeutral(NeutralNormal, bTextureArraysChanged);
         }
         else
         {
             DropletNormalRegistry.ReserveNeutralSlice(bTextureArraysChanged);
-            RivuletNormalRegistry.ReserveNeutralSlice(bTextureArraysChanged);
         }
+
         const FSurfaceWaterProfileParameters& Surface = Profile.Parameters.SurfaceWater;
         const bool bDropletRequested = Surface.bEnabled && Surface.bEnableDroplets;
-        const bool bRivuletRequested = Surface.bEnabled && Surface.bEnableRivulets;
+        UTexture2D* ResolvedDropletNormal = bDropletRequested
+            ? ResolveSharedNormalizedSurfaceTexture(
+                Profile,
+                Profile.NormalizedDropletNormal,
+                Surface.DropletNormalTexture,
+                Profile.SourceDropletNormal,
+                TEXT("DropletNormal"),
+                true)
+            : nullptr;
+        UTexture2D* ResolvedDropletMask = bDropletRequested
+            ? ResolveSharedNormalizedSurfaceTexture(
+                Profile,
+                Profile.NormalizedDropletMask,
+                Surface.DropletMaskTexture,
+                Profile.SourceDropletMask,
+                TEXT("DropletMask"),
+                false)
+            : nullptr;
         EnsureMaskRegistryNeutral(
             DropletMaskRegistry,
-            bDropletRequested ? Profile.NormalizedDropletMask : nullptr,
-            bTextureArraysChanged);
-        EnsureMaskRegistryNeutral(
-            RivuletMaskRegistry,
-            bRivuletRequested ? Profile.NormalizedRivuletMask : nullptr,
+            ResolvedDropletMask,
             bTextureArraysChanged);
         Slices.DropletMask = bDropletRequested
-            ? DropletMaskRegistry.FindOrAdd(Profile.NormalizedDropletMask, bTextureArraysChanged)
+            ? DropletMaskRegistry.FindOrAdd(ResolvedDropletMask, bTextureArraysChanged)
             : 0;
         Slices.DropletNormal = bDropletRequested
-            ? DropletNormalRegistry.FindOrAdd(Profile.NormalizedDropletNormal, bTextureArraysChanged)
-            : 0;
-        Slices.RivuletMask = bRivuletRequested
-            ? RivuletMaskRegistry.FindOrAdd(Profile.NormalizedRivuletMask, bTextureArraysChanged)
-            : 0;
-        Slices.RivuletNormal = bRivuletRequested
-            ? RivuletNormalRegistry.FindOrAdd(Profile.NormalizedRivuletNormal, bTextureArraysChanged)
+            ? DropletNormalRegistry.FindOrAdd(ResolvedDropletNormal, bTextureArraysChanged)
             : 0;
 
-        const auto DescribeNormalTexture =
-            [](UTexture2D* SourceTexture)
-            {
-                return SourceTexture != nullptr
-                    ? FString::Printf(
-                        TEXT("%s (%dx%d format %d)"),
-                        *SourceTexture->GetPathName(),
-                        SourceTexture->GetSizeX(),
-                        SourceTexture->GetSizeY(),
-                        static_cast<int32>(SourceTexture->GetPixelFormat()))
-                    : FString(TEXT("None"));
-            };
+        const auto DescribeTexture = [](UTexture2D* SourceTexture)
+        {
+            return SourceTexture != nullptr
+                ? FString::Printf(
+                    TEXT("%s (%dx%d format %d)"),
+                    *SourceTexture->GetPathName(),
+                    SourceTexture->GetSizeX(),
+                    SourceTexture->GetSizeY(),
+                    static_cast<int32>(SourceTexture->GetPixelFormat()))
+                : FString(TEXT("None"));
+        };
         const FString ProfileKey = ResolveProfileKey(Profile);
         UE_LOG(
             LogDWC,
             Display,
-            TEXT("DWC Surface Water normal registry result for asset '%s' slot %d profile '%s': surfaceEnabled=%d normalStrength=%.6g droplet(requested=%d slice=%d source=%s) rivulet(requested=%d slice=%d source=%s)."),
+            TEXT("DWC Surface Water droplet registry result for asset '%s' slot %d profile '%s': surfaceEnabled=%d normalStrength=%.6g requested=%d normalSlice=%d maskSlice=%d normal=%s mask=%s."),
             *GetPathNameSafe(WetClothingAsset),
             MaterialSlotIndex,
             *ProfileKey,
@@ -1535,100 +1573,55 @@ void UDWCGPUResourceSubsystem::ApplyFallbackRenderProfileParameters(
             Surface.SurfaceWaterNormalStrength,
             bDropletRequested ? 1 : 0,
             Slices.DropletNormal,
-            *DescribeNormalTexture(Profile.NormalizedDropletNormal),
-            bRivuletRequested ? 1 : 0,
-            Slices.RivuletNormal,
-            *DescribeNormalTexture(Profile.NormalizedRivuletNormal));
+            Slices.DropletMask,
+            *DescribeTexture(ResolvedDropletNormal),
+            *DescribeTexture(ResolvedDropletMask));
 
-        if (Surface.bEnabled && Surface.SurfaceWaterNormalStrength <= UE_KINDA_SMALL_NUMBER &&
-            (bDropletRequested || bRivuletRequested))
+        if (Surface.bEnabled && Surface.SurfaceWaterNormalStrength <= UE_KINDA_SMALL_NUMBER && bDropletRequested)
         {
             UE_LOG(
                 LogDWC,
                 Warning,
-                TEXT("DWC Surface Water normal strength is %.6g for asset '%s' slot %d profile '%s'; detail normal weight resolves to zero even if coverage is visible."),
+                TEXT("DWC Surface Water normal strength is %.6g for asset '%s' slot %d profile '%s'; droplet detail normal weight resolves to zero even if coverage is visible."),
                 Surface.SurfaceWaterNormalStrength,
                 *GetPathNameSafe(WetClothingAsset),
                 MaterialSlotIndex,
                 *ProfileKey);
         }
 
-        if (Surface.bEnabled && !bDropletRequested && !bRivuletRequested)
+        if (Surface.bEnabled && !bDropletRequested)
         {
             UE_LOG(
                 LogDWC,
                 Warning,
-                TEXT("DWC Surface Water is enabled but neither Droplet nor Rivulet normals are enabled for asset '%s' slot %d profile '%s'; World Normal remains the source material normal."),
+                TEXT("DWC Surface Water is enabled but Droplet rendering is disabled for asset '%s' slot %d profile '%s'; World Normal remains the source material normal."),
                 *GetPathNameSafe(WetClothingAsset),
                 MaterialSlotIndex,
                 *ProfileKey);
         }
 
-        const auto LogSliceZeroFallback =
-            [WetClothingAsset, MaterialSlotIndex, &Profile, &DescribeNormalTexture](
-                const TCHAR* NormalKind,
-                UTexture2D* SourceTexture,
-                const int32 ResolvedSlice,
-                const bool bRequested)
-            {
-                if (!bRequested || ResolvedSlice != 0)
-                {
-                    return;
-                }
-
-                UE_LOG(
-                    LogDWC,
-                    Warning,
-                    TEXT("DWC %s normal resolved to Texture2DArray slice 0 flat-normal fallback for asset '%s' slot %d profile '%s'. Source texture: %s."),
-                    NormalKind,
-                    *GetPathNameSafe(WetClothingAsset),
-                    MaterialSlotIndex,
-                    *ResolveProfileKey(Profile),
-                    *DescribeNormalTexture(SourceTexture));
-            };
-        LogSliceZeroFallback(
-            TEXT("Droplet"),
-            Profile.NormalizedDropletNormal,
-            Slices.DropletNormal,
-            bDropletRequested);
-        LogSliceZeroFallback(
-            TEXT("Rivulet"),
-            Profile.NormalizedRivuletNormal,
-            Slices.RivuletNormal,
-            bRivuletRequested);
-
-        const auto LogMaskSliceZero =
-            [WetClothingAsset, MaterialSlotIndex, &Profile, &DescribeNormalTexture](
-                const TCHAR* MaskKind,
-                UTexture2D* SourceTexture,
-                const int32 ResolvedSlice,
-                const bool bRequested)
-            {
-                if (!bRequested || ResolvedSlice != 0)
-                {
-                    return;
-                }
-
-                UE_LOG(
-                    LogDWC,
-                    Warning,
-                    TEXT("DWC %s mask resolved to Texture2DArray slice 0 for asset '%s' slot %d profile '%s'. Reference-style Surface Water is mask-gated, so this contribution resolves to zero. Source texture: %s."),
-                    MaskKind,
-                    *GetPathNameSafe(WetClothingAsset),
-                    MaterialSlotIndex,
-                    *ResolveProfileKey(Profile),
-                    *DescribeNormalTexture(SourceTexture));
-            };
-        LogMaskSliceZero(
-            TEXT("Droplet"),
-            Profile.NormalizedDropletMask,
-            Slices.DropletMask,
-            bDropletRequested);
-        LogMaskSliceZero(
-            TEXT("Rivulet"),
-            Profile.NormalizedRivuletMask,
-            Slices.RivuletMask,
-            bRivuletRequested);
+        if (bDropletRequested && Slices.DropletNormal == 0)
+        {
+            UE_LOG(
+                LogDWC,
+                Warning,
+                TEXT("DWC Droplet normal resolved to Texture2DArray slice 0 flat-normal fallback for asset '%s' slot %d profile '%s'. Source texture: %s."),
+                *GetPathNameSafe(WetClothingAsset),
+                MaterialSlotIndex,
+                *ProfileKey,
+                *DescribeTexture(ResolvedDropletNormal));
+        }
+        if (bDropletRequested && Slices.DropletMask == 0 && ResolvedDropletMask != nullptr)
+        {
+            UE_LOG(
+                LogDWC,
+                Warning,
+                TEXT("DWC Droplet mask resolved to Texture2DArray slice 0 for asset '%s' slot %d profile '%s'. Surface Water falls back to unmasked coverage. Source texture: %s."),
+                *GetPathNameSafe(WetClothingAsset),
+                MaterialSlotIndex,
+                *ProfileKey,
+                *DescribeTexture(ResolvedDropletMask));
+        }
 
         if (bTextureArraysChanged)
         {

@@ -1,4 +1,4 @@
-"""Create or recreate MF_DWC_DebugWetPartColor with Wet Part and Surface Water overlays."""
+"""Create or recreate MF_DWC_DebugWetPartColor with droplet-only Surface Water debug."""
 from __future__ import annotations
 
 import os
@@ -17,10 +17,10 @@ ASSET_NAME = "MF_DWC_DebugWetPartColor"
 def build() -> None:
     mf = c.create_or_replace_material_function(ASSET_NAME, OVERWRITE_EXISTING)
 
-    c.create_comment(mf, "1. Inputs", -6200, -3300, 3400, 6200, parent=True)
-    c.create_comment(mf, "2. Wet Part Debug", -2400, -3300, 3000, 2700, parent=True)
-    c.create_comment(mf, "3. Surface Water Debug", -2400, 0, 4200, 2900, parent=True)
-    c.create_comment(mf, "4. Final Output", 2300, -3300, 3000, 6200, parent=True)
+    c.create_comment(mf, "1. Inputs", -6200, -3000, 3400, 5600, parent=True)
+    c.create_comment(mf, "2. Wet Part Debug", -2400, -3000, 3000, 2500, parent=True)
+    c.create_comment(mf, "3. Droplet Debug", -2400, 0, 3600, 2500, parent=True)
+    c.create_comment(mf, "4. Final Output", 1800, -3000, 3000, 5600, parent=True)
 
     specs = [
         ("BaseColor", "vector3", (1.0, 1.0, 1.0), "Evaluated base color before debug overlays."),
@@ -28,22 +28,22 @@ def build() -> None:
         ("VertexColorAlpha", "scalar", (0.0,), "Packed Wet Part debug blue channel."),
         ("WetnessMask", "scalar", (0.0,), "Resolved absorbed-wetness amount."),
         ("WetPartDebugStrength", "scalar", (0.0,), "Runtime Wet Part debug strength."),
-        ("DropletCoverage", "scalar", (0.0,), "Visible Droplet coverage from the Appearance MF."),
-        ("RivuletCoverage", "scalar", (0.0,), "Visible Rivulet coverage from the Appearance MF."),
+        ("DropletCoverage", "scalar", (0.0,), "Debug droplet coverage from the Appearance MF."),
         ("SurfaceWaterDebugStrength", "scalar", (0.0,), "Runtime Surface Water debug strength."),
         ("DropletDebugColor", "vector3", (1.0, 0.85, 0.0), "Droplet debug color."),
-        ("RivuletDebugColor", "vector3", (0.72, 0.45, 1.0), "Rivulet debug color."),
     ]
     declarations: dict[str, object] = {}
     for i, (name, kind, preview, desc) in enumerate(specs):
-        node = c.function_input(mf, name, kind, preview, i, -5850, -2750 + i * 520, desc)
+        node = c.function_input(mf, name, kind, preview, i, -5850, -2500 + i * 580, desc)
         declarations[name] = c.named_declaration(
-            mf, f"IN_{name}", node, ("", "Result"), -4550, -2750 + i * 520
+            mf, f"IN_{name}", node, ("", "Result"), -4550, -2500 + i * 580
         )
 
-    wet_inputs = []
-    for i, name in enumerate(("BaseColor", "VertexColorRGB", "VertexColorAlpha", "WetnessMask", "WetPartDebugStrength")):
-        wet_inputs.append((name, c.named_usage(mf, declarations[name], -2000 + (i % 2) * 750, -2700 + (i // 2) * 650), ("", "Result")))
+    wet_names = ("BaseColor", "VertexColorRGB", "VertexColorAlpha", "WetnessMask", "WetPartDebugStrength")
+    wet_inputs = [
+        (name, c.named_usage(mf, declarations[name], -2000 + (i % 2) * 750, -2450 + (i // 2) * 650), ("", "Result"))
+        for i, name in enumerate(wet_names)
+    ]
     wet_result = c.custom_expression(
         mf,
         """
@@ -52,57 +52,53 @@ float WetPartAlpha = saturate(WetnessMask * WetPartDebugStrength);
 return lerp(BaseColor, WetPartColor, WetPartAlpha);
 """,
         wet_inputs,
-        "float3", -650, -1800,
+        "float3", -650, -1500,
         "Apply the authored Wet Part color overlay, gated by absorbed wetness.",
     )
-    wet_result_decl = c.named_declaration(mf, "DEBUG_WetPartResult", wet_result, ("", "Result"), 250, -1800)
+    wet_decl = c.named_declaration(mf, "DEBUG_WetPartResult", wet_result, ("", "Result"), 250, -1500)
 
-    surface_names = (
-        "DropletCoverage", "RivuletCoverage", "SurfaceWaterDebugStrength",
-        "DropletDebugColor", "RivuletDebugColor",
-    )
-    surface_inputs = []
-    for i, name in enumerate(surface_names):
-        surface_inputs.append((name, c.named_usage(mf, declarations[name], -2000 + (i % 2) * 900, 350 + (i // 2) * 650), ("", "Result")))
-    surface_color = c.custom_expression(
+    droplet_inputs = []
+    for i, name in enumerate(("DropletCoverage", "SurfaceWaterDebugStrength", "DropletDebugColor")):
+        droplet_inputs.append(
+            (name, c.named_usage(mf, declarations[name], -2000 + i * 800, 450), ("", "Result"))
+        )
+    droplet_color = c.custom_expression(
         mf,
-        """
-float D = saturate(DropletCoverage * SurfaceWaterDebugStrength);
-float R = saturate(RivuletCoverage * SurfaceWaterDebugStrength);
-return D >= R ? DropletDebugColor : RivuletDebugColor;
-""",
-        surface_inputs,
-        "float3", -400, 850,
-        "Choose the dominant visible Surface Water type for an unambiguous debug color.",
+        "return DropletDebugColor;",
+        droplet_inputs,
+        "float3", -300, 850,
+        "Use the configured droplet debug color.",
     )
-    surface_alpha_inputs = []
-    for i, name in enumerate(("DropletCoverage", "RivuletCoverage", "SurfaceWaterDebugStrength")):
-        surface_alpha_inputs.append((name, c.named_usage(mf, declarations[name], -1900 + i * 750, 2000), ("", "Result")))
-    surface_alpha = c.custom_expression(
+    alpha_inputs = []
+    for i, name in enumerate(("DropletCoverage", "SurfaceWaterDebugStrength")):
+        alpha_inputs.append(
+            (name, c.named_usage(mf, declarations[name], -1700 + i * 900, 1550), ("", "Result"))
+        )
+    droplet_alpha = c.custom_expression(
         mf,
-        "return saturate(max(DropletCoverage, RivuletCoverage) * SurfaceWaterDebugStrength);",
-        surface_alpha_inputs,
-        "float1", 600, 1950,
-        "Compute the final Surface Water debug overlay alpha.",
+        "return saturate(DropletCoverage * SurfaceWaterDebugStrength);",
+        alpha_inputs,
+        "float1", 150, 1550,
+        "Compute the droplet debug overlay alpha.",
     )
-    surface_color_decl = c.named_declaration(mf, "DEBUG_SurfaceColor", surface_color, ("", "Result"), 1100, 850)
-    surface_alpha_decl = c.named_declaration(mf, "DEBUG_SurfaceAlpha", surface_alpha, ("", "Result"), 1100, 1950)
+    color_decl = c.named_declaration(mf, "DEBUG_SurfaceColor", droplet_color, ("", "Result"), 850, 850)
+    alpha_decl = c.named_declaration(mf, "DEBUG_SurfaceAlpha", droplet_alpha, ("", "Result"), 850, 1550)
 
-    wet_use = c.named_usage(mf, wet_result_decl, 2700, -800)
-    surface_color_use = c.named_usage(mf, surface_color_decl, 2700, 0)
-    surface_alpha_use = c.named_usage(mf, surface_alpha_decl, 2700, 800)
+    wet_use = c.named_usage(mf, wet_decl, 2200, -650)
+    color_use = c.named_usage(mf, color_decl, 2200, 50)
+    alpha_use = c.named_usage(mf, alpha_decl, 2200, 750)
     final_color = c.lerp(
-        mf, wet_use, ("", "Result"), surface_color_use, ("", "Result"), surface_alpha_use, ("", "Result"),
-        3600, 0, "Place Surface Water debug colors above the Wet Part overlay.",
+        mf, wet_use, ("", "Result"), color_use, ("", "Result"), alpha_use, ("", "Result"),
+        3100, 0, "Place the droplet debug color above the Wet Part overlay.",
     )
-    final_decl = c.named_declaration(mf, "OUT_BaseColor", final_color, ("", "Result"), 4400, 0)
+    final_decl = c.named_declaration(mf, "OUT_BaseColor", final_color, ("", "Result"), 3900, 0)
 
-    final_use = c.named_usage(mf, final_decl, 5650, -700)
-    color_use = c.named_usage(mf, surface_color_decl, 5650, 0)
-    alpha_use = c.named_usage(mf, surface_alpha_decl, 5650, 700)
-    c.function_output(mf, "BaseColor", final_use, ("", "Result"), 0, 6500, -700, "Final debug-overlaid Base Color.")
-    c.function_output(mf, "DebugColor", color_use, ("", "Result"), 1, 6500, 0, "Dominant Surface Water debug color.")
-    c.function_output(mf, "DebugAlpha", alpha_use, ("", "Result"), 2, 6500, 700, "Surface Water debug alpha.")
+    final_use = c.named_usage(mf, final_decl, 5000, -650)
+    color_out = c.named_usage(mf, color_decl, 5000, 50)
+    alpha_out = c.named_usage(mf, alpha_decl, 5000, 750)
+    c.function_output(mf, "BaseColor", final_use, ("", "Result"), 0, 5900, -650, "Final debug-overlaid Base Color.")
+    c.function_output(mf, "DebugColor", color_out, ("", "Result"), 1, 5900, 50, "Droplet debug color.")
+    c.function_output(mf, "DebugAlpha", alpha_out, ("", "Result"), 2, 5900, 750, "Droplet debug alpha.")
 
     c.finalize_material_function(mf)
 

@@ -27,7 +27,7 @@ namespace DWCWetnessProfilePreviewMaterial
 namespace
 {
     constexpr const TCHAR* DynamicWetClothesPluginName = TEXT("DynamicWetClothes");
-    constexpr const TCHAR* PreviewMaterialAssetName = TEXT("M_DWC_WetnessProfilePreviewV9");
+    constexpr const TCHAR* PreviewMaterialAssetName = TEXT("M_DWC_WetnessProfilePreviewV10");
 
     enum class EPreviewMaterialCreationState : uint8
     {
@@ -236,54 +236,22 @@ namespace
             Material, SurfaceVisibilityThresholdParameter, 0.25f, -1250, 380);
         UMaterialExpressionScalarParameter* DropletsEnabled = CreateScalarParameter(
             Material, DropletsEnabledParameter, 1.0f, -1250, 480);
-        UMaterialExpressionScalarParameter* RivuletsEnabled = CreateScalarParameter(
-            Material, RivuletsEnabledParameter, 1.0f, -1250, 580);
-        UMaterialExpressionScalarParameter* RivuletScrollSpeed = CreateScalarParameter(
-            Material, RivuletScrollSpeedParameter, 0.0f, -1250, 680);
         UMaterialExpressionScalarParameter* DropletDetailSize = CreateScalarParameter(
-            Material, DropletDetailSizeParameter, 1.0f, -1250, 780);
-        UMaterialExpressionScalarParameter* RivuletDetailSize = CreateScalarParameter(
-            Material, RivuletDetailSizeParameter, 1.0f, -1250, 880);
+            Material, DropletDetailSizeParameter, 1.0f, -1250, 580);
 
         UMaterialExpressionTextureCoordinate* TextureCoordinate = Cast<UMaterialExpressionTextureCoordinate>(
             UMaterialEditingLibrary::CreateMaterialExpression(
                 Material,
                 UMaterialExpressionTextureCoordinate::StaticClass(),
                 -1250,
-                900));
-        UMaterialExpressionTime* Time = Cast<UMaterialExpressionTime>(
-            UMaterialEditingLibrary::CreateMaterialExpression(
-                Material,
-                UMaterialExpressionTime::StaticClass(),
-                -1250,
-                1000));
+                720));
 
         UTexture* DefaultNormalTexture = LoadDefaultNormalTexture();
         UTexture* DefaultMaskTexture = LoadDefaultMaskTexture();
         UMaterialExpressionTextureObjectParameter* DropletNormal = CreateNormalTextureParameter(
-            Material,
-            DropletNormalTextureParameter,
-            DefaultNormalTexture,
-            -1250,
-            840);
-        UMaterialExpressionTextureObjectParameter* RivuletNormal = CreateNormalTextureParameter(
-            Material,
-            RivuletNormalTextureParameter,
-            DefaultNormalTexture,
-            -1250,
-            960);
+            Material, DropletNormalTextureParameter, DefaultNormalTexture, -1250, 840);
         UMaterialExpressionTextureObjectParameter* DropletMask = CreateMaskTextureParameter(
-            Material,
-            DropletMaskTextureParameter,
-            DefaultMaskTexture,
-            -1250,
-            1080);
-        UMaterialExpressionTextureObjectParameter* RivuletMask = CreateMaskTextureParameter(
-            Material,
-            RivuletMaskTextureParameter,
-            DefaultMaskTexture,
-            -1250,
-            1200);
+            Material, DropletMaskTextureParameter, DefaultMaskTexture, -1250, 960);
 
         UMaterialExpressionCustom* BaseColorExpression = CreateCustomExpression(
             Material,
@@ -297,11 +265,8 @@ return AbsorbedGray;
             CMOT_Float3,
             {
                 TEXT("AbsorbedWater"),
-                TEXT("SurfaceWater"),
                 TEXT("AbsorbedEnabled"),
-                TEXT("SurfaceEnabled"),
                 TEXT("AbsorbedDarkeningStrength"),
-                TEXT("SurfaceVisibilityThreshold"),
             },
             -620,
             -360);
@@ -316,21 +281,14 @@ float ThresholdMin = saturate(SurfaceVisibilityThreshold);
 float ThresholdMax = min(ThresholdMin + 0.4, 1.0);
 float Surface = smoothstep(ThresholdMin, ThresholdMax, EnabledSurface);
 float2 DropletUV = frac(UV / max(DropletDetailSize, 1.0e-4));
-float2 RivuletUV = frac(UV / max(RivuletDetailSize, 1.0e-4) + float2(0.0, TimeValue * RivuletScrollSpeed * 0.08));
-float DropletMask = Texture2DSampleLevel(DropletMaskTex, DropletMaskTexSampler, DropletUV, 0).r;
-float RivuletMask = Texture2DSampleLevel(RivuletMaskTex, RivuletMaskTexSampler, RivuletUV, 0).r;
-DropletMask = saturate(DropletMask);
-RivuletMask = saturate(RivuletMask);
-float Coverage = saturate(
-    Surface * saturate(DropletsEnabled) * DropletMask +
-    Surface * saturate(RivuletsEnabled) * RivuletMask);
+float DropletMaskValue = saturate(Texture2DSampleLevel(DropletMaskTex, DropletMaskTexSampler, DropletUV, 0).r);
+float Coverage = Surface * saturate(DropletsEnabled) * DropletMaskValue;
 float AbsorbedRoughness = lerp(0.72, 0.52, saturate(Absorbed * AbsorbedGlossinessStrength));
 return saturate(lerp(AbsorbedRoughness, saturate(SurfaceTargetRoughness), saturate(Coverage * SurfaceRoughnessBlend)));
 )"),
             CMOT_Float1,
             {
                 TEXT("UV"),
-                TEXT("TimeValue"),
                 TEXT("AbsorbedWater"),
                 TEXT("SurfaceWater"),
                 TEXT("AbsorbedEnabled"),
@@ -340,12 +298,8 @@ return saturate(lerp(AbsorbedRoughness, saturate(SurfaceTargetRoughness), satura
                 TEXT("SurfaceVisibilityThreshold"),
                 TEXT("SurfaceRoughnessBlend"),
                 TEXT("DropletsEnabled"),
-                TEXT("RivuletsEnabled"),
-                TEXT("RivuletScrollSpeed"),
                 TEXT("DropletDetailSize"),
-                TEXT("RivuletDetailSize"),
                 TEXT("DropletMaskTex"),
-                TEXT("RivuletMaskTex"),
             },
             -620,
             80);
@@ -358,55 +312,36 @@ float EnabledSurface = saturate(SurfaceWater) * saturate(SurfaceEnabled);
 float ThresholdMin = saturate(SurfaceVisibilityThreshold);
 float ThresholdMax = min(ThresholdMin + 0.4, 1.0);
 float Surface = smoothstep(ThresholdMin, ThresholdMax, EnabledSurface);
-
 float2 DropletUV = frac(UV / max(DropletDetailSize, 1.0e-4));
-float2 RivuletUV = frac(UV / max(RivuletDetailSize, 1.0e-4) + float2(0.0, TimeValue * RivuletScrollSpeed * 0.08));
 float2 DropletXY = -(Texture2DSampleLevel(DropletNormalTex, DropletNormalTexSampler, DropletUV, 0).rg * 2.0 - 1.0);
-float2 RivuletXY = -(Texture2DSampleLevel(RivuletNormalTex, RivuletNormalTexSampler, RivuletUV, 0).rg * 2.0 - 1.0);
-float DropletMask = Texture2DSampleLevel(DropletMaskTex, DropletMaskTexSampler, DropletUV, 0).r;
-float RivuletMask = Texture2DSampleLevel(RivuletMaskTex, RivuletMaskTexSampler, RivuletUV, 0).r;
-DropletMask = saturate(DropletMask);
-RivuletMask = saturate(RivuletMask);
-
-float DropletWeight = Surface * saturate(DropletsEnabled) * DropletMask;
-float RivuletWeight = Surface * saturate(RivuletsEnabled) * RivuletMask;
+float DropletMaskValue = saturate(Texture2DSampleLevel(DropletMaskTex, DropletMaskTexSampler, DropletUV, 0).r);
+float DropletWeight = Surface * saturate(DropletsEnabled) * DropletMaskValue;
 float Strength = clamp(SurfaceNormalStrength, 0.0, 8.0);
 float DropletVisualHeightBoost = 1.65;
 float2 CombinedXY = DropletXY * DropletWeight * min(Strength * DropletVisualHeightBoost, 12.0);
-CombinedXY += RivuletXY * RivuletWeight * Strength;
 return normalize(float3(CombinedXY, 1.0));
 )"),
             CMOT_Float3,
             {
                 TEXT("UV"),
-                TEXT("TimeValue"),
                 TEXT("SurfaceWater"),
                 TEXT("SurfaceEnabled"),
                 TEXT("SurfaceNormalStrength"),
                 TEXT("SurfaceVisibilityThreshold"),
                 TEXT("DropletsEnabled"),
-                TEXT("RivuletsEnabled"),
-                TEXT("RivuletScrollSpeed"),
                 TEXT("DropletDetailSize"),
-                TEXT("RivuletDetailSize"),
                 TEXT("DropletNormalTex"),
-                TEXT("RivuletNormalTex"),
                 TEXT("DropletMaskTex"),
-                TEXT("RivuletMaskTex"),
             },
             -620,
             520);
 
         bool bConnected = true;
         bConnected &= ConnectExpression(AbsorbedWater, BaseColorExpression, TEXT("AbsorbedWater"));
-        bConnected &= ConnectExpression(SurfaceWater, BaseColorExpression, TEXT("SurfaceWater"));
         bConnected &= ConnectExpression(AbsorbedEnabled, BaseColorExpression, TEXT("AbsorbedEnabled"));
-        bConnected &= ConnectExpression(SurfaceEnabled, BaseColorExpression, TEXT("SurfaceEnabled"));
         bConnected &= ConnectExpression(AbsorbedDarkeningStrength, BaseColorExpression, TEXT("AbsorbedDarkeningStrength"));
-        bConnected &= ConnectExpression(SurfaceVisibilityThreshold, BaseColorExpression, TEXT("SurfaceVisibilityThreshold"));
 
         bConnected &= ConnectExpression(TextureCoordinate, RoughnessExpression, TEXT("UV"));
-        bConnected &= ConnectExpression(Time, RoughnessExpression, TEXT("TimeValue"));
         bConnected &= ConnectExpression(AbsorbedWater, RoughnessExpression, TEXT("AbsorbedWater"));
         bConnected &= ConnectExpression(SurfaceWater, RoughnessExpression, TEXT("SurfaceWater"));
         bConnected &= ConnectExpression(AbsorbedEnabled, RoughnessExpression, TEXT("AbsorbedEnabled"));
@@ -416,28 +351,18 @@ return normalize(float3(CombinedXY, 1.0));
         bConnected &= ConnectExpression(SurfaceVisibilityThreshold, RoughnessExpression, TEXT("SurfaceVisibilityThreshold"));
         bConnected &= ConnectExpression(SurfaceRoughnessBlend, RoughnessExpression, TEXT("SurfaceRoughnessBlend"));
         bConnected &= ConnectExpression(DropletsEnabled, RoughnessExpression, TEXT("DropletsEnabled"));
-        bConnected &= ConnectExpression(RivuletsEnabled, RoughnessExpression, TEXT("RivuletsEnabled"));
-        bConnected &= ConnectExpression(RivuletScrollSpeed, RoughnessExpression, TEXT("RivuletScrollSpeed"));
         bConnected &= ConnectExpression(DropletDetailSize, RoughnessExpression, TEXT("DropletDetailSize"));
-        bConnected &= ConnectExpression(RivuletDetailSize, RoughnessExpression, TEXT("RivuletDetailSize"));
         bConnected &= ConnectExpression(DropletMask, RoughnessExpression, TEXT("DropletMaskTex"));
-        bConnected &= ConnectExpression(RivuletMask, RoughnessExpression, TEXT("RivuletMaskTex"));
 
         bConnected &= ConnectExpression(TextureCoordinate, NormalExpression, TEXT("UV"));
-        bConnected &= ConnectExpression(Time, NormalExpression, TEXT("TimeValue"));
         bConnected &= ConnectExpression(SurfaceWater, NormalExpression, TEXT("SurfaceWater"));
         bConnected &= ConnectExpression(SurfaceEnabled, NormalExpression, TEXT("SurfaceEnabled"));
         bConnected &= ConnectExpression(SurfaceNormalStrength, NormalExpression, TEXT("SurfaceNormalStrength"));
         bConnected &= ConnectExpression(SurfaceVisibilityThreshold, NormalExpression, TEXT("SurfaceVisibilityThreshold"));
         bConnected &= ConnectExpression(DropletsEnabled, NormalExpression, TEXT("DropletsEnabled"));
-        bConnected &= ConnectExpression(RivuletsEnabled, NormalExpression, TEXT("RivuletsEnabled"));
-        bConnected &= ConnectExpression(RivuletScrollSpeed, NormalExpression, TEXT("RivuletScrollSpeed"));
         bConnected &= ConnectExpression(DropletDetailSize, NormalExpression, TEXT("DropletDetailSize"));
-        bConnected &= ConnectExpression(RivuletDetailSize, NormalExpression, TEXT("RivuletDetailSize"));
         bConnected &= ConnectExpression(DropletNormal, NormalExpression, TEXT("DropletNormalTex"));
-        bConnected &= ConnectExpression(RivuletNormal, NormalExpression, TEXT("RivuletNormalTex"));
         bConnected &= ConnectExpression(DropletMask, NormalExpression, TEXT("DropletMaskTex"));
-        bConnected &= ConnectExpression(RivuletMask, NormalExpression, TEXT("RivuletMaskTex"));
 
         bConnected &= BaseColorExpression != nullptr &&
                       UMaterialEditingLibrary::ConnectMaterialProperty(BaseColorExpression, FString(), MP_BaseColor);

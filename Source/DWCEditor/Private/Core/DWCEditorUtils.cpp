@@ -157,8 +157,6 @@ bool DWCEditorUtils::SaveAsset(UObject* Asset)
         {
             AddDirtyGeneratedPackage(LocalProfile.NormalizedDropletNormal.Get());
             AddDirtyGeneratedPackage(LocalProfile.NormalizedDropletMask.Get());
-            AddDirtyGeneratedPackage(LocalProfile.NormalizedRivuletNormal.Get());
-            AddDirtyGeneratedPackage(LocalProfile.NormalizedRivuletMask.Get());
         }
         AddDirtyGeneratedPackage(WetClothingAsset->Derived.Inline.BakedWetPartData.NormalizedNeutralSurfaceNormal.Get());
 

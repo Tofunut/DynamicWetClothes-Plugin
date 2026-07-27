@@ -237,7 +237,6 @@ struct FTriangleAbsorptionDispatch
 
 struct FSurfaceStampDispatch
 {
-    EDWCSurfaceStampType Type = EDWCSurfaceStampType::Droplet;
     FIntPoint DispatchMin = FIntPoint::ZeroValue;
     FIntPoint DispatchSize = FIntPoint::ZeroValue;
     FVector2f UV = FVector2f::ZeroVector;
@@ -258,7 +257,6 @@ struct FSlotRenderDispatch
     FTextureRenderTargetResource* CurrentPendingResource = nullptr;
     FTextureRenderTargetResource* NextPendingResource = nullptr;
     FTextureRenderTargetResource* SurfaceDropletResource = nullptr;
-    FTextureRenderTargetResource* SurfaceRivuletResource = nullptr;
     TArray<FTriangleAbsorptionDispatch> AbsorptionDispatches;
     TArray<FVector4f> BinnedAbsorptionContacts;
     TArray<FUint2GPU> BinnedAbsorptionTileBins;
@@ -294,7 +292,6 @@ bool BuildSurfaceStampDispatch(
     const int32 MaxX = FMath::CeilToInt(Center.X + HalfSize.X + 1.0f);
     const int32 MaxY = FMath::CeilToInt(Center.Y + HalfSize.Y + 1.0f);
 
-    OutDispatch.Type = Request.Type;
     OutDispatch.DispatchMin = FIntPoint(MinX, MinY);
     OutDispatch.DispatchSize = FIntPoint(MaxX - MinX + 1, MaxY - MinY + 1);
     OutDispatch.UV = Request.UV;
@@ -1310,8 +1307,6 @@ bool FDWCGPUBackend::CreateSlotResources()
             };
             Slot.SurfaceDropletRT = CreateSurfaceRenderTarget(
                 FName(*FString::Printf(TEXT("DWC_SurfaceDropletRT_Slot%d"), Slot.MaterialSlotIndex)));
-            Slot.SurfaceRivuletRT = CreateSurfaceRenderTarget(
-                FName(*FString::Printf(TEXT("DWC_SurfaceRivuletRT_Slot%d"), Slot.MaterialSlotIndex)));
         }
 
         if (Slot.MaterialSlotIndex >= 0 && Slot.MaterialSlotIndex < MeshComponent->GetNumMaterials())
@@ -1332,24 +1327,18 @@ bool FDWCGPUBackend::CreateSlotResources()
             {
                 const bool bHasWetnessMapParameter = MaterialHasTextureParameter(MID, WetnessMapParameterName);
                 const bool bHasDropletRTParameter = MaterialHasTextureParameter(MID, DWCWetMaterialParameters::SurfaceDropletRT());
-                const bool bHasRivuletRTParameter =
-                    MaterialHasTextureParameter(MID, DWCWetMaterialParameters::SurfaceRivuletRT());
                 const bool bHasWetPartDataParameter = MaterialHasTextureParameter(MID, DWCWetMaterialParameters::WetPartDataTexture());
                 const bool bHasProfileRemapParameter = MaterialHasTextureParameter(MID, DWCWetMaterialParameters::ProfileRemapLUT());
                 const bool bHasGlobalProfileParameter = MaterialHasTextureParameter(MID, DWCWetMaterialParameters::GlobalRenderProfileLUT());
                 const bool bHasGlobalTexelSizeParameter = MaterialHasScalarParameter(MID, DWCWetMaterialParameters::GlobalRenderProfileTexelSize());
 
-                // Droplet/Rivulet normal arrays may be statically compiled out per
-                // material slot, so their absence is not a runtime contract failure.
+                // Droplet normal arrays may be statically compiled out per material slot,
+                // so their absence is not a runtime contract failure.
                 TArray<FString> MissingParameters;
                 if (!bHasWetnessMapParameter) MissingParameters.Add(WetnessMapParameterName.ToString());
                 if (Slot.bUsesSurfaceWater && !bHasDropletRTParameter)
                 {
                     MissingParameters.Add(DWCWetMaterialParameters::SurfaceDropletRT().ToString());
-                }
-                if (Slot.bUsesSurfaceWater && !bHasRivuletRTParameter)
-                {
-                    MissingParameters.Add(DWCWetMaterialParameters::SurfaceRivuletRT().ToString());
                 }
                 if (!bHasWetPartDataParameter) MissingParameters.Add(DWCWetMaterialParameters::WetPartDataTexture().ToString());
                 if (!bHasProfileRemapParameter) MissingParameters.Add(DWCWetMaterialParameters::ProfileRemapLUT().ToString());
@@ -1387,9 +1376,6 @@ bool FDWCGPUBackend::CreateSlotResources()
                 MID->SetTextureParameterValue(
                     DWCWetMaterialParameters::SurfaceDropletRT(),
                     Slot.bUsesSurfaceWater ? Slot.SurfaceDropletRT.Get() : nullptr);
-                MID->SetTextureParameterValue(
-                    DWCWetMaterialParameters::SurfaceRivuletRT(),
-                    Slot.bUsesSurfaceWater ? Slot.SurfaceRivuletRT.Get() : nullptr);
                 MID->SetScalarParameterValue(
                     DWCWetMaterialParameters::SurfaceWaterTexelSize(),
                     Slot.bUsesSurfaceWater && Slot.SurfaceWaterResolution > 0
@@ -1612,9 +1598,6 @@ void FDWCGPUBackend::DispatchSimulation(
             NextPendingMap->GameThread_GetRenderTargetResource();
         SlotDispatch.SurfaceDropletResource = Slot.SurfaceDropletRT.IsValid()
             ? Slot.SurfaceDropletRT->GameThread_GetRenderTargetResource()
-            : nullptr;
-        SlotDispatch.SurfaceRivuletResource = Slot.SurfaceRivuletRT.IsValid()
-            ? Slot.SurfaceRivuletRT->GameThread_GetRenderTargetResource()
             : nullptr;
 
         for (const FDWCSurfaceStampRequest& Request : SurfaceStamps)
@@ -2054,7 +2037,6 @@ void FDWCGPUBackend::DispatchSimulation(
             TShaderMapRef<FDWCDiffuseDry8CS> DiffuseDry8Shader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
             TShaderMapRef<FDWCSeamGatherCS> SeamShader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
             TShaderMapRef<FDWCSurfaceDropletStampCS> DropletStampShader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
-            TShaderMapRef<FDWCSurfaceRivuletStampCS> RivuletStampShader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
 
             TArray<FDWCGPUNiagaraWetCollisionBuffer> NiagaraWetCollisionBuffers;
             DWCGPUNiagaraWetCollisionBridge::CollectBuffers_RenderThread(NiagaraWetCollisionBuffers);
@@ -2100,7 +2082,6 @@ void FDWCGPUBackend::DispatchSimulation(
                 }
 
                 FRDGTextureUAVRef DropletSurfaceUAV = nullptr;
-                FRDGTextureUAVRef RivuletSurfaceUAV = nullptr;
                 if (SurfaceLookupSRV != nullptr &&
                     SlotDispatch.SurfaceDropletResource != nullptr &&
                     SlotDispatch.SurfaceDropletResource->GetRenderTargetTexture() != nullptr)
@@ -2111,16 +2092,6 @@ void FDWCGPUBackend::DispatchSimulation(
                     DropletSurfaceUAV = GraphBuilder.CreateUAV(
                         GraphBuilder.RegisterExternalTexture(DropletExternal));
                 }
-                if (SurfaceLookupSRV != nullptr &&
-                    SlotDispatch.SurfaceRivuletResource != nullptr &&
-                    SlotDispatch.SurfaceRivuletResource->GetRenderTargetTexture() != nullptr)
-                {
-                    TRefCountPtr<IPooledRenderTarget> RivuletExternal = CreateRenderTarget(
-                        SlotDispatch.SurfaceRivuletResource->GetRenderTargetTexture(),
-                        TEXT("DWC.SurfaceRivulet"));
-                    RivuletSurfaceUAV = GraphBuilder.CreateUAV(
-                        GraphBuilder.RegisterExternalTexture(RivuletExternal));
-                }
 
                 for (int32 StampIndex = 0; StampIndex < SlotDispatch.SurfaceStampDispatches.Num(); ++StampIndex)
                 {
@@ -2130,7 +2101,7 @@ void FDWCGPUBackend::DispatchSimulation(
                         FMath::DivideAndRoundUp(Stamp.DispatchSize.Y, 8),
                         1);
 
-                    if (Stamp.Type == EDWCSurfaceStampType::Droplet && DropletSurfaceUAV != nullptr)
+                    if (DropletSurfaceUAV != nullptr)
                     {
                         FDWCSurfaceDropletStampCS::FParameters* Parameters =
                             GraphBuilder.AllocParameters<FDWCSurfaceDropletStampCS::FParameters>();
@@ -2154,37 +2125,6 @@ void FDWCGPUBackend::DispatchSimulation(
                             GraphBuilder,
                             RDG_EVENT_NAME("DWC Surface Droplet Slot %d Stamp %d", StaticSlot.MaterialSlotIndex, StampIndex),
                             DropletStampShader,
-                            Parameters,
-                            GroupCount);
-                    }
-                    else if (Stamp.Type == EDWCSurfaceStampType::Rivulet && RivuletSurfaceUAV != nullptr)
-                    {
-                        FDWCSurfaceRivuletStampCS::FParameters* Parameters =
-                            GraphBuilder.AllocParameters<FDWCSurfaceRivuletStampCS::FParameters>();
-                        Parameters->TextureSize = FIntPoint(
-                            SlotDispatch.SurfaceWaterResolution,
-                            SlotDispatch.SurfaceWaterResolution);
-                        Parameters->TriangleCount = static_cast<uint32>(StaticData->TriangleCount);
-                        Parameters->StampMinPixel = Stamp.DispatchMin;
-                        Parameters->StampDispatchSize = Stamp.DispatchSize;
-                        Parameters->StampUV = Stamp.UV;
-                        Parameters->StampCenterPixels = Stamp.CenterPixels;
-                        Parameters->StampHalfSizePixels = Stamp.HalfSizePixels;
-                        Parameters->StampAmount = Stamp.Amount;
-                        Parameters->StampTimeSeconds = SurfaceTimeSeconds;
-                        Parameters->StampLifetimeSeconds = Stamp.LifetimeSeconds;
-                        Parameters->TexelLookup = SurfaceLookupSRV;
-                        Parameters->TriangleFlow = FlowSRV;
-                        Parameters->TriangleMetric = MetricSRV;
-                        Parameters->TriangleDataToSurfaceWaterNormalUV =
-                            TriangleDataToNormalUVSRV;
-                        Parameters->TargetSurface = RivuletSurfaceUAV;
-                        FDWCWorkloadStats::RecordGPUBackendDispatch();
-                        RDG_EVENT_SCOPE_STAT(GraphBuilder, DWC_SurfaceStamp, "DWC SurfaceStamp");
-                        FComputeShaderUtils::AddPass(
-                            GraphBuilder,
-                            RDG_EVENT_NAME("DWC Surface Rivulet Slot %d Stamp %d", StaticSlot.MaterialSlotIndex, StampIndex),
-                            RivuletStampShader,
                             Parameters,
                             GroupCount);
                     }
@@ -2541,7 +2481,6 @@ void FDWCGPUBackend::Shutdown()
         {
             MID->SetTextureParameterValue(WetnessMapParameterName, nullptr);
             MID->SetTextureParameterValue(DWCWetMaterialParameters::SurfaceDropletRT(), nullptr);
-            MID->SetTextureParameterValue(DWCWetMaterialParameters::SurfaceRivuletRT(), nullptr);
         }
     }
 

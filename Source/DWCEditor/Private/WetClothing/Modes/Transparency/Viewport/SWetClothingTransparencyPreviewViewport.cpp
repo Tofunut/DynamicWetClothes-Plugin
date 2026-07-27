@@ -33,7 +33,7 @@
 namespace
 {
     constexpr int32 TransparencyHitBVHLeafTriangleCount = 8;
-    constexpr int32 ForceRenderLOD0 = 1; // USkinnedMeshComponent forced LOD is 1-based; 0 means automatic.
+    constexpr int32 TransparencyViewportForceRenderLOD0 = 1; // USkinnedMeshComponent forced LOD is 1-based; 0 means automatic.
     constexpr int32 MaxPendingPreviewTextureRegions = 4;
     constexpr int32 TransparencyPreviewMaterialGraphVersion = 2;
     constexpr const TCHAR* RuntimeTransparencyMapParameterName = TEXT("DWC_TransparencyMap");
@@ -875,7 +875,7 @@ void SWetClothingTransparencyPreviewViewport::BuildFullBlueprintPreview()
             continue;
         }
 
-        MeshComponent->SetForcedLOD(ForceRenderLOD0);
+        MeshComponent->SetForcedLOD(TransparencyViewportForceRenderLOD0);
         if (MeshComponent->GetSkeletalMeshAsset() == Asset->GetDWCSkeletalMesh())
         {
             ConfigurePreviewMeshComponent(MeshComponent);
@@ -902,7 +902,7 @@ void SWetClothingTransparencyPreviewViewport::ConfigurePreviewMeshComponent(USke
     }
 
     PreviewMeshComponents.AddUnique(MeshComponent);
-    MeshComponent->SetForcedLOD(ForceRenderLOD0);
+    MeshComponent->SetForcedLOD(TransparencyViewportForceRenderLOD0);
     ApplyPreviewMaterials(MeshComponent);
     ApplyWetnessPreview();
     MeshComponent->MarkRenderStateDirty();

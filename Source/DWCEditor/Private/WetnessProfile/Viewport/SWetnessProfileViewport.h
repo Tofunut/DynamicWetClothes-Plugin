@@ -47,9 +47,8 @@ class SWetnessProfileViewport : public SEditorViewport, public FGCObject
     void SetPreviewSurfaceWater(float InAmount);
     float GetPreviewSurfaceWater() const { return PreviewSurfaceWater; }
 
-    void SetPreviewDetailSizes(float InDropletDetailSize, float InStreakDetailSize);
+    void SetPreviewDropletDetailSize(float InDropletDetailSize);
     float GetPreviewDropletDetailSize() const { return PreviewDropletDetailSize; }
-    float GetPreviewStreakDetailSize() const { return PreviewStreakDetailSize; }
 
     void SetPreviewAnimationEnabled(bool bInEnabled);
     void SetPreviewAnimationSpeed(float InSpeed);
@@ -72,6 +71,7 @@ class SWetnessProfileViewport : public SEditorViewport, public FGCObject
     void ApplyResolvedPreviewMesh(bool bFocus);
     USkeletalMesh* ResolveProfilePreviewSkeletalMesh() const;
     UPrimitiveComponent* GetActivePreviewComponent() const;
+    void RebuildGeneratedSpherePreviewMaterial();
     void RebuildGeneratedPreviewMaterials(USkeletalMesh* SkeletalMesh);
     void RefreshPreviewMaterialParameters();
     void RefreshGeneratedPreviewMaterialParameters();
@@ -93,10 +93,10 @@ class SWetnessProfileViewport : public SEditorViewport, public FGCObject
     TArray<TObjectPtr<UMaterialInstanceConstant>> GeneratedPreviewMaterialInstances;
     TArray<TObjectPtr<UMaterialInstanceDynamic>> GeneratedPreviewDynamicMaterials;
     int32 GeneratedPreviewMaterialSlotCount = 0;
+    bool bGeneratedSpherePreviewMaterialValid = false;
     TObjectPtr<UTexture2D> PreviewWetnessMapTexture = nullptr;
     TObjectPtr<UTexture2D> PreviewWetPartDataTexture = nullptr;
     TObjectPtr<UTexture2D> PreviewSurfaceDropletTexture = nullptr;
-    TObjectPtr<UTexture2D> PreviewSurfaceRivuletTexture = nullptr;
     TObjectPtr<UTexture> PreviewDefaultNormalTexture = nullptr;
     TObjectPtr<UTexture> PreviewDefaultMaskTexture = nullptr;
     TSharedPtr<STextBlock> OverlayText;
@@ -106,7 +106,6 @@ class SWetnessProfileViewport : public SEditorViewport, public FGCObject
     float PreviewAbsorbedWater = 0.5f;
     float PreviewSurfaceWater = 0.5f;
     float PreviewDropletDetailSize = 1.0f;
-    float PreviewStreakDetailSize = 1.0f;
     float PreviewAnimationSpeed = 1.0f;
     float PreviewAnimationTime = 0.0f;
 };

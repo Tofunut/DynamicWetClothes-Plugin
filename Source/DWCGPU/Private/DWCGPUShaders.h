@@ -222,30 +222,3 @@ public:
     static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters);
 };
 
-/** Writes one gravity-aligned rivulet stamp into a slot-local surface-state RT. */
-class FDWCSurfaceRivuletStampCS final : public FGlobalShader
-{
-public:
-    DECLARE_GLOBAL_SHADER(FDWCSurfaceRivuletStampCS);
-    SHADER_USE_PARAMETER_STRUCT(FDWCSurfaceRivuletStampCS, FGlobalShader);
-
-    BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
-        SHADER_PARAMETER(FIntPoint, TextureSize)
-        SHADER_PARAMETER(uint32, TriangleCount)
-        SHADER_PARAMETER(FIntPoint, StampMinPixel)
-        SHADER_PARAMETER(FIntPoint, StampDispatchSize)
-        SHADER_PARAMETER(FVector2f, StampUV)
-        SHADER_PARAMETER(FVector2f, StampCenterPixels)
-        SHADER_PARAMETER(FVector2f, StampHalfSizePixels)
-        SHADER_PARAMETER(float, StampAmount)
-        SHADER_PARAMETER(float, StampTimeSeconds)
-        SHADER_PARAMETER(float, StampLifetimeSeconds)
-        SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint4>, TexelLookup)
-        SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float4>, TriangleFlow)
-        SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float4>, TriangleMetric)
-        SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float4>, TriangleDataToSurfaceWaterNormalUV)
-        SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float4>, TargetSurface)
-    END_SHADER_PARAMETER_STRUCT()
-
-    static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters);
-};

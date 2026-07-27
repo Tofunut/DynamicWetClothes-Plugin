@@ -110,7 +110,7 @@ namespace
         return Value < 0.0f ? Value + 1.0f : Value;
     }
 
-    constexpr const TCHAR* WetWrinkleBaseNormalTextureFolderPath = TEXT("/DynamicWetClothes/Presets/WrinkleTextures");
+    constexpr const TCHAR* WetWrinkleBaseNormalTextureFolderPath = TEXT("/DynamicWetClothes/Textures/Wrinkles");
     constexpr float WetWrinkleDefaultSizeCm = 8.0f;
     constexpr float WetWrinkleDefaultSizeUV = 0.0677f;
     constexpr float WetWrinkleUVPerCm = WetWrinkleDefaultSizeUV / WetWrinkleDefaultSizeCm;
@@ -1230,7 +1230,7 @@ TSharedRef<SWidget> SWetWrinkleEditorPanel::BuildPatchBrushSection()
                         + SHorizontalBox::Slot()
                               .FillWidth(1.0f)
                                   [SAssignNew(WrinkleTextureSearchPathTextBox, SEditableTextBox)
-                                   .HintText(LOCTEXT("WrinkleTexturePathHint", "/Game/Wrinkles"))]
+                                   .HintText(LOCTEXT("WrinkleTexturePathHint", "/DynamicWetClothes/Textures/Wrinkles"))]
 
                         + SHorizontalBox::Slot()
                               .AutoWidth()
@@ -3865,7 +3865,7 @@ FReply SWetWrinkleEditorPanel::HandleAddWrinkleTextureSearchPathClicked()
     {
         FMessageDialog::Open(
             EAppMsgType::Ok,
-            LOCTEXT("InvalidWrinkleTexturePath", "Enter a unique Unreal Content path beginning with '/', for example /Game/Wrinkles."));
+            LOCTEXT("InvalidWrinkleTexturePath", "Enter a unique Unreal Content path beginning with '/', for example /DynamicWetClothes/Textures/Wrinkles."));
         return FReply::Handled();
     }
 

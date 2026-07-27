@@ -601,7 +601,7 @@ void FWetnessProfileDetailsCustomization::CustomizeDetails(IDetailLayoutBuilder&
             DropletTexturesGroup,
             FindPropertyByPath(TEXT("Parameters.SurfaceWater.DropletMaskTexture")),
             LOCTEXT("DropletMask", "Mask Texture"),
-            LOCTEXT("DropletMaskTooltip", "Mask texture used to localize droplet normal detail. Empty uses the unmasked droplet detail."),
+            LOCTEXT("DropletMaskTooltip", "Mask texture used to localize visible Surface Water coverage and droplet detail. Required when Surface Water droplets are enabled."),
             DropletSettingsEnabled);
 
     }

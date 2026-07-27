@@ -55,9 +55,6 @@ struct DWC_API FWetPartSurfaceWaterSettings
     UPROPERTY(EditAnywhere, Category = "Surface Water", meta = (ClampMin = "0.0", ClampMax = "4.0", UIMin = "0.0", UIMax = "4.0"))
     float DropletDetailSize = 1.0f;
 
-    /** Physical-looking size of the repeating Rivulet detail-normal pattern. */
-    UPROPERTY(EditAnywhere, Category = "Surface Water", meta = (ClampMin = "0.0", ClampMax = "4.0", UIMin = "0.0", UIMax = "4.0"))
-    float RivuletDetailSize = 1.0f;
 };
 
 /** Part-local data. Material slot and UV channel are owned by the parent WCA/slot. */
@@ -318,18 +315,20 @@ struct DWC_API FWetClothingLocalRenderProfile
     UPROPERTY(VisibleAnywhere, Category = "Wet Part Data Texture")
     FString StableKey;
 
-    /** Array-compatible Derived textures. Runtime never packs the source profile textures directly. */
+    /** Authored source identities retained without hard-loading the source textures at runtime. */
+    UPROPERTY(VisibleAnywhere, Category = "Wet Part Data Texture|Surface Texture")
+    FSoftObjectPath SourceDropletNormal;
+
+    UPROPERTY(VisibleAnywhere, Category = "Wet Part Data Texture|Surface Texture")
+    FSoftObjectPath SourceDropletMask;
+
+    /** Project-wide shared, array-compatible textures. Runtime never packs authored profile textures directly. */
     UPROPERTY(VisibleAnywhere, Category = "Wet Part Data Texture|Surface Texture")
     TObjectPtr<UTexture2D> NormalizedDropletNormal = nullptr;
 
     UPROPERTY(VisibleAnywhere, Category = "Wet Part Data Texture|Surface Texture")
     TObjectPtr<UTexture2D> NormalizedDropletMask = nullptr;
 
-    UPROPERTY(VisibleAnywhere, Category = "Wet Part Data Texture|Surface Texture")
-    TObjectPtr<UTexture2D> NormalizedRivuletNormal = nullptr;
-
-    UPROPERTY(VisibleAnywhere, Category = "Wet Part Data Texture|Surface Texture")
-    TObjectPtr<UTexture2D> NormalizedRivuletMask = nullptr;
 };
 
 USTRUCT(BlueprintType)
@@ -340,7 +339,7 @@ struct DWC_API FWetClothingBakedWetPartDataSlotTexture
     UPROPERTY(VisibleAnywhere, Category = "Wet Part Data Texture")
     int32 MaterialSlotIndex = INDEX_NONE;
 
-    /** Point-sampled Wet Part data: R=Local Profile ID, G=Droplet Detail Size, B=Rivulet Detail Size, A=reserved. */
+    /** Point-sampled Wet Part data: R=Local Profile ID, G=Droplet Detail Size, B/A=reserved. */
     UPROPERTY(VisibleAnywhere, Category = "Wet Part Data Texture")
     TObjectPtr<UTexture2D> WetPartDataTexture = nullptr;
 
@@ -382,7 +381,7 @@ struct DWC_API FWetClothingBakedWetPartData
     UPROPERTY(VisibleAnywhere, Category = "Wet Part Data Texture|Surface Texture")
     int32 SurfaceTextureResolution = 256;
 
-    /** Shared flat normal used as Texture2DArray slice 0. */
+    /** Project-wide shared flat normal used as Texture2DArray slice 0. */
     UPROPERTY(VisibleAnywhere, Category = "Wet Part Data Texture|Surface Texture")
     TObjectPtr<UTexture2D> NormalizedNeutralSurfaceNormal = nullptr;
 

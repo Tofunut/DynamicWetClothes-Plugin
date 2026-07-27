@@ -294,7 +294,7 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Debug")
     bool bShowWetPartDebugColors = false;
 
-    /** Displays GPU surface-water droplets/rivulets as debug colors over the wet part debug overlay. */
+    /** Displays GPU surface-water droplets as a debug color over the wet part debug overlay. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Debug", meta = (EditCondition = "SimulationMode == EDWCSimulationMode::WetnessMapGPU"))
     bool bShowSurfaceWaterDebugColors = false;
 

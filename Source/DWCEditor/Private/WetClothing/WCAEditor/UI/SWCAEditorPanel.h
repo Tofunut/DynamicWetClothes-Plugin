@@ -25,6 +25,7 @@ struct FWCAEditorIssueStatus
     bool bRuntimeIssue = false;
     bool bMapIssue = false;
     bool bMaterialIssue = false;
+    bool bSurfaceWaterProfileIssue = false;
     bool bFailure = false;
     EWCAEditorStatusSeverity Severity = EWCAEditorStatusSeverity::Info;
     TArray<FString> GeneratedDataUVMessages;
@@ -35,7 +36,7 @@ struct FWCAEditorIssueStatus
 
     bool HasIssues() const
     {
-        return bGeneratedDataUVIssue || bRuntimeIssue || bMapIssue || bMaterialIssue || bFailure;
+        return bGeneratedDataUVIssue || bRuntimeIssue || bMapIssue || bMaterialIssue || bSurfaceWaterProfileIssue || bFailure;
     }
 
     FString BuildSummary() const;

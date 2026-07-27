@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "WetRendering/DWCSurfaceTextureSharedAsset.h"
 
 class UTexture2D;
 class UWetClothingAsset;
@@ -9,14 +10,14 @@ struct FWetnessProfileParameters;
 
 namespace DWCSurfaceTextureNormalization
 {
-    constexpr int32 Resolution = 256;
-    constexpr int32 Version = 5;
+    constexpr int32 Resolution = DWCSurfaceTextureSharedAsset::Resolution;
+    constexpr int32 Version = DWCSurfaceTextureSharedAsset::Version;
 }
 
 /**
  * Converts authored profile textures into deterministic, array-compatible
- * Derived assets. All runtime Texture2DArray slices are sourced from these
- * textures rather than from arbitrary authored textures.
+ * project-wide shared assets. Every WCA referencing the same source texture
+ * reuses the same normalized asset and Texture2DArray registry entry.
  */
 class FWetClothingSurfaceTextureNormalizer
 {
@@ -33,7 +34,6 @@ public:
 
 private:
     static bool NormalizeTexture(
-        UWetClothingAsset& WetClothingAsset,
         UTexture2D* SourceTexture,
         const TCHAR* TextureRole,
         bool bNormalMap,

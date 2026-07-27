@@ -33,7 +33,6 @@ private:
         TArray<TStrongObjectPtr<UTextureRenderTarget2D>> WetnessMaps;
         TArray<TStrongObjectPtr<UTextureRenderTarget2D>> PendingWetnessMaps;
         TStrongObjectPtr<UTextureRenderTarget2D> SurfaceDropletRT;
-        TStrongObjectPtr<UTextureRenderTarget2D> SurfaceRivuletRT;
         int32 CurrentTextureIndex = 0;
         int32 CurrentPendingTextureIndex = 0;
         TWeakObjectPtr<UMaterialInstanceDynamic> MaterialInstance;

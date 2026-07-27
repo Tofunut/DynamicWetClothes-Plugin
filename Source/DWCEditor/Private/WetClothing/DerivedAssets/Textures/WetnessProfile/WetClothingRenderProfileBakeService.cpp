@@ -2,6 +2,7 @@
 
 #include "DataAssets/WetClothingAsset.h"
 #include "Engine/SkeletalMesh.h"
+#include "Engine/Texture2D.h"
 #include "FileHelpers.h"
 #include "Materials/Material.h"
 #include "Materials/MaterialInterface.h"
@@ -84,12 +85,12 @@ namespace
 
         TSet<int32> CheckedMaterialSlots;
         TSet<FString> CheckedProfileKeys;
-        TSet<FString> BakedProfileKeys;
+        TMap<FString, const FWetClothingLocalRenderProfile*> BakedProfilesByKey;
         for (const FWetClothingLocalRenderProfile& LocalProfile : Baked.LocalProfiles)
         {
             if (!LocalProfile.StableKey.IsEmpty())
             {
-                BakedProfileKeys.Add(LocalProfile.StableKey);
+                BakedProfilesByKey.Add(LocalProfile.StableKey, &LocalProfile);
             }
         }
 
@@ -116,7 +117,11 @@ namespace
             }
 
             CheckedProfileKeys.Add(StableKey);
-            if (!BakedProfileKeys.Contains(StableKey))
+            const FWetClothingLocalRenderProfile* const* BakedProfilePtr =
+                BakedProfilesByKey.Find(StableKey);
+            const FWetClothingLocalRenderProfile* BakedProfile =
+                BakedProfilePtr != nullptr ? *BakedProfilePtr : nullptr;
+            if (BakedProfile == nullptr)
             {
                 const int32 WetPartID = ExpectedProfile.Entry != nullptr
                     ? ExpectedProfile.Entry->WetPartID
@@ -125,6 +130,34 @@ namespace
                     TEXT("Wet Part %d in slot %d uses a profile that is missing from baked Render Profile Data."),
                     WetPartID,
                     ExpectedProfile.MaterialSlotIndex));
+                continue;
+            }
+
+            const FSurfaceWaterProfileParameters& Surface = Parameters.SurfaceWater;
+            if (!Surface.bEnabled || !Surface.bEnableDroplets)
+            {
+                continue;
+            }
+
+            const FString SharedFolder = DWCSurfaceTextureSharedAsset::GetSharedFolder();
+            const auto IsSharedNormalizedTexture = [&SharedFolder](const UTexture2D* Texture)
+            {
+                return Texture != nullptr && Texture->GetPathName().StartsWith(SharedFolder);
+            };
+
+            if (Surface.DropletNormalTexture != nullptr &&
+                !IsSharedNormalizedTexture(BakedProfile->NormalizedDropletNormal))
+            {
+                PendingLines.Add(FString::Printf(
+                    TEXT("Profile '%s' requires a global normalized Droplet normal texture rebake."),
+                    *StableKey));
+            }
+            if (Surface.DropletMaskTexture != nullptr &&
+                !IsSharedNormalizedTexture(BakedProfile->NormalizedDropletMask))
+            {
+                PendingLines.Add(FString::Printf(
+                    TEXT("Profile '%s' requires a global normalized Droplet mask texture rebake."),
+                    *StableKey));
             }
         }
     }
@@ -478,9 +511,11 @@ bool FWetClothingRenderProfileBakeService::SaveBakedRenderProfileAssets(UWetClot
     {
         AddRenderProfilePackageForObject(LocalProfile.NormalizedDropletNormal.Get(), PackagesToSave);
         AddRenderProfilePackageForObject(LocalProfile.NormalizedDropletMask.Get(), PackagesToSave);
-        AddRenderProfilePackageForObject(LocalProfile.NormalizedRivuletNormal.Get(), PackagesToSave);
-        AddRenderProfilePackageForObject(LocalProfile.NormalizedRivuletMask.Get(), PackagesToSave);
     }
+
+    AddRenderProfilePackageForObject(
+        WetClothingAsset->Derived.Inline.BakedWetPartData.NormalizedNeutralSurfaceNormal.Get(),
+        PackagesToSave);
 
     for (const FWetClothingGeneratedWetMaterialOverride& Override : WetClothingAsset->Derived.Inline.GeneratedWetMaterialOverrides)
     {

@@ -5,6 +5,7 @@
 #include "WetClothing/DerivedAssets/Materials/WCAMaterialGenerator.h"
 #include "WetClothing/DerivedAssets/Textures/Transparency/DWCTransparencyEditedMapBaker.h"
 #include "WetClothing/DerivedAssets/Textures/WetnessProfile/WetClothingRenderProfileBakeService.h"
+#include "WetClothing/DerivedAssets/Textures/WetnessProfile/WetClothingWetPartDataTextureBaker.h"
 #include "WetClothing/DerivedAssets/Textures/Wrinkle/WetWrinkleNormalMapBaker.h"
 
 namespace
@@ -181,6 +182,147 @@ namespace
             if (BakedMap.MaterialSlotIndex != INDEX_NONE && Asset.IsMaterialSlotWettable(BakedMap.MaterialSlotIndex))
             {
                 OutMaterialSlots.Add(BakedMap.MaterialSlotIndex);
+            }
+        }
+    }
+
+    constexpr float MinSurfaceWaterRepresentationFraction = 0.05f;
+    constexpr float MinSurfaceWaterRejectedFraction = 0.05f;
+    constexpr float MinSurfaceWaterDropletSpawnProbability = 0.05f;
+    constexpr float MinSurfaceWaterDropletLifetimeSeconds = 0.25f;
+    constexpr float MinSurfaceWaterDropletRadiusPixels = 1.0f;
+
+    FString DescribeWetPartProfile(
+        const FWetPartProfileAssignment* Profile,
+        const int32 ProfileIndex)
+    {
+        if (Profile != nullptr && Profile->SourceProfile.IsValid())
+        {
+            return FString::Printf(TEXT("profile '%s'"), *Profile->SourceProfile.GetAssetName());
+        }
+        if (ProfileIndex == 0)
+        {
+            return TEXT("the default inline profile");
+        }
+        return FString::Printf(TEXT("profile %d"), ProfileIndex);
+    }
+
+    void CollectSurfaceWaterProfileProblems(
+        const FWetnessProfileParameters& Parameters,
+        TArray<FString>& OutProblems)
+    {
+        OutProblems.Reset();
+
+        const FSurfaceWaterProfileParameters& Surface = Parameters.SurfaceWater;
+        if (!Surface.bEnabled)
+        {
+            return;
+        }
+
+        if (!Surface.bEnableDroplets)
+        {
+            OutProblems.Add(TEXT("bEnableDroplets is disabled"));
+        }
+
+        const float SurfaceRepresentationFraction =
+            FMath::Clamp(Surface.SurfaceRepresentationFraction, 0.0f, 1.0f);
+        const float RejectedWaterFraction =
+            FMath::Clamp(Parameters.GetRejectedWaterFraction(), 0.0f, 1.0f);
+        const float MaxSurfaceAmount = SurfaceRepresentationFraction * RejectedWaterFraction;
+
+        if (SurfaceRepresentationFraction < MinSurfaceWaterRepresentationFraction)
+        {
+            OutProblems.Add(FString::Printf(
+                TEXT("SurfaceRepresentationFraction %.3f is below %.3f"),
+                Surface.SurfaceRepresentationFraction,
+                MinSurfaceWaterRepresentationFraction));
+        }
+        if (RejectedWaterFraction < MinSurfaceWaterRejectedFraction)
+        {
+            OutProblems.Add(FString::Printf(
+                TEXT("rejected water fraction %.3f is below %.3f because AbsorptionFraction is too high"),
+                RejectedWaterFraction,
+                MinSurfaceWaterRejectedFraction));
+        }
+        if (Surface.DropletSpawnProbability < MinSurfaceWaterDropletSpawnProbability)
+        {
+            OutProblems.Add(FString::Printf(
+                TEXT("DropletSpawnProbability %.3f is below %.3f"),
+                Surface.DropletSpawnProbability,
+                MinSurfaceWaterDropletSpawnProbability));
+        }
+        if (Surface.DropletLifetimeSeconds < MinSurfaceWaterDropletLifetimeSeconds)
+        {
+            OutProblems.Add(FString::Printf(
+                TEXT("DropletLifetimeSeconds %.3f is below %.3f"),
+                Surface.DropletLifetimeSeconds,
+                MinSurfaceWaterDropletLifetimeSeconds));
+        }
+        if (Surface.DropletRadiusPixels < MinSurfaceWaterDropletRadiusPixels)
+        {
+            OutProblems.Add(FString::Printf(
+                TEXT("DropletRadiusPixels %.3f is below %.3f"),
+                Surface.DropletRadiusPixels,
+                MinSurfaceWaterDropletRadiusPixels));
+        }
+        if (MaxSurfaceAmount > UE_KINDA_SMALL_NUMBER &&
+            Surface.SurfaceVisibilityThreshold >= MaxSurfaceAmount)
+        {
+            OutProblems.Add(FString::Printf(
+                TEXT("SurfaceVisibilityThreshold %.3f is not below the maximum possible surface amount %.3f"),
+                Surface.SurfaceVisibilityThreshold,
+                MaxSurfaceAmount));
+        }
+    }
+
+    void AddSurfaceWaterInputIssues(
+        FWCAValidationReport& Report,
+        const UWetClothingAsset& Asset)
+    {
+        const FWetClothingEditableWetPartData& EditableData = Asset.Authored.PartData.EditableWetPartData;
+        TSet<int32> ReportedProfileIndices;
+
+        for (const FWetClothingAuthoredMaterialSlot& Slot : EditableData.MaterialSlots)
+        {
+            if (!Slot.bIsWettableSlot || Slot.MaterialSlotIndex == INDEX_NONE)
+            {
+                continue;
+            }
+
+            for (const FWetClothingWetPartEntry& Entry : Slot.WetPartEntries)
+            {
+                if (Entry.AssignedUVIslandIDs.IsEmpty() ||
+                    ReportedProfileIndices.Contains(Entry.ProfileIndex))
+                {
+                    continue;
+                }
+
+                const FWetPartProfileAssignment* Profile = EditableData.FindProfile(Entry);
+                FWetnessProfileParameters Parameters;
+                FWetClothingWetPartDataTextureBaker::ResolveProfileParameters(Profile, Parameters);
+                TArray<FString> Problems;
+                CollectSurfaceWaterProfileProblems(Parameters, Problems);
+                if (Problems.IsEmpty())
+                {
+                    continue;
+                }
+
+                ReportedProfileIndices.Add(Entry.ProfileIndex);
+                AddIssue(
+                    Report,
+                    FName(*FString::Printf(TEXT("SurfaceWaterProfileBounds_Profile%d"), Entry.ProfileIndex)),
+                    EWCAValidationSeverity::Warning,
+                    EWCAValidationIssueCategory::Map,
+                    EWCAValidationFixKind::FixSurfaceWaterProfile,
+                    NSLOCTEXT("WCAValidationReport", "SurfaceWaterInputTitle", "Surface Water Input"),
+                    NSLOCTEXT("WCAValidationReport", "SurfaceWaterProfileFixStatus", "Fix Available"),
+                    FText::FromString(FString::Printf(
+                        TEXT("Surface Water: %s used by Wet Part %d in slot %d has values that can prevent droplet stamps from rendering: %s."),
+                        *DescribeWetPartProfile(Profile, Entry.ProfileIndex),
+                        Entry.WetPartID,
+                        Slot.MaterialSlotIndex,
+                        *FString::Join(Problems, TEXT("; ")))),
+                    NSLOCTEXT("WCAValidationReport", "SurfaceWaterProfileFixAction", "Use Resolve to clamp the Surface Water profile to renderable minimum values, then rebuild dependent render data."));
             }
         }
     }
@@ -560,6 +702,8 @@ FWCAValidationReport BuildWCAValidationReport(
             FText::FromString(VisualSummary),
             NSLOCTEXT("WCAValidationReport", "WetPartDataTextureAction", "Use Bake Render Profile Data to rebuild it."));
     }
+
+    AddSurfaceWaterInputIssues(Report, Asset);
 
     const bool bHasFailedState =
         State.GeneratedDataUV == EDWCBakeStatus::Failed ||

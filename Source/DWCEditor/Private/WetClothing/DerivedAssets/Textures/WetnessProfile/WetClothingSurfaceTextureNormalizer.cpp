@@ -5,11 +5,9 @@
 #include "DataAssets/WetClothingPartData.h"
 #include "DataAssets/WetnessProfile.h"
 #include "Engine/Texture2D.h"
-#include "Misc/PackageName.h"
-#include "Misc/SecureHash.h"
-#include "ObjectTools.h"
 #include "UObject/Package.h"
 #include "WetClothing/Foundation/TextureAccess/WetClothingTextureReadback.h"
+#include "WetRendering/DWCSurfaceTextureSharedAsset.h"
 
 namespace
 {
@@ -161,7 +159,7 @@ namespace
         const TCHAR* AssetName = bNormalMap
             ? TEXT("T_DWC_DefaultSurfaceNormal")
             : TEXT("T_DWC_DefaultSurfaceMask");
-        const FString PackageName = FString(TEXT("/Game/DWCGenerated/SharedDefaults")) / AssetName;
+        const FString PackageName = FString(DWCSurfaceTextureSharedAsset::GetSharedFolder()) / AssetName;
         const FString ObjectPath = FString::Printf(TEXT("%s.%s"), *PackageName, AssetName);
 
         UTexture2D* Texture = LoadObject<UTexture2D>(nullptr, *ObjectPath);
@@ -219,7 +217,6 @@ namespace
     }
 
     UTexture2D* CreateOrUpdateNormalizedAsset(
-        UWetClothingAsset& WetClothingAsset,
         UTexture2D& SourceTexture,
         const TCHAR* TextureRole,
         const bool bNormalMap,
@@ -227,30 +224,25 @@ namespace
         FString& OutErrorMessage)
     {
 #if WITH_EDITORONLY_DATA
-        const FString WcaPackageName = WetClothingAsset.GetOutermost()->GetName();
-        const FString WcaFolder = FPackageName::GetLongPackagePath(WcaPackageName);
-        if (WcaFolder.IsEmpty())
+        const FString ObjectName = DWCSurfaceTextureSharedAsset::MakeNormalizedTextureObjectName(
+            &SourceTexture,
+            TextureRole,
+            bNormalMap);
+        const FString PackageName = DWCSurfaceTextureSharedAsset::MakeNormalizedTexturePackageName(
+            &SourceTexture,
+            TextureRole,
+            bNormalMap);
+        const FString ObjectPath = DWCSurfaceTextureSharedAsset::MakeNormalizedTextureObjectPath(
+            &SourceTexture,
+            TextureRole,
+            bNormalMap);
+        if (ObjectName.IsEmpty() || PackageName.IsEmpty() || ObjectPath.IsEmpty())
         {
-            OutErrorMessage = TEXT("Could not resolve the WCA package path while normalizing a surface texture.");
+            OutErrorMessage = FString::Printf(
+                TEXT("Could not resolve the shared normalized texture path for '%s'."),
+                *SourceTexture.GetPathName());
             return nullptr;
         }
-
-        const FString SourceBuildKey = FString::Printf(
-            TEXT("DWC.SurfaceTexture.v%d|Role=%s|Normal=%d|Texture=%s"),
-            DWCSurfaceTextureNormalization::Version,
-            TextureRole,
-            bNormalMap ? 1 : 0,
-            *SourceTexture.GetPathName());
-        const FString StableHash = FMD5::HashAnsiString(*SourceBuildKey);
-        const FString ObjectName = ObjectTools::SanitizeObjectName(FString::Printf(
-            TEXT("T_%s_%s_%s"),
-            *WetClothingAsset.GetName(),
-            *StableHash.Left(12),
-            TextureRole));
-        const FString GeneratedFolder =
-            WcaFolder / TEXT("Generated") / WetClothingAsset.GetName() / TEXT("Textures") / TEXT("Profiles");
-        const FString PackageName = GeneratedFolder / ObjectName;
-        const FString ObjectPath = PackageName + TEXT(".") + ObjectName;
 
         UTexture2D* Texture = LoadObject<UTexture2D>(nullptr, *ObjectPath);
         if (Texture == nullptr)
@@ -314,7 +306,6 @@ UTexture2D* FWetClothingSurfaceTextureNormalizer::GetOrCreateNeutralNormalTextur
 }
 
 bool FWetClothingSurfaceTextureNormalizer::NormalizeTexture(
-    UWetClothingAsset& WetClothingAsset,
     UTexture2D* SourceTexture,
     const TCHAR* TextureRole,
     const bool bNormalMap,
@@ -368,7 +359,6 @@ bool FWetClothingSurfaceTextureNormalizer::NormalizeTexture(
     }
 
     OutNormalizedTexture = CreateOrUpdateNormalizedAsset(
-        WetClothingAsset,
         *SourceTexture,
         TextureRole,
         bNormalMap,
@@ -383,39 +373,29 @@ bool FWetClothingSurfaceTextureNormalizer::NormalizeProfileTextures(
     FWetClothingLocalRenderProfile& InOutLocalProfile,
     FString& OutErrorMessage)
 {
+    (void)WetClothingAsset;
     const FSurfaceWaterProfileParameters& Surface = SourceParameters.SurfaceWater;
+    InOutLocalProfile.SourceDropletNormal = Surface.DropletNormalTexture != nullptr
+        ? FSoftObjectPath(Surface.DropletNormalTexture.Get())
+        : FSoftObjectPath();
+    InOutLocalProfile.SourceDropletMask = Surface.DropletMaskTexture != nullptr
+        ? FSoftObjectPath(Surface.DropletMaskTexture.Get())
+        : FSoftObjectPath();
+
     UTexture2D* DropletNormal = nullptr;
     UTexture2D* DropletMask = nullptr;
-    UTexture2D* RivuletNormal = nullptr;
-    UTexture2D* RivuletMask = nullptr;
 
     if (!NormalizeTexture(
-            WetClothingAsset,
             Surface.DropletNormalTexture,
             TEXT("DropletNormal"),
             true,
             DropletNormal,
             OutErrorMessage) ||
         !NormalizeTexture(
-            WetClothingAsset,
             Surface.DropletMaskTexture,
             TEXT("DropletMask"),
             false,
             DropletMask,
-            OutErrorMessage) ||
-        !NormalizeTexture(
-            WetClothingAsset,
-            Surface.RivuletNormalTexture,
-            TEXT("RivuletNormal"),
-            true,
-            RivuletNormal,
-            OutErrorMessage) ||
-        !NormalizeTexture(
-            WetClothingAsset,
-            Surface.RivuletMaskTexture,
-            TEXT("RivuletMask"),
-            false,
-            RivuletMask,
             OutErrorMessage))
     {
         return false;
@@ -423,8 +403,6 @@ bool FWetClothingSurfaceTextureNormalizer::NormalizeProfileTextures(
 
     InOutLocalProfile.NormalizedDropletNormal = DropletNormal;
     InOutLocalProfile.NormalizedDropletMask = DropletMask;
-    InOutLocalProfile.NormalizedRivuletNormal = RivuletNormal;
-    InOutLocalProfile.NormalizedRivuletMask = RivuletMask;
     OutErrorMessage.Reset();
     return true;
 }

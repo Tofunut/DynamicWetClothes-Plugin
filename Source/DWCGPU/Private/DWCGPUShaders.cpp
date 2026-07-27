@@ -64,8 +64,3 @@ bool FDWCSurfaceDropletStampCS::ShouldCompilePermutation(const FGlobalShaderPerm
     return ShouldCompileDWC(Parameters);
 }
 
-IMPLEMENT_GLOBAL_SHADER(FDWCSurfaceRivuletStampCS, "/DWCGPU/DWCSurfaceRivuletStamp.usf", "MainCS", SF_Compute);
-bool FDWCSurfaceRivuletStampCS::ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
-{
-    return ShouldCompileDWC(Parameters);
-}

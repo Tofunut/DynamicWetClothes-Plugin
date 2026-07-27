@@ -221,6 +221,11 @@ namespace
     void AddReportIssueToStatus(FWCAEditorIssueStatus& Status, const FWCAValidationIssue& Issue)
     {
         RaiseIssueSeverity(Status, ToEditorSeverity(Issue.Severity));
+        if (Issue.FixKind == EWCAValidationFixKind::FixSurfaceWaterProfile)
+        {
+            Status.bSurfaceWaterProfileIssue = true;
+        }
+
         TArray<FString>* TargetMessages = nullptr;
         switch (Issue.Category)
         {

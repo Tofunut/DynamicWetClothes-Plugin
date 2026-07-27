@@ -87,6 +87,18 @@ def build() -> None:
         "Build the UV direction perpendicular to flow.",
     )
     across_decl = c.named_declaration(mf, "SHARED_AcrossDirection", across_dir, ("", "Result"), -4050, -950)
+    flip_x = c.scalar_parameter(
+        mf, "DWC_SurfaceWaterNormalFlipX", 0.0, -5050, 50,
+        group="DWC Surface Water",
+        description="Preview/runtime debug switch: invert the final surface-water tangent normal X channel when > 0.5.",
+    )
+    flip_y = c.scalar_parameter(
+        mf, "DWC_SurfaceWaterNormalFlipY", 0.0, -5050, 600,
+        group="DWC Surface Water",
+        description="Preview/runtime debug switch: invert the final surface-water tangent normal Y channel when > 0.5.",
+    )
+    flip_x_decl = c.named_declaration(mf, "SHARED_NormalFlipX", flip_x, ("", "Result"), -4050, 50)
+    flip_y_decl = c.named_declaration(mf, "SHARED_NormalFlipY", flip_y, ("", "Result"), -4050, 600)
 
     # 2-1 Droplet UV
     normal_uv_use = c.named_usage(mf, declarations["SurfaceWaterNormalUV"], -2150, -1750)
@@ -176,6 +188,8 @@ return Aligned;
     )
     droplet_raw_for_decode = c.named_usage(mf, droplet_raw_decl, 7950, -1500)
     droplet_normal_slice_use2 = c.named_usage(mf, declarations["DropletNormalSlice"], 7950, -1100)
+    droplet_flip_x_use = c.named_usage(mf, flip_x_decl, 7950, -700)
+    droplet_flip_y_use = c.named_usage(mf, flip_y_decl, 7950, -300)
     droplet_decoded = c.custom_expression(
         mf,
         """
@@ -184,11 +198,14 @@ if (DropletNormalSlice <= 0.5)
     return float3(0.0, 0.0, 1.0);
 }
 float3 N = normalize(SampledNormal);
-return normalize(float3(-N.xy, N.z));
+float2 FlipSign = float2(FlipX > 0.5 ? -1.0 : 1.0, FlipY > 0.5 ? -1.0 : 1.0);
+return normalize(float3((-N.xy) * FlipSign, N.z));
 """,
         [
             ("SampledNormal", droplet_raw_for_decode, ("", "Result")),
             ("DropletNormalSlice", droplet_normal_slice_use2, ("", "Result")),
+            ("FlipX", droplet_flip_x_use, ("", "Result")),
+            ("FlipY", droplet_flip_y_use, ("", "Result")),
         ],
         "float3", 8500, -1400,
         "Normalize the tangent-space droplet normal already decoded by the Normal sampler, flip XY to match DWC convex-water convention, or return flat for slice 0.",
@@ -238,6 +255,8 @@ return normalize(float3(-N.xy, N.z));
     )
     rivulet_raw_for_decode = c.named_usage(mf, rivulet_raw_decl, 7950, 550)
     rivulet_normal_slice_use2 = c.named_usage(mf, declarations["RivuletNormalSlice"], 7950, 950)
+    rivulet_flip_x_use = c.named_usage(mf, flip_x_decl, 7950, 1350)
+    rivulet_flip_y_use = c.named_usage(mf, flip_y_decl, 7950, 1750)
     rivulet_decoded = c.custom_expression(
         mf,
         """
@@ -246,11 +265,14 @@ if (RivuletNormalSlice <= 0.5)
     return float3(0.0, 0.0, 1.0);
 }
 float3 N = normalize(SampledNormal);
-return normalize(float3(-N.xy, N.z));
+float2 FlipSign = float2(FlipX > 0.5 ? -1.0 : 1.0, FlipY > 0.5 ? -1.0 : 1.0);
+return normalize(float3((-N.xy) * FlipSign, N.z));
 """,
         [
             ("SampledNormal", rivulet_raw_for_decode, ("", "Result")),
             ("RivuletNormalSlice", rivulet_normal_slice_use2, ("", "Result")),
+            ("FlipX", rivulet_flip_x_use, ("", "Result")),
+            ("FlipY", rivulet_flip_y_use, ("", "Result")),
         ],
         "float3", 8500, 750,
         "Normalize the tangent-space rivulet normal already decoded by the Normal sampler, flip XY to match DWC convex-water convention, or return flat for slice 0.",

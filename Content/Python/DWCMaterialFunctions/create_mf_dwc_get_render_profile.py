@@ -173,7 +173,7 @@ def build() -> None:
         group="DWC Render Profile", description="Fallback packed profile texel 1.",
     )
     fallback2 = c.vector_parameter(
-        mf, "DWC_FallbackRenderProfile2", (0.0, 0.0, 0.0, 0.0), 3200, 150,
+        mf, "DWC_FallbackRenderProfile2", (0.0, 0.0, 0.02, 1.0), 3200, 150,
         group="DWC Render Profile", description="Fallback packed profile texel 2.",
     )
     fallback0_rgba = c.append_vector(
@@ -232,7 +232,7 @@ def build() -> None:
     texel1_uses = [c.named_usage(mf, texel1_decl, 7400, -1500 + i * 480) for i in range(4)]
     texel1_names = [
         ("SurfaceWaterNormalStrength", "R", "PROFILE_SurfaceWaterNormalStrength"),
-        ("SurfaceWaterRoughnessStrength", "G", "PROFILE_SurfaceWaterRoughnessStrength"),
+        ("SurfaceWaterRoughnessBlend", "G", "PROFILE_SurfaceWaterRoughnessBlend"),
         ("SurfaceVisibilityThreshold", "B", "PROFILE_SurfaceVisibilityThreshold"),
         ("RivuletUVScrollSpeed", "A", "PROFILE_RivuletUVScrollSpeed"),
     ]
@@ -243,10 +243,12 @@ def build() -> None:
         )
 
     # 3-3 Decode packed texel 2.
-    texel2_uses = [c.named_usage(mf, texel2_decl, 7400, 500 + i * 360) for i in range(2)]
+    texel2_uses = [c.named_usage(mf, texel2_decl, 7400, 500 + i * 360) for i in range(4)]
     texel2_names = [
         ("DropletMaskSlice", "R", "PROFILE_DropletMaskSlice"),
         ("RivuletMaskSlice", "G", "PROFILE_RivuletMaskSlice"),
+        ("SurfaceWaterTargetRoughness", "B", "PROFILE_SurfaceWaterTargetRoughness"),
+        ("OriginalSurfaceDetail", "A", "PROFILE_OriginalSurfaceDetail"),
     ]
     for i, (output_name, channel, reroute_name) in enumerate(texel2_names):
         mask = c.component_mask(mf, texel2_uses[i], ("", "Result"), channel, 7800, 500 + i * 360)
@@ -261,8 +263,9 @@ def build() -> None:
     ordered_outputs = [
         "AbsorbedDarkeningStrength", "AbsorbedGlossinessStrength",
         "DropletNormalSlice", "RivuletNormalSlice",
-        "SurfaceWaterNormalStrength", "SurfaceWaterRoughnessStrength",
+        "SurfaceWaterNormalStrength", "SurfaceWaterRoughnessBlend",
         "SurfaceVisibilityThreshold", "RivuletUVScrollSpeed",
+        "SurfaceWaterTargetRoughness", "OriginalSurfaceDetail",
         "DropletMaskSlice", "RivuletMaskSlice",
         "DropletDetailSize", "RivuletDetailSize",
     ]
@@ -274,7 +277,9 @@ def build() -> None:
         "DropletMaskSlice": "Droplet mask Texture2DArray slice.",
         "RivuletMaskSlice": "Rivulet mask Texture2DArray slice.",
         "SurfaceWaterNormalStrength": "Common surface-water detail-normal strength.",
-        "SurfaceWaterRoughnessStrength": "Surface-water roughness blend strength.",
+        "SurfaceWaterRoughnessBlend": "Surface-water roughness blend strength.",
+        "SurfaceWaterTargetRoughness": "Wet surface target roughness for fully visible surface water.",
+        "OriginalSurfaceDetail": "Original material normal detail retained under surface water.",
         "SurfaceVisibilityThreshold": "Visible amount threshold for droplet/rivulet coverage.",
         "RivuletUVScrollSpeed": "Flow-axis scroll speed for rivulet detail normals.",
         "DropletDetailSize": "Part-local physical-looking size of the Droplet detail pattern.",

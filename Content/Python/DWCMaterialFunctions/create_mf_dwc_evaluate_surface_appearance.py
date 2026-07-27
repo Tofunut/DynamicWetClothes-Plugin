@@ -64,6 +64,7 @@ def build() -> None:
     authored_specs = [
         ("BaseColor", "vector3", (1.0, 1.0, 1.0), "Original material Base Color."),
         ("BaseRoughness", "scalar", (0.5,), "Original material Roughness."),
+        ("BaseMetallic", "scalar", (0.0,), "Original material Metallic."),
         ("BaseNormal", "vector3", (0.0, 0.0, 1.0), "Original tangent-space Normal."),
         ("WetDarkeningStrength", "scalar", (0.35,), "Absorbed wetness darkening strength."),
         ("WetRoughness", "scalar", (0.12,), "Target roughness at full absorbed wetness."),
@@ -96,7 +97,6 @@ def build() -> None:
         ("DWCDataUV", "vector2", (0.0, 0.0), "DWC Data UV used by Wet Part data and runtime state textures."),
         ("SurfaceWaterNormalUV", "vector2", (0.0, 0.0), "Repeated detail-normal mesh UV."),
         ("SurfaceTime", "scalar", (0.0,), "Surface-water lifetime and scroll time."),
-        ("SurfaceWaterTargetRoughness", "scalar", (0.02,), "Common visible surface-water target roughness."),
     ]
     for i, (name, kind, preview, desc) in enumerate(runtime_specs):
         y = -5050 + i * 650
@@ -116,8 +116,9 @@ def build() -> None:
     profile_outputs = [
         "AbsorbedDarkeningStrength", "AbsorbedGlossinessStrength",
         "DropletNormalSlice", "RivuletNormalSlice",
-        "SurfaceWaterNormalStrength", "SurfaceWaterRoughnessStrength",
+        "SurfaceWaterNormalStrength", "SurfaceWaterRoughnessBlend",
         "SurfaceVisibilityThreshold", "RivuletUVScrollSpeed",
+        "SurfaceWaterTargetRoughness", "OriginalSurfaceDetail",
         "DropletMaskSlice", "RivuletMaskSlice",
         "DropletDetailSize", "RivuletDetailSize",
     ]
@@ -131,7 +132,7 @@ def build() -> None:
 
     # 1-4 Shared Constants.
     lifetime_epsilon = c.scalar_constant(mf, 0.01, -14800, 850, "Avoid zero lifetime division")
-    visibility_feather = c.scalar_constant(mf, 0.4, -14800, 1450, "CL145 default coverage smoothstep feather: Surface Water ramps from amount threshold 0.25 to 0.65.")
+    visibility_feather = c.scalar_constant(mf, 0.1, -14800, 1450, "Coverage smoothstep feather: Surface Water ramps quickly from amount threshold 0.25 to 0.35.")
     flat_normal = c.vector_constant(mf, (0.0, 0.0, 1.0), -14800, 2050, "Flat tangent normal")
     shared_lifetime = c.named_declaration(mf, "SHARED_LifetimeEpsilon", lifetime_epsilon, ("", "Result"), -13700, 850)
     shared_feather = c.named_declaration(mf, "SHARED_VisibilityFeather", visibility_feather, ("", "Result"), -13700, 1450)
@@ -151,18 +152,20 @@ def build() -> None:
     # 2-2 Wet Base Color.
     base_color_use = c.named_usage(mf, declarations["BaseColor"], -4650, -4900)
     absorbed_use = c.named_usage(mf, absorbed_wetness_decl, -4650, -4250)
+    base_metallic_use = c.named_usage(mf, declarations["BaseMetallic"], -4650, -3925)
     darkening_use = c.named_usage(mf, declarations["WetDarkeningStrength"], -4650, -3600)
     profile_darkening_use = c.named_usage(mf, profile_declarations["AbsorbedDarkeningStrength"], -4650, -2950)
     wet_base_color = c.custom_expression(
         mf,
-        "float Amount = saturate(Wetness * DarkeningStrength * ProfileDarkeningStrength);\nreturn BaseColor * (1.0 - Amount);",
+        "float NonMetalResponse = 1.0 - saturate(BaseMetallic);\nfloat Amount = saturate(Wetness * DarkeningStrength * ProfileDarkeningStrength * NonMetalResponse);\nreturn BaseColor * (1.0 - Amount);",
         [
             ("BaseColor", base_color_use, ("", "Result")),
             ("Wetness", absorbed_use, ("", "Result")),
+            ("BaseMetallic", base_metallic_use, ("", "Result")),
             ("DarkeningStrength", darkening_use, ("", "Result")),
             ("ProfileDarkeningStrength", profile_darkening_use, ("", "Result")),
         ],
-        "float3", -3500, -4050, "Apply absorbed-wetness darkening to original Base Color."
+        "float3", -3500, -4050, "Apply absorbed-wetness darkening to non-metal original Base Color."
     )
     wet_base_decl = c.named_declaration(
         mf, "ABSORBED_WetBaseColor", wet_base_color, ("", "Result"), -2150, -4050
@@ -202,11 +205,13 @@ def build() -> None:
     transparency_min_use = c.named_usage(mf, declarations["TransparencyWetnessMin"], -4650, 1550)
     transparency_max_use = c.named_usage(mf, declarations["TransparencyWetnessMax"], -4650, 2100)
     transparency_wet_use = c.named_usage(mf, absorbed_wetness_decl, -3600, 2100)
+    transparency_metallic_use = c.named_usage(mf, declarations["BaseMetallic"], -3600, 1550)
     absorbed_base_color = c.custom_expression(
         mf,
         """
 float T = saturate((Wetness - WetnessMin) / max(WetnessMax - WetnessMin, 0.0001));
-float Weight = saturate(TransparencyAlpha * T * Enabled);
+float NonMetalResponse = 1.0 - saturate(BaseMetallic);
+float Weight = saturate(TransparencyAlpha * T * Enabled * NonMetalResponse);
 return lerp(WetBaseColor, TransparencyColor, Weight);
 """,
         [
@@ -217,8 +222,9 @@ return lerp(WetBaseColor, TransparencyColor, Weight);
             ("WetnessMin", transparency_min_use, ("", "Result")),
             ("WetnessMax", transparency_max_use, ("", "Result")),
             ("Wetness", transparency_wet_use, ("", "Result")),
+            ("BaseMetallic", transparency_metallic_use, ("", "Result")),
         ],
-        "float3", -3300, 700, "Blend the wet base color toward the baked transparency reveal color."
+        "float3", -3300, 700, "Blend non-metal wet base color toward the baked transparency reveal color."
     )
     absorbed_base_decl = c.named_declaration(
         mf, "ABSORBED_BaseColor", absorbed_base_color, ("", "Result"), -2050, 700
@@ -325,11 +331,51 @@ return smoothstep(ThresholdMin, ThresholdMax, VisibleAmount);
     rivulet_normal_decl = c.named_declaration(
         mf, "SURFACE_RivuletNormal", normal_call, "RivuletNormal", 4100, 50
     )
-    # 3-5 Surface selection and roughness. The reference graph gates visible
-    # detail by the authored mask instead of applying the whole RT stamp as one
-    # flat glossy/dark patch.
-    droplet_cov_use2 = c.named_usage(mf, droplet_coverage_decl, 7350, -650)
-    rivulet_cov_use2 = c.named_usage(mf, rivulet_coverage_decl, 7350, 50)
+    # 3-5 Surface selection and roughness. Editor preview may replace the RT
+    # droplet/rivulet amount, but the authored masks must still gate every
+    # visible Surface Water rendering contribution.
+    preview_surface_override = c.scalar_parameter(
+        mf, "DWC_PreviewSurfaceWaterOverride", 0.0, 6400, -1400,
+        group="DWC Surface Water",
+        description="Editor preview only: when > 0.5, replace RT droplet/rivulet coverage before authored mask gating.",
+    )
+    preview_surface_amount = c.scalar_parameter(
+        mf, "DWC_PreviewSurfaceWaterAmount", 0.0, 6400, -1100,
+        group="DWC Surface Water",
+        description="Editor preview only: direct RT-like Surface Water amount used by Wetness Profile preview materials.",
+    )
+    droplet_cov_preview_source = c.named_usage(mf, droplet_coverage_decl, 6400, -800)
+    droplet_coverage_preview = c.custom_expression(
+        mf,
+        "return PreviewOverride > 0.5 ? saturate(PreviewAmount) : saturate(Coverage);",
+        [
+            ("PreviewOverride", preview_surface_override, ("", "Result")),
+            ("PreviewAmount", preview_surface_amount, ("", "Result")),
+            ("Coverage", droplet_cov_preview_source, ("", "Result")),
+        ],
+        "float1", 7000, -950,
+        "Wetness Profile preview replaces only the raw droplet amount; downstream masks still decide where rendering appears."
+    )
+    effective_droplet_coverage_decl = c.named_declaration(
+        mf, "SURFACE_EffectiveDropletCoverage", droplet_coverage_preview, ("", "Result"), 7900, -950
+    )
+    rivulet_cov_preview_source = c.named_usage(mf, rivulet_coverage_decl, 6400, -250)
+    rivulet_coverage_preview = c.custom_expression(
+        mf,
+        "return PreviewOverride > 0.5 ? saturate(PreviewAmount) : saturate(Coverage);",
+        [
+            ("PreviewOverride", preview_surface_override, ("", "Result")),
+            ("PreviewAmount", preview_surface_amount, ("", "Result")),
+            ("Coverage", rivulet_cov_preview_source, ("", "Result")),
+        ],
+        "float1", 7000, -400,
+        "Wetness Profile preview replaces only the raw rivulet amount; downstream masks still decide where rendering appears."
+    )
+    effective_rivulet_coverage_decl = c.named_declaration(
+        mf, "SURFACE_EffectiveRivuletCoverage", rivulet_coverage_preview, ("", "Result"), 7900, -400
+    )
+    droplet_cov_use2 = c.named_usage(mf, effective_droplet_coverage_decl, 7350, -650)
+    rivulet_cov_use2 = c.named_usage(mf, effective_rivulet_coverage_decl, 7350, 50)
     droplet_mask_use2 = c.named_usage(mf, droplet_mask_decl, 7350, 650)
     rivulet_mask_use2 = c.named_usage(mf, rivulet_mask_decl, 7350, 950)
     surface_coverage = c.custom_expression(
@@ -348,8 +394,41 @@ return saturate(D + F - D * F);
         "float1", 8200, -300, "CL145-style Surface Water combined mask: D + F - D * F after authored mask gating."
     )
     surface_coverage_decl = c.named_declaration(mf, "SURFACE_Coverage", surface_coverage, ("", "Result"), 9000, -300)
-    surface_coverage_use = c.named_usage(mf, surface_coverage_decl, 7350, 1000)
-    rough_strength_use = c.named_usage(mf, profile_declarations["SurfaceWaterRoughnessStrength"], 7350, 1650)
+    droplet_cov_visible_use = c.named_usage(mf, effective_droplet_coverage_decl, 9300, 50)
+    droplet_mask_visible_use = c.named_usage(mf, droplet_mask_decl, 9300, 350)
+    droplet_visible_coverage = c.custom_expression(
+        mf,
+        "return saturate(Coverage) * saturate(Mask);",
+        [
+            ("Coverage", droplet_cov_visible_use, ("", "Result")),
+            ("Mask", droplet_mask_visible_use, ("", "Result")),
+        ],
+        "float1", 10150, 150,
+        "Mask-gated droplet coverage for Surface Water debug/output."
+    )
+    visible_droplet_coverage_decl = c.named_declaration(
+        mf, "SURFACE_VisibleDropletCoverage", droplet_visible_coverage, ("", "Result"), 11100, 150
+    )
+    rivulet_cov_visible_use = c.named_usage(mf, effective_rivulet_coverage_decl, 9300, 650)
+    rivulet_mask_visible_use = c.named_usage(mf, rivulet_mask_decl, 9300, 950)
+    rivulet_visible_coverage = c.custom_expression(
+        mf,
+        "return saturate(Coverage) * saturate(Mask);",
+        [
+            ("Coverage", rivulet_cov_visible_use, ("", "Result")),
+            ("Mask", rivulet_mask_visible_use, ("", "Result")),
+        ],
+        "float1", 10150, 750,
+        "Mask-gated rivulet coverage for Surface Water debug/output."
+    )
+    visible_rivulet_coverage_decl = c.named_declaration(
+        mf, "SURFACE_VisibleRivuletCoverage", rivulet_visible_coverage, ("", "Result"), 11100, 750
+    )
+    effective_surface_coverage_decl = c.named_declaration(
+        mf, "SURFACE_EffectiveCoverage", surface_coverage_decl, ("", "Result"), 11100, -600
+    )
+    surface_coverage_use = c.named_usage(mf, effective_surface_coverage_decl, 7350, 1000)
+    rough_strength_use = c.named_usage(mf, profile_declarations["SurfaceWaterRoughnessBlend"], 7350, 1650)
     surface_roughness_weight = c.custom_expression(
         mf, "return saturate(Coverage * RoughnessStrength);",
         [("Coverage", surface_coverage_use, ("", "Result")), ("RoughnessStrength", rough_strength_use, ("", "Result"))],
@@ -361,8 +440,8 @@ return saturate(D + F - D * F);
 
     droplet_normal_use2 = c.named_usage(mf, droplet_normal_decl, 7200, 2050)
     rivulet_normal_use2 = c.named_usage(mf, rivulet_normal_decl, 7200, 2500)
-    droplet_cov_use3 = c.named_usage(mf, droplet_coverage_decl, 8000, 2050)
-    rivulet_cov_use3 = c.named_usage(mf, rivulet_coverage_decl, 8000, 2500)
+    droplet_cov_use3 = c.named_usage(mf, effective_droplet_coverage_decl, 8000, 2050)
+    rivulet_cov_use3 = c.named_usage(mf, effective_rivulet_coverage_decl, 8000, 2500)
     droplet_mask_use3 = c.named_usage(mf, droplet_mask_decl, 8400, 2050)
     rivulet_mask_use3 = c.named_usage(mf, rivulet_mask_decl, 8400, 2500)
     normal_strength_use3 = c.named_usage(mf, profile_declarations["SurfaceWaterNormalStrength"], 8000, 2950)
@@ -372,10 +451,12 @@ return saturate(D + F - D * F);
 float D = saturate(DropletCoverage) * saturate(DropletMask);
 float F = saturate(RivuletCoverage) * saturate(RivuletMask);
 float Strength = clamp(NormalStrength, 0.0, 8.0);
+float DropletVisualHeightBoost = 1.65;
 
-// CL145 strengthens only XY, preserves each texture normal's Z/B profile, then normalizes.
+// Droplets need a stronger convex edge than rivulets to read as raised beads.
+// Strengthen only XY, preserve each texture normal's Z/B profile, then normalize.
 float3 DropletN = normalize(DropletNormal);
-DropletN = normalize(float3(DropletN.xy * Strength, DropletN.z));
+DropletN = normalize(float3(DropletN.xy * min(Strength * DropletVisualHeightBoost, 12.0), DropletN.z));
 
 float3 RivuletN = normalize(RivuletNormal);
 RivuletN = normalize(float3(RivuletN.xy * Strength, RivuletN.z));
@@ -395,7 +476,7 @@ return normalize(lerp(float3(0.0, 0.0, 1.0), CombinedWaterNormal, CombinedMask))
             ("NormalStrength", normal_strength_use3, ("", "Result")),
         ],
         "float3", 9000, 2400,
-        "CL145-style Surface Water normal: strengthen XY while preserving sampled Z, blend Droplet/Flow by F/(D+F), then lerp from flat by the combined mask."
+        "Surface Water normal: give droplets a stronger bead-like convex edge, blend Droplet/Flow by F/(D+F), then lerp from flat by the combined mask."
     )
     combined_surface_decl = c.named_declaration(
         mf, "SURFACE_CombinedNormalRaw", combined_surface_normal, ("", "Result"), 10000, 2400
@@ -455,9 +536,10 @@ return normalize(lerp(float3(0.0, 0.0, 1.0), CombinedWaterNormal, CombinedMask))
     # 4-2 Final Roughness.
     base_rough_use = c.named_usage(mf, declarations["BaseRoughness"], 17700, -4900)
     wet_rough_use = c.named_usage(mf, declarations["WetRoughness"], 17700, -4250)
+    base_metallic_use2 = c.named_usage(mf, declarations["BaseMetallic"], 17700, -3925)
     absorbed_wet_use2 = c.named_usage(mf, absorbed_wetness_decl, 17700, -3600)
     absorbed_gloss_use = c.named_usage(mf, profile_declarations["AbsorbedGlossinessStrength"], 17700, -2950)
-    surface_target_rough_use = c.named_usage(mf, declarations["SurfaceWaterTargetRoughness"], 18500, -2300)
+    surface_target_rough_use = c.named_usage(mf, profile_declarations["SurfaceWaterTargetRoughness"], 18500, -2300)
     surface_rough_weight_use = c.named_usage(mf, surface_roughness_decl, 18500, -1750)
     final_roughness = c.custom_expression(
         mf,
@@ -465,20 +547,21 @@ return normalize(lerp(float3(0.0, 0.0, 1.0), CombinedWaterNormal, CombinedMask))
 float AbsorbedRoughness = lerp(
     BaseRoughness,
     WetRoughness,
-    saturate(Wetness * AbsorbedGlossinessStrength));
+    saturate(Wetness * AbsorbedGlossinessStrength * (1.0 - saturate(BaseMetallic))));
 float SafeSurfaceTarget = saturate(SurfaceWaterTargetRoughness);
 return lerp(AbsorbedRoughness, SafeSurfaceTarget, saturate(SurfaceRoughnessWeight));
 """,
         [
             ("BaseRoughness", base_rough_use, ("", "Result")),
             ("WetRoughness", wet_rough_use, ("", "Result")),
+            ("BaseMetallic", base_metallic_use2, ("", "Result")),
             ("Wetness", absorbed_wet_use2, ("", "Result")),
             ("AbsorbedGlossinessStrength", absorbed_gloss_use, ("", "Result")),
             ("SurfaceWaterTargetRoughness", surface_target_rough_use, ("", "Result")),
             ("SurfaceRoughnessWeight", surface_rough_weight_use, ("", "Result")),
         ],
         "float1", 19400, -3300,
-        "Reference-style Surface Water roughness: absorbed wetness first, then visible masked Surface Water drives roughness toward the glossy target."
+        "Surface Water roughness: absorbed wetness affects non-metal areas first, then visible masked Surface Water drives roughness toward the profile wet-surface target."
     )
     out_roughness_decl = c.named_declaration(
         mf, "OUT_Roughness", final_roughness, ("", "Result"), 20700, -3600
@@ -490,7 +573,8 @@ return lerp(AbsorbedRoughness, SafeSurfaceTarget, saturate(SurfaceRoughnessWeigh
         ("WrinkleNormal", wrinkle_normal_decl),
         ("WrinkleWeight", wrinkle_weight_decl),
         ("SurfaceNormal", surface_normal_decl),
-        ("SurfaceCoverage", surface_coverage_decl),
+        ("SurfaceCoverage", effective_surface_coverage_decl),
+        ("OriginalSurfaceDetail", profile_declarations["OriginalSurfaceDetail"]),
         ("FlatNormal", shared_flat),
     ]
     normal_usages = []
@@ -516,6 +600,9 @@ if (saturate(WrinkleWeight) > 0.0001)
 
 if (SurfaceWeight > 0.001)
 {
+    float Retention = lerp(1.0, saturate(OriginalSurfaceDetail), SurfaceWeight);
+    Result = normalize(lerp(FlatNormal, Result, Retention));
+
     float3 SurfaceBlended;
     SurfaceBlended.xy = Result.xy * S.z + S.xy * Result.z;
     SurfaceBlended.z = Result.z * S.z - dot(Result.xy, S.xy);
@@ -524,7 +611,7 @@ if (SurfaceWeight > 0.001)
 return Result;
 """,
         normal_usages,
-        "float3", 16300, 300, "Surface-safe angle-correct normal blend: Base + Wrinkle, flatten cloth detail under visible water, then Surface Water."
+        "float3", 16300, 300, "Surface-safe angle-correct normal blend: Base + Wrinkle, retain profile-controlled original detail under visible Surface Water, then Surface Water."
     )
     out_normal_decl = c.named_declaration(
         mf, "OUT_Normal", final_normal, ("", "Result"), 17500, 300
@@ -532,8 +619,15 @@ return Result;
 
     # 4-4 Function Outputs.
     coverage_zero = c.scalar_constant(mf, 0.0, 17800, 2700, "Disabled Surface Water coverage")
-    droplet_coverage_use_out = c.named_usage(mf, droplet_coverage_decl, 17800, 1700)
-    rivulet_coverage_use_out = c.named_usage(mf, rivulet_coverage_decl, 17800, 2200)
+    surface_coverage_use_out = c.named_usage(mf, effective_surface_coverage_decl, 17800, 1200)
+    droplet_coverage_use_out = c.named_usage(mf, visible_droplet_coverage_decl, 17800, 1700)
+    rivulet_coverage_use_out = c.named_usage(mf, visible_rivulet_coverage_decl, 17800, 2200)
+    selected_surface_coverage = c.static_switch_parameter(
+        mf, "DWC_UseSurfaceWater", False,
+        surface_coverage_use_out, ("", "Result"), coverage_zero, ("", "Result"),
+        18400, 1200, group="DWC Surface Water",
+        description="Output zero mask-gated surface coverage when the Surface Water branch is compiled out.",
+    )
     selected_droplet_coverage = c.static_switch_parameter(
         mf, "DWC_UseSurfaceWater", False,
         droplet_coverage_use_out, ("", "Result"), coverage_zero, ("", "Result"),
@@ -546,6 +640,9 @@ return Result;
         18400, 2300, group="DWC Surface Water",
         description="Output zero coverage when the Surface Water branch is compiled out.",
     )
+    out_surface_coverage_decl = c.named_declaration(
+        mf, "OUT_SurfaceCoverage", selected_surface_coverage, ("", "Result"), 19000, 1200
+    )
     out_droplet_coverage_decl = c.named_declaration(
         mf, "OUT_DropletCoverage", selected_droplet_coverage, ("", "Result"), 19000, 1700
     )
@@ -557,8 +654,9 @@ return Result;
         ("BaseColor", out_base_decl, "Final DWC Base Color."),
         ("Roughness", out_roughness_decl, "Final DWC Roughness."),
         ("Normal", out_normal_decl, "Final DWC tangent-space Normal."),
-        ("DropletCoverage", out_droplet_coverage_decl, "Visible Droplet coverage for debug visualization."),
-        ("RivuletCoverage", out_rivulet_coverage_decl, "Visible Rivulet coverage for debug visualization."),
+        ("SurfaceCoverage", out_surface_coverage_decl, "Mask-gated visible Surface Water coverage for material property layering."),
+        ("DropletCoverage", out_droplet_coverage_decl, "Mask-gated visible Droplet coverage for debug visualization."),
+        ("RivuletCoverage", out_rivulet_coverage_decl, "Mask-gated visible Rivulet coverage for debug visualization."),
     ]
     for i, (name, declaration, desc) in enumerate(final_outputs):
         usage = c.named_usage(mf, declaration, 19000, -650 + i * 1100)

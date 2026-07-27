@@ -2151,9 +2151,10 @@ void FDWCGPUBackend::DispatchSimulation(
                 WorkingDesc.ClearValue = FClearValueBinding::Black;
                 FRDGTextureRef InputAppliedTexture = GraphBuilder.CreateTexture(WorkingDesc, TEXT("DWC.AbsorbedWetness.InputApplied"));
                 AddCopyTexturePass(GraphBuilder, CurrentTexture, InputAppliedTexture);
+                FRDGTextureRef InputPendingTexture = GraphBuilder.CreateTexture(WorkingDesc, TEXT("DWC.AbsorbedWetness.PendingInputApplied"));
+                AddCopyTexturePass(GraphBuilder, CurrentPendingTexture, InputPendingTexture);
                 FRDGTextureUAVRef InputUAV = GraphBuilder.CreateUAV(InputAppliedTexture);
-                FRDGTextureUAVRef PendingInputUAV =
-                    GraphBuilder.CreateUAV(CurrentPendingTexture);
+                FRDGTextureUAVRef PendingInputUAV = GraphBuilder.CreateUAV(InputPendingTexture);
 
                 if (!SlotDispatch.BinnedAbsorptionContacts.IsEmpty() &&
                     !SlotDispatch.BinnedAbsorptionTileBins.IsEmpty() &&
@@ -2285,7 +2286,7 @@ void FDWCGPUBackend::DispatchSimulation(
                     DiffuseParameters->CapillaryImmediateAbsorptionFraction =
                         CapillaryImmediateAbsorptionFractionValue;
                     DiffuseParameters->SourceWetnessTexture = InputAppliedTexture;
-                    DiffuseParameters->PendingWetnessTexture = CurrentPendingTexture;
+                    DiffuseParameters->PendingWetnessTexture = InputPendingTexture;
                     DiffuseParameters->DestinationWetnessTexture = GraphBuilder.CreateUAV(NextTexture);
                     DiffuseParameters->DestinationPendingWetnessTexture =
                         GraphBuilder.CreateUAV(NextPendingTexture);
@@ -2315,7 +2316,7 @@ void FDWCGPUBackend::DispatchSimulation(
                     DiffuseParameters->CapillaryImmediateAbsorptionFraction =
                         CapillaryImmediateAbsorptionFractionValue;
                     DiffuseParameters->SourceWetnessTexture = InputAppliedTexture;
-                    DiffuseParameters->PendingWetnessTexture = CurrentPendingTexture;
+                    DiffuseParameters->PendingWetnessTexture = InputPendingTexture;
                     DiffuseParameters->DestinationWetnessTexture = GraphBuilder.CreateUAV(NextTexture);
                     DiffuseParameters->DestinationPendingWetnessTexture =
                         GraphBuilder.CreateUAV(NextPendingTexture);

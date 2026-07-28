@@ -158,11 +158,11 @@ def build() -> None:
         group="DWC Render Profile", description="Fallback packed profile texel 0.",
     )
     fallback1 = c.vector_parameter(
-        mf, "DWC_FallbackRenderProfile1", (1.0, 0.5, 0.2, 0.5), 3200, -550,
+        mf, "DWC_FallbackRenderProfile1", (1.0, 0.5, 0.0, 0.5), 3200, -550,
         group="DWC Render Profile", description="Fallback packed profile texel 1.",
     )
     fallback2 = c.vector_parameter(
-        mf, "DWC_FallbackRenderProfile2", (0.0, 0.0, 0.02, 1.0), 3200, 150,
+        mf, "DWC_FallbackRenderProfile2", (0.0, 0.0, 0.02, 0.5), 3200, 150,
         group="DWC Render Profile", description="Fallback packed profile texel 2.",
     )
     fallback0_rgba = c.append_vector(
@@ -221,7 +221,7 @@ def build() -> None:
     texel1_names = [
         ("SurfaceWaterNormalStrength", "R", "PROFILE_SurfaceWaterNormalStrength"),
         ("SurfaceWaterRoughnessBlend", "G", "PROFILE_SurfaceWaterRoughnessBlend"),
-        ("SurfaceVisibilityThreshold", "B", "PROFILE_SurfaceVisibilityThreshold"),
+        ("SurfaceWaterSpecular", "A", "PROFILE_SurfaceWaterSpecular"),
     ]
     for i, (output_name, channel, reroute_name) in enumerate(texel1_names):
         mask = c.component_mask(mf, texel1_uses[i], ("", "Result"), channel, 7800, -1500 + i * 480)
@@ -234,7 +234,7 @@ def build() -> None:
     texel2_names = [
         ("DropletMaskSlice", "R", "PROFILE_DropletMaskSlice"),
         ("SurfaceWaterTargetRoughness", "B", "PROFILE_SurfaceWaterTargetRoughness"),
-        ("OriginalSurfaceDetail", "A", "PROFILE_OriginalSurfaceDetail"),
+        ("SurfaceWaterTotalStrength", "A", "PROFILE_SurfaceWaterTotalStrength"),
     ]
     for i, (output_name, channel, reroute_name) in enumerate(texel2_names):
         mask = c.component_mask(mf, texel2_uses[i], ("", "Result"), channel, 7800, 500 + i * 360)
@@ -248,8 +248,8 @@ def build() -> None:
     ordered_outputs = [
         "AbsorbedDarkeningStrength", "AbsorbedGlossinessStrength",
         "DropletNormalSlice", "SurfaceWaterNormalStrength",
-        "SurfaceWaterRoughnessBlend", "SurfaceVisibilityThreshold",
-        "SurfaceWaterTargetRoughness", "OriginalSurfaceDetail",
+        "SurfaceWaterRoughnessBlend",
+        "SurfaceWaterSpecular", "SurfaceWaterTargetRoughness", "SurfaceWaterTotalStrength",
         "DropletMaskSlice", "DropletDetailSize",
     ]
     descriptions = {
@@ -259,9 +259,9 @@ def build() -> None:
         "DropletMaskSlice": "Droplet mask Texture2DArray slice.",
         "SurfaceWaterNormalStrength": "Common surface-water detail-normal strength.",
         "SurfaceWaterRoughnessBlend": "Surface-water roughness blend strength.",
+        "SurfaceWaterSpecular": "Wet surface target specular for fully visible surface water.",
         "SurfaceWaterTargetRoughness": "Wet surface target roughness for fully visible surface water.",
-        "OriginalSurfaceDetail": "Original material normal detail retained under surface water.",
-        "SurfaceVisibilityThreshold": "Visible amount threshold for droplet coverage.",
+        "SurfaceWaterTotalStrength": "Overall Surface Water rendering response strength.",
         "DropletDetailSize": "Part-local physical-looking size of the Droplet detail pattern.",
     }
     for i, name in enumerate(ordered_outputs):

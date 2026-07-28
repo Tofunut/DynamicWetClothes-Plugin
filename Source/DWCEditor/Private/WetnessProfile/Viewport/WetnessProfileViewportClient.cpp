@@ -4,6 +4,7 @@
 #include "Components/PrimitiveComponent.h"
 #include "SEditorViewport.h"
 #include "SWetnessProfileViewport.h"
+#include "WetClothing/Modes/DWCPreviewViewportToolbarUtils.h"
 
 FWetnessProfileViewportClient::FWetnessProfileViewportClient(FAdvancedPreviewScene* InPreviewScene, const TSharedRef<SWetnessProfileViewport>& InViewportWidget)
     : FEditorViewportClient(nullptr, InPreviewScene, StaticCastSharedRef<SEditorViewport>(InViewportWidget)), PreviewScene(InPreviewScene)
@@ -12,6 +13,7 @@ FWetnessProfileViewportClient::FWetnessProfileViewportClient(FAdvancedPreviewSce
     SetRealtime(false);
     SetViewLocation(FVector(180.0f, 0.0f, 80.0f));
     SetViewRotation(FRotator(-18.0f, 180.0f, 0.0f));
+    UE::DWCEditor::ApplyDWCPreviewCameraSpeedSettings(*this);
 
     EngineShowFlags.SetGrid(true);
     EngineShowFlags.SetSelectionOutline(true);

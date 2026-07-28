@@ -1,4 +1,4 @@
-"""Create or recreate MF_DWC_SampleSurfaceWaterNormals as a droplet-only sampler."""
+"""Create MF_DWC_SampleSurfaceWaterNormals for direct authored-texture array slices."""
 from __future__ import annotations
 
 import os
@@ -82,8 +82,8 @@ def build() -> None:
     )
     normal_sample = c.texture2d_array_parameter(
         mf, "DWC_DropletNormalTextureArray", normal_array_fallback, 650, -750,
-        sampler_type=c.normal_sampler(), group="DWC Surface Water",
-        description="Global droplet normal Texture2DArray. Slice 0 is flat.",
+        sampler_type=c.linear_color_sampler(), group="DWC Surface Water",
+        description="Global droplet normal Texture2DArray sampled as raw packed RG. Slice 0 is flat.",
     )
     c.try_connect(mask_array_uv, ("", "Result"), mask_sample, ("Coordinates", "UVs"))
     c.try_connect(normal_array_uv, ("", "Result"), normal_sample, ("Coordinates", "UVs"))
@@ -115,9 +115,11 @@ if (DropletNormalSlice <= 0.5)
 {
     return float3(0.0, 0.0, 1.0);
 }
-float3 N = normalize(SampledNormal);
+// SampledNormal comes from the authored texture built mip-0 bytes.
+// Keep the established WP custom-mesh decode and response unchanged.
+float2 DropletXY = -(SampledNormal.rg * 2.0 - 1.0);
 float2 FlipSign = float2(FlipX > 0.5 ? -1.0 : 1.0, FlipY > 0.5 ? -1.0 : 1.0);
-return normalize(float3((-N.xy) * FlipSign, N.z));
+return normalize(float3(DropletXY * FlipSign, 1.0));
 """,
         [
             ("SampledNormal", normal_raw_use, ("", "Result")),
@@ -126,7 +128,7 @@ return normalize(float3((-N.xy) * FlipSign, N.z));
             ("FlipY", flip_y_use, ("", "Result")),
         ],
         "float3", 3000, -350,
-        "Decode the droplet tangent normal or return flat for the reserved slice.",
+        "Decode raw packed droplet normal RG like the Wetness Profile preview, or return flat for the reserved slice.",
     )
 
     mask_decl = c.named_declaration(mf, "SURFACE_DropletMask", safe_mask, ("", "Result"), 3900, -1700)
@@ -139,7 +141,7 @@ return normalize(float3((-N.xy) * FlipSign, N.z));
     )
     c.function_output(
         mf, "DropletNormal", normal_out, ("", "Result"), 1, 6200, -250,
-        "Raw tangent-space droplet normal without coverage or strength.",
+        "WP-compatible tangent-space droplet detail normal without coverage or strength.",
     )
 
     c.finalize_material_function(mf)

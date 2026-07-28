@@ -834,8 +834,11 @@ def _configure_data_texture(texture: Any) -> None:
 def _configure_normal_texture(texture: Any) -> None:
     changed = set_property_if_changed(texture, "srgb", False)
     compression_enum = getattr(unreal, "TextureCompressionSettings", None)
-    if compression_enum is not None and hasattr(compression_enum, "TC_NORMALMAP"):
-        changed |= set_property_if_changed(texture, "compression_settings", compression_enum.TC_NORMALMAP)
+    if compression_enum is not None:
+        for name in ("TC_VECTOR_DISPLACEMENTMAP", "TC_DEFAULT"):
+            if hasattr(compression_enum, name):
+                changed |= set_property_if_changed(texture, "compression_settings", getattr(compression_enum, name))
+                break
     mip_enum = getattr(unreal, "TextureMipGenSettings", None)
     if mip_enum is not None and hasattr(mip_enum, "TMGS_NO_MIPMAPS"):
         changed |= set_property_if_changed(texture, "mip_gen_settings", mip_enum.TMGS_NO_MIPMAPS)
@@ -902,8 +905,11 @@ def ensure_default_textures() -> tuple[Any, Any]:
                 update_source()
     array_changed |= set_property_if_changed(normal_array, "srgb", False)
     compression_enum = getattr(unreal, "TextureCompressionSettings", None)
-    if compression_enum is not None and hasattr(compression_enum, "TC_NORMALMAP"):
-        array_changed |= set_property_if_changed(normal_array, "compression_settings", compression_enum.TC_NORMALMAP)
+    if compression_enum is not None:
+        for name in ("TC_VECTOR_DISPLACEMENTMAP", "TC_DEFAULT"):
+            if hasattr(compression_enum, name):
+                array_changed |= set_property_if_changed(normal_array, "compression_settings", getattr(compression_enum, name))
+                break
     if array_changed:
         normal_array.modify()
         save_asset(array_path)

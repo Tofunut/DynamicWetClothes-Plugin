@@ -38,6 +38,7 @@ def build() -> None:
     specs = [
         ("BaseColor", "vector3", (1.0, 1.0, 1.0), "Original material Base Color."),
         ("BaseRoughness", "scalar", (0.5,), "Original material Roughness."),
+        ("BaseSpecular", "scalar", (0.5,), "Original material Specular."),
         ("BaseMetallic", "scalar", (0.0,), "Original material Metallic."),
         ("BaseNormal", "vector3", (0.0, 0.0, 1.0), "Original tangent-space Normal."),
         ("Wetness", "scalar", (0.0,), "Resolved absorbed wetness."),
@@ -77,9 +78,9 @@ def build() -> None:
         "DropletNormalSlice",
         "SurfaceWaterNormalStrength",
         "SurfaceWaterRoughnessBlend",
-        "SurfaceVisibilityThreshold",
+        "SurfaceWaterSpecular",
         "SurfaceWaterTargetRoughness",
-        "OriginalSurfaceDetail",
+        "SurfaceWaterTotalStrength",
         "DropletMaskSlice",
         "DropletDetailSize",
     ]
@@ -173,17 +174,15 @@ return lerp(WetBaseColor, TransparencyColor, Alpha);
     droplet_rt = c.texture2d_parameter(
         mf, "DWC_SurfaceDropletRT", data_fallback, -250, -5250,
         sampler_type=c.linear_color_sampler(), group="DWC Surface Water",
-        description="Droplet state RT: R=amount, G=spawn time, B=lifetime, A=debug brush falloff.",
+        description="Droplet state RT: R=stamp region amount, G=spawn time, B=lifetime, A=reserved.",
     )
     c.try_connect(rt_uv, ("", "Result"), droplet_rt, ("Coordinates", "UVs"))
     droplet_amount = c.component_mask(mf, droplet_rt, "R", "R", 450, -5500)
     droplet_spawn = c.component_mask(mf, droplet_rt, "G", "G", 450, -4850)
     droplet_lifetime = c.component_mask(mf, droplet_rt, "B", "B", 450, -4200)
-    droplet_debug_brush = c.component_mask(mf, droplet_rt, "A", "A", 450, -3550)
     amount_decl = c.named_declaration(mf, "SURFACE_DropletAmount", droplet_amount, ("", "Result"), 1200, -5500)
     spawn_decl = c.named_declaration(mf, "SURFACE_DropletSpawnTime", droplet_spawn, ("", "Result"), 1200, -4850)
     lifetime_decl = c.named_declaration(mf, "SURFACE_DropletLifetime", droplet_lifetime, ("", "Result"), 1200, -4200)
-    debug_brush_decl = c.named_declaration(mf, "SURFACE_DropletDebugBrush", droplet_debug_brush, ("", "Result"), 1200, -3550)
 
     lifetime_fade_inputs = [
         ("SpawnTime", c.named_usage(mf, spawn_decl, 1900, -5000), ("", "Result")),
@@ -194,11 +193,14 @@ return lerp(WetBaseColor, TransparencyColor, Alpha);
         mf,
         """
 float Age = max(SurfaceTime - SpawnTime, 0.0);
-return 1.0 - saturate(Age / max(Lifetime, 0.01));
+float SafeLifetime = max(Lifetime, 0.01);
+float FadeDuration = min(0.35, SafeLifetime * 0.15);
+float FadeStart = max(SafeLifetime - FadeDuration, 0.0);
+return 1.0 - smoothstep(FadeStart, SafeLifetime, Age);
 """,
         lifetime_fade_inputs,
         "float1", 3100, -5000,
-        "Compute droplet lifetime fade.",
+        "Keep droplets fully visible for most of their lifetime and fade only near the end.",
     )
     lifetime_fade_decl = c.named_declaration(mf, "SURFACE_DropletLifetimeFade", lifetime_fade, ("", "Result"), 4300, -5000)
 
@@ -216,18 +218,15 @@ return 1.0 - saturate(Age / max(Lifetime, 0.01));
 
     coverage_inputs = [
         ("VisibleAmount", c.named_usage(mf, visible_amount_decl, 1900, -5550), ("", "Result")),
-        ("VisibilityThreshold", c.named_usage(mf, profile_declarations["SurfaceVisibilityThreshold"], 1900, -3350), ("", "Result")),
     ]
     raw_coverage = c.custom_expression(
         mf,
         """
-float ThresholdMin = saturate(VisibilityThreshold);
-float ThresholdMax = min(ThresholdMin + 0.1, 1.0);
-return smoothstep(ThresholdMin, ThresholdMax, VisibleAmount);
+return VisibleAmount > 1.0e-4 ? 1.0 : 0.0;
 """,
         coverage_inputs,
         "float1", 3100, -4450,
-        "Compute droplet lifetime fade and thresholded coverage.",
+        "Treat any live droplet state as visible coverage; Total Strength controls visual intensity.",
     )
     raw_coverage_decl = c.named_declaration(mf, "SURFACE_RawDropletCoverage", raw_coverage, ("", "Result"), 4300, -4450)
 
@@ -242,11 +241,9 @@ return smoothstep(ThresholdMin, ThresholdMax, VisibleAmount);
         description="Editor preview only: direct droplet amount.",
     )
     raw_cov_use = c.named_usage(mf, raw_coverage_decl, 3000, -2450)
-    debug_brush_use = c.named_usage(mf, debug_brush_decl, 3000, -3050)
-    lifetime_fade_use = c.named_usage(mf, lifetime_fade_decl, 3000, -3600)
     effective_coverage = c.custom_expression(
         mf,
-        "return PreviewOverride > 0.5 ? saturate(PreviewAmount) : saturate(Coverage);",
+        "return PreviewOverride > 0.5 ? (PreviewAmount > 1.0e-4 ? 1.0 : 0.0) : saturate(Coverage);",
         [
             ("PreviewOverride", preview_override, ("", "Result")),
             ("PreviewAmount", preview_amount, ("", "Result")),
@@ -256,19 +253,6 @@ return smoothstep(ThresholdMin, ThresholdMax, VisibleAmount);
         "Select preview or runtime droplet coverage before authored mask gating.",
     )
     effective_coverage_decl = c.named_declaration(mf, "SURFACE_EffectiveDropletCoverage", effective_coverage, ("", "Result"), 5400, -2450)
-    debug_coverage = c.custom_expression(
-        mf,
-        "return PreviewOverride > 0.5 ? saturate(PreviewAmount) : saturate(DebugBrush * LifetimeFade);",
-        [
-            ("PreviewOverride", preview_override, ("", "Result")),
-            ("PreviewAmount", preview_amount, ("", "Result")),
-            ("DebugBrush", debug_brush_use, ("", "Result")),
-            ("LifetimeFade", lifetime_fade_use, ("", "Result")),
-        ],
-        "float1", 4200, -3050,
-        "Expose stamp brush falloff for debug color mode before amount, threshold, or authored mask gating.",
-    )
-    debug_coverage_decl = c.named_declaration(mf, "SURFACE_DropletDebugCoverage", debug_coverage, ("", "Result"), 5400, -3050)
 
     normal_call = c.function_call(
         mf, normal_function, 800, -900,
@@ -298,27 +282,43 @@ return smoothstep(ThresholdMin, ThresholdMax, VisibleAmount);
     )
     surface_coverage_decl = c.named_declaration(mf, "SURFACE_Coverage", visible_coverage, ("", "Result"), 7600, -1600)
 
-    surface_normal = c.custom_expression(
+    visual_brush = c.custom_expression(
         mf,
         """
 float C = saturate(Coverage);
-float Strength = clamp(NormalStrength, 0.0, 8.0);
-float3 B = normalize(BaseNormal);
-float3 D = normalize(DropletNormal);
-float3 Water = normalize(float3(D.xy * Strength, D.z));
-float Preserve = saturate(OriginalSurfaceDetail);
-float3 UnderWaterBase = normalize(lerp(float3(0.0, 0.0, 1.0), B, Preserve));
-return normalize(lerp(UnderWaterBase, Water, C));
+float M = saturate(Mask);
+return C * M;
+""",
+        [
+            ("Coverage", c.named_usage(mf, effective_coverage_decl, 5700, -700), ("", "Result")),
+            ("Mask", c.named_usage(mf, droplet_mask_decl, 5700, -100), ("", "Result")),
+        ],
+        "float1", 6600, 250,
+        "Use the authored droplet mask and live stamp region as the visual water brush.",
+    )
+    visual_brush_decl = c.named_declaration(mf, "SURFACE_VisualBrush", visual_brush, ("", "Result"), 7600, 250)
+
+    surface_normal = c.custom_expression(
+        mf,
+        """
+// Preserve the established WP custom-mesh response. Texture-path parity is
+// handled in C++ by uploading the authored 512 texture directly.
+float C = saturate(Coverage);
+float Strength = clamp(NormalStrength, 0.0, 3.0);
+float DropletVisualHeightBoost = 1.65;
+float DropletWeight = C * saturate(TotalStrength);
+float2 CombinedXY = DropletNormal.xy * DropletWeight * min(Strength * DropletVisualHeightBoost, 12.0);
+return normalize(float3(CombinedXY, 1.0));
 """,
         [
             ("BaseNormal", c.named_usage(mf, wrinkle_decl, 4400, -500), ("", "Result")),
             ("DropletNormal", c.named_usage(mf, droplet_normal_decl, 4400, 50), ("", "Result")),
             ("Coverage", c.named_usage(mf, surface_coverage_decl, 4400, 600), ("", "Result")),
             ("NormalStrength", c.named_usage(mf, profile_declarations["SurfaceWaterNormalStrength"], 4400, 1150), ("", "Result")),
-            ("OriginalSurfaceDetail", c.named_usage(mf, profile_declarations["OriginalSurfaceDetail"], 4400, 1700), ("", "Result")),
+            ("TotalStrength", c.named_usage(mf, profile_declarations["SurfaceWaterTotalStrength"], 4400, 1700), ("", "Result")),
         ],
         "float3", 6000, 450,
-        "Compose the droplet normal over the retained original surface detail.",
+        "Match the Wetness Profile preview surface-normal formula for droplet normals.",
     )
     surface_normal_decl = c.named_declaration(mf, "SURFACE_NormalRaw", surface_normal, ("", "Result"), 7600, 450)
 
@@ -362,37 +362,115 @@ return normalize(lerp(UnderWaterBase, Water, C));
     selected_coverage_decl = c.named_declaration(
         mf, "SURFACE_SelectedCoverage", selected_coverage, ("", "Result"), 12100, 1450
     )
-    enabled_debug_coverage_use = c.named_usage(mf, debug_coverage_decl, 10600, 2200)
-    disabled_debug_zero = c.scalar_constant(mf, 0.0, 10600, 2750, "Disabled Surface Water debug coverage")
-    selected_debug_coverage = c.static_switch_parameter(
+    enabled_amount_use = c.named_usage(mf, amount_decl, 10600, 2200)
+    disabled_amount_zero = c.scalar_constant(mf, 0.0, 10600, 2750, "Disabled Surface Water droplet amount")
+    selected_amount = c.static_switch_parameter(
         mf, "DWC_UseSurfaceWater", False,
-        enabled_debug_coverage_use, ("", "Result"),
-        disabled_debug_zero, ("", "Result"),
+        enabled_amount_use, ("", "Result"),
+        disabled_amount_zero, ("", "Result"),
         11600, 2450,
         group="DWC Surface Water",
-        description="Compile raw Surface Water debug coverage only for slots that use Surface Water.",
+        description="Compile raw Surface Water droplet amount only for slots that use Surface Water.",
     )
-    selected_debug_coverage_decl = c.named_declaration(
-        mf, "SURFACE_SelectedDebugCoverage", selected_debug_coverage, ("", "Result"), 12600, 2450
+    selected_amount_decl = c.named_declaration(
+        mf, "SURFACE_SelectedDropletAmount", selected_amount, ("", "Result"), 12600, 2450
+    )
+    enabled_brush_use = c.named_usage(mf, visual_brush_decl, 10600, 3300)
+    disabled_brush_zero = c.scalar_constant(mf, 0.0, 10600, 3850, "Disabled Surface Water visual droplet brush")
+    selected_brush = c.static_switch_parameter(
+        mf, "DWC_UseSurfaceWater", False,
+        enabled_brush_use, ("", "Result"),
+        disabled_brush_zero, ("", "Result"),
+        11600, 3550,
+        group="DWC Surface Water",
+        description="Compile visual Surface Water droplet brush only for slots that use Surface Water.",
+    )
+    selected_brush_decl = c.named_declaration(
+        mf, "SURFACE_SelectedDropletBrush", selected_brush, ("", "Result"), 12600, 3550
+    )
+    enabled_lifetime_fade_use = c.named_usage(mf, lifetime_fade_decl, 10600, 4400)
+    disabled_lifetime_fade_zero = c.scalar_constant(mf, 0.0, 10600, 4950, "Disabled Surface Water lifetime fade")
+    selected_lifetime_fade = c.static_switch_parameter(
+        mf, "DWC_UseSurfaceWater", False,
+        enabled_lifetime_fade_use, ("", "Result"),
+        disabled_lifetime_fade_zero, ("", "Result"),
+        11600, 4650,
+        group="DWC Surface Water",
+        description="Compile raw Surface Water droplet lifetime fade only for slots that use Surface Water.",
+    )
+    selected_lifetime_fade_decl = c.named_declaration(
+        mf, "SURFACE_SelectedDropletLifetimeFade", selected_lifetime_fade, ("", "Result"), 12600, 4650
     )
 
     # Final outputs.
-    final_color_use = c.named_usage(mf, absorbed_color_decl, 9550, -4550)
-    final_color_decl = c.named_declaration(mf, "FINAL_BaseColor", final_color_use, ("", "Result"), 10500, -4550)
+    final_color = c.custom_expression(
+        mf,
+        """
+float C = saturate(Coverage);
+float Brush = saturate(DropletBrush);
+float Metal = saturate(BaseMetallic);
+float NonMetal = 1.0 - Metal;
+float SpecularCue = saturate(WaterSpecular);
+float Total = saturate(TotalStrength);
+float BaseLuminance = dot(BaseColor, float3(0.299, 0.587, 0.114));
+float DarkSurfaceDamp = lerp(0.28, 1.0, smoothstep(0.05, 0.55, BaseLuminance));
+float Edge = smoothstep(0.08, 0.48, Brush) * (1.0 - smoothstep(0.55, 0.96, Brush));
+float Center = smoothstep(0.50, 1.0, Brush);
+float CenterLift = 0.008 * Center * DarkSurfaceDamp;
+float EdgeLift = (0.08 + 0.09 * SpecularCue) * Edge * DarkSurfaceDamp;
+float3 NonMetalClearColor = lerp(AbsorbedColor, BaseColor, 0.38 + 0.16 * SpecularCue);
+float3 NonMetalGlint = CenterLift + EdgeLift;
+float NonMetalBlend = C * Total * (0.58 + 0.18 * SpecularCue);
+float3 NonMetalWater = lerp(AbsorbedColor, NonMetalClearColor + NonMetalGlint, NonMetalBlend);
+
+float MetalEdgeLift = (0.015 + 0.035 * SpecularCue) * Edge * DarkSurfaceDamp;
+float MetalCenterLift = 0.002 * Center * DarkSurfaceDamp;
+float MetalBlend = C * Total * (0.08 + 0.05 * SpecularCue);
+float3 MetalWater = lerp(AbsorbedColor, BaseColor + MetalEdgeLift + MetalCenterLift, MetalBlend);
+
+return saturate(lerp(NonMetalWater, MetalWater, Metal));
+""",
+        [
+            ("BaseColor", c.named_usage(mf, declarations["BaseColor"], 9550, -5350), ("", "Result")),
+            ("AbsorbedColor", c.named_usage(mf, absorbed_color_decl, 9550, -4800), ("", "Result")),
+            ("BaseMetallic", c.named_usage(mf, declarations["BaseMetallic"], 9550, -4250), ("", "Result")),
+            ("Coverage", c.named_usage(mf, selected_coverage_decl, 9550, -3700), ("", "Result")),
+            ("DropletBrush", c.named_usage(mf, selected_brush_decl, 9550, -3150), ("", "Result")),
+            ("WaterSpecular", c.named_usage(mf, profile_declarations["SurfaceWaterSpecular"], 9550, -2600), ("", "Result")),
+            ("TotalStrength", c.named_usage(mf, profile_declarations["SurfaceWaterTotalStrength"], 9550, -2050), ("", "Result")),
+        ],
+        "float3", 11200, -4550,
+        "Add a subtle clear-water film response inside final droplet coverage while preserving the source color.",
+    )
+    final_color_decl = c.named_declaration(mf, "FINAL_BaseColor", final_color, ("", "Result"), 12600, -4550)
 
     final_roughness = c.custom_expression(
         mf,
-        "return saturate(lerp(AbsorbedRoughness, TargetRoughness, saturate(Coverage * RoughnessBlend)));",
+        "return saturate(lerp(AbsorbedRoughness, TargetRoughness, saturate(Coverage * RoughnessBlend * TotalStrength)));",
         [
             ("AbsorbedRoughness", c.named_usage(mf, absorbed_rough_decl, 9550, -3000), ("", "Result")),
             ("TargetRoughness", c.named_usage(mf, profile_declarations["SurfaceWaterTargetRoughness"], 9550, -2450), ("", "Result")),
             ("Coverage", c.named_usage(mf, selected_coverage_decl, 9550, -1900), ("", "Result")),
             ("RoughnessBlend", c.named_usage(mf, profile_declarations["SurfaceWaterRoughnessBlend"], 9550, -1350), ("", "Result")),
+            ("TotalStrength", c.named_usage(mf, profile_declarations["SurfaceWaterTotalStrength"], 9550, -800), ("", "Result")),
         ],
         "float1", 11200, -2200,
         "Blend absorbed roughness toward the surface-water target.",
     )
     final_rough_decl = c.named_declaration(mf, "FINAL_Roughness", final_roughness, ("", "Result"), 12600, -2200)
+    final_specular = c.custom_expression(
+        mf,
+        "return saturate(lerp(BaseSpecular, TargetSpecular, saturate(Coverage * TotalStrength)));",
+        [
+            ("BaseSpecular", c.named_usage(mf, declarations["BaseSpecular"], 9550, -900), ("", "Result")),
+            ("TargetSpecular", c.named_usage(mf, profile_declarations["SurfaceWaterSpecular"], 9550, -350), ("", "Result")),
+            ("Coverage", c.named_usage(mf, selected_coverage_decl, 9550, 200), ("", "Result")),
+            ("TotalStrength", c.named_usage(mf, profile_declarations["SurfaceWaterTotalStrength"], 9550, 750), ("", "Result")),
+        ],
+        "float1", 11200, -350,
+        "Blend source specular toward the surface-water target inside final droplet coverage.",
+    )
+    final_specular_decl = c.named_declaration(mf, "FINAL_Specular", final_specular, ("", "Result"), 12600, -350)
     final_normal_decl = c.named_declaration(
         mf, "FINAL_Normal", c.named_usage(mf, selected_normal_decl, 12800, -250), ("", "Result"), 13600, -250
     )
@@ -400,10 +478,13 @@ return normalize(lerp(UnderWaterBase, Water, C));
     outputs = [
         ("BaseColor", final_color_decl, "Final wet Base Color."),
         ("Roughness", final_rough_decl, "Final wet Roughness."),
+        ("Specular", final_specular_decl, "Final wet Specular."),
         ("Normal", final_normal_decl, "Final tangent-space Normal."),
         ("SurfaceCoverage", selected_coverage_decl, "Visible mask-gated droplet coverage, or zero when compiled out."),
         ("DropletCoverage", selected_coverage_decl, "Visible mask-gated droplet coverage, or zero when compiled out."),
-        ("DropletDebugCoverage", selected_debug_coverage_decl, "Lifetime-faded droplet RT amount for debug visualization."),
+        ("DropletAmount", selected_amount_decl, "Raw droplet RT amount, or zero when Surface Water is compiled out."),
+        ("DropletBrush", selected_brush_decl, "Visual mask-shaped droplet brush, or zero when Surface Water is compiled out."),
+        ("DropletLifetimeFade", selected_lifetime_fade_decl, "Raw droplet lifetime fade, or zero when Surface Water is compiled out."),
     ]
     for i, (name, declaration, description) in enumerate(outputs):
         use = c.named_usage(mf, declaration, 13700, -4200 + i * 1100)

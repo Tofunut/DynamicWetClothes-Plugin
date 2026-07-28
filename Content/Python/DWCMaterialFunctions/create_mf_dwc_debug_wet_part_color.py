@@ -17,7 +17,7 @@ ASSET_NAME = "MF_DWC_DebugWetPartColor"
 def build() -> None:
     mf = c.create_or_replace_material_function(ASSET_NAME, OVERWRITE_EXISTING)
 
-    c.create_comment(mf, "1. Inputs", -6200, -3000, 3400, 5600, parent=True)
+    c.create_comment(mf, "1. Inputs", -6200, -3600, 3400, 6800, parent=True)
     c.create_comment(mf, "2. Wet Part Debug", -2400, -3000, 3000, 2500, parent=True)
     c.create_comment(mf, "3. Droplet Debug", -2400, 0, 3600, 2500, parent=True)
     c.create_comment(mf, "4. Final Output", 1800, -3000, 3000, 5600, parent=True)
@@ -28,7 +28,9 @@ def build() -> None:
         ("VertexColorAlpha", "scalar", (0.0,), "Packed Wet Part debug blue channel."),
         ("WetnessMask", "scalar", (0.0,), "Resolved absorbed-wetness amount."),
         ("WetPartDebugStrength", "scalar", (0.0,), "Runtime Wet Part debug strength."),
-        ("DropletCoverage", "scalar", (0.0,), "Debug droplet coverage from the Appearance MF."),
+        ("DropletAmount", "scalar", (0.0,), "Raw droplet RT amount from the Appearance MF."),
+        ("DropletBrush", "scalar", (0.0,), "Visual mask-shaped droplet brush from the Appearance MF."),
+        ("DropletLifetimeFade", "scalar", (0.0,), "Raw droplet lifetime fade from the Appearance MF."),
         ("SurfaceWaterDebugStrength", "scalar", (0.0,), "Runtime Surface Water debug strength."),
         ("DropletDebugColor", "vector3", (1.0, 0.85, 0.0), "Droplet debug color."),
     ]
@@ -58,9 +60,9 @@ return lerp(BaseColor, WetPartColor, WetPartAlpha);
     wet_decl = c.named_declaration(mf, "DEBUG_WetPartResult", wet_result, ("", "Result"), 250, -1500)
 
     droplet_inputs = []
-    for i, name in enumerate(("DropletCoverage", "SurfaceWaterDebugStrength", "DropletDebugColor")):
+    for i, name in enumerate(("DropletAmount", "DropletBrush", "DropletLifetimeFade", "SurfaceWaterDebugStrength", "DropletDebugColor")):
         droplet_inputs.append(
-            (name, c.named_usage(mf, declarations[name], -2000 + i * 800, 450), ("", "Result"))
+            (name, c.named_usage(mf, declarations[name], -2200 + (i % 3) * 800, 450 + (i // 3) * 550), ("", "Result"))
         )
     droplet_color = c.custom_expression(
         mf,
@@ -70,16 +72,19 @@ return lerp(BaseColor, WetPartColor, WetPartAlpha);
         "Use the configured droplet debug color.",
     )
     alpha_inputs = []
-    for i, name in enumerate(("DropletCoverage", "SurfaceWaterDebugStrength")):
+    for i, name in enumerate(("DropletAmount", "DropletBrush", "DropletLifetimeFade", "SurfaceWaterDebugStrength")):
         alpha_inputs.append(
-            (name, c.named_usage(mf, declarations[name], -1700 + i * 900, 1550), ("", "Result"))
+            (name, c.named_usage(mf, declarations[name], -2200 + i * 700, 1550), ("", "Result"))
         )
     droplet_alpha = c.custom_expression(
         mf,
-        "return saturate(DropletCoverage * SurfaceWaterDebugStrength);",
+        """
+float HasAmount = DropletAmount > 1.0e-4 ? 1.0 : 0.0;
+return saturate(DropletBrush * HasAmount * DropletLifetimeFade * SurfaceWaterDebugStrength);
+""",
         alpha_inputs,
         "float1", 150, 1550,
-        "Compute the droplet debug overlay alpha.",
+        "Compute droplet debug alpha from raw droplet state.",
     )
     color_decl = c.named_declaration(mf, "DEBUG_SurfaceColor", droplet_color, ("", "Result"), 850, 850)
     alpha_decl = c.named_declaration(mf, "DEBUG_SurfaceAlpha", droplet_alpha, ("", "Result"), 850, 1550)

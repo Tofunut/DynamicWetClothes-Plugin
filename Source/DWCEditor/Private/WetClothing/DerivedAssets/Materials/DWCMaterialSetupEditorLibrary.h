@@ -16,4 +16,10 @@ class DWCEDITOR_API UDWCMaterialSetupEditorLibrary : public UBlueprintFunctionLi
     UFUNCTION(BlueprintCallable, CallInEditor, Category = "DWC|Material Setup")
     static bool RepairGeneratedWetMaterials(UWetClothingAsset* WetClothingAsset, FString& OutReport);
 
+    UFUNCTION(BlueprintCallable, CallInEditor, Category = "DWC|Material Setup")
+    static bool BakeRenderProfileDataAndUpdateMaterials(
+        UWetClothingAsset* WetClothingAsset,
+        FString& OutReport,
+        bool& bOutHadWarnings);
+
 };

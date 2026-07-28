@@ -17,7 +17,6 @@
 #include "Runtime/Engine/Public/Rendering/SkeletalMeshRenderData.h"
 #include "DataAssets/WetClothingAsset.h"
 #include "DataAssets/WetnessProfile.h"
-#include "UObject/Package.h"
 
 
 namespace
@@ -48,21 +47,7 @@ namespace
             if (const UWetnessProfile* SourceProfile =
                     Cast<UWetnessProfile>(SourceObject))
             {
-                if (const UPackage* SourcePackage = SourceProfile->GetOutermost();
-                    SourcePackage != nullptr && SourcePackage->IsDirty())
-                {
-                    UE_LOG(
-                        LogTemp,
-                        Verbose,
-                        TEXT("DynamicWetClothesComponent: Wetness Profile '%s' has unsaved editor changes while initializing WCA '%s' on '%s'. Using the WCA snapshot/fallback profile."),
-                        *ProfileAssignment->SourceProfile.ToString(),
-                        *GetNameSafe(&Asset),
-                        *GetNameSafe(OwnerForLogs));
-                }
-                else
-                {
-                    return SourceProfile->GetParameters();
-                }
+                return SourceProfile->GetParameters();
             }
             else
             {

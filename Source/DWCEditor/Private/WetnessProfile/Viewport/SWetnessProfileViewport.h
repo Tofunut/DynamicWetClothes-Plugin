@@ -23,6 +23,16 @@ class STextBlock;
 class SWetnessProfileViewport : public SEditorViewport, public FGCObject
 {
   public:
+    enum class EPreviewMode : uint8
+    {
+        Lit,
+        Absorbed,
+        SurfaceCoverage,
+        FinalDropletCoverage,
+        DropletNormal,
+        DropletStampTest
+    };
+
     SLATE_BEGIN_ARGS(SWetnessProfileViewport) {}
     SLATE_ARGUMENT(UWetnessProfile*, WetnessProfile)
     SLATE_END_ARGS()
@@ -45,10 +55,12 @@ class SWetnessProfileViewport : public SEditorViewport, public FGCObject
     float GetPreviewAbsorbedWater() const { return PreviewAbsorbedWater; }
 
     void SetPreviewSurfaceWater(float InAmount);
-    float GetPreviewSurfaceWater() const { return PreviewSurfaceWater; }
 
     void SetPreviewDropletDetailSize(float InDropletDetailSize);
     float GetPreviewDropletDetailSize() const { return PreviewDropletDetailSize; }
+
+    void SetPreviewMode(EPreviewMode InPreviewMode);
+    EPreviewMode GetPreviewMode() const { return PreviewMode; }
 
     void SetPreviewAnimationEnabled(bool bInEnabled);
     void SetPreviewAnimationSpeed(float InSpeed);
@@ -63,6 +75,7 @@ class SWetnessProfileViewport : public SEditorViewport, public FGCObject
 
   protected:
     virtual TSharedRef<FEditorViewportClient> MakeEditorViewportClient() override;
+    virtual TSharedPtr<SWidget> BuildViewportToolbar() override;
     virtual void PopulateViewportOverlays(TSharedRef<SOverlay> Overlay) override;
     virtual void OnFocusViewportToSelection() override;
 
@@ -104,8 +117,9 @@ class SWetnessProfileViewport : public SEditorViewport, public FGCObject
     bool bHasPreviewMeshOverride = false;
     bool bPreviewAnimationEnabled = true;
     float PreviewAbsorbedWater = 0.5f;
-    float PreviewSurfaceWater = 0.5f;
+    float PreviewSurfaceWater = 1.0f;
     float PreviewDropletDetailSize = 1.0f;
+    EPreviewMode PreviewMode = EPreviewMode::Lit;
     float PreviewAnimationSpeed = 1.0f;
     float PreviewAnimationTime = 0.0f;
 };

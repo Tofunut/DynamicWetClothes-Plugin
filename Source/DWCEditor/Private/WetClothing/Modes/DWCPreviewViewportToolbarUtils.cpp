@@ -2,6 +2,7 @@
 
 #include "EditorViewportClient.h"
 #include "SEditorViewport.h"
+#include "Settings/EditorViewportSettings.h"
 #include "Styling/AppStyle.h"
 #include "ToolMenus.h"
 #include "ViewportToolbar/UnrealEdViewportToolbar.h"
@@ -10,6 +11,10 @@
 
 namespace
 {
+	constexpr float DWCPreviewCameraSpeed = 0.25f;
+	constexpr float DWCPreviewCameraMinUISpeed = 0.01f;
+	constexpr float DWCPreviewCameraMaxUISpeed = 32.0f;
+
 	void AddBufferVisualizationEntry(
 		FToolMenuSection& Section,
 		const TWeakPtr<FEditorViewportClient> WeakViewportClient,
@@ -126,6 +131,14 @@ namespace
 			false,
 			FSlateIcon(FAppStyle::GetAppStyleSetName(), TEXT("EditorViewport.VisualizeBufferMode")));
 	}
+}
+
+void UE::DWCEditor::ApplyDWCPreviewCameraSpeedSettings(FEditorViewportClient& ViewportClient)
+{
+	ViewportClient.SetCameraSpeedSettings(FEditorViewportCameraSpeedSettings::FromUIRange(
+		DWCPreviewCameraSpeed,
+		DWCPreviewCameraMinUISpeed,
+		DWCPreviewCameraMaxUISpeed));
 }
 
 FToolMenuEntry UE::DWCEditor::CreateDWCViewModesSubmenu()

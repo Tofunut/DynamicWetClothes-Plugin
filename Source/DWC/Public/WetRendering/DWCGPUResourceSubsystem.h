@@ -125,6 +125,9 @@ struct DWC_API FDWCAssetRenderProfileResources
     /** Bake identity used to invalidate this WCA's slot texture/remap cache after an editor rebake. */
     FGuid SourceBakeGuid;
 
+    /** Resolved profile parameter identity used to invalidate remaps when source Wetness Profiles change. */
+    FString ResolvedProfileSignature;
+
     int32 RegistryRevision = INDEX_NONE;
     bool bSurfaceResourcesResolved = false;
 

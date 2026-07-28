@@ -27,7 +27,7 @@ namespace DWCWetnessProfilePreviewMaterial
 namespace
 {
     constexpr const TCHAR* DynamicWetClothesPluginName = TEXT("DynamicWetClothes");
-    constexpr const TCHAR* PreviewMaterialAssetName = TEXT("M_DWC_WetnessProfilePreviewV10");
+    constexpr const TCHAR* PreviewMaterialAssetName = TEXT("M_DWC_WetnessProfilePreviewV13");
 
     enum class EPreviewMaterialCreationState : uint8
     {
@@ -232,26 +232,32 @@ namespace
             Material, SurfaceNormalStrengthParameter, 1.0f, -1250, 180);
         UMaterialExpressionScalarParameter* SurfaceRoughnessBlend = CreateScalarParameter(
             Material, SurfaceRoughnessBlendParameter, 1.0f, -1250, 280);
-        UMaterialExpressionScalarParameter* SurfaceVisibilityThreshold = CreateScalarParameter(
-            Material, SurfaceVisibilityThresholdParameter, 0.25f, -1250, 380);
+        UMaterialExpressionScalarParameter* SurfaceTotalStrength = CreateScalarParameter(
+            Material, SurfaceTotalStrengthParameter, 0.5f, -1250, 380);
+        UMaterialExpressionScalarParameter* SurfaceSpecular = CreateScalarParameter(
+            Material, SurfaceSpecularParameter, 0.5f, -1250, 480);
         UMaterialExpressionScalarParameter* DropletsEnabled = CreateScalarParameter(
-            Material, DropletsEnabledParameter, 1.0f, -1250, 480);
+            Material, DropletsEnabledParameter, 1.0f, -1250, 580);
+        UMaterialExpressionScalarParameter* DropletStampSize = CreateScalarParameter(
+            Material, DropletStampSizeParameter, 16.0f, -1250, 680);
         UMaterialExpressionScalarParameter* DropletDetailSize = CreateScalarParameter(
-            Material, DropletDetailSizeParameter, 1.0f, -1250, 580);
+            Material, DropletDetailSizeParameter, 1.0f, -1250, 780);
+        UMaterialExpressionScalarParameter* DebugMode = CreateScalarParameter(
+            Material, DebugModeParameter, 0.0f, -1250, 880);
 
         UMaterialExpressionTextureCoordinate* TextureCoordinate = Cast<UMaterialExpressionTextureCoordinate>(
             UMaterialEditingLibrary::CreateMaterialExpression(
                 Material,
                 UMaterialExpressionTextureCoordinate::StaticClass(),
                 -1250,
-                720));
+                1020));
 
         UTexture* DefaultNormalTexture = LoadDefaultNormalTexture();
         UTexture* DefaultMaskTexture = LoadDefaultMaskTexture();
         UMaterialExpressionTextureObjectParameter* DropletNormal = CreateNormalTextureParameter(
-            Material, DropletNormalTextureParameter, DefaultNormalTexture, -1250, 840);
+            Material, DropletNormalTextureParameter, DefaultNormalTexture, -1250, 1140);
         UMaterialExpressionTextureObjectParameter* DropletMask = CreateMaskTextureParameter(
-            Material, DropletMaskTextureParameter, DefaultMaskTexture, -1250, 960);
+            Material, DropletMaskTextureParameter, DefaultMaskTexture, -1250, 1260);
 
         UMaterialExpressionCustom* BaseColorExpression = CreateCustomExpression(
             Material,
@@ -260,13 +266,54 @@ namespace
 float Absorbed = saturate(AbsorbedWater) * saturate(AbsorbedEnabled) * saturate(AbsorbedDarkeningStrength);
 float3 DryGray = float3(0.1, 0.1, 0.1);
 float3 AbsorbedGray = DryGray * lerp(1.0, 0.45, Absorbed);
-return AbsorbedGray;
+float EnabledSurface = saturate(SurfaceWater) * saturate(SurfaceEnabled);
+float Surface = EnabledSurface > 1.0e-4 ? 1.0 : 0.0;
+float2 DropletUV = frac(UV / max(DropletDetailSize, 1.0e-4));
+float DropletMaskValue = saturate(Texture2DSampleLevel(DropletMaskTex, DropletMaskTexSampler, DropletUV, 0).r);
+float Coverage = Surface * saturate(DropletsEnabled) * DropletMaskValue;
+float ResponseSurface = (SurfaceWater > 1.0e-4 ? 1.0 : 0.0) * saturate(SurfaceEnabled);
+float ResponseCoverage = ResponseSurface * saturate(DropletsEnabled) * DropletMaskValue;
+float2 DropletXY = -(Texture2DSampleLevel(DropletNormalTex, DropletNormalTexSampler, DropletUV, 0).rg * 2.0 - 1.0);
+float3 DropletNormalColor = normalize(float3(DropletXY, 1.0)) * 0.5 + 0.5;
+float2 StampCell = frac(UV * 6.0) - 0.5;
+float StampRadius = lerp(0.04, 0.42, saturate(sqrt(max(DropletStampSize, 1.0) / 64.0)));
+float Stamp = 1.0 - smoothstep(StampRadius, StampRadius + 0.025, length(StampCell));
+float Brush = DropletMaskValue;
+float SpecularCue = saturate(SurfaceSpecular);
+float BaseLuminance = dot(DryGray, float3(0.299, 0.587, 0.114));
+float DarkSurfaceDamp = lerp(0.28, 1.0, smoothstep(0.05, 0.55, BaseLuminance));
+float3 ClearWaterGray = lerp(AbsorbedGray, DryGray, 0.38 + 0.16 * SpecularCue);
+float Edge = smoothstep(0.08, 0.48, Brush) * (1.0 - smoothstep(0.55, 0.96, Brush));
+float Center = smoothstep(0.50, 1.0, Brush);
+float CenterLift = 0.008 * Center * DarkSurfaceDamp;
+float EdgeLift = (0.08 + 0.09 * SpecularCue) * Edge * DarkSurfaceDamp;
+float3 WaterGlint = CenterLift + EdgeLift;
+float LitBlend = ResponseCoverage * saturate(SurfaceTotalStrength) * (0.58 + 0.18 * SpecularCue);
+float3 LitColor = saturate(lerp(AbsorbedGray, ClearWaterGray + WaterGlint, LitBlend));
+float Mode = floor(DebugMode + 0.5);
+if (Mode == 1.0) return lerp(float3(0.02, 0.02, 0.02), float3(0.05, 0.35, 1.0), saturate(AbsorbedWater) * saturate(AbsorbedEnabled));
+if (Mode == 2.0) return lerp(float3(0.02, 0.02, 0.02), float3(0.0, 0.72, 1.0), Surface);
+if (Mode == 3.0) return lerp(float3(0.02, 0.02, 0.02), float3(1.0, 0.85, 0.05), ResponseCoverage);
+if (Mode == 4.0) return DropletNormalColor;
+if (Mode == 5.0) return lerp(float3(0.02, 0.02, 0.02), float3(1.0, 0.15, 0.65), Stamp);
+return LitColor;
 )"),
             CMOT_Float3,
             {
+                TEXT("UV"),
                 TEXT("AbsorbedWater"),
+                TEXT("SurfaceWater"),
                 TEXT("AbsorbedEnabled"),
+                TEXT("SurfaceEnabled"),
                 TEXT("AbsorbedDarkeningStrength"),
+                TEXT("SurfaceTotalStrength"),
+                TEXT("SurfaceSpecular"),
+                TEXT("DropletsEnabled"),
+                TEXT("DropletStampSize"),
+                TEXT("DropletDetailSize"),
+                TEXT("DebugMode"),
+                TEXT("DropletNormalTex"),
+                TEXT("DropletMaskTex"),
             },
             -620,
             -360);
@@ -277,14 +324,14 @@ return AbsorbedGray;
             TEXT(R"(
 float Absorbed = saturate(AbsorbedWater) * saturate(AbsorbedEnabled);
 float EnabledSurface = saturate(SurfaceWater) * saturate(SurfaceEnabled);
-float ThresholdMin = saturate(SurfaceVisibilityThreshold);
-float ThresholdMax = min(ThresholdMin + 0.4, 1.0);
-float Surface = smoothstep(ThresholdMin, ThresholdMax, EnabledSurface);
+float Surface = EnabledSurface > 1.0e-4 ? 1.0 : 0.0;
 float2 DropletUV = frac(UV / max(DropletDetailSize, 1.0e-4));
 float DropletMaskValue = saturate(Texture2DSampleLevel(DropletMaskTex, DropletMaskTexSampler, DropletUV, 0).r);
 float Coverage = Surface * saturate(DropletsEnabled) * DropletMaskValue;
+float ResponseSurface = (SurfaceWater > 1.0e-4 ? 1.0 : 0.0) * saturate(SurfaceEnabled);
+float ResponseCoverage = ResponseSurface * saturate(DropletsEnabled) * DropletMaskValue;
 float AbsorbedRoughness = lerp(0.72, 0.52, saturate(Absorbed * AbsorbedGlossinessStrength));
-return saturate(lerp(AbsorbedRoughness, saturate(SurfaceTargetRoughness), saturate(Coverage * SurfaceRoughnessBlend)));
+return saturate(lerp(AbsorbedRoughness, saturate(SurfaceTargetRoughness), saturate(ResponseCoverage * SurfaceRoughnessBlend * SurfaceTotalStrength)));
 )"),
             CMOT_Float1,
             {
@@ -295,8 +342,8 @@ return saturate(lerp(AbsorbedRoughness, saturate(SurfaceTargetRoughness), satura
                 TEXT("SurfaceEnabled"),
                 TEXT("AbsorbedGlossinessStrength"),
                 TEXT("SurfaceTargetRoughness"),
-                TEXT("SurfaceVisibilityThreshold"),
                 TEXT("SurfaceRoughnessBlend"),
+                TEXT("SurfaceTotalStrength"),
                 TEXT("DropletsEnabled"),
                 TEXT("DropletDetailSize"),
                 TEXT("DropletMaskTex"),
@@ -309,14 +356,13 @@ return saturate(lerp(AbsorbedRoughness, saturate(SurfaceTargetRoughness), satura
             TEXT("DWC Wetness Profile Preview Surface Normal"),
             TEXT(R"(
 float EnabledSurface = saturate(SurfaceWater) * saturate(SurfaceEnabled);
-float ThresholdMin = saturate(SurfaceVisibilityThreshold);
-float ThresholdMax = min(ThresholdMin + 0.4, 1.0);
-float Surface = smoothstep(ThresholdMin, ThresholdMax, EnabledSurface);
+float Surface = EnabledSurface > 1.0e-4 ? 1.0 : 0.0;
 float2 DropletUV = frac(UV / max(DropletDetailSize, 1.0e-4));
 float2 DropletXY = -(Texture2DSampleLevel(DropletNormalTex, DropletNormalTexSampler, DropletUV, 0).rg * 2.0 - 1.0);
 float DropletMaskValue = saturate(Texture2DSampleLevel(DropletMaskTex, DropletMaskTexSampler, DropletUV, 0).r);
-float DropletWeight = Surface * saturate(DropletsEnabled) * DropletMaskValue;
-float Strength = clamp(SurfaceNormalStrength, 0.0, 8.0);
+float ResponseSurface = (SurfaceWater > 1.0e-4 ? 1.0 : 0.0) * saturate(SurfaceEnabled);
+float DropletWeight = ResponseSurface * saturate(DropletsEnabled) * DropletMaskValue * saturate(SurfaceTotalStrength);
+float Strength = clamp(SurfaceNormalStrength, 0.0, 3.0);
 float DropletVisualHeightBoost = 1.65;
 float2 CombinedXY = DropletXY * DropletWeight * min(Strength * DropletVisualHeightBoost, 12.0);
 return normalize(float3(CombinedXY, 1.0));
@@ -327,7 +373,7 @@ return normalize(float3(CombinedXY, 1.0));
                 TEXT("SurfaceWater"),
                 TEXT("SurfaceEnabled"),
                 TEXT("SurfaceNormalStrength"),
-                TEXT("SurfaceVisibilityThreshold"),
+                TEXT("SurfaceTotalStrength"),
                 TEXT("DropletsEnabled"),
                 TEXT("DropletDetailSize"),
                 TEXT("DropletNormalTex"),
@@ -336,10 +382,48 @@ return normalize(float3(CombinedXY, 1.0));
             -620,
             520);
 
+        UMaterialExpressionCustom* SpecularExpression = CreateCustomExpression(
+            Material,
+            TEXT("DWC Wetness Profile Preview Specular"),
+            TEXT(R"(
+float EnabledSurface = saturate(SurfaceWater) * saturate(SurfaceEnabled);
+float Surface = EnabledSurface > 1.0e-4 ? 1.0 : 0.0;
+float2 DropletUV = frac(UV / max(DropletDetailSize, 1.0e-4));
+float DropletMaskValue = saturate(Texture2DSampleLevel(DropletMaskTex, DropletMaskTexSampler, DropletUV, 0).r);
+float Coverage = Surface * saturate(DropletsEnabled) * DropletMaskValue;
+float ResponseSurface = (SurfaceWater > 1.0e-4 ? 1.0 : 0.0) * saturate(SurfaceEnabled);
+float ResponseCoverage = ResponseSurface * saturate(DropletsEnabled) * DropletMaskValue;
+return saturate(lerp(0.5, SurfaceSpecular, ResponseCoverage * saturate(SurfaceTotalStrength)));
+)"),
+            CMOT_Float1,
+            {
+                TEXT("UV"),
+                TEXT("SurfaceWater"),
+                TEXT("SurfaceEnabled"),
+                TEXT("SurfaceSpecular"),
+                TEXT("SurfaceTotalStrength"),
+                TEXT("DropletsEnabled"),
+                TEXT("DropletDetailSize"),
+                TEXT("DropletMaskTex"),
+            },
+            -620,
+            960);
+
         bool bConnected = true;
+        bConnected &= ConnectExpression(TextureCoordinate, BaseColorExpression, TEXT("UV"));
         bConnected &= ConnectExpression(AbsorbedWater, BaseColorExpression, TEXT("AbsorbedWater"));
+        bConnected &= ConnectExpression(SurfaceWater, BaseColorExpression, TEXT("SurfaceWater"));
         bConnected &= ConnectExpression(AbsorbedEnabled, BaseColorExpression, TEXT("AbsorbedEnabled"));
+        bConnected &= ConnectExpression(SurfaceEnabled, BaseColorExpression, TEXT("SurfaceEnabled"));
         bConnected &= ConnectExpression(AbsorbedDarkeningStrength, BaseColorExpression, TEXT("AbsorbedDarkeningStrength"));
+        bConnected &= ConnectExpression(SurfaceTotalStrength, BaseColorExpression, TEXT("SurfaceTotalStrength"));
+        bConnected &= ConnectExpression(SurfaceSpecular, BaseColorExpression, TEXT("SurfaceSpecular"));
+        bConnected &= ConnectExpression(DropletsEnabled, BaseColorExpression, TEXT("DropletsEnabled"));
+        bConnected &= ConnectExpression(DropletStampSize, BaseColorExpression, TEXT("DropletStampSize"));
+        bConnected &= ConnectExpression(DropletDetailSize, BaseColorExpression, TEXT("DropletDetailSize"));
+        bConnected &= ConnectExpression(DebugMode, BaseColorExpression, TEXT("DebugMode"));
+        bConnected &= ConnectExpression(DropletNormal, BaseColorExpression, TEXT("DropletNormalTex"));
+        bConnected &= ConnectExpression(DropletMask, BaseColorExpression, TEXT("DropletMaskTex"));
 
         bConnected &= ConnectExpression(TextureCoordinate, RoughnessExpression, TEXT("UV"));
         bConnected &= ConnectExpression(AbsorbedWater, RoughnessExpression, TEXT("AbsorbedWater"));
@@ -348,8 +432,8 @@ return normalize(float3(CombinedXY, 1.0));
         bConnected &= ConnectExpression(SurfaceEnabled, RoughnessExpression, TEXT("SurfaceEnabled"));
         bConnected &= ConnectExpression(AbsorbedGlossinessStrength, RoughnessExpression, TEXT("AbsorbedGlossinessStrength"));
         bConnected &= ConnectExpression(SurfaceTargetRoughness, RoughnessExpression, TEXT("SurfaceTargetRoughness"));
-        bConnected &= ConnectExpression(SurfaceVisibilityThreshold, RoughnessExpression, TEXT("SurfaceVisibilityThreshold"));
         bConnected &= ConnectExpression(SurfaceRoughnessBlend, RoughnessExpression, TEXT("SurfaceRoughnessBlend"));
+        bConnected &= ConnectExpression(SurfaceTotalStrength, RoughnessExpression, TEXT("SurfaceTotalStrength"));
         bConnected &= ConnectExpression(DropletsEnabled, RoughnessExpression, TEXT("DropletsEnabled"));
         bConnected &= ConnectExpression(DropletDetailSize, RoughnessExpression, TEXT("DropletDetailSize"));
         bConnected &= ConnectExpression(DropletMask, RoughnessExpression, TEXT("DropletMaskTex"));
@@ -358,11 +442,20 @@ return normalize(float3(CombinedXY, 1.0));
         bConnected &= ConnectExpression(SurfaceWater, NormalExpression, TEXT("SurfaceWater"));
         bConnected &= ConnectExpression(SurfaceEnabled, NormalExpression, TEXT("SurfaceEnabled"));
         bConnected &= ConnectExpression(SurfaceNormalStrength, NormalExpression, TEXT("SurfaceNormalStrength"));
-        bConnected &= ConnectExpression(SurfaceVisibilityThreshold, NormalExpression, TEXT("SurfaceVisibilityThreshold"));
+        bConnected &= ConnectExpression(SurfaceTotalStrength, NormalExpression, TEXT("SurfaceTotalStrength"));
         bConnected &= ConnectExpression(DropletsEnabled, NormalExpression, TEXT("DropletsEnabled"));
         bConnected &= ConnectExpression(DropletDetailSize, NormalExpression, TEXT("DropletDetailSize"));
         bConnected &= ConnectExpression(DropletNormal, NormalExpression, TEXT("DropletNormalTex"));
         bConnected &= ConnectExpression(DropletMask, NormalExpression, TEXT("DropletMaskTex"));
+
+        bConnected &= ConnectExpression(TextureCoordinate, SpecularExpression, TEXT("UV"));
+        bConnected &= ConnectExpression(SurfaceWater, SpecularExpression, TEXT("SurfaceWater"));
+        bConnected &= ConnectExpression(SurfaceEnabled, SpecularExpression, TEXT("SurfaceEnabled"));
+        bConnected &= ConnectExpression(SurfaceSpecular, SpecularExpression, TEXT("SurfaceSpecular"));
+        bConnected &= ConnectExpression(SurfaceTotalStrength, SpecularExpression, TEXT("SurfaceTotalStrength"));
+        bConnected &= ConnectExpression(DropletsEnabled, SpecularExpression, TEXT("DropletsEnabled"));
+        bConnected &= ConnectExpression(DropletDetailSize, SpecularExpression, TEXT("DropletDetailSize"));
+        bConnected &= ConnectExpression(DropletMask, SpecularExpression, TEXT("DropletMaskTex"));
 
         bConnected &= BaseColorExpression != nullptr &&
                       UMaterialEditingLibrary::ConnectMaterialProperty(BaseColorExpression, FString(), MP_BaseColor);
@@ -370,6 +463,8 @@ return normalize(float3(CombinedXY, 1.0));
                       UMaterialEditingLibrary::ConnectMaterialProperty(RoughnessExpression, FString(), MP_Roughness);
         bConnected &= NormalExpression != nullptr &&
                       UMaterialEditingLibrary::ConnectMaterialProperty(NormalExpression, FString(), MP_Normal);
+        bConnected &= SpecularExpression != nullptr &&
+                      UMaterialEditingLibrary::ConnectMaterialProperty(SpecularExpression, FString(), MP_Specular);
         return bConnected;
     }
 

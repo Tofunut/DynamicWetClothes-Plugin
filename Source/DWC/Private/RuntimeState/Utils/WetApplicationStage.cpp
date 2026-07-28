@@ -131,8 +131,7 @@ namespace
             const FSurfaceWaterProfileParameters& SurfaceProfile = WetnessProfile->SurfaceWater;
             const float SurfaceAmount = Contact.Amount *
                 FMath::Clamp(Contact.TriangleInfluence, 0.0f, 1.0f) *
-                WetnessProfile->GetRejectedWaterFraction() *
-                FMath::Clamp(SurfaceProfile.SurfaceRepresentationFraction, 0.0f, 1.0f);
+                WetnessProfile->GetRejectedWaterFraction();
             if (SurfaceAmount <= 0.0f)
             {
                 continue;
@@ -150,7 +149,7 @@ namespace
                 Accumulator.BestInfluence = Contact.TriangleInfluence;
                 Accumulator.BestUV = Contact.ContactUV;
                 Accumulator.Profile = SurfaceProfile;
-                Accumulator.DropletRadiusScale = FMath::Clamp(WetPart->SurfaceWater.DropletRadiusScale, 0.25f, 4.0f);
+                Accumulator.DropletRadiusScale = WetPart->SurfaceWater.GetResolvedDropletStampSizeScale();
                 Accumulator.bHasProfile = true;
             }
         }

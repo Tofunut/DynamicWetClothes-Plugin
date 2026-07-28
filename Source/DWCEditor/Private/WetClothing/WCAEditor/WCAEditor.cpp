@@ -4,7 +4,6 @@
 #include "Core/DWCEditorStyle.h"
 #include "Core/DWCEditorUtils.h"
 #include "DataAssets/WetClothingAsset.h"
-#include "DataAssets/WetnessProfile.h"
 #include "WetClothing/Asset/WetClothingAssetFactory.h"
 #include "WetClothing/DerivedAssets/Materials/WCAMaterialGenerator.h"
 #include "WetClothing/DerivedAssets/Textures/Transparency/DWCTransparencyEditedMapBaker.h"
@@ -1688,216 +1687,6 @@ namespace
         return true;
     }
 
-    constexpr float MinSurfaceWaterRepresentationFraction = 0.05f;
-    constexpr float MinSurfaceWaterRejectedFraction = 0.05f;
-    constexpr float MinSurfaceWaterDropletSpawnProbability = 0.05f;
-    constexpr float MinSurfaceWaterDropletLifetimeSeconds = 0.25f;
-    constexpr float MinSurfaceWaterDropletRadiusPixels = 1.0f;
-
-    bool ClampSurfaceWaterFloat(
-        float& Value,
-        const float MinValue,
-        const TCHAR* Label,
-        TArray<FString>& OutChanges)
-    {
-        if (Value >= MinValue)
-        {
-            return false;
-        }
-
-        const float OldValue = Value;
-        Value = MinValue;
-        OutChanges.Add(FString::Printf(TEXT("%s %.3f -> %.3f"), Label, OldValue, Value));
-        return true;
-    }
-
-    bool FixSurfaceWaterProfileParameters(
-        FWetnessProfileParameters& Parameters,
-        TArray<FString>& OutChanges)
-    {
-        OutChanges.Reset();
-
-        FSurfaceWaterProfileParameters& Surface = Parameters.SurfaceWater;
-        if (!Surface.bEnabled)
-        {
-            return false;
-        }
-
-        if (!Surface.bEnableDroplets)
-        {
-            Surface.bEnableDroplets = true;
-            OutChanges.Add(TEXT("bEnableDroplets false -> true"));
-        }
-
-        ClampSurfaceWaterFloat(
-            Surface.SurfaceRepresentationFraction,
-            MinSurfaceWaterRepresentationFraction,
-            TEXT("SurfaceRepresentationFraction"),
-            OutChanges);
-        ClampSurfaceWaterFloat(
-            Surface.DropletSpawnProbability,
-            MinSurfaceWaterDropletSpawnProbability,
-            TEXT("DropletSpawnProbability"),
-            OutChanges);
-        ClampSurfaceWaterFloat(
-            Surface.DropletLifetimeSeconds,
-            MinSurfaceWaterDropletLifetimeSeconds,
-            TEXT("DropletLifetimeSeconds"),
-            OutChanges);
-        ClampSurfaceWaterFloat(
-            Surface.DropletRadiusPixels,
-            MinSurfaceWaterDropletRadiusPixels,
-            TEXT("DropletRadiusPixels"),
-            OutChanges);
-
-        if (Parameters.AbsorbedWetness.bEnabled)
-        {
-            const float RejectedWaterFraction =
-                FMath::Clamp(Parameters.GetRejectedWaterFraction(), 0.0f, 1.0f);
-            if (RejectedWaterFraction < MinSurfaceWaterRejectedFraction)
-            {
-                const float OldValue = Parameters.AbsorbedWetness.AbsorptionFraction;
-                Parameters.AbsorbedWetness.AbsorptionFraction = 1.0f - MinSurfaceWaterRejectedFraction;
-                OutChanges.Add(FString::Printf(
-                    TEXT("AbsorptionFraction %.3f -> %.3f"),
-                    OldValue,
-                    Parameters.AbsorbedWetness.AbsorptionFraction));
-            }
-        }
-
-        const float SurfaceRepresentationFraction =
-            FMath::Clamp(Surface.SurfaceRepresentationFraction, 0.0f, 1.0f);
-        const float RejectedWaterFraction =
-            FMath::Clamp(Parameters.GetRejectedWaterFraction(), 0.0f, 1.0f);
-        const float MaxSurfaceAmount = SurfaceRepresentationFraction * RejectedWaterFraction;
-        if (MaxSurfaceAmount > UE_KINDA_SMALL_NUMBER &&
-            Surface.SurfaceVisibilityThreshold >= MaxSurfaceAmount)
-        {
-            const float OldValue = Surface.SurfaceVisibilityThreshold;
-            Surface.SurfaceVisibilityThreshold =
-                FMath::Clamp(MaxSurfaceAmount * 0.5f, 0.0f, 1.0f);
-            OutChanges.Add(FString::Printf(
-                TEXT("SurfaceVisibilityThreshold %.3f -> %.3f"),
-                OldValue,
-                Surface.SurfaceVisibilityThreshold));
-        }
-
-        return !OutChanges.IsEmpty();
-    }
-
-    bool FixSurfaceWaterProfilesForAsset(
-        UWetClothingAsset& Asset,
-        FString& OutSummary,
-        FString& OutFailure)
-    {
-        OutSummary.Reset();
-        OutFailure.Reset();
-
-        FWetClothingEditableWetPartData& EditableData = Asset.Authored.PartData.EditableWetPartData;
-        TArray<FString> ProfileSummaries;
-        TArray<UWetnessProfile*> ModifiedSourceProfiles;
-        bool bModifiedAsset = false;
-
-        TSet<int32> UsedProfileIndices;
-        for (const FWetClothingAuthoredMaterialSlot& Slot : EditableData.MaterialSlots)
-        {
-            if (!Slot.bIsWettableSlot || Slot.MaterialSlotIndex == INDEX_NONE)
-            {
-                continue;
-            }
-            for (const FWetClothingWetPartEntry& Entry : Slot.WetPartEntries)
-            {
-                if (!Entry.AssignedUVIslandIDs.IsEmpty() &&
-                    EditableData.Profiles.IsValidIndex(Entry.ProfileIndex))
-                {
-                    UsedProfileIndices.Add(Entry.ProfileIndex);
-                }
-            }
-        }
-
-        TArray<int32> ProfileIndices = UsedProfileIndices.Array();
-        ProfileIndices.Sort();
-
-        for (const int32 ProfileIndex : ProfileIndices)
-        {
-            FWetPartProfileAssignment& Assignment = EditableData.Profiles[ProfileIndex];
-            UWetnessProfile* SourceProfile = nullptr;
-            FWetnessProfileParameters Parameters = Assignment.Parameters;
-
-            if (Assignment.SourceProfile.IsValid())
-            {
-                UObject* SourceObject = Assignment.SourceProfile.ResolveObject();
-                if (SourceObject == nullptr)
-                {
-                    SourceObject = Assignment.SourceProfile.TryLoad();
-                }
-                SourceProfile = Cast<UWetnessProfile>(SourceObject);
-                if (SourceProfile != nullptr)
-                {
-                    Parameters = SourceProfile->Parameters;
-                }
-            }
-
-            TArray<FString> Changes;
-            if (!FixSurfaceWaterProfileParameters(Parameters, Changes))
-            {
-                continue;
-            }
-
-            if (!bModifiedAsset)
-            {
-                Asset.Modify();
-                bModifiedAsset = true;
-            }
-
-            Assignment.Parameters = Parameters;
-            if (SourceProfile != nullptr)
-            {
-                SourceProfile->Modify();
-                SourceProfile->Parameters = Parameters;
-                SourceProfile->PostEditChange();
-                SourceProfile->MarkPackageDirty();
-                ModifiedSourceProfiles.AddUnique(SourceProfile);
-            }
-
-            const FString ProfileName = SourceProfile != nullptr
-                ? SourceProfile->GetName()
-                : (Assignment.SourceProfile.IsValid()
-                    ? Assignment.SourceProfile.GetAssetName()
-                    : FString::Printf(TEXT("Inline profile %d"), ProfileIndex));
-            ProfileSummaries.Add(FString::Printf(
-                TEXT("%s: %s"),
-                *ProfileName,
-                *FString::Join(Changes, TEXT(", "))));
-        }
-
-        if (ProfileSummaries.IsEmpty())
-        {
-            OutSummary = TEXT("No Surface Water profile clamps were required.");
-            return true;
-        }
-
-        Asset.MarkPackageDirty();
-        FWCAGeneratedDataInvalidator::InvalidateAsset(Asset);
-        Asset.RefreshBakeState(true);
-
-        for (UWetnessProfile* SourceProfile : ModifiedSourceProfiles)
-        {
-            if (!DWCEditorUtils::SaveAsset(SourceProfile))
-            {
-                OutFailure = FString::Printf(
-                    TEXT("Surface Water profile '%s' was updated but could not be saved."),
-                    *GetNameSafe(SourceProfile));
-                return false;
-            }
-        }
-
-        OutSummary = FString::Printf(
-            TEXT("Clamped Surface Water profile values:\n- %s"),
-            *FString::Join(ProfileSummaries, TEXT("\n- ")));
-        return true;
-    }
-
     EWCAPendingCloseChoice ShowDWCResolveCloseDialog(const FString& IssueSummary)
     {
         EWCAPendingCloseChoice Choice = EWCAPendingCloseChoice::Cancel;
@@ -3228,13 +3017,13 @@ bool FWCAEditor::ResolveIssuesAndSave(FString& OutFailure, FString* OutSuccessSu
     }
 
     FScopedSlowTask SlowTask(
-        10.0f,
+        9.0f,
         FText::FromString(FString::Printf(TEXT("Resolving and saving %s..."), *GetNameSafe(Asset))));
     SlowTask.MakeDialog(false);
 
     const FDWCWetClothingAssetSetupSettings& Setup = Asset->GetSetupSettings();
     FWCAEditorIssueStatus Status = EditorPanel->CollectIssueStatus(true, true);
-    FWCAValidationReport InitialValidationReport =
+    const FWCAValidationReport InitialValidationReport =
         BuildWCAValidationReport(*Asset, EWCAValidationMode::Deep, false);
     if (InitialValidationReport.HasManualIssues())
     {
@@ -3244,41 +3033,7 @@ bool FWCAEditor::ResolveIssuesAndSave(FString& OutFailure, FString* OutSuccessSu
             : FString::Printf(TEXT("Manual validation issues must be fixed before Resolve Issues can continue.\n\n%s"), *ManualSummary);
         return false;
     }
-    bool bPreparedRuntimePrerequisites = false;
-    TArray<FString> ResolveSummaries;
 #if WITH_EDITORONLY_DATA
-    if (InitialValidationReport.Issues.ContainsByPredicate(
-            [](const FWCAValidationIssue& Issue)
-            {
-                return Issue.FixKind == EWCAValidationFixKind::FixSurfaceWaterProfile;
-            }))
-    {
-        SlowTask.EnterProgressFrame(
-            1.0f,
-            LOCTEXT("ResolveIssuesSurfaceWaterProfileProgress", "Clamping Surface Water profile values that prevent droplet stamps from rendering..."));
-        FString SurfaceWaterSummary;
-        if (!FixSurfaceWaterProfilesForAsset(*Asset, SurfaceWaterSummary, OutFailure))
-        {
-            if (OutFailure.IsEmpty())
-            {
-                OutFailure = TEXT("Surface Water profile values could not be fixed.");
-            }
-            return false;
-        }
-        ResolveSummaries.Add(SurfaceWaterSummary);
-
-        Status = EditorPanel->CollectIssueStatus(true, true);
-        InitialValidationReport = BuildWCAValidationReport(*Asset, EWCAValidationMode::Deep, false);
-        if (InitialValidationReport.HasManualIssues())
-        {
-            const FString ManualSummary = InitialValidationReport.BuildManualIssueSummary();
-            OutFailure = ManualSummary.IsEmpty()
-                ? TEXT("Manual validation issues must be fixed before Resolve Issues can continue.")
-                : FString::Printf(TEXT("Manual validation issues must be fixed before Resolve Issues can continue.\n\n%s"), *ManualSummary);
-            return false;
-        }
-    }
-
     const FDWCAssetBakeState InitialBakeState = Asset->GetBakeState();
     const bool bInitialGPUMapsRequireBake =
         Setup.bBuildGPUWetnessMapSimulationData &&
@@ -3296,6 +3051,8 @@ bool FWCAEditor::ResolveIssuesAndSave(FString& OutFailure, FString* OutSuccessSu
                 return Issue.FixKind == EWCAValidationFixKind::BakeTransparencyMaps;
             });
 #endif
+    bool bPreparedRuntimePrerequisites = false;
+    TArray<FString> ResolveSummaries;
 
     if (Status.bGeneratedDataUVIssue)
     {

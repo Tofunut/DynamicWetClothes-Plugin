@@ -55,12 +55,12 @@ struct DWC_API FSurfaceWaterProfileParameters
     bool bEnabled = false;
 
     /** Enables droplet stamp generation for this profile. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet", meta = (EditCondition = "false", EditConditionHides))
     bool bEnableDroplets = true;
 
-    /** Fraction of water rejected by absorption that is represented visually. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-    float SurfaceRepresentationFraction = 0.5f;
+    /** Legacy representation scale. Surface Water now routes all unabsorbed water to droplets. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Simulation", meta = (ClampMin = "0.0", ClampMax = "1.0", EditCondition = "false", EditConditionHides))
+    float SurfaceRepresentationFraction = 1.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float DropletSpawnProbability = 0.5f;
@@ -68,29 +68,29 @@ struct DWC_API FSurfaceWaterProfileParameters
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet", meta = (ClampMin = "0.01", Units = "s"))
     float DropletLifetimeSeconds = 5.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet", meta = (ClampMin="0.0", ClampMax="256.0", DisplayName="Base Radius (RT Pixels)"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet", meta = (ClampMin="0.0", ClampMax="256.0", DisplayName="Droplet Stamp Size"))
     float DropletRadiusPixels = 16.0f;
 
 
+    /** Multiplies all Surface Water rendering response after final droplet coverage is resolved. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rendering", meta=(ClampMin="0.0", ClampMax="1.0", DisplayName="Total Strength"))
+    float SurfaceWaterTotalStrength = 0.5f;
+
     /** Roughness reached by fully visible surface water. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rendering", meta=(ClampMin="0.0", ClampMax="1.0", DisplayName="Wet Surface Roughness"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rendering", meta=(ClampMin="0.0", ClampMax="1.0", DisplayName="Water Roughness"))
     float SurfaceWaterTargetRoughness = 0.02f;
 
-    /** Strength applied to the droplet detail normal. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rendering", meta=(ClampMin="0.0", ClampMax="8.0", DisplayName="Water Detail Strength"))
+    /** Strength applied to the droplet normal. 1.0 is the authored texture strength. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rendering", meta=(ClampMin="0.0", ClampMax="3.0", DisplayName="Water Normal Strength"))
     float SurfaceWaterNormalStrength = 3.0f;
 
     /** Strength of the Surface Water roughness blend toward Wet Surface Roughness. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rendering", meta=(ClampMin="0.0", ClampMax="1.0", DisplayName="Wet Roughness Blend"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rendering", meta=(ClampMin="0.0", ClampMax="1.0", DisplayName="Roughness Blend"))
     float SurfaceWaterRoughnessBlend = 0.85f;
 
-    /** Amount of original material normal detail retained under visible surface water. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rendering", meta=(ClampMin="0.0", ClampMax="1.0", DisplayName="Original Surface Detail"))
-    float OriginalSurfaceDetail = 1.0f;
-
-    /** Minimum visible RT amount before Surface Water rendering begins. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rendering", meta=(ClampMin="0.0", ClampMax="1.0"))
-    float SurfaceVisibilityThreshold = 0.25f;
+    /** Specular reached by fully visible surface water. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rendering", meta=(ClampMin="0.0", ClampMax="1.0", DisplayName="Water Specular"))
+    float SurfaceWaterSpecular = 0.5f;
 
     /** Optional profile override. Null disables the Droplet normal contribution. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet|Rendering")
@@ -130,8 +130,7 @@ struct DWC_API FWetnessProfileParameters
 
     bool SupportsSurfaceWater() const
     {
-        return SurfaceWater.bEnabled && SurfaceWater.bEnableDroplets &&
-               SurfaceWater.SurfaceRepresentationFraction > 0.0f;
+        return SurfaceWater.bEnabled;
     }
 
     float GetAbsorptionMultiplier() const

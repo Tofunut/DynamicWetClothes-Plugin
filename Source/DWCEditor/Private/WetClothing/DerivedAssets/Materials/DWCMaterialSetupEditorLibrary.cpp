@@ -2,6 +2,7 @@
 
 #include "DataAssets/WetClothingAsset.h"
 #include "WetClothing/DerivedAssets/Materials/WCAMaterialGenerator.h"
+#include "WetClothing/DerivedAssets/Textures/WetnessProfile/WetClothingRenderProfileBakeService.h"
 
 bool UDWCMaterialSetupEditorLibrary::RepairGeneratedWetMaterials(
     UWetClothingAsset* WetClothingAsset,
@@ -66,4 +67,34 @@ bool UDWCMaterialSetupEditorLibrary::RepairGeneratedWetMaterials(
     }
     OutReport = FString::Join(Messages, TEXT("\n"));
     return RepairedCount > 0;
+}
+
+bool UDWCMaterialSetupEditorLibrary::BakeRenderProfileDataAndUpdateMaterials(
+    UWetClothingAsset* WetClothingAsset,
+    FString& OutReport,
+    bool& bOutHadWarnings)
+{
+    bOutHadWarnings = false;
+    OutReport.Reset();
+    if (!WetClothingAsset)
+    {
+        OutReport = TEXT("WetClothingAsset is null.");
+        return false;
+    }
+
+    if (!FWetClothingRenderProfileBakeService::BakeRenderProfileDataAndUpdateMaterials(
+            WetClothingAsset,
+            OutReport,
+            &bOutHadWarnings))
+    {
+        return false;
+    }
+
+    const bool bSaved = FWetClothingRenderProfileBakeService::SaveBakedRenderProfileAssets(WetClothingAsset);
+    if (!bSaved)
+    {
+        bOutHadWarnings = true;
+        OutReport += TEXT("\n\nWarning: Render profile data was generated, but one or more generated assets could not be saved.");
+    }
+    return true;
 }

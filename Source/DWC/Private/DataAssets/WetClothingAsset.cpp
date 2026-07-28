@@ -21,6 +21,7 @@ namespace
 {
     static constexpr float CoincidentVertexNeighborTolerance = 0.001f;
     static constexpr int32 DWCRuntimeBulkPayloadMagic = 0x44574342; // DWCB
+    static constexpr int32 DWCMinSupportedRuntimeBulkDataVersion = 1;
     static constexpr int64 RuntimeBulkProgressThresholdBytes = 8ll * 1024ll * 1024ll;
     static constexpr float DWCRuntimeBulkHeaderProgress = 0.2f;
     static constexpr float DWCRuntimeBulkCPUVertexProgress = 0.25f;
@@ -378,8 +379,8 @@ namespace
         const FString SurfaceKeyHead = FString::Printf(
             TEXT("Surf{%d,%d,%.9g,%.9g,%.9g,%.9g,"),
             Surface.bEnabled ? 1 : 0,
-            Surface.bEnableDroplets ? 1 : 0,
-            Surface.SurfaceRepresentationFraction,
+            Surface.bEnabled ? 1 : 0,
+            1.0,
             Surface.DropletSpawnProbability,
             Surface.DropletLifetimeSeconds,
             Surface.DropletRadiusPixels);
@@ -389,8 +390,8 @@ namespace
             Surface.SurfaceWaterTargetRoughness,
             Surface.SurfaceWaterNormalStrength,
             Surface.SurfaceWaterRoughnessBlend,
-            Surface.OriginalSurfaceDetail,
-            Surface.SurfaceVisibilityThreshold,
+            Surface.SurfaceWaterTotalStrength,
+            Surface.SurfaceWaterSpecular,
             *GetPathNameSafe(Surface.DropletNormalTexture.Get()),
             *GetPathNameSafe(Surface.DropletMaskTexture.Get()));
 
@@ -565,9 +566,10 @@ namespace
                         Profile != nullptr ? *Profile->GetDisplayName() : TEXT(""));
                 }
                 Signature += FString::Printf(
-                    TEXT(",Profile=%s,Blend=%d,DropletRadiusScale=%.9g,DropletDetailSize=%.9g"),
+                    TEXT(",Profile=%s,Blend=%d,OverrideDropletStampSize=%d,DropletRadiusScale=%.9g,DropletDetailSize=%.9g"),
                     Profile != nullptr ? *Profile->SourceProfile.ToString() : TEXT(""),
                     Profile != nullptr ? static_cast<int32>(Profile->BlendMode) : 0,
+                    Entry.SurfaceWater.bOverrideDropletStampSize ? 1 : 0,
                     Entry.SurfaceWater.DropletRadiusScale,
                     Entry.SurfaceWater.DropletDetailSize);
                 Signature += FString::Printf(TEXT(",Islands=%d"), AssignedIslandIDs.Num());
@@ -1197,7 +1199,9 @@ namespace
         Ar << Magic;
         Ar << Version;
         if (Ar.IsLoading() &&
-            (Magic != DWCRuntimeBulkPayloadMagic || Version != UWetClothingAsset::CurrentRuntimeBulkDataVersion))
+            (Magic != DWCRuntimeBulkPayloadMagic ||
+             Version < DWCMinSupportedRuntimeBulkDataVersion ||
+             Version > UWetClothingAsset::CurrentRuntimeBulkDataVersion))
         {
             Ar.SetError();
             return;
@@ -1598,13 +1602,36 @@ bool UWetClothingAsset::DoesMaterialSlotUseSurfaceWater(const int32 MaterialSlot
         const int32 ProfileIndex = WetPartData.Profiles.IsValidIndex(Entry.ProfileIndex)
             ? Entry.ProfileIndex
             : 0;
-        const FWetnessProfileParameters* Parameters =
-            Derived.Inline.ResolvedWetnessProfileParameters.IsValidIndex(ProfileIndex)
-                ? &Derived.Inline.ResolvedWetnessProfileParameters[ProfileIndex]
-                : (WetPartData.Profiles.IsValidIndex(ProfileIndex)
-                       ? &WetPartData.Profiles[ProfileIndex].Parameters
-                       : nullptr);
-        if (Parameters != nullptr && Parameters->SupportsSurfaceWater())
+        FWetnessProfileParameters Parameters;
+        const bool bHasAuthoredProfile = WetPartData.Profiles.IsValidIndex(ProfileIndex);
+        bool bHasParameters = false;
+        if (bHasAuthoredProfile)
+        {
+            const FWetPartProfileAssignment& ProfileAssignment = WetPartData.Profiles[ProfileIndex];
+            if (ProfileAssignment.SourceProfile.IsValid())
+            {
+                if (const UWetnessProfile* SourceProfile =
+                        Cast<UWetnessProfile>(ProfileAssignment.SourceProfile.TryLoad()))
+                {
+                    Parameters = SourceProfile->GetParameters();
+                    bHasParameters = true;
+                }
+            }
+            if (!bHasParameters)
+            {
+                Parameters = Derived.Inline.ResolvedWetnessProfileParameters.IsValidIndex(ProfileIndex)
+                    ? Derived.Inline.ResolvedWetnessProfileParameters[ProfileIndex]
+                    : ProfileAssignment.Parameters;
+                bHasParameters = true;
+            }
+        }
+        else if (Derived.Inline.ResolvedWetnessProfileParameters.IsValidIndex(ProfileIndex))
+        {
+            Parameters = Derived.Inline.ResolvedWetnessProfileParameters[ProfileIndex];
+            bHasParameters = true;
+        }
+
+        if (bHasParameters && Parameters.SupportsSurfaceWater())
         {
             return true;
         }
@@ -2990,14 +3017,12 @@ bool UWetClothingAsset::RebuildRuntimeDataForSave(FString* OutErrorMessage)
         DWCBakeOutput::CPURuntimeData |
         DWCBakeOutput::GPURuntimeData |
         DWCBakeOutput::GPUMaps;
-    const bool bCPUDataCurrent = Metadata.SetupSettings.bBuildCPUVertexSimulationData
-        ? (DWCBuildStatus::IsUsable(Derived.Inline.BakeState.CPURuntimeData) &&
-           IsPrecomputedSimulationDataValidForMesh(RuntimeMesh))
+    bool bCPUDataCurrent = Metadata.SetupSettings.bBuildCPUVertexSimulationData
+        ? IsPrecomputedSimulationDataValidForMesh(RuntimeMesh)
         : (Derived.Inline.BakeState.CPURuntimeData == EDWCBakeStatus::Disabled &&
            !HasCPURuntimeDataPayload());
-    const bool bGPUDataCurrent = Metadata.SetupSettings.bBuildGPUWetnessMapSimulationData
-        ? (DWCBuildStatus::IsUsable(Derived.Inline.BakeState.GPURuntimeData) &&
-           IsGPURuntimeDataValidForMesh(RuntimeMesh, RuntimeSimulationLODIndex))
+    bool bGPUDataCurrent = Metadata.SetupSettings.bBuildGPUWetnessMapSimulationData
+        ? IsGPURuntimeDataValidForMesh(RuntimeMesh, RuntimeSimulationLODIndex)
         : (Derived.Inline.BakeState.GPURuntimeData == EDWCBakeStatus::Disabled &&
            Derived.Inline.BakeState.GPUMaps == EDWCBakeStatus::Disabled &&
            !HasGPURuntimeDataPayload() &&
@@ -3008,6 +3033,33 @@ bool UWetClothingAsset::RebuildRuntimeDataForSave(FString* OutErrorMessage)
         Metadata.SetupSettings.LastGeneratedLODIndex,
         Derived.Bulk.LODVertexColorRuntimeData);
     const bool bHasPendingRuntimeOutput = (PendingRuntimeSaveOutputMask & RuntimeOutputMask) != 0;
+    auto RecoverUnreadableRuntimeBulkData = [this, RuntimeOutputMask, &bCPUDataCurrent, &bGPUDataCurrent]()
+    {
+        UE_LOG(
+            LogDWC,
+            Warning,
+            TEXT("WetClothingAsset: Existing runtime bulk data for '%s' could not be loaded. Discarding the unreadable payload and rebuilding runtime data from authored inputs."),
+            *GetNameSafe(this));
+
+        Derived.Bulk.NeighborRuntimeData = FWetClothingPrecomputedSimulationData();
+        Derived.Bulk.GPURuntimeData.Reset();
+        ClearRuntimeBulkData();
+        Derived.Inline.BakeState.CPURuntimeData = Metadata.SetupSettings.bBuildCPUVertexSimulationData
+                                       ? EDWCBakeStatus::Required
+                                       : EDWCBakeStatus::Disabled;
+        Derived.Inline.BakeState.GPURuntimeData = Metadata.SetupSettings.bBuildGPUWetnessMapSimulationData
+                                       ? EDWCBakeStatus::Required
+                                       : EDWCBakeStatus::Disabled;
+        Derived.Inline.BakeState.GPUMaps = Metadata.SetupSettings.bBuildGPUWetnessMapSimulationData
+                                ? EDWCBakeStatus::Required
+                                : EDWCBakeStatus::Disabled;
+        Derived.Inline.BakeState.GeneratedOutputMask &= ~RuntimeOutputMask;
+        Derived.Inline.BakeState.SavedOutputMask &= ~RuntimeOutputMask;
+        PendingRuntimeSaveOutputMask &= ~RuntimeOutputMask;
+        Derived.Inline.BakeState.LastFailure.Reset();
+        bCPUDataCurrent = false;
+        bGPUDataCurrent = false;
+    };
     if (bHasWettableSlots &&
         !bRuntimeBulkDataDirty &&
         !bHasPendingRuntimeOutput &&
@@ -3016,8 +3068,25 @@ bool UWetClothingAsset::RebuildRuntimeDataForSave(FString* OutErrorMessage)
         bGPUDataCurrent &&
         bLODVertexColorDataCurrent)
     {
-        DWC::Error::SetMessage(OutErrorMessage, TEXT(""));
-        return true;
+        if (HasRuntimeBulkPayload() && !bRuntimeBulkDataLoaded && !LoadRuntimeBulkData(true))
+        {
+            RecoverUnreadableRuntimeBulkData();
+        }
+        else
+        {
+            if (Metadata.SetupSettings.bBuildCPUVertexSimulationData)
+            {
+                Derived.Inline.BakeState.CPURuntimeData = EDWCBakeStatus::Valid;
+                MarkBakeOutputGenerated(DWCBakeOutput::CPURuntimeData);
+            }
+            if (Metadata.SetupSettings.bBuildGPUWetnessMapSimulationData)
+            {
+                Derived.Inline.BakeState.GPURuntimeData = EDWCBakeStatus::Valid;
+                MarkBakeOutputGenerated(DWCBakeOutput::GPURuntimeData);
+            }
+            DWC::Error::SetMessage(OutErrorMessage, TEXT(""));
+            return true;
+        }
     }
 
     const bool bCPUBackendEnabled = Metadata.SetupSettings.bBuildCPUVertexSimulationData;
@@ -3042,10 +3111,7 @@ bool UWetClothingAsset::RebuildRuntimeDataForSave(FString* OutErrorMessage)
 
     if (!LoadRuntimeBulkData(true))
     {
-        DWC::Error::SetMessage(
-            OutErrorMessage,
-            TEXT("Existing WCA runtime bulk data could not be loaded. Rebuild was aborted to avoid discarding valid runtime payloads."));
-        return false;
+        RecoverUnreadableRuntimeBulkData();
     }
 
     TGuardValue<bool> RebuildGuard(bRuntimeDataRebuildInProgress, true);
@@ -3118,8 +3184,7 @@ bool UWetClothingAsset::RebuildRuntimeDataForSave(FString* OutErrorMessage)
 
     if (Metadata.SetupSettings.bBuildCPUVertexSimulationData)
     {
-        if (DWCBuildStatus::IsUsable(Derived.Inline.BakeState.CPURuntimeData) &&
-            IsPrecomputedSimulationDataValidForMesh(RuntimeMesh))
+        if (bCPUDataCurrent)
         {
             SlowTask.EnterProgressFrame(
                 1.25f,
@@ -3160,10 +3225,7 @@ bool UWetClothingAsset::RebuildRuntimeDataForSave(FString* OutErrorMessage)
 
     if (Metadata.SetupSettings.bBuildGPUWetnessMapSimulationData)
     {
-        const bool bRuntimeGPUDataValid =
-            DWCBuildStatus::IsUsable(Derived.Inline.BakeState.GPURuntimeData) &&
-            IsGPURuntimeDataValidForMesh(RuntimeMesh, RuntimeLODIndex);
-        if (bRuntimeGPUDataValid)
+        if (bGPUDataCurrent)
         {
             SlowTask.EnterProgressFrame(
                 1.5f,

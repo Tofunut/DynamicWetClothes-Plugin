@@ -29,18 +29,23 @@ namespace
         { TEXT("Parameters.AbsorbedWetness.AbsorbedGlossinessStrength"), 0.0, 1.0, 0.5 },
 
         // Simulation | Surface Water
-        { TEXT("Parameters.SurfaceWater.SurfaceRepresentationFraction"), 0.0, 1.0, 0.5 },
+        { TEXT("Parameters.SurfaceWater.SurfaceRepresentationFraction"), 0.0, 1.0, 1.0 },
         { TEXT("Parameters.SurfaceWater.DropletSpawnProbability"), 0.0, 1.0, 0.5 },
         { TEXT("Parameters.SurfaceWater.DropletLifetimeSeconds"), 0.01, 120.0, 5.0 },
         { TEXT("Parameters.SurfaceWater.DropletRadiusPixels"), 0.0, 256.0, 16.0 },
 
         // Rendering | Surface Water
+        { TEXT("Parameters.SurfaceWater.SurfaceWaterTotalStrength"), 0.0, 1.0, 0.5 },
         { TEXT("Parameters.SurfaceWater.SurfaceWaterTargetRoughness"), 0.0, 1.0, 0.02 },
-        { TEXT("Parameters.SurfaceWater.SurfaceWaterNormalStrength"), 0.0, 8.0, 3.0 },
+        { TEXT("Parameters.SurfaceWater.SurfaceWaterNormalStrength"), 0.0, 3.0, 3.0 },
         { TEXT("Parameters.SurfaceWater.SurfaceWaterRoughnessBlend"), 0.0, 1.0, 0.85 },
-        { TEXT("Parameters.SurfaceWater.OriginalSurfaceDetail"), 0.0, 1.0, 1.0 },
-        { TEXT("Parameters.SurfaceWater.SurfaceVisibilityThreshold"), 0.0, 1.0, 0.25 },
+        { TEXT("Parameters.SurfaceWater.SurfaceWaterSpecular"), 0.0, 1.0, 0.5 },
     };
+
+    constexpr float MinRenderableRejectedWaterFraction = 0.05f;
+    constexpr float MinRenderableDropletSpawnProbability = 0.05f;
+    constexpr float MinRenderableDropletLifetimeSeconds = 0.25f;
+    constexpr float MinRenderableDropletRadiusPixels = 1.0f;
 
     const FNumericRule* FindNumericRule(const FString& PropertyPath)
     {
@@ -255,6 +260,144 @@ namespace
                    ? FindFProperty<FStructProperty>(Profile->GetClass(), TEXT("Parameters"))
                    : nullptr;
     }
+
+    bool ClampRenderableFloat(
+        float& Value,
+        const float MinValue,
+        const TCHAR* Label,
+        TArray<FString>* OutChanges)
+    {
+        if (Value >= MinValue)
+        {
+            return false;
+        }
+
+        const float Original = Value;
+        Value = MinValue;
+        if (OutChanges != nullptr)
+        {
+            OutChanges->Add(FString::Printf(
+                TEXT("%s: %.3f -> %.3f"),
+                Label,
+                Original,
+                Value));
+        }
+        return true;
+    }
+
+    bool ApplySurfaceWaterRenderableMinimums(
+        FWetnessProfileParameters& Parameters,
+        TArray<FString>* OutChanges)
+    {
+        FSurfaceWaterProfileParameters& Surface = Parameters.SurfaceWater;
+        if (!Surface.bEnabled)
+        {
+            return false;
+        }
+
+        bool bChanged = false;
+        if (!Surface.bEnableDroplets)
+        {
+            Surface.bEnableDroplets = true;
+            bChanged = true;
+            if (OutChanges != nullptr)
+            {
+                OutChanges->Add(TEXT("Surface Water droplets: disabled -> enabled"));
+            }
+        }
+
+        if (!FMath::IsNearlyEqual(Surface.SurfaceRepresentationFraction, 1.0f))
+        {
+            const float Original = Surface.SurfaceRepresentationFraction;
+            Surface.SurfaceRepresentationFraction = 1.0f;
+            bChanged = true;
+            if (OutChanges != nullptr)
+            {
+                OutChanges->Add(FString::Printf(
+                    TEXT("Surface Water routing: %.3f -> 1.000"),
+                    Original));
+            }
+        }
+
+        bChanged |= ClampRenderableFloat(
+            Surface.DropletSpawnProbability,
+            MinRenderableDropletSpawnProbability,
+            TEXT("Droplet spawn chance"),
+            OutChanges);
+        bChanged |= ClampRenderableFloat(
+            Surface.DropletLifetimeSeconds,
+            MinRenderableDropletLifetimeSeconds,
+            TEXT("Droplet lifetime"),
+            OutChanges);
+        bChanged |= ClampRenderableFloat(
+            Surface.DropletRadiusPixels,
+            MinRenderableDropletRadiusPixels,
+            TEXT("Droplet size"),
+            OutChanges);
+
+        if (Parameters.AbsorbedWetness.bEnabled)
+        {
+            const float RejectedWaterFraction =
+                FMath::Clamp(Parameters.GetRejectedWaterFraction(), 0.0f, 1.0f);
+            if (RejectedWaterFraction < MinRenderableRejectedWaterFraction)
+            {
+                const float Original = Parameters.AbsorbedWetness.AbsorptionFraction;
+                Parameters.AbsorbedWetness.AbsorptionFraction = 1.0f - MinRenderableRejectedWaterFraction;
+                bChanged = true;
+                if (OutChanges != nullptr)
+                {
+                    OutChanges->Add(FString::Printf(
+                        TEXT("Absorption: %.3f -> %.3f"),
+                        Original,
+                        Parameters.AbsorbedWetness.AbsorptionFraction));
+                }
+            }
+        }
+
+        return bChanged;
+    }
+
+    void FindSurfaceWaterRenderableIssues(
+        const FWetnessProfileParameters& Parameters,
+        TArray<FString>& OutIssues)
+    {
+        const FSurfaceWaterProfileParameters& Surface = Parameters.SurfaceWater;
+        if (!Surface.bEnabled)
+        {
+            return;
+        }
+
+        const float RejectedWaterFraction =
+            FMath::Clamp(Parameters.GetRejectedWaterFraction(), 0.0f, 1.0f);
+        if (RejectedWaterFraction < MinRenderableRejectedWaterFraction)
+        {
+            OutIssues.Add(FString::Printf(
+                TEXT("Absorption leaves only %.1f%% rejected water; Surface Water needs at least %.1f%%."),
+                RejectedWaterFraction * 100.0f,
+                MinRenderableRejectedWaterFraction * 100.0f));
+        }
+        if (Surface.DropletSpawnProbability < MinRenderableDropletSpawnProbability)
+        {
+            OutIssues.Add(FString::Printf(
+                TEXT("Droplet spawn chance is %.1f%%; values below %.1f%% can prevent stamps from spawning."),
+                Surface.DropletSpawnProbability * 100.0f,
+                MinRenderableDropletSpawnProbability * 100.0f));
+        }
+        if (Surface.DropletLifetimeSeconds < MinRenderableDropletLifetimeSeconds)
+        {
+            OutIssues.Add(FString::Printf(
+                TEXT("Droplet lifetime is %.2fs; values below %.2fs can disappear before preview/render updates."),
+                Surface.DropletLifetimeSeconds,
+                MinRenderableDropletLifetimeSeconds));
+        }
+        if (Surface.DropletRadiusPixels < MinRenderableDropletRadiusPixels)
+        {
+            OutIssues.Add(FString::Printf(
+                TEXT("Droplet size is %.2f RT pixel(s); values below %.2f cannot produce a stable stamp."),
+                Surface.DropletRadiusPixels,
+                MinRenderableDropletRadiusPixels));
+        }
+    }
 }
 
 bool FWetnessProfileEditorPolicy::SanitizeProfile(UWetnessProfile* Profile, TArray<FString>* OutChanges)
@@ -297,11 +440,13 @@ bool FWetnessProfileEditorPolicy::SanitizeParameters(
     FWetnessProfileParameters& Parameters,
     TArray<FString>* OutChanges)
 {
-    return SanitizeStructRecursive(
+    bool bChanged = SanitizeStructRecursive(
         &Parameters,
         FWetnessProfileParameters::StaticStruct(),
         TEXT("Parameters"),
         OutChanges);
+    bChanged |= ApplySurfaceWaterRenderableMinimums(Parameters, OutChanges);
+    return bChanged;
 }
 
 void FWetnessProfileEditorPolicy::FindProfileIssues(
@@ -321,4 +466,5 @@ void FWetnessProfileEditorPolicy::FindProfileIssues(
         ParametersProperty->Struct,
         TEXT("Parameters"),
         OutIssues);
+    FindSurfaceWaterRenderableIssues(Profile->GetParameters(), OutIssues);
 }

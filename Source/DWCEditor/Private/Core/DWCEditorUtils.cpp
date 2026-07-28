@@ -152,12 +152,8 @@ bool DWCEditorUtils::SaveAsset(UObject* Asset)
         {
             AddDirtyGeneratedPackage(SlotTexture.WetPartDataTexture.Get());
         }
-        for (const FWetClothingLocalRenderProfile& LocalProfile :
-             WetClothingAsset->Derived.Inline.BakedWetPartData.LocalProfiles)
-        {
-            AddDirtyGeneratedPackage(LocalProfile.NormalizedDropletNormal.Get());
-            AddDirtyGeneratedPackage(LocalProfile.NormalizedDropletMask.Get());
-        }
+        // Local render profiles reference authored Surface Water textures directly.
+        // Do not treat those source texture packages as generated DWC outputs.
         AddDirtyGeneratedPackage(WetClothingAsset->Derived.Inline.BakedWetPartData.NormalizedNeutralSurfaceNormal.Get());
 
         for (const FWetWrinkleBakedMapSet& WrinkleMap :

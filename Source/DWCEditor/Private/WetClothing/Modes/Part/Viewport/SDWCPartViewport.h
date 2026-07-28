@@ -25,6 +25,12 @@ enum class EDWCSurfaceWaterTilingPreviewCoverageMode : uint8
     SingleCircle
 };
 
+enum class EDWCSurfaceWaterTilingPreviewDisplayMode : uint8
+{
+    Lit,
+    DropletNormal
+};
+
 /**
  * Part-edit viewport.
  *
@@ -64,10 +70,10 @@ class SDWCPartViewport : public SEditorViewport, public FGCObject
     void  SetShowWetPartColors(bool bInShowWetPartColors);
     void  SetPreviewWetPart(int32 MaterialSlotIndex, int32 WetPartID);
     void  SetPreviewWetness(float AbsorbedWetness, float SurfaceWater);
-    void  SetSurfaceWaterTargetRoughness(float InTargetRoughness);
     void  SetSurfaceWaterPreviewDropletsEnabled(bool bInDropletsEnabled);
     void  SetSurfaceWaterPreviewNormalFlip(bool bInFlipX, bool bInFlipY);
     void  SetSurfaceWaterTilingPreviewCoverageMode(EDWCSurfaceWaterTilingPreviewCoverageMode InMode);
+    void  SetSurfaceWaterTilingPreviewDisplayMode(EDWCSurfaceWaterTilingPreviewDisplayMode InMode);
     void  RefreshSurfaceWaterPreviewDynamicTextures();
     void  RefreshSurfaceWaterPreviewMaterial();
     void  FocusOnPreviewMesh(bool bInstant = false);
@@ -144,10 +150,10 @@ class SDWCPartViewport : public SEditorViewport, public FGCObject
     EDWCSurfaceWaterTilingPreviewCoverageMode    SurfaceWaterPreviewCoverageMode = EDWCSurfaceWaterTilingPreviewCoverageMode::FullPart;
     float                                        PreviewAbsorbedWetness = 0.0f;
     float                                        PreviewSurfaceWater = 1.0f;
-    float                                        SurfaceWaterTargetRoughness = 0.02f;
     bool                                         bSurfaceWaterPreviewDropletsEnabled = true;
     bool                                         bSurfaceWaterPreviewFlipNormalX = false;
     bool                                         bSurfaceWaterPreviewFlipNormalY = false;
+    EDWCSurfaceWaterTilingPreviewDisplayMode     SurfaceWaterPreviewDisplayMode = EDWCSurfaceWaterTilingPreviewDisplayMode::Lit;
     float                                        SelectionOverlayThicknessScale = 1.0f;
     FString                                      SurfaceWaterPreviewStatus;
     bool                                         bSurfaceWaterPreviewStatusIsError = false;

@@ -239,9 +239,9 @@ namespace
             TEXT("DropletNormalSlice"),
             TEXT("SurfaceWaterNormalStrength"),
             TEXT("SurfaceWaterRoughnessBlend"),
+            TEXT("SurfaceWaterSpecular"),
             TEXT("SurfaceWaterTargetRoughness"),
-            TEXT("OriginalSurfaceDetail"),
-            TEXT("SurfaceVisibilityThreshold"),
+            TEXT("SurfaceWaterTotalStrength"),
             TEXT("DropletDetailSize")
         };
         static const TArray<FName> SurfaceNormalInputs = {
@@ -255,14 +255,15 @@ namespace
         static const TArray<FName> DebugWetPartInputs = {
             TEXT("BaseColor"), TEXT("VertexColorRGB"), TEXT("VertexColorAlpha"),
             TEXT("WetnessMask"), TEXT("WetPartDebugStrength"),
-            TEXT("DropletCoverage"), TEXT("SurfaceWaterDebugStrength"),
+            TEXT("DropletAmount"), TEXT("DropletBrush"), TEXT("DropletLifetimeFade"),
+            TEXT("SurfaceWaterDebugStrength"),
             TEXT("DropletDebugColor")
         };
         static const TArray<FName> DebugWetPartOutputs = {
             TEXT("BaseColor"), TEXT("DebugColor"), TEXT("DebugAlpha")
         };
         static const TArray<FName> EvaluateInputs = {
-            TEXT("BaseColor"), TEXT("BaseRoughness"), TEXT("BaseMetallic"), TEXT("BaseNormal"),
+            TEXT("BaseColor"), TEXT("BaseRoughness"), TEXT("BaseSpecular"), TEXT("BaseMetallic"), TEXT("BaseNormal"),
             TEXT("Wetness"), TEXT("DWCDataUV"), TEXT("SurfaceWaterNormalUV"), TEXT("SurfaceTime"),
             TEXT("WetDarkeningStrength"), TEXT("WetRoughness"),
             TEXT("WrinkleNormal"), TEXT("UseWrinkleNormalMap"), TEXT("WrinkleStrength"),
@@ -271,8 +272,9 @@ namespace
             TEXT("TransparencyWetnessMin"), TEXT("TransparencyWetnessMax")
         };
         static const TArray<FName> EvaluateOutputs = {
-            TEXT("BaseColor"), TEXT("Roughness"), TEXT("Normal"),
-            TEXT("SurfaceCoverage"), TEXT("DropletCoverage")
+            TEXT("BaseColor"), TEXT("Roughness"), TEXT("Specular"), TEXT("Normal"),
+            TEXT("SurfaceCoverage"), TEXT("DropletCoverage"),
+            TEXT("DropletAmount"), TEXT("DropletBrush"), TEXT("DropletLifetimeFade")
         };
 
         bool bValid = true;
@@ -499,19 +501,6 @@ namespace
     }
 
     bool ResolveRequiredOutputName(UMaterialExpression* Expression, const FString& OutputName, FString& OutResolvedOutputName)
-    {
-        const TArray<FString> OutputNames = GetMaterialExpressionOutputNames(Expression);
-        if (OutputNames.Contains(OutputName))
-        {
-            OutResolvedOutputName = OutputName;
-            return true;
-        }
-
-        OutResolvedOutputName.Reset();
-        return false;
-    }
-
-    bool ResolveOptionalOutputName(UMaterialExpression* Expression, const FString& OutputName, FString& OutResolvedOutputName)
     {
         const TArray<FString> OutputNames = GetMaterialExpressionOutputNames(Expression);
         if (OutputNames.Contains(OutputName))
@@ -775,7 +764,7 @@ namespace
             UMaterialEditingLibrary::CreateMaterialExpression(Material, UMaterialExpressionConstant::StaticClass(), NodePosition.X, NodePosition.Y));
         if (Fallback != nullptr)
         {
-            Fallback->R = 0.5f;
+            Fallback->R = Property == MP_Metallic ? 0.0f : 0.5f;
         }
         OutOutputName.Reset();
         return Fallback;
@@ -1633,7 +1622,7 @@ namespace
         if (!ExistingObject->Rename(
                 *RetiredName,
                 GetTransientPackage(),
-                REN_DontCreateRedirectors | REN_ForceNoResetLoaders | REN_NonTransactional))
+                REN_DontCreateRedirectors | REN_NonTransactional))
         {
             OutErrorMessage = FString::Printf(
                 TEXT("Could not retire existing generated asset '%s' before regeneration."),
@@ -1700,9 +1689,9 @@ namespace
             CreateCustomExpression(
                 Material,
                 TEXT("DWC Surface Water Metallic Layer"),
-                TEXT("return saturate(BaseMetallic) * (1.0 - saturate(SurfaceCoverage));"),
+                TEXT("return saturate(BaseMetallic);"),
                 CMOT_Float1,
-                { TEXT("BaseMetallic"), TEXT("SurfaceCoverage") },
+                { TEXT("BaseMetallic") },
                 1120,
                 180);
         UMaterialExpressionVertexColor*       VertexColor = FindOrCreateVertexColor(Material, -2600, -520);
@@ -1783,6 +1772,7 @@ namespace
 
         bConnected &= ConnectChecked(BaseColorInput, BaseColorOutputName, Evaluate, TEXT("BaseColor"), FailureReasons);
         bConnected &= ConnectChecked(RoughnessInput, RoughnessOutputName, Evaluate, TEXT("BaseRoughness"), FailureReasons);
+        bConnected &= ConnectChecked(SpecularInput, SpecularOutputName, Evaluate, TEXT("BaseSpecular"), FailureReasons);
         bConnected &= ConnectChecked(MetallicInput, MetallicOutputName, Evaluate, TEXT("BaseMetallic"), FailureReasons);
         bConnected &= ConnectChecked(BaseNormalInput, BaseNormalOutputName, Evaluate, TEXT("BaseNormal"), FailureReasons);
         bConnected &= ConnectChecked(WetnessSourceSwitch, FString(), Evaluate, TEXT("Wetness"), FailureReasons);
@@ -1806,23 +1796,26 @@ namespace
 
         FString BaseColorResultOutput;
         FString RoughnessResultOutput;
+        FString SpecularResultOutput;
         FString NormalResultOutput;
         FString SurfaceCoverageOutput;
         FString DropletCoverageOutput;
-        FString DropletDebugCoverageOutput;
+        FString DropletAmountOutput;
+        FString DropletBrushOutput;
+        FString DropletLifetimeFadeOutput;
         bConnected &= ResolveRequiredOutputName(Evaluate, TEXT("BaseColor"), BaseColorResultOutput);
         bConnected &= ResolveRequiredOutputName(Evaluate, TEXT("Roughness"), RoughnessResultOutput);
+        bConnected &= ResolveRequiredOutputName(Evaluate, TEXT("Specular"), SpecularResultOutput);
         bConnected &= ResolveRequiredOutputName(Evaluate, TEXT("Normal"), NormalResultOutput);
         bConnected &= ResolveRequiredOutputName(Evaluate, TEXT("SurfaceCoverage"), SurfaceCoverageOutput);
         bConnected &= ResolveRequiredOutputName(Evaluate, TEXT("DropletCoverage"), DropletCoverageOutput);
+        bConnected &= ResolveRequiredOutputName(Evaluate, TEXT("DropletAmount"), DropletAmountOutput);
+        bConnected &= ResolveRequiredOutputName(Evaluate, TEXT("DropletBrush"), DropletBrushOutput);
+        bConnected &= ResolveRequiredOutputName(Evaluate, TEXT("DropletLifetimeFade"), DropletLifetimeFadeOutput);
         if (!bConnected)
         {
             FailureReasons.Add(TEXT("MF_DWC_EvaluateSurfaceAppearance does not expose the required contract."));
             return false;
-        }
-        if (!ResolveOptionalOutputName(Evaluate, TEXT("DropletDebugCoverage"), DropletDebugCoverageOutput))
-        {
-            DropletDebugCoverageOutput = DropletCoverageOutput;
         }
 
         UMaterialExpressionScalarParameter* WetPartDebugStrength = FindOrCreateScalarParameter(
@@ -1832,8 +1825,10 @@ namespace
         UMaterialExpressionVectorParameter* DropletDebugColor = FindOrCreateVectorParameter(
             Material, DWCWetMaterialParameters::SurfaceWaterDebugDropletColor(),
             FLinearColor(1.0f, 0.85f, 0.0f, 1.0f), 180, 720);
+        UMaterialExpressionScalarParameter* PreviewDebugMode = FindOrCreateScalarParameter(
+            Material, TEXT("DWCPreview_DebugMode"), 0.0f, 180, 820);
         if (WetPartDebugStrength == nullptr || SurfaceWaterDebugStrength == nullptr ||
-            DropletDebugColor == nullptr)
+            DropletDebugColor == nullptr || PreviewDebugMode == nullptr)
         {
             FailureReasons.Add(TEXT("Could not create the unified DWC debug graph."));
             return false;
@@ -1858,16 +1853,51 @@ namespace
         bConnected &= ConnectChecked(VertexColor, TEXT("A"), DebugWetPart, TEXT("VertexColorAlpha"), FailureReasons);
         bConnected &= ConnectChecked(WetnessSourceSwitch, FString(), DebugWetPart, TEXT("WetnessMask"), FailureReasons);
         bConnected &= ConnectChecked(WetPartDebugStrength, FString(), DebugWetPart, TEXT("WetPartDebugStrength"), FailureReasons);
-        bConnected &= ConnectChecked(Evaluate, DropletDebugCoverageOutput, DebugWetPart, TEXT("DropletCoverage"), FailureReasons);
+        bConnected &= ConnectChecked(Evaluate, DropletAmountOutput, DebugWetPart, TEXT("DropletAmount"), FailureReasons);
+        bConnected &= ConnectChecked(Evaluate, DropletBrushOutput, DebugWetPart, TEXT("DropletBrush"), FailureReasons);
+        bConnected &= ConnectChecked(Evaluate, DropletLifetimeFadeOutput, DebugWetPart, TEXT("DropletLifetimeFade"), FailureReasons);
         bConnected &= ConnectChecked(SurfaceWaterDebugStrength, FString(), DebugWetPart, TEXT("SurfaceWaterDebugStrength"), FailureReasons);
         bConnected &= ConnectChecked(DropletDebugColor, FString(), DebugWetPart, TEXT("DropletDebugColor"), FailureReasons);
         bConnected &= ConnectChecked(MetallicInput, MetallicOutputName, MetallicLayer, TEXT("BaseMetallic"), FailureReasons);
-        bConnected &= ConnectChecked(Evaluate, SurfaceCoverageOutput, MetallicLayer, TEXT("SurfaceCoverage"), FailureReasons);
 
         FString DebugBaseColorOutput;
         bConnected &= ResolveRequiredOutputName(DebugWetPart, TEXT("BaseColor"), DebugBaseColorOutput);
 
-        if (!UMaterialEditingLibrary::ConnectMaterialProperty(DebugWetPart, DebugBaseColorOutput, MP_BaseColor))
+        UMaterialExpressionCustom* PreviewDebugBaseColor = CreateCustomExpression(
+            Material,
+            TEXT("DWC Wetness Profile Preview Debug BaseColor"),
+            TEXT(R"(
+float Mode = floor(DebugMode + 0.5);
+if (Mode == 1.0) return lerp(float3(0.02, 0.02, 0.02), float3(0.05, 0.35, 1.0), saturate(WetnessMask));
+if (Mode == 2.0) return lerp(float3(0.02, 0.02, 0.02), float3(0.0, 0.72, 1.0), saturate(SurfaceCoverage));
+if (Mode == 3.0) return lerp(float3(0.02, 0.02, 0.02), float3(1.0, 0.85, 0.05), saturate(DropletCoverage));
+if (Mode == 4.0) return saturate(Normal * 0.5 + 0.5);
+if (Mode == 5.0) return lerp(float3(0.02, 0.02, 0.02), float3(1.0, 0.15, 0.65), saturate(DropletBrush));
+return LitBaseColor;
+)"),
+            CMOT_Float3,
+            {
+                TEXT("LitBaseColor"),
+                TEXT("WetnessMask"),
+                TEXT("SurfaceCoverage"),
+                TEXT("DropletCoverage"),
+                TEXT("DropletBrush"),
+                TEXT("Normal"),
+                TEXT("DebugMode"),
+            },
+            1200,
+            -620);
+
+        bConnected &= PreviewDebugBaseColor != nullptr;
+        bConnected &= ConnectChecked(DebugWetPart, DebugBaseColorOutput, PreviewDebugBaseColor, TEXT("LitBaseColor"), FailureReasons);
+        bConnected &= ConnectChecked(WetnessSourceSwitch, FString(), PreviewDebugBaseColor, TEXT("WetnessMask"), FailureReasons);
+        bConnected &= ConnectChecked(Evaluate, SurfaceCoverageOutput, PreviewDebugBaseColor, TEXT("SurfaceCoverage"), FailureReasons);
+        bConnected &= ConnectChecked(Evaluate, DropletCoverageOutput, PreviewDebugBaseColor, TEXT("DropletCoverage"), FailureReasons);
+        bConnected &= ConnectChecked(Evaluate, DropletBrushOutput, PreviewDebugBaseColor, TEXT("DropletBrush"), FailureReasons);
+        bConnected &= ConnectChecked(Evaluate, NormalResultOutput, PreviewDebugBaseColor, TEXT("Normal"), FailureReasons);
+        bConnected &= ConnectChecked(PreviewDebugMode, FString(), PreviewDebugBaseColor, TEXT("DebugMode"), FailureReasons);
+
+        if (!UMaterialEditingLibrary::ConnectMaterialProperty(PreviewDebugBaseColor, FString(), MP_BaseColor))
         {
             FailureReasons.Add(TEXT("Failed to connect unified DWC BaseColor/debug output."));
             bConnected = false;
@@ -1882,9 +1912,9 @@ namespace
             FailureReasons.Add(TEXT("Failed to connect unified DWC Normal output."));
             bConnected = false;
         }
-        if (!UMaterialEditingLibrary::ConnectMaterialProperty(SpecularInput, SpecularOutputName, MP_Specular))
+        if (!UMaterialEditingLibrary::ConnectMaterialProperty(Evaluate, SpecularResultOutput, MP_Specular))
         {
-            FailureReasons.Add(TEXT("Failed to preserve the source material Specular output."));
+            FailureReasons.Add(TEXT("Failed to connect unified DWC Specular output."));
             bConnected = false;
         }
         if (!UMaterialEditingLibrary::ConnectMaterialProperty(MetallicLayer, FString(), MP_Metallic))

@@ -2,4 +2,4 @@
 
 #include "CoreMinimal.h"
 
-DECLARE_LOG_CATEGORY_EXTERN(LogDWC, Log, All);
+DWC_API DECLARE_LOG_CATEGORY_EXTERN(LogDWC, Log, All);

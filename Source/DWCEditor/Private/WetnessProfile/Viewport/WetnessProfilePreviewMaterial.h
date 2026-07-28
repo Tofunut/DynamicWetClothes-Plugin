@@ -15,10 +15,12 @@ namespace DWCWetnessProfilePreviewMaterial
     inline const FName SurfaceTargetRoughnessParameter(TEXT("DWCPreview_SurfaceTargetRoughness"));
     inline const FName SurfaceNormalStrengthParameter(TEXT("DWCPreview_SurfaceNormalStrength"));
     inline const FName SurfaceRoughnessBlendParameter(TEXT("DWCPreview_SurfaceRoughnessBlend"));
-    inline const FName OriginalSurfaceDetailParameter(TEXT("DWCPreview_OriginalSurfaceDetail"));
-    inline const FName SurfaceVisibilityThresholdParameter(TEXT("DWCPreview_SurfaceVisibilityThreshold"));
+    inline const FName SurfaceTotalStrengthParameter(TEXT("DWCPreview_SurfaceTotalStrength"));
+    inline const FName SurfaceSpecularParameter(TEXT("DWCPreview_SurfaceSpecular"));
     inline const FName DropletsEnabledParameter(TEXT("DWCPreview_DropletsEnabled"));
+    inline const FName DropletStampSizeParameter(TEXT("DWCPreview_DropletStampSize"));
     inline const FName DropletDetailSizeParameter(TEXT("DWCPreview_DropletDetailSize"));
+    inline const FName DebugModeParameter(TEXT("DWCPreview_DebugMode"));
     inline const FName DropletNormalTextureParameter(TEXT("DWCPreview_DropletNormal"));
     inline const FName DropletMaskTextureParameter(TEXT("DWCPreview_DropletMask"));
 

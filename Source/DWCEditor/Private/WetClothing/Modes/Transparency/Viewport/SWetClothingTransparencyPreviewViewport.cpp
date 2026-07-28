@@ -148,6 +148,7 @@ namespace
             FOVAngle = 65.0f;
             SetViewLocation(FVector(250.0f, 0.0f, 120.0f));
             SetViewRotation(FRotator(-20.0f, 180.0f, 0.0f));
+            UE::DWCEditor::ApplyDWCPreviewCameraSpeedSettings(*this);
             EngineShowFlags.SetGrid(true);
             EngineShowFlags.SetSelectionOutline(true);
             EngineShowFlags.SetCompositeEditorPrimitives(true);

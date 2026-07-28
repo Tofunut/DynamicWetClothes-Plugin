@@ -7,6 +7,7 @@
 #include "SceneView.h"
 #include "SEditorViewport.h"
 #include "SDWCPartViewport.h"
+#include "WetClothing/Modes/DWCPreviewViewportToolbarUtils.h"
 
 FDWCPartViewportClient::FDWCPartViewportClient(
     FAdvancedPreviewScene*                       InPreviewScene,
@@ -24,6 +25,7 @@ FDWCPartViewportClient::FDWCPartViewportClient(
 
     SetViewLocation(FVector(250.0f, 0.0f, 120.0f));
     SetViewRotation(FRotator(-20.0f, 180.0f, 0.0f));
+    UE::DWCEditor::ApplyDWCPreviewCameraSpeedSettings(*this);
 
     EngineShowFlags.SetGrid(true);
     EngineShowFlags.SetSelectionOutline(true);

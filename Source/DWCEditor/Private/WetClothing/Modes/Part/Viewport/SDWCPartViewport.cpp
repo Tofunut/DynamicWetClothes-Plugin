@@ -35,6 +35,9 @@
 namespace
 {
     constexpr int32 PartViewportForceRenderLOD0 = 1; // USkinnedMeshComponent forced LOD is 1-based; 0 means automatic.
+    const FName PreviewSurfaceWaterOverrideParameter(TEXT("DWC_PreviewSurfaceWaterOverride"));
+    const FName PreviewSurfaceWaterAmountParameter(TEXT("DWC_PreviewSurfaceWaterAmount"));
+    const FName PreviewDebugModeParameter(TEXT("DWCPreview_DebugMode"));
 
     struct FQuantizedLocalVertex
     {
@@ -835,24 +838,6 @@ void SDWCPartViewport::SetPreviewWetness(const float AbsorbedWetness, const floa
     }
 }
 
-void SDWCPartViewport::SetSurfaceWaterTargetRoughness(const float InTargetRoughness)
-{
-    const float NewTargetRoughness = FMath::Clamp(InTargetRoughness, 0.0f, 1.0f);
-    if (FMath::IsNearlyEqual(SurfaceWaterTargetRoughness, NewTargetRoughness))
-    {
-        return;
-    }
-
-    SurfaceWaterTargetRoughness = NewTargetRoughness;
-    if (SurfaceWaterPreviewMaterial != nullptr)
-    {
-        SurfaceWaterPreviewMaterial->SetScalarParameterValue(
-            DWCWetMaterialParameters::SurfaceWaterTargetRoughness(),
-            SurfaceWaterTargetRoughness);
-    }
-    RequestViewportRedraw();
-}
-
 void SDWCPartViewport::SetSurfaceWaterPreviewDropletsEnabled(const bool bInDropletsEnabled)
 {
     if (bSurfaceWaterPreviewDropletsEnabled == bInDropletsEnabled)
@@ -907,6 +892,27 @@ void SDWCPartViewport::SetSurfaceWaterTilingPreviewCoverageMode(
     if (bSurfaceWaterTilingPreview)
     {
         RefreshSurfaceWaterPreviewDynamicTextures();
+    }
+}
+
+void SDWCPartViewport::SetSurfaceWaterTilingPreviewDisplayMode(
+    const EDWCSurfaceWaterTilingPreviewDisplayMode InMode)
+{
+    if (SurfaceWaterPreviewDisplayMode == InMode)
+    {
+        return;
+    }
+
+    SurfaceWaterPreviewDisplayMode = InMode;
+    if (SurfaceWaterPreviewMaterial != nullptr)
+    {
+        ApplySurfaceWaterPreviewRenderOverrides();
+        if (OverlayText.IsValid())
+        {
+            OverlayText->SetText(GetViewportHintText());
+            OverlayText->SetColorAndOpacity(GetViewportHintTextColor());
+        }
+        RequestViewportRedraw();
     }
 }
 
@@ -1318,8 +1324,24 @@ bool SDWCPartViewport::BuildSurfaceWaterPreviewTextures(FString& OutErrorMessage
     const int32 Height = SurfacePreviewCachedHeight;
     const int32 LocalProfileID = SurfacePreviewCachedLocalProfileID;
     SurfacePreviewLocalProfileID = LocalProfileID;
+
+    const FWetPartProfileAssignment* PreviewPartProfile = Editable.FindProfile(*Part);
+    FWetnessProfileParameters PreviewProfileParameters;
+    if (!FWetClothingWetPartDataTextureBaker::ResolveProfileParameters(
+            PreviewPartProfile,
+            PreviewProfileParameters))
+    {
+        OutErrorMessage = TEXT("Could not resolve the selected Wet Part's profile parameters.");
+        return false;
+    }
+    const FSurfaceWaterProfileParameters& Surface = PreviewProfileParameters.SurfaceWater;
     const FVector2D SingleCircleCenter = SurfacePreviewCachedSingleCircleCenter;
-    const float SingleCircleRadiusPixels = FMath::Clamp(7.0f * Part->SurfaceWater.DropletRadiusScale, 2.0f, 32.0f);
+    const float RequestedSingleCircleRadiusPixels =
+        Surface.DropletRadiusPixels * Part->SurfaceWater.GetResolvedDropletStampSizeScale();
+    const float SingleCircleRadiusPixels = RequestedSingleCircleRadiusPixels > UE_KINDA_SMALL_NUMBER
+        ? FMath::Clamp(RequestedSingleCircleRadiusPixels, 1.0f, 256.0f)
+        : 0.0f;
+    const float PreviewDropletLifetimeSeconds = FMath::Max(0.01f, Surface.DropletLifetimeSeconds);
 
     TArray<FColor> PreviewPartDataPixels = SurfacePreviewCachedSourcePartDataPixels;
     TArray<FLinearColor> WetnessPixels;
@@ -1348,16 +1370,36 @@ bool SDWCPartViewport::BuildSurfaceWaterPreviewTextures(FString& OutErrorMessage
 
             if (SurfaceWaterPreviewCoverageMode == EDWCSurfaceWaterTilingPreviewCoverageMode::SingleCircle)
             {
-                const float DistanceSquared = FVector2D::DistSquared(
-                    FVector2D(static_cast<float>(X), static_cast<float>(Y)),
-                    SingleCircleCenter);
-                if (DistanceSquared > FMath::Square(SingleCircleRadiusPixels))
+                if (SingleCircleRadiusPixels <= UE_KINDA_SMALL_NUMBER)
                 {
                     continue;
                 }
+                const float Distance = FVector2D::Distance(
+                    FVector2D(static_cast<float>(X), static_cast<float>(Y)),
+                    SingleCircleCenter);
+                const float EdgeWidthPixels = FMath::Max(1.5f, SingleCircleRadiusPixels * 0.08f);
+                const float RegionAlpha = 1.0f - FMath::SmoothStep(
+                    SingleCircleRadiusPixels - EdgeWidthPixels,
+                    SingleCircleRadiusPixels,
+                    Distance);
+                if (RegionAlpha <= UE_KINDA_SMALL_NUMBER)
+                {
+                    continue;
+                }
+                DropletPixels[PixelIndex] = FLinearColor(
+                    SurfaceAmount * RegionAlpha,
+                    0.0f,
+                    PreviewDropletLifetimeSeconds,
+                    0.0f);
             }
-
-            DropletPixels[PixelIndex] = FLinearColor(SurfaceAmount, 0.0f, 60.0f, 1.0f);
+            else
+            {
+                DropletPixels[PixelIndex] = FLinearColor(
+                    SurfaceAmount,
+                    0.0f,
+                    PreviewDropletLifetimeSeconds,
+                    0.0f);
+            }
         }
     }
 
@@ -1410,6 +1452,8 @@ void SDWCPartViewport::ApplySurfaceWaterPreviewTextureParameters()
         SurfacePreviewWetnessMap != nullptr && SurfacePreviewWetnessMap->GetSizeX() > 0
             ? 1.0f / static_cast<float>(SurfacePreviewWetnessMap->GetSizeX())
             : 0.0f);
+    SurfaceWaterPreviewMaterial->SetScalarParameterValue(PreviewSurfaceWaterOverrideParameter, 0.0f);
+    SurfaceWaterPreviewMaterial->SetScalarParameterValue(PreviewSurfaceWaterAmountParameter, 0.0f);
 }
 
 void SDWCPartViewport::RefreshSurfaceWaterPreviewDynamicTextures()
@@ -1577,7 +1621,7 @@ void SDWCPartViewport::RefreshSurfaceWaterPreviewMaterial()
                 NormalizeError))
         {
             SurfaceWaterPreviewStatus = FString::Printf(
-                TEXT("Could not normalize the selected profile's Surface Water mask/normal textures for WCA preview: %s"),
+                TEXT("Could not prepare the selected profile's 512 Surface Water mask/normal textures for WCA preview: %s"),
                 *NormalizeError);
             bSurfaceWaterPreviewStatusIsError = true;
         }
@@ -1586,7 +1630,6 @@ void SDWCPartViewport::RefreshSurfaceWaterPreviewMaterial()
     const FSurfaceWaterProfileParameters& Surface = LocalProfile.Parameters.SurfaceWater;
 
     UDWCGPUResourceSubsystem* ResourceSubsystem = nullptr;
-    bool bAppliedSelectedProfileFallback = false;
     if (PreviewScene.IsValid())
     {
         if (UWorld* PreviewWorld = PreviewScene->GetWorld())
@@ -1596,18 +1639,15 @@ void SDWCPartViewport::RefreshSurfaceWaterPreviewMaterial()
     }
     if (ResourceSubsystem != nullptr)
     {
-        TArray<TObjectPtr<UMaterialInstanceDynamic>> PreviewMIDs;
-        PreviewMIDs.Init(nullptr, FMath::Max(PreviewMeshComponent->GetNumMaterials(), PreviewMaterialSlotIndex + 1));
-        PreviewMIDs[PreviewMaterialSlotIndex] = SurfaceWaterPreviewMaterial;
-        ResourceSubsystem->ApplyResourcesToMaterials(
-            Asset,
-            PreviewMIDs,
-            EDWCRenderResourceUsage::FullGPU);
-        bAppliedSelectedProfileFallback = ResourceSubsystem->ApplyPreviewRenderProfileFallbackProfile(
+        if (!ResourceSubsystem->ApplyPreviewRenderProfileFallbackProfile(
             Asset,
             PreviewMaterialSlotIndex,
             LocalProfile,
-            *SurfaceWaterPreviewMaterial);
+            *SurfaceWaterPreviewMaterial))
+        {
+            SurfaceWaterPreviewStatus = TEXT("Could not apply the selected Surface Water render profile to the tiling preview material.");
+            bSurfaceWaterPreviewStatusIsError = true;
+        }
 
         if (ResourceSubsystem->GetDropletNormalArray() == nullptr ||
             ResourceSubsystem->GetDropletMaskArray() == nullptr)
@@ -1630,11 +1670,6 @@ void SDWCPartViewport::RefreshSurfaceWaterPreviewMaterial()
         DWCWetMaterialParameters::WetPartDebugStrength(), 0.0f);
     SurfaceWaterPreviewMaterial->SetScalarParameterValue(
         DWCWetMaterialParameters::SurfaceWaterDebugStrength(), 0.0f);
-    SurfaceWaterPreviewMaterial->SetScalarParameterValue(
-        DWCWetMaterialParameters::SurfaceWaterTargetRoughness(),
-        SurfaceWaterTargetRoughness);
-    SurfaceWaterPreviewMaterial->SetScalarParameterValue(
-        DWCWetMaterialParameters::UseRenderProfileLUT(), 0.0f);
     bSurfaceWaterPreviewFallbackProfileCacheValid =
         SurfaceWaterPreviewMaterial->GetVectorParameterValue(
             FHashedMaterialParameterInfo(FMaterialParameterInfo(DWCWetMaterialParameters::FallbackRenderProfileTexel(0))),
@@ -1656,37 +1691,61 @@ void SDWCPartViewport::RefreshSurfaceWaterPreviewMaterial()
 
     if (SurfaceWaterPreviewStatus.IsEmpty())
     {
-        SurfaceWaterPreviewStatus = bAppliedSelectedProfileFallback
-            ? TEXT("Using a transient DWC preview material with the selected Part's baked droplet profile and float state map.")
-            : TEXT("Using a transient DWC preview material with a forced GPU droplet preview permutation and float state map.");
-        bSurfaceWaterPreviewStatusIsError = !bAppliedSelectedProfileFallback;
+        SurfaceWaterPreviewStatus = TEXT("Using a transient DWC preview material with runtime Render Profile resources and a float state map.");
+        bSurfaceWaterPreviewStatusIsError = false;
     }
 
     if (SurfaceWaterPreviewCoverageMode == EDWCSurfaceWaterTilingPreviewCoverageMode::SingleCircle)
     {
+        const float EffectiveStampRadiusPixels =
+            Surface.DropletRadiusPixels * Part->SurfaceWater.GetResolvedDropletStampSizeScale();
         SurfaceWaterPreviewStatus += FString::Printf(
-            TEXT("\nPreview LocalProfileID %d: SurfaceEnabled=%d Droplets=%d ProfileNormalStrength=%.3g ProfileRoughnessStrength=%.3g ProfileVisibilityThreshold=%.3g. SingleCircleSurface=%g RadiusScale=%.3g AbsorbedWetness=0."),
+            TEXT("\nPreview LocalProfileID %d: SurfaceEnabled=%d NormalStrength=%.3g RoughnessBlend=%.3g TargetRoughness=%.3g TotalStrength=%.3g Specular=%.3g."),
             SurfacePreviewLocalProfileID,
             Surface.bEnabled ? 1 : 0,
-            Surface.bEnableDroplets ? 1 : 0,
             Surface.SurfaceWaterNormalStrength,
             Surface.SurfaceWaterRoughnessBlend,
-            Surface.SurfaceVisibilityThreshold,
+            Surface.SurfaceWaterTargetRoughness,
+            Surface.SurfaceWaterTotalStrength,
+            Surface.SurfaceWaterSpecular);
+        SurfaceWaterPreviewStatus += FString::Printf(
+            TEXT("\nSingleCircleSurface=%g SpawnChance=%.3g StampRadiusPx=%.3g RadiusScale=%.3g Lifetime=%.3g DetailSize=%.3g AbsorbedWetness=0 NormalFlipXY=%d/%d."),
             PreviewSurfaceWater,
-            Part->SurfaceWater.DropletRadiusScale);
+            Surface.DropletSpawnProbability,
+            EffectiveStampRadiusPixels,
+            Part->SurfaceWater.GetResolvedDropletStampSizeScale(),
+            Surface.DropletLifetimeSeconds,
+            Part->SurfaceWater.DropletDetailSize,
+            bSurfaceWaterPreviewFlipNormalX ? 1 : 0,
+            bSurfaceWaterPreviewFlipNormalY ? 1 : 0);
     }
     else
     {
         SurfaceWaterPreviewStatus += FString::Printf(
-            TEXT("\nPreview LocalProfileID %d: SurfaceEnabled=%d Droplets=%d ProfileNormalStrength=%.3g ProfileRoughnessStrength=%.3g ProfileVisibilityThreshold=%.3g. FullPartSurface=%g AbsorbedWetness=0."),
+            TEXT("\nPreview LocalProfileID %d: SurfaceEnabled=%d NormalStrength=%.3g RoughnessBlend=%.3g TargetRoughness=%.3g TotalStrength=%.3g Specular=%.3g."),
             SurfacePreviewLocalProfileID,
             Surface.bEnabled ? 1 : 0,
-            Surface.bEnableDroplets ? 1 : 0,
             Surface.SurfaceWaterNormalStrength,
             Surface.SurfaceWaterRoughnessBlend,
-            Surface.SurfaceVisibilityThreshold,
-            PreviewSurfaceWater);
+            Surface.SurfaceWaterTargetRoughness,
+            Surface.SurfaceWaterTotalStrength,
+            Surface.SurfaceWaterSpecular);
+        SurfaceWaterPreviewStatus += FString::Printf(
+            TEXT("\nFullPartSurface=%g SpawnChance=%.3g StampRadiusPx=%.3g RadiusScale=%.3g Lifetime=%.3g DetailSize=%.3g AbsorbedWetness=0 NormalFlipXY=%d/%d."),
+            PreviewSurfaceWater,
+            Surface.DropletSpawnProbability,
+            Surface.DropletRadiusPixels * Part->SurfaceWater.GetResolvedDropletStampSizeScale(),
+            Part->SurfaceWater.GetResolvedDropletStampSizeScale(),
+            Surface.DropletLifetimeSeconds,
+            Part->SurfaceWater.DropletDetailSize,
+            bSurfaceWaterPreviewFlipNormalX ? 1 : 0,
+            bSurfaceWaterPreviewFlipNormalY ? 1 : 0);
     }
+    SurfaceWaterPreviewStatus += FString::Printf(
+        TEXT("\nDisplayMode=%s."),
+        SurfaceWaterPreviewDisplayMode == EDWCSurfaceWaterTilingPreviewDisplayMode::DropletNormal
+            ? TEXT("DropletNormal")
+            : TEXT("Lit"));
     if (!Surface.bEnabled)
     {
         SurfaceWaterPreviewStatus += TEXT("\nSelected preview profile has Surface Water disabled, so the preview keeps the source material appearance.");
@@ -1695,18 +1754,13 @@ void SDWCPartViewport::RefreshSurfaceWaterPreviewMaterial()
     {
         SurfaceWaterPreviewStatus += TEXT("\nSelected preview profile has zero Surface Water Normal Strength, so World Normal remains unchanged.");
     }
-    else if (!Surface.bEnableDroplets || !bSurfaceWaterPreviewDropletsEnabled)
+    else if (!bSurfaceWaterPreviewDropletsEnabled)
     {
-        SurfaceWaterPreviewStatus += TEXT("\nThe droplet normal layer is disabled in the selected profile or Water Tiling override, so World Normal remains unchanged.");
+        SurfaceWaterPreviewStatus += TEXT("\nThe droplet normal layer is disabled, so World Normal remains unchanged.");
     }
-    SurfaceWaterPreviewStatus += FString::Printf(
-        TEXT("\nWater Tiling overrides: Droplets=%d FlipNormalX=%d FlipNormalY=%d."),
-        bSurfaceWaterPreviewDropletsEnabled ? 1 : 0,
-        bSurfaceWaterPreviewFlipNormalX ? 1 : 0,
-        bSurfaceWaterPreviewFlipNormalY ? 1 : 0);
 
     const bool bMissingDropletNormal =
-        Surface.bEnableDroplets &&
+        Surface.bEnabled &&
         bSurfaceWaterPreviewDropletsEnabled &&
         LocalProfile.NormalizedDropletNormal == nullptr;
     const UWetnessProfile* SourceProfile = Cast<UWetnessProfile>(LocalProfile.SourceProfile.TryLoad());
@@ -1721,7 +1775,7 @@ void SDWCPartViewport::RefreshSurfaceWaterPreviewMaterial()
         AuthoredSurface != nullptr && AuthoredSurface->DropletMaskTexture != nullptr ? 1 : 0,
         LocalProfile.NormalizedDropletMask != nullptr ? 1 : 0);
     const bool bMissingDropletMask =
-        Surface.bEnableDroplets &&
+        Surface.bEnabled &&
         bSurfaceWaterPreviewDropletsEnabled &&
         LocalProfile.NormalizedDropletMask == nullptr;
     if (bMissingDropletNormal)
@@ -1756,6 +1810,9 @@ void SDWCPartViewport::ApplySurfaceWaterPreviewRenderOverrides()
     SurfaceWaterPreviewMaterial->SetScalarParameterValue(
         DWCWetMaterialParameters::SurfaceWaterNormalFlipY(),
         bSurfaceWaterPreviewFlipNormalY ? 1.0f : 0.0f);
+    SurfaceWaterPreviewMaterial->SetScalarParameterValue(
+        PreviewDebugModeParameter,
+        SurfaceWaterPreviewDisplayMode == EDWCSurfaceWaterTilingPreviewDisplayMode::DropletNormal ? 4.0f : 0.0f);
 
     if (!bSurfaceWaterPreviewFallbackProfileCacheValid)
     {

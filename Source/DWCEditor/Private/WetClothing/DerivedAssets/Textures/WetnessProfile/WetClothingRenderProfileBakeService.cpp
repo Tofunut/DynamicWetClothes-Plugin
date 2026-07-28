@@ -12,6 +12,7 @@
 #include "WetClothing/DerivedAssets/Materials/WCAMaterialGenerator.h"
 #include "WetClothing/DerivedAssets/Textures/WetnessProfile/WetClothingWetPartDataTextureBaker.h"
 #include "WetClothing/DerivedAssets/Textures/WetnessProfile/WetClothingSurfaceTextureNormalizer.h"
+#include "WetRendering/DWCSurfaceTextureSharedAsset.h"
 
 namespace
 {
@@ -134,29 +135,56 @@ namespace
             }
 
             const FSurfaceWaterProfileParameters& Surface = Parameters.SurfaceWater;
-            if (!Surface.bEnabled || !Surface.bEnableDroplets)
+            if (!Surface.bEnabled)
             {
                 continue;
             }
 
-            const FString SharedFolder = DWCSurfaceTextureSharedAsset::GetSharedFolder();
-            const auto IsSharedNormalizedTexture = [&SharedFolder](const UTexture2D* Texture)
+            FString SurfaceTextureError;
+            if (!FWetClothingSurfaceTextureNormalizer::ValidateProfileTextures(
+                    Parameters,
+                    SurfaceTextureError))
             {
-                return Texture != nullptr && Texture->GetPathName().StartsWith(SharedFolder);
+                PendingLines.Add(FString::Printf(
+                    TEXT("Profile '%s' has invalid authored Surface Water texture settings: %s"),
+                    *StableKey,
+                    *SurfaceTextureError));
+                continue;
+            }
+
+            const auto SourcePathMatches = [](
+                const UTexture2D* AuthoredTexture,
+                const FSoftObjectPath& BakedSourcePath)
+            {
+                return AuthoredTexture != nullptr
+                    ? BakedSourcePath == FSoftObjectPath(AuthoredTexture)
+                    : !BakedSourcePath.IsValid();
             };
 
-            if (Surface.DropletNormalTexture != nullptr &&
-                !IsSharedNormalizedTexture(BakedProfile->NormalizedDropletNormal))
+            if (!SourcePathMatches(
+                    Surface.DropletNormalTexture,
+                    BakedProfile->SourceDropletNormal) ||
+                !FWetClothingSurfaceTextureNormalizer::IsPreparedTextureReferenceCurrent(
+                    BakedProfile->NormalizedDropletNormal,
+                    Surface.DropletNormalTexture,
+                    TEXT("DropletNormal"),
+                    true))
             {
                 PendingLines.Add(FString::Printf(
-                    TEXT("Profile '%s' requires a global normalized Droplet normal texture rebake."),
+                    TEXT("Profile '%s' requires a Render Profile Data rebake so its 512 Droplet normal reference is regenerated."),
                     *StableKey));
             }
-            if (Surface.DropletMaskTexture != nullptr &&
-                !IsSharedNormalizedTexture(BakedProfile->NormalizedDropletMask))
+            if (!SourcePathMatches(
+                    Surface.DropletMaskTexture,
+                    BakedProfile->SourceDropletMask) ||
+                !FWetClothingSurfaceTextureNormalizer::IsPreparedTextureReferenceCurrent(
+                    BakedProfile->NormalizedDropletMask,
+                    Surface.DropletMaskTexture,
+                    TEXT("DropletMask"),
+                    false))
             {
                 PendingLines.Add(FString::Printf(
-                    TEXT("Profile '%s' requires a global normalized Droplet mask texture rebake."),
+                    TEXT("Profile '%s' requires a Render Profile Data rebake so its 512 Droplet mask reference is regenerated."),
                     *StableKey));
             }
         }
@@ -506,11 +534,23 @@ bool FWetClothingRenderProfileBakeService::SaveBakedRenderProfileAssets(UWetClot
     {
         AddRenderProfilePackageForObject(SlotTexture.WetPartDataTexture.Get(), PackagesToSave);
     }
+    // Save only DWC-generated 512 Surface Water textures. Authored 512 inputs are
+    // referenced directly and their source packages must not be force-saved here.
+    const FString SharedSurfaceFolder(DWCSurfaceTextureSharedAsset::GetSharedFolder());
     for (const FWetClothingLocalRenderProfile& LocalProfile :
          WetClothingAsset->Derived.Inline.BakedWetPartData.LocalProfiles)
     {
-        AddRenderProfilePackageForObject(LocalProfile.NormalizedDropletNormal.Get(), PackagesToSave);
-        AddRenderProfilePackageForObject(LocalProfile.NormalizedDropletMask.Get(), PackagesToSave);
+        const auto AddGeneratedSurfaceTexture = [
+            &PackagesToSave,
+            &SharedSurfaceFolder](UTexture2D* Texture)
+        {
+            if (Texture != nullptr && Texture->GetPathName().StartsWith(SharedSurfaceFolder))
+            {
+                AddRenderProfilePackageForObject(Texture, PackagesToSave);
+            }
+        };
+        AddGeneratedSurfaceTexture(LocalProfile.NormalizedDropletNormal.Get());
+        AddGeneratedSurfaceTexture(LocalProfile.NormalizedDropletMask.Get());
     }
 
     AddRenderProfilePackageForObject(

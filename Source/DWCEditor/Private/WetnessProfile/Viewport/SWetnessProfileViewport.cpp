@@ -17,8 +17,13 @@
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
 #include "Styling/AppStyle.h"
+#include "ToolMenus.h"
 #include "UObject/UObjectGlobals.h"
+#include "Utility/DWCLog.h"
+#include "ViewportToolbar/UnrealEdViewportToolbar.h"
+#include "WetClothing/Modes/DWCPreviewViewportToolbarUtils.h"
 #include "WetClothing/DerivedAssets/Materials/WCAMaterialGenerator.h"
+#include "WetClothing/DerivedAssets/Textures/WetnessProfile/WetClothingSurfaceTextureNormalizer.h"
 #include "WetRendering/DWCGPUResourceSubsystem.h"
 #include "WetRendering/WetMaterialParameters.h"
 #include "WetnessProfile/Editor/WetnessProfileEditorPolicy.h"
@@ -261,6 +266,17 @@ void SWetnessProfileViewport::SetPreviewDropletDetailSize(const float InDropletD
     RefreshPreviewMaterialParameters();
 }
 
+void SWetnessProfileViewport::SetPreviewMode(const EPreviewMode InPreviewMode)
+{
+    if (PreviewMode == InPreviewMode)
+    {
+        return;
+    }
+
+    PreviewMode = InPreviewMode;
+    RefreshPreviewMaterialParameters();
+}
+
 void SWetnessProfileViewport::SetPreviewAnimationEnabled(const bool bInEnabled)
 {
     if (bPreviewAnimationEnabled == bInEnabled)
@@ -331,6 +347,31 @@ TSharedRef<FEditorViewportClient> SWetnessProfileViewport::MakeEditorViewportCli
     ViewportClient = MakeShared<FWetnessProfileViewportClient>(PreviewScene.Get(), SharedThis(this));
     ViewportClient->SetPreviewMeshComponent(GetActivePreviewComponent());
     return ViewportClient.ToSharedRef();
+}
+
+TSharedPtr<SWidget> SWetnessProfileViewport::BuildViewportToolbar()
+{
+    const FName ViewportToolbarName = TEXT("WetnessProfileEditor.ViewportToolbar");
+
+    if (!UToolMenus::Get()->IsMenuRegistered(ViewportToolbarName))
+    {
+        UToolMenu* const ViewportToolbarMenu =
+            UToolMenus::Get()->RegisterMenu(ViewportToolbarName, NAME_None, EMultiBoxType::SlimHorizontalToolBar);
+        ViewportToolbarMenu->StyleName = TEXT("ViewportToolbar");
+
+        ViewportToolbarMenu->AddSection(TEXT("Left"));
+
+        FToolMenuSection& RightSection = ViewportToolbarMenu->AddSection(TEXT("Right"));
+        RightSection.Alignment = EToolMenuSectionAlign::Last;
+        RightSection.AddEntry(UE::UnrealEd::CreateCameraSubmenu(UE::UnrealEd::FViewportCameraMenuOptions().ShowAll()));
+        RightSection.AddEntry(UE::DWCEditor::CreateDWCViewModesSubmenu());
+    }
+
+    FToolMenuContext ViewportToolbarContext;
+    ViewportToolbarContext.AppendCommandList(GetCommandList());
+    ViewportToolbarContext.AddObject(UE::UnrealEd::CreateViewportToolbarDefaultContext(SharedThis(this)));
+
+    return UToolMenus::Get()->GenerateWidget(ViewportToolbarName, ViewportToolbarContext);
 }
 
 void SWetnessProfileViewport::PopulateViewportOverlays(TSharedRef<SOverlay> Overlay)
@@ -673,22 +714,28 @@ void SWetnessProfileViewport::RefreshPreviewMaterialParameters()
             FMath::Clamp(Surface.SurfaceWaterTargetRoughness, 0.0f, 1.0f));
         PreviewMaterialInstance->SetScalarParameterValue(
             SurfaceNormalStrengthParameter,
-            FMath::Clamp(Surface.SurfaceWaterNormalStrength, 0.0f, 8.0f));
+            FMath::Clamp(Surface.SurfaceWaterNormalStrength, 0.0f, 3.0f));
         PreviewMaterialInstance->SetScalarParameterValue(
             SurfaceRoughnessBlendParameter,
             FMath::Clamp(Surface.SurfaceWaterRoughnessBlend, 0.0f, 1.0f));
         PreviewMaterialInstance->SetScalarParameterValue(
-            OriginalSurfaceDetailParameter,
-            FMath::Clamp(Surface.OriginalSurfaceDetail, 0.0f, 1.0f));
+            SurfaceTotalStrengthParameter,
+            FMath::Clamp(Surface.SurfaceWaterTotalStrength, 0.0f, 1.0f));
         PreviewMaterialInstance->SetScalarParameterValue(
-            SurfaceVisibilityThresholdParameter,
-            FMath::Clamp(Surface.SurfaceVisibilityThreshold, 0.0f, 1.0f));
+            SurfaceSpecularParameter,
+            FMath::Clamp(Surface.SurfaceWaterSpecular, 0.0f, 1.0f));
         PreviewMaterialInstance->SetScalarParameterValue(
             DropletsEnabledParameter,
-            Surface.bEnableDroplets ? 1.0f : 0.0f);
+            Surface.bEnabled ? 1.0f : 0.0f);
+        PreviewMaterialInstance->SetScalarParameterValue(
+            DropletStampSizeParameter,
+            FMath::Clamp(Surface.DropletRadiusPixels, 1.0f, 256.0f));
         PreviewMaterialInstance->SetScalarParameterValue(
             DropletDetailSizeParameter,
             FMath::Clamp(PreviewDropletDetailSize, 0.0f, 4.0f));
+        PreviewMaterialInstance->SetScalarParameterValue(
+            DebugModeParameter,
+            static_cast<float>(PreviewMode));
 
         PreviewMaterialInstance->SetTextureParameterValue(
             DropletNormalTextureParameter,
@@ -736,15 +783,15 @@ void SWetnessProfileViewport::RefreshGeneratedPreviewMaterialParameters()
         0.0f,
         0.0f);
     const FLinearColor FallbackProfile1(
-        FMath::Max(0.0f, Surface.SurfaceWaterNormalStrength),
+        FMath::Clamp(Surface.SurfaceWaterNormalStrength, 0.0f, 3.0f),
         FMath::Clamp(Surface.SurfaceWaterRoughnessBlend, 0.0f, 1.0f),
-        FMath::Clamp(Surface.SurfaceVisibilityThreshold, 0.0f, 1.0f),
-        0.0f);
+        0.0f,
+        FMath::Clamp(Surface.SurfaceWaterSpecular, 0.0f, 1.0f));
     const FLinearColor FallbackProfile2(
         0.0f,
         0.0f,
         FMath::Clamp(Surface.SurfaceWaterTargetRoughness, 0.0f, 1.0f),
-        FMath::Clamp(Surface.OriginalSurfaceDetail, 0.0f, 1.0f));
+        FMath::Clamp(Surface.SurfaceWaterTotalStrength, 0.0f, 1.0f));
 
     const float SurfacePreviewAmount = Surface.bEnabled ? PreviewSurfaceWater : 0.0f;
     FWetClothingLocalRenderProfile PreviewLocalProfile;
@@ -752,8 +799,19 @@ void SWetnessProfileViewport::RefreshGeneratedPreviewMaterialParameters()
     PreviewLocalProfile.StableKey = FString::Printf(
         TEXT("WetnessProfileViewport|%s"),
         *GetPathNameSafe(WetnessProfile.Get()));
-    PreviewLocalProfile.NormalizedDropletNormal = Surface.DropletNormalTexture;
-    PreviewLocalProfile.NormalizedDropletMask = Surface.DropletMaskTexture;
+    FString PreparedSurfaceTextureError;
+    if (!FWetClothingSurfaceTextureNormalizer::PrepareProfileTextures(
+            Parameters,
+            PreviewLocalProfile,
+            PreparedSurfaceTextureError))
+    {
+        UE_LOG(
+            LogDWC,
+            Warning,
+            TEXT("DWC Wetness Profile preview could not prepare 512 Surface Water textures for '%s': %s"),
+            *GetPathNameSafe(WetnessProfile.Get()),
+            *PreparedSurfaceTextureError);
+    }
 
     UDWCGPUResourceSubsystem* ResourceSubsystem = nullptr;
     if (PreviewScene.IsValid())
@@ -792,7 +850,16 @@ void SWetnessProfileViewport::RefreshGeneratedPreviewMaterialParameters()
         }
         PreviewMID->SetScalarParameterValue(PreviewSurfaceWaterOverrideParameter, 1.0f);
         PreviewMID->SetScalarParameterValue(PreviewSurfaceWaterAmountParameter, SurfacePreviewAmount);
-        PreviewMID->SetScalarParameterValue(DWCWetMaterialParameters::SurfaceWaterDebugStrength(), 0.0f);
+        PreviewMID->SetScalarParameterValue(
+            DWCWetnessProfilePreviewMaterial::DebugModeParameter,
+            static_cast<float>(PreviewMode));
+        const bool bSurfaceDebugMode =
+            PreviewMode == EPreviewMode::SurfaceCoverage ||
+            PreviewMode == EPreviewMode::FinalDropletCoverage ||
+            PreviewMode == EPreviewMode::DropletStampTest;
+        PreviewMID->SetScalarParameterValue(
+            DWCWetMaterialParameters::SurfaceWaterDebugStrength(),
+            bSurfaceDebugMode ? 1.0f : 0.0f);
         PreviewMID->SetScalarParameterValue(DWCWetMaterialParameters::WetPartDebugStrength(), 0.0f);
     }
 }
@@ -827,12 +894,12 @@ FText SWetnessProfileViewport::GetOverlayText() const
     return FText::Format(
         LOCTEXT(
             "PreviewHint",
-            "Wetness Profile Preview\nAbsorbed Wetness {0}%  |  Surface Water {1}%\nDarkening {2}%  |  Absorbed Glossiness {3}%\nWater Detail {4}%  |  Wet Roughness Blend {5}%"),
+            "Wetness Profile Preview\nAbsorbed Wetness {0}%  |  Total Strength {1}%\nDarkening {2}%  |  Absorbed Glossiness {3}%\nWater Normal {4}%  |  Roughness Blend {5}%"),
         FText::AsNumber(FMath::RoundToInt(PreviewAbsorbedWater * 100.0f)),
-        FText::AsNumber(FMath::RoundToInt(PreviewSurfaceWater * 100.0f)),
+        FText::AsNumber(FMath::RoundToInt(FMath::Clamp(Surface.SurfaceWaterTotalStrength, 0.0f, 1.0f) * 100.0f)),
         FText::AsNumber(FMath::RoundToInt(Parameters.GetAbsorbedDarkeningStrength() * 100.0f)),
         FText::AsNumber(FMath::RoundToInt(Parameters.GetAbsorbedGlossinessStrength() * 100.0f)),
-        FText::AsNumber(FMath::RoundToInt(FMath::Clamp(Surface.SurfaceWaterNormalStrength / 2.0f, 0.0f, 1.0f) * 100.0f)),
+        FText::AsNumber(FMath::RoundToInt(FMath::Clamp(Surface.SurfaceWaterNormalStrength, 0.0f, 3.0f) * 100.0f)),
         FText::AsNumber(FMath::RoundToInt(FMath::Clamp(Surface.SurfaceWaterRoughnessBlend, 0.0f, 1.0f) * 100.0f)));
 }
 

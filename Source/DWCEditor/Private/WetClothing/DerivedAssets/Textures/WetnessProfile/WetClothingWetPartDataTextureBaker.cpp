@@ -43,18 +43,18 @@ namespace
             TEXT("SurfaceWaterTargetRoughness=%.9g|")
             TEXT("SurfaceWaterNormalStrength=%.9g|")
             TEXT("SurfaceWaterRoughnessBlend=%.9g|")
-            TEXT("OriginalSurfaceDetail=%.9g|")
-            TEXT("SurfaceVisibilityThreshold=%.9g"),
+            TEXT("SurfaceWaterTotalStrength=%.9g|")
+            TEXT("SurfaceWaterSpecular=%.9g"),
             Parameters.GetAbsorbedDarkeningStrength(),
             Parameters.GetAbsorbedGlossinessStrength(),
-            Surface.bEnabled && Surface.bEnableDroplets ? 1 : 0,
+            Surface.bEnabled ? 1 : 0,
             *MakeTextureBuildKey(Surface.DropletNormalTexture),
             *MakeTextureBuildKey(Surface.DropletMaskTexture),
             Surface.SurfaceWaterTargetRoughness,
             Surface.SurfaceWaterNormalStrength,
             Surface.SurfaceWaterRoughnessBlend,
-            Surface.OriginalSurfaceDetail,
-            Surface.SurfaceVisibilityThreshold);
+            Surface.SurfaceWaterTotalStrength,
+            Surface.SurfaceWaterSpecular);
     }
 
     struct FProfileBakeEntry
@@ -134,7 +134,7 @@ FString FWetClothingWetPartDataTextureBaker::MakeProfileStableKey(
     const FWetnessProfileParameters& Parameters)
 {
     const FString ParameterHash = FMD5::HashAnsiString(*FString::Printf(
-        TEXT("DWC.RenderProfile.v6|SurfaceTextureNormalization=%d|%s"),
+        TEXT("DWC.RenderProfile.v7|SurfaceTextureNormalization=%d|%s"),
         DWCSurfaceTextureNormalization::Version,
         *MakeParametersKey(Parameters)));
     if (ProfileAssignment != nullptr && ProfileAssignment->SourceProfile.IsValid())
@@ -381,12 +381,13 @@ FString FWetClothingWetPartDataTextureBaker::MakeBuildSignature(const UWetClothi
         TArray<int32> IslandIDs = BakeEntry.Entry->AssignedUVIslandIDs;
         IslandIDs.Sort();
         Canonical += FString::Printf(
-            TEXT("|Slot=%d;OriginalUV=%d;Part=%d;Profile=%s;Key=%s;DropletRadiusScale=%.9g;DropletDetailSize=%.9g;Islands="),
+            TEXT("|Slot=%d;OriginalUV=%d;Part=%d;Profile=%s;Key=%s;OverrideDropletStampSize=%d;DropletRadiusScale=%.9g;DropletDetailSize=%.9g;Islands="),
             BakeEntry.MaterialSlotIndex,
             WetClothingAsset->GetOriginalUVChannelIndex(),
             BakeEntry.Entry->WetPartID,
             BakeEntry.Profile != nullptr ? *BakeEntry.Profile->SourceProfile.ToString() : TEXT("None"),
             *MakeProfileStableKey(BakeEntry.Profile, Parameters),
+            BakeEntry.Entry->SurfaceWater.bOverrideDropletStampSize ? 1 : 0,
             BakeEntry.Entry->SurfaceWater.DropletRadiusScale,
             BakeEntry.Entry->SurfaceWater.DropletDetailSize);
         for (const int32 IslandID : IslandIDs)
@@ -470,8 +471,9 @@ bool FWetClothingWetPartDataTextureBaker::Bake(
                 return false;
             }
 
-            // Runtime rows retain only normalized array-compatible texture references.
-            // Authored source textures remain owned by the Wetness Profile asset.
+            // Runtime rows retain either the authored 512 texture or a DWC-generated
+            // 512 duplicate built by Unreal's texture pipeline. The dedicated render-profile
+            // texture fields remain the authoritative Texture2DArray upload sources.
             LocalProfile.Parameters.SurfaceWater.DropletNormalTexture = nullptr;
             LocalProfile.Parameters.SurfaceWater.DropletMaskTexture = nullptr;
             LocalIDByStableKey.Add(StableKey, LocalProfileID);

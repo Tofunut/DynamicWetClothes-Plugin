@@ -47,13 +47,22 @@ struct DWC_API FWetPartSurfaceWaterSettings
 {
     GENERATED_BODY()
 
-    /** Multiplies the Wetness Profile Droplet radius before the GPU stamp is recorded. */
-    UPROPERTY(EditAnywhere, Category = "Surface Water", meta = (ClampMin = "0.25", ClampMax = "4.0", UIMin = "0.25", UIMax = "4.0"))
+    /** Uses a part-local stamp-size scale instead of the Wetness Profile default. */
+    UPROPERTY(EditAnywhere, Category = "Surface Water")
+    bool bOverrideDropletStampSize = false;
+
+    /** Multiplies the Wetness Profile Droplet Stamp Size before the GPU stamp is recorded. */
+    UPROPERTY(EditAnywhere, Category = "Surface Water", meta = (ClampMin = "0.25", ClampMax = "4.0", UIMin = "0.25", UIMax = "4.0", DisplayName = "Droplet Stamp Size Scale", EditCondition = "bOverrideDropletStampSize"))
     float DropletRadiusScale = 1.0f;
 
     /** Physical-looking size of the repeating Droplet detail-normal pattern. */
     UPROPERTY(EditAnywhere, Category = "Surface Water", meta = (ClampMin = "0.0", ClampMax = "4.0", UIMin = "0.0", UIMax = "4.0"))
     float DropletDetailSize = 1.0f;
+
+    float GetResolvedDropletStampSizeScale() const
+    {
+        return bOverrideDropletStampSize ? FMath::Clamp(DropletRadiusScale, 0.25f, 4.0f) : 1.0f;
+    }
 
 };
 
@@ -322,7 +331,7 @@ struct DWC_API FWetClothingLocalRenderProfile
     UPROPERTY(VisibleAnywhere, Category = "Wet Part Data Texture|Surface Texture")
     FSoftObjectPath SourceDropletMask;
 
-    /** Project-wide shared, array-compatible textures. Runtime never packs authored profile textures directly. */
+    /** Array-compatible authored textures retained as hard references for runtime Texture2DArray upload. */
     UPROPERTY(VisibleAnywhere, Category = "Wet Part Data Texture|Surface Texture")
     TObjectPtr<UTexture2D> NormalizedDropletNormal = nullptr;
 
@@ -377,9 +386,9 @@ struct DWC_API FWetClothingBakedWetPartData
     UPROPERTY(VisibleAnywhere, Category = "Wet Part Data Texture")
     int32 PaddingPixels = 4;
 
-    /** Resolution shared by every normalized Surface Water normal texture. */
+    /** Required resolution for every authored Surface Water texture uploaded to the runtime arrays. */
     UPROPERTY(VisibleAnywhere, Category = "Wet Part Data Texture|Surface Texture")
-    int32 SurfaceTextureResolution = 256;
+    int32 SurfaceTextureResolution = 512;
 
     /** Project-wide shared flat normal used as Texture2DArray slice 0. */
     UPROPERTY(VisibleAnywhere, Category = "Wet Part Data Texture|Surface Texture")

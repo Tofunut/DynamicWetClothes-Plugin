@@ -27,7 +27,6 @@
 #include "RenderingThread.h"
 #include "Rendering/SkeletalMeshRenderData.h"
 #include "SkeletalRenderPublic.h"
-#include "UObject/Package.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogDWCGPU, Log, All);
 
@@ -91,20 +90,7 @@ FWetnessProfileParameters ResolveRuntimeWetnessProfileParameters(
         if (const UWetnessProfile* SourceProfile =
                 Cast<UWetnessProfile>(SourceObject))
         {
-            if (const UPackage* SourcePackage = SourceProfile->GetOutermost();
-                SourcePackage != nullptr && SourcePackage->IsDirty())
-            {
-                UE_LOG(
-                    LogDWCGPU,
-                    Verbose,
-                    TEXT("DWCGPU: Wetness Profile '%s' has unsaved editor changes while initializing WCA '%s'. Using the WCA snapshot/fallback profile."),
-                    *AuthoredProfile->SourceProfile.ToString(),
-                    *GetNameSafe(&Asset));
-            }
-            else
-            {
-                return SourceProfile->GetParameters();
-            }
+            return SourceProfile->GetParameters();
         }
         else
         {

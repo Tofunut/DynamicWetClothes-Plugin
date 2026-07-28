@@ -5,16 +5,15 @@
 class UTexture2D;
 
 /**
- * Deterministic project-wide asset contract for normalized Surface Water textures.
+ * Surface Water Texture2DArray contract.
  *
- * The generated assets are shared by every WCA. A source texture therefore maps
- * to one normalized texture asset and one world-local Texture2DArray slice,
- * instead of producing a duplicate generated asset for each WCA.
+ * Authored 512 textures are uploaded directly. Other authored textures are duplicated
+ * and resized to 512 by Unreal's texture build pipeline in the shared folder.
  */
 namespace DWCSurfaceTextureSharedAsset
 {
-    constexpr int32 Resolution = 256;
-    constexpr int32 Version = 7;
+    constexpr int32 Resolution = 512;
+    constexpr int32 Version = 12;
 
     DWC_API const TCHAR* GetSharedFolder();
 

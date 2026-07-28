@@ -52,7 +52,10 @@ float DWC_VisibleSurfaceAmount(float4 State, float CurrentTimeSeconds)
     }
 
     const float Age = max(CurrentTimeSeconds - State.g, 0.0);
-    const float Fade = 1.0 - smoothstep(0.0, max(State.b, 0.01), Age);
+    const float Lifetime = max(State.b, 0.01);
+    const float FadeDuration = min(0.35, Lifetime * 0.15);
+    const float FadeStart = max(Lifetime - FadeDuration, 0.0);
+    const float Fade = 1.0 - smoothstep(FadeStart, Lifetime, Age);
     return State.r * Fade;
 }
 
@@ -69,14 +72,15 @@ void DWC_WriteDropletStamp(
     const float4 Existing = TargetSurface[Pixel];
     const float ExistingVisibleAmount =
         DWC_VisibleSurfaceAmount(Existing, StampTimeSeconds);
-    const float NewAmount = saturate(max(ExistingVisibleAmount, Brush * StampAmount));
+    const float StampRegion = smoothstep(0.0, 0.12, saturate(Brush));
+    const float NewAmount = saturate(max(ExistingVisibleAmount, StampRegion * StampAmount));
 
-    // Droplet A stores brush falloff for debug visualization.
+    // RGB stores only stamp state; authored mask/normal textures define the rendered droplet shape.
     TargetSurface[Pixel] = float4(
         NewAmount,
         StampTimeSeconds,
         StampLifetimeSeconds,
-        saturate(Brush));
+        0.0);
 }
 
 

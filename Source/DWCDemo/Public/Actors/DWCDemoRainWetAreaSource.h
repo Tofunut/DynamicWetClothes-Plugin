@@ -63,7 +63,7 @@ class DWCDEMO_API ADWCDemoRainWetAreaSource : public AActor
     UPROPERTY(EditAnywhere, Category = "DWC Demo|Rain Wet Area Source", meta = (ClampMin = "0.01"))
     float UpdateInterval = 0.1f;
 
-    UPROPERTY(EditAnywhere, Category = "DWC Demo|Rain Wet Area Source")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DWC Demo|Rain Wet Area Source", meta = (AllowPrivateAccess = "true"))
     bool bApplyWetArea = true;
 
     UPROPERTY(EditAnywhere, Category = "DWC Demo|Rain Wet Area Source", meta = (ClampMin = "1"))
@@ -96,4 +96,7 @@ class DWCDEMO_API ADWCDemoRainWetAreaSource : public AActor
     TMap<TWeakObjectPtr<UDynamicWetClothesComponent>, int32> ReceiverOverlapCounts;
     FTimerHandle                                             WetnessTimer;
     mutable double                                           LastDebugLogTime = -1000000.0;
+
+    public:
+
 };

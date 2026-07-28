@@ -1606,7 +1606,12 @@ void FDWCGPUBackend::DispatchSimulation(
 
         for (const FDWCResolvedSurfaceContact& Contact : Contacts)
         {
-            if (Contact.MaterialSlotIndex != Slot.MaterialSlotIndex || !BakedData.Triangles.IsValidIndex(Contact.TriangleID))
+            if (Contact.MaterialSlotIndex != Slot.MaterialSlotIndex)
+            {
+                continue;
+            }
+
+            if (!BakedData.Triangles.IsValidIndex(Contact.TriangleID))
             {
                 continue;
             }

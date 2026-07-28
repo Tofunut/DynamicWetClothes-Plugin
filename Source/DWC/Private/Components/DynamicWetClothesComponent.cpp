@@ -525,9 +525,9 @@ bool UDynamicWetClothesComponent::InitializeGPUBackend(FDWCWetMeshReceiverRuntim
     InitArgs.WetnessSettings = &WetnessSettings;
     InitArgs.WetMaterialInstances = &Receiver.RenderStage->WetMaterialInstances;
     InitArgs.LODIndex = UWetClothingAsset::RuntimeSimulationLODIndex;
-    InitArgs.SpreadRateScale = GPUSpreadRateScale;
-    InitArgs.DryRateScale = GPUDryRateScale;
-    InitArgs.GravityFlowStrengthScale = GPUGravityFlowStrengthScale;
+    InitArgs.SpreadRateScale = 1.0f;
+    InitArgs.DryRateScale = 1.0f;
+    InitArgs.GravityFlowStrengthScale = 1.0f;
     InitArgs.CapillaryImmediateAbsorptionFraction = GPUImmediateAbsorptionFraction;
     InitArgs.ReceiverGPUId = MakeDWCReceiverGPUId(Receiver.ReceiverId);
     InitArgs.bUseEightDirectionDiffusion =
@@ -1159,9 +1159,6 @@ void UDynamicWetClothesComponent::PostEditChangeProperty(FPropertyChangedEvent& 
         PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, WetClothingAssets) ||
         PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, SimulationMode) ||
         PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, GPUDiffusionNeighborMode) ||
-        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, GPUSpreadRateScale) ||
-        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, GPUDryRateScale) ||
-        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, GPUGravityFlowStrengthScale) ||
         PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, GPUImmediateAbsorptionFraction);
     const bool bRequiresMaterialRefresh =
         bRequiresRuntimeRebuild ||

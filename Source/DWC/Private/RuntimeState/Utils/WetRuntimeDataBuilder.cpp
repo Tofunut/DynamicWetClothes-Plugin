@@ -60,6 +60,7 @@ namespace
                     *GetNameSafe(OwnerForLogs));
             }
         }
+
 #endif
 
         return Asset.Derived.Inline.ResolvedWetnessProfileParameters.IsValidIndex(ProfileIndex)

@@ -369,7 +369,7 @@ namespace
             TEXT("Abs{%d,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g}"),
             Absorbed.bEnabled ? 1 : 0,
             Parameters.GetAbsorptionFraction(),
-            Parameters.GetAbsorptionRate(),
+            Parameters.GetAbsorptionMultiplier(),
             Parameters.GetSpreadRatePerSecond(),
             Parameters.GetDryRatePerSecond(),
             Parameters.GetGravityFlowStrength(),

@@ -68,25 +68,22 @@ struct DWC_API FSurfaceWaterProfileParameters
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet", meta = (ClampMin = "0.01", Units = "s"))
     float DropletLifetimeSeconds = 5.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet", meta = (ClampMin="0.0", ClampMax="256.0", DisplayName="Droplet Stamp Size"))
     float DropletRadiusPixels = 16.0f;
 
-
-    /** Multiplies all Surface Water rendering response after final droplet coverage is resolved. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rendering", meta=(ClampMin="0.0", ClampMax="1.0", DisplayName="Total Strength"))
-    float SurfaceWaterTotalStrength = 0.5f;
 
     /** Roughness reached by fully visible surface water. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rendering", meta=(ClampMin="0.0", ClampMax="1.0", DisplayName="Water Roughness"))
     float SurfaceWaterTargetRoughness = 0.02f;
 
-    /** Strength applied to the droplet normal. 1.0 is the authored texture strength. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rendering", meta=(ClampMin="0.0", ClampMax="3.0", DisplayName="Water Normal Strength"))
     float SurfaceWaterNormalStrength = 3.0f;
 
     /** Strength of the Surface Water roughness blend toward Wet Surface Roughness. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rendering", meta=(ClampMin="0.0", ClampMax="1.0", DisplayName="Roughness Blend"))
     float SurfaceWaterRoughnessBlend = 0.85f;
+
+    /** Overall Surface Water rendering strength after droplet coverage is resolved. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rendering", meta=(ClampMin="0.0", ClampMax="1.0", DisplayName="Total Strength"))
+    float SurfaceWaterTotalStrength = 0.5f;
 
     /** Specular reached by fully visible surface water. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rendering", meta=(ClampMin="0.0", ClampMax="1.0", DisplayName="Water Specular"))
@@ -107,6 +104,8 @@ struct DWC_API FWetnessProfileParameters
 {
     GENERATED_BODY()
 
+    static constexpr float AbsorptionMultiplierScale = 10.0f;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water Response", meta = (ShowOnlyInnerProperties))
     FAbsorbedWetnessProfileParameters AbsorbedWetness;
 
@@ -125,7 +124,7 @@ struct DWC_API FWetnessProfileParameters
 
     bool SupportsAbsorbedWetness() const
     {
-        return GetAbsorptionFraction() > 0.0f && GetAbsorptionRate() > 0.0f;
+        return GetAbsorptionFraction() > 0.0f;
     }
 
     bool SupportsSurfaceWater() const
@@ -135,7 +134,7 @@ struct DWC_API FWetnessProfileParameters
 
     float GetAbsorptionMultiplier() const
     {
-        return GetAbsorptionFraction() * GetAbsorptionRate();
+        return GetAbsorptionFraction() * AbsorptionMultiplierScale;
     }
 
     float GetRejectedWaterFraction() const { return 1.0f - GetAbsorptionFraction(); }

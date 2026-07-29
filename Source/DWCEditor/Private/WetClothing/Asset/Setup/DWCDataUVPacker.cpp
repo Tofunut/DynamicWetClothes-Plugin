@@ -176,6 +176,54 @@ namespace DWCDataUVPackerPrivate
         return true;
     }
 
+    static void PackRecordsInGrid(
+        TArray<FPackingRecord>& Records,
+        const FVector2D& AtlasMin,
+        const FVector2D& AtlasSize,
+        const double IslandPaddingUV)
+    {
+        if (Records.IsEmpty())
+        {
+            return;
+        }
+
+        Records.Sort(
+            [](const FPackingRecord& A, const FPackingRecord& B)
+            {
+                const double AreaA = A.DesiredSize.X * A.DesiredSize.Y;
+                const double AreaB = B.DesiredSize.X * B.DesiredSize.Y;
+                return !FMath::IsNearlyEqual(AreaA, AreaB) ? AreaA > AreaB : A.ChartIndex < B.ChartIndex;
+            });
+
+        const int32 ColumnCount = FMath::CeilToInt(FMath::Sqrt(static_cast<double>(Records.Num())));
+        const int32 RowCount = FMath::DivideAndRoundUp(Records.Num(), ColumnCount);
+        const FVector2D CellSize(
+            AtlasSize.X / static_cast<double>(ColumnCount),
+            AtlasSize.Y / static_cast<double>(RowCount));
+        const double CellPadding = FMath::Min(
+            IslandPaddingUV,
+            FMath::Max(FMath::Min(CellSize.X, CellSize.Y) * 0.25, 0.0));
+        const FVector2D ContentCellSize(
+            FMath::Max(CellSize.X - CellPadding * 2.0, 1.0e-7),
+            FMath::Max(CellSize.Y - CellPadding * 2.0, 1.0e-7));
+
+        for (int32 RecordIndex = 0; RecordIndex < Records.Num(); ++RecordIndex)
+        {
+            FPackingRecord& Record = Records[RecordIndex];
+            const int32 ColumnIndex = RecordIndex % ColumnCount;
+            const int32 RowIndex = RecordIndex / ColumnCount;
+            const FVector2D CellMin = AtlasMin + FVector2D(
+                static_cast<double>(ColumnIndex) * CellSize.X,
+                static_cast<double>(RowIndex) * CellSize.Y);
+            const double UniformScale = FMath::Min(
+                ContentCellSize.X / FMath::Max(Record.DesiredSize.X, 1.0e-7),
+                ContentCellSize.Y / FMath::Max(Record.DesiredSize.Y, 1.0e-7));
+            Record.PackedSize = Record.DesiredSize * UniformScale;
+            Record.PackedMin = CellMin + FVector2D(CellPadding, CellPadding) +
+                (ContentCellSize - Record.PackedSize) * 0.5;
+        }
+    }
+
     static bool PackRecordsWithMaximumScale(
         TArray<FPackingRecord>& Records,
         const FVector2D& AtlasMin,
@@ -354,11 +402,27 @@ void FDWCDataUVPacker::Pack(
                 FMath::Sqrt(TargetArea / AspectRatio));
         }
 
-        bool bPacked = DWCDataUVPackerPrivate::PackRecordsWithMaximumScale(
-            Records,
-            AtlasMin,
-            AtlasSize,
-            IslandPaddingUV);
+        constexpr int32 MaxRectsChartLimit = 256;
+        bool bPacked = true;
+        if (Records.Num() >= MaxRectsChartLimit)
+        {
+            // MaxRects performs free-rectangle pruning for every record and every scale
+            // retry. A pathological overlap split can create thousands of charts; use a
+            // deterministic bounded path before that work becomes superlinear.
+            DWCDataUVPackerPrivate::PackRecordsInGrid(
+                Records,
+                AtlasMin,
+                AtlasSize,
+                IslandPaddingUV);
+        }
+        else
+        {
+            bPacked = DWCDataUVPackerPrivate::PackRecordsWithMaximumScale(
+                Records,
+                AtlasMin,
+                AtlasSize,
+                IslandPaddingUV);
+        }
 
         if (!bPacked && PaddingUV > 0.0)
         {

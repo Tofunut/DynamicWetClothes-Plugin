@@ -3,6 +3,14 @@
 #include "WetClothing/Foundation/UV/DWCUVGeometry.h"
 #include "WetClothing/Foundation/UV/DWCUVIslandBuilder.h"
 
+namespace DWCDataUVChartBuilderPrivate
+{
+    // Candidate pairs are materialized as a hash set by the exact overlap path. Keep
+    // that work bounded; dense stacked UV shells otherwise grow quadratically.
+    static constexpr int64 MaxSpatialCellInsertionsPerIsland = 1000000;
+    static constexpr int64 MaxCandidatePairInsertionsPerIsland = 1000000;
+}
+
 void FDWCDataUVChartBuilder::BuildOriginalUVIslands(
     const TArray<FDWCDataUVTriangle>& Triangles,
     const TMap<int32, TArray<int32>>& TriangleIndicesByMaterialSlot,
@@ -69,7 +77,7 @@ void FDWCDataUVChartBuilder::BuildOriginalUVIslandsForSlot(
     }
 }
 
-void FDWCDataUVChartBuilder::BuildOverlapConflictGraph(
+bool FDWCDataUVChartBuilder::BuildOverlapConflictGraph(
     const TArray<FDWCDataUVTriangle>& Triangles,
     const FDWCDataUVChart& OriginalUVIsland,
     TArray<TSet<int32>>& OutConflicts,
@@ -80,7 +88,7 @@ void FDWCDataUVChartBuilder::BuildOverlapConflictGraph(
     OutOverlapPairCount = 0;
     if (TriangleCount < 2)
     {
-        return;
+        return true;
     }
 
     FBox2D Bounds(ForceInit);
@@ -114,6 +122,7 @@ void FDWCDataUVChartBuilder::BuildOverlapConflictGraph(
     const FVector2D CellSize = BoundsSize / static_cast<double>(GridDimension);
 
     TMap<int32, TArray<int32>> CellToLocalTriangles;
+    int64 SpatialCellInsertionCount = 0;
     for (int32 LocalIndex = 0; LocalIndex < TriangleCount; ++LocalIndex)
     {
         const FBox2D& TriangleBox = TriangleBounds[LocalIndex];
@@ -138,6 +147,16 @@ void FDWCDataUVChartBuilder::BuildOverlapConflictGraph(
             FMath::FloorToInt((TriangleBox.Max.Y - Bounds.Min.Y) / CellSize.Y),
             0,
             GridDimension - 1);
+        SpatialCellInsertionCount +=
+            static_cast<int64>(MaxCellX - MinCellX + 1) *
+            static_cast<int64>(MaxCellY - MinCellY + 1);
+        if (SpatialCellInsertionCount >
+            DWCDataUVChartBuilderPrivate::MaxSpatialCellInsertionsPerIsland)
+        {
+            OutConflicts.Reset();
+            OutOverlapPairCount = 0;
+            return false;
+        }
 
         for (int32 CellY = MinCellY; CellY <= MaxCellY; ++CellY)
         {
@@ -149,9 +168,22 @@ void FDWCDataUVChartBuilder::BuildOverlapConflictGraph(
     }
 
     TSet<uint64> CandidatePairs;
+    int64 CandidatePairInsertionCount = 0;
     for (const TPair<int32, TArray<int32>>& CellPair : CellToLocalTriangles)
     {
         const TArray<int32>& LocalTriangles = CellPair.Value;
+        const int64 CellTriangleCount = LocalTriangles.Num();
+        const int64 CellPairInsertionCount =
+            CellTriangleCount > 1 ? CellTriangleCount * (CellTriangleCount - 1) / 2 : 0;
+        CandidatePairInsertionCount += CellPairInsertionCount;
+        if (CandidatePairInsertionCount >
+            DWCDataUVChartBuilderPrivate::MaxCandidatePairInsertionsPerIsland)
+        {
+            OutConflicts.Reset();
+            OutOverlapPairCount = 0;
+            return false;
+        }
+
         for (int32 AListIndex = 0; AListIndex < LocalTriangles.Num(); ++AListIndex)
         {
             for (int32 BListIndex = AListIndex + 1; BListIndex < LocalTriangles.Num(); ++BListIndex)
@@ -192,6 +224,8 @@ void FDWCDataUVChartBuilder::BuildOverlapConflictGraph(
             ++OutOverlapPairCount;
         }
     }
+
+    return true;
 }
 
 void FDWCDataUVChartBuilder::BuildNonOverlappingCharts(
@@ -199,21 +233,40 @@ void FDWCDataUVChartBuilder::BuildNonOverlappingCharts(
     const TArray<FDWCDataUVChart>& OriginalUVIslands,
     TArray<FDWCDataUVChart>& OutCharts,
     int32& OutSplitOriginalUVIslandCount,
-    int32& OutOverlapPairCount)
+    int32& OutOverlapPairCount,
+    int32& OutCandidateBudgetFallbackChartCount)
 {
     OutCharts.Reset();
     OutSplitOriginalUVIslandCount = 0;
     OutOverlapPairCount = 0;
+    OutCandidateBudgetFallbackChartCount = 0;
 
     for (const FDWCDataUVChart& OriginalUVIsland : OriginalUVIslands)
     {
         TArray<TSet<int32>> Conflicts;
         int32 IslandOverlapPairCount = 0;
-        BuildOverlapConflictGraph(
+        const bool bConflictGraphWithinBudget = BuildOverlapConflictGraph(
             Triangles,
             OriginalUVIsland,
             Conflicts,
             IslandOverlapPairCount);
+        if (!bConflictGraphWithinBudget)
+        {
+            ++OutSplitOriginalUVIslandCount;
+            for (const int32 TriangleIndex : OriginalUVIsland.TriangleIndices)
+            {
+                if (!Triangles.IsValidIndex(TriangleIndex))
+                {
+                    continue;
+                }
+
+                FDWCDataUVChart& TriangleChart = OutCharts.AddDefaulted_GetRef();
+                TriangleChart.MaterialSlotIndex = OriginalUVIsland.MaterialSlotIndex;
+                TriangleChart.TriangleIndices.Add(TriangleIndex);
+                ++OutCandidateBudgetFallbackChartCount;
+            }
+            continue;
+        }
         OutOverlapPairCount += IslandOverlapPairCount;
 
         if (IslandOverlapPairCount == 0)

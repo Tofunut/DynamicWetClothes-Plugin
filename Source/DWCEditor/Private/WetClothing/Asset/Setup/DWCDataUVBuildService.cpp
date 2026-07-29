@@ -161,10 +161,13 @@ FDWCDataUVBuildResult FDWCDataUVBuildService::Generate(
 
     FDWCPreparedMeshEditTransaction MeshEditTransaction(PreparedMesh);
     FString TransactionError;
-    if (!MeshEditTransaction.CaptureEditableLOD(CanonicalDataUVLODIndex, &TransactionError))
+    for (const int32 LODIndex : PayloadLODIndices)
     {
-        SetFailure(Result, TransactionError);
-        return Result;
+        if (!MeshEditTransaction.CaptureEditableLOD(LODIndex, &TransactionError))
+        {
+            SetFailure(Result, TransactionError);
+            return Result;
+        }
     }
 
     for (const int32 LODIndex : PayloadLODIndices)
@@ -191,6 +194,12 @@ FDWCDataUVBuildResult FDWCDataUVBuildService::Generate(
     int32 SplitOriginalUVIslandCount = 0;
     int32 SelfOverlapPairCount = 0;
     int32 TriangleFallbackChartCount = 0;
+    int32 ChartBoundarySplitVertexInstanceCount = 0;
+    double TriangleReadMilliseconds = 0.0;
+    double OriginalIslandBuildMilliseconds = 0.0;
+    double ChartBuildMilliseconds = 0.0;
+    double SeamSplitMilliseconds = 0.0;
+    double PackAndValidateMilliseconds = 0.0;
     bool bGeneratedWithWarnings = false;
 
     int32 DataUVChannelIndex = Asset.GetDWCDataUVChannelIndex();
@@ -263,12 +272,6 @@ FDWCDataUVBuildResult FDWCDataUVBuildService::Generate(
     }
     OriginalUVTopologies.Add(MoveTemp(OriginalUVTopology));
 
-    bGeneratedWithWarnings = bGeneratedWithWarnings || CanonicalUVResult.HasWarnings();
-    ExcludedTriangleCount += CanonicalUVResult.DegenerateSourceUVTriangleCount + CanonicalUVResult.InvalidSourceUVTriangleCount;
-    SplitOriginalUVIslandCount += CanonicalUVResult.SplitOriginalUVIslandCount;
-    SelfOverlapPairCount += CanonicalUVResult.SelfOverlapPairCount;
-    TriangleFallbackChartCount += CanonicalUVResult.TriangleFallbackChartCount;
-
     for (const int32 LODIndex : PayloadLODIndices)
     {
         CurrentRenderData = PreparedMesh->GetResourceForRendering();
@@ -287,17 +290,19 @@ FDWCDataUVBuildResult FDWCDataUVBuildService::Generate(
         FDWCDataUVGenerationResult UVResult = CanonicalUVResult;
         if (LODIndex != CanonicalDataUVLODIndex)
         {
-            UVResult = FDWCDataUVGenerator::TransferFromSourceLOD(
+            // A Data UV chart boundary is render topology, not just a UV value. Generate
+            // each target LOD so it receives its own VertexInstance seams.
+            UVResult = FDWCDataUVGenerator::GenerateForSkeletalMesh(
                 PreparedMesh,
-                CanonicalDataUVLODIndex,
                 LODIndex,
+                Asset.GetOriginalUVChannelIndex(),
                 DataUVChannelIndex,
                 true,
                 INDEX_NONE);
             if (!UVResult.bSucceeded)
             {
                 SetFailure(Result, FString::Printf(
-                    TEXT("LOD%d DWC Data UV transfer failed: %s"),
+                    TEXT("LOD%d DWC Data UV generation failed: %s"),
                     LODIndex,
                     *UVResult.Message));
                 return Result;
@@ -305,7 +310,7 @@ FDWCDataUVBuildResult FDWCDataUVBuildService::Generate(
             if (UVResult.UVChannelIndex != DataUVChannelIndex)
             {
                 SetFailure(Result, FString::Printf(
-                    TEXT("LOD%d transferred DWC Data UV channel %d, but this asset requires UV%d for every generated LOD."),
+                    TEXT("LOD%d generated DWC Data UV channel %d, but this asset requires UV%d for every generated LOD."),
                     LODIndex,
                     UVResult.UVChannelIndex,
                     DataUVChannelIndex));
@@ -337,6 +342,12 @@ FDWCDataUVBuildResult FDWCDataUVBuildService::Generate(
         SplitOriginalUVIslandCount += UVResult.SplitOriginalUVIslandCount;
         SelfOverlapPairCount += UVResult.SelfOverlapPairCount;
         TriangleFallbackChartCount += UVResult.TriangleFallbackChartCount;
+        ChartBoundarySplitVertexInstanceCount += UVResult.ChartBoundarySplitVertexInstanceCount;
+        TriangleReadMilliseconds += UVResult.TriangleReadMilliseconds;
+        OriginalIslandBuildMilliseconds += UVResult.OriginalIslandBuildMilliseconds;
+        ChartBuildMilliseconds += UVResult.ChartBuildMilliseconds;
+        SeamSplitMilliseconds += UVResult.SeamSplitMilliseconds;
+        PackAndValidateMilliseconds += UVResult.PackAndValidateMilliseconds;
     }
 
     if (DataUVMetadata.IsEmpty())
@@ -365,12 +376,21 @@ FDWCDataUVBuildResult FDWCDataUVBuildService::Generate(
     Result.SplitOriginalUVIslandCount = SplitOriginalUVIslandCount;
     Result.SelfOverlapPairCount = SelfOverlapPairCount;
     Result.TriangleFallbackChartCount = TriangleFallbackChartCount;
+    Result.ChartBoundarySplitVertexInstanceCount = ChartBoundarySplitVertexInstanceCount;
     Result.Message = FString::Printf(
-        TEXT("Generated canonical LOD0 DWC Data UV channel %d and transferred it to LOD%d-LOD%d of the DWC Prepared Skeletal Mesh with %d LOD0 Original UV island record(s)."),
+        TEXT("Generated DWC Data UV channel %d for LOD%d-LOD%d of the DWC Prepared Skeletal Mesh, creating %d chart-boundary VertexInstance seam(s), with %d LOD0 Original UV island record(s)."),
         DataUVChannelIndex,
         FirstLODIndex,
         LastLODIndex,
+        Result.ChartBoundarySplitVertexInstanceCount,
         Result.OriginalUVIslandCount);
+    Result.Message += FString::Printf(
+        TEXT("\nTiming across generated LODs (ms): triangle read %.1f, Original UV islands %.1f, overlap/chart split %.1f, seam split %.1f, pack/validate %.1f."),
+        TriangleReadMilliseconds,
+        OriginalIslandBuildMilliseconds,
+        ChartBuildMilliseconds,
+        SeamSplitMilliseconds,
+        PackAndValidateMilliseconds);
 
     if (Result.bGeneratedWithWarnings)
     {

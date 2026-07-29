@@ -17,7 +17,8 @@ public:
         const TArray<FDWCDataUVChart>& OriginalUVIslands,
         TArray<FDWCDataUVChart>& OutCharts,
         int32& OutSplitOriginalUVIslandCount,
-        int32& OutOverlapPairCount);
+        int32& OutOverlapPairCount,
+        int32& OutCandidateBudgetFallbackChartCount);
 
     static void BuildTriangleFallbackCharts(
         const TArray<FDWCDataUVTriangle>& Triangles,
@@ -32,7 +33,7 @@ private:
         const TArray<int32>& SlotTriangleIndices,
         TArray<FDWCDataUVChart>& OutOriginalUVIslands);
 
-    static void BuildOverlapConflictGraph(
+    static bool BuildOverlapConflictGraph(
         const TArray<FDWCDataUVTriangle>& Triangles,
         const FDWCDataUVChart& OriginalUVIsland,
         TArray<TSet<int32>>& OutConflicts,

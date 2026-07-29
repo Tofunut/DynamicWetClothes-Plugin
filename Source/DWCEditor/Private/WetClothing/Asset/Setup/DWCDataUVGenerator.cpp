@@ -3,10 +3,12 @@
 #include "DWCDataUVChartBuilder.h"
 #include "DWCDataUVGenerationTypes.h"
 #include "DWCDataUVPacker.h"
+#include "DWCDataUVSeamSplitter.h"
 #include "DWCDataUVValidator.h"
 
 #include "Algo/Sort.h"
 #include "Engine/SkeletalMesh.h"
+#include "HAL/PlatformTime.h"
 #include "MeshDescription.h"
 #include "RenderResource.h"
 #include "RenderingThread.h"
@@ -529,6 +531,7 @@ FDWCDataUVGenerationResult FDWCDataUVGenerator::GenerateForSkeletalMesh(
     using namespace DWCDataUVGeneratorInternal;
 
     FDWCDataUVGenerationResult Result;
+    const double GenerationStartTime = FPlatformTime::Seconds();
 
     if (SkeletalMesh == nullptr)
     {
@@ -546,7 +549,7 @@ FDWCDataUVGenerationResult FDWCDataUVGenerator::GenerateForSkeletalMesh(
     SkeletalMesh->Modify();
 
     FSkeletalMeshAttributes Attributes(*MeshDescription);
-    Attributes.Register();
+    Attributes.Register(true);
 
     auto VertexPositions = Attributes.GetVertexPositions();
     auto VertexInstanceUVs = Attributes.GetVertexInstanceUVs();
@@ -680,12 +683,14 @@ FDWCDataUVGenerationResult FDWCDataUVGenerator::GenerateForSkeletalMesh(
         }
         return Result;
     }
+    const double TriangleReadEndTime = FPlatformTime::Seconds();
 
     TArray<FDWCDataUVChart> OriginalUVIslands;
     FDWCDataUVChartBuilder::BuildOriginalUVIslands(
         Triangles,
         SlotToTriangleIndices,
         OriginalUVIslands);
+    const double OriginalIslandBuildEndTime = FPlatformTime::Seconds();
 
     if (OriginalUVIslands.Num() == 0)
     {
@@ -701,13 +706,31 @@ FDWCDataUVGenerationResult FDWCDataUVGenerator::GenerateForSkeletalMesh(
         OriginalUVIslands,
         DataUVCharts,
         Result.SplitOriginalUVIslandCount,
-        Result.SelfOverlapPairCount);
+        Result.SelfOverlapPairCount,
+        Result.TriangleFallbackChartCount);
+    const double ChartBuildEndTime = FPlatformTime::Seconds();
 
     if (DataUVCharts.Num() == 0)
     {
         SetFailure(Result, TEXT("Original-UV islands were found, but no non-overlapping Data UV charts could be generated."));
         return Result;
     }
+
+    // A packed chart needs its own render corners. Without this split, a shared
+    // VertexInstance receives the UV of the last chart that writes to it.
+    const FDWCDataUVSeamSplitResult SeamSplitResult = FDWCDataUVSeamSplitter::SplitChartBoundaries(
+        *MeshDescription,
+        Triangles,
+        DataUVCharts);
+    if (!SeamSplitResult.bSucceeded)
+    {
+        SetFailure(Result, FString::Printf(
+            TEXT("DWC Data UV chart-boundary seam generation failed: %s"),
+            *SeamSplitResult.Message));
+        return Result;
+    }
+    Result.ChartBoundarySplitVertexInstanceCount = SeamSplitResult.SplitVertexInstanceCount;
+    const double SeamSplitEndTime = FPlatformTime::Seconds();
 
     TMap<int32, FVector2f> PackedUVByVertexInstance;
     FDWCDataUVPacker::Pack(Triangles, DataUVCharts, InternalPackingResolution, InternalPaddingPixels, PackedUVByVertexInstance);
@@ -717,13 +740,27 @@ FDWCDataUVGenerationResult FDWCDataUVGenerator::GenerateForSkeletalMesh(
     if (!FDWCDataUVValidator::Validate(Triangles, DataUVCharts, PackedUVByVertexInstance, ProblemMaterialSlots, PackedValidationError))
     {
         TArray<FDWCDataUVChart> FallbackCharts;
+        int32 ValidationFallbackChartCount = 0;
         FDWCDataUVChartBuilder::BuildTriangleFallbackCharts(
             Triangles,
             DataUVCharts,
             ProblemMaterialSlots,
             FallbackCharts,
-            Result.TriangleFallbackChartCount);
+            ValidationFallbackChartCount);
+        Result.TriangleFallbackChartCount += ValidationFallbackChartCount;
         DataUVCharts = MoveTemp(FallbackCharts);
+
+        const FDWCDataUVSeamSplitResult FallbackSeamSplitResult =
+            FDWCDataUVSeamSplitter::SplitChartBoundaries(*MeshDescription, Triangles, DataUVCharts);
+        if (!FallbackSeamSplitResult.bSucceeded)
+        {
+            SetFailure(Result, FString::Printf(
+                TEXT("DWC Data UV fallback seam generation failed: %s"),
+                *FallbackSeamSplitResult.Message));
+            return Result;
+        }
+        Result.ChartBoundarySplitVertexInstanceCount +=
+            FallbackSeamSplitResult.SplitVertexInstanceCount;
 
         FDWCDataUVPacker::Pack(Triangles, DataUVCharts, InternalPackingResolution, InternalPaddingPixels, PackedUVByVertexInstance);
         ProblemMaterialSlots.Reset();
@@ -736,13 +773,22 @@ FDWCDataUVGenerationResult FDWCDataUVGenerator::GenerateForSkeletalMesh(
             return Result;
         }
     }
+    const double PackAndValidateEndTime = FPlatformTime::Seconds();
+
+    // Topology edits may reallocate MeshDescription attribute storage. Reacquire the
+    // writable UV reference and reassert the destination channel before committing.
+    auto WritableVertexInstanceUVs = Attributes.GetVertexInstanceUVs();
+    if (WritableVertexInstanceUVs.GetNumChannels() <= NewUVChannelIndex)
+    {
+        WritableVertexInstanceUVs.SetNumChannels(NewUVChannelIndex + 1);
+    }
 
     for (const TPair<int32, FVector2f>& Pair : PackedUVByVertexInstance)
     {
         const FVertexInstanceID VertexInstanceID(Pair.Key);
         if (IsValidElementID(VertexInstanceID))
         {
-            VertexInstanceUVs.Set(VertexInstanceID, NewUVChannelIndex, Pair.Value);
+            WritableVertexInstanceUVs.Set(VertexInstanceID, NewUVChannelIndex, Pair.Value);
         }
     }
 
@@ -758,7 +804,7 @@ FDWCDataUVGenerationResult FDWCDataUVGenerator::GenerateForSkeletalMesh(
         const FVertexInstanceID VertexInstanceID(ExcludedVertexInstanceValue);
         if (IsValidElementID(VertexInstanceID))
         {
-            VertexInstanceUVs.Set(VertexInstanceID, NewUVChannelIndex, FVector2f(0.0f, 0.0f));
+            WritableVertexInstanceUVs.Set(VertexInstanceID, NewUVChannelIndex, FVector2f(0.0f, 0.0f));
         }
     }
 
@@ -794,10 +840,11 @@ FDWCDataUVGenerationResult FDWCDataUVGenerator::GenerateForSkeletalMesh(
     else
     {
         Result.Message = FString::Printf(
-            TEXT("Created DWC Data UV channel %d and generated %s with %d packed Data UV chart(s)."),
+            TEXT("Created DWC Data UV channel %d and generated %s with %d packed Data UV chart(s), creating %d chart-boundary VertexInstance seam(s)."),
             NewUVChannelIndex,
             *TargetLabel,
-            DataUVCharts.Num());
+            DataUVCharts.Num(),
+            Result.ChartBoundarySplitVertexInstanceCount);
     }
 
     if (Result.HasWarnings())
@@ -810,6 +857,19 @@ FDWCDataUVGenerationResult FDWCDataUVGenerator::GenerateForSkeletalMesh(
             Result.SelfOverlapPairCount,
             Result.TriangleFallbackChartCount);
     }
+
+    Result.TriangleReadMilliseconds = (TriangleReadEndTime - GenerationStartTime) * 1000.0;
+    Result.OriginalIslandBuildMilliseconds = (OriginalIslandBuildEndTime - TriangleReadEndTime) * 1000.0;
+    Result.ChartBuildMilliseconds = (ChartBuildEndTime - OriginalIslandBuildEndTime) * 1000.0;
+    Result.SeamSplitMilliseconds = (SeamSplitEndTime - ChartBuildEndTime) * 1000.0;
+    Result.PackAndValidateMilliseconds = (PackAndValidateEndTime - SeamSplitEndTime) * 1000.0;
+    Result.Message += FString::Printf(
+        TEXT(" Timing (ms): triangle read %.1f, Original UV islands %.1f, overlap/chart split %.1f, seam split %.1f, pack/validate %.1f."),
+        Result.TriangleReadMilliseconds,
+        Result.OriginalIslandBuildMilliseconds,
+        Result.ChartBuildMilliseconds,
+        Result.SeamSplitMilliseconds,
+        Result.PackAndValidateMilliseconds);
 
     return Result;
 }

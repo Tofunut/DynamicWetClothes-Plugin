@@ -8,6 +8,7 @@ namespace DWCDataUVValidatorPrivate
     {
         int32 SourceTriangleIndex = INDEX_NONE;
         int32 MaterialSlotIndex = INDEX_NONE;
+        int32 ChartIndex = INDEX_NONE;
         FVector2D UVs[3] = { FVector2D::ZeroVector, FVector2D::ZeroVector, FVector2D::ZeroVector };
         FBox2D Bounds = FBox2D(ForceInit);
     };
@@ -26,11 +27,24 @@ bool FDWCDataUVValidator::Validate(
     OutError.Reset();
 
     TMap<int32, TSet<int32>> TriangleIndicesByMaterial;
-    for (const FDWCDataUVChart& Chart : Charts)
+    TMap<int32, int32> ChartIndexByTriangle;
+    for (int32 ChartIndex = 0; ChartIndex < Charts.Num(); ++ChartIndex)
     {
+        const FDWCDataUVChart& Chart = Charts[ChartIndex];
         TSet<int32>& TriangleSet = TriangleIndicesByMaterial.FindOrAdd(Chart.MaterialSlotIndex);
         for (const int32 TriangleIndex : Chart.TriangleIndices)
         {
+            if (const int32* ExistingChartIndex = ChartIndexByTriangle.Find(TriangleIndex))
+            {
+                OutProblemMaterialSlots.Add(Chart.MaterialSlotIndex);
+                OutError = FString::Printf(
+                    TEXT("Generated DWC UV assigns triangle %d to multiple charts (%d and %d)."),
+                    TriangleIndex,
+                    *ExistingChartIndex,
+                    ChartIndex);
+                continue;
+            }
+            ChartIndexByTriangle.Add(TriangleIndex, ChartIndex);
             TriangleSet.Add(TriangleIndex);
         }
     }
@@ -52,6 +66,7 @@ bool FDWCDataUVValidator::Validate(
             FPackedTriangleRecord PackedTriangle;
             PackedTriangle.SourceTriangleIndex = TriangleIndex;
             PackedTriangle.MaterialSlotIndex = MaterialPair.Key;
+            PackedTriangle.ChartIndex = ChartIndexByTriangle.FindRef(TriangleIndex);
             PackedTriangle.Bounds = FBox2D(ForceInit);
 
             bool bHasAllCorners = true;
@@ -132,11 +147,32 @@ bool FDWCDataUVValidator::Validate(
         for (const TPair<int32, TArray<int32>>& CellPair : CellToTriangleIndices)
         {
             const TArray<int32>& LocalTriangles = CellPair.Value;
-            for (int32 AListIndex = 0; AListIndex < LocalTriangles.Num(); ++AListIndex)
+            TMap<int32, TArray<int32>> TriangleIndicesByChart;
+            for (const int32 LocalTriangleIndex : LocalTriangles)
             {
-                for (int32 BListIndex = AListIndex + 1; BListIndex < LocalTriangles.Num(); ++BListIndex)
+                TriangleIndicesByChart.FindOrAdd(PackedTriangles[LocalTriangleIndex].ChartIndex).Add(LocalTriangleIndex);
+            }
+
+            if (TriangleIndicesByChart.Num() < 2)
+            {
+                continue;
+            }
+
+            TArray<int32> ChartIndices;
+            TriangleIndicesByChart.GetKeys(ChartIndices);
+            for (int32 ChartAListIndex = 0; ChartAListIndex < ChartIndices.Num(); ++ChartAListIndex)
+            {
+                const TArray<int32>& ChartATriangles = TriangleIndicesByChart.FindChecked(ChartIndices[ChartAListIndex]);
+                for (int32 ChartBListIndex = ChartAListIndex + 1; ChartBListIndex < ChartIndices.Num(); ++ChartBListIndex)
                 {
-                    CandidatePairs.Add(FDWCUVGeometry::MakeTrianglePairKey(LocalTriangles[AListIndex], LocalTriangles[BListIndex]));
+                    const TArray<int32>& ChartBTriangles = TriangleIndicesByChart.FindChecked(ChartIndices[ChartBListIndex]);
+                    for (const int32 LocalA : ChartATriangles)
+                    {
+                        for (const int32 LocalB : ChartBTriangles)
+                        {
+                            CandidatePairs.Add(FDWCUVGeometry::MakeTrianglePairKey(LocalA, LocalB));
+                        }
+                    }
                 }
             }
         }

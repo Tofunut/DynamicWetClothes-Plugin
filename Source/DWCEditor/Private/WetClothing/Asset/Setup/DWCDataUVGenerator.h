@@ -21,7 +21,14 @@ struct FDWCDataUVGenerationResult
     int32 DegenerateSourceUVTriangleCount = 0;
     int32 InvalidSourceUVTriangleCount = 0;
     int32 TriangleFallbackChartCount = 0;
+    /** VertexInstances duplicated to make non-overlapping Data UV chart boundaries real seams. */
+    int32 ChartBoundarySplitVertexInstanceCount = 0;
     int32 RenderVertexCount = 0;
+    double TriangleReadMilliseconds = 0.0;
+    double OriginalIslandBuildMilliseconds = 0.0;
+    double ChartBuildMilliseconds = 0.0;
+    double SeamSplitMilliseconds = 0.0;
+    double PackAndValidateMilliseconds = 0.0;
 
     /** 3D degenerate triangles are excluded automatically and are informational only. */
     int32 GetWarningCount() const

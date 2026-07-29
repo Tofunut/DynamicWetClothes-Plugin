@@ -51,6 +51,12 @@ static TAutoConsoleVariable<int32> CVarDWCGPUBinnedAbsorption(
     TEXT("Use tile-binned GPU absorption for large positive wetness input batches. 0 disables the experimental path."),
     ECVF_Default);
 
+static TAutoConsoleVariable<float> CVarDWCGPUWetAreaStampRadiusPixels(
+    TEXT("r.DWC.GPU.WetAreaStampRadiusPixels"),
+    3.0f,
+    TEXT("Circular Data-UV stamp radius, in wetness-map texels, for GPU WetArea samples."),
+    ECVF_Default);
+
 uint32 FloatToBits(const float Value)
 {
     uint32 Bits = 0;
@@ -299,6 +305,78 @@ bool BuildSurfaceStampDispatch(
     return OutDispatch.DispatchSize.X > 0 && OutDispatch.DispatchSize.Y > 0;
 }
 
+bool BuildAbsorptionStampDispatch(
+    const FDWCResolvedSurfaceContact& Contact,
+    const FDWCGPUBakedTriangle& Triangle,
+    const float RadiusPixels,
+    const int32 Resolution,
+    FTriangleAbsorptionDispatch& OutDispatch)
+{
+    if (Resolution <= 0 || Contact.ContactUV.ContainsNaN() ||
+        !FMath::IsFinite(Contact.ContactUV.X) || !FMath::IsFinite(Contact.ContactUV.Y))
+    {
+        return false;
+    }
+
+    const float SafeRadiusPixels = FMath::Max(0.5f, RadiusPixels);
+    const FVector2f ClampedUV(
+        FMath::Clamp(Contact.ContactUV.X, 0.0f, 1.0f),
+        FMath::Clamp(Contact.ContactUV.Y, 0.0f, 1.0f));
+    const FIntPoint CenterTexel(
+        FMath::Clamp(FMath::FloorToInt(ClampedUV.X * Resolution), 0, Resolution - 1),
+        FMath::Clamp(FMath::FloorToInt(ClampedUV.Y * Resolution), 0, Resolution - 1));
+    const FVector2f CenterPixels(
+        static_cast<float>(CenterTexel.X) + 0.5f,
+        static_cast<float>(CenterTexel.Y) + 0.5f);
+
+    const int32 MinX = FMath::Clamp(
+        FMath::FloorToInt(CenterPixels.X - SafeRadiusPixels - 1.0f),
+        0,
+        Resolution - 1);
+    const int32 MinY = FMath::Clamp(
+        FMath::FloorToInt(CenterPixels.Y - SafeRadiusPixels - 1.0f),
+        0,
+        Resolution - 1);
+    const int32 MaxX = FMath::Clamp(
+        FMath::CeilToInt(CenterPixels.X + SafeRadiusPixels + 1.0f),
+        0,
+        Resolution - 1);
+    const int32 MaxY = FMath::Clamp(
+        FMath::CeilToInt(CenterPixels.Y + SafeRadiusPixels + 1.0f),
+        0,
+        Resolution - 1);
+    if (MaxX < MinX || MaxY < MinY)
+    {
+        return false;
+    }
+
+    const float InverseResolution = 1.0f / static_cast<float>(Resolution);
+    OutDispatch.DispatchMin = FIntPoint(MinX, MinY);
+    OutDispatch.DispatchSize = FIntPoint(MaxX - MinX + 1, MaxY - MinY + 1);
+    OutDispatch.UV01 = FVector4f(
+        CenterPixels.X * InverseResolution,
+        CenterPixels.Y * InverseResolution,
+        SafeRadiusPixels * InverseResolution,
+        SafeRadiusPixels * InverseResolution);
+    OutDispatch.UV2AndSettings.X =
+        static_cast<float>(FMath::Max(0, Triangle.UVIslandID) + 1);
+    return true;
+}
+
+bool IsSampledWetAreaContact(const FDWCResolvedSurfaceContact& Contact)
+{
+    constexpr float TriangleCenterWeight = 1.0f / 3.0f;
+    constexpr float WeightTolerance = 1.0e-4f;
+
+    // ResolveWetArea has always emitted one contact at the exact triangle centroid.
+    // Keep that CPU contract untouched and select the GPU-only stamp path here.
+    return FMath::IsNearlyEqual(Contact.Barycentric.X, TriangleCenterWeight, WeightTolerance) &&
+           FMath::IsNearlyEqual(Contact.Barycentric.Y, TriangleCenterWeight, WeightTolerance) &&
+           FMath::IsNearlyEqual(Contact.Barycentric.Z, TriangleCenterWeight, WeightTolerance) &&
+           FMath::IsNearlyZero(Contact.DistanceToSurface) &&
+           FMath::IsNearlyEqual(Contact.TriangleInfluence, 1.0f, WeightTolerance);
+}
+
 bool BuildDispatchBounds(
     const FDWCGPUBakedTriangle& Triangle,
     const int32 Resolution,
@@ -332,7 +410,8 @@ bool BuildDispatchBounds(
 
 bool CanUseBinnedAbsorption(const FTriangleAbsorptionDispatch& Dispatch)
 {
-    return Dispatch.P2AndMode.W < 0.5f &&
+    const bool bSupportedMode = Dispatch.P2AndMode.W < 0.5f || Dispatch.P2AndMode.W > 1.5f;
+    return bSupportedMode &&
            Dispatch.P0AndAmount.W > 0.0f &&
            Dispatch.DispatchSize.X > 0 &&
            Dispatch.DispatchSize.Y > 0;
@@ -1720,18 +1799,30 @@ void FDWCGPUBackend::DispatchSimulation(
 
             const FDWCGPUBakedTriangle& Triangle = BakedData.Triangles[Contact.TriangleID];
             FTriangleAbsorptionDispatch Dispatch;
-            if (!BuildDispatchBounds(Triangle, Slot.Resolution, Dispatch.DispatchMin, Dispatch.DispatchSize))
+            const bool bUseUVStamp = IsSampledWetAreaContact(Contact);
+            const bool bBuiltDispatch = bUseUVStamp
+                ? BuildAbsorptionStampDispatch(
+                      Contact,
+                      Triangle,
+                      CVarDWCGPUWetAreaStampRadiusPixels.GetValueOnAnyThread(),
+                      Slot.Resolution,
+                      Dispatch)
+                : BuildDispatchBounds(Triangle, Slot.Resolution, Dispatch.DispatchMin, Dispatch.DispatchSize);
+            if (!bBuiltDispatch)
             {
                 continue;
             }
 
-            FillTriangleUVs(Triangle, Dispatch);
-            Dispatch.UV2AndSettings.Z = FMath::Max(0.0f, Contact.DistanceToSurface);
+            if (!bUseUVStamp)
+            {
+                FillTriangleUVs(Triangle, Dispatch);
+                Dispatch.UV2AndSettings.Z = FMath::Max(0.0f, Contact.DistanceToSurface);
+            }
             Dispatch.ContactAndRadius = MakePositionAndValue(Contact.ContactWorldPosition, FMath::Max(Contact.Radius, KINDA_SMALL_NUMBER));
             const float AppliedAmount = Contact.Amount > 0.0f ? Contact.Amount * Contact.AbsorptionMultiplier : Contact.Amount;
             Dispatch.P0AndAmount = MakePositionAndValue(Contact.WorldTrianglePosition0, AppliedAmount);
             Dispatch.P1AndMaxWetness = MakePositionAndValue(Contact.WorldTrianglePosition1, MaxWetness);
-            Dispatch.P2AndMode = MakePositionAndValue(Contact.WorldTrianglePosition2, 0.0f);
+            Dispatch.P2AndMode = MakePositionAndValue(Contact.WorldTrianglePosition2, bUseUVStamp ? 2.0f : 0.0f);
             SlotDispatch.AbsorptionDispatches.Add(Dispatch);
         }
 
@@ -2341,6 +2432,7 @@ void FDWCGPUBackend::DispatchSimulation(
                     Parameters->Contacts = GraphBuilder.CreateSRV(BinnedContactsBuffer);
                     Parameters->TileBins = GraphBuilder.CreateSRV(BinnedTileBinsBuffer);
                     Parameters->TileContactIndices = GraphBuilder.CreateSRV(BinnedTileContactIndicesBuffer);
+                    Parameters->TexelLookup = LookupSRV;
                     Parameters->PendingWetnessTexture = PendingInputUAV;
                     FDWCWorkloadStats::RecordGPUBackendDispatch();
                     RDG_EVENT_SCOPE_STAT(GraphBuilder, DWC_ApplyAbsorption, "DWC ApplyAbsorption");
@@ -2372,6 +2464,7 @@ void FDWCGPUBackend::DispatchSimulation(
                     Parameters->P0AndAmount = Dispatch.P0AndAmount;
                     Parameters->P1AndMaxWetness = Dispatch.P1AndMaxWetness;
                     Parameters->P2AndMode = Dispatch.P2AndMode;
+                    Parameters->TexelLookup = LookupSRV;
                     Parameters->WetnessTexture = InputUAV;
                     Parameters->PendingWetnessTexture = PendingInputUAV;
                     FDWCWorkloadStats::RecordGPUBackendDispatch();

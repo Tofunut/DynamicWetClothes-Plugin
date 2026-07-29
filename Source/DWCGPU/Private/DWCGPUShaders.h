@@ -3,7 +3,7 @@
 #include "GlobalShader.h"
 #include "ShaderParameterStruct.h"
 
-/** Applies a resolved world-space contact to one current-pose triangle UV region. */
+/** Applies a resolved world-space contact, wet-all triangle, or Data-UV stamp. */
 class FDWCApplyTriangleAbsorptionCS final : public FGlobalShader
 {
 public:
@@ -20,6 +20,7 @@ public:
         SHADER_PARAMETER(FVector4f, P0AndAmount)
         SHADER_PARAMETER(FVector4f, P1AndMaxWetness)
         SHADER_PARAMETER(FVector4f, P2AndMode)
+        SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint4>, TexelLookup)
         SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float>, WetnessTexture)
         SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float>, PendingWetnessTexture)
     END_SHADER_PARAMETER_STRUCT()
@@ -41,6 +42,7 @@ public:
         SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float4>, Contacts)
         SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint2>, TileBins)
         SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, TileContactIndices)
+        SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint4>, TexelLookup)
         SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float>, PendingWetnessTexture)
     END_SHADER_PARAMETER_STRUCT()
 

@@ -2,6 +2,7 @@
 
 RWTexture2D<float> WetnessTexture;
 RWTexture2D<float> PendingWetnessTexture;
+StructuredBuffer<uint4> TexelLookup;
 
 int2 TextureSize;
 int2 DispatchMin;
@@ -17,7 +18,7 @@ float4 ContactAndRadius;
 float4 P0AndAmount;
 // P1AndMaxWetness = (TriangleP1.xyz, MaxWetness)
 float4 P1AndMaxWetness;
-// P2AndMode = (TriangleP2.xyz, Mode), Mode 0 = contact, Mode 1 = wet all
+// P2AndMode = (TriangleP2.xyz, Mode), 0 = world contact, 1 = wet all, 2 = Data-UV stamp
 float4 P2AndMode;
 
 bool ComputeBarycentricUV(float2 Point, float2 A, float2 B, float2 C, out float3 Barycentric)
@@ -61,29 +62,48 @@ void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
     const float2 UV1 = UV01.zw;
     const float2 UV2 = UV2AndSettings.xy;
 
-    float3 Barycentric;
-    if (!ComputeBarycentricUV(UV, UV0, UV1, UV2, Barycentric))
-    {
-        return;
-    }
-
     float Influence = 1.0;
-    if (P2AndMode.w < 0.5)
+    const float Mode = P2AndMode.w;
+    if (Mode > 1.5)
     {
-        const float3 TexelWorldPosition =
-            P0AndAmount.xyz * Barycentric.x +
-            P1AndMaxWetness.xyz * Barycentric.y +
-            P2AndMode.xyz * Barycentric.z;
-
-        const float Radius = max(ContactAndRadius.w, 1.0e-4);
-        const float SurfaceDistance = length(TexelWorldPosition - ContactAndRadius.xyz);
-        const float ContactDepth = max(UV2AndSettings.z, 0.0);
-        const float Distance = sqrt(SurfaceDistance * SurfaceDistance + ContactDepth * ContactDepth);
-        Influence = saturate(1.0 - Distance / Radius);
-        if (Influence <= 0.0)
+        const uint4 PixelLookup = TexelLookup[Texel.y * TextureSize.x + Texel.x];
+        const uint StampIsland = (uint)round(max(UV2AndSettings.x, 0.0));
+        if (PixelLookup.w == 0u || PixelLookup.w != StampIsland)
         {
             return;
         }
+
+        const float2 HalfSizeUV = max(UV01.zw, 0.5 / float2(TextureSize));
+        const float2 LocalPosition = (UV - UV01.xy) / HalfSizeUV;
+        const float Brush = 1.0 - smoothstep(0.55, 1.0, length(LocalPosition));
+        Influence = smoothstep(0.0, 0.12, saturate(Brush));
+    }
+    else
+    {
+        float3 Barycentric;
+        if (!ComputeBarycentricUV(UV, UV0, UV1, UV2, Barycentric))
+        {
+            return;
+        }
+
+        if (Mode < 0.5)
+        {
+            const float3 TexelWorldPosition =
+                P0AndAmount.xyz * Barycentric.x +
+                P1AndMaxWetness.xyz * Barycentric.y +
+                P2AndMode.xyz * Barycentric.z;
+
+            const float Radius = max(ContactAndRadius.w, 1.0e-4);
+            const float SurfaceDistance = length(TexelWorldPosition - ContactAndRadius.xyz);
+            const float ContactDepth = max(UV2AndSettings.z, 0.0);
+            const float Distance = sqrt(SurfaceDistance * SurfaceDistance + ContactDepth * ContactDepth);
+            Influence = saturate(1.0 - Distance / Radius);
+        }
+    }
+
+    if (Influence <= 0.0)
+    {
+        return;
     }
 
     const float AppliedWetness = P0AndAmount.w * Influence;

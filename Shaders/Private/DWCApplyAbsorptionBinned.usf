@@ -5,6 +5,7 @@ RWTexture2D<float> PendingWetnessTexture;
 StructuredBuffer<float4> Contacts;
 StructuredBuffer<uint2> TileBins;
 StructuredBuffer<uint> TileContactIndices;
+StructuredBuffer<uint4> TexelLookup;
 
 int2 TextureSize;
 int2 TileGridSize;
@@ -32,7 +33,7 @@ bool ComputeBarycentricUV(float2 Point, float2 A, float2 B, float2 C, out float3
     return all(Barycentric >= -1.0e-4) && all(Barycentric <= 1.0001);
 }
 
-float ComputeContactWetness(uint ContactIndex, float2 UV)
+float ComputeContactWetness(uint ContactIndex, float2 UV, uint PixelIsland)
 {
     const uint BaseIndex = ContactIndex * DWCAbsorptionContactFloat4Count;
     const float4 UV01 = Contacts[BaseIndex + 0u];
@@ -41,6 +42,21 @@ float ComputeContactWetness(uint ContactIndex, float2 UV)
     const float4 P0AndAmount = Contacts[BaseIndex + 3u];
     const float4 P1AndMaxWetness = Contacts[BaseIndex + 4u];
     const float4 P2AndMode = Contacts[BaseIndex + 5u];
+
+    if (P2AndMode.w > 1.5)
+    {
+        const uint StampIsland = (uint)round(max(UV2AndSettings.x, 0.0));
+        if (PixelIsland == 0u || PixelIsland != StampIsland)
+        {
+            return 0.0;
+        }
+
+        const float2 HalfSizeUV = max(UV01.zw, 0.5 / float2(TextureSize));
+        const float2 LocalPosition = (UV - UV01.xy) / HalfSizeUV;
+        const float Brush = 1.0 - smoothstep(0.55, 1.0, length(LocalPosition));
+        const float Influence = smoothstep(0.0, 0.12, saturate(Brush));
+        return max(P0AndAmount.w, 0.0) * Influence;
+    }
 
     float3 Barycentric;
     if (!ComputeBarycentricUV(UV, UV01.xy, UV01.zw, UV2AndSettings.xy, Barycentric))
@@ -80,11 +96,15 @@ void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
     }
 
     const float2 UV = (float2(Texel) + 0.5) / float2(TextureSize);
+    const uint4 PixelLookup = TexelLookup[Texel.y * TextureSize.x + Texel.x];
     float PendingDelta = 0.0;
 
     for (uint BinOffset = 0u; BinOffset < Bin.y; ++BinOffset)
     {
-        PendingDelta += ComputeContactWetness(TileContactIndices[Bin.x + BinOffset], UV);
+        PendingDelta += ComputeContactWetness(
+            TileContactIndices[Bin.x + BinOffset],
+            UV,
+            PixelLookup.w);
     }
 
     if (PendingDelta > 0.0 && isfinite(PendingDelta))

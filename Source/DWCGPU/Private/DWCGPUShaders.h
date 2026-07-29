@@ -197,6 +197,28 @@ public:
     static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters);
 };
 
+/** Semi-Lagrangian destination gather for the independently stamped Flow Droplet RT. */
+class FDWCSurfaceFlowAdvectionCS final : public FGlobalShader
+{
+public:
+    DECLARE_GLOBAL_SHADER(FDWCSurfaceFlowAdvectionCS);
+    SHADER_USE_PARAMETER_STRUCT(FDWCSurfaceFlowAdvectionCS, FGlobalShader);
+
+    BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
+        SHADER_PARAMETER(FIntPoint, TextureSize)
+        SHADER_PARAMETER(float, DeltaSeconds)
+        SHADER_PARAMETER(float, CurrentTimeSeconds)
+        SHADER_PARAMETER_RDG_TEXTURE(Texture2D, SourceSurface)
+        SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float4>, DestinationSurface)
+        SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint4>, TexelLookup)
+        SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float4>, TriangleFlow)
+        SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float4>, Profiles)
+        SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, TriangleProfileIndices)
+    END_SHADER_PARAMETER_STRUCT()
+
+    static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters);
+};
+
 /** Writes one droplet stamp into a slot-local surface-state RT. */
 class FDWCSurfaceDropletStampCS final : public FGlobalShader
 {

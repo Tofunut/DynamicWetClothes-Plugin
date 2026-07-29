@@ -3138,6 +3138,7 @@ TSharedRef<SWidget> SWetClothingPartEditorPanel::BuildSurfaceWaterTilingWindowCo
     const auto BuildScaleRow = [this](
         const FText& Label,
         const FText& ToolTip,
+        const TAttribute<bool>& IsEnabled,
         const TAttribute<float>& Value,
         TFunction<void(float)> OnValueChanged) -> TSharedRef<SWidget>
     {
@@ -3156,7 +3157,7 @@ TSharedRef<SWidget> SWetClothingPartEditorPanel::BuildSurfaceWaterTilingWindowCo
                                     .MinSliderValue(0.25f).MaxSliderValue(4.0f)
                                     .Delta(0.05f)
                                     .Value(Value)
-                                    .IsEnabled(this, &SWetClothingPartEditorPanel::IsSelectedDropletStampSizeOverrideEnabled)
+                                    .IsEnabled(IsEnabled)
                                     .OnValueChanged_Lambda([OnValueChanged = MoveTemp(OnValueChanged)](const float NewValue)
                                     {
                                         OnValueChanged(NewValue);
@@ -3357,18 +3358,36 @@ TSharedRef<SWidget> SWetClothingPartEditorPanel::BuildSurfaceWaterTilingWindowCo
                                                          [SNew(SBox)
                                                               .Visibility(this, &SWetClothingPartEditorPanel::GetSingleCirclePreviewVisibility)
                                                                   [BuildPreviewToggle(
-                                                                      LOCTEXT("PopupOverrideDropletStampSize", "Override Stamp Size"),
-                                                                      LOCTEXT("PopupOverrideDropletStampSizeTooltip", "Use a part-local scale for this Wet Part instead of the Wetness Profile Droplet Stamp Size."),
+                                                                      LOCTEXT("PopupOverrideDropletStampSize", "Override Static Stamp Size"),
+                                                                      LOCTEXT("PopupOverrideDropletStampSizeTooltip", "Use a part-local scale for this Wet Part instead of the Wetness Profile static Droplet Stamp Size."),
                                                                       TAttribute<ECheckBoxState>::Create(TAttribute<ECheckBoxState>::FGetter::CreateSP(this, &SWetClothingPartEditorPanel::GetSelectedDropletStampSizeOverrideCheckState)),
                                                                       FOnCheckStateChanged::CreateSP(this, &SWetClothingPartEditorPanel::HandleSelectedDropletStampSizeOverrideChanged))]]
                                                    + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 3.0f)
                                                           [SNew(SBox)
                                                                .Visibility(this, &SWetClothingPartEditorPanel::GetSingleCirclePreviewVisibility)
                                                                    [BuildScaleRow(
-                                                                       LOCTEXT("PopupDropletStampSizeScale", "Droplet Stamp Size Scale"),
-                                                                       LOCTEXT("PopupDropletStampSizeScaleTooltip", "Multiplies the Wetness Profile Droplet Stamp Size for this Wet Part."),
+                                                                       LOCTEXT("PopupDropletStampSizeScale", "Static Stamp Size Scale"),
+                                                                       LOCTEXT("PopupDropletStampSizeScaleTooltip", "Multiplies the Wetness Profile static Droplet Stamp Size for this Wet Part."),
+                                                                       TAttribute<bool>::Create(TAttribute<bool>::FGetter::CreateSP(this, &SWetClothingPartEditorPanel::IsSelectedDropletStampSizeOverrideEnabled)),
                                                                        TAttribute<float>::Create(TAttribute<float>::FGetter::CreateSP(this, &SWetClothingPartEditorPanel::GetSelectedDropletRadiusScale)),
                                                                        [this](const float NewValue) { HandleSelectedDropletRadiusScaleChanged(NewValue); })]]
+                                                   + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 8.0f, 0.0f, 3.0f)
+                                                         [SNew(SBox)
+                                                              .Visibility(this, &SWetClothingPartEditorPanel::GetSingleCirclePreviewVisibility)
+                                                                  [BuildPreviewToggle(
+                                                                      LOCTEXT("PopupOverrideDropletFlowStampSize", "Override Flow Stamp Size"),
+                                                                      LOCTEXT("PopupOverrideDropletFlowStampSizeTooltip", "Use a separate part-local scale for Flow Droplet stamps instead of the Wetness Profile Flow Stamp Size."),
+                                                                      TAttribute<ECheckBoxState>::Create(TAttribute<ECheckBoxState>::FGetter::CreateSP(this, &SWetClothingPartEditorPanel::GetSelectedDropletFlowStampSizeOverrideCheckState)),
+                                                                      FOnCheckStateChanged::CreateSP(this, &SWetClothingPartEditorPanel::HandleSelectedDropletFlowStampSizeOverrideChanged))]]
+                                                   + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 3.0f)
+                                                         [SNew(SBox)
+                                                              .Visibility(this, &SWetClothingPartEditorPanel::GetSingleCirclePreviewVisibility)
+                                                                  [BuildScaleRow(
+                                                                      LOCTEXT("PopupDropletFlowStampSizeScale", "Flow Stamp Size Scale"),
+                                                                      LOCTEXT("PopupDropletFlowStampSizeScaleTooltip", "Multiplies the Wetness Profile Flow Stamp Width and Height for this Wet Part."),
+                                                                      TAttribute<bool>::Create(TAttribute<bool>::FGetter::CreateSP(this, &SWetClothingPartEditorPanel::IsSelectedDropletFlowStampSizeOverrideEnabled)),
+                                                                      TAttribute<float>::Create(TAttribute<float>::FGetter::CreateSP(this, &SWetClothingPartEditorPanel::GetSelectedDropletFlowSizeScale)),
+                                                                      [this](const float NewValue) { HandleSelectedDropletFlowSizeScaleChanged(NewValue); })]]
                                                     + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 12.0f, 0.0f, 0.0f)
                                                           [SNew(STextBlock)
                                                                .Text_Lambda([this]()
@@ -3415,10 +3434,24 @@ float SWetClothingPartEditorPanel::GetSelectedDropletRadiusScale() const
     return Entry != nullptr ? FMath::Clamp(Entry->SurfaceWater.DropletRadiusScale, 0.25f, 4.0f) : 1.0f;
 }
 
+float SWetClothingPartEditorPanel::GetSelectedDropletFlowSizeScale() const
+{
+    const FWetClothingWetPartEntry* Entry = FindWetPartEntry(SelectedWetPartID);
+    return Entry != nullptr ? FMath::Clamp(Entry->SurfaceWater.DropletFlowSizeScale, 0.25f, 4.0f) : 1.0f;
+}
+
 ECheckBoxState SWetClothingPartEditorPanel::GetSelectedDropletStampSizeOverrideCheckState() const
 {
     const FWetClothingWetPartEntry* Entry = FindWetPartEntry(SelectedWetPartID);
     return Entry != nullptr && Entry->SurfaceWater.bOverrideDropletStampSize
+               ? ECheckBoxState::Checked
+               : ECheckBoxState::Unchecked;
+}
+
+ECheckBoxState SWetClothingPartEditorPanel::GetSelectedDropletFlowStampSizeOverrideCheckState() const
+{
+    const FWetClothingWetPartEntry* Entry = FindWetPartEntry(SelectedWetPartID);
+    return Entry != nullptr && Entry->SurfaceWater.bOverrideDropletFlowStampSize
                ? ECheckBoxState::Checked
                : ECheckBoxState::Unchecked;
 }
@@ -3448,12 +3481,46 @@ void SWetClothingPartEditorPanel::HandleSelectedDropletStampSizeOverrideChanged(
     }
 }
 
+void SWetClothingPartEditorPanel::HandleSelectedDropletFlowStampSizeOverrideChanged(
+    const ECheckBoxState NewState)
+{
+    UWetClothingAsset* Asset = WetClothingAsset.Get();
+    FWetClothingWetPartEntry* Entry = FindMutableWetPartEntry(SelectedWetPartID);
+    if (Asset == nullptr || Entry == nullptr || Entry->WetPartID < 0)
+    {
+        return;
+    }
+
+    const bool bNewValue = NewState == ECheckBoxState::Checked;
+    if (Entry->SurfaceWater.bOverrideDropletFlowStampSize == bNewValue)
+    {
+        return;
+    }
+
+    Asset->Modify();
+    Entry->SurfaceWater.bOverrideDropletFlowStampSize = bNewValue;
+    Asset->MarkRuntimeBakeOutputsDirty(DWCBakeOutput::GPURuntimeData | DWCBakeOutput::GPUMaps);
+    Asset->MarkPackageDirty();
+    if (SurfaceWaterTilingPreviewViewport.IsValid())
+    {
+        SurfaceWaterTilingPreviewViewport->RefreshSurfaceWaterPreviewDynamicTextures();
+    }
+}
+
 bool SWetClothingPartEditorPanel::IsSelectedDropletStampSizeOverrideEnabled() const
 {
     const FWetClothingWetPartEntry* Entry = FindWetPartEntry(SelectedWetPartID);
     return IsSelectedWetPartSurfaceSettingsEnabled() &&
            Entry != nullptr &&
            Entry->SurfaceWater.bOverrideDropletStampSize;
+}
+
+bool SWetClothingPartEditorPanel::IsSelectedDropletFlowStampSizeOverrideEnabled() const
+{
+    const FWetClothingWetPartEntry* Entry = FindWetPartEntry(SelectedWetPartID);
+    return IsSelectedWetPartSurfaceSettingsEnabled() &&
+           Entry != nullptr &&
+           Entry->SurfaceWater.bOverrideDropletFlowStampSize;
 }
 
 float SWetClothingPartEditorPanel::GetSelectedDropletDetailSize() const
@@ -3487,6 +3554,31 @@ void SWetClothingPartEditorPanel::HandleSelectedDropletRadiusScaleChanged(const 
 
     Asset->Modify();
     Entry->SurfaceWater.DropletRadiusScale = NewValue;
+    Asset->MarkRuntimeBakeOutputsDirty(DWCBakeOutput::GPURuntimeData | DWCBakeOutput::GPUMaps);
+    Asset->MarkPackageDirty();
+    if (SurfaceWaterTilingPreviewViewport.IsValid())
+    {
+        SurfaceWaterTilingPreviewViewport->RefreshSurfaceWaterPreviewDynamicTextures();
+    }
+}
+
+void SWetClothingPartEditorPanel::HandleSelectedDropletFlowSizeScaleChanged(const float InValue)
+{
+    UWetClothingAsset* Asset = WetClothingAsset.Get();
+    FWetClothingWetPartEntry* Entry = FindMutableWetPartEntry(SelectedWetPartID);
+    if (Asset == nullptr || Entry == nullptr || Entry->WetPartID < 0)
+    {
+        return;
+    }
+
+    const float NewValue = FMath::Clamp(InValue, 0.25f, 4.0f);
+    if (FMath::IsNearlyEqual(Entry->SurfaceWater.DropletFlowSizeScale, NewValue))
+    {
+        return;
+    }
+
+    Asset->Modify();
+    Entry->SurfaceWater.DropletFlowSizeScale = NewValue;
     Asset->MarkRuntimeBakeOutputsDirty(DWCBakeOutput::GPURuntimeData | DWCBakeOutput::GPUMaps);
     Asset->MarkPackageDirty();
     if (SurfaceWaterTilingPreviewViewport.IsValid())

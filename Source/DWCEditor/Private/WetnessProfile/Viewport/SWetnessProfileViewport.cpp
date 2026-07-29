@@ -197,6 +197,7 @@ void SWetnessProfileViewport::AddReferencedObjects(FReferenceCollector& Collecto
     Collector.AddReferencedObject(PreviewWetnessMapTexture);
     Collector.AddReferencedObject(PreviewWetPartDataTexture);
     Collector.AddReferencedObject(PreviewSurfaceDropletTexture);
+    Collector.AddReferencedObject(PreviewSurfaceFlowDropletTexture);
     Collector.AddReferencedObject(PreviewDefaultNormalTexture);
     Collector.AddReferencedObject(PreviewDefaultMaskTexture);
 }
@@ -458,6 +459,10 @@ void SWetnessProfileViewport::InitializePreviewComponents()
     PreviewSurfaceDropletTexture = CreateSinglePixelPreviewTexture(
         GetTransientPackage(),
         TEXT("DWC_WetnessProfilePreviewDropletRT"),
+        MakeScalarPreviewColor(PreviewSurfaceWater));
+    PreviewSurfaceFlowDropletTexture = CreateSinglePixelPreviewTexture(
+        GetTransientPackage(),
+        TEXT("DWC_WetnessProfilePreviewFlowDropletRT"),
         MakeScalarPreviewColor(PreviewSurfaceWater));
     PreviewScene->AddComponent(PreviewMeshComponent, PreviewLiftTransform());
     PreviewScene->AddComponent(PreviewSkeletalMeshComponent, PreviewLiftTransform());
@@ -776,22 +781,29 @@ void SWetnessProfileViewport::RefreshGeneratedPreviewMaterialParameters()
             0u,
             255u));
     WriteSinglePixelTexture(PreviewSurfaceDropletTexture, MakeScalarPreviewColor(PreviewSurfaceWater));
+    WriteSinglePixelTexture(PreviewSurfaceFlowDropletTexture, MakeScalarPreviewColor(PreviewSurfaceWater));
 
     const FLinearColor FallbackProfile0(
         Parameters.GetAbsorbedDarkeningStrength(),
         Parameters.GetAbsorbedGlossinessStrength(),
         0.0f,
-        0.0f);
+        Surface.bEnabled && Surface.bEnableDropletFlow ? 1.0f : 0.0f);
     const FLinearColor FallbackProfile1(
         FMath::Clamp(Surface.SurfaceWaterNormalStrength, 0.0f, 3.0f),
         FMath::Clamp(Surface.SurfaceWaterRoughnessBlend, 0.0f, 1.0f),
-        0.0f,
+        Surface.DropletFlowSpeed,
         FMath::Clamp(Surface.SurfaceWaterSpecular, 0.0f, 1.0f));
     const FLinearColor FallbackProfile2(
         0.0f,
         0.0f,
         FMath::Clamp(Surface.SurfaceWaterTargetRoughness, 0.0f, 1.0f),
         FMath::Clamp(Surface.SurfaceWaterTotalStrength, 0.0f, 1.0f));
+    const FLinearColor FallbackProfile3(
+        Surface.DropletFlowDirectionDegrees,
+        FMath::Max(Surface.DropletFlowNoiseTiling, 0.01f),
+        FMath::Clamp(Surface.DropletFlowNoiseStrength, 0.0f, 1.0f),
+        Surface.DropletFlowNoiseSpeed);
+    const FLinearColor FallbackProfile4(0.0f, 0.0f, 0.0f, 0.0f);
 
     const float SurfacePreviewAmount = Surface.bEnabled ? PreviewSurfaceWater : 0.0f;
     FWetClothingLocalRenderProfile PreviewLocalProfile;
@@ -832,7 +844,12 @@ void SWetnessProfileViewport::RefreshGeneratedPreviewMaterialParameters()
         PreviewMID->SetTextureParameterValue(DWCWetMaterialParameters::WetnessMap(), PreviewWetnessMapTexture);
         PreviewMID->SetTextureParameterValue(DWCWetMaterialParameters::WetPartDataTexture(), PreviewWetPartDataTexture);
         PreviewMID->SetTextureParameterValue(DWCWetMaterialParameters::SurfaceDropletRT(), PreviewSurfaceDropletTexture);
-        PreviewMID->SetScalarParameterValue(DWCWetMaterialParameters::SurfaceWaterTime(), 0.0f);
+        PreviewMID->SetTextureParameterValue(
+            DWCWetMaterialParameters::SurfaceFlowDropletRT(),
+            PreviewSurfaceFlowDropletTexture);
+        PreviewMID->SetScalarParameterValue(
+            DWCWetMaterialParameters::SurfaceWaterTime(),
+            PreviewAnimationTime);
         PreviewMID->SetScalarParameterValue(DWCWetMaterialParameters::SurfaceWaterTexelSize(), 1.0f);
         PreviewMID->SetScalarParameterValue(DWCWetMaterialParameters::UseRenderProfileLUT(), 0.0f);
         const bool bAppliedProfileTextures =
@@ -847,6 +864,8 @@ void SWetnessProfileViewport::RefreshGeneratedPreviewMaterialParameters()
             PreviewMID->SetVectorParameterValue(DWCWetMaterialParameters::FallbackRenderProfileTexel(0), FallbackProfile0);
             PreviewMID->SetVectorParameterValue(DWCWetMaterialParameters::FallbackRenderProfileTexel(1), FallbackProfile1);
             PreviewMID->SetVectorParameterValue(DWCWetMaterialParameters::FallbackRenderProfileTexel(2), FallbackProfile2);
+            PreviewMID->SetVectorParameterValue(DWCWetMaterialParameters::FallbackRenderProfileTexel(3), FallbackProfile3);
+            PreviewMID->SetVectorParameterValue(DWCWetMaterialParameters::FallbackRenderProfileTexel(4), FallbackProfile4);
         }
         PreviewMID->SetScalarParameterValue(PreviewSurfaceWaterOverrideParameter, 1.0f);
         PreviewMID->SetScalarParameterValue(PreviewSurfaceWaterAmountParameter, SurfacePreviewAmount);

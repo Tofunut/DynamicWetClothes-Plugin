@@ -93,7 +93,7 @@ def build() -> None:
     remap_lut = c.texture2d_parameter(
         mf, "DWC_ProfileRemapLUT", data_fallback, -750, -1450,
         sampler_type=c.linear_color_sampler(), group="DWC Render Profile",
-        description="Maps Local Profile ID to the first U coordinate of its global 3-texel profile.",
+        description="Maps Local Profile ID to the first U coordinate of its global 5-texel profile.",
     )
     c.try_connect(remap_uv, ("", "Result"), remap_lut, ("Coordinates", "UVs"))
     remap_r = c.component_mask(mf, remap_lut, "R", "R", -250, -1450)
@@ -101,173 +101,126 @@ def build() -> None:
         mf, "PROFILE_GlobalProfileStartU", remap_r, ("", "Result"), -100, -1200
     )
 
-    # 2-2 Global LUT Coordinates
-    start_u0 = c.named_usage(mf, global_start_decl, 400, -1550)
-    start_u1 = c.named_usage(mf, global_start_decl, 400, -950)
-    start_u2 = c.named_usage(mf, global_start_decl, 400, -350)
-    half0 = c.scalar_constant(mf, 0.5, 700, -1350, "LUT center V")
-    half1 = c.scalar_constant(mf, 0.5, 700, -750, "LUT center V")
-    half2 = c.scalar_constant(mf, 0.5, 700, -150, "LUT center V")
+    # 2-2/2-3 Sample all five packed texels. The profile start U points at
+    # texel 0; subsequent texels are one global LUT texel apart.
     texel_size = c.scalar_parameter(
-        mf, "DWC_GlobalRenderProfileTexelSize", 1.0 / 765.0, 700, -1050,
+        mf, "DWC_GlobalRenderProfileTexelSize", 1.0 / 1275.0, 500, -1900,
         group="DWC Render Profile",
-        description="U width of one texel in the runtime global Render Profile LUT.",
+        description="U width of one texel in the 255 x 5 runtime Render Profile LUT.",
     )
-    one = c.scalar_constant(mf, 1.0, 700, -450)
-    two = c.scalar_constant(mf, 2.0, 700, 50)
-    offset = c.multiply(mf, texel_size, ("", "Result"), one, ("", "Result"), 1050, -550)
-    offset2 = c.multiply(mf, texel_size, ("", "Result"), two, ("", "Result"), 1050, 50)
-    profile1_u = c.add(mf, start_u1, ("", "Result"), offset, ("", "Result"), 1400, -950)
-    profile2_u = c.add(mf, start_u2, ("", "Result"), offset2, ("", "Result"), 1400, -350)
-    profile0_uv = c.append_vector(mf, start_u0, ("", "Result"), half0, ("", "Result"), 1400, -1550)
-    profile1_uv = c.append_vector(mf, profile1_u, ("", "Result"), half1, ("", "Result"), 1650, -950)
-    profile2_uv = c.append_vector(mf, profile2_u, ("", "Result"), half2, ("", "Result"), 1650, -350)
-    profile0_uv_decl = c.named_declaration(mf, "PROFILE_Texel0UV", profile0_uv, ("", "Result"), 1700, -1550)
-    profile1_uv_decl = c.named_declaration(mf, "PROFILE_Texel1UV", profile1_uv, ("", "Result"), 1700, -750)
-    profile2_uv_decl = c.named_declaration(mf, "PROFILE_Texel2UV", profile2_uv, ("", "Result"), 1700, -150)
-
-    # 2-3 Global Profile Sampling and optional fallback.
-    uv0_use = c.named_usage(mf, profile0_uv_decl, 2500, -1550)
-    uv1_use = c.named_usage(mf, profile1_uv_decl, 2500, -850)
-    uv2_use = c.named_usage(mf, profile2_uv_decl, 2500, -150)
-    lut0 = c.texture2d_parameter(
-        mf, "DWC_GlobalRenderProfileLUT", data_fallback, 2850, -1550,
-        sampler_type=c.linear_color_sampler(), group="DWC Render Profile",
-        description="Runtime global Render Profile LUT, sampled at profile texel 0.",
-    )
-    lut1 = c.texture2d_parameter(
-        mf, "DWC_GlobalRenderProfileLUT", data_fallback, 2850, -850,
-        sampler_type=c.linear_color_sampler(), group="DWC Render Profile",
-        description="Runtime global Render Profile LUT, sampled at profile texel 1.",
-    )
-    lut2 = c.texture2d_parameter(
-        mf, "DWC_GlobalRenderProfileLUT", data_fallback, 2850, -150,
-        sampler_type=c.linear_color_sampler(), group="DWC Render Profile",
-        description="Runtime global Render Profile LUT, sampled at profile texel 2.",
-    )
-    c.try_connect(uv0_use, ("", "Result"), lut0, ("Coordinates", "UVs"))
-    c.try_connect(uv1_use, ("", "Result"), lut1, ("Coordinates", "UVs"))
-    c.try_connect(uv2_use, ("", "Result"), lut2, ("Coordinates", "UVs"))
-    # Texture Sample's primary output is RGB, so append A explicitly to preserve
-    # the packed fourth channels used by the render-profile data.
-    lut0_rgba = c.append_vector(mf, lut0, "RGB", lut0, "A", 3150, -1650, "Reconstruct packed RGBA texel 0.")
-    lut1_rgba = c.append_vector(mf, lut1, "RGB", lut1, "A", 3150, -950, "Reconstruct packed RGBA texel 1.")
-    lut2_rgba = c.append_vector(mf, lut2, "RGB", lut2, "A", 3150, -250, "Reconstruct packed RGBA texel 2.")
-    fallback0 = c.vector_parameter(
-        mf, "DWC_FallbackRenderProfile0", (0.5, 0.5, 0.0, 0.0), 3200, -1250,
-        group="DWC Render Profile", description="Fallback packed profile texel 0.",
-    )
-    fallback1 = c.vector_parameter(
-        mf, "DWC_FallbackRenderProfile1", (1.0, 0.5, 0.0, 0.5), 3200, -550,
-        group="DWC Render Profile", description="Fallback packed profile texel 1.",
-    )
-    fallback2 = c.vector_parameter(
-        mf, "DWC_FallbackRenderProfile2", (0.0, 0.0, 0.02, 0.5), 3200, 150,
-        group="DWC Render Profile", description="Fallback packed profile texel 2.",
-    )
-    fallback0_rgba = c.append_vector(
-        mf, fallback0, "RGB", fallback0, "A", 3500, -1250,
-        "Reconstruct packed RGBA fallback profile texel 0.",
-    )
-    fallback1_rgba = c.append_vector(
-        mf, fallback1, "RGB", fallback1, "A", 3500, -550,
-        "Reconstruct packed RGBA fallback profile texel 1.",
-    )
-    fallback2_rgba = c.append_vector(
-        mf, fallback2, "RGB", fallback2, "A", 3500, 150,
-        "Reconstruct packed RGBA fallback profile texel 2.",
-    )
-    # This must be a scalar parameter, not a Static Switch: the runtime resource
-    # subsystem updates it on each MID with SetScalarParameterValue.
     use_runtime_lut = c.scalar_parameter(
-        mf, "DWC_UseRenderProfileLUT", 0.0, 3200, -200,
-        group="DWC Render Profile", description="0 uses fallback profile values; 1 uses runtime LUT data.",
+        mf, "DWC_UseRenderProfileLUT", 0.0, 3200, -2100,
+        group="DWC Render Profile",
+        description="0 uses fallback profile values; 1 uses runtime LUT data.",
     )
-    profile0 = c.lerp(
-        mf, fallback0_rgba, ("", "Result"), lut0_rgba, ("", "Result"),
-        use_runtime_lut, ("", "Result"), 3800, -1550,
-        "Select fallback or runtime packed profile texel 0.",
-    )
-    profile1 = c.lerp(
-        mf, fallback1_rgba, ("", "Result"), lut1_rgba, ("", "Result"),
-        use_runtime_lut, ("", "Result"), 3800, -850,
-        "Select fallback or runtime packed profile texel 1.",
-    )
-    profile2 = c.lerp(
-        mf, fallback2_rgba, ("", "Result"), lut2_rgba, ("", "Result"),
-        use_runtime_lut, ("", "Result"), 3800, -150,
-        "Select fallback or runtime packed profile texel 2.",
-    )
-    texel0_decl = c.named_declaration(mf, "PROFILE_Texel0", profile0, ("", "Result"), 4100, -1350)
-    texel1_decl = c.named_declaration(mf, "PROFILE_Texel1", profile1, ("", "Result"), 4100, -650)
-    texel2_decl = c.named_declaration(mf, "PROFILE_Texel2", profile2, ("", "Result"), 4100, 50)
+    fallback_defaults = [
+        (0.5, 0.5, 0.0, 0.0),
+        (1.0, 0.5, 0.25, 0.5),
+        (0.0, 0.0, 0.02, 0.5),
+        (90.0, 2.0, 0.05, 0.15),
+        (0.0, 0.0, 0.0, 0.0),
+    ]
+    packed_texels = []
+    for texel_index in range(5):
+        y = -1700 + texel_index * 650
+        start_use = c.named_usage(mf, global_start_decl, 500, y)
+        texel_uv = c.custom_expression(
+            mf,
+            f"return float2(StartU + {float(texel_index):.1f} * TexelSize, 0.5);",
+            [
+                ("StartU", start_use, ("", "Result")),
+                ("TexelSize", texel_size, ("", "Result")),
+            ],
+            "float2", 1100, y,
+            f"Build the center UV for packed Render Profile texel {texel_index}.",
+        )
+        lut_sample = c.texture2d_parameter(
+            mf, "DWC_GlobalRenderProfileLUT", data_fallback, 1900, y,
+            sampler_type=c.linear_color_sampler(), group="DWC Render Profile",
+            description=f"Runtime global Render Profile LUT texel {texel_index}.",
+        )
+        c.try_connect(texel_uv, ("", "Result"), lut_sample, ("Coordinates", "UVs"))
+        lut_rgba = c.append_vector(
+            mf, lut_sample, "RGB", lut_sample, "A", 2500, y,
+            f"Reconstruct packed RGBA texel {texel_index}.",
+        )
+        fallback = c.vector_parameter(
+            mf, f"DWC_FallbackRenderProfile{texel_index}",
+            fallback_defaults[texel_index], 3150, y + 250,
+            group="DWC Render Profile",
+            description=f"Fallback packed profile texel {texel_index}.",
+        )
+        fallback_rgba = c.append_vector(
+            mf, fallback, "RGB", fallback, "A", 3600, y + 250,
+            f"Reconstruct fallback RGBA texel {texel_index}.",
+        )
+        selected = c.lerp(
+            mf, fallback_rgba, ("", "Result"), lut_rgba, ("", "Result"),
+            use_runtime_lut, ("", "Result"), 4200, y,
+            f"Select fallback or runtime packed profile texel {texel_index}.",
+        )
+        packed_texels.append(c.named_declaration(
+            mf, f"PROFILE_Texel{texel_index}", selected, ("", "Result"), 4850, y
+        ))
 
-    # 3-1 Decode packed texel 0.
-    texel0_uses = [c.named_usage(mf, texel0_decl, 5150, -1600 + i * 380) for i in range(4)]
-    texel0_names = [
-        ("AbsorbedDarkeningStrength", "R", "PROFILE_AbsorbedDarkeningStrength"),
-        ("AbsorbedGlossinessStrength", "G", "PROFILE_AbsorbedGlossinessStrength"),
-        ("DropletNormalSlice", "B", "PROFILE_DropletNormalSlice"),
+    # Packed layout must remain identical to DWCGPUResourceSubsystem.cpp.
+    packed_outputs = [
+        ("AbsorbedDarkeningStrength", 0, "R"),
+        ("AbsorbedGlossinessStrength", 0, "G"),
+        ("DropletNormalSlice", 0, "B"),
+        ("DropletFlowEnabled", 0, "A"),
+        ("SurfaceWaterNormalStrength", 1, "R"),
+        ("SurfaceWaterRoughnessBlend", 1, "G"),
+        ("DropletFlowSpeed", 1, "B"),
+        ("SurfaceWaterSpecular", 1, "A"),
+        ("DropletMaskSlice", 2, "R"),
+        ("DropletFlowNoiseSlice", 2, "G"),
+        ("SurfaceWaterTargetRoughness", 2, "B"),
+        ("SurfaceWaterTotalStrength", 2, "A"),
+        ("DropletFlowDirectionDegrees", 3, "R"),
+        ("DropletFlowNoiseTiling", 3, "G"),
+        ("DropletFlowNoiseStrength", 3, "B"),
+        ("DropletFlowNoiseSpeed", 3, "A"),
+        ("DropletFlowNormalSlice", 4, "R"),
+        ("DropletFlowMaskSlice", 4, "G"),
     ]
     profile_decls: dict[str, object] = {}
-    for i, (output_name, channel, reroute_name) in enumerate(texel0_names):
-        mask = c.component_mask(mf, texel0_uses[i], ("", "Result"), channel, 5550, -1600 + i * 380)
-        profile_decls[output_name] = c.named_declaration(
-            mf, reroute_name, mask, ("", "Result"), 6100, -1600 + i * 380
+    for output_index, (name, texel_index, channel) in enumerate(packed_outputs):
+        y = -2000 + output_index * 230
+        texel_use = c.named_usage(mf, packed_texels[texel_index], 5600, y)
+        mask = c.component_mask(mf, texel_use, ("", "Result"), channel, 6100, y)
+        profile_decls[name] = c.named_declaration(
+            mf, f"PROFILE_{name}", mask, ("", "Result"), 6700, y
         )
-
-    # 3-2 Decode packed texel 1.
-    texel1_uses = [c.named_usage(mf, texel1_decl, 7400, -1500 + i * 480) for i in range(4)]
-    texel1_names = [
-        ("SurfaceWaterNormalStrength", "R", "PROFILE_SurfaceWaterNormalStrength"),
-        ("SurfaceWaterRoughnessBlend", "G", "PROFILE_SurfaceWaterRoughnessBlend"),
-        ("SurfaceWaterSpecular", "A", "PROFILE_SurfaceWaterSpecular"),
-    ]
-    for i, (output_name, channel, reroute_name) in enumerate(texel1_names):
-        mask = c.component_mask(mf, texel1_uses[i], ("", "Result"), channel, 7800, -1500 + i * 480)
-        profile_decls[output_name] = c.named_declaration(
-            mf, reroute_name, mask, ("", "Result"), 8350, -1500 + i * 480
-        )
-
-    # 3-3 Decode packed texel 2.
-    texel2_uses = [c.named_usage(mf, texel2_decl, 7400, 500 + i * 360) for i in range(4)]
-    texel2_names = [
-        ("DropletMaskSlice", "R", "PROFILE_DropletMaskSlice"),
-        ("SurfaceWaterTargetRoughness", "B", "PROFILE_SurfaceWaterTargetRoughness"),
-        ("SurfaceWaterTotalStrength", "A", "PROFILE_SurfaceWaterTotalStrength"),
-    ]
-    for i, (output_name, channel, reroute_name) in enumerate(texel2_names):
-        mask = c.component_mask(mf, texel2_uses[i], ("", "Result"), channel, 7800, 500 + i * 360)
-        profile_decls[output_name] = c.named_declaration(
-            mf, reroute_name, mask, ("", "Result"), 8350, 500 + i * 360
-        )
-
     profile_decls["DropletDetailSize"] = droplet_detail_decl
 
-    # 3-3 Function outputs use only local Named Reroute usages; no wires cross comments.
-    ordered_outputs = [
-        "AbsorbedDarkeningStrength", "AbsorbedGlossinessStrength",
-        "DropletNormalSlice", "SurfaceWaterNormalStrength",
-        "SurfaceWaterRoughnessBlend",
-        "SurfaceWaterSpecular", "SurfaceWaterTargetRoughness", "SurfaceWaterTotalStrength",
-        "DropletMaskSlice", "DropletDetailSize",
-    ]
+    ordered_outputs = [name for name, _, _ in packed_outputs] + ["DropletDetailSize"]
     descriptions = {
         "AbsorbedDarkeningStrength": "Absorbed wetness base-color darkening strength.",
         "AbsorbedGlossinessStrength": "Absorbed wetness roughness blend strength.",
-        "DropletNormalSlice": "Droplet normal Texture2DArray slice.",
-        "DropletMaskSlice": "Droplet mask Texture2DArray slice.",
+        "DropletNormalSlice": "Stationary Droplet normal Texture2DArray slice.",
+        "DropletFlowEnabled": "Whether the independently stamped Flow Droplet path is enabled.",
         "SurfaceWaterNormalStrength": "Common surface-water detail-normal strength.",
         "SurfaceWaterRoughnessBlend": "Surface-water roughness blend strength.",
-        "SurfaceWaterSpecular": "Wet surface target specular for fully visible surface water.",
-        "SurfaceWaterTargetRoughness": "Wet surface target roughness for fully visible surface water.",
+        "DropletFlowSpeed": "Signed Flow Droplet panning speed in UV per second.",
+        "SurfaceWaterSpecular": "Wet surface target specular.",
+        "DropletMaskSlice": "Stationary Droplet mask Texture2DArray slice.",
+        "DropletFlowNoiseSlice": "Flow noise Texture2DArray slice.",
+        "SurfaceWaterTargetRoughness": "Wet surface target roughness.",
         "SurfaceWaterTotalStrength": "Overall Surface Water rendering response strength.",
+        "DropletFlowDirectionDegrees": "Flow direction in UV-space degrees.",
+        "DropletFlowNoiseTiling": "Flow noise UV tiling.",
+        "DropletFlowNoiseStrength": "Flow noise sideways bend strength.",
+        "DropletFlowNoiseSpeed": "Signed Flow noise panning speed.",
+        "DropletFlowNormalSlice": "Flow Droplet normal Texture2DArray slice.",
+        "DropletFlowMaskSlice": "Flow Droplet mask Texture2DArray slice.",
         "DropletDetailSize": "Part-local physical-looking size of the Droplet detail pattern.",
     }
-    for i, name in enumerate(ordered_outputs):
-        usage = c.named_usage(mf, profile_decls[name], 9650, -1700 + i * 240)
+    for output_index, name in enumerate(ordered_outputs):
+        y = -2100 + output_index * 230
+        usage = c.named_usage(mf, profile_decls[name], 7600, y)
         c.function_output(
-            mf, name, usage, ("", "Result"), i, 10400, -1700 + i * 240, descriptions[name]
+            mf, name, usage, ("", "Result"), output_index, 8400, y, descriptions[name]
         )
 
     c.finalize_material_function(mf)

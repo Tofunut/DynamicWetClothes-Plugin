@@ -564,8 +564,8 @@ void SWetnessProfileEditorPanel::ApplyPreviewSettingsToViewport()
     {
         PreviewViewport->SetPreviewMode(*SelectedPreviewModeItem);
     }
-    PreviewViewport->SetPreviewAnimationEnabled(false);
-    PreviewViewport->SetPreviewAnimationSpeed(0.0f);
+    PreviewViewport->SetPreviewAnimationEnabled(true);
+    PreviewViewport->SetPreviewAnimationSpeed(1.0f);
 }
 
 #undef LOCTEXT_NAMESPACE

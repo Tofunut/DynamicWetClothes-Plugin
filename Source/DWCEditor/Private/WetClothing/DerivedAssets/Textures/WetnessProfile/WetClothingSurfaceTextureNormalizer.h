@@ -55,12 +55,14 @@ private:
         UTexture2D* SourceTexture,
         const TCHAR* TextureRole,
         bool bNormalMap,
+        bool bAllowSourceConversion,
         FString& OutErrorMessage);
 
     static bool NormalizeTexture(
         UTexture2D* SourceTexture,
         const TCHAR* TextureRole,
         bool bNormalMap,
+        bool bAllowSourceConversion,
         UTexture2D*& OutNormalizedTexture,
         FString& OutErrorMessage);
 };

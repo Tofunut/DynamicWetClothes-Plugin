@@ -39,7 +39,13 @@ namespace
         return FString::Printf(
             TEXT("AbsorbedDarkening=%.9g|")
             TEXT("AbsorbedGlossiness=%.9g|")
-            TEXT("DropletsEnabled=%d|DropletNormal=%s|DropletMask=%s|")
+            TEXT("DropletsEnabled=%d|DropletSpawn=%.9g|DropletLifetime=%.9g|DropletRadius=%.9g|DropletMax=%d|")
+            TEXT("DropletNormal=%s|DropletMask=%s|")
+            TEXT("FlowEnabled=%d|FlowSpawn=%.9g|FlowLifetime=%.9g|FlowWidth=%.9g|")
+            TEXT("FlowHeight=%.9g|FlowPositionSpread=%.9g|FlowMax=%d|")
+            TEXT("FlowSpeed=%.9g|FlowAdvectionSpeed=%.9g|FlowDirection=%.9g|")
+            TEXT("FlowNormal=%s|FlowMask=%s|FlowNoise=%s|")
+            TEXT("FlowNoiseTiling=%.9g|FlowNoiseStrength=%.9g|FlowNoiseSpeed=%.9g|")
             TEXT("SurfaceWaterTargetRoughness=%.9g|")
             TEXT("SurfaceWaterNormalStrength=%.9g|")
             TEXT("SurfaceWaterRoughnessBlend=%.9g|")
@@ -48,8 +54,28 @@ namespace
             Parameters.GetAbsorbedDarkeningStrength(),
             Parameters.GetAbsorbedGlossinessStrength(),
             Surface.bEnabled ? 1 : 0,
+            Surface.DropletSpawnProbability,
+            Surface.DropletLifetimeSeconds,
+            Surface.DropletRadiusPixels,
+            Surface.DropletMaxActiveStamps,
             *MakeTextureBuildKey(Surface.DropletNormalTexture),
             *MakeTextureBuildKey(Surface.DropletMaskTexture),
+            Surface.bEnableDropletFlow ? 1 : 0,
+            Surface.DropletFlowSpawnProbability,
+            Surface.DropletFlowLifetimeSeconds,
+            Surface.DropletFlowRadiusPixels,
+            Surface.DropletFlowHeightPixels,
+            Surface.DropletFlowSpawnPositionSpread,
+            Surface.DropletFlowMaxActiveStamps,
+            Surface.DropletFlowSpeed,
+            Surface.DropletFlowAdvectionSpeed,
+            Surface.DropletFlowDirectionDegrees,
+            *MakeTextureBuildKey(Surface.DropletFlowNormalTexture),
+            *MakeTextureBuildKey(Surface.DropletFlowMaskTexture),
+            *MakeTextureBuildKey(Surface.DropletFlowNoiseTexture),
+            Surface.DropletFlowNoiseTiling,
+            Surface.DropletFlowNoiseStrength,
+            Surface.DropletFlowNoiseSpeed,
             Surface.SurfaceWaterTargetRoughness,
             Surface.SurfaceWaterNormalStrength,
             Surface.SurfaceWaterRoughnessBlend,
@@ -381,7 +407,7 @@ FString FWetClothingWetPartDataTextureBaker::MakeBuildSignature(const UWetClothi
         TArray<int32> IslandIDs = BakeEntry.Entry->AssignedUVIslandIDs;
         IslandIDs.Sort();
         Canonical += FString::Printf(
-            TEXT("|Slot=%d;OriginalUV=%d;Part=%d;Profile=%s;Key=%s;OverrideDropletStampSize=%d;DropletRadiusScale=%.9g;DropletDetailSize=%.9g;Islands="),
+            TEXT("|Slot=%d;OriginalUV=%d;Part=%d;Profile=%s;Key=%s;OverrideDropletStampSize=%d;DropletRadiusScale=%.9g;OverrideDropletFlowStampSize=%d;DropletFlowSizeScale=%.9g;DropletDetailSize=%.9g;Islands="),
             BakeEntry.MaterialSlotIndex,
             WetClothingAsset->GetOriginalUVChannelIndex(),
             BakeEntry.Entry->WetPartID,
@@ -389,6 +415,8 @@ FString FWetClothingWetPartDataTextureBaker::MakeBuildSignature(const UWetClothi
             *MakeProfileStableKey(BakeEntry.Profile, Parameters),
             BakeEntry.Entry->SurfaceWater.bOverrideDropletStampSize ? 1 : 0,
             BakeEntry.Entry->SurfaceWater.DropletRadiusScale,
+            BakeEntry.Entry->SurfaceWater.bOverrideDropletFlowStampSize ? 1 : 0,
+            BakeEntry.Entry->SurfaceWater.DropletFlowSizeScale,
             BakeEntry.Entry->SurfaceWater.DropletDetailSize);
         for (const int32 IslandID : IslandIDs)
         {
@@ -476,6 +504,9 @@ bool FWetClothingWetPartDataTextureBaker::Bake(
             // texture fields remain the authoritative Texture2DArray upload sources.
             LocalProfile.Parameters.SurfaceWater.DropletNormalTexture = nullptr;
             LocalProfile.Parameters.SurfaceWater.DropletMaskTexture = nullptr;
+            LocalProfile.Parameters.SurfaceWater.DropletFlowNormalTexture = nullptr;
+            LocalProfile.Parameters.SurfaceWater.DropletFlowMaskTexture = nullptr;
+            LocalProfile.Parameters.SurfaceWater.DropletFlowNoiseTexture = nullptr;
             LocalIDByStableKey.Add(StableKey, LocalProfileID);
         }
         LocalIDByEntry.Add(Entry, LocalProfileID);

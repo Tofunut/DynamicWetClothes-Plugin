@@ -20,9 +20,15 @@ namespace
         float TotalSurfaceAmount = 0.0f;
         float BestInfluence = -1.0f;
         FVector2f BestUV = FVector2f::ZeroVector;
+        float FlowSelectionWeight = 0.0f;
+        FVector2f FlowCandidateUV = FVector2f::ZeroVector;
+        FVector3f FlowCandidateBarycentric = FVector3f::ZeroVector;
+        int32 FlowCandidateTriangleID = INDEX_NONE;
         FSurfaceWaterProfileParameters Profile;
         float DropletRadiusScale = 1.0f;
+        float DropletFlowSizeScale = 1.0f;
         bool bHasProfile = false;
+        bool bHasFlowCandidate = false;
     };
 
     struct FGPUSurfaceWaterAccumulatorKey
@@ -46,6 +52,21 @@ namespace
         }
     };
 
+    uint64 MakeSurfaceStampGroupId(
+        const FGPUSurfaceWaterAccumulatorKey& Key,
+        const bool bFlowing)
+    {
+        const uint64 MaterialSlotBits =
+            static_cast<uint64>(static_cast<uint32>(Key.MaterialSlotIndex) & 0x7fffu);
+        const uint64 WetPartBits =
+            static_cast<uint64>(static_cast<uint32>(Key.WetPartID));
+        const uint64 ProfileBits = static_cast<uint64>(Key.ProfileIndex);
+        return (bFlowing ? (1ull << 63) : 0ull) |
+               (MaterialSlotBits << 48) |
+               (WetPartBits << 16) |
+               ProfileBits;
+    }
+
     int32 GetDominantTriangleVertexIndex(
         const FDWCGPUBakedTriangle& Triangle,
         const FVector3f&             Barycentric)
@@ -59,6 +80,46 @@ namespace
             return Triangle.VertexIndices.Y;
         }
         return Triangle.VertexIndices.Z;
+    }
+
+    FVector2f MakeIndependentFlowStampUV(
+        const FDWCGPUBakedTriangle& Triangle,
+        const FVector3f& ContactBarycentric,
+        const float PositionSpread,
+        FRandomStream& RandomStream)
+    {
+        FVector3f SafeContactBarycentric(
+            FMath::Max(ContactBarycentric.X, 0.0f),
+            FMath::Max(ContactBarycentric.Y, 0.0f),
+            FMath::Max(ContactBarycentric.Z, 0.0f));
+        const float ContactWeight = SafeContactBarycentric.X +
+            SafeContactBarycentric.Y +
+            SafeContactBarycentric.Z;
+        SafeContactBarycentric = ContactWeight > KINDA_SMALL_NUMBER
+            ? SafeContactBarycentric / ContactWeight
+            : FVector3f(1.0f / 3.0f, 1.0f / 3.0f, 1.0f / 3.0f);
+
+        // Square-root sampling produces a uniform point inside the selected UV triangle.
+        const float Root = FMath::Sqrt(RandomStream.FRand());
+        const float Edge = RandomStream.FRand();
+        const FVector3f RandomBarycentric(
+            1.0f - Root,
+            Root * (1.0f - Edge),
+            Root * Edge);
+        const FVector3f FlowBarycentric = FMath::Lerp(
+            SafeContactBarycentric,
+            RandomBarycentric,
+            FMath::Clamp(PositionSpread, 0.0f, 1.0f));
+
+        return FVector2f(
+            static_cast<float>(
+                Triangle.UV0.X * FlowBarycentric.X +
+                Triangle.UV1.X * FlowBarycentric.Y +
+                Triangle.UV2.X * FlowBarycentric.Z),
+            static_cast<float>(
+                Triangle.UV0.Y * FlowBarycentric.X +
+                Triangle.UV1.Y * FlowBarycentric.Y +
+                Triangle.UV2.Y * FlowBarycentric.Z));
     }
 
     bool QueueGPUSurfaceWaterStamps(
@@ -79,6 +140,7 @@ namespace
         const FDWCGPULODBakeData& GPUData =
             Asset->GetGPUWetMapRuntimeData(UWetClothingAsset::RuntimeSimulationLODIndex);
         TMap<FGPUSurfaceWaterAccumulatorKey, FGPUSurfaceWaterAccumulator> Accumulators;
+        FRandomStream& RandomStream = Receiver.GPUSurfaceWaterRandomStream;
 
         for (const FDWCResolvedSurfaceContact& Contact : Contacts)
         {
@@ -144,19 +206,31 @@ namespace
             FGPUSurfaceWaterAccumulator& Accumulator = Accumulators.FindOrAdd(AccumulatorKey);
             Accumulator.MaterialSlotIndex = Contact.MaterialSlotIndex;
             Accumulator.TotalSurfaceAmount += SurfaceAmount;
+
+            // Flow stamps use a weighted reservoir sample instead of reusing the static stamp's strongest contact.
+            Accumulator.FlowSelectionWeight += SurfaceAmount;
+            if (!Accumulator.bHasFlowCandidate ||
+                RandomStream.FRand() * Accumulator.FlowSelectionWeight < SurfaceAmount)
+            {
+                Accumulator.FlowCandidateUV = Contact.ContactUV;
+                Accumulator.FlowCandidateBarycentric = Contact.Barycentric;
+                Accumulator.FlowCandidateTriangleID = Contact.TriangleID;
+                Accumulator.bHasFlowCandidate = true;
+            }
+
             if (Contact.TriangleInfluence > Accumulator.BestInfluence)
             {
                 Accumulator.BestInfluence = Contact.TriangleInfluence;
                 Accumulator.BestUV = Contact.ContactUV;
                 Accumulator.Profile = SurfaceProfile;
                 Accumulator.DropletRadiusScale = WetPart->SurfaceWater.GetResolvedDropletStampSizeScale();
+                Accumulator.DropletFlowSizeScale = WetPart->SurfaceWater.GetResolvedDropletFlowStampSizeScale();
                 Accumulator.bHasProfile = true;
             }
         }
 
-        FRandomStream& RandomStream = Receiver.GPUSurfaceWaterRandomStream;
         TArray<FDWCSurfaceStampRequest> Requests;
-        Requests.Reserve(Accumulators.Num());
+        Requests.Reserve(Accumulators.Num() * 2);
 
         for (const TPair<FGPUSurfaceWaterAccumulatorKey, FGPUSurfaceWaterAccumulator>& Pair : Accumulators)
         {
@@ -176,6 +250,36 @@ namespace
                 Request.HalfSizePixels = FVector2f(FMath::Max(0.5f, Surface.DropletRadiusPixels * Accumulator.DropletRadiusScale));
                 Request.Amount = Accumulator.TotalSurfaceAmount;
                 Request.LifetimeSeconds = FMath::Max(0.01f, Surface.DropletLifetimeSeconds);
+                Request.MaxActiveStamps = FMath::Clamp(Surface.DropletMaxActiveStamps, 1, 4096);
+                Request.StampGroupId = MakeSurfaceStampGroupId(Pair.Key, false);
+                Request.bFlowing = false;
+            }
+
+            if (Surface.bEnableDropletFlow &&
+                Surface.DropletFlowRadiusPixels > 0.0f &&
+                Surface.DropletFlowHeightPixels > 0.0f &&
+                Accumulator.bHasFlowCandidate &&
+                RandomStream.FRand() < FMath::Clamp(Surface.DropletFlowSpawnProbability, 0.0f, 1.0f))
+            {
+                FDWCSurfaceStampRequest& Request = Requests.AddDefaulted_GetRef();
+                Request.MaterialSlotIndex = Accumulator.MaterialSlotIndex;
+                Request.UV = Accumulator.FlowCandidateUV;
+                if (GPUData.Triangles.IsValidIndex(Accumulator.FlowCandidateTriangleID))
+                {
+                    Request.UV = MakeIndependentFlowStampUV(
+                        GPUData.Triangles[Accumulator.FlowCandidateTriangleID],
+                        Accumulator.FlowCandidateBarycentric,
+                        Surface.DropletFlowSpawnPositionSpread,
+                        RandomStream);
+                }
+                Request.HalfSizePixels = FVector2f(
+                    FMath::Max(0.5f, Surface.DropletFlowRadiusPixels * Accumulator.DropletFlowSizeScale),
+                    FMath::Max(0.5f, Surface.DropletFlowHeightPixels * Accumulator.DropletFlowSizeScale));
+                Request.Amount = Accumulator.TotalSurfaceAmount;
+                Request.LifetimeSeconds = FMath::Max(0.01f, Surface.DropletFlowLifetimeSeconds);
+                Request.MaxActiveStamps = FMath::Clamp(Surface.DropletFlowMaxActiveStamps, 1, 4096);
+                Request.StampGroupId = MakeSurfaceStampGroupId(Pair.Key, true);
+                Request.bFlowing = true;
             }
 
         }

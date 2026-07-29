@@ -166,9 +166,14 @@ class SWetClothingPartEditorPanel : public SCompoundWidget
     void                                           HandleSelectedDropletStampSizeOverrideChanged(ECheckBoxState NewState);
     bool                                           IsSelectedDropletStampSizeOverrideEnabled() const;
     float                                          GetSelectedDropletRadiusScale() const;
+    ECheckBoxState                                 GetSelectedDropletFlowStampSizeOverrideCheckState() const;
+    void                                           HandleSelectedDropletFlowStampSizeOverrideChanged(ECheckBoxState NewState);
+    bool                                           IsSelectedDropletFlowStampSizeOverrideEnabled() const;
+    float                                          GetSelectedDropletFlowSizeScale() const;
     float                                          GetSelectedDropletDetailSize() const;
     FText                                          GetSelectedDropletDetailSizeText() const;
     void                                           HandleSelectedDropletRadiusScaleChanged(float InValue);
+    void                                           HandleSelectedDropletFlowSizeScaleChanged(float InValue);
     void                                           HandleSelectedDropletDetailSizeChanged(float InValue);
     ECheckBoxState                                 GetSurfaceWaterPreviewCoverageModeState(EDWCSurfaceWaterTilingPreviewCoverageMode Mode) const;
     void                                           HandleSurfaceWaterPreviewCoverageModeChanged(ECheckBoxState NewState, EDWCSurfaceWaterTilingPreviewCoverageMode Mode);

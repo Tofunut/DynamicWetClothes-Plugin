@@ -187,6 +187,45 @@ namespace
                     TEXT("Profile '%s' requires a Render Profile Data rebake so its 512 Droplet mask reference is regenerated."),
                     *StableKey));
             }
+            if (!SourcePathMatches(
+                    Surface.DropletFlowNormalTexture,
+                    BakedProfile->SourceDropletFlowNormal) ||
+                !FWetClothingSurfaceTextureNormalizer::IsPreparedTextureReferenceCurrent(
+                    BakedProfile->NormalizedDropletFlowNormal,
+                    Surface.DropletFlowNormalTexture,
+                    TEXT("DropletFlowNormal"),
+                    true))
+            {
+                PendingLines.Add(FString::Printf(
+                    TEXT("Profile '%s' requires a Render Profile Data rebake so its Flow Droplet normal reference is regenerated."),
+                    *StableKey));
+            }
+            if (!SourcePathMatches(
+                    Surface.DropletFlowMaskTexture,
+                    BakedProfile->SourceDropletFlowMask) ||
+                !FWetClothingSurfaceTextureNormalizer::IsPreparedTextureReferenceCurrent(
+                    BakedProfile->NormalizedDropletFlowMask,
+                    Surface.DropletFlowMaskTexture,
+                    TEXT("DropletFlowMask"),
+                    false))
+            {
+                PendingLines.Add(FString::Printf(
+                    TEXT("Profile '%s' requires a Render Profile Data rebake so its Flow Droplet mask reference is regenerated."),
+                    *StableKey));
+            }
+            if (!SourcePathMatches(
+                    Surface.DropletFlowNoiseTexture,
+                    BakedProfile->SourceDropletFlowNoise) ||
+                !FWetClothingSurfaceTextureNormalizer::IsPreparedTextureReferenceCurrent(
+                    BakedProfile->NormalizedDropletFlowNoise,
+                    Surface.DropletFlowNoiseTexture,
+                    TEXT("DropletFlowNoise"),
+                    false))
+            {
+                PendingLines.Add(FString::Printf(
+                    TEXT("Profile '%s' requires a Render Profile Data rebake so its Flow Droplet noise reference is regenerated."),
+                    *StableKey));
+            }
         }
     }
 
@@ -551,6 +590,9 @@ bool FWetClothingRenderProfileBakeService::SaveBakedRenderProfileAssets(UWetClot
         };
         AddGeneratedSurfaceTexture(LocalProfile.NormalizedDropletNormal.Get());
         AddGeneratedSurfaceTexture(LocalProfile.NormalizedDropletMask.Get());
+        AddGeneratedSurfaceTexture(LocalProfile.NormalizedDropletFlowNormal.Get());
+        AddGeneratedSurfaceTexture(LocalProfile.NormalizedDropletFlowMask.Get());
+        AddGeneratedSurfaceTexture(LocalProfile.NormalizedDropletFlowNoise.Get());
     }
 
     AddRenderProfilePackageForObject(

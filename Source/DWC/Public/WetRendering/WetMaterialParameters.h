@@ -15,6 +15,7 @@ namespace DWCWetMaterialParameters
     DWC_API FName FallbackRenderProfileTexel(int32 TexelIndex);
     DWC_API const FName& DropletMaskTextureArray();
     DWC_API const FName& DropletNormalTextureArray();
+    DWC_API const FName& DropletFlowNoiseTextureArray();
     DWC_API const FName& SurfaceWaterTargetRoughness();
     DWC_API const FName& SurfaceWaterNormalFlipX();
     DWC_API const FName& SurfaceWaterNormalFlipY();
@@ -27,6 +28,7 @@ namespace DWCWetMaterialParameters
     DWC_API const FName& UnderColor();
     DWC_API const FName& UnderColorBlendStrength();
     DWC_API const FName& SurfaceDropletRT();
+    DWC_API const FName& SurfaceFlowDropletRT();
     DWC_API const FName& SurfaceWaterTime();
     DWC_API const FName& SurfaceWaterTexelSize();
 

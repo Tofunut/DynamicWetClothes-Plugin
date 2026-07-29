@@ -20,6 +20,9 @@ struct DWC_API FDWCSurfaceStampRequest
     float Amount = 0.0f;
     float LifetimeSeconds = 0.0f;
     int32 MaterialSlotIndex = INDEX_NONE;
+    int32 MaxActiveStamps = 256;
+    uint64 StampGroupId = 0;
+    bool bFlowing = false;
 };
 
 struct DWC_API FDWCGPUBackendInitArgs

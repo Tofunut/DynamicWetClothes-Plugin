@@ -1,0 +1,126 @@
+#include "/Engine/Public/Platform.ush"
+#include "/DWCGPU/DWCSurfaceStampCommon.ush"
+
+Texture2D<float4> SourceSurface;
+RWTexture2D<float4> DestinationSurface;
+
+StructuredBuffer<uint4> TexelLookup;
+StructuredBuffer<float4> TriangleFlow;
+StructuredBuffer<float4> Profiles;
+StructuredBuffer<uint> TriangleProfileIndices;
+
+int2 TextureSize;
+float DeltaSeconds;
+float CurrentTimeSeconds;
+
+uint Flatten(int2 Texel)
+{
+    return (uint)(Texel.y * TextureSize.x + Texel.x);
+}
+
+bool IsInside(int2 Texel)
+{
+    return all(Texel >= 0) && all(Texel < TextureSize);
+}
+
+bool IsLiveState(float4 State)
+{
+    return State.r > 1.0e-5 &&
+           State.b > 0.0 &&
+           CurrentTimeSeconds - State.g < max(State.b, 0.01);
+}
+
+float4 GatherAdvectedState(float2 SourcePosition, uint IslandID)
+{
+    const int2 BaseTexel = int2(floor(SourcePosition));
+    const float2 Fraction = frac(SourcePosition);
+    const float Weights[4] =
+    {
+        (1.0 - Fraction.x) * (1.0 - Fraction.y),
+        Fraction.x * (1.0 - Fraction.y),
+        (1.0 - Fraction.x) * Fraction.y,
+        Fraction.x * Fraction.y
+    };
+    const int2 Offsets[4] =
+    {
+        int2(0, 0),
+        int2(1, 0),
+        int2(0, 1),
+        int2(1, 1)
+    };
+
+    float Amount = 0.0;
+    float BestContribution = 0.0;
+    float4 DonorState = 0.0;
+
+    [unroll]
+    for (uint SampleIndex = 0u; SampleIndex < 4u; ++SampleIndex)
+    {
+        const int2 SourceTexel = BaseTexel + Offsets[SampleIndex];
+        if (!IsInside(SourceTexel))
+        {
+            continue;
+        }
+
+        const uint4 SourceLookup = TexelLookup[Flatten(SourceTexel)];
+        if (!DWC_IsValidLookup(SourceLookup) || SourceLookup.w != IslandID)
+        {
+            continue;
+        }
+
+        const float4 State = SourceSurface.Load(int3(SourceTexel, 0));
+        if (!IsLiveState(State))
+        {
+            continue;
+        }
+
+        const float Contribution = saturate(State.r) * Weights[SampleIndex];
+        Amount += Contribution;
+        if (Contribution > BestContribution)
+        {
+            BestContribution = Contribution;
+            DonorState = State;
+        }
+    }
+
+    return BestContribution > 0.0
+        ? float4(saturate(Amount), DonorState.g, DonorState.b, 0.0)
+        : 0.0;
+}
+
+[numthreads(8, 8, 1)]
+void MainCS(uint3 DispatchThreadID : SV_DispatchThreadID)
+{
+    const int2 DestinationTexel = int2(DispatchThreadID.xy);
+    if (!IsInside(DestinationTexel))
+    {
+        return;
+    }
+
+    const uint4 DestinationLookup = TexelLookup[Flatten(DestinationTexel)];
+    if (!DWC_IsValidLookup(DestinationLookup))
+    {
+        DestinationSurface[DestinationTexel] = 0.0;
+        return;
+    }
+
+    const uint ProfileIndex = TriangleProfileIndices[DestinationLookup.x];
+    const float AdvectionSpeed = max(Profiles[ProfileIndex].w, 0.0);
+    const float2 FlowUV = TriangleFlow[DestinationLookup.x].xy;
+    const float FlowLength = length(FlowUV);
+    const float2 FlowDirection = FlowLength > 1.0e-8 ? FlowUV / FlowLength : 0.0;
+    const float2 DestinationUV =
+        (float2(DestinationTexel) + 0.5) / float2(TextureSize);
+    const float2 SourceUV =
+        DestinationUV - FlowDirection * (AdvectionSpeed * max(DeltaSeconds, 0.0));
+
+    if (any(SourceUV < 0.0) || any(SourceUV >= 1.0))
+    {
+        DestinationSurface[DestinationTexel] = 0.0;
+        return;
+    }
+
+    const float2 SourcePosition = SourceUV * float2(TextureSize) - 0.5;
+    DestinationSurface[DestinationTexel] =
+        GatherAdvectedState(SourcePosition, DestinationLookup.w);
+}

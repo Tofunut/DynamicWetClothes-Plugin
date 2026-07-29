@@ -110,6 +110,7 @@ class SWetnessProfileViewport : public SEditorViewport, public FGCObject
     TObjectPtr<UTexture2D> PreviewWetnessMapTexture = nullptr;
     TObjectPtr<UTexture2D> PreviewWetPartDataTexture = nullptr;
     TObjectPtr<UTexture2D> PreviewSurfaceDropletTexture = nullptr;
+    TObjectPtr<UTexture2D> PreviewSurfaceFlowDropletTexture = nullptr;
     TObjectPtr<UTexture> PreviewDefaultNormalTexture = nullptr;
     TObjectPtr<UTexture> PreviewDefaultMaskTexture = nullptr;
     TSharedPtr<STextBlock> OverlayText;

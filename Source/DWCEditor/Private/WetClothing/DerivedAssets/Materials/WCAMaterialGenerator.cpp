@@ -1031,6 +1031,10 @@ namespace
             {
                 OutMissingParameters.Add(DWCWetMaterialParameters::SurfaceDropletRT().ToString());
             }
+            if (!MaterialInterfaceHasTextureParameter(MaterialInterface, DWCWetMaterialParameters::SurfaceFlowDropletRT()))
+            {
+                OutMissingParameters.Add(DWCWetMaterialParameters::SurfaceFlowDropletRT().ToString());
+            }
             if (!MaterialInterfaceHasTextureParameter(MaterialInterface, DWCWetMaterialParameters::DropletMaskTextureArray()))
             {
                 OutMissingParameters.Add(DWCWetMaterialParameters::DropletMaskTextureArray().ToString());
@@ -1038,6 +1042,10 @@ namespace
             if (!MaterialInterfaceHasTextureParameter(MaterialInterface, DWCWetMaterialParameters::DropletNormalTextureArray()))
             {
                 OutMissingParameters.Add(DWCWetMaterialParameters::DropletNormalTextureArray().ToString());
+            }
+            if (!MaterialInterfaceHasTextureParameter(MaterialInterface, DWCWetMaterialParameters::DropletFlowNoiseTextureArray()))
+            {
+                OutMissingParameters.Add(DWCWetMaterialParameters::DropletFlowNoiseTextureArray().ToString());
             }
         }
         if (!MaterialInterfaceHasTextureParameter(MaterialInterface, DWCWetMaterialParameters::WetPartDataTexture()))

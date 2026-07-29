@@ -162,7 +162,7 @@ class DWC_API UDWCGPUResourceSubsystem final : public UWorldSubsystem
 
 public:
     static constexpr int32 MaxRuntimeProfileCount = 255;
-    static constexpr int32 TexelsPerProfile = 3;
+    static constexpr int32 TexelsPerProfile = 5;
     static constexpr int32 GlobalLUTWidth = MaxRuntimeProfileCount * TexelsPerProfile;
     static constexpr int32 LocalRemapWidth = 256;
 
@@ -207,6 +207,7 @@ public:
     UTexture2D* GetGlobalRenderProfileLUT() const { return GlobalRenderProfileLUT; }
     UTexture2DArray* GetDropletNormalArray() const { return DropletNormalArray; }
     UTexture2DArray* GetDropletMaskArray() const { return DropletMaskArray; }
+    UTexture2DArray* GetDropletFlowNoiseArray() const { return DropletFlowNoiseArray; }
     int32 GetRegistryRevision() const { return RegistryRevision; }
     FDWCGPUResourceSubsystemStats GetStats() const;
 
@@ -293,6 +294,9 @@ private:
     TObjectPtr<UTexture2DArray> DropletNormalArray = nullptr;
 
     UPROPERTY(Transient)
+    TObjectPtr<UTexture2DArray> DropletFlowNoiseArray = nullptr;
+
+    UPROPERTY(Transient)
     TMap<TObjectPtr<UWetClothingAsset>, FDWCAssetRenderProfileResources> AssetResources;
 
     TMap<FDWCGPUStaticResourceKey, TSharedPtr<FDWCGPUStaticSlotResources, ESPMode::ThreadSafe>> StaticSlotResources;
@@ -301,6 +305,7 @@ private:
     TMap<FString, int32> RuntimeProfileIndexByKey;
     FTextureArrayRegistry DropletMaskRegistry;
     FTextureArrayRegistry DropletNormalRegistry;
+    FTextureArrayRegistry DropletFlowNoiseRegistry;
     TSet<int32> DirtyRuntimeProfileIndices;
     TSet<TWeakObjectPtr<UMaterialInstanceDynamic>> RegisteredMaterialInstances;
     TSet<TWeakObjectPtr<UMaterialInstanceDynamic>> GPUMaterialInstances;

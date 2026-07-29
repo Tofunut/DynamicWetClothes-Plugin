@@ -55,6 +55,14 @@ struct DWC_API FWetPartSurfaceWaterSettings
     UPROPERTY(EditAnywhere, Category = "Surface Water", meta = (ClampMin = "0.25", ClampMax = "4.0", UIMin = "0.25", UIMax = "4.0", DisplayName = "Droplet Stamp Size Scale", EditCondition = "bOverrideDropletStampSize"))
     float DropletRadiusScale = 1.0f;
 
+    /** Uses a part-local Flow stamp-size scale instead of the Wetness Profile default. */
+    UPROPERTY(EditAnywhere, Category = "Surface Water")
+    bool bOverrideDropletFlowStampSize = false;
+
+    /** Multiplies both Flow Stamp Width and Height while preserving their Profile-authored aspect ratio. */
+    UPROPERTY(EditAnywhere, Category = "Surface Water", meta = (ClampMin = "0.25", ClampMax = "4.0", UIMin = "0.25", UIMax = "4.0", DisplayName = "Flow Stamp Size Scale", EditCondition = "bOverrideDropletFlowStampSize"))
+    float DropletFlowSizeScale = 1.0f;
+
     /** Physical-looking size of the repeating Droplet detail-normal pattern. */
     UPROPERTY(EditAnywhere, Category = "Surface Water", meta = (ClampMin = "0.0", ClampMax = "4.0", UIMin = "0.0", UIMax = "4.0"))
     float DropletDetailSize = 1.0f;
@@ -62,6 +70,11 @@ struct DWC_API FWetPartSurfaceWaterSettings
     float GetResolvedDropletStampSizeScale() const
     {
         return bOverrideDropletStampSize ? FMath::Clamp(DropletRadiusScale, 0.25f, 4.0f) : 1.0f;
+    }
+
+    float GetResolvedDropletFlowStampSizeScale() const
+    {
+        return bOverrideDropletFlowStampSize ? FMath::Clamp(DropletFlowSizeScale, 0.25f, 4.0f) : 1.0f;
     }
 
 };
@@ -331,12 +344,30 @@ struct DWC_API FWetClothingLocalRenderProfile
     UPROPERTY(VisibleAnywhere, Category = "Wet Part Data Texture|Surface Texture")
     FSoftObjectPath SourceDropletMask;
 
+    UPROPERTY(VisibleAnywhere, Category = "Wet Part Data Texture|Surface Texture")
+    FSoftObjectPath SourceDropletFlowNormal;
+
+    UPROPERTY(VisibleAnywhere, Category = "Wet Part Data Texture|Surface Texture")
+    FSoftObjectPath SourceDropletFlowMask;
+
+    UPROPERTY(VisibleAnywhere, Category = "Wet Part Data Texture|Surface Texture")
+    FSoftObjectPath SourceDropletFlowNoise;
+
     /** Array-compatible authored textures retained as hard references for runtime Texture2DArray upload. */
     UPROPERTY(VisibleAnywhere, Category = "Wet Part Data Texture|Surface Texture")
     TObjectPtr<UTexture2D> NormalizedDropletNormal = nullptr;
 
     UPROPERTY(VisibleAnywhere, Category = "Wet Part Data Texture|Surface Texture")
     TObjectPtr<UTexture2D> NormalizedDropletMask = nullptr;
+
+    UPROPERTY(VisibleAnywhere, Category = "Wet Part Data Texture|Surface Texture")
+    TObjectPtr<UTexture2D> NormalizedDropletFlowNormal = nullptr;
+
+    UPROPERTY(VisibleAnywhere, Category = "Wet Part Data Texture|Surface Texture")
+    TObjectPtr<UTexture2D> NormalizedDropletFlowMask = nullptr;
+
+    UPROPERTY(VisibleAnywhere, Category = "Wet Part Data Texture|Surface Texture")
+    TObjectPtr<UTexture2D> NormalizedDropletFlowNoise = nullptr;
 
 };
 

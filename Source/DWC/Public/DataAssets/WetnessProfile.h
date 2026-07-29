@@ -70,6 +70,70 @@ struct DWC_API FSurfaceWaterProfileParameters
 
     float DropletRadiusPixels = 16.0f;
 
+    /** Maximum number of concurrently alive static stamps for each Wet Part/profile. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet", meta = (ClampMin = "1", ClampMax = "4096", UIMin = "1", UIMax = "1024", DisplayName = "Max Active Stamps"))
+    int32 DropletMaxActiveStamps = 256;
+
+    /** Enables independently stamped flowing droplets in the dedicated Flow Droplet RT. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet|Flow")
+    bool bEnableDropletFlow = false;
+
+    /** Independent spawn probability for stamps written into the Flow Droplet RT. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet|Flow", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float DropletFlowSpawnProbability = 0.5f;
+
+    /** Lifetime of stamps written into the Flow Droplet RT. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet|Flow", meta = (ClampMin = "0.01", Units = "s"))
+    float DropletFlowLifetimeSeconds = 5.0f;
+
+    /** Horizontal half-size of stamps written into the Flow Droplet RT. Kept under the legacy name for asset compatibility. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet|Flow", meta = (ClampMin = "0.0", ClampMax = "256.0", DisplayName = "Flow Stamp Width"))
+    float DropletFlowRadiusPixels = 16.0f;
+
+    /** Vertical half-size of stamps written into the Flow Droplet RT. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet|Flow", meta = (ClampMin = "0.0", ClampMax = "256.0", DisplayName = "Flow Stamp Height"))
+    float DropletFlowHeightPixels = 32.0f;
+
+    /** Blends the independently selected flow contact toward a random point in the same UV triangle. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet|Flow", meta = (ClampMin = "0.0", ClampMax = "1.0", DisplayName = "Spawn Position Spread"))
+    float DropletFlowSpawnPositionSpread = 0.35f;
+
+    /** Maximum number of concurrently alive flow stamps for each Wet Part/profile. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet|Flow", meta = (ClampMin = "1", ClampMax = "4096", UIMin = "1", UIMax = "1024", DisplayName = "Max Active Stamps"))
+    int32 DropletFlowMaxActiveStamps = 256;
+
+    /** Signed UV distance travelled per second. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet|Flow", meta = (ClampMin = "-4.0", ClampMax = "4.0", UIMin = "-1.0", UIMax = "1.0"))
+    float DropletFlowSpeed = 0.25f;
+
+    /** UV distance per second used to advect the Flow Droplet RT along pose-dependent surface gravity. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet|Flow", meta = (ClampMin = "0.0", ClampMax = "4.0", UIMin = "0.0", UIMax = "1.0"))
+    float DropletFlowAdvectionSpeed = 0.08f;
+
+    /** Flow direction in UV space. 0 points along +U and 90 points along +V. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet|Flow", meta = (ClampMin = "-360.0", ClampMax = "360.0", UIMin = "-180.0", UIMax = "180.0", Units = "deg"))
+    float DropletFlowDirectionDegrees = 90.0f;
+
+    /** Optional normal texture for flowing droplets. Empty falls back to the static Droplet normal. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet|Flow")
+    TObjectPtr<UTexture2D> DropletFlowNormalTexture = nullptr;
+
+    /** Optional mask texture for flowing droplets. Empty falls back to the static Droplet mask. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet|Flow")
+    TObjectPtr<UTexture2D> DropletFlowMaskTexture = nullptr;
+
+    /** Optional grayscale noise used to bend the flowing UV path sideways. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet|Flow")
+    TObjectPtr<UTexture2D> DropletFlowNoiseTexture = nullptr;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet|Flow", meta = (ClampMin = "0.01", ClampMax = "64.0"))
+    float DropletFlowNoiseTiling = 2.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet|Flow", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float DropletFlowNoiseStrength = 0.05f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet|Flow", meta = (ClampMin = "-4.0", ClampMax = "4.0", UIMin = "-1.0", UIMax = "1.0"))
+    float DropletFlowNoiseSpeed = 0.15f;
 
     /** Roughness reached by fully visible surface water. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rendering", meta=(ClampMin="0.0", ClampMax="1.0", DisplayName="Water Roughness"))

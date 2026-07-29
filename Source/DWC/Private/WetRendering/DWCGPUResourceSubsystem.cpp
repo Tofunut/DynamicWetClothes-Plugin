@@ -185,6 +185,8 @@ namespace
         const FString ParameterState = FString::Printf(
             TEXT("AbsorbedDarkening=%.9g|AbsorbedGlossiness=%.9g|")
             TEXT("DropletsEnabled=%d|DropletNormal=%s|DropletMask=%s|")
+            TEXT("FlowEnabled=%d|FlowNormal=%s|FlowMask=%s|FlowNoise=%s|")
+            TEXT("FlowSpeed=%.9g|FlowDirection=%.9g|FlowNoiseTiling=%.9g|FlowNoiseStrength=%.9g|FlowNoiseSpeed=%.9g|")
             TEXT("TargetRoughness=%.9g|NormalStrength=%.9g|RoughnessBlend=%.9g|")
             TEXT("SurfaceWaterTotalStrength=%.9g|WaterSpecular=%.9g"),
             LocalProfile.Parameters.GetAbsorbedDarkeningStrength(),
@@ -198,6 +200,24 @@ namespace
                 LocalProfile.NormalizedDropletMask,
                 Surface.DropletMaskTexture,
                 LocalProfile.SourceDropletMask),
+            Surface.bEnableDropletFlow ? 1 : 0,
+            *ResolveProfileTextureIdentity(
+                LocalProfile.NormalizedDropletFlowNormal,
+                Surface.DropletFlowNormalTexture,
+                LocalProfile.SourceDropletFlowNormal),
+            *ResolveProfileTextureIdentity(
+                LocalProfile.NormalizedDropletFlowMask,
+                Surface.DropletFlowMaskTexture,
+                LocalProfile.SourceDropletFlowMask),
+            *ResolveProfileTextureIdentity(
+                LocalProfile.NormalizedDropletFlowNoise,
+                Surface.DropletFlowNoiseTexture,
+                LocalProfile.SourceDropletFlowNoise),
+            Surface.DropletFlowSpeed,
+            Surface.DropletFlowDirectionDegrees,
+            Surface.DropletFlowNoiseTiling,
+            Surface.DropletFlowNoiseStrength,
+            Surface.DropletFlowNoiseSpeed,
             Surface.SurfaceWaterTargetRoughness,
             Surface.SurfaceWaterNormalStrength,
             Surface.SurfaceWaterRoughnessBlend,
@@ -216,6 +236,8 @@ namespace
         const FSurfaceWaterProfileParameters& Surface = Parameters.SurfaceWater;
         return FString::Printf(
             TEXT("AbsorbedDarkening=%.9g|AbsorbedGlossiness=%.9g|DropletsEnabled=%d|DropletNormal=%s|DropletMask=%s|")
+            TEXT("FlowEnabled=%d|FlowNormal=%s|FlowMask=%s|FlowNoise=%s|")
+            TEXT("FlowSpeed=%.9g|FlowDirection=%.9g|FlowNoiseTiling=%.9g|FlowNoiseStrength=%.9g|FlowNoiseSpeed=%.9g|")
             TEXT("TargetRoughness=%.9g|NormalStrength=%.9g|RoughnessBlend=%.9g|")
             TEXT("SurfaceWaterTotalStrength=%.9g|WaterSpecular=%.9g"),
             Parameters.GetAbsorbedDarkeningStrength(),
@@ -223,6 +245,15 @@ namespace
             Surface.bEnabled ? 1 : 0,
             *GetPathNameSafe(Surface.DropletNormalTexture),
             *GetPathNameSafe(Surface.DropletMaskTexture),
+            Surface.bEnableDropletFlow ? 1 : 0,
+            *GetPathNameSafe(Surface.DropletFlowNormalTexture),
+            *GetPathNameSafe(Surface.DropletFlowMaskTexture),
+            *GetPathNameSafe(Surface.DropletFlowNoiseTexture),
+            Surface.DropletFlowSpeed,
+            Surface.DropletFlowDirectionDegrees,
+            Surface.DropletFlowNoiseTiling,
+            Surface.DropletFlowNoiseStrength,
+            Surface.DropletFlowNoiseSpeed,
             Surface.SurfaceWaterTargetRoughness,
             Surface.SurfaceWaterNormalStrength,
             Surface.SurfaceWaterRoughnessBlend,
@@ -268,6 +299,15 @@ namespace
             : FSoftObjectPath();
         LocalProfile.SourceDropletMask = Surface.DropletMaskTexture != nullptr
             ? FSoftObjectPath(Surface.DropletMaskTexture.Get())
+            : FSoftObjectPath();
+        LocalProfile.SourceDropletFlowNormal = Surface.DropletFlowNormalTexture != nullptr
+            ? FSoftObjectPath(Surface.DropletFlowNormalTexture.Get())
+            : FSoftObjectPath();
+        LocalProfile.SourceDropletFlowMask = Surface.DropletFlowMaskTexture != nullptr
+            ? FSoftObjectPath(Surface.DropletFlowMaskTexture.Get())
+            : FSoftObjectPath();
+        LocalProfile.SourceDropletFlowNoise = Surface.DropletFlowNoiseTexture != nullptr
+            ? FSoftObjectPath(Surface.DropletFlowNoiseTexture.Get())
             : FSoftObjectPath();
 
         // Refresh authored parameters and source identities, but preserve the
@@ -450,6 +490,9 @@ namespace
     {
         int32 DropletMask = 0;
         int32 DropletNormal = 0;
+        int32 DropletFlowMask = 0;
+        int32 DropletFlowNormal = 0;
+        int32 DropletFlowNoise = 0;
     };
 
     FLinearColor MakeFallbackRenderProfileTexel(
@@ -466,21 +509,35 @@ namespace
                 Parameters.GetAbsorbedDarkeningStrength(),
                 Parameters.GetAbsorbedGlossinessStrength(),
                 static_cast<float>(Surface.bEnabled ? Slices.DropletNormal : 0),
-                0.0f);
+                Surface.bEnabled && Surface.bEnableDropletFlow ? 1.0f : 0.0f);
 
         case 1:
             return FLinearColor(
                 FMath::Clamp(Surface.SurfaceWaterNormalStrength, 0.0f, 3.0f),
                 FMath::Clamp(Surface.SurfaceWaterRoughnessBlend, 0.0f, 1.0f),
-                0.0f,
+                Surface.DropletFlowSpeed,
                 FMath::Clamp(Surface.SurfaceWaterSpecular, 0.0f, 1.0f));
 
         case 2:
             return FLinearColor(
                 static_cast<float>(Surface.bEnabled ? Slices.DropletMask : 0),
-                0.0f,
+                static_cast<float>(Surface.bEnabled && Surface.bEnableDropletFlow ? Slices.DropletFlowNoise : 0),
                 FMath::Clamp(Surface.SurfaceWaterTargetRoughness, 0.0f, 1.0f),
                 FMath::Clamp(Surface.SurfaceWaterTotalStrength, 0.0f, 1.0f));
+
+        case 3:
+            return FLinearColor(
+                Surface.DropletFlowDirectionDegrees,
+                FMath::Max(Surface.DropletFlowNoiseTiling, 0.01f),
+                FMath::Clamp(Surface.DropletFlowNoiseStrength, 0.0f, 1.0f),
+                Surface.DropletFlowNoiseSpeed);
+
+        case 4:
+            return FLinearColor(
+                static_cast<float>(Surface.bEnabled && Surface.bEnableDropletFlow ? Slices.DropletFlowNormal : 0),
+                static_cast<float>(Surface.bEnabled && Surface.bEnableDropletFlow ? Slices.DropletFlowMask : 0),
+                0.0f,
+                0.0f);
 
         default:
             return FLinearColor::Black;
@@ -677,6 +734,7 @@ void UDWCGPUResourceSubsystem::Deinitialize()
     RuntimeProfileIndexByKey.Reset();
     DropletMaskRegistry.Reset();
     DropletNormalRegistry.Reset();
+    DropletFlowNoiseRegistry.Reset();
     DirtyRuntimeProfileIndices.Reset();
     RegisteredMaterialInstances.Reset();
     GPUMaterialInstances.Reset();
@@ -685,6 +743,7 @@ void UDWCGPUResourceSubsystem::Deinitialize()
     GlobalRenderProfileLUT = nullptr;
     DropletMaskArray = nullptr;
     DropletNormalArray = nullptr;
+    DropletFlowNoiseArray = nullptr;
     bTextureArraysDirty = false;
     RegistryRevision = 0;
     Super::Deinitialize();
@@ -778,7 +837,8 @@ FDWCGPUResourceSubsystemStats UDWCGPUResourceSubsystem::GetStats() const
                       RegisteredMaterialInstances.GetAllocatedSize() +
                       GPUMaterialInstances.GetAllocatedSize() +
                       GetRegistryCPUBytes(DropletMaskRegistry) +
-                      GetRegistryCPUBytes(DropletNormalRegistry);
+                      GetRegistryCPUBytes(DropletNormalRegistry) +
+                      GetRegistryCPUBytes(DropletFlowNoiseRegistry);
     for (const FRuntimeProfileRecord& Profile : RuntimeProfiles)
     {
         Stats.CPUBytes += Profile.StableKey.GetAllocatedSize() +
@@ -795,8 +855,10 @@ FDWCGPUResourceSubsystemStats UDWCGPUResourceSubsystem::GetStats() const
     AddUniqueTextureGPUBytes(NeutralProfileRemapLUT, SeenTextures, Stats.WetPartDataRemapGPUBytes);
     AddUniqueTextureGPUBytes(DropletMaskArray, SeenTextures, Stats.SurfaceNormalArrayGPUBytes);
     AddUniqueTextureGPUBytes(DropletNormalArray, SeenTextures, Stats.SurfaceNormalArrayGPUBytes);
+    AddUniqueTextureGPUBytes(DropletFlowNoiseArray, SeenTextures, Stats.SurfaceNormalArrayGPUBytes);
     Stats.TextureArrayCount += DropletMaskArray != nullptr ? 1u : 0u;
     Stats.TextureArrayCount += DropletNormalArray != nullptr ? 1u : 0u;
+    Stats.TextureArrayCount += DropletFlowNoiseArray != nullptr ? 1u : 0u;
 
     for (const TPair<TObjectPtr<UWetClothingAsset>, FDWCAssetRenderProfileResources>& Pair : AssetResources)
     {
@@ -904,6 +966,7 @@ int32 UDWCGPUResourceSubsystem::FindOrAddRuntimeProfile(
         const FSurfaceWaterProfileParameters& Surface = LocalProfile.Parameters.SurfaceWater;
         bool bTextureArraysChanged = false;
         const bool bDropletRequested = Surface.bEnabled;
+        const bool bFlowRequested = bDropletRequested && Surface.bEnableDropletFlow;
         UTexture2D* ResolvedDropletNormal = bDropletRequested
             ? ResolveDirectSurfaceTexture(
                 LocalProfile,
@@ -922,9 +985,60 @@ int32 UDWCGPUResourceSubsystem::FindOrAddRuntimeProfile(
                 TEXT("DropletMask"),
                 false)
             : nullptr;
+        const bool bHasDedicatedFlowNormal =
+            LocalProfile.NormalizedDropletFlowNormal != nullptr ||
+            Surface.DropletFlowNormalTexture != nullptr ||
+            LocalProfile.SourceDropletFlowNormal.IsValid();
+        const bool bHasDedicatedFlowMask =
+            LocalProfile.NormalizedDropletFlowMask != nullptr ||
+            Surface.DropletFlowMaskTexture != nullptr ||
+            LocalProfile.SourceDropletFlowMask.IsValid();
+        UTexture2D* ResolvedDropletFlowNormal = bFlowRequested
+            ? ResolveDirectSurfaceTexture(
+                LocalProfile,
+                bHasDedicatedFlowNormal
+                    ? LocalProfile.NormalizedDropletFlowNormal.Get()
+                    : LocalProfile.NormalizedDropletNormal.Get(),
+                bHasDedicatedFlowNormal
+                    ? Surface.DropletFlowNormalTexture.Get()
+                    : Surface.DropletNormalTexture.Get(),
+                bHasDedicatedFlowNormal
+                    ? LocalProfile.SourceDropletFlowNormal
+                    : LocalProfile.SourceDropletNormal,
+                TEXT("DropletFlowNormal"),
+                true)
+            : nullptr;
+        UTexture2D* ResolvedDropletFlowMask = bFlowRequested
+            ? ResolveDirectSurfaceTexture(
+                LocalProfile,
+                bHasDedicatedFlowMask
+                    ? LocalProfile.NormalizedDropletFlowMask.Get()
+                    : LocalProfile.NormalizedDropletMask.Get(),
+                bHasDedicatedFlowMask
+                    ? Surface.DropletFlowMaskTexture.Get()
+                    : Surface.DropletMaskTexture.Get(),
+                bHasDedicatedFlowMask
+                    ? LocalProfile.SourceDropletFlowMask
+                    : LocalProfile.SourceDropletMask,
+                TEXT("DropletFlowMask"),
+                false)
+            : nullptr;
+        UTexture2D* ResolvedDropletFlowNoise = bFlowRequested
+            ? ResolveDirectSurfaceTexture(
+                LocalProfile,
+                LocalProfile.NormalizedDropletFlowNoise,
+                Surface.DropletFlowNoiseTexture,
+                LocalProfile.SourceDropletFlowNoise,
+                TEXT("DropletFlowNoise"),
+                false)
+            : nullptr;
         EnsureMaskRegistryNeutral(
             DropletMaskRegistry,
             ResolvedDropletMask,
+            bTextureArraysChanged);
+        EnsureMaskRegistryNeutral(
+            DropletFlowNoiseRegistry,
+            ResolvedDropletFlowNoise,
             bTextureArraysChanged);
         const int32 DropletMaskSlice = bDropletRequested
             ? DropletMaskRegistry.FindOrAdd(ResolvedDropletMask, bTextureArraysChanged)
@@ -932,39 +1046,59 @@ int32 UDWCGPUResourceSubsystem::FindOrAddRuntimeProfile(
         const int32 DropletNormalSlice = bDropletRequested
             ? DropletNormalRegistry.FindOrAdd(ResolvedDropletNormal, bTextureArraysChanged)
             : 0;
+        const int32 DropletFlowMaskSlice = bFlowRequested
+            ? DropletMaskRegistry.FindOrAdd(ResolvedDropletFlowMask, bTextureArraysChanged)
+            : 0;
+        const int32 DropletFlowNormalSlice = bFlowRequested
+            ? DropletNormalRegistry.FindOrAdd(ResolvedDropletFlowNormal, bTextureArraysChanged)
+            : 0;
+        const int32 DropletFlowNoiseSlice = bFlowRequested
+            ? DropletFlowNoiseRegistry.FindOrAdd(ResolvedDropletFlowNoise, bTextureArraysChanged)
+            : 0;
 
         Record->PackedTexels[0] = FLinearColor(
             LocalProfile.Parameters.GetAbsorbedDarkeningStrength(),
             LocalProfile.Parameters.GetAbsorbedGlossinessStrength(),
             static_cast<float>(DropletNormalSlice),
-            0.0f);
+            bFlowRequested ? 1.0f : 0.0f);
         Record->PackedTexels[1] = FLinearColor(
             FMath::Clamp(Surface.SurfaceWaterNormalStrength, 0.0f, 3.0f),
             FMath::Clamp(Surface.SurfaceWaterRoughnessBlend, 0.0f, 1.0f),
-            0.0f,
+            Surface.DropletFlowSpeed,
             FMath::Clamp(Surface.SurfaceWaterSpecular, 0.0f, 1.0f));
         Record->PackedTexels[2] = FLinearColor(
             static_cast<float>(DropletMaskSlice),
-            0.0f,
+            static_cast<float>(DropletFlowNoiseSlice),
             FMath::Clamp(Surface.SurfaceWaterTargetRoughness, 0.0f, 1.0f),
             FMath::Clamp(Surface.SurfaceWaterTotalStrength, 0.0f, 1.0f));
+        Record->PackedTexels[3] = FLinearColor(
+            Surface.DropletFlowDirectionDegrees,
+            FMath::Max(Surface.DropletFlowNoiseTiling, 0.01f),
+            FMath::Clamp(Surface.DropletFlowNoiseStrength, 0.0f, 1.0f),
+            Surface.DropletFlowNoiseSpeed);
+        Record->PackedTexels[4] = FLinearColor(
+            static_cast<float>(DropletFlowNormalSlice),
+            static_cast<float>(DropletFlowMaskSlice),
+            0.0f,
+            0.0f);
         UE_LOG(
             LogDWC,
             Display,
-            TEXT("DWC runtime Surface Water render profile packed: runtimeIndex=%d profile='%s' surfaceEnabled=%d normalStrength=%.6g roughnessBlend=%.6g targetRoughness=%.6g totalStrength=%.6g specular=%.6g requested=%d normalSlice=%d maskSlice=%d normal=%s mask=%s."),
+            TEXT("DWC runtime Surface Water render profile packed: runtimeIndex=%d profile='%s' surfaceEnabled=%d flowEnabled=%d normalStrength=%.6g roughnessBlend=%.6g targetRoughness=%.6g totalStrength=%.6g specular=%.6g staticSlices=(%d,%d) flowSlices=(%d,%d,%d)."),
             RuntimeIndex,
             *Key,
             Surface.bEnabled ? 1 : 0,
+            bFlowRequested ? 1 : 0,
             Surface.SurfaceWaterNormalStrength,
             Surface.SurfaceWaterRoughnessBlend,
             Surface.SurfaceWaterTargetRoughness,
             Surface.SurfaceWaterTotalStrength,
             Surface.SurfaceWaterSpecular,
-            bDropletRequested ? 1 : 0,
             DropletNormalSlice,
             DropletMaskSlice,
-            *DescribeSurfaceTexture(ResolvedDropletNormal),
-            *DescribeSurfaceTexture(ResolvedDropletMask));
+            DropletFlowNormalSlice,
+            DropletFlowMaskSlice,
+            DropletFlowNoiseSlice);
         Record->bSurfaceResourcesResolved = true;
         DirtyRuntimeProfileIndices.Add(RuntimeIndex);
         bTextureArraysDirty |= bTextureArraysChanged;
@@ -1330,7 +1464,14 @@ bool UDWCGPUResourceSubsystem::EnsureTextureArraysUpToDate()
         DropletNormalRegistry,
         DropletNormalArray,
         true);
-    return bDropletMaskArrayReplaced || bDropletArrayReplaced;
+    const bool bDropletFlowNoiseArrayReplaced = EnsureTextureArray(
+        TEXT("DWC_DropletFlowNoiseArray"),
+        DropletFlowNoiseRegistry,
+        DropletFlowNoiseArray,
+        false);
+    return bDropletMaskArrayReplaced ||
+           bDropletArrayReplaced ||
+           bDropletFlowNoiseArrayReplaced;
 }
 
 void UDWCGPUResourceSubsystem::RebindGPUTextureArrays()
@@ -1427,7 +1568,8 @@ const FDWCAssetRenderProfileResources* UDWCGPUResourceSubsystem::AcquireAssetRes
     if (Usage == EDWCRenderResourceUsage::FullGPU &&
         (bTextureArraysDirty ||
          DropletMaskArray == nullptr ||
-         DropletNormalArray == nullptr))
+         DropletNormalArray == nullptr ||
+         DropletFlowNoiseArray == nullptr))
     {
         const bool bArrayResourceReplaced = EnsureTextureArraysUpToDate();
         bTextureArraysDirty = false;
@@ -1612,6 +1754,12 @@ void UDWCGPUResourceSubsystem::BindGlobalResources(
         {
             MID.SetTextureParameterValue(DWCWetMaterialParameters::DropletNormalTextureArray(), DropletNormalArray);
         }
+        if (DropletFlowNoiseArray != nullptr)
+        {
+            MID.SetTextureParameterValue(
+                DWCWetMaterialParameters::DropletFlowNoiseTextureArray(),
+                DropletFlowNoiseArray);
+        }
     }
 }
 
@@ -1638,6 +1786,7 @@ void UDWCGPUResourceSubsystem::ApplyFallbackRenderProfileParameters(
         bool bTextureArraysChanged = false;
         const FSurfaceWaterProfileParameters& Surface = Profile.Parameters.SurfaceWater;
         const bool bDropletRequested = Surface.bEnabled;
+        const bool bFlowRequested = bDropletRequested && Surface.bEnableDropletFlow;
         UTexture2D* ResolvedDropletNormal = bDropletRequested
             ? ResolveDirectSurfaceTexture(
                 Profile,
@@ -1654,6 +1803,53 @@ void UDWCGPUResourceSubsystem::ApplyFallbackRenderProfileParameters(
                 Surface.DropletMaskTexture,
                 Profile.SourceDropletMask,
                 TEXT("DropletMask"),
+                false)
+            : nullptr;
+        const bool bHasDedicatedFlowNormal =
+            Profile.NormalizedDropletFlowNormal != nullptr ||
+            Surface.DropletFlowNormalTexture != nullptr ||
+            Profile.SourceDropletFlowNormal.IsValid();
+        const bool bHasDedicatedFlowMask =
+            Profile.NormalizedDropletFlowMask != nullptr ||
+            Surface.DropletFlowMaskTexture != nullptr ||
+            Profile.SourceDropletFlowMask.IsValid();
+        UTexture2D* ResolvedDropletFlowNormal = bFlowRequested
+            ? ResolveDirectSurfaceTexture(
+                Profile,
+                bHasDedicatedFlowNormal
+                    ? Profile.NormalizedDropletFlowNormal.Get()
+                    : Profile.NormalizedDropletNormal.Get(),
+                bHasDedicatedFlowNormal
+                    ? Surface.DropletFlowNormalTexture.Get()
+                    : Surface.DropletNormalTexture.Get(),
+                bHasDedicatedFlowNormal
+                    ? Profile.SourceDropletFlowNormal
+                    : Profile.SourceDropletNormal,
+                TEXT("DropletFlowNormal"),
+                true)
+            : nullptr;
+        UTexture2D* ResolvedDropletFlowMask = bFlowRequested
+            ? ResolveDirectSurfaceTexture(
+                Profile,
+                bHasDedicatedFlowMask
+                    ? Profile.NormalizedDropletFlowMask.Get()
+                    : Profile.NormalizedDropletMask.Get(),
+                bHasDedicatedFlowMask
+                    ? Surface.DropletFlowMaskTexture.Get()
+                    : Surface.DropletMaskTexture.Get(),
+                bHasDedicatedFlowMask
+                    ? Profile.SourceDropletFlowMask
+                    : Profile.SourceDropletMask,
+                TEXT("DropletFlowMask"),
+                false)
+            : nullptr;
+        UTexture2D* ResolvedDropletFlowNoise = bFlowRequested
+            ? ResolveDirectSurfaceTexture(
+                Profile,
+                Profile.NormalizedDropletFlowNoise,
+                Surface.DropletFlowNoiseTexture,
+                Profile.SourceDropletFlowNoise,
+                TEXT("DropletFlowNoise"),
                 false)
             : nullptr;
         const bool bEditorPreviewWorld =
@@ -1688,6 +1884,18 @@ void UDWCGPUResourceSubsystem::ApplyFallbackRenderProfileParameters(
             DropletMaskRegistry,
             ResolvedDropletMask,
             DropletMaskArray);
+        ResetMismatchedPreviewRegistry(
+            DropletNormalRegistry,
+            ResolvedDropletFlowNormal,
+            DropletNormalArray);
+        ResetMismatchedPreviewRegistry(
+            DropletMaskRegistry,
+            ResolvedDropletFlowMask,
+            DropletMaskArray);
+        ResetMismatchedPreviewRegistry(
+            DropletFlowNoiseRegistry,
+            ResolvedDropletFlowNoise,
+            DropletFlowNoiseArray);
 
         // Establish slice 0 after any preview-registry reset. Otherwise the reset
         // would remove the reserved/neutral slice and FindOrAdd would reject the
@@ -1707,32 +1915,45 @@ void UDWCGPUResourceSubsystem::ApplyFallbackRenderProfileParameters(
             DropletMaskRegistry,
             ResolvedDropletMask,
             bTextureArraysChanged);
+        EnsureMaskRegistryNeutral(
+            DropletMaskRegistry,
+            ResolvedDropletFlowMask,
+            bTextureArraysChanged);
+        EnsureMaskRegistryNeutral(
+            DropletFlowNoiseRegistry,
+            ResolvedDropletFlowNoise,
+            bTextureArraysChanged);
         Slices.DropletMask = bDropletRequested
             ? DropletMaskRegistry.FindOrAdd(ResolvedDropletMask, bTextureArraysChanged)
             : 0;
         Slices.DropletNormal = bDropletRequested
             ? DropletNormalRegistry.FindOrAdd(ResolvedDropletNormal, bTextureArraysChanged)
             : 0;
+        Slices.DropletFlowMask = bFlowRequested
+            ? DropletMaskRegistry.FindOrAdd(ResolvedDropletFlowMask, bTextureArraysChanged)
+            : 0;
+        Slices.DropletFlowNormal = bFlowRequested
+            ? DropletNormalRegistry.FindOrAdd(ResolvedDropletFlowNormal, bTextureArraysChanged)
+            : 0;
+        Slices.DropletFlowNoise = bFlowRequested
+            ? DropletFlowNoiseRegistry.FindOrAdd(ResolvedDropletFlowNoise, bTextureArraysChanged)
+            : 0;
 
         const FString ProfileKey = ResolveProfileKey(Profile);
         UE_LOG(
             LogDWC,
             Display,
-            TEXT("DWC fallback Surface Water render profile prepared for asset '%s' slot %d profile '%s' (used only when runtime LUT is unavailable): surfaceEnabled=%d normalStrength=%.6g roughnessBlend=%.6g targetRoughness=%.6g totalStrength=%.6g specular=%.6g requested=%d normalSlice=%d maskSlice=%d normal=%s mask=%s."),
+            TEXT("DWC fallback Surface Water render profile prepared for asset '%s' slot %d profile '%s' (used only when runtime LUT is unavailable): surfaceEnabled=%d flowEnabled=%d staticSlices=(%d,%d) flowSlices=(%d,%d,%d)."),
             *GetPathNameSafe(WetClothingAsset),
             MaterialSlotIndex,
             *ProfileKey,
             Surface.bEnabled ? 1 : 0,
-            Surface.SurfaceWaterNormalStrength,
-            Surface.SurfaceWaterRoughnessBlend,
-            Surface.SurfaceWaterTargetRoughness,
-            Surface.SurfaceWaterTotalStrength,
-            Surface.SurfaceWaterSpecular,
-            bDropletRequested ? 1 : 0,
+            bFlowRequested ? 1 : 0,
             Slices.DropletNormal,
             Slices.DropletMask,
-            *DescribeSurfaceTexture(ResolvedDropletNormal),
-            *DescribeSurfaceTexture(ResolvedDropletMask));
+            Slices.DropletFlowNormal,
+            Slices.DropletFlowMask,
+            Slices.DropletFlowNoise);
 
         if (Surface.bEnabled && Surface.SurfaceWaterNormalStrength <= UE_KINDA_SMALL_NUMBER && bDropletRequested)
         {

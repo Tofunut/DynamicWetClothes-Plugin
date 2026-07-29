@@ -373,6 +373,7 @@ bool FWetClothingSurfaceTextureNormalizer::ValidateTexture(
     UTexture2D* SourceTexture,
     const TCHAR* TextureRole,
     const bool bNormalMap,
+    const bool bAllowSourceConversion,
     FString& OutErrorMessage)
 {
     if (SourceTexture == nullptr)
@@ -381,7 +382,7 @@ bool FWetClothingSurfaceTextureNormalizer::ValidateTexture(
         return true;
     }
 
-    if (SourceTexture->SRGB)
+    if (SourceTexture->SRGB && !bAllowSourceConversion)
     {
         OutErrorMessage = FString::Printf(
             TEXT("%s texture '%s' must have sRGB disabled."),
@@ -393,7 +394,8 @@ bool FWetClothingSurfaceTextureNormalizer::ValidateTexture(
     const TextureCompressionSettings ExpectedCompression = bNormalMap
         ? TC_Normalmap
         : TC_Masks;
-    if (SourceTexture->CompressionSettings != ExpectedCompression)
+    if (SourceTexture->CompressionSettings != ExpectedCompression &&
+        !bAllowSourceConversion)
     {
         OutErrorMessage = FString::Printf(
             TEXT("%s texture '%s' has compression setting %d, but Surface Water requires %s (%d)."),
@@ -405,7 +407,11 @@ bool FWetClothingSurfaceTextureNormalizer::ValidateTexture(
         return false;
     }
 
-    if (IsDirectlyUsableAtTargetResolution(*SourceTexture))
+    const bool bRequiresSourceConversion =
+        SourceTexture->SRGB ||
+        SourceTexture->CompressionSettings != ExpectedCompression;
+    if (IsDirectlyUsableAtTargetResolution(*SourceTexture) &&
+        !bRequiresSourceConversion)
     {
         OutErrorMessage.Reset();
         return true;
@@ -449,6 +455,7 @@ bool FWetClothingSurfaceTextureNormalizer::ValidateProfileTextures(
             Surface.DropletNormalTexture,
             TEXT("Droplet normal"),
             true,
+            false,
             OutErrorMessage))
     {
         return false;
@@ -458,6 +465,28 @@ bool FWetClothingSurfaceTextureNormalizer::ValidateProfileTextures(
             Surface.DropletMaskTexture,
             TEXT("Droplet mask"),
             false,
+            false,
+            OutErrorMessage))
+    {
+        return false;
+    }
+    if (!ValidateTexture(
+            Surface.DropletFlowNormalTexture,
+            TEXT("Droplet flow normal"),
+            true,
+            false,
+            OutErrorMessage) ||
+        !ValidateTexture(
+            Surface.DropletFlowMaskTexture,
+            TEXT("Droplet flow mask"),
+            false,
+            false,
+            OutErrorMessage) ||
+        !ValidateTexture(
+            Surface.DropletFlowNoiseTexture,
+            TEXT("Droplet flow noise"),
+            false,
+            true,
             OutErrorMessage))
     {
         return false;
@@ -471,11 +500,17 @@ bool FWetClothingSurfaceTextureNormalizer::NormalizeTexture(
     UTexture2D* SourceTexture,
     const TCHAR* TextureRole,
     const bool bNormalMap,
+    const bool bAllowSourceConversion,
     UTexture2D*& OutNormalizedTexture,
     FString& OutErrorMessage)
 {
     OutNormalizedTexture = nullptr;
-    if (!ValidateTexture(SourceTexture, TextureRole, bNormalMap, OutErrorMessage))
+    if (!ValidateTexture(
+            SourceTexture,
+            TextureRole,
+            bNormalMap,
+            bAllowSourceConversion,
+            OutErrorMessage))
     {
         return false;
     }
@@ -486,7 +521,12 @@ bool FWetClothingSurfaceTextureNormalizer::NormalizeTexture(
         return true;
     }
 
-    if (IsDirectlyUsableAtTargetResolution(*SourceTexture))
+    const TextureCompressionSettings ExpectedCompression = bNormalMap
+        ? TC_Normalmap
+        : TC_Masks;
+    if (IsDirectlyUsableAtTargetResolution(*SourceTexture) &&
+        SourceTexture->CompressionSettings == ExpectedCompression &&
+        !SourceTexture->SRGB)
     {
         OutNormalizedTexture = SourceTexture;
         OutErrorMessage.Reset();
@@ -513,20 +553,55 @@ bool FWetClothingSurfaceTextureNormalizer::PrepareProfileTextures(
     InOutLocalProfile.SourceDropletMask = Surface.DropletMaskTexture != nullptr
         ? FSoftObjectPath(Surface.DropletMaskTexture.Get())
         : FSoftObjectPath();
+    InOutLocalProfile.SourceDropletFlowNormal = Surface.DropletFlowNormalTexture != nullptr
+        ? FSoftObjectPath(Surface.DropletFlowNormalTexture.Get())
+        : FSoftObjectPath();
+    InOutLocalProfile.SourceDropletFlowMask = Surface.DropletFlowMaskTexture != nullptr
+        ? FSoftObjectPath(Surface.DropletFlowMaskTexture.Get())
+        : FSoftObjectPath();
+    InOutLocalProfile.SourceDropletFlowNoise = Surface.DropletFlowNoiseTexture != nullptr
+        ? FSoftObjectPath(Surface.DropletFlowNoiseTexture.Get())
+        : FSoftObjectPath();
 
     UTexture2D* PreparedNormal = nullptr;
     UTexture2D* PreparedMask = nullptr;
+    UTexture2D* PreparedFlowNormal = nullptr;
+    UTexture2D* PreparedFlowMask = nullptr;
+    UTexture2D* PreparedFlowNoise = nullptr;
     if (!NormalizeTexture(
             Surface.DropletNormalTexture,
             TEXT("DropletNormal"),
             true,
+            false,
             PreparedNormal,
             OutErrorMessage) ||
         !NormalizeTexture(
             Surface.DropletMaskTexture,
             TEXT("DropletMask"),
             false,
+            false,
             PreparedMask,
+            OutErrorMessage) ||
+        !NormalizeTexture(
+            Surface.DropletFlowNormalTexture,
+            TEXT("DropletFlowNormal"),
+            true,
+            false,
+            PreparedFlowNormal,
+            OutErrorMessage) ||
+        !NormalizeTexture(
+            Surface.DropletFlowMaskTexture,
+            TEXT("DropletFlowMask"),
+            false,
+            false,
+            PreparedFlowMask,
+            OutErrorMessage) ||
+        !NormalizeTexture(
+            Surface.DropletFlowNoiseTexture,
+            TEXT("DropletFlowNoise"),
+            false,
+            true,
+            PreparedFlowNoise,
             OutErrorMessage))
     {
         return false;
@@ -534,6 +609,9 @@ bool FWetClothingSurfaceTextureNormalizer::PrepareProfileTextures(
 
     InOutLocalProfile.NormalizedDropletNormal = PreparedNormal;
     InOutLocalProfile.NormalizedDropletMask = PreparedMask;
+    InOutLocalProfile.NormalizedDropletFlowNormal = PreparedFlowNormal;
+    InOutLocalProfile.NormalizedDropletFlowMask = PreparedFlowMask;
+    InOutLocalProfile.NormalizedDropletFlowNoise = PreparedFlowNoise;
     OutErrorMessage.Reset();
     return true;
 }
@@ -559,7 +637,12 @@ bool FWetClothingSurfaceTextureNormalizer::IsPreparedTextureReferenceCurrent(
         return PreparedTexture == nullptr;
     }
 
-    if (IsDirectlyUsableAtTargetResolution(*SourceTexture))
+    const TextureCompressionSettings ExpectedCompression = bNormalMap
+        ? TC_Normalmap
+        : TC_Masks;
+    if (IsDirectlyUsableAtTargetResolution(*SourceTexture) &&
+        SourceTexture->CompressionSettings == ExpectedCompression &&
+        !SourceTexture->SRGB)
     {
         return PreparedTexture == SourceTexture;
     }

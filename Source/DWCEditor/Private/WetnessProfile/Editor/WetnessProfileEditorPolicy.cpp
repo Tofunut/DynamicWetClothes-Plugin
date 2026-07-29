@@ -33,6 +33,19 @@ namespace
         { TEXT("Parameters.SurfaceWater.DropletSpawnProbability"), 0.0, 1.0, 0.5 },
         { TEXT("Parameters.SurfaceWater.DropletLifetimeSeconds"), 0.01, 120.0, 5.0 },
         { TEXT("Parameters.SurfaceWater.DropletRadiusPixels"), 0.0, 256.0, 16.0 },
+        { TEXT("Parameters.SurfaceWater.DropletMaxActiveStamps"), 1.0, 4096.0, 256.0 },
+        { TEXT("Parameters.SurfaceWater.DropletFlowSpawnProbability"), 0.0, 1.0, 0.5 },
+        { TEXT("Parameters.SurfaceWater.DropletFlowLifetimeSeconds"), 0.01, 120.0, 5.0 },
+        { TEXT("Parameters.SurfaceWater.DropletFlowRadiusPixels"), 0.0, 256.0, 16.0 },
+        { TEXT("Parameters.SurfaceWater.DropletFlowHeightPixels"), 0.0, 256.0, 32.0 },
+        { TEXT("Parameters.SurfaceWater.DropletFlowSpawnPositionSpread"), 0.0, 1.0, 0.35 },
+        { TEXT("Parameters.SurfaceWater.DropletFlowMaxActiveStamps"), 1.0, 4096.0, 256.0 },
+        { TEXT("Parameters.SurfaceWater.DropletFlowSpeed"), -4.0, 4.0, 0.25 },
+        { TEXT("Parameters.SurfaceWater.DropletFlowAdvectionSpeed"), 0.0, 4.0, 0.08 },
+        { TEXT("Parameters.SurfaceWater.DropletFlowDirectionDegrees"), -360.0, 360.0, 90.0 },
+        { TEXT("Parameters.SurfaceWater.DropletFlowNoiseTiling"), 0.01, 64.0, 2.0 },
+        { TEXT("Parameters.SurfaceWater.DropletFlowNoiseStrength"), 0.0, 1.0, 0.05 },
+        { TEXT("Parameters.SurfaceWater.DropletFlowNoiseSpeed"), -4.0, 4.0, 0.15 },
 
         // Rendering | Surface Water
         { TEXT("Parameters.SurfaceWater.SurfaceWaterTotalStrength"), 0.0, 1.0, 0.5 },
@@ -126,6 +139,37 @@ namespace
         return true;
     }
 
+    bool SanitizeIntegerProperty(
+        FIntProperty* Property,
+        void* Container,
+        const FNumericRule& Rule,
+        const FString& PropertyPath,
+        TArray<FString>* OutChanges)
+    {
+        const int32 Original = Property->GetPropertyValue_InContainer(Container);
+        const int32 Sanitized = FMath::Clamp(
+            Original,
+            static_cast<int32>(Rule.MinValue),
+            static_cast<int32>(Rule.MaxValue));
+        if (Original == Sanitized)
+        {
+            return false;
+        }
+
+        Property->SetPropertyValue_InContainer(Container, Sanitized);
+        if (OutChanges != nullptr)
+        {
+            OutChanges->Add(FString::Printf(
+                TEXT("%s: %d -> %d (allowed %.0f..%.0f)"),
+                *PropertyPath,
+                Original,
+                Sanitized,
+                Rule.MinValue,
+                Rule.MaxValue));
+        }
+        return true;
+    }
+
     bool SanitizeStructRecursive(
         void* StructMemory,
         UStruct* StructType,
@@ -168,6 +212,10 @@ namespace
             {
                 bChanged |= SanitizeFloatingProperty(DoubleProperty, StructMemory, *Rule, PropertyPath, OutChanges);
             }
+            else if (FIntProperty* IntProperty = CastField<FIntProperty>(Property))
+            {
+                bChanged |= SanitizeIntegerProperty(IntProperty, StructMemory, *Rule, PropertyPath, OutChanges);
+            }
         }
         return bChanged;
     }
@@ -203,6 +251,25 @@ namespace
         {
             OutIssues.Add(FString::Printf(
                 TEXT("%s is %.9g; allowed range is %.9g..%.9g."),
+                *PropertyPath,
+                Value,
+                Rule.MinValue,
+                Rule.MaxValue));
+        }
+    }
+
+    void FindIntegerIssue(
+        const FIntProperty* Property,
+        const void* Container,
+        const FNumericRule& Rule,
+        const FString& PropertyPath,
+        TArray<FString>& OutIssues)
+    {
+        const int32 Value = Property->GetPropertyValue_InContainer(Container);
+        if (Value < Rule.MinValue || Value > Rule.MaxValue)
+        {
+            OutIssues.Add(FString::Printf(
+                TEXT("%s is %d; allowed range is %.0f..%.0f."),
                 *PropertyPath,
                 Value,
                 Rule.MinValue,
@@ -250,6 +317,10 @@ namespace
             else if (const FDoubleProperty* DoubleProperty = CastField<FDoubleProperty>(Property))
             {
                 FindFloatingIssue(DoubleProperty, StructMemory, *Rule, PropertyPath, OutIssues);
+            }
+            else if (const FIntProperty* IntProperty = CastField<FIntProperty>(Property))
+            {
+                FindIntegerIssue(IntProperty, StructMemory, *Rule, PropertyPath, OutIssues);
             }
         }
     }
@@ -334,6 +405,29 @@ namespace
             MinRenderableDropletRadiusPixels,
             TEXT("Droplet size"),
             OutChanges);
+        if (Surface.bEnableDropletFlow)
+        {
+            bChanged |= ClampRenderableFloat(
+                Surface.DropletFlowSpawnProbability,
+                MinRenderableDropletSpawnProbability,
+                TEXT("Flow Droplet spawn chance"),
+                OutChanges);
+            bChanged |= ClampRenderableFloat(
+                Surface.DropletFlowLifetimeSeconds,
+                MinRenderableDropletLifetimeSeconds,
+                TEXT("Flow Droplet lifetime"),
+                OutChanges);
+            bChanged |= ClampRenderableFloat(
+                Surface.DropletFlowRadiusPixels,
+                MinRenderableDropletRadiusPixels,
+                TEXT("Flow Droplet width"),
+                OutChanges);
+            bChanged |= ClampRenderableFloat(
+                Surface.DropletFlowHeightPixels,
+                MinRenderableDropletRadiusPixels,
+                TEXT("Flow Droplet height"),
+                OutChanges);
+        }
 
         if (Parameters.AbsorbedWetness.bEnabled)
         {
@@ -396,6 +490,37 @@ namespace
                 TEXT("Droplet size is %.2f RT pixel(s); values below %.2f cannot produce a stable stamp."),
                 Surface.DropletRadiusPixels,
                 MinRenderableDropletRadiusPixels));
+        }
+        if (Surface.bEnableDropletFlow)
+        {
+            if (Surface.DropletFlowSpawnProbability < MinRenderableDropletSpawnProbability)
+            {
+                OutIssues.Add(FString::Printf(
+                    TEXT("Flow Droplet spawn chance is %.1f%%; values below %.1f%% can prevent flow stamps from spawning."),
+                    Surface.DropletFlowSpawnProbability * 100.0f,
+                    MinRenderableDropletSpawnProbability * 100.0f));
+            }
+            if (Surface.DropletFlowLifetimeSeconds < MinRenderableDropletLifetimeSeconds)
+            {
+                OutIssues.Add(FString::Printf(
+                    TEXT("Flow Droplet lifetime is %.2fs; values below %.2fs can disappear before render updates."),
+                    Surface.DropletFlowLifetimeSeconds,
+                    MinRenderableDropletLifetimeSeconds));
+            }
+            if (Surface.DropletFlowRadiusPixels < MinRenderableDropletRadiusPixels)
+            {
+                OutIssues.Add(FString::Printf(
+                    TEXT("Flow Droplet width is %.2f RT pixel(s); values below %.2f cannot produce a stable stamp."),
+                    Surface.DropletFlowRadiusPixels,
+                    MinRenderableDropletRadiusPixels));
+            }
+            if (Surface.DropletFlowHeightPixels < MinRenderableDropletRadiusPixels)
+            {
+                OutIssues.Add(FString::Printf(
+                    TEXT("Flow Droplet height is %.2f RT pixel(s); values below %.2f cannot produce a stable stamp."),
+                    Surface.DropletFlowHeightPixels,
+                    MinRenderableDropletRadiusPixels));
+            }
         }
     }
 }

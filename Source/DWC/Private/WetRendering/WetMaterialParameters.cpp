@@ -17,6 +17,7 @@ namespace DWCWetMaterialParameters
     DWC_DEFINE_MATERIAL_PARAMETER(UseRenderProfileLUT, "DWC_UseRenderProfileLUT")
     DWC_DEFINE_MATERIAL_PARAMETER(DropletMaskTextureArray, "DWC_DropletMaskTextureArray")
     DWC_DEFINE_MATERIAL_PARAMETER(DropletNormalTextureArray, "DWC_DropletNormalTextureArray")
+    DWC_DEFINE_MATERIAL_PARAMETER(DropletFlowNoiseTextureArray, "DWC_DropletFlowNoiseTextureArray")
     DWC_DEFINE_MATERIAL_PARAMETER(SurfaceWaterTargetRoughness, "DWC_SurfaceWaterTargetRoughness")
     DWC_DEFINE_MATERIAL_PARAMETER(SurfaceWaterNormalFlipX, "DWC_SurfaceWaterNormalFlipX")
     DWC_DEFINE_MATERIAL_PARAMETER(SurfaceWaterNormalFlipY, "DWC_SurfaceWaterNormalFlipY")
@@ -28,6 +29,7 @@ namespace DWCWetMaterialParameters
     DWC_DEFINE_MATERIAL_PARAMETER(UnderColor, "DWC_UnderColor")
     DWC_DEFINE_MATERIAL_PARAMETER(UnderColorBlendStrength, "DWC_UnderColorBlendStrength")
     DWC_DEFINE_MATERIAL_PARAMETER(SurfaceDropletRT, "DWC_SurfaceDropletRT")
+    DWC_DEFINE_MATERIAL_PARAMETER(SurfaceFlowDropletRT, "DWC_SurfaceFlowDropletRT")
     DWC_DEFINE_MATERIAL_PARAMETER(SurfaceWaterTime, "DWC_SurfaceWaterTime")
     DWC_DEFINE_MATERIAL_PARAMETER(SurfaceWaterTexelSize, "DWC_SurfaceWaterTexelSize")
 

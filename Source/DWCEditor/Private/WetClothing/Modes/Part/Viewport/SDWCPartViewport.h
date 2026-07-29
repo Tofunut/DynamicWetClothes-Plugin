@@ -120,6 +120,7 @@ class SDWCPartViewport : public SEditorViewport, public FGCObject
     TObjectPtr<UTexture2D>                      SurfacePreviewWetnessMap = nullptr;
     TObjectPtr<UTexture2D>                      SurfacePreviewWetPartDataTexture = nullptr;
     TObjectPtr<UTexture2D>                      SurfacePreviewDropletRT = nullptr;
+    TObjectPtr<UTexture2D>                      SurfacePreviewFlowDropletRT = nullptr;
     TArray<FColor>                              SurfacePreviewCachedSourcePartDataPixels;
     TArray<uint8>                               SurfacePreviewCachedSelectedMask;
     FVector2D                                   SurfacePreviewCachedSingleCircleCenter = FVector2D::ZeroVector;
@@ -133,6 +134,8 @@ class SDWCPartViewport : public SEditorViewport, public FGCObject
     FLinearColor                                SurfaceWaterPreviewBaseFallbackProfile0 = FLinearColor::Black;
     FLinearColor                                SurfaceWaterPreviewBaseFallbackProfile1 = FLinearColor::Black;
     FLinearColor                                SurfaceWaterPreviewBaseFallbackProfile2 = FLinearColor::Black;
+    FLinearColor                                SurfaceWaterPreviewBaseFallbackProfile3 = FLinearColor::Black;
+    FLinearColor                                SurfaceWaterPreviewBaseFallbackProfile4 = FLinearColor::Black;
     TArray<TObjectPtr<UMaterialInterface>>       OriginalPreviewMaterials;
     TArray<FWetClothingAssetUVIsland>            CurrentSelectableIslands;
     TSet<int32>                                  CurrentHighlightedUVIslandIDs;

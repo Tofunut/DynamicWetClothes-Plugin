@@ -1362,6 +1362,8 @@ bool SDWCPartViewport::BuildSurfaceWaterPreviewTextures(FString& OutErrorMessage
 
     const float SurfaceAmount = FMath::Clamp(PreviewSurfaceWater, 0.0f, 1.0f);
     const uint8 DropletDetailSize = EncodeSurfacePreviewDetailSize(Part->SurfaceWater.DropletDetailSize);
+    const uint8 DropletFlowDetailSize =
+        EncodeSurfacePreviewDetailSize(Part->SurfaceWater.DropletFlowDetailSize);
 
     for (int32 Y = 0; Y < Height; ++Y)
     {
@@ -1375,7 +1377,7 @@ bool SDWCPartViewport::BuildSurfaceWaterPreviewTextures(FString& OutErrorMessage
 
             PreviewPartDataPixels[PixelIndex].R = LocalProfileID;
             PreviewPartDataPixels[PixelIndex].G = DropletDetailSize;
-            PreviewPartDataPixels[PixelIndex].B = 0;
+            PreviewPartDataPixels[PixelIndex].B = DropletFlowDetailSize;
             PreviewPartDataPixels[PixelIndex].A = 0;
             WetnessPixels[PixelIndex] = FLinearColor(0.0f, 0.0f, 0.0f, 1.0f);
 
@@ -1732,7 +1734,13 @@ void SDWCPartViewport::RefreshSurfaceWaterPreviewMaterial()
             SurfaceWaterPreviewBaseFallbackProfile3) &&
         SurfaceWaterPreviewMaterial->GetVectorParameterValue(
             FHashedMaterialParameterInfo(FMaterialParameterInfo(DWCWetMaterialParameters::FallbackRenderProfileTexel(4))),
-            SurfaceWaterPreviewBaseFallbackProfile4);
+            SurfaceWaterPreviewBaseFallbackProfile4) &&
+        SurfaceWaterPreviewMaterial->GetVectorParameterValue(
+            FHashedMaterialParameterInfo(FMaterialParameterInfo(DWCWetMaterialParameters::FallbackRenderProfileTexel(5))),
+            SurfaceWaterPreviewBaseFallbackProfile5) &&
+        SurfaceWaterPreviewMaterial->GetVectorParameterValue(
+            FHashedMaterialParameterInfo(FMaterialParameterInfo(DWCWetMaterialParameters::FallbackRenderProfileTexel(6))),
+            SurfaceWaterPreviewBaseFallbackProfile6);
     ApplySurfaceWaterPreviewRenderOverrides();
 
     if (PreviewMaterialSlotIndex >= 0 && PreviewMaterialSlotIndex < PreviewMeshComponent->GetNumMaterials())
@@ -1762,13 +1770,14 @@ void SDWCPartViewport::RefreshSurfaceWaterPreviewMaterial()
             Surface.SurfaceWaterTotalStrength,
             Surface.SurfaceWaterSpecular);
         SurfaceWaterPreviewStatus += FString::Printf(
-            TEXT("\nSingleCircleSurface=%g SpawnChance=%.3g StampRadiusPx=%.3g RadiusScale=%.3g Lifetime=%.3g DetailSize=%.3g AbsorbedWetness=0 NormalFlipXY=%d/%d."),
+            TEXT("\nSingleCircleSurface=%g SpawnChance=%.3g StampRadiusPx=%.3g RadiusScale=%.3g Lifetime=%.3g StaticSize=%.3g FlowSize=%.3g AbsorbedWetness=0 NormalFlipXY=%d/%d."),
             PreviewSurfaceWater,
             Surface.DropletSpawnProbability,
             EffectiveStampRadiusPixels,
             Part->SurfaceWater.GetResolvedDropletStampSizeScale(),
             Surface.DropletLifetimeSeconds,
             Part->SurfaceWater.DropletDetailSize,
+            Part->SurfaceWater.DropletFlowDetailSize,
             bSurfaceWaterPreviewFlipNormalX ? 1 : 0,
             bSurfaceWaterPreviewFlipNormalY ? 1 : 0);
     }
@@ -1784,13 +1793,14 @@ void SDWCPartViewport::RefreshSurfaceWaterPreviewMaterial()
             Surface.SurfaceWaterTotalStrength,
             Surface.SurfaceWaterSpecular);
         SurfaceWaterPreviewStatus += FString::Printf(
-            TEXT("\nFullPartSurface=%g SpawnChance=%.3g StampRadiusPx=%.3g RadiusScale=%.3g Lifetime=%.3g DetailSize=%.3g AbsorbedWetness=0 NormalFlipXY=%d/%d."),
+            TEXT("\nFullPartSurface=%g SpawnChance=%.3g StampRadiusPx=%.3g RadiusScale=%.3g Lifetime=%.3g StaticSize=%.3g FlowSize=%.3g AbsorbedWetness=0 NormalFlipXY=%d/%d."),
             PreviewSurfaceWater,
             Surface.DropletSpawnProbability,
             Surface.DropletRadiusPixels * Part->SurfaceWater.GetResolvedDropletStampSizeScale(),
             Part->SurfaceWater.GetResolvedDropletStampSizeScale(),
             Surface.DropletLifetimeSeconds,
             Part->SurfaceWater.DropletDetailSize,
+            Part->SurfaceWater.DropletFlowDetailSize,
             bSurfaceWaterPreviewFlipNormalX ? 1 : 0,
             bSurfaceWaterPreviewFlipNormalY ? 1 : 0);
     }
@@ -1877,6 +1887,8 @@ void SDWCPartViewport::ApplySurfaceWaterPreviewRenderOverrides()
     FLinearColor Texel2 = SurfaceWaterPreviewBaseFallbackProfile2;
     const FLinearColor Texel3 = SurfaceWaterPreviewBaseFallbackProfile3;
     FLinearColor Texel4 = SurfaceWaterPreviewBaseFallbackProfile4;
+    const FLinearColor Texel5 = SurfaceWaterPreviewBaseFallbackProfile5;
+    const FLinearColor Texel6 = SurfaceWaterPreviewBaseFallbackProfile6;
 
     if (!bSurfaceWaterPreviewDropletsEnabled)
     {
@@ -1898,6 +1910,10 @@ void SDWCPartViewport::ApplySurfaceWaterPreviewRenderOverrides()
         DWCWetMaterialParameters::FallbackRenderProfileTexel(3), Texel3);
     SurfaceWaterPreviewMaterial->SetVectorParameterValue(
         DWCWetMaterialParameters::FallbackRenderProfileTexel(4), Texel4);
+    SurfaceWaterPreviewMaterial->SetVectorParameterValue(
+        DWCWetMaterialParameters::FallbackRenderProfileTexel(5), Texel5);
+    SurfaceWaterPreviewMaterial->SetVectorParameterValue(
+        DWCWetMaterialParameters::FallbackRenderProfileTexel(6), Texel6);
 }
 
 FText SDWCPartViewport::GetSurfaceWaterPreviewStatusText() const

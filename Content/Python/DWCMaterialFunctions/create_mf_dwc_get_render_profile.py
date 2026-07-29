@@ -49,7 +49,7 @@ def build() -> None:
     profile_id = c.texture2d_parameter(
         mf, "DWC_WetPartDataTexture", data_fallback, -5950, -1450,
         sampler_type=c.linear_color_sampler(), group="DWC Render Profile",
-        description="Slot-local Wet Part data. R=Local Profile ID, G=Droplet Detail Size, B/A=reserved.",
+        description="Slot-local Wet Part data. R=Local Profile ID, G=Static Droplet Size, B=Flow Droplet Size, A=reserved.",
     )
     c.try_connect(data_uv_use, ("", "Result"), profile_id, ("Coordinates", "UVs"))
     profile_id_r = c.component_mask(mf, profile_id, "R", "R", -5350, -1450)
@@ -66,6 +66,17 @@ def build() -> None:
     )
     droplet_detail_decl = c.named_declaration(
         mf, "PART_DropletDetailSize", droplet_detail, ("", "Result"), -4000, -850
+    )
+    droplet_flow_detail_encoded = c.component_mask(mf, profile_id, "B", "B", -5350, -250)
+    droplet_flow_detail = c.custom_expression(
+        mf,
+        "return lerp(0.0, 4.0, saturate(Encoded));",
+        [("Encoded", droplet_flow_detail_encoded, ("", "Result"))],
+        "float1", -4700, -250,
+        "Decode the Part-local Flow Droplet Size from the B channel.",
+    )
+    droplet_flow_detail_decl = c.named_declaration(
+        mf, "PART_DropletFlowDetailSize", droplet_flow_detail, ("", "Result"), -4000, -250
     )
 
     # 1-3 Local Profile ID Decode
@@ -93,7 +104,7 @@ def build() -> None:
     remap_lut = c.texture2d_parameter(
         mf, "DWC_ProfileRemapLUT", data_fallback, -750, -1450,
         sampler_type=c.linear_color_sampler(), group="DWC Render Profile",
-        description="Maps Local Profile ID to the first U coordinate of its global 5-texel profile.",
+        description="Maps Local Profile ID to the first U coordinate of its global 7-texel profile.",
     )
     c.try_connect(remap_uv, ("", "Result"), remap_lut, ("Coordinates", "UVs"))
     remap_r = c.component_mask(mf, remap_lut, "R", "R", -250, -1450)
@@ -101,12 +112,12 @@ def build() -> None:
         mf, "PROFILE_GlobalProfileStartU", remap_r, ("", "Result"), -100, -1200
     )
 
-    # 2-2/2-3 Sample all five packed texels. The profile start U points at
+    # 2-2/2-3 Sample all seven packed texels. The profile start U points at
     # texel 0; subsequent texels are one global LUT texel apart.
     texel_size = c.scalar_parameter(
-        mf, "DWC_GlobalRenderProfileTexelSize", 1.0 / 1275.0, 500, -1900,
+        mf, "DWC_GlobalRenderProfileTexelSize", 1.0 / 1785.0, 500, -1900,
         group="DWC Render Profile",
-        description="U width of one texel in the 255 x 5 runtime Render Profile LUT.",
+        description="U width of one texel in the 255 x 7 runtime Render Profile LUT.",
     )
     use_runtime_lut = c.scalar_parameter(
         mf, "DWC_UseRenderProfileLUT", 0.0, 3200, -2100,
@@ -119,9 +130,11 @@ def build() -> None:
         (0.0, 0.0, 0.02, 0.5),
         (90.0, 2.0, 0.05, 0.15),
         (0.0, 0.0, 0.0, 0.0),
+        (0.5, 0.02, 0.85, 0.5),
+        (1.0, 1.0, 3.0, 0.0),
     ]
     packed_texels = []
-    for texel_index in range(5):
+    for texel_index in range(7):
         y = -1700 + texel_index * 650
         start_use = c.named_usage(mf, global_start_decl, 500, y)
         texel_uv = c.custom_expression(
@@ -183,6 +196,13 @@ def build() -> None:
         ("DropletFlowNoiseSpeed", 3, "A"),
         ("DropletFlowNormalSlice", 4, "R"),
         ("DropletFlowMaskSlice", 4, "G"),
+        ("DropletFlowTotalStrength", 5, "R"),
+        ("DropletFlowTargetRoughness", 5, "G"),
+        ("DropletFlowRoughnessBlend", 5, "B"),
+        ("DropletFlowSpecular", 5, "A"),
+        ("SurfaceWaterColorBlend", 6, "R"),
+        ("DropletFlowColorBlend", 6, "G"),
+        ("DropletFlowNormalStrength", 6, "B"),
     ]
     profile_decls: dict[str, object] = {}
     for output_index, (name, texel_index, channel) in enumerate(packed_outputs):
@@ -193,8 +213,12 @@ def build() -> None:
             mf, f"PROFILE_{name}", mask, ("", "Result"), 6700, y
         )
     profile_decls["DropletDetailSize"] = droplet_detail_decl
+    profile_decls["DropletFlowDetailSize"] = droplet_flow_detail_decl
 
-    ordered_outputs = [name for name, _, _ in packed_outputs] + ["DropletDetailSize"]
+    ordered_outputs = [name for name, _, _ in packed_outputs] + [
+        "DropletDetailSize",
+        "DropletFlowDetailSize",
+    ]
     descriptions = {
         "AbsorbedDarkeningStrength": "Absorbed wetness base-color darkening strength.",
         "AbsorbedGlossinessStrength": "Absorbed wetness roughness blend strength.",
@@ -214,7 +238,15 @@ def build() -> None:
         "DropletFlowNoiseSpeed": "Signed Flow noise panning speed.",
         "DropletFlowNormalSlice": "Flow Droplet normal Texture2DArray slice.",
         "DropletFlowMaskSlice": "Flow Droplet mask Texture2DArray slice.",
-        "DropletDetailSize": "Part-local physical-looking size of the Droplet detail pattern.",
+        "DropletFlowTotalStrength": "Overall Flow Droplet rendering response strength.",
+        "DropletFlowTargetRoughness": "Flow Droplet target roughness.",
+        "DropletFlowRoughnessBlend": "Flow Droplet roughness blend strength.",
+        "DropletFlowSpecular": "Flow Droplet target specular.",
+        "SurfaceWaterColorBlend": "Stationary Droplet Base Color blend strength.",
+        "DropletFlowColorBlend": "Flow Droplet Base Color blend strength.",
+        "DropletFlowNormalStrength": "Flow Droplet detail-normal strength.",
+        "DropletDetailSize": "Part-local physical-looking size of the stationary Droplet detail pattern.",
+        "DropletFlowDetailSize": "Part-local physical-looking size of the Flow Droplet detail pattern.",
     }
     for output_index, name in enumerate(ordered_outputs):
         y = -2100 + output_index * 230

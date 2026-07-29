@@ -136,6 +136,8 @@ class SDWCPartViewport : public SEditorViewport, public FGCObject
     FLinearColor                                SurfaceWaterPreviewBaseFallbackProfile2 = FLinearColor::Black;
     FLinearColor                                SurfaceWaterPreviewBaseFallbackProfile3 = FLinearColor::Black;
     FLinearColor                                SurfaceWaterPreviewBaseFallbackProfile4 = FLinearColor::Black;
+    FLinearColor                                SurfaceWaterPreviewBaseFallbackProfile5 = FLinearColor::Black;
+    FLinearColor                                SurfaceWaterPreviewBaseFallbackProfile6 = FLinearColor::Black;
     TArray<TObjectPtr<UMaterialInterface>>       OriginalPreviewMaterials;
     TArray<FWetClothingAssetUVIsland>            CurrentSelectableIslands;
     TSet<int32>                                  CurrentHighlightedUVIslandIDs;

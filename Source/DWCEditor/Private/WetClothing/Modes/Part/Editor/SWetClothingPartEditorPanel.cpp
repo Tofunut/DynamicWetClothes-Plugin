@@ -3318,7 +3318,7 @@ TSharedRef<SWidget> SWetClothingPartEditorPanel::BuildSurfaceWaterTilingWindowCo
                                                   [SNew(SVerticalBox)
                                                    + SVerticalBox::Slot().AutoHeight()
                                                          [SNew(STextBlock)
-                                                              .Text(LOCTEXT("SurfaceWaterTilingSettingsHeader", "Surface Water Detail Size"))
+                                                              .Text(LOCTEXT("SurfaceWaterTilingSettingsHeader", "Surface Water Droplet Sizes"))
                                                               .Font(FAppStyle::GetFontStyle(TEXT("PropertyWindow.BoldFont")))]
                                                    + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 8.0f, 0.0f, 8.0f)
                                                          [SNew(SSeparator)]
@@ -3412,14 +3412,23 @@ TSharedRef<SWidget> SWetClothingPartEditorPanel::BuildSurfaceWaterTilingWindowCo
                            .BorderImage(FAppStyle::Get().GetBrush(TEXT("ToolPanel.GroupBorder")))
                                 [SNew(SVerticalBox)
                                  + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 3.0f)
-                                       [BuildDetailSizeSlider(
-                                           LOCTEXT("PopupDropletDetailSize", "Droplet Detail Size"),
-                                           TAttribute<float>::Create(TAttribute<float>::FGetter::CreateLambda([this]()
-                                           {
-                                               return FMath::Clamp(GetSelectedDropletDetailSize() / 4.0f, 0.0f, 1.0f);
-                                           })),
-                                           [this](const float NewValue) { HandleSelectedDropletDetailSizeChanged(NewValue); },
-                                           TAttribute<FText>::Create(TAttribute<FText>::FGetter::CreateSP(this, &SWetClothingPartEditorPanel::GetSelectedDropletDetailSizeText)))]]]];
+                                        [BuildDetailSizeSlider(
+                                            LOCTEXT("PopupDropletDetailSize", "Static Droplet Size"),
+                                            TAttribute<float>::Create(TAttribute<float>::FGetter::CreateLambda([this]()
+                                            {
+                                                return FMath::Clamp(GetSelectedDropletDetailSize() / 4.0f, 0.0f, 1.0f);
+                                            })),
+                                            [this](const float NewValue) { HandleSelectedDropletDetailSizeChanged(NewValue); },
+                                            TAttribute<FText>::Create(TAttribute<FText>::FGetter::CreateSP(this, &SWetClothingPartEditorPanel::GetSelectedDropletDetailSizeText)))]
+                                  + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 8.0f, 0.0f, 3.0f)
+                                        [BuildDetailSizeSlider(
+                                            LOCTEXT("PopupDropletFlowDetailSize", "Flow Droplet Size"),
+                                            TAttribute<float>::Create(TAttribute<float>::FGetter::CreateLambda([this]()
+                                            {
+                                                return FMath::Clamp(GetSelectedDropletFlowDetailSize() / 4.0f, 0.0f, 1.0f);
+                                            })),
+                                            [this](const float NewValue) { HandleSelectedDropletFlowDetailSizeChanged(NewValue); },
+                                            TAttribute<FText>::Create(TAttribute<FText>::FGetter::CreateSP(this, &SWetClothingPartEditorPanel::GetSelectedDropletFlowDetailSizeText)))]]]];
 }
 
 void SWetClothingPartEditorPanel::HandleSurfaceWaterTilingWindowClosed(const TSharedRef<SWindow>& /*Window*/)
@@ -3537,6 +3546,20 @@ FText SWetClothingPartEditorPanel::GetSelectedDropletDetailSizeText() const
     return FText::AsNumber(GetSelectedDropletDetailSize(), &Options);
 }
 
+float SWetClothingPartEditorPanel::GetSelectedDropletFlowDetailSize() const
+{
+    const FWetClothingWetPartEntry* Entry = FindWetPartEntry(SelectedWetPartID);
+    return Entry != nullptr ? FMath::Clamp(Entry->SurfaceWater.DropletFlowDetailSize, 0.0f, 4.0f) : 1.0f;
+}
+
+FText SWetClothingPartEditorPanel::GetSelectedDropletFlowDetailSizeText() const
+{
+    FNumberFormattingOptions Options;
+    Options.MinimumFractionalDigits = 2;
+    Options.MaximumFractionalDigits = 2;
+    return FText::AsNumber(GetSelectedDropletFlowDetailSize(), &Options);
+}
+
 void SWetClothingPartEditorPanel::HandleSelectedDropletRadiusScaleChanged(const float InValue)
 {
     UWetClothingAsset* Asset = WetClothingAsset.Get();
@@ -3604,6 +3627,31 @@ void SWetClothingPartEditorPanel::HandleSelectedDropletDetailSizeChanged(const f
 
     Asset->Modify();
     Entry->SurfaceWater.DropletDetailSize = NewValue;
+    Asset->MarkRuntimeBakeOutputsDirty(DWCBakeOutput::GPUMaps);
+    Asset->MarkPackageDirty();
+    if (SurfaceWaterTilingPreviewViewport.IsValid())
+    {
+        SurfaceWaterTilingPreviewViewport->RefreshSurfaceWaterPreviewDynamicTextures();
+    }
+}
+
+void SWetClothingPartEditorPanel::HandleSelectedDropletFlowDetailSizeChanged(const float InValue)
+{
+    UWetClothingAsset* Asset = WetClothingAsset.Get();
+    FWetClothingWetPartEntry* Entry = FindMutableWetPartEntry(SelectedWetPartID);
+    if (Asset == nullptr || Entry == nullptr || Entry->WetPartID < 0)
+    {
+        return;
+    }
+
+    const float NewValue = FMath::Clamp(InValue, 0.0f, 4.0f);
+    if (FMath::IsNearlyEqual(Entry->SurfaceWater.DropletFlowDetailSize, NewValue))
+    {
+        return;
+    }
+
+    Asset->Modify();
+    Entry->SurfaceWater.DropletFlowDetailSize = NewValue;
     Asset->MarkRuntimeBakeOutputsDirty(DWCBakeOutput::GPUMaps);
     Asset->MarkPackageDirty();
     if (SurfaceWaterTilingPreviewViewport.IsValid())

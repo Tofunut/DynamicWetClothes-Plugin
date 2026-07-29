@@ -68,6 +68,8 @@ struct DWC_API FSurfaceWaterProfileParameters
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet", meta = (ClampMin = "0.01", Units = "s"))
     float DropletLifetimeSeconds = 5.0f;
 
+    /** Half-size of stationary stamps written into the static Droplet RT. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet", meta = (ClampMin = "0.0", ClampMax = "256.0", DisplayName = "Static Stamp Size"))
     float DropletRadiusPixels = 16.0f;
 
     /** Maximum number of concurrently alive static stamps for each Wet Part/profile. */
@@ -139,6 +141,8 @@ struct DWC_API FSurfaceWaterProfileParameters
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rendering", meta=(ClampMin="0.0", ClampMax="1.0", DisplayName="Water Roughness"))
     float SurfaceWaterTargetRoughness = 0.02f;
 
+    /** Normal-map strength for stationary droplets. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rendering", meta=(ClampMin="0.0", ClampMax="3.0", DisplayName="Water Normal Strength"))
     float SurfaceWaterNormalStrength = 3.0f;
 
     /** Strength of the Surface Water roughness blend toward Wet Surface Roughness. */
@@ -149,9 +153,37 @@ struct DWC_API FSurfaceWaterProfileParameters
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rendering", meta=(ClampMin="0.0", ClampMax="1.0", DisplayName="Total Strength"))
     float SurfaceWaterTotalStrength = 0.5f;
 
+    /** How strongly stationary droplets modify the underlying Base Color. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rendering", meta=(ClampMin="0.0", ClampMax="1.0", DisplayName="Color Blend"))
+    float SurfaceWaterColorBlend = 1.0f;
+
     /** Specular reached by fully visible surface water. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rendering", meta=(ClampMin="0.0", ClampMax="1.0", DisplayName="Water Specular"))
     float SurfaceWaterSpecular = 0.5f;
+
+    /** Roughness reached by fully visible flowing droplets. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet|Flow|Rendering", meta=(ClampMin="0.0", ClampMax="1.0", DisplayName="Water Roughness"))
+    float DropletFlowTargetRoughness = 0.02f;
+
+    /** Strength of the Flow Droplet roughness blend toward Water Roughness. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet|Flow|Rendering", meta=(ClampMin="0.0", ClampMax="1.0", DisplayName="Roughness Blend"))
+    float DropletFlowRoughnessBlend = 0.85f;
+
+    /** Overall Flow Droplet rendering strength after coverage is resolved. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet|Flow|Rendering", meta=(ClampMin="0.0", ClampMax="1.0", DisplayName="Total Strength"))
+    float DropletFlowTotalStrength = 0.5f;
+
+    /** How strongly flowing droplets modify the underlying Base Color. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet|Flow|Rendering", meta=(ClampMin="0.0", ClampMax="1.0", DisplayName="Color Blend"))
+    float DropletFlowColorBlend = 1.0f;
+
+    /** Normal-map strength for flowing droplets. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet|Flow|Rendering", meta=(ClampMin="0.0", ClampMax="3.0", DisplayName="Water Normal Strength"))
+    float DropletFlowNormalStrength = 3.0f;
+
+    /** Specular reached by fully visible flowing droplets. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet|Flow|Rendering", meta=(ClampMin="0.0", ClampMax="1.0", DisplayName="Water Specular"))
+    float DropletFlowSpecular = 0.5f;
 
     /** Optional profile override. Null disables the Droplet normal contribution. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet|Rendering")

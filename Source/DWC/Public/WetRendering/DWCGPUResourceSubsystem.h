@@ -162,7 +162,7 @@ class DWC_API UDWCGPUResourceSubsystem final : public UWorldSubsystem
 
 public:
     static constexpr int32 MaxRuntimeProfileCount = 255;
-    static constexpr int32 TexelsPerProfile = 5;
+    static constexpr int32 TexelsPerProfile = 7;
     static constexpr int32 GlobalLUTWidth = MaxRuntimeProfileCount * TexelsPerProfile;
     static constexpr int32 LocalRemapWidth = 256;
 

@@ -83,6 +83,7 @@ def build() -> None:
         "SurfaceWaterSpecular",
         "SurfaceWaterTargetRoughness",
         "SurfaceWaterTotalStrength",
+        "SurfaceWaterColorBlend",
         "DropletMaskSlice",
         "DropletFlowNoiseSlice",
         "DropletFlowDirectionDegrees",
@@ -91,7 +92,14 @@ def build() -> None:
         "DropletFlowNoiseSpeed",
         "DropletFlowNormalSlice",
         "DropletFlowMaskSlice",
+        "DropletFlowTotalStrength",
+        "DropletFlowTargetRoughness",
+        "DropletFlowRoughnessBlend",
+        "DropletFlowSpecular",
+        "DropletFlowColorBlend",
+        "DropletFlowNormalStrength",
         "DropletDetailSize",
+        "DropletFlowDetailSize",
     ]
     profile_declarations: dict[str, object] = {}
     for i, name in enumerate(profile_outputs):
@@ -349,6 +357,7 @@ return saturate(FlowEnabled) * (PreviewOverride > 0.5 ? PreviewCoverage : Runtim
     normal_inputs = [
         ("SurfaceWaterNormalUV", declarations["SurfaceWaterNormalUV"]),
         ("DropletDetailSize", profile_declarations["DropletDetailSize"]),
+        ("DropletFlowDetailSize", profile_declarations["DropletFlowDetailSize"]),
         ("DropletMaskSlice", profile_declarations["DropletMaskSlice"]),
         ("DropletNormalSlice", profile_declarations["DropletNormalSlice"]),
         ("DropletFlowEnabled", profile_declarations["DropletFlowEnabled"]),
@@ -432,18 +441,78 @@ return max(StaticBrush, FlowBrush);
     )
     visual_brush_decl = c.named_declaration(mf, "SURFACE_VisualBrush", visual_brush, ("", "Result"), 7600, 600)
 
+    surface_appearance = c.custom_expression(
+        mf,
+        """
+float StaticResponse = saturate(StaticCoverage) * saturate(StaticTotalStrength);
+float FlowResponse = saturate(FlowCoverage) * saturate(FlowTotalStrength);
+float WeightSum = StaticResponse + FlowResponse;
+float SafeWeight = max(WeightSum, 1.0e-5);
+float TargetRoughness =
+    (StaticTargetRoughness * StaticResponse + FlowTargetRoughness * FlowResponse) / SafeWeight;
+float RoughnessBlend =
+    (StaticRoughnessBlend * StaticResponse + FlowRoughnessBlend * FlowResponse) / SafeWeight;
+float Specular =
+    (StaticSpecular * StaticResponse + FlowSpecular * FlowResponse) / SafeWeight;
+float Response = 1.0 - (1.0 - StaticResponse) * (1.0 - FlowResponse);
+return float4(
+    saturate(TargetRoughness),
+    saturate(RoughnessBlend),
+    saturate(Specular),
+    saturate(Response));
+""",
+        [
+            ("StaticCoverage", c.named_usage(mf, static_coverage_decl, 7950, 900), ("", "Result")),
+            ("FlowCoverage", c.named_usage(mf, flow_coverage_decl, 7950, 1250), ("", "Result")),
+            ("StaticTotalStrength", c.named_usage(mf, profile_declarations["SurfaceWaterTotalStrength"], 7950, 1600), ("", "Result")),
+            ("FlowTotalStrength", c.named_usage(mf, profile_declarations["DropletFlowTotalStrength"], 7950, 1950), ("", "Result")),
+            ("StaticTargetRoughness", c.named_usage(mf, profile_declarations["SurfaceWaterTargetRoughness"], 7950, 2300), ("", "Result")),
+            ("FlowTargetRoughness", c.named_usage(mf, profile_declarations["DropletFlowTargetRoughness"], 7950, 2650), ("", "Result")),
+            ("StaticRoughnessBlend", c.named_usage(mf, profile_declarations["SurfaceWaterRoughnessBlend"], 7950, 3000), ("", "Result")),
+            ("FlowRoughnessBlend", c.named_usage(mf, profile_declarations["DropletFlowRoughnessBlend"], 7950, 3350), ("", "Result")),
+            ("StaticSpecular", c.named_usage(mf, profile_declarations["SurfaceWaterSpecular"], 7950, 3700), ("", "Result")),
+            ("FlowSpecular", c.named_usage(mf, profile_declarations["DropletFlowSpecular"], 7950, 4050), ("", "Result")),
+        ],
+        "float4", 9300, 2500,
+        "Resolve independently authored stationary and Flow Droplet appearance into one response.",
+    )
+
+    surface_color_response = c.custom_expression(
+        mf,
+        """
+float StaticResponse =
+    saturate(StaticCoverage) * saturate(StaticTotalStrength) * saturate(StaticColorBlend);
+float FlowResponse =
+    saturate(FlowCoverage) * saturate(FlowTotalStrength) * saturate(FlowColorBlend);
+return saturate(1.0 - (1.0 - StaticResponse) * (1.0 - FlowResponse));
+""",
+        [
+            ("StaticCoverage", c.named_usage(mf, static_coverage_decl, 9650, 900), ("", "Result")),
+            ("FlowCoverage", c.named_usage(mf, flow_coverage_decl, 9650, 1250), ("", "Result")),
+            ("StaticTotalStrength", c.named_usage(mf, profile_declarations["SurfaceWaterTotalStrength"], 9650, 1600), ("", "Result")),
+            ("FlowTotalStrength", c.named_usage(mf, profile_declarations["DropletFlowTotalStrength"], 9650, 1950), ("", "Result")),
+            ("StaticColorBlend", c.named_usage(mf, profile_declarations["SurfaceWaterColorBlend"], 9650, 2300), ("", "Result")),
+            ("FlowColorBlend", c.named_usage(mf, profile_declarations["DropletFlowColorBlend"], 9650, 2650), ("", "Result")),
+        ],
+        "float1", 10800, 1750,
+        "Resolve independently authored stationary and Flow Droplet Base Color response.",
+    )
+
     surface_normal = c.custom_expression(
         mf,
         """
-float StaticWeight = saturate(StaticCoverage);
-float FlowWeight = saturate(FlowCoverage);
+float StaticWeight = saturate(StaticCoverage) * saturate(StaticTotalStrength);
+float FlowWeight = saturate(FlowCoverage) * saturate(FlowTotalStrength);
 float WeightSum = StaticWeight + FlowWeight;
-float2 DetailXY = DropletNormal.xy * StaticWeight + FlowDropletNormal.xy * FlowWeight;
-DetailXY /= max(WeightSum, 1.0);
-float Strength = clamp(NormalStrength, 0.0, 3.0);
 float DropletVisualHeightBoost = 1.65;
-float DropletWeight = saturate(WeightSum) * saturate(TotalStrength);
-float2 CombinedXY = DetailXY * DropletWeight * min(Strength * DropletVisualHeightBoost, 12.0);
+float2 StaticXY =
+    DropletNormal.xy * min(clamp(StaticNormalStrength, 0.0, 3.0) * DropletVisualHeightBoost, 12.0);
+float2 FlowXY =
+    FlowDropletNormal.xy * min(clamp(FlowNormalStrength, 0.0, 3.0) * DropletVisualHeightBoost, 12.0);
+float2 DetailXY = StaticXY * StaticWeight + FlowXY * FlowWeight;
+DetailXY /= max(WeightSum, 1.0e-5);
+float DropletWeight = 1.0 - (1.0 - StaticWeight) * (1.0 - FlowWeight);
+float2 CombinedXY = DetailXY * DropletWeight;
 return normalize(float3(CombinedXY, 1.0));
 """,
         [
@@ -452,8 +521,10 @@ return normalize(float3(CombinedXY, 1.0));
             ("FlowDropletNormal", c.named_usage(mf, flow_droplet_normal_decl, 4400, 600), ("", "Result")),
             ("StaticCoverage", c.named_usage(mf, static_coverage_decl, 4400, 1150), ("", "Result")),
             ("FlowCoverage", c.named_usage(mf, flow_coverage_decl, 4400, 1700), ("", "Result")),
-            ("NormalStrength", c.named_usage(mf, profile_declarations["SurfaceWaterNormalStrength"], 4400, 2250), ("", "Result")),
-            ("TotalStrength", c.named_usage(mf, profile_declarations["SurfaceWaterTotalStrength"], 4400, 2800), ("", "Result")),
+            ("StaticNormalStrength", c.named_usage(mf, profile_declarations["SurfaceWaterNormalStrength"], 4400, 2250), ("", "Result")),
+            ("FlowNormalStrength", c.named_usage(mf, profile_declarations["DropletFlowNormalStrength"], 4400, 2800), ("", "Result")),
+            ("StaticTotalStrength", c.named_usage(mf, profile_declarations["SurfaceWaterTotalStrength"], 4400, 3350), ("", "Result")),
+            ("FlowTotalStrength", c.named_usage(mf, profile_declarations["DropletFlowTotalStrength"], 4400, 3900), ("", "Result")),
         ],
         "float3", 6000, 2050,
         "Blend stationary and independently panned Flow Droplet normals.",
@@ -499,6 +570,74 @@ return normalize(float3(CombinedXY, 1.0));
     )
     selected_coverage_decl = c.named_declaration(
         mf, "SURFACE_SelectedCoverage", selected_coverage, ("", "Result"), 12100, 1450
+    )
+    disabled_appearance_rgb = c.vector_constant(
+        mf, (0.0, 0.0, 0.0), 9000, 2150, "Disabled Surface Water appearance values"
+    )
+    disabled_appearance_alpha = c.scalar_constant(
+        mf, 0.0, 9000, 2500, "Disabled Surface Water appearance response"
+    )
+    disabled_appearance = c.append_vector(
+        mf, disabled_appearance_rgb, ("", "Result"), disabled_appearance_alpha, ("", "Result"),
+        9800, 2300, "Pack disabled Surface Water appearance.",
+    )
+    selected_appearance = c.static_switch_parameter(
+        mf, "DWC_UseSurfaceWater", False,
+        surface_appearance, ("", "Result"),
+        disabled_appearance, ("", "Result"),
+        10700, 2250,
+        group="DWC Surface Water",
+        description="Compile independently authored static and Flow Droplet appearance only for slots that use Surface Water.",
+    )
+    selected_target_roughness = c.custom_expression(
+        mf, "return Packed.r;",
+        [("Packed", selected_appearance, ("", "Result"))],
+        "float1", 11700, 2100,
+        "Decode the coverage-weighted droplet target roughness.",
+    )
+    selected_roughness_blend = c.custom_expression(
+        mf, "return Packed.g;",
+        [("Packed", selected_appearance, ("", "Result"))],
+        "float1", 11700, 2450,
+        "Decode the coverage-weighted droplet roughness blend.",
+    )
+    selected_specular = c.custom_expression(
+        mf, "return Packed.b;",
+        [("Packed", selected_appearance, ("", "Result"))],
+        "float1", 11700, 2800,
+        "Decode the coverage-weighted droplet target specular.",
+    )
+    selected_appearance_response = c.custom_expression(
+        mf, "return Packed.a;",
+        [("Packed", selected_appearance, ("", "Result"))],
+        "float1", 11700, 3150,
+        "Decode the combined static and Flow Droplet appearance response.",
+    )
+    selected_target_roughness_decl = c.named_declaration(
+        mf, "SURFACE_SelectedTargetRoughness", selected_target_roughness, ("", "Result"), 12700, 2100
+    )
+    selected_roughness_blend_decl = c.named_declaration(
+        mf, "SURFACE_SelectedRoughnessBlend", selected_roughness_blend, ("", "Result"), 12700, 2450
+    )
+    selected_specular_decl = c.named_declaration(
+        mf, "SURFACE_SelectedSpecular", selected_specular, ("", "Result"), 12700, 2800
+    )
+    selected_appearance_response_decl = c.named_declaration(
+        mf, "SURFACE_SelectedAppearanceResponse", selected_appearance_response, ("", "Result"), 12700, 3150
+    )
+    disabled_color_response = c.scalar_constant(
+        mf, 0.0, 10700, 3500, "Disabled Surface Water Base Color response"
+    )
+    selected_color_response = c.static_switch_parameter(
+        mf, "DWC_UseSurfaceWater", False,
+        surface_color_response, ("", "Result"),
+        disabled_color_response, ("", "Result"),
+        11700, 3500,
+        group="DWC Surface Water",
+        description="Compile independently authored static and Flow Droplet Base Color response only for slots that use Surface Water.",
+    )
+    selected_color_response_decl = c.named_declaration(
+        mf, "SURFACE_SelectedColorResponse", selected_color_response, ("", "Result"), 12700, 3500
     )
     enabled_amount_use = c.custom_expression(
         mf,
@@ -564,12 +703,11 @@ return normalize(float3(CombinedXY, 1.0));
     final_color = c.custom_expression(
         mf,
         """
-float C = saturate(Coverage);
+float C = saturate(ColorResponse);
 float Brush = saturate(DropletBrush);
 float Metal = saturate(BaseMetallic);
 float NonMetal = 1.0 - Metal;
 float SpecularCue = saturate(WaterSpecular);
-float Total = saturate(TotalStrength);
 float BaseLuminance = dot(BaseColor, float3(0.299, 0.587, 0.114));
 float DarkSurfaceDamp = lerp(0.28, 1.0, smoothstep(0.05, 0.55, BaseLuminance));
 float Edge = smoothstep(0.08, 0.48, Brush) * (1.0 - smoothstep(0.55, 0.96, Brush));
@@ -578,12 +716,12 @@ float CenterLift = 0.008 * Center * DarkSurfaceDamp;
 float EdgeLift = (0.08 + 0.09 * SpecularCue) * Edge * DarkSurfaceDamp;
 float3 NonMetalClearColor = lerp(AbsorbedColor, BaseColor, 0.38 + 0.16 * SpecularCue);
 float3 NonMetalGlint = CenterLift + EdgeLift;
-float NonMetalBlend = C * Total * (0.58 + 0.18 * SpecularCue);
+float NonMetalBlend = C * (0.58 + 0.18 * SpecularCue);
 float3 NonMetalWater = lerp(AbsorbedColor, NonMetalClearColor + NonMetalGlint, NonMetalBlend);
 
 float MetalEdgeLift = (0.015 + 0.035 * SpecularCue) * Edge * DarkSurfaceDamp;
 float MetalCenterLift = 0.002 * Center * DarkSurfaceDamp;
-float MetalBlend = C * Total * (0.08 + 0.05 * SpecularCue);
+float MetalBlend = C * (0.08 + 0.05 * SpecularCue);
 float3 MetalWater = lerp(AbsorbedColor, BaseColor + MetalEdgeLift + MetalCenterLift, MetalBlend);
 
 return saturate(lerp(NonMetalWater, MetalWater, Metal));
@@ -592,10 +730,9 @@ return saturate(lerp(NonMetalWater, MetalWater, Metal));
             ("BaseColor", c.named_usage(mf, declarations["BaseColor"], 9550, -5350), ("", "Result")),
             ("AbsorbedColor", c.named_usage(mf, absorbed_color_decl, 9550, -4800), ("", "Result")),
             ("BaseMetallic", c.named_usage(mf, declarations["BaseMetallic"], 9550, -4250), ("", "Result")),
-            ("Coverage", c.named_usage(mf, selected_coverage_decl, 9550, -3700), ("", "Result")),
+            ("ColorResponse", c.named_usage(mf, selected_color_response_decl, 9550, -3700), ("", "Result")),
             ("DropletBrush", c.named_usage(mf, selected_brush_decl, 9550, -3150), ("", "Result")),
-            ("WaterSpecular", c.named_usage(mf, profile_declarations["SurfaceWaterSpecular"], 9550, -2600), ("", "Result")),
-            ("TotalStrength", c.named_usage(mf, profile_declarations["SurfaceWaterTotalStrength"], 9550, -2050), ("", "Result")),
+            ("WaterSpecular", c.named_usage(mf, selected_specular_decl, 9550, -2600), ("", "Result")),
         ],
         "float3", 11200, -4550,
         "Add a subtle clear-water film response inside final droplet coverage while preserving the source color.",
@@ -604,13 +741,12 @@ return saturate(lerp(NonMetalWater, MetalWater, Metal));
 
     final_roughness = c.custom_expression(
         mf,
-        "return saturate(lerp(AbsorbedRoughness, TargetRoughness, saturate(Coverage * RoughnessBlend * TotalStrength)));",
+        "return saturate(lerp(AbsorbedRoughness, TargetRoughness, saturate(AppearanceResponse * RoughnessBlend)));",
         [
             ("AbsorbedRoughness", c.named_usage(mf, absorbed_rough_decl, 9550, -3000), ("", "Result")),
-            ("TargetRoughness", c.named_usage(mf, profile_declarations["SurfaceWaterTargetRoughness"], 9550, -2450), ("", "Result")),
-            ("Coverage", c.named_usage(mf, selected_coverage_decl, 9550, -1900), ("", "Result")),
-            ("RoughnessBlend", c.named_usage(mf, profile_declarations["SurfaceWaterRoughnessBlend"], 9550, -1350), ("", "Result")),
-            ("TotalStrength", c.named_usage(mf, profile_declarations["SurfaceWaterTotalStrength"], 9550, -800), ("", "Result")),
+            ("TargetRoughness", c.named_usage(mf, selected_target_roughness_decl, 9550, -2450), ("", "Result")),
+            ("AppearanceResponse", c.named_usage(mf, selected_appearance_response_decl, 9550, -1900), ("", "Result")),
+            ("RoughnessBlend", c.named_usage(mf, selected_roughness_blend_decl, 9550, -1350), ("", "Result")),
         ],
         "float1", 11200, -2200,
         "Blend absorbed roughness toward the surface-water target.",
@@ -618,12 +754,11 @@ return saturate(lerp(NonMetalWater, MetalWater, Metal));
     final_rough_decl = c.named_declaration(mf, "FINAL_Roughness", final_roughness, ("", "Result"), 12600, -2200)
     final_specular = c.custom_expression(
         mf,
-        "return saturate(lerp(BaseSpecular, TargetSpecular, saturate(Coverage * TotalStrength)));",
+        "return saturate(lerp(BaseSpecular, TargetSpecular, saturate(AppearanceResponse)));",
         [
             ("BaseSpecular", c.named_usage(mf, declarations["BaseSpecular"], 9550, -900), ("", "Result")),
-            ("TargetSpecular", c.named_usage(mf, profile_declarations["SurfaceWaterSpecular"], 9550, -350), ("", "Result")),
-            ("Coverage", c.named_usage(mf, selected_coverage_decl, 9550, 200), ("", "Result")),
-            ("TotalStrength", c.named_usage(mf, profile_declarations["SurfaceWaterTotalStrength"], 9550, 750), ("", "Result")),
+            ("TargetSpecular", c.named_usage(mf, selected_specular_decl, 9550, -350), ("", "Result")),
+            ("AppearanceResponse", c.named_usage(mf, selected_appearance_response_decl, 9550, 200), ("", "Result")),
         ],
         "float1", 11200, -350,
         "Blend source specular toward the surface-water target inside final droplet coverage.",

@@ -63,9 +63,13 @@ struct DWC_API FWetPartSurfaceWaterSettings
     UPROPERTY(EditAnywhere, Category = "Surface Water", meta = (ClampMin = "0.25", ClampMax = "4.0", UIMin = "0.25", UIMax = "4.0", DisplayName = "Flow Stamp Size Scale", EditCondition = "bOverrideDropletFlowStampSize"))
     float DropletFlowSizeScale = 1.0f;
 
-    /** Physical-looking size of the repeating Droplet detail-normal pattern. */
-    UPROPERTY(EditAnywhere, Category = "Surface Water", meta = (ClampMin = "0.0", ClampMax = "4.0", UIMin = "0.0", UIMax = "4.0"))
+    /** Physical-looking size of the repeating stationary Droplet detail-normal pattern. */
+    UPROPERTY(EditAnywhere, Category = "Surface Water", meta = (ClampMin = "0.0", ClampMax = "4.0", UIMin = "0.0", UIMax = "4.0", DisplayName = "Static Droplet Size"))
     float DropletDetailSize = 1.0f;
+
+    /** Physical-looking size of the independently repeating Flow Droplet detail-normal pattern. */
+    UPROPERTY(EditAnywhere, Category = "Surface Water", meta = (ClampMin = "0.0", ClampMax = "4.0", UIMin = "0.0", UIMax = "4.0", DisplayName = "Flow Droplet Size"))
+    float DropletFlowDetailSize = 1.0f;
 
     float GetResolvedDropletStampSizeScale() const
     {
@@ -379,7 +383,7 @@ struct DWC_API FWetClothingBakedWetPartDataSlotTexture
     UPROPERTY(VisibleAnywhere, Category = "Wet Part Data Texture")
     int32 MaterialSlotIndex = INDEX_NONE;
 
-    /** Point-sampled Wet Part data: R=Local Profile ID, G=Droplet Detail Size, B/A=reserved. */
+    /** Point-sampled Wet Part data: R=Local Profile ID, G=Static Droplet Size, B=Flow Droplet Size, A=reserved. */
     UPROPERTY(VisibleAnywhere, Category = "Wet Part Data Texture")
     TObjectPtr<UTexture2D> WetPartDataTexture = nullptr;
 

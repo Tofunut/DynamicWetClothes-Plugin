@@ -50,7 +50,11 @@ namespace
             TEXT("SurfaceWaterNormalStrength=%.9g|")
             TEXT("SurfaceWaterRoughnessBlend=%.9g|")
             TEXT("SurfaceWaterTotalStrength=%.9g|")
-            TEXT("SurfaceWaterSpecular=%.9g"),
+            TEXT("SurfaceWaterColorBlend=%.9g|")
+            TEXT("SurfaceWaterSpecular=%.9g|")
+            TEXT("FlowTargetRoughness=%.9g|FlowRoughnessBlend=%.9g|")
+            TEXT("FlowTotalStrength=%.9g|FlowColorBlend=%.9g|")
+            TEXT("FlowNormalStrength=%.9g|FlowSpecular=%.9g"),
             Parameters.GetAbsorbedDarkeningStrength(),
             Parameters.GetAbsorbedGlossinessStrength(),
             Surface.bEnabled ? 1 : 0,
@@ -80,7 +84,14 @@ namespace
             Surface.SurfaceWaterNormalStrength,
             Surface.SurfaceWaterRoughnessBlend,
             Surface.SurfaceWaterTotalStrength,
-            Surface.SurfaceWaterSpecular);
+            Surface.SurfaceWaterColorBlend,
+            Surface.SurfaceWaterSpecular,
+            Surface.DropletFlowTargetRoughness,
+            Surface.DropletFlowRoughnessBlend,
+            Surface.DropletFlowTotalStrength,
+            Surface.DropletFlowColorBlend,
+            Surface.DropletFlowNormalStrength,
+            Surface.DropletFlowSpecular);
     }
 
     struct FProfileBakeEntry
@@ -407,7 +418,7 @@ FString FWetClothingWetPartDataTextureBaker::MakeBuildSignature(const UWetClothi
         TArray<int32> IslandIDs = BakeEntry.Entry->AssignedUVIslandIDs;
         IslandIDs.Sort();
         Canonical += FString::Printf(
-            TEXT("|Slot=%d;OriginalUV=%d;Part=%d;Profile=%s;Key=%s;OverrideDropletStampSize=%d;DropletRadiusScale=%.9g;OverrideDropletFlowStampSize=%d;DropletFlowSizeScale=%.9g;DropletDetailSize=%.9g;Islands="),
+            TEXT("|Slot=%d;OriginalUV=%d;Part=%d;Profile=%s;Key=%s;OverrideDropletStampSize=%d;DropletRadiusScale=%.9g;OverrideDropletFlowStampSize=%d;DropletFlowSizeScale=%.9g;DropletDetailSize=%.9g;DropletFlowDetailSize=%.9g;Islands="),
             BakeEntry.MaterialSlotIndex,
             WetClothingAsset->GetOriginalUVChannelIndex(),
             BakeEntry.Entry->WetPartID,
@@ -417,7 +428,8 @@ FString FWetClothingWetPartDataTextureBaker::MakeBuildSignature(const UWetClothi
             BakeEntry.Entry->SurfaceWater.DropletRadiusScale,
             BakeEntry.Entry->SurfaceWater.bOverrideDropletFlowStampSize ? 1 : 0,
             BakeEntry.Entry->SurfaceWater.DropletFlowSizeScale,
-            BakeEntry.Entry->SurfaceWater.DropletDetailSize);
+            BakeEntry.Entry->SurfaceWater.DropletDetailSize,
+            BakeEntry.Entry->SurfaceWater.DropletFlowDetailSize);
         for (const int32 IslandID : IslandIDs)
         {
             Canonical += FString::Printf(TEXT("%d,"), IslandID);
@@ -554,7 +566,7 @@ bool FWetClothingWetPartDataTextureBaker::Bake(
             const FColor PackedPartData(
                 LocalProfileID,
                 DWCWetPartDataTextureBake::EncodeDetailSize(Entry->SurfaceWater.DropletDetailSize),
-                0,
+                DWCWetPartDataTextureBake::EncodeDetailSize(Entry->SurfaceWater.DropletFlowDetailSize),
                 0);
             for (const FWetClothingAssetUVIsland& Island : OriginalIslands)
             {

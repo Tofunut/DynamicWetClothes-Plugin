@@ -454,7 +454,7 @@ void SWetnessProfileViewport::InitializePreviewComponents()
         FColor(
             0u,
             EncodePreviewDetailSize(PreviewDropletDetailSize),
-            0u,
+            EncodePreviewDetailSize(PreviewDropletDetailSize),
             255u));
     PreviewSurfaceDropletTexture = CreateSinglePixelPreviewTexture(
         GetTransientPackage(),
@@ -778,7 +778,7 @@ void SWetnessProfileViewport::RefreshGeneratedPreviewMaterialParameters()
         FColor(
             0u,
             EncodePreviewDetailSize(PreviewDropletDetailSize),
-            0u,
+            EncodePreviewDetailSize(PreviewDropletDetailSize),
             255u));
     WriteSinglePixelTexture(PreviewSurfaceDropletTexture, MakeScalarPreviewColor(PreviewSurfaceWater));
     WriteSinglePixelTexture(PreviewSurfaceFlowDropletTexture, MakeScalarPreviewColor(PreviewSurfaceWater));
@@ -804,6 +804,16 @@ void SWetnessProfileViewport::RefreshGeneratedPreviewMaterialParameters()
         FMath::Clamp(Surface.DropletFlowNoiseStrength, 0.0f, 1.0f),
         Surface.DropletFlowNoiseSpeed);
     const FLinearColor FallbackProfile4(0.0f, 0.0f, 0.0f, 0.0f);
+    const FLinearColor FallbackProfile5(
+        FMath::Clamp(Surface.DropletFlowTotalStrength, 0.0f, 1.0f),
+        FMath::Clamp(Surface.DropletFlowTargetRoughness, 0.0f, 1.0f),
+        FMath::Clamp(Surface.DropletFlowRoughnessBlend, 0.0f, 1.0f),
+        FMath::Clamp(Surface.DropletFlowSpecular, 0.0f, 1.0f));
+    const FLinearColor FallbackProfile6(
+        FMath::Clamp(Surface.SurfaceWaterColorBlend, 0.0f, 1.0f),
+        FMath::Clamp(Surface.DropletFlowColorBlend, 0.0f, 1.0f),
+        FMath::Clamp(Surface.DropletFlowNormalStrength, 0.0f, 3.0f),
+        0.0f);
 
     const float SurfacePreviewAmount = Surface.bEnabled ? PreviewSurfaceWater : 0.0f;
     FWetClothingLocalRenderProfile PreviewLocalProfile;
@@ -866,6 +876,8 @@ void SWetnessProfileViewport::RefreshGeneratedPreviewMaterialParameters()
             PreviewMID->SetVectorParameterValue(DWCWetMaterialParameters::FallbackRenderProfileTexel(2), FallbackProfile2);
             PreviewMID->SetVectorParameterValue(DWCWetMaterialParameters::FallbackRenderProfileTexel(3), FallbackProfile3);
             PreviewMID->SetVectorParameterValue(DWCWetMaterialParameters::FallbackRenderProfileTexel(4), FallbackProfile4);
+            PreviewMID->SetVectorParameterValue(DWCWetMaterialParameters::FallbackRenderProfileTexel(5), FallbackProfile5);
+            PreviewMID->SetVectorParameterValue(DWCWetMaterialParameters::FallbackRenderProfileTexel(6), FallbackProfile6);
         }
         PreviewMID->SetScalarParameterValue(PreviewSurfaceWaterOverrideParameter, 1.0f);
         PreviewMID->SetScalarParameterValue(PreviewSurfaceWaterAmountParameter, SurfacePreviewAmount);
@@ -913,13 +925,16 @@ FText SWetnessProfileViewport::GetOverlayText() const
     return FText::Format(
         LOCTEXT(
             "PreviewHint",
-            "Wetness Profile Preview\nAbsorbed Wetness {0}%  |  Total Strength {1}%\nDarkening {2}%  |  Absorbed Glossiness {3}%\nWater Normal {4}%  |  Roughness Blend {5}%"),
+            "Wetness Profile Preview\nAbsorbed Wetness {0}%  |  Static/Flow Strength {1}%/{6}%\nDarkening {2}%  |  Absorbed Glossiness {3}%\nStatic/Flow Normal {4}%/{8}%  |  Roughness Blend {5}%/{7}%"),
         FText::AsNumber(FMath::RoundToInt(PreviewAbsorbedWater * 100.0f)),
         FText::AsNumber(FMath::RoundToInt(FMath::Clamp(Surface.SurfaceWaterTotalStrength, 0.0f, 1.0f) * 100.0f)),
         FText::AsNumber(FMath::RoundToInt(Parameters.GetAbsorbedDarkeningStrength() * 100.0f)),
         FText::AsNumber(FMath::RoundToInt(Parameters.GetAbsorbedGlossinessStrength() * 100.0f)),
         FText::AsNumber(FMath::RoundToInt(FMath::Clamp(Surface.SurfaceWaterNormalStrength, 0.0f, 3.0f) * 100.0f)),
-        FText::AsNumber(FMath::RoundToInt(FMath::Clamp(Surface.SurfaceWaterRoughnessBlend, 0.0f, 1.0f) * 100.0f)));
+        FText::AsNumber(FMath::RoundToInt(FMath::Clamp(Surface.SurfaceWaterRoughnessBlend, 0.0f, 1.0f) * 100.0f)),
+        FText::AsNumber(FMath::RoundToInt(FMath::Clamp(Surface.DropletFlowTotalStrength, 0.0f, 1.0f) * 100.0f)),
+        FText::AsNumber(FMath::RoundToInt(FMath::Clamp(Surface.DropletFlowRoughnessBlend, 0.0f, 1.0f) * 100.0f)),
+        FText::AsNumber(FMath::RoundToInt(FMath::Clamp(Surface.DropletFlowNormalStrength, 0.0f, 3.0f) * 100.0f)));
 }
 
 #undef LOCTEXT_NAMESPACE

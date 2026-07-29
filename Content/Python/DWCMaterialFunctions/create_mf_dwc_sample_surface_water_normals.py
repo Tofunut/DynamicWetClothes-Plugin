@@ -26,7 +26,8 @@ def build() -> None:
 
     specs = [
         ("SurfaceWaterNormalUV", "vector2", (0.0, 0.0), "Mesh UV used for repeated detail."),
-        ("DropletDetailSize", "scalar", (1.0,), "Part-local detail size."),
+        ("DropletDetailSize", "scalar", (1.0,), "Part-local stationary Droplet size."),
+        ("DropletFlowDetailSize", "scalar", (1.0,), "Part-local Flow Droplet size."),
         ("DropletMaskSlice", "scalar", (0.0,), "Stationary mask array slice."),
         ("DropletNormalSlice", "scalar", (0.0,), "Stationary normal array slice."),
         ("DropletFlowEnabled", "scalar", (0.0,), "Flow path enable."),
@@ -67,9 +68,23 @@ def build() -> None:
             ("DetailSize", c.named_usage(mf, declarations["DropletDetailSize"], -5850, -4000), ("", "Result")),
         ],
         "float2", -4900, -4300,
-        "Scale mesh UV by the Part-local Droplet detail size.",
+        "Scale mesh UV by the Part-local stationary Droplet size.",
     )
     base_uv_decl = c.named_declaration(mf, "SURFACE_BaseDropletUV", base_uv, ("", "Result"), -4050, -4300)
+
+    flow_base_uv = c.custom_expression(
+        mf,
+        "return UV / max(DetailSize, 1.0e-4);",
+        [
+            ("UV", c.named_usage(mf, declarations["SurfaceWaterNormalUV"], -5850, -700), ("", "Result")),
+            ("DetailSize", c.named_usage(mf, declarations["DropletFlowDetailSize"], -5850, -250), ("", "Result")),
+        ],
+        "float2", -4900, -500,
+        "Scale mesh UV by the Part-local Flow Droplet size.",
+    )
+    flow_base_uv_decl = c.named_declaration(
+        mf, "SURFACE_BaseFlowDropletUV", flow_base_uv, ("", "Result"), -4050, -500
+    )
 
     def sample_detail(
         prefix: str,
@@ -160,7 +175,7 @@ float2 Direction = float2(cos(Radians), sin(Radians));
 return BaseUV * max(Tiling, 0.01) + Direction * (SurfaceTime * NoiseSpeed);
 """,
         [
-            ("BaseUV", c.named_usage(mf, base_uv_decl, -5850, 0), ("", "Result")),
+            ("BaseUV", c.named_usage(mf, flow_base_uv_decl, -5850, 0), ("", "Result")),
             ("DirectionDegrees", c.named_usage(mf, declarations["DropletFlowDirectionDegrees"], -5850, 450), ("", "Result")),
             ("Tiling", c.named_usage(mf, declarations["DropletFlowNoiseTiling"], -5850, 900), ("", "Result")),
             ("SurfaceTime", c.named_usage(mf, declarations["SurfaceTime"], -5850, 1350), ("", "Result")),
@@ -197,7 +212,7 @@ float2 Panned = BaseUV - Direction * (SurfaceTime * FlowSpeed);
 return lerp(BaseUV, Panned + Sideways * NoiseOffset, saturate(FlowEnabled));
 """,
         [
-            ("BaseUV", c.named_usage(mf, base_uv_decl, -2850, -50), ("", "Result")),
+            ("BaseUV", c.named_usage(mf, flow_base_uv_decl, -2850, -50), ("", "Result")),
             ("FlowEnabled", c.named_usage(mf, declarations["DropletFlowEnabled"], -2850, 400), ("", "Result")),
             ("FlowSpeed", c.named_usage(mf, declarations["DropletFlowSpeed"], -2850, 850), ("", "Result")),
             ("DirectionDegrees", c.named_usage(mf, declarations["DropletFlowDirectionDegrees"], -2850, 1300), ("", "Result")),

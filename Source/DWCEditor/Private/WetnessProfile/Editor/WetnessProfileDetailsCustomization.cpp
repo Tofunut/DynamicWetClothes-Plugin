@@ -494,7 +494,7 @@ void FWetnessProfileDetailsCustomization::CustomizeDetails(IDetailLayoutBuilder&
         AddMappedFloatProperty(
             SimulationCategory,
             FindPropertyByPath(TEXT("Parameters.SurfaceWater.DropletRadiusPixels")),
-            LOCTEXT("DropletStampSize", "Droplet Stamp Size"),
+            LOCTEXT("DropletStampSize", "Static Stamp Size"),
             LOCTEXT("DropletStampSizeTooltip", "Base size of the surface-water stamp coverage. Wet Parts can override this with a local scale."),
             12.5f, 100.0f, 12.5f, 100.0f, 1.0f, 1, LOCTEXT("PercentSuffixDropletSize", "%"),
             MakeSquaredRawToPercent(64.0f), MakeSquaredPercentToRaw(64.0f), 1.0f, 256.0f,
@@ -618,51 +618,104 @@ void FWetnessProfileDetailsCustomization::CustomizeDetails(IDetailLayoutBuilder&
                 : LOCTEXT("CombinedSurfaceRenderingCategory", "Surface Water | Rendering"),
             ECategoryPriority::Important);
         ConfigurePrimaryCategory(RenderingCategory, BaseSortOrder + 10);
-        RenderingCategory.AddCustomRow(LOCTEXT("SharedSurfaceAppearanceFilter", "Shared Surface Water Appearance"))
-            .WholeRowContent()
-            [
-                SNew(STextBlock)
-                .Text(LOCTEXT("SharedSurfaceAppearanceHint", "Surface-water appearance settings applied to Droplets."))
-                .AutoWrapText(true)
-                .ColorAndOpacity(FSlateColor::UseSubduedForeground())
-            ];
+        IDetailGroup& StaticRenderingGroup = RenderingCategory.AddGroup(
+            TEXT("DWCStaticDropletRendering"),
+            LOCTEXT("StaticDropletRenderingGroup", "Static Droplet"),
+            false,
+            true);
 
         AddFloatProperty(
-            RenderingCategory,
+            StaticRenderingGroup,
             FindPropertyByPath(TEXT("Parameters.SurfaceWater.SurfaceWaterTotalStrength")),
             LOCTEXT("SurfaceTotalStrength", "Total Strength"),
             LOCTEXT("SurfaceTotalStrengthTooltip", "Overall Surface Water rendering strength after final droplet coverage is resolved. This does not change the preview Surface Water amount."),
             0.0f, 1.0f, 0.0f, 1.0f, 0.01f, 100.0f, 1, LOCTEXT("PercentSuffixSurfaceTotalStrength", "%"),
             SurfaceSettingsEnabled);
         AddFloatProperty(
-            RenderingCategory,
+            StaticRenderingGroup,
+            FindPropertyByPath(TEXT("Parameters.SurfaceWater.SurfaceWaterColorBlend")),
+            LOCTEXT("SurfaceColorBlend", "Color Blend"),
+            LOCTEXT("SurfaceColorBlendTooltip", "How strongly Static Droplet coverage modifies the underlying Base Color. This does not affect normal, roughness, or specular."),
+            0.0f, 1.0f, 0.0f, 1.0f, 0.01f, 100.0f, 1, LOCTEXT("PercentSuffixSurfaceColorBlend", "%"),
+            SurfaceSettingsEnabled);
+        AddMappedFloatProperty(
+            StaticRenderingGroup,
+            FindPropertyByPath(TEXT("Parameters.SurfaceWater.SurfaceWaterNormalStrength")),
+            LOCTEXT("SurfaceNormalStrength", "Water Normal Strength"),
+            LOCTEXT("SurfaceNormalStrengthTooltip", "Static Droplet normal-map strength. 100% is the authored normal texture strength."),
+            0.0f, 300.0f, 0.0f, 300.0f, 1.0f, 1, LOCTEXT("PercentSuffix7", "%"),
+            MakeLinearRawToPercent(1.0f, 300.0f), MakeLinearPercentToRaw(1.0f, 300.0f), 0.0f, 3.0f,
+            SurfaceSettingsEnabled);
+        AddFloatProperty(
+            StaticRenderingGroup,
             FindPropertyByPath(TEXT("Parameters.SurfaceWater.SurfaceWaterTargetRoughness")),
             LOCTEXT("WaterRoughness", "Water Roughness"),
             LOCTEXT("WaterRoughnessTooltip", "Target roughness reached inside final droplet coverage."),
             0.0f, 1.0f, 0.0f, 1.0f, 0.01f, 100.0f, 1, LOCTEXT("PercentSuffixWetSurfaceRoughness", "%"),
             SurfaceSettingsEnabled);
         AddFloatProperty(
-            RenderingCategory,
+            StaticRenderingGroup,
             FindPropertyByPath(TEXT("Parameters.SurfaceWater.SurfaceWaterRoughnessBlend")),
             LOCTEXT("WetRoughnessBlend", "Roughness Blend"),
             LOCTEXT("WetRoughnessBlendTooltip", "How strongly final droplet coverage blends from source roughness to Water Roughness."),
             0.0f, 1.0f, 0.0f, 1.0f, 0.01f, 100.0f, 1, LOCTEXT("PercentSuffix8", "%"),
             SurfaceSettingsEnabled);
-        AddMappedFloatProperty(
-            RenderingCategory,
-            FindPropertyByPath(TEXT("Parameters.SurfaceWater.SurfaceWaterNormalStrength")),
-            LOCTEXT("SurfaceNormalStrength", "Water Normal Strength"),
-            LOCTEXT("SurfaceNormalStrengthTooltip", "Droplet normal strength inside final droplet coverage. 100% is the authored normal texture strength."),
-            0.0f, 300.0f, 0.0f, 300.0f, 1.0f, 1, LOCTEXT("PercentSuffix7", "%"),
-            MakeLinearRawToPercent(1.0f, 300.0f), MakeLinearPercentToRaw(1.0f, 300.0f), 0.0f, 3.0f,
-            SurfaceSettingsEnabled);
         AddFloatProperty(
-            RenderingCategory,
+            StaticRenderingGroup,
             FindPropertyByPath(TEXT("Parameters.SurfaceWater.SurfaceWaterSpecular")),
             LOCTEXT("WaterSpecular", "Water Specular"),
             LOCTEXT("WaterSpecularTooltip", "Target specular reached inside final droplet coverage."),
             0.0f, 1.0f, 0.0f, 1.0f, 0.01f, 100.0f, 1, LOCTEXT("PercentSuffixWaterSpecular", "%"),
             SurfaceSettingsEnabled);
+
+        IDetailGroup& FlowRenderingGroup = RenderingCategory.AddGroup(
+            TEXT("DWCDropletFlowRendering"),
+            LOCTEXT("DropletFlowRenderingGroup", "Droplet Flow"),
+            false,
+            true);
+        AddFloatProperty(
+            FlowRenderingGroup,
+            FindPropertyByPath(TEXT("Parameters.SurfaceWater.DropletFlowTotalStrength")),
+            LOCTEXT("DropletFlowTotalStrength", "Total Strength"),
+            LOCTEXT("DropletFlowTotalStrengthTooltip", "Overall Flow Droplet rendering strength after its coverage is resolved."),
+            0.0f, 1.0f, 0.0f, 1.0f, 0.01f, 100.0f, 1, LOCTEXT("PercentSuffixFlowTotalStrength", "%"),
+            DropletFlowSettingsEnabled);
+        AddFloatProperty(
+            FlowRenderingGroup,
+            FindPropertyByPath(TEXT("Parameters.SurfaceWater.DropletFlowColorBlend")),
+            LOCTEXT("DropletFlowColorBlend", "Color Blend"),
+            LOCTEXT("DropletFlowColorBlendTooltip", "How strongly Flow Droplet coverage modifies the underlying Base Color. This does not affect normal, roughness, or specular."),
+            0.0f, 1.0f, 0.0f, 1.0f, 0.01f, 100.0f, 1, LOCTEXT("PercentSuffixFlowColorBlend", "%"),
+            DropletFlowSettingsEnabled);
+        AddMappedFloatProperty(
+            FlowRenderingGroup,
+            FindPropertyByPath(TEXT("Parameters.SurfaceWater.DropletFlowNormalStrength")),
+            LOCTEXT("DropletFlowNormalStrength", "Water Normal Strength"),
+            LOCTEXT("DropletFlowNormalStrengthTooltip", "Flow Droplet normal-map strength. 100% is the authored normal texture strength."),
+            0.0f, 300.0f, 0.0f, 300.0f, 1.0f, 1, LOCTEXT("PercentSuffixFlowNormalStrength", "%"),
+            MakeLinearRawToPercent(1.0f, 300.0f), MakeLinearPercentToRaw(1.0f, 300.0f), 0.0f, 3.0f,
+            DropletFlowSettingsEnabled);
+        AddFloatProperty(
+            FlowRenderingGroup,
+            FindPropertyByPath(TEXT("Parameters.SurfaceWater.DropletFlowTargetRoughness")),
+            LOCTEXT("DropletFlowWaterRoughness", "Water Roughness"),
+            LOCTEXT("DropletFlowWaterRoughnessTooltip", "Target roughness reached inside Flow Droplet coverage."),
+            0.0f, 1.0f, 0.0f, 1.0f, 0.01f, 100.0f, 1, LOCTEXT("PercentSuffixFlowRoughness", "%"),
+            DropletFlowSettingsEnabled);
+        AddFloatProperty(
+            FlowRenderingGroup,
+            FindPropertyByPath(TEXT("Parameters.SurfaceWater.DropletFlowRoughnessBlend")),
+            LOCTEXT("DropletFlowRoughnessBlend", "Roughness Blend"),
+            LOCTEXT("DropletFlowRoughnessBlendTooltip", "How strongly Flow Droplet coverage blends from source roughness to its Water Roughness."),
+            0.0f, 1.0f, 0.0f, 1.0f, 0.01f, 100.0f, 1, LOCTEXT("PercentSuffixFlowRoughnessBlend", "%"),
+            DropletFlowSettingsEnabled);
+        AddFloatProperty(
+            FlowRenderingGroup,
+            FindPropertyByPath(TEXT("Parameters.SurfaceWater.DropletFlowSpecular")),
+            LOCTEXT("DropletFlowWaterSpecular", "Water Specular"),
+            LOCTEXT("DropletFlowWaterSpecularTooltip", "Target specular reached inside Flow Droplet coverage."),
+            0.0f, 1.0f, 0.0f, 1.0f, 0.01f, 100.0f, 1, LOCTEXT("PercentSuffixFlowSpecular", "%"),
+            DropletFlowSettingsEnabled);
 
         IDetailCategoryBuilder& DetailTexturesCategory = DetailBuilder.EditCategory(
             TEXT("DWCSurfaceDetailTextures"),

@@ -242,12 +242,20 @@ namespace
             TEXT("SurfaceWaterSpecular"),
             TEXT("SurfaceWaterTargetRoughness"),
             TEXT("SurfaceWaterTotalStrength"),
-            TEXT("DropletDetailSize")
+            TEXT("SurfaceWaterColorBlend"),
+            TEXT("DropletFlowRoughnessBlend"),
+            TEXT("DropletFlowSpecular"),
+            TEXT("DropletFlowTargetRoughness"),
+            TEXT("DropletFlowTotalStrength"),
+            TEXT("DropletFlowColorBlend"),
+            TEXT("DropletFlowNormalStrength"),
+            TEXT("DropletDetailSize"),
+            TEXT("DropletFlowDetailSize")
         };
         static const TArray<FName> SurfaceNormalInputs = {
             TEXT("SurfaceWaterNormalUV"),
             TEXT("DropletMaskSlice"), TEXT("DropletNormalSlice"),
-            TEXT("DropletDetailSize")
+            TEXT("DropletDetailSize"), TEXT("DropletFlowDetailSize")
         };
         static const TArray<FName> SurfaceNormalOutputs = {
             TEXT("DropletMask"), TEXT("DropletNormal")

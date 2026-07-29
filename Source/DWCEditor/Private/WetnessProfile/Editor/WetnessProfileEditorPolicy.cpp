@@ -49,10 +49,17 @@ namespace
 
         // Rendering | Surface Water
         { TEXT("Parameters.SurfaceWater.SurfaceWaterTotalStrength"), 0.0, 1.0, 0.5 },
+        { TEXT("Parameters.SurfaceWater.SurfaceWaterColorBlend"), 0.0, 1.0, 1.0 },
         { TEXT("Parameters.SurfaceWater.SurfaceWaterTargetRoughness"), 0.0, 1.0, 0.02 },
         { TEXT("Parameters.SurfaceWater.SurfaceWaterNormalStrength"), 0.0, 3.0, 3.0 },
         { TEXT("Parameters.SurfaceWater.SurfaceWaterRoughnessBlend"), 0.0, 1.0, 0.85 },
         { TEXT("Parameters.SurfaceWater.SurfaceWaterSpecular"), 0.0, 1.0, 0.5 },
+        { TEXT("Parameters.SurfaceWater.DropletFlowTotalStrength"), 0.0, 1.0, 0.5 },
+        { TEXT("Parameters.SurfaceWater.DropletFlowColorBlend"), 0.0, 1.0, 1.0 },
+        { TEXT("Parameters.SurfaceWater.DropletFlowNormalStrength"), 0.0, 3.0, 3.0 },
+        { TEXT("Parameters.SurfaceWater.DropletFlowTargetRoughness"), 0.0, 1.0, 0.02 },
+        { TEXT("Parameters.SurfaceWater.DropletFlowRoughnessBlend"), 0.0, 1.0, 0.85 },
+        { TEXT("Parameters.SurfaceWater.DropletFlowSpecular"), 0.0, 1.0, 0.5 },
     };
 
     constexpr float MinRenderableRejectedWaterFraction = 0.05f;

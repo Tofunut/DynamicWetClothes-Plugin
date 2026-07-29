@@ -188,7 +188,9 @@ namespace
             TEXT("FlowEnabled=%d|FlowNormal=%s|FlowMask=%s|FlowNoise=%s|")
             TEXT("FlowSpeed=%.9g|FlowDirection=%.9g|FlowNoiseTiling=%.9g|FlowNoiseStrength=%.9g|FlowNoiseSpeed=%.9g|")
             TEXT("TargetRoughness=%.9g|NormalStrength=%.9g|RoughnessBlend=%.9g|")
-            TEXT("SurfaceWaterTotalStrength=%.9g|WaterSpecular=%.9g"),
+            TEXT("SurfaceWaterTotalStrength=%.9g|StaticColorBlend=%.9g|WaterSpecular=%.9g|")
+            TEXT("FlowTargetRoughness=%.9g|FlowRoughnessBlend=%.9g|FlowTotalStrength=%.9g|")
+            TEXT("FlowColorBlend=%.9g|FlowNormalStrength=%.9g|FlowSpecular=%.9g"),
             LocalProfile.Parameters.GetAbsorbedDarkeningStrength(),
             LocalProfile.Parameters.GetAbsorbedGlossinessStrength(),
             Surface.bEnabled ? 1 : 0,
@@ -222,7 +224,14 @@ namespace
             Surface.SurfaceWaterNormalStrength,
             Surface.SurfaceWaterRoughnessBlend,
             Surface.SurfaceWaterTotalStrength,
-            Surface.SurfaceWaterSpecular);
+            Surface.SurfaceWaterColorBlend,
+            Surface.SurfaceWaterSpecular,
+            Surface.DropletFlowTargetRoughness,
+            Surface.DropletFlowRoughnessBlend,
+            Surface.DropletFlowTotalStrength,
+            Surface.DropletFlowColorBlend,
+            Surface.DropletFlowNormalStrength,
+            Surface.DropletFlowSpecular);
         const FString ParameterHash = FMD5::HashAnsiString(*ParameterState);
         if (LocalProfile.SourceProfile.IsValid())
         {
@@ -239,7 +248,9 @@ namespace
             TEXT("FlowEnabled=%d|FlowNormal=%s|FlowMask=%s|FlowNoise=%s|")
             TEXT("FlowSpeed=%.9g|FlowDirection=%.9g|FlowNoiseTiling=%.9g|FlowNoiseStrength=%.9g|FlowNoiseSpeed=%.9g|")
             TEXT("TargetRoughness=%.9g|NormalStrength=%.9g|RoughnessBlend=%.9g|")
-            TEXT("SurfaceWaterTotalStrength=%.9g|WaterSpecular=%.9g"),
+            TEXT("SurfaceWaterTotalStrength=%.9g|StaticColorBlend=%.9g|WaterSpecular=%.9g|")
+            TEXT("FlowTargetRoughness=%.9g|FlowRoughnessBlend=%.9g|FlowTotalStrength=%.9g|")
+            TEXT("FlowColorBlend=%.9g|FlowNormalStrength=%.9g|FlowSpecular=%.9g"),
             Parameters.GetAbsorbedDarkeningStrength(),
             Parameters.GetAbsorbedGlossinessStrength(),
             Surface.bEnabled ? 1 : 0,
@@ -258,7 +269,14 @@ namespace
             Surface.SurfaceWaterNormalStrength,
             Surface.SurfaceWaterRoughnessBlend,
             Surface.SurfaceWaterTotalStrength,
-            Surface.SurfaceWaterSpecular);
+            Surface.SurfaceWaterColorBlend,
+            Surface.SurfaceWaterSpecular,
+            Surface.DropletFlowTargetRoughness,
+            Surface.DropletFlowRoughnessBlend,
+            Surface.DropletFlowTotalStrength,
+            Surface.DropletFlowColorBlend,
+            Surface.DropletFlowNormalStrength,
+            Surface.DropletFlowSpecular);
     }
 
     bool ResolveSourceProfileParameters(
@@ -537,6 +555,20 @@ namespace
                 static_cast<float>(Surface.bEnabled && Surface.bEnableDropletFlow ? Slices.DropletFlowNormal : 0),
                 static_cast<float>(Surface.bEnabled && Surface.bEnableDropletFlow ? Slices.DropletFlowMask : 0),
                 0.0f,
+                0.0f);
+
+        case 5:
+            return FLinearColor(
+                FMath::Clamp(Surface.DropletFlowTotalStrength, 0.0f, 1.0f),
+                FMath::Clamp(Surface.DropletFlowTargetRoughness, 0.0f, 1.0f),
+                FMath::Clamp(Surface.DropletFlowRoughnessBlend, 0.0f, 1.0f),
+                FMath::Clamp(Surface.DropletFlowSpecular, 0.0f, 1.0f));
+
+        case 6:
+            return FLinearColor(
+                FMath::Clamp(Surface.SurfaceWaterColorBlend, 0.0f, 1.0f),
+                FMath::Clamp(Surface.DropletFlowColorBlend, 0.0f, 1.0f),
+                FMath::Clamp(Surface.DropletFlowNormalStrength, 0.0f, 3.0f),
                 0.0f);
 
         default:
@@ -1080,6 +1112,16 @@ int32 UDWCGPUResourceSubsystem::FindOrAddRuntimeProfile(
             static_cast<float>(DropletFlowNormalSlice),
             static_cast<float>(DropletFlowMaskSlice),
             0.0f,
+            0.0f);
+        Record->PackedTexels[5] = FLinearColor(
+            FMath::Clamp(Surface.DropletFlowTotalStrength, 0.0f, 1.0f),
+            FMath::Clamp(Surface.DropletFlowTargetRoughness, 0.0f, 1.0f),
+            FMath::Clamp(Surface.DropletFlowRoughnessBlend, 0.0f, 1.0f),
+            FMath::Clamp(Surface.DropletFlowSpecular, 0.0f, 1.0f));
+        Record->PackedTexels[6] = FLinearColor(
+            FMath::Clamp(Surface.SurfaceWaterColorBlend, 0.0f, 1.0f),
+            FMath::Clamp(Surface.DropletFlowColorBlend, 0.0f, 1.0f),
+            FMath::Clamp(Surface.DropletFlowNormalStrength, 0.0f, 3.0f),
             0.0f);
         UE_LOG(
             LogDWC,

@@ -1,0 +1,288 @@
+#include "/Engine/Public/Platform.ush"
+
+Buffer<float4> Contacts;
+Buffer<int> ContactCount;
+StructuredBuffer<float4> TrianglePositions;
+StructuredBuffer<float4> TriangleUV01;
+StructuredBuffer<float4> TriangleUV2AndDroplet;
+StructuredBuffer<float4> TriangleFlowDropletSettings;
+StructuredBuffer<float> TriangleFlowSpawnPositionSpread;
+StructuredBuffer<uint4> TriangleSurfaceMetadata;
+RWStructuredBuffer<uint4> ResolvedStaticContacts;
+RWStructuredBuffer<uint4> ResolvedFlowContacts;
+
+uint TriangleCount;
+uint ContactIndexOffset;
+int MaxContacts;
+
+static const uint DWCWetCollisionContactFloat4Count = 2u;
+static const uint DWCInvalidTriangle = 0xffffffffu;
+static const uint DWCResolveGroupSize = 64u;
+
+groupshared float GBestDistanceSquared[DWCResolveGroupSize];
+groupshared uint GBestTriangle[DWCResolveGroupSize];
+groupshared float3 GBestBarycentric[DWCResolveGroupSize];
+
+float3 DWC_ClosestPointBarycentric(
+    float3 Point,
+    float3 A,
+    float3 B,
+    float3 C)
+{
+    const float3 AB = B - A;
+    const float3 AC = C - A;
+    const float3 AP = Point - A;
+    const float D1 = dot(AB, AP);
+    const float D2 = dot(AC, AP);
+    if (D1 <= 0.0 && D2 <= 0.0)
+    {
+        return float3(1.0, 0.0, 0.0);
+    }
+
+    const float3 BP = Point - B;
+    const float D3 = dot(AB, BP);
+    const float D4 = dot(AC, BP);
+    if (D3 >= 0.0 && D4 <= D3)
+    {
+        return float3(0.0, 1.0, 0.0);
+    }
+
+    const float VC = D1 * D4 - D3 * D2;
+    if (VC <= 0.0 && D1 >= 0.0 && D3 <= 0.0)
+    {
+        const float V = D1 / max(D1 - D3, 1.0e-8);
+        return float3(1.0 - V, V, 0.0);
+    }
+
+    const float3 CP = Point - C;
+    const float D5 = dot(AB, CP);
+    const float D6 = dot(AC, CP);
+    if (D6 >= 0.0 && D5 <= D6)
+    {
+        return float3(0.0, 0.0, 1.0);
+    }
+
+    const float VB = D5 * D2 - D1 * D6;
+    if (VB <= 0.0 && D2 >= 0.0 && D6 <= 0.0)
+    {
+        const float W = D2 / max(D2 - D6, 1.0e-8);
+        return float3(1.0 - W, 0.0, W);
+    }
+
+    const float VA = D3 * D6 - D5 * D4;
+    if (VA <= 0.0 && (D4 - D3) >= 0.0 && (D5 - D6) >= 0.0)
+    {
+        const float EdgeDenominator = max((D4 - D3) + (D5 - D6), 1.0e-8);
+        const float W = (D4 - D3) / EdgeDenominator;
+        return float3(0.0, 1.0 - W, W);
+    }
+
+    const float Denominator = VA + VB + VC;
+    if (abs(Denominator) <= 1.0e-8)
+    {
+        return float3(1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0);
+    }
+
+    const float InverseDenominator = rcp(Denominator);
+    const float V = VB * InverseDenominator;
+    const float W = VC * InverseDenominator;
+    return float3(1.0 - V - W, V, W);
+}
+
+uint DWC_Hash(uint Value)
+{
+    Value ^= Value >> 16u;
+    Value *= 0x7feb352du;
+    Value ^= Value >> 15u;
+    Value *= 0x846ca68bu;
+    Value ^= Value >> 16u;
+    return Value;
+}
+
+float DWC_ContactRandom(uint ContactIndex, float3 Position, uint Salt)
+{
+    uint Seed = DWC_Hash(ContactIndex ^ Salt);
+    Seed = DWC_Hash(Seed ^ asuint(Position.x));
+    Seed = DWC_Hash(Seed ^ asuint(Position.y));
+    Seed = DWC_Hash(Seed ^ asuint(Position.z));
+    return (float)(Seed & 0x00ffffffu) / 16777216.0;
+}
+
+[numthreads(64, 1, 1)]
+void MainCS(
+    uint3 GroupId : SV_GroupID,
+    uint3 GroupThreadId : SV_GroupThreadID)
+{
+    const uint ContactIndex = ContactIndexOffset + GroupId.x;
+    const uint ClampedContactCount = (uint)min(max(ContactCount[0], 0), MaxContacts);
+    if (ContactIndex >= ClampedContactCount)
+    {
+        return;
+    }
+
+    if (GroupThreadId.x == 0u)
+    {
+        ResolvedStaticContacts[ContactIndex] = uint4(0u, 0u, DWCInvalidTriangle, 0u);
+        ResolvedFlowContacts[ContactIndex] = uint4(0u, 0u, DWCInvalidTriangle, 0u);
+    }
+    GroupMemoryBarrierWithGroupSync();
+
+    const uint ContactBase = ContactIndex * DWCWetCollisionContactFloat4Count;
+    const float4 ContactAndRadius = Contacts[ContactBase + 0u];
+    const float Amount = Contacts[ContactBase + 1u].w;
+    const float Radius = ContactAndRadius.w;
+    if (Amount <= 0.0 || Radius <= 0.0 || !all(isfinite(ContactAndRadius)))
+    {
+        return;
+    }
+
+    float BestDistanceSquared = 3.402823466e+38;
+    uint BestTriangle = DWCInvalidTriangle;
+    float3 BestBarycentric = float3(1.0, 0.0, 0.0);
+    const float RadiusSquared = Radius * Radius;
+
+    for (uint TriangleIndex = GroupThreadId.x;
+         TriangleIndex < TriangleCount;
+         TriangleIndex += DWCResolveGroupSize)
+    {
+        const uint4 SurfaceMetadata = TriangleSurfaceMetadata[TriangleIndex];
+        const float4 UV2AndDroplet = TriangleUV2AndDroplet[TriangleIndex];
+        const float4 FlowDropletSettings = TriangleFlowDropletSettings[TriangleIndex];
+        const float StaticSpawnProbability = asfloat(SurfaceMetadata.z);
+        const float RejectedWaterFraction = asfloat(SurfaceMetadata.w);
+        const bool bSupportsStatic =
+            UV2AndDroplet.z > 0.0 &&
+            UV2AndDroplet.w > 0.0 &&
+            StaticSpawnProbability > 0.0;
+        const bool bSupportsFlow =
+            FlowDropletSettings.x > 0.0 &&
+            FlowDropletSettings.y > 0.0 &&
+            FlowDropletSettings.z > 0.0 &&
+            FlowDropletSettings.w > 0.0;
+        if (SurfaceMetadata.y == 0u ||
+            RejectedWaterFraction <= 0.0 ||
+            (!bSupportsStatic && !bSupportsFlow))
+        {
+            continue;
+        }
+
+        const uint PositionBase = TriangleIndex * 3u;
+        const float3 P0 = TrianglePositions[PositionBase + 0u].xyz;
+        const float3 P1 = TrianglePositions[PositionBase + 1u].xyz;
+        const float3 P2 = TrianglePositions[PositionBase + 2u].xyz;
+        const float3 Barycentric = DWC_ClosestPointBarycentric(
+            ContactAndRadius.xyz,
+            P0,
+            P1,
+            P2);
+        const float3 ClosestPosition =
+            P0 * Barycentric.x +
+            P1 * Barycentric.y +
+            P2 * Barycentric.z;
+        const float DistanceSquared = dot(
+            ClosestPosition - ContactAndRadius.xyz,
+            ClosestPosition - ContactAndRadius.xyz);
+        if (DistanceSquared <= RadiusSquared &&
+            (DistanceSquared < BestDistanceSquared ||
+             (DistanceSquared == BestDistanceSquared && TriangleIndex < BestTriangle)))
+        {
+            BestDistanceSquared = DistanceSquared;
+            BestTriangle = TriangleIndex;
+            BestBarycentric = Barycentric;
+        }
+    }
+
+    GBestDistanceSquared[GroupThreadId.x] = BestDistanceSquared;
+    GBestTriangle[GroupThreadId.x] = BestTriangle;
+    GBestBarycentric[GroupThreadId.x] = BestBarycentric;
+    GroupMemoryBarrierWithGroupSync();
+
+    for (uint Stride = DWCResolveGroupSize / 2u; Stride > 0u; Stride >>= 1u)
+    {
+        if (GroupThreadId.x < Stride)
+        {
+            const uint OtherIndex = GroupThreadId.x + Stride;
+            const float OtherDistanceSquared = GBestDistanceSquared[OtherIndex];
+            const uint OtherTriangle = GBestTriangle[OtherIndex];
+            if (OtherDistanceSquared < GBestDistanceSquared[GroupThreadId.x] ||
+                (OtherDistanceSquared == GBestDistanceSquared[GroupThreadId.x] &&
+                 OtherTriangle < GBestTriangle[GroupThreadId.x]))
+            {
+                GBestDistanceSquared[GroupThreadId.x] = OtherDistanceSquared;
+                GBestTriangle[GroupThreadId.x] = OtherTriangle;
+                GBestBarycentric[GroupThreadId.x] = GBestBarycentric[OtherIndex];
+            }
+        }
+        GroupMemoryBarrierWithGroupSync();
+    }
+
+    if (GroupThreadId.x != 0u || GBestTriangle[0] == DWCInvalidTriangle)
+    {
+        return;
+    }
+
+    const uint ResolvedTriangle = GBestTriangle[0];
+    const uint4 SurfaceMetadata = TriangleSurfaceMetadata[ResolvedTriangle];
+    const float4 UV01 = TriangleUV01[ResolvedTriangle];
+    const float4 UV2AndDroplet = TriangleUV2AndDroplet[ResolvedTriangle];
+    const float2 UV2 = UV2AndDroplet.xy;
+    const float4 FlowDropletSettings = TriangleFlowDropletSettings[ResolvedTriangle];
+    const float3 Barycentric = GBestBarycentric[0];
+
+    const float StaticSpawnProbability = saturate(asfloat(SurfaceMetadata.z));
+    const bool bSupportsStatic =
+        UV2AndDroplet.z > 0.0 &&
+        UV2AndDroplet.w > 0.0 &&
+        StaticSpawnProbability > 0.0;
+    if (bSupportsStatic &&
+        DWC_ContactRandom(ContactIndex, ContactAndRadius.xyz, 0x2c1b3c6du) <
+            StaticSpawnProbability)
+    {
+        const float2 StaticUV = saturate(
+            UV01.xy * Barycentric.x +
+            UV01.zw * Barycentric.y +
+            UV2 * Barycentric.z);
+        ResolvedStaticContacts[ContactIndex] = uint4(
+            asuint(StaticUV.x),
+            asuint(StaticUV.y),
+            ResolvedTriangle,
+            SurfaceMetadata.y);
+    }
+
+    const float FlowSpawnProbability = saturate(FlowDropletSettings.w);
+    const bool bSupportsFlow =
+        FlowDropletSettings.x > 0.0 &&
+        FlowDropletSettings.y > 0.0 &&
+        FlowDropletSettings.z > 0.0 &&
+        FlowSpawnProbability > 0.0;
+    if (bSupportsFlow &&
+        DWC_ContactRandom(ContactIndex, ContactAndRadius.xyz, 0x297a2d39u) <
+            FlowSpawnProbability)
+    {
+        const float Root = sqrt(DWC_ContactRandom(
+            ContactIndex,
+            ContactAndRadius.xyz,
+            0x7f4a7c15u));
+        const float Edge = DWC_ContactRandom(
+            ContactIndex,
+            ContactAndRadius.xyz,
+            0x94d049bbu);
+        const float3 RandomBarycentric = float3(
+            1.0 - Root,
+            Root * (1.0 - Edge),
+            Root * Edge);
+        const float3 FlowBarycentric = lerp(
+            Barycentric,
+            RandomBarycentric,
+            saturate(TriangleFlowSpawnPositionSpread[ResolvedTriangle]));
+        const float2 FlowUV = saturate(
+            UV01.xy * FlowBarycentric.x +
+            UV01.zw * FlowBarycentric.y +
+            UV2 * FlowBarycentric.z);
+        ResolvedFlowContacts[ContactIndex] = uint4(
+            asuint(FlowUV.x),
+            asuint(FlowUV.y),
+            ResolvedTriangle,
+            SurfaceMetadata.y);
+    }
+}

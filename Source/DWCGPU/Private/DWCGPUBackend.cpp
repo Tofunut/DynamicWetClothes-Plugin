@@ -33,6 +33,8 @@ DEFINE_LOG_CATEGORY_STATIC(LogDWCGPU, Log, All);
 DECLARE_GPU_STAT_NAMED(DWC_UpdateTriangleFlow, TEXT("DWC UpdateTriangleFlow"));
 DECLARE_GPU_STAT_NAMED(DWC_SurfaceStamp, TEXT("DWC SurfaceStamp"));
 DECLARE_GPU_STAT_NAMED(DWC_SurfaceFlowAdvection, TEXT("DWC SurfaceFlowAdvection"));
+DECLARE_GPU_STAT_NAMED(DWC_NiagaraDropletResolve, TEXT("DWC NiagaraDropletResolve"));
+DECLARE_GPU_STAT_NAMED(DWC_NiagaraDropletStamp, TEXT("DWC NiagaraDropletStamp"));
 DECLARE_GPU_STAT_NAMED(DWC_ApplyAbsorption, TEXT("DWC ApplyAbsorption"));
 DECLARE_GPU_STAT_NAMED(DWC_DiffuseDry, TEXT("DWC DiffuseDry"));
 DECLARE_GPU_STAT_NAMED(DWC_SeamGather, TEXT("DWC SeamGather"));
@@ -44,6 +46,7 @@ constexpr float DWCSeamTransferScale = 1.0f;
 constexpr int32 DWCAbsorptionBinTileSize = 16;
 constexpr int32 DWCAbsorptionBinMinDispatches = 32;
 constexpr int32 DWCAbsorptionContactFloat4Count = 6;
+constexpr int32 DWCMaxComputeGroupsPerDimension = 65535;
 
 static TAutoConsoleVariable<int32> CVarDWCGPUBinnedAbsorption(
     TEXT("r.DWC.GPU.BinnedAbsorption"),
@@ -153,7 +156,7 @@ int32 FindOrAddGPUProfile(
     return Profiles.Add(PackedProfile);
 }
 
-int32 ResolveAuthoredProfileIndexForBakedTriangle(
+const FWetClothingWetPartEntry* ResolveWetPartForBakedTriangle(
     const UWetClothingAsset& Asset,
     const FDWCGPUBakedTriangle& Triangle)
 {
@@ -161,33 +164,35 @@ int32 ResolveAuthoredProfileIndexForBakedTriangle(
     const FWetClothingAuthoredMaterialSlot* Slot = WetPartData.FindMaterialSlot(Triangle.MaterialSlotIndex);
     if (Slot == nullptr)
     {
-        return INDEX_NONE;
+        return nullptr;
     }
 
-    int32 DefaultProfileIndex = INDEX_NONE;
-    int32 IslandProfileIndex = INDEX_NONE;
+    const FWetClothingWetPartEntry* DefaultPart = nullptr;
+    const FWetClothingWetPartEntry* IslandPart = nullptr;
     for (const FWetClothingWetPartEntry& Entry : Slot->WetPartEntries)
     {
-        const int32 ProfileIndex = WetPartData.Profiles.IsValidIndex(Entry.ProfileIndex)
-            ? Entry.ProfileIndex
-            : 0;
-        if (Entry.WetPartID == 0 && DefaultProfileIndex == INDEX_NONE)
+        if (Entry.WetPartID == 0 && DefaultPart == nullptr)
         {
-            DefaultProfileIndex = ProfileIndex;
+            DefaultPart = &Entry;
         }
         if (Entry.AssignedUVIslandIDs.Contains(Triangle.UVIslandID))
         {
-            IslandProfileIndex = ProfileIndex;
+            IslandPart = &Entry;
         }
     }
+    return IslandPart != nullptr ? IslandPart : DefaultPart;
+}
 
-    if (WetPartData.Profiles.IsValidIndex(IslandProfileIndex))
+int32 ResolveAuthoredProfileIndexForBakedTriangle(
+    const UWetClothingAsset& Asset,
+    const FDWCGPUBakedTriangle& Triangle)
+{
+    const FWetClothingEditableWetPartData& WetPartData = Asset.Authored.PartData.EditableWetPartData;
+    if (const FWetClothingWetPartEntry* Part = ResolveWetPartForBakedTriangle(Asset, Triangle))
     {
-        return IslandProfileIndex;
-    }
-    if (WetPartData.Profiles.IsValidIndex(DefaultProfileIndex))
-    {
-        return DefaultProfileIndex;
+        return WetPartData.Profiles.IsValidIndex(Part->ProfileIndex)
+            ? Part->ProfileIndex
+            : 0;
     }
     return WetPartData.Profiles.IsValidIndex(0) ? 0 : INDEX_NONE;
 }
@@ -645,6 +650,11 @@ struct FDWCGPUBackend::FStaticSimulationData
     TArray<FVector4f> Profiles;
     TArray<uint32> TriangleProfileIndices;
     TArray<FVector4f> TriangleDataToSurfaceWaterNormalUV;
+    TArray<FVector4f> TriangleUV01;
+    TArray<FVector4f> TriangleUV2AndDroplet;
+    TArray<FVector4f> TriangleFlowDropletSettings;
+    TArray<float> TriangleFlowSpawnPositionSpread;
+    TArray<FUint4GPU> TriangleSurfaceMetadata;
     TArray<FSlotData> Slots;
 };
 
@@ -655,6 +665,13 @@ struct FDWCGPUBackend::FRenderState
 
     /** Per-component triangle -> runtime profile index buffer because profile dedupe can change without a GPU-map rebake. */
     TRefCountPtr<FRDGPooledBuffer> TriangleProfileIndices;
+
+    /** Static triangle data used to resolve Niagara GPU contacts to independent static/flow Data-UV stamps. */
+    TRefCountPtr<FRDGPooledBuffer> NiagaraTriangleUV01;
+    TRefCountPtr<FRDGPooledBuffer> NiagaraTriangleUV2AndDroplet;
+    TRefCountPtr<FRDGPooledBuffer> NiagaraTriangleFlowDropletSettings;
+    TRefCountPtr<FRDGPooledBuffer> NiagaraTriangleFlowSpawnPositionSpread;
+    TRefCountPtr<FRDGPooledBuffer> NiagaraTriangleSurfaceMetadata;
 
     /** Per-character buffers updated from the current skinned pose. */
     TRefCountPtr<FRDGPooledBuffer> TriangleFlow;
@@ -838,12 +855,15 @@ bool FDWCGPUBackend::BuildStaticSimulationData()
     Data->Profiles.Reserve(FMath::Max(1, Baked.Profiles.Num()));
     const FWetClothingEditableWetPartData& WetPartData = Asset->Authored.PartData.EditableWetPartData;
     TArray<FDWCGPUProfileParameters> CurrentAuthoredProfiles;
+    TArray<FWetnessProfileParameters> CurrentResolvedProfiles;
     TArray<float> CurrentSurfaceFlowAdvectionSpeeds;
     CurrentAuthoredProfiles.SetNum(WetPartData.Profiles.Num());
+    CurrentResolvedProfiles.SetNum(WetPartData.Profiles.Num());
     CurrentSurfaceFlowAdvectionSpeeds.SetNumZeroed(WetPartData.Profiles.Num());
     for (int32 ProfileIndex = 0; ProfileIndex < WetPartData.Profiles.Num(); ++ProfileIndex)
     {
-        const FWetnessProfileParameters ResolvedProfile =
+        FWetnessProfileParameters& ResolvedProfile = CurrentResolvedProfiles[ProfileIndex];
+        ResolvedProfile =
             ResolveRuntimeWetnessProfileParameters(*Asset, ProfileIndex);
         CurrentAuthoredProfiles[ProfileIndex] = MakeRuntimeGPUProfile(ResolvedProfile);
         const FSurfaceWaterProfileParameters& Surface = ResolvedProfile.SurfaceWater;
@@ -864,6 +884,11 @@ bool FDWCGPUBackend::BuildStaticSimulationData()
     Data->TriangleDataToSurfaceWaterNormalUV.Init(
         FVector4f(1.0f, 0.0f, 0.0f, 1.0f),
         Data->TriangleCount);
+    Data->TriangleUV01.Init(FVector4f(0, 0, 0, 0), Data->TriangleCount);
+    Data->TriangleUV2AndDroplet.Init(FVector4f(0, 0, 0, 0), Data->TriangleCount);
+    Data->TriangleFlowDropletSettings.Init(FVector4f(0, 0, 0, 0), Data->TriangleCount);
+    Data->TriangleFlowSpawnPositionSpread.Init(0.0f, Data->TriangleCount);
+    Data->TriangleSurfaceMetadata.Init(FUint4GPU(), Data->TriangleCount);
 
     int32 MaxSectionIndex = INDEX_NONE;
     for (const FDWCGPUBakedTriangle& Triangle : Baked.Triangles)
@@ -917,7 +942,8 @@ bool FDWCGPUBackend::BuildStaticSimulationData()
         }
 
         const int32 AuthoredProfileIndex = ResolveAuthoredProfileIndexForBakedTriangle(*Asset, Triangle);
-        if (AuthoredProfileIndex == INDEX_NONE)
+        if (AuthoredProfileIndex == INDEX_NONE ||
+            !CurrentResolvedProfiles.IsValidIndex(AuthoredProfileIndex))
         {
             UE_LOG(
                 LogDWCGPU,
@@ -927,6 +953,68 @@ bool FDWCGPUBackend::BuildStaticSimulationData()
                 *GetNameSafe(Asset));
             return false;
         }
+        const FWetClothingWetPartEntry* WetPart =
+            ResolveWetPartForBakedTriangle(*Asset, Triangle);
+        const FWetnessProfileParameters& ResolvedProfile =
+            CurrentResolvedProfiles[AuthoredProfileIndex];
+        const FSurfaceWaterProfileParameters& Surface = ResolvedProfile.SurfaceWater;
+        const float DropletRadiusScale = WetPart != nullptr
+            ? WetPart->SurfaceWater.GetResolvedDropletStampSizeScale()
+            : 1.0f;
+        const float DropletRadiusPixels =
+            Surface.bEnabled
+                ? FMath::Max(0.0f, Surface.DropletRadiusPixels * DropletRadiusScale)
+                : 0.0f;
+        const float DropletLifetimeSeconds =
+            Surface.bEnabled ? FMath::Max(0.01f, Surface.DropletLifetimeSeconds) : 0.0f;
+        const float DropletSpawnProbability =
+            Surface.bEnabled ? FMath::Clamp(Surface.DropletSpawnProbability, 0.0f, 1.0f) : 0.0f;
+        const float DropletFlowSizeScale = WetPart != nullptr
+            ? WetPart->SurfaceWater.GetResolvedDropletFlowStampSizeScale()
+            : 1.0f;
+        const bool bEnableDropletFlow = Surface.bEnabled && Surface.bEnableDropletFlow;
+        const float DropletFlowRadiusPixels =
+            bEnableDropletFlow
+                ? FMath::Max(0.0f, Surface.DropletFlowRadiusPixels * DropletFlowSizeScale)
+                : 0.0f;
+        const float DropletFlowHeightPixels =
+            bEnableDropletFlow
+                ? FMath::Max(0.0f, Surface.DropletFlowHeightPixels * DropletFlowSizeScale)
+                : 0.0f;
+        const float DropletFlowLifetimeSeconds =
+            bEnableDropletFlow ? FMath::Max(0.01f, Surface.DropletFlowLifetimeSeconds) : 0.0f;
+        const float DropletFlowSpawnProbability =
+            bEnableDropletFlow
+                ? FMath::Clamp(Surface.DropletFlowSpawnProbability, 0.0f, 1.0f)
+                : 0.0f;
+        const float RejectedWaterFraction =
+            Surface.bEnabled ? FMath::Clamp(ResolvedProfile.GetRejectedWaterFraction(), 0.0f, 1.0f) : 0.0f;
+
+        Data->TriangleUV01[Triangle.TriangleID] = FVector4f(
+            static_cast<float>(Triangle.UV0.X),
+            static_cast<float>(Triangle.UV0.Y),
+            static_cast<float>(Triangle.UV1.X),
+            static_cast<float>(Triangle.UV1.Y));
+        Data->TriangleUV2AndDroplet[Triangle.TriangleID] = FVector4f(
+            static_cast<float>(Triangle.UV2.X),
+            static_cast<float>(Triangle.UV2.Y),
+            DropletRadiusPixels,
+            DropletLifetimeSeconds);
+        Data->TriangleFlowDropletSettings[Triangle.TriangleID] = FVector4f(
+            DropletFlowRadiusPixels,
+            DropletFlowHeightPixels,
+            DropletFlowLifetimeSeconds,
+            DropletFlowSpawnProbability);
+        Data->TriangleFlowSpawnPositionSpread[Triangle.TriangleID] =
+            bEnableDropletFlow
+                ? FMath::Clamp(Surface.DropletFlowSpawnPositionSpread, 0.0f, 1.0f)
+                : 0.0f;
+        Data->TriangleSurfaceMetadata[Triangle.TriangleID] = FUint4GPU(
+            static_cast<uint32>(Triangle.MaterialSlotIndex),
+            static_cast<uint32>(FMath::Max(0, Triangle.UVIslandID) + 1),
+            FloatToBits(DropletSpawnProbability),
+            FloatToBits(RejectedWaterFraction));
+
         const FDWCGPUProfileParameters& CurrentProfile = CurrentAuthoredProfiles[AuthoredProfileIndex];
         const int32 RuntimeProfileIndex = FindOrAddGPUProfile(
             Data->Profiles,
@@ -2032,7 +2120,39 @@ void FDWCGPUBackend::DispatchSimulation(
                 SharedStaticResources[0]->TriangleDataToSurfaceWaterNormalUV,
                 TEXT("DWC.SharedTriangleDataToSurfaceWaterNormalUV"),
                 StaticData->TriangleDataToSurfaceWaterNormalUV);
-            if (!ProfileBuffer || !TriangleProfileIndexBuffer || !TriangleDataToNormalUVBuffer)
+            FRDGBufferRef NiagaraTriangleUV01Buffer = RegisterOrUploadStructuredBuffer(
+                GraphBuilder,
+                RTState->NiagaraTriangleUV01,
+                TEXT("DWC.NiagaraTriangleUV01"),
+                StaticData->TriangleUV01);
+            FRDGBufferRef NiagaraTriangleUV2AndDropletBuffer = RegisterOrUploadStructuredBuffer(
+                GraphBuilder,
+                RTState->NiagaraTriangleUV2AndDroplet,
+                TEXT("DWC.NiagaraTriangleUV2AndDroplet"),
+                StaticData->TriangleUV2AndDroplet);
+            FRDGBufferRef NiagaraTriangleFlowDropletSettingsBuffer = RegisterOrUploadStructuredBuffer(
+                GraphBuilder,
+                RTState->NiagaraTriangleFlowDropletSettings,
+                TEXT("DWC.NiagaraTriangleFlowDropletSettings"),
+                StaticData->TriangleFlowDropletSettings);
+            FRDGBufferRef NiagaraTriangleFlowSpawnPositionSpreadBuffer = RegisterOrUploadStructuredBuffer(
+                GraphBuilder,
+                RTState->NiagaraTriangleFlowSpawnPositionSpread,
+                TEXT("DWC.NiagaraTriangleFlowSpawnPositionSpread"),
+                StaticData->TriangleFlowSpawnPositionSpread);
+            FRDGBufferRef NiagaraTriangleSurfaceMetadataBuffer = RegisterOrUploadStructuredBuffer(
+                GraphBuilder,
+                RTState->NiagaraTriangleSurfaceMetadata,
+                TEXT("DWC.NiagaraTriangleSurfaceMetadata"),
+                StaticData->TriangleSurfaceMetadata);
+            if (!ProfileBuffer ||
+                !TriangleProfileIndexBuffer ||
+                !TriangleDataToNormalUVBuffer ||
+                !NiagaraTriangleUV01Buffer ||
+                !NiagaraTriangleUV2AndDropletBuffer ||
+                !NiagaraTriangleFlowDropletSettingsBuffer ||
+                !NiagaraTriangleFlowSpawnPositionSpreadBuffer ||
+                !NiagaraTriangleSurfaceMetadataBuffer)
             {
                 return;
             }
@@ -2040,6 +2160,16 @@ void FDWCGPUBackend::DispatchSimulation(
             FRDGBufferSRVRef TriangleProfileIndexSRV = GraphBuilder.CreateSRV(TriangleProfileIndexBuffer);
             FRDGBufferSRVRef TriangleDataToNormalUVSRV =
                 GraphBuilder.CreateSRV(TriangleDataToNormalUVBuffer);
+            FRDGBufferSRVRef NiagaraTriangleUV01SRV =
+                GraphBuilder.CreateSRV(NiagaraTriangleUV01Buffer);
+            FRDGBufferSRVRef NiagaraTriangleUV2AndDropletSRV =
+                GraphBuilder.CreateSRV(NiagaraTriangleUV2AndDropletBuffer);
+            FRDGBufferSRVRef NiagaraTriangleFlowDropletSettingsSRV =
+                GraphBuilder.CreateSRV(NiagaraTriangleFlowDropletSettingsBuffer);
+            FRDGBufferSRVRef NiagaraTriangleFlowSpawnPositionSpreadSRV =
+                GraphBuilder.CreateSRV(NiagaraTriangleFlowSpawnPositionSpreadBuffer);
+            FRDGBufferSRVRef NiagaraTriangleSurfaceMetadataSRV =
+                GraphBuilder.CreateSRV(NiagaraTriangleSurfaceMetadataBuffer);
 
             FRDGBufferRef TriangleFlowBuffer = nullptr;
             if (RTState->TriangleFlow.IsValid())
@@ -2224,6 +2354,10 @@ void FDWCGPUBackend::DispatchSimulation(
             TShaderMapRef<FDWCApplyTriangleAbsorptionCS> AbsorptionShader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
             TShaderMapRef<FDWCApplyBinnedAbsorptionCS> BinnedAbsorptionShader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
             TShaderMapRef<FDWCApplyNiagaraWetCollisionCS> NiagaraWetCollisionShader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
+            TShaderMapRef<FDWCResolveNiagaraDropletContactsCS> ResolveNiagaraDropletContactsShader(
+                GetGlobalShaderMap(GMaxRHIFeatureLevel));
+            TShaderMapRef<FDWCStampNiagaraDropletsCS> StampNiagaraDropletsShader(
+                GetGlobalShaderMap(GMaxRHIFeatureLevel));
             TShaderMapRef<FDWCDiffuseDryCS> DiffuseDry4Shader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
             TShaderMapRef<FDWCDiffuseDry8CS> DiffuseDry8Shader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
             TShaderMapRef<FDWCSeamGatherCS> SeamShader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
@@ -2233,6 +2367,114 @@ void FDWCGPUBackend::DispatchSimulation(
 
             TArray<FDWCGPUNiagaraWetCollisionBuffer> NiagaraWetCollisionBuffers;
             DWCGPUNiagaraWetCollisionBridge::CollectBuffers_RenderThread(NiagaraWetCollisionBuffers);
+
+            struct FPreparedNiagaraWetCollisionResources
+            {
+                int32 MaxContacts = 0;
+                FRDGBufferSRVRef Contacts = nullptr;
+                FRDGBufferSRVRef ContactCount = nullptr;
+                FRDGBufferSRVRef ResolvedStaticDropletContacts = nullptr;
+                FRDGBufferSRVRef ResolvedFlowDropletContacts = nullptr;
+            };
+
+            TArray<FPreparedNiagaraWetCollisionResources> PreparedNiagaraWetCollisionResources;
+            if (ReceiverGPUIdValue != 0)
+            {
+                PreparedNiagaraWetCollisionResources.Reserve(NiagaraWetCollisionBuffers.Num());
+                for (const FDWCGPUNiagaraWetCollisionBuffer& CollisionBuffer : NiagaraWetCollisionBuffers)
+                {
+                    if (!CollisionBuffer.ContactBuffer.IsValid() ||
+                        !CollisionBuffer.ContactCountBuffer.IsValid() ||
+                        CollisionBuffer.MaxContacts <= 0)
+                    {
+                        continue;
+                    }
+                    if (CollisionBuffer.bRestrictToTargetReceiverGPUIds &&
+                        !CollisionBuffer.TargetReceiverGPUIds.Contains(ReceiverGPUIdValue))
+                    {
+                        continue;
+                    }
+
+                    FRDGBufferRef ContactBuffer = GraphBuilder.RegisterExternalBuffer(
+                        CollisionBuffer.ContactBuffer,
+                        TEXT("DWC.NiagaraWetCollision.Contacts.External"));
+                    FRDGBufferRef ContactCountBuffer = GraphBuilder.RegisterExternalBuffer(
+                        CollisionBuffer.ContactCountBuffer,
+                        TEXT("DWC.NiagaraWetCollision.ContactCount.External"));
+                    FRDGBufferRef ResolvedStaticDropletContactsBuffer = GraphBuilder.CreateBuffer(
+                        FRDGBufferDesc::CreateStructuredDesc(
+                            sizeof(FUint4GPU),
+                            static_cast<uint32>(CollisionBuffer.MaxContacts)),
+                        TEXT("DWC.NiagaraWetCollision.ResolvedStaticDropletContacts"));
+                    FRDGBufferRef ResolvedFlowDropletContactsBuffer = GraphBuilder.CreateBuffer(
+                        FRDGBufferDesc::CreateStructuredDesc(
+                            sizeof(FUint4GPU),
+                            static_cast<uint32>(CollisionBuffer.MaxContacts)),
+                        TEXT("DWC.NiagaraWetCollision.ResolvedFlowDropletContacts"));
+                    FRDGBufferUAVRef ResolvedStaticDropletContactsUAV =
+                        GraphBuilder.CreateUAV(ResolvedStaticDropletContactsBuffer);
+                    FRDGBufferUAVRef ResolvedFlowDropletContactsUAV =
+                        GraphBuilder.CreateUAV(ResolvedFlowDropletContactsBuffer);
+
+                    FPreparedNiagaraWetCollisionResources& Prepared =
+                        PreparedNiagaraWetCollisionResources.AddDefaulted_GetRef();
+                    Prepared.MaxContacts = CollisionBuffer.MaxContacts;
+                    Prepared.Contacts =
+                        GraphBuilder.CreateSRV(ContactBuffer, PF_A32B32G32R32F);
+                    Prepared.ContactCount =
+                        GraphBuilder.CreateSRV(ContactCountBuffer, PF_R32_SINT);
+                    Prepared.ResolvedStaticDropletContacts =
+                        GraphBuilder.CreateSRV(ResolvedStaticDropletContactsBuffer);
+                    Prepared.ResolvedFlowDropletContacts =
+                        GraphBuilder.CreateSRV(ResolvedFlowDropletContactsBuffer);
+
+                    for (int32 ContactOffset = 0;
+                         ContactOffset < CollisionBuffer.MaxContacts;
+                         ContactOffset += DWCMaxComputeGroupsPerDimension)
+                    {
+                        const int32 ResolveBatchCount = FMath::Min(
+                            DWCMaxComputeGroupsPerDimension,
+                            CollisionBuffer.MaxContacts - ContactOffset);
+                        FDWCResolveNiagaraDropletContactsCS::FParameters* Parameters =
+                            GraphBuilder.AllocParameters<FDWCResolveNiagaraDropletContactsCS::FParameters>();
+                        Parameters->TriangleCount =
+                            static_cast<uint32>(StaticData->TriangleCount);
+                        Parameters->ContactIndexOffset =
+                            static_cast<uint32>(ContactOffset);
+                        Parameters->MaxContacts = CollisionBuffer.MaxContacts;
+                        Parameters->Contacts = Prepared.Contacts;
+                        Parameters->ContactCount = Prepared.ContactCount;
+                        Parameters->TrianglePositions = TrianglePositionsSRV;
+                        Parameters->TriangleUV01 = NiagaraTriangleUV01SRV;
+                        Parameters->TriangleUV2AndDroplet =
+                            NiagaraTriangleUV2AndDropletSRV;
+                        Parameters->TriangleFlowDropletSettings =
+                            NiagaraTriangleFlowDropletSettingsSRV;
+                        Parameters->TriangleFlowSpawnPositionSpread =
+                            NiagaraTriangleFlowSpawnPositionSpreadSRV;
+                        Parameters->TriangleSurfaceMetadata =
+                            NiagaraTriangleSurfaceMetadataSRV;
+                        Parameters->ResolvedStaticContacts =
+                            ResolvedStaticDropletContactsUAV;
+                        Parameters->ResolvedFlowContacts =
+                            ResolvedFlowDropletContactsUAV;
+                        FDWCWorkloadStats::RecordGPUBackendDispatch();
+                        RDG_EVENT_SCOPE_STAT(
+                            GraphBuilder,
+                            DWC_NiagaraDropletResolve,
+                            "DWC NiagaraDropletResolve");
+                        FComputeShaderUtils::AddPass(
+                            GraphBuilder,
+                            RDG_EVENT_NAME(
+                                "DWC Resolve Niagara Droplet Contacts Offset %d Count %d",
+                                ContactOffset,
+                                ResolveBatchCount),
+                            ResolveNiagaraDropletContactsShader,
+                            Parameters,
+                            FIntVector(ResolveBatchCount, 1, 1));
+                    }
+                }
+            }
 
             for (FSlotRenderDispatch& SlotDispatch : SlotDispatches)
             {
@@ -2265,7 +2507,9 @@ void FDWCGPUBackend::DispatchSimulation(
                     SlotDispatch.NextSurfaceFlowDropletResource != nullptr &&
                     SlotDispatch.CurrentSurfaceFlowDropletResource->GetRenderTargetTexture() != nullptr &&
                     SlotDispatch.NextSurfaceFlowDropletResource->GetRenderTargetTexture() != nullptr;
-                if ((!SlotDispatch.SurfaceStampDispatches.IsEmpty() || bHasSurfaceFlowResources) &&
+                if ((!SlotDispatch.SurfaceStampDispatches.IsEmpty() ||
+                     bHasSurfaceFlowResources ||
+                     !PreparedNiagaraWetCollisionResources.IsEmpty()) &&
                     !StaticSlot.SurfaceTexelLookup.IsEmpty())
                 {
                     FRDGBufferRef SurfaceLookupBuffer = RegisterOrUploadStructuredBuffer(
@@ -2479,53 +2723,110 @@ void FDWCGPUBackend::DispatchSimulation(
                             FMath::DivideAndRoundUp(Dispatch.DispatchSize.Y, 8), 1));
                 }
 
-                if (ReceiverGPUIdValue != 0 && !NiagaraWetCollisionBuffers.IsEmpty())
+                if (!PreparedNiagaraWetCollisionResources.IsEmpty())
                 {
-                    for (const FDWCGPUNiagaraWetCollisionBuffer& CollisionBuffer : NiagaraWetCollisionBuffers)
+                    for (const FPreparedNiagaraWetCollisionResources& CollisionResources :
+                         PreparedNiagaraWetCollisionResources)
                     {
-                        if (!CollisionBuffer.ContactBuffer.IsValid() ||
-                            !CollisionBuffer.ContactCountBuffer.IsValid() ||
-                            CollisionBuffer.MaxContacts <= 0)
-                        {
-                            continue;
-                        }
-
-                        if (CollisionBuffer.bRestrictToTargetReceiverGPUIds &&
-                            !CollisionBuffer.TargetReceiverGPUIds.Contains(ReceiverGPUIdValue))
-                        {
-                            continue;
-                        }
-
-                        FRDGBufferRef ContactBuffer = GraphBuilder.RegisterExternalBuffer(
-                            CollisionBuffer.ContactBuffer,
-                            TEXT("DWC.NiagaraWetCollision.Contacts.External"));
-                        FRDGBufferRef ContactCountBuffer = GraphBuilder.RegisterExternalBuffer(
-                            CollisionBuffer.ContactCountBuffer,
-                            TEXT("DWC.NiagaraWetCollision.ContactCount.External"));
-
                         FDWCApplyNiagaraWetCollisionCS::FParameters* Parameters =
                             GraphBuilder.AllocParameters<FDWCApplyNiagaraWetCollisionCS::FParameters>();
                         Parameters->TextureSize = FIntPoint(SlotDispatch.Resolution, SlotDispatch.Resolution);
-                        Parameters->MaxContacts = CollisionBuffer.MaxContacts;
+                        Parameters->MaxContacts = CollisionResources.MaxContacts;
                         Parameters->ReceiverBoundsMin = ReceiverBoundsMinValue;
                         Parameters->ReceiverBoundsMax = ReceiverBoundsMaxValue;
-                        Parameters->Contacts = GraphBuilder.CreateSRV(ContactBuffer, PF_A32B32G32R32F);
-                        Parameters->ContactCount = GraphBuilder.CreateSRV(ContactCountBuffer, PF_R32_SINT);
+                        Parameters->Contacts = CollisionResources.Contacts;
+                        Parameters->ContactCount = CollisionResources.ContactCount;
                         Parameters->TexelLookup = LookupSRV;
                         Parameters->TrianglePositions = TrianglePositionsSRV;
                         Parameters->PendingWetnessTexture = PendingInputUAV;
+                        FDWCWorkloadStats::RecordGPUBackendDispatch();
                         FComputeShaderUtils::AddPass(
                             GraphBuilder,
                             RDG_EVENT_NAME(
                                 "DWC Apply Niagara Wet Collision Slot %d MaxContacts %d",
                                 StaticSlot.MaterialSlotIndex,
-                                CollisionBuffer.MaxContacts),
+                                CollisionResources.MaxContacts),
                             NiagaraWetCollisionShader,
                             Parameters,
                             FIntVector(
                                 FMath::DivideAndRoundUp(SlotDispatch.Resolution, 8),
                                 FMath::DivideAndRoundUp(SlotDispatch.Resolution, 8),
                                 1));
+
+                        if (SurfaceLookupSRV != nullptr &&
+                            SlotDispatch.SurfaceWaterResolution > 0)
+                        {
+                            const auto AddNiagaraDropletStampPass =
+                                [&](const bool bFlowing,
+                                    FRDGBufferSRVRef ResolvedContacts,
+                                    FRDGTextureUAVRef TargetSurfaceUAV)
+                                {
+                                    if (ResolvedContacts == nullptr || TargetSurfaceUAV == nullptr)
+                                    {
+                                        return;
+                                    }
+
+                                    FDWCStampNiagaraDropletsCS::FParameters* DropletParameters =
+                                        GraphBuilder.AllocParameters<FDWCStampNiagaraDropletsCS::FParameters>();
+                                    DropletParameters->TextureSize = FIntPoint(
+                                        SlotDispatch.SurfaceWaterResolution,
+                                        SlotDispatch.SurfaceWaterResolution);
+                                    DropletParameters->TriangleCount =
+                                        static_cast<uint32>(StaticData->TriangleCount);
+                                    DropletParameters->MaterialSlotIndex =
+                                        static_cast<uint32>(StaticSlot.MaterialSlotIndex);
+                                    DropletParameters->bFlowing = bFlowing ? 1u : 0u;
+                                    DropletParameters->MaxContacts =
+                                        CollisionResources.MaxContacts;
+                                    DropletParameters->CurrentTimeSeconds =
+                                        SurfaceTimeSeconds;
+                                    DropletParameters->Contacts =
+                                        CollisionResources.Contacts;
+                                    DropletParameters->ContactCount =
+                                        CollisionResources.ContactCount;
+                                    DropletParameters->ResolvedContacts =
+                                        ResolvedContacts;
+                                    DropletParameters->TriangleUV2AndDroplet =
+                                        NiagaraTriangleUV2AndDropletSRV;
+                                    DropletParameters->TriangleFlowDropletSettings =
+                                        NiagaraTriangleFlowDropletSettingsSRV;
+                                    DropletParameters->TriangleSurfaceMetadata =
+                                        NiagaraTriangleSurfaceMetadataSRV;
+                                    DropletParameters->TexelLookup = SurfaceLookupSRV;
+                                    DropletParameters->TargetSurface = TargetSurfaceUAV;
+                                    FDWCWorkloadStats::RecordGPUBackendDispatch();
+                                    RDG_EVENT_SCOPE_STAT(
+                                        GraphBuilder,
+                                        DWC_NiagaraDropletStamp,
+                                        "DWC NiagaraDropletStamp");
+                                    FComputeShaderUtils::AddPass(
+                                        GraphBuilder,
+                                        RDG_EVENT_NAME(
+                                            "DWC Stamp Niagara %s Droplets Slot %d MaxContacts %d",
+                                            bFlowing ? TEXT("Flow") : TEXT("Static"),
+                                            StaticSlot.MaterialSlotIndex,
+                                            CollisionResources.MaxContacts),
+                                        StampNiagaraDropletsShader,
+                                        DropletParameters,
+                                        FIntVector(
+                                            FMath::DivideAndRoundUp(
+                                                SlotDispatch.SurfaceWaterResolution,
+                                                8),
+                                            FMath::DivideAndRoundUp(
+                                                SlotDispatch.SurfaceWaterResolution,
+                                                8),
+                                            1));
+                                };
+
+                            AddNiagaraDropletStampPass(
+                                false,
+                                CollisionResources.ResolvedStaticDropletContacts,
+                                DropletSurfaceUAV);
+                            AddNiagaraDropletStampPass(
+                                true,
+                                CollisionResources.ResolvedFlowDropletContacts,
+                                FlowDropletSurfaceUAV);
+                        }
                     }
                 }
 
@@ -2695,16 +2996,23 @@ FDWCGPUBackendStats FDWCGPUBackend::GetStats() const
         const FStaticSimulationData& Data = *StaticSimulationData;
         Stats.CPUBytes += sizeof(Data) +
                           Data.Sections.GetAllocatedSize() +
-                          Data.Profiles.GetAllocatedSize() +
-                          Data.TriangleProfileIndices.GetAllocatedSize() +
-                          Data.TriangleDataToSurfaceWaterNormalUV.GetAllocatedSize() +
-                          Data.Slots.GetAllocatedSize();
+                           Data.Profiles.GetAllocatedSize() +
+                           Data.TriangleProfileIndices.GetAllocatedSize() +
+                           Data.TriangleDataToSurfaceWaterNormalUV.GetAllocatedSize() +
+                           Data.TriangleUV01.GetAllocatedSize() +
+                           Data.TriangleUV2AndDroplet.GetAllocatedSize() +
+                           Data.TriangleFlowDropletSettings.GetAllocatedSize() +
+                           Data.TriangleFlowSpawnPositionSpread.GetAllocatedSize() +
+                           Data.TriangleSurfaceMetadata.GetAllocatedSize() +
+                           Data.Slots.GetAllocatedSize();
 
         // Lookup/section/profile-index buffers are owned by the world subsystem.
         // Profile values include per-component simulation scale overrides, so the
         // profile buffer remains instance-local together with flow/metric buffers.
         Stats.GPUBytes += static_cast<uint64>(Data.Profiles.Num()) * sizeof(FVector4f);
         Stats.GPUBytes += static_cast<uint64>(Data.TriangleCount) * sizeof(FVector4f) * 2ull;
+        Stats.GPUBytes += static_cast<uint64>(Data.TriangleCount) *
+                          (sizeof(FVector4f) * 3ull + sizeof(float) + sizeof(FUint4GPU));
 
         for (const FStaticSimulationData::FSectionData& Section : Data.Sections)
         {

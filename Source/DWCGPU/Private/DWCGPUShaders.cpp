@@ -40,6 +40,18 @@ bool FDWCApplyNiagaraWetCollisionCS::ShouldCompilePermutation(const FGlobalShade
     return ShouldCompileDWC(Parameters);
 }
 
+IMPLEMENT_GLOBAL_SHADER(FDWCResolveNiagaraDropletContactsCS, "/DWCGPU/DWCResolveNiagaraDropletContacts.usf", "MainCS", SF_Compute);
+bool FDWCResolveNiagaraDropletContactsCS::ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
+{
+    return ShouldCompileDWC(Parameters);
+}
+
+IMPLEMENT_GLOBAL_SHADER(FDWCStampNiagaraDropletsCS, "/DWCGPU/DWCStampNiagaraDroplets.usf", "MainCS", SF_Compute);
+bool FDWCStampNiagaraDropletsCS::ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
+{
+    return ShouldCompileDWC(Parameters);
+}
+
 IMPLEMENT_GLOBAL_SHADER(FDWCDiffuseDryCS, "/DWCGPU/DWCDiffuseDry.usf", "MainCS", SF_Compute);
 bool FDWCDiffuseDryCS::ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
 {

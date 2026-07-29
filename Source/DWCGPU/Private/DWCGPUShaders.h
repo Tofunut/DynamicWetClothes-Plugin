@@ -119,6 +119,59 @@ public:
     static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters);
 };
 
+/** Resolves each Niagara GPU contact to one nearest current-pose wettable triangle. */
+class FDWCResolveNiagaraDropletContactsCS final : public FGlobalShader
+{
+public:
+    DECLARE_GLOBAL_SHADER(FDWCResolveNiagaraDropletContactsCS);
+    SHADER_USE_PARAMETER_STRUCT(FDWCResolveNiagaraDropletContactsCS, FGlobalShader);
+
+    BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
+        SHADER_PARAMETER(uint32, TriangleCount)
+        SHADER_PARAMETER(uint32, ContactIndexOffset)
+        SHADER_PARAMETER(int32, MaxContacts)
+        SHADER_PARAMETER_RDG_BUFFER_SRV(Buffer<float4>, Contacts)
+        SHADER_PARAMETER_RDG_BUFFER_SRV(Buffer<int>, ContactCount)
+        SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float4>, TrianglePositions)
+        SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float4>, TriangleUV01)
+        SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float4>, TriangleUV2AndDroplet)
+        SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float4>, TriangleFlowDropletSettings)
+        SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float>, TriangleFlowSpawnPositionSpread)
+        SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint4>, TriangleSurfaceMetadata)
+        SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<uint4>, ResolvedStaticContacts)
+        SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<uint4>, ResolvedFlowContacts)
+    END_SHADER_PARAMETER_STRUCT()
+
+    static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters);
+};
+
+/** Writes resolved Niagara GPU contacts into the selected slot's static or flowing Droplet RT. */
+class FDWCStampNiagaraDropletsCS final : public FGlobalShader
+{
+public:
+    DECLARE_GLOBAL_SHADER(FDWCStampNiagaraDropletsCS);
+    SHADER_USE_PARAMETER_STRUCT(FDWCStampNiagaraDropletsCS, FGlobalShader);
+
+    BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
+        SHADER_PARAMETER(FIntPoint, TextureSize)
+        SHADER_PARAMETER(uint32, TriangleCount)
+        SHADER_PARAMETER(uint32, MaterialSlotIndex)
+        SHADER_PARAMETER(uint32, bFlowing)
+        SHADER_PARAMETER(int32, MaxContacts)
+        SHADER_PARAMETER(float, CurrentTimeSeconds)
+        SHADER_PARAMETER_RDG_BUFFER_SRV(Buffer<float4>, Contacts)
+        SHADER_PARAMETER_RDG_BUFFER_SRV(Buffer<int>, ContactCount)
+        SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint4>, ResolvedContacts)
+        SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float4>, TriangleUV2AndDroplet)
+        SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float4>, TriangleFlowDropletSettings)
+        SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint4>, TriangleSurfaceMetadata)
+        SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint4>, TexelLookup)
+        SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float4>, TargetSurface)
+    END_SHADER_PARAMETER_STRUCT()
+
+    static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters);
+};
+
 /** Conservative destination gather for absorbed-wetness spread, gravity bias, and drying. */
 class FDWCDiffuseDryCS final : public FGlobalShader
 {

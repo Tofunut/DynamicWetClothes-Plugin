@@ -1,0 +1,106 @@
+#include "/Engine/Public/Platform.ush"
+#include "/DWCGPU/DWCSurfaceStampCommon.ush"
+
+Buffer<float4> Contacts;
+Buffer<int> ContactCount;
+StructuredBuffer<uint4> ResolvedContacts;
+StructuredBuffer<float4> TriangleUV2AndDroplet;
+StructuredBuffer<float4> TriangleFlowDropletSettings;
+StructuredBuffer<uint4> TriangleSurfaceMetadata;
+StructuredBuffer<uint4> TexelLookup;
+RWTexture2D<float4> TargetSurface;
+
+int2 TextureSize;
+uint TriangleCount;
+uint MaterialSlotIndex;
+uint bFlowing;
+int MaxContacts;
+float CurrentTimeSeconds;
+
+static const uint DWCWetCollisionContactFloat4Count = 2u;
+static const uint DWCInvalidTriangle = 0xffffffffu;
+
+[numthreads(8, 8, 1)]
+void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+    const int2 Pixel = int2(DispatchThreadId.xy);
+    if (any(Pixel < 0) || any(Pixel >= TextureSize))
+    {
+        return;
+    }
+
+    const uint4 PixelLookup = TexelLookup[Pixel.y * TextureSize.x + Pixel.x];
+    if (!DWC_IsValidLookup(PixelLookup))
+    {
+        return;
+    }
+
+    const uint ClampedContactCount = (uint)min(max(ContactCount[0], 0), MaxContacts);
+    float BestCoverage = 0.0;
+    float BestBrush = 0.0;
+    float BestAmount = 0.0;
+    float BestLifetime = 0.0;
+
+    for (uint ContactIndex = 0u; ContactIndex < ClampedContactCount; ++ContactIndex)
+    {
+        const uint4 Resolved = ResolvedContacts[ContactIndex];
+        if (Resolved.z == DWCInvalidTriangle ||
+            Resolved.z >= TriangleCount ||
+            Resolved.w == 0u ||
+            Resolved.w != PixelLookup.w)
+        {
+            continue;
+        }
+
+        const uint4 SurfaceMetadata = TriangleSurfaceMetadata[Resolved.z];
+        if (SurfaceMetadata.x != MaterialSlotIndex)
+        {
+            continue;
+        }
+
+        const float4 UV2AndDroplet = TriangleUV2AndDroplet[Resolved.z];
+        const float4 FlowDropletSettings = TriangleFlowDropletSettings[Resolved.z];
+        const float2 HalfSizePixels = bFlowing != 0u
+            ? max(FlowDropletSettings.xy, float2(0.5, 0.5))
+            : float2(max(UV2AndDroplet.z, 0.5), max(UV2AndDroplet.z, 0.5));
+        const float LifetimeSeconds = max(
+            bFlowing != 0u ? FlowDropletSettings.z : UV2AndDroplet.w,
+            0.01);
+        const float RejectedWaterFraction = saturate(asfloat(SurfaceMetadata.w));
+        const float ContactAmount = max(
+            Contacts[ContactIndex * DWCWetCollisionContactFloat4Count + 1u].w,
+            0.0);
+        const float StampAmount = ContactAmount * RejectedWaterFraction;
+        if (StampAmount <= 0.0)
+        {
+            continue;
+        }
+
+        const float2 CenterPixels =
+            float2(asfloat(Resolved.x), asfloat(Resolved.y)) * float2(TextureSize);
+        const float2 LocalPosition =
+            ((float2(Pixel) + 0.5) - CenterPixels) /
+            HalfSizePixels;
+        const float Brush = DWC_StampBrush(LocalPosition);
+        const float StampRegion = smoothstep(0.0, 0.12, saturate(Brush));
+        const float Coverage = StampRegion * StampAmount;
+        if (Coverage > BestCoverage)
+        {
+            BestCoverage = Coverage;
+            BestBrush = Brush;
+            BestAmount = StampAmount;
+            BestLifetime = LifetimeSeconds;
+        }
+    }
+
+    if (BestCoverage > 0.0)
+    {
+        DWC_WriteDropletStamp(
+            Pixel,
+            BestBrush,
+            BestAmount,
+            CurrentTimeSeconds,
+            BestLifetime,
+            TargetSurface);
+    }
+}

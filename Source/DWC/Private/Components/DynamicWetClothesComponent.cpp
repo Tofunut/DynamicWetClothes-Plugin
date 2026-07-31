@@ -236,7 +236,7 @@ bool UDynamicWetClothesComponent::InitializeWetRuntime()
             UE_LOG(
                 LogDWC,
                 Error,
-                TEXT("DynamicWetClothesComponent: No GPU wet mesh receiver could be initialized on %s. Bake GPU Simulation Maps and generate GPU materials for the Wet Clothing Asset."),
+                TEXT("DynamicWetClothesComponent: No GPU wet mesh receiver could be initialized on %s. Use Build for Runtime > Build GPU Runtime Data and Generate Materials for the Wet Clothing Asset."),
                 *GetNameSafe(GetOwner()));
             return false;
         }

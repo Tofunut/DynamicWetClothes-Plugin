@@ -22,10 +22,16 @@ struct FDWCDataUVBuildResult
 class FDWCDataUVBuildService
 {
 public:
+    /** Initial creation/recovery only. Once successful, the packed layout and island topology are sealed. */
     static FDWCDataUVBuildResult Generate(
         UWetClothingAsset& Asset,
         bool bForceNewAsset = false,
         bool bAllowOverwriteExistingDataUVChannel = false,
         bool bUsePreferredDataUVChannel = false);
-    static bool BuildOriginalUVTopology(UWetClothingAsset& Asset, FString* OutErrorMessage = nullptr);
+
+    /** Copies the sealed Data UV values to another channel without rebuilding charts or island topology. */
+    static FDWCDataUVBuildResult RelocateChannel(
+        UWetClothingAsset& Asset,
+        int32 DestinationUVChannelIndex,
+        bool bAllowOverwriteExistingDataUVChannel = false);
 };

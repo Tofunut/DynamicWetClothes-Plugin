@@ -148,6 +148,10 @@ struct DWC_API FWCAMetadata
     UPROPERTY(VisibleAnywhere, Category = "Wet Clothing|Mesh")
     int32 DWCDataUVChannelIndex = INDEX_NONE;
 
+    /** Set after the first successful Data UV commit. The packed layout and Original UV island identities never rebuild afterwards. */
+    UPROPERTY(VisibleAnywhere, Category = "Wet Clothing|Mesh")
+    bool bDataUVLayoutSealed = false;
+
     UPROPERTY(VisibleAnywhere, Category = "Wet Clothing|Mesh")
     int32 SimulationLODIndex = 0;
 
@@ -176,9 +180,21 @@ class DWC_API UWetClothingAsset : public UDataAsset
     virtual void PreSave(FObjectPreSaveContext SaveContext) override;
     bool InitializeNewAsset(USkeletalMesh* InSourceMesh, const FDWCWetClothingAssetSetupSettings& InSettings, FString* OutErrorMessage = nullptr);
     bool ApplySetupSettings(const FDWCWetClothingAssetSetupSettings& InSettings, FString* OutChangeSummary = nullptr);
-    void SetGeneratedDataUVTarget(USkeletalMesh* InRuntimeMesh, int32 InDWCDataUVChannelIndex);
-    void SetDataUVMetadata(TArray<FDWCDataUVLODMetadata>&& InMetadata);
-    void SetOriginalUVTopologies(TArray<FDWCEditorUVTopologyData>&& InTopologies);
+
+    /** True after the first successful DWC Data UV build seals the Original UV topology and packed layout. */
+    bool HasLockedDataUVLayout() const;
+
+    /** Atomically stores and seals the first successful Data UV layout. This API refuses every later replacement attempt. */
+    bool CommitInitialDataUVLayout(
+        USkeletalMesh* InRuntimeMesh,
+        int32 InDWCDataUVChannelIndex,
+        TArray<FDWCDataUVLODMetadata>&& InMetadata,
+        TArray<FDWCEditorUVTopologyData>&& InTopologies,
+        FString* OutErrorMessage = nullptr);
+
+    /** Commits a channel-only relocation after the prepared mesh UV values have been copied verbatim. */
+    bool CommitDataUVChannelRelocation(int32 InDWCDataUVChannelIndex, FString* OutErrorMessage = nullptr);
+    const TArray<FDWCDataUVLODMetadata>& GetDataUVMetadata() const { return Derived.Inline.DataUVMetadata; }
     void MarkGeneratedDataUVOutOfDate();
     void MarkSimulationBakeOutOfDate();
     void MarkWrinkleBakeOutOfDate();
@@ -202,6 +218,8 @@ class DWC_API UWetClothingAsset : public UDataAsset
     bool PrepareRuntimeDataForEditorSave(FString* OutErrorMessage = nullptr);
     void ReleaseLoadedRuntimeBulkPayloadForEditor();
     void ClearRuntimeDataEditorSavePreparation();
+    /** Saves a targeted CPU/GPU runtime segment without rebuilding the other segment during PreSave. */
+    void SkipNextRuntimeDataPreSaveRebuild();
     void BeginRuntimeDataEditorSaveAttempt();
     void CompleteRuntimeDataEditorSaveAttempt(bool bSaveSucceeded);
     bool IsBakeOutputSavePending(int32 OutputMask) const;

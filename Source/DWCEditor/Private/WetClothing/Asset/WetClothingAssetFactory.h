@@ -39,16 +39,16 @@ public:
     UPROPERTY(EditAnywhere, Category = "Simulation Data", meta = (DisplayName = "GPU Wetness Map Simulation Data"))
     bool bBuildGPUWetnessMapSimulationData = true;
 
-    UPROPERTY(EditAnywhere, Category = "Map Resolutions", meta = (DisplayName = "GPU Simulation"))
+    UPROPERTY(EditAnywhere, Category = "Texture Resolutions", meta = (DisplayName = "GPU Simulation"))
     EDWCMapResolution GPUSimulationMapResolution = EDWCMapResolution::Resolution512;
 
-    UPROPERTY(EditAnywhere, Category = "Map Resolutions", meta = (DisplayName = "Surface Water RT"))
+    UPROPERTY(EditAnywhere, Category = "Texture Resolutions", meta = (DisplayName = "Surface Water"))
     EDWCMapResolution SurfaceWaterRTResolution = EDWCMapResolution::Resolution1024;
 
-    UPROPERTY(EditAnywhere, Category = "Map Resolutions", meta = (DisplayName = "Wrinkle"))
+    UPROPERTY(EditAnywhere, Category = "Texture Resolutions", meta = (DisplayName = "Wrinkle"))
     EDWCMapResolution WrinkleMapResolution = EDWCMapResolution::Resolution1024;
 
-    UPROPERTY(EditAnywhere, Category = "Map Resolutions", meta = (DisplayName = "Transparency"))
+    UPROPERTY(EditAnywhere, Category = "Texture Resolutions", meta = (DisplayName = "Transparency"))
     EDWCMapResolution TransparencyMapResolution = EDWCMapResolution::Resolution1024;
 
     FDWCWetClothingAssetSetupSettings BuildSettings() const
@@ -92,16 +92,16 @@ public:
     UPROPERTY(EditAnywhere, Category = "Simulation Data", meta = (DisplayName = "GPU Wetness Map Simulation Data"))
     bool bBuildGPUWetnessMapSimulationData = true;
 
-    UPROPERTY(EditAnywhere, Category = "Map Resolutions", meta = (DisplayName = "GPU Simulation"))
+    UPROPERTY(EditAnywhere, Category = "Texture Resolutions", meta = (DisplayName = "GPU Simulation"))
     EDWCMapResolution GPUSimulationMapResolution = EDWCMapResolution::Resolution512;
 
-    UPROPERTY(EditAnywhere, Category = "Map Resolutions", meta = (DisplayName = "Surface Water RT"))
+    UPROPERTY(EditAnywhere, Category = "Texture Resolutions", meta = (DisplayName = "Surface Water"))
     EDWCMapResolution SurfaceWaterRTResolution = EDWCMapResolution::Resolution1024;
 
-    UPROPERTY(EditAnywhere, Category = "Map Resolutions", meta = (DisplayName = "Wrinkle"))
+    UPROPERTY(EditAnywhere, Category = "Texture Resolutions", meta = (DisplayName = "Wrinkle"))
     EDWCMapResolution WrinkleMapResolution = EDWCMapResolution::Resolution1024;
 
-    UPROPERTY(EditAnywhere, Category = "Map Resolutions", meta = (DisplayName = "Transparency"))
+    UPROPERTY(EditAnywhere, Category = "Texture Resolutions", meta = (DisplayName = "Transparency"))
     EDWCMapResolution TransparencyMapResolution = EDWCMapResolution::Resolution1024;
 
     void InitializeFromSettings(const FDWCWetClothingAssetSetupSettings& InSettings)

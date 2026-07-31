@@ -10,8 +10,11 @@
 #include "Misc/ScopeExit.h"
 #include "Rendering/SkeletalMeshLODRenderData.h"
 #include "Rendering/SkeletalMeshRenderData.h"
+#include "MeshDescription.h"
+#include "SkeletalMeshAttributes.h"
 #include "WetClothing/Foundation/MeshAnalysis/WetClothingAssetMeshAnalyzer.h"
 #include "WetClothing/WCAEditor/WCAGeneratedDataInvalidator.h"
+#include "WetClothing/WCAEditor/UI/UVView/WCAUVIslandViewCache.h"
 
 namespace DWCDataUVBuildServicePrivate
 {
@@ -44,57 +47,6 @@ namespace DWCDataUVBuildServicePrivate
     }
 }
 
-bool FDWCDataUVBuildService::BuildOriginalUVTopology(
-    UWetClothingAsset& Asset,
-    FString* OutErrorMessage)
-{
-    FWCAGeneratedDataInvalidator::InvalidateAsset(Asset);
-    ON_SCOPE_EXIT
-    {
-        FWCAGeneratedDataInvalidator::InvalidateAsset(Asset);
-    };
-
-    USkeletalMesh* PreparedMesh = Asset.GetRuntimeSkeletalMesh();
-    const FSkeletalMeshRenderData* RenderData = PreparedMesh != nullptr
-        ? PreparedMesh->GetResourceForRendering()
-        : nullptr;
-    if (RenderData == nullptr)
-    {
-        if (OutErrorMessage) *OutErrorMessage = TEXT("The DWC Prepared Skeletal Mesh has no render LOD data.");
-        return false;
-    }
-
-    TArray<FDWCEditorUVTopologyData> Topologies;
-    Topologies.Reserve(1);
-    const int32 TopologyLODIndex = DWCDataUVBuildServicePrivate::CanonicalDataUVLODIndex;
-    if (!RenderData->LODRenderData.IsValidIndex(TopologyLODIndex))
-    {
-        if (OutErrorMessage) *OutErrorMessage = TEXT("The DWC Prepared Skeletal Mesh has no LOD0 render data.");
-        return false;
-    }
-
-    if (RenderData->LODRenderData[TopologyLODIndex].GetNumVertices() <= 0)
-    {
-        if (OutErrorMessage) *OutErrorMessage = TEXT("The DWC Prepared Skeletal Mesh LOD0 has no vertices.");
-        return false;
-    }
-
-    FDWCEditorUVTopologyData& Topology = Topologies.AddDefaulted_GetRef();
-    if (!FDWCOriginalUVTopologyBuilder::BuildLOD(
-            Asset,
-            PreparedMesh,
-            TopologyLODIndex,
-            Topology,
-            OutErrorMessage))
-    {
-        return false;
-    }
-
-    Asset.SetOriginalUVTopologies(MoveTemp(Topologies));
-    if (OutErrorMessage) OutErrorMessage->Reset();
-    return true;
-}
-
 FDWCDataUVBuildResult FDWCDataUVBuildService::Generate(
     UWetClothingAsset& Asset,
     const bool bForceNewAsset,
@@ -106,12 +58,20 @@ FDWCDataUVBuildResult FDWCDataUVBuildService::Generate(
     FDWCDataUVBuildResult Result;
     USkeletalMesh* TouchedMesh = Asset.GetRuntimeSkeletalMesh();
 
-    // An explicit Rebuild is always an invalidation boundary. This applies to success,
-    // validation failure, user cancellation, and partial generation failure alike.
-    FWCAGeneratedDataInvalidator::InvalidateDataUVRebuild(Asset, TouchedMesh);
+    if (Asset.HasLockedDataUVLayout())
+    {
+        SetFailure(
+            Result,
+            TEXT("DWC Data UV layout is locked after the initial build. Change only the DWC Data UV channel in Asset Setup, or create a new WCA to use different Original UV/island topology."));
+        return Result;
+    }
+
+    // Initial generation is an invalidation boundary. After a successful atomic commit this path is permanently sealed.
+    // Validation failure, user cancellation, and partial generation failure leave no committed island/layout replacement.
+    FWCAGeneratedDataInvalidator::InvalidateDataUVInitialization(Asset, TouchedMesh);
     ON_SCOPE_EXIT
     {
-        FWCAGeneratedDataInvalidator::InvalidateDataUVRebuild(Asset, TouchedMesh);
+        FWCAGeneratedDataInvalidator::InvalidateDataUVInitialization(Asset, TouchedMesh);
     };
 
     USkeletalMesh* SourceMesh = Asset.GetSourceSkeletalMesh();
@@ -362,10 +322,18 @@ FDWCDataUVBuildResult FDWCDataUVBuildService::Generate(
         OriginalUVIslandCount += Topology.Islands.Num();
     }
 
-    // Persistent generated data is committed only after every target LOD succeeds.
-    Asset.SetGeneratedDataUVTarget(PreparedMesh, DataUVChannelIndex);
-    Asset.SetDataUVMetadata(MoveTemp(DataUVMetadata));
-    Asset.SetOriginalUVTopologies(MoveTemp(OriginalUVTopologies));
+    // Persistent generated data is committed atomically only after every target LOD succeeds.
+    FString CommitError;
+    if (!Asset.CommitInitialDataUVLayout(
+            PreparedMesh,
+            DataUVChannelIndex,
+            MoveTemp(DataUVMetadata),
+            MoveTemp(OriginalUVTopologies),
+            &CommitError))
+    {
+        SetFailure(Result, CommitError.IsEmpty() ? TEXT("Failed to seal the initial DWC Data UV layout.") : CommitError);
+        return Result;
+    }
     MeshEditTransaction.Commit();
 
     Result.bSucceeded = true;
@@ -378,7 +346,7 @@ FDWCDataUVBuildResult FDWCDataUVBuildService::Generate(
     Result.TriangleFallbackChartCount = TriangleFallbackChartCount;
     Result.ChartBoundarySplitVertexInstanceCount = ChartBoundarySplitVertexInstanceCount;
     Result.Message = FString::Printf(
-        TEXT("Generated DWC Data UV channel %d for LOD%d-LOD%d of the DWC Prepared Skeletal Mesh, creating %d chart-boundary VertexInstance seam(s), with %d LOD0 Original UV island record(s)."),
+        TEXT("Generated and sealed DWC Data UV channel %d for LOD%d-LOD%d of the DWC Prepared Skeletal Mesh, creating %d chart-boundary VertexInstance seam(s), with %d immutable LOD0 Original UV island record(s)."),
         DataUVChannelIndex,
         FirstLODIndex,
         LastLODIndex,
@@ -404,3 +372,131 @@ FDWCDataUVBuildResult FDWCDataUVBuildService::Generate(
 
     return Result;
 }
+
+FDWCDataUVBuildResult FDWCDataUVBuildService::RelocateChannel(
+    UWetClothingAsset& Asset,
+    const int32 DestinationUVChannelIndex,
+    const bool bAllowOverwriteExistingDataUVChannel)
+{
+    using namespace DWCDataUVBuildServicePrivate;
+
+    FDWCDataUVBuildResult Result;
+    if (!Asset.HasLockedDataUVLayout())
+    {
+        SetFailure(Result, TEXT("The WCA has no sealed DWC Data UV layout to relocate."));
+        return Result;
+    }
+
+    USkeletalMesh* PreparedMesh = Asset.GetRuntimeSkeletalMesh();
+    if (PreparedMesh == nullptr)
+    {
+        SetFailure(Result, TEXT("The DWC Prepared Skeletal Mesh is unavailable."));
+        return Result;
+    }
+
+    const int32 SourceUVChannelIndex = Asset.GetDWCDataUVChannelIndex();
+    const int32 SafeDestinationUVChannelIndex = FMath::Clamp(DestinationUVChannelIndex, 0, 7);
+    if (SafeDestinationUVChannelIndex == Asset.GetOriginalUVChannelIndex())
+    {
+        SetFailure(Result, TEXT("DWC Data UV cannot be relocated onto the locked Original UV channel."));
+        return Result;
+    }
+    if (SourceUVChannelIndex == SafeDestinationUVChannelIndex)
+    {
+        Result.bSucceeded = true;
+        Result.PreparedMesh = PreparedMesh;
+        Result.Message = FString::Printf(TEXT("DWC Data UV already uses UV%d. The sealed layout was not changed."), SourceUVChannelIndex);
+        return Result;
+    }
+
+    const TArray<FDWCDataUVLODMetadata>& ExistingMetadata = Asset.GetDataUVMetadata();
+    if (ExistingMetadata.IsEmpty())
+    {
+        SetFailure(Result, TEXT("The WCA has no DWC Data UV metadata to relocate."));
+        return Result;
+    }
+
+    FDWCPreparedMeshEditTransaction MeshEditTransaction(PreparedMesh);
+    FString TransactionError;
+    for (const FDWCDataUVLODMetadata& LODMetadata : ExistingMetadata)
+    {
+        if (!MeshEditTransaction.CaptureEditableLOD(LODMetadata.LODIndex, &TransactionError))
+        {
+            SetFailure(Result, TransactionError);
+            return Result;
+        }
+    }
+
+    PreparedMesh->Modify();
+    for (const FDWCDataUVLODMetadata& LODMetadata : ExistingMetadata)
+    {
+        FMeshDescription* MeshDescription = PreparedMesh->GetMeshDescription(LODMetadata.LODIndex);
+        if (MeshDescription == nullptr)
+        {
+            SetFailure(Result, FString::Printf(TEXT("LOD%d does not expose editable mesh data."), LODMetadata.LODIndex));
+            return Result;
+        }
+
+        FSkeletalMeshAttributes Attributes(*MeshDescription);
+        Attributes.Register(true);
+        auto VertexInstanceUVs = Attributes.GetVertexInstanceUVs();
+        const int32 ExistingUVChannelCount = VertexInstanceUVs.GetNumChannels();
+        if (SourceUVChannelIndex < 0 || SourceUVChannelIndex >= ExistingUVChannelCount)
+        {
+            SetFailure(Result, FString::Printf(
+                TEXT("LOD%d does not contain the sealed DWC Data UV source channel UV%d."),
+                LODMetadata.LODIndex,
+                SourceUVChannelIndex));
+            return Result;
+        }
+        if (SafeDestinationUVChannelIndex < ExistingUVChannelCount && !bAllowOverwriteExistingDataUVChannel)
+        {
+            SetFailure(Result, FString::Printf(
+                TEXT("LOD%d UV%d already exists. Confirm overwrite in Asset Setup before relocating DWC Data UV."),
+                LODMetadata.LODIndex,
+                SafeDestinationUVChannelIndex));
+            return Result;
+        }
+        if (SafeDestinationUVChannelIndex >= ExistingUVChannelCount)
+        {
+            VertexInstanceUVs.SetNumChannels(SafeDestinationUVChannelIndex + 1);
+        }
+
+        for (const FVertexInstanceID VertexInstanceID : MeshDescription->VertexInstances().GetElementIDs())
+        {
+            VertexInstanceUVs.Set(
+                VertexInstanceID,
+                SafeDestinationUVChannelIndex,
+                VertexInstanceUVs.Get(VertexInstanceID, SourceUVChannelIndex));
+        }
+
+        PreparedMesh->CommitMeshDescription(LODMetadata.LODIndex);
+    }
+
+    PreparedMesh->PostEditChange();
+    PreparedMesh->MarkPackageDirty();
+    UWetClothingAsset::ClearMeshContentSignatureCache();
+
+    FString CommitError;
+    if (!Asset.CommitDataUVChannelRelocation(SafeDestinationUVChannelIndex, &CommitError))
+    {
+        SetFailure(Result, CommitError.IsEmpty() ? TEXT("Failed to commit the DWC Data UV channel relocation.") : CommitError);
+        return Result;
+    }
+
+    MeshEditTransaction.Commit();
+    FWCAGeneratedDataInvalidator::InvalidateAsset(Asset);
+    FWCAUVIslandViewCache::InvalidateMesh(PreparedMesh);
+
+    Result.bSucceeded = true;
+    Result.PreparedMesh = PreparedMesh;
+    Result.OriginalUVIslandCount = Asset.FindOriginalUVTopologyForLOD(Asset.GetSimulationLODIndex()) != nullptr
+        ? Asset.FindOriginalUVTopologyForLOD(Asset.GetSimulationLODIndex())->Islands.Num()
+        : 0;
+    Result.Message = FString::Printf(
+        TEXT("Relocated the sealed DWC Data UV layout from UV%d to UV%d without rebuilding packed charts or Original UV island topology. The previous channel remains unchanged but is no longer referenced by this WCA."),
+        SourceUVChannelIndex,
+        SafeDestinationUVChannelIndex);
+    return Result;
+}
+

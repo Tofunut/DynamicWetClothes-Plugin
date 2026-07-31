@@ -752,7 +752,7 @@ bool FDWCGPUBackend::Initialize(const FDWCGPUBackendInitArgs& Args)
     if (!SkeletalMesh || !Args.WetClothingAsset->IsGPUWetMapDataValidForMesh(SkeletalMesh, Args.LODIndex) ||
         !GPUData.bMapDataValid || GPUData.MapBakeVersion != DWCFullSimulationMapVersion || GPUData.LODIndex != Args.LODIndex)
     {
-        UE_LOG(LogDWCGPU, Warning, TEXT("DWCGPU: GPU simulation maps are missing or out of date for %s. Use Bake Maps in the Wet Clothing Asset editor."), *GetNameSafe(SkeletalMesh));
+        UE_LOG(LogDWCGPU, Warning, TEXT("DWCGPU: GPU simulation maps are missing or out of date for %s. Use Build for Runtime > Build GPU Runtime Data in the Wet Clothing Asset editor."), *GetNameSafe(SkeletalMesh));
         return false;
     }
 
@@ -829,7 +829,7 @@ bool FDWCGPUBackend::BuildStaticSimulationData()
         UE_LOG(
             LogDWCGPU,
             Warning,
-            TEXT("DWCGPU: Wet Clothing Asset '%s' has no generated DWC Data UV channel. Rebuild DWC Data UV before using GPU simulation."),
+            TEXT("DWCGPU: Wet Clothing Asset '%s' has no generated DWC Data UV channel. Create a new WCA if the sealed DWC Data UV is missing or invalid before using GPU simulation."),
             *GetNameSafe(Asset));
         return false;
     }
@@ -919,7 +919,7 @@ bool FDWCGPUBackend::BuildStaticSimulationData()
             UE_LOG(
                 LogDWCGPU,
                 Warning,
-                TEXT("DWCGPU: Baked triangle %d in '%s' uses UV%d, but the asset now uses DWC Data UV%d. Rebuild DWC Data UV, save the Wet Clothing Asset, then Bake GPU Simulation Maps."),
+                TEXT("DWCGPU: Baked triangle %d in '%s' uses UV%d, but the asset now uses DWC Data UV%d. Create a new WCA if the sealed Data UV layout changed, then use Build for Runtime > Build GPU Runtime Data."),
                 Triangle.TriangleID,
                 *GetNameSafe(Asset),
                 Triangle.UVChannelIndex,
@@ -931,7 +931,7 @@ bool FDWCGPUBackend::BuildStaticSimulationData()
             UE_LOG(
                 LogDWCGPU,
                 Warning,
-                TEXT("DWCGPU: Baked triangle %d in '%s' targets material slot %d, which is no longer marked wettable. Save the Wet Clothing Asset and Bake GPU Simulation Maps again."),
+                TEXT("DWCGPU: Baked triangle %d in '%s' targets material slot %d, which is no longer marked wettable. Save the Wet Clothing Asset and use Build for Runtime > Build GPU Runtime Data again."),
                 Triangle.TriangleID,
                 *GetNameSafe(Asset),
                 Triangle.MaterialSlotIndex);
@@ -945,7 +945,7 @@ bool FDWCGPUBackend::BuildStaticSimulationData()
             UE_LOG(
                 LogDWCGPU,
                 Warning,
-                TEXT("DWCGPU: Could not resolve current Wetness Profile for baked triangle %d in '%s'. Save the Wet Clothing Asset and Bake GPU Simulation Maps again."),
+                TEXT("DWCGPU: Could not resolve current Wetness Profile for baked triangle %d in '%s'. Save the Wet Clothing Asset and use Build for Runtime > Build GPU Runtime Data again."),
                 Triangle.TriangleID,
                 *GetNameSafe(Asset));
             return false;
@@ -1095,7 +1095,7 @@ bool FDWCGPUBackend::BuildStaticSimulationData()
             UE_LOG(
                 LogDWCGPU,
                 Warning,
-                TEXT("DWCGPU: Baked GPU map for '%s' targets material slot %d, which is no longer marked wettable. Save the Wet Clothing Asset and Bake GPU Simulation Maps again."),
+                TEXT("DWCGPU: Baked GPU map for '%s' targets material slot %d, which is no longer marked wettable. Save the Wet Clothing Asset and use Build for Runtime > Build GPU Runtime Data again."),
                 *GetNameSafe(Asset),
                 BakedSlot.MaterialSlotIndex);
             return false;
@@ -1105,7 +1105,7 @@ bool FDWCGPUBackend::BuildStaticSimulationData()
             UE_LOG(
                 LogDWCGPU,
                 Warning,
-                TEXT("DWCGPU: Baked GPU map for '%s' slot %d uses UV%d, but the asset now uses DWC Data UV%d. Rebuild DWC Data UV, save the Wet Clothing Asset, then Bake GPU Simulation Maps."),
+                TEXT("DWCGPU: Baked GPU map for '%s' slot %d uses UV%d, but the asset now uses DWC Data UV%d. Create a new WCA if the sealed Data UV layout changed, then use Build for Runtime > Build GPU Runtime Data."),
                 *GetNameSafe(Asset),
                 BakedSlot.MaterialSlotIndex,
                 BakedSlot.UVChannelIndex,
@@ -1254,7 +1254,7 @@ bool FDWCGPUBackend::BuildStaticSimulationData()
         UE_LOG(
             LogDWCGPU,
             Warning,
-            TEXT("DWCGPU: Baked GPU material-slot maps for '%s' do not match the current wettable slots. Baked=[%s], Expected=[%s]. Bake GPU Simulation Maps again."),
+            TEXT("DWCGPU: Baked GPU material-slot maps for '%s' do not match the current wettable slots. Baked=[%s], Expected=[%s]. Use Build for Runtime > Build GPU Runtime Data again."),
             *GetNameSafe(Asset),
             *JoinSortedSlotSet(SeenMaterialSlots),
             *JoinSortedSlotSet(ExpectedWettableSlots));
@@ -1631,7 +1631,7 @@ bool FDWCGPUBackend::CreateSlotResources()
             UE_LOG(
                 LogDWCGPU,
                 Warning,
-                TEXT("DWCGPU: Baked material slot %d is out of range for mesh '%s' (%d materials). Bake GPU Simulation Maps again for the current runtime mesh."),
+                TEXT("DWCGPU: Baked material slot %d is out of range for mesh '%s' (%d materials). Use Build for Runtime > Build GPU Runtime Data again for the current runtime mesh."),
                 Slot.MaterialSlotIndex,
                 *GetNameSafe(MeshComponent),
                 MeshComponent->GetNumMaterials());

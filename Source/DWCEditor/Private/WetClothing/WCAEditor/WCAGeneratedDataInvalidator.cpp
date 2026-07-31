@@ -21,7 +21,7 @@ void FWCAGeneratedDataInvalidator::InvalidateAsset(const UWetClothingAsset& Asse
     UWetClothingAsset::ClearMeshContentSignatureCache();
 }
 
-void FWCAGeneratedDataInvalidator::InvalidateDataUVRebuild(
+void FWCAGeneratedDataInvalidator::InvalidateDataUVInitialization(
     const UWetClothingAsset& Asset,
     const USkeletalMesh* TouchedMesh)
 {

@@ -1,7 +1,6 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Styling/SlateColor.h"
 #include "WetClothing/WCAEditor/WCAEditorMode.h"
 #include "Widgets/SCompoundWidget.h"
 
@@ -19,25 +18,30 @@ enum class EWCAEditorStatusSeverity : uint8
     Error
 };
 
+/** Lightweight validation summary used by toolbar refresh and resolve/close flows. */
 struct FWCAEditorIssueStatus
 {
     bool bGeneratedDataUVIssue = false;
     bool bRuntimeIssue = false;
-    bool bMapIssue = false;
-    bool bMaterialIssue = false;
+    bool bGeneratedMaterialsIssue = false;
+    bool bGPUMapsIssue = false;
+    bool bRenderProfileIssue = false;
+    bool bWrinkleMapsIssue = false;
+    bool bTransparencyMapsIssue = false;
     bool bFailure = false;
+    int32 IssueCount = 0;
     EWCAEditorStatusSeverity Severity = EWCAEditorStatusSeverity::Info;
+
     TArray<FString> GeneratedDataUVMessages;
     TArray<FString> RuntimeMessages;
-    TArray<FString> MapMessages;
-    TArray<FString> MaterialMessages;
+    TArray<FString> GeneratedMaterialMessages;
+    TArray<FString> GPUMapMessages;
+    TArray<FString> RenderProfileMessages;
+    TArray<FString> WrinkleMapMessages;
+    TArray<FString> TransparencyMapMessages;
     TArray<FString> FailureMessages;
 
-    bool HasIssues() const
-    {
-        return bGeneratedDataUVIssue || bRuntimeIssue || bMapIssue || bMaterialIssue || bFailure;
-    }
-
+    bool HasIssues() const { return IssueCount > 0; }
     FString BuildSummary() const;
 };
 
@@ -72,10 +76,6 @@ private:
     EActiveTimerReturnType HandleDeferredRefresh(double CurrentTime, float DeltaTime);
     EActiveTimerReturnType HandleStatusRefreshTimer(double CurrentTime, float DeltaTime);
     void UpdateCachedStatus(bool bRefreshAssetState = true);
-    EVisibility GetRuntimeReadyWarningVisibility() const;
-    FText GetRuntimeReadyWarningText() const;
-    FSlateColor GetRuntimeReadyStatusTextColor() const;
-    FSlateColor GetRuntimeReadyStatusBackgroundColor() const;
 
 private:
     TWeakObjectPtr<UWetClothingAsset> WetClothingAsset;
@@ -89,7 +89,6 @@ private:
     bool bRefreshPending = false;
     bool bPendingFullModeRefresh = false;
     bool bSuppressStatusChangedNotification = false;
-    bool bStatusWarningVisible = false;
-    FText CachedStatusText;
+    int32 CachedIssueCount = 0;
     EWCAEditorStatusSeverity CachedStatusSeverity = EWCAEditorStatusSeverity::Info;
 };

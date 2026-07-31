@@ -119,7 +119,7 @@ bool FDWCOriginalUVRuntimeTopologyAdapter::BuildIslands(
     {
         DWC::Error::SetMessage(
             OutErrorMessage,
-            TEXT("Stored Original UV topology does not match the runtime mesh. Rebuild DWC Data UV before rebuilding runtime data."));
+            TEXT("Stored Original UV topology does not match the runtime mesh. The sealed topology cannot be rebuilt; create a new WCA for the changed mesh."));
         return false;
     }
 

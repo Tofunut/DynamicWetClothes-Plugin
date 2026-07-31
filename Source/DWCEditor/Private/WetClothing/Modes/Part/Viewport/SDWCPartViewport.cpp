@@ -1195,7 +1195,7 @@ bool SDWCPartViewport::BuildSurfaceWaterPreviewTextures(FString& OutErrorMessage
     const FWetClothingBakedWetPartDataSlotTexture* BakedSlot = Baked.FindSlot(PreviewMaterialSlotIndex);
     if (BakedSlot == nullptr || BakedSlot->WetPartDataTexture == nullptr)
     {
-        OutErrorMessage = TEXT("Bake Render Profile Data before opening the Surface Water Tiling preview.");
+        OutErrorMessage = TEXT("Use Build for Runtime > Bake Render Profile Lookup Texture before opening the Surface Water Tiling preview.");
         return false;
     }
 
@@ -1273,7 +1273,7 @@ bool SDWCPartViewport::BuildSurfaceWaterPreviewTextures(FString& OutErrorMessage
         }
         if (LocalProfileID == 0)
         {
-            OutErrorMessage = TEXT("The selected Wet Part's profile is not present in the baked Render Profile Data. Re-bake Render Profile Data.");
+            OutErrorMessage = TEXT("The selected Wet Part's profile is not present in the baked Render Profile Lookup Texture. Use Build for Runtime > Bake Render Profile Lookup Texture.");
             return false;
         }
 
@@ -1701,7 +1701,7 @@ void SDWCPartViewport::RefreshSurfaceWaterPreviewMaterial()
             ResourceSubsystem->GetDropletMaskArray() == nullptr ||
             ResourceSubsystem->GetDropletFlowNoiseArray() == nullptr)
         {
-            SurfaceWaterPreviewStatus = TEXT("Surface Water preview droplet texture-array resources are incomplete. Coverage still renders, but masked detail may be missing until Render Profile Data is re-baked.");
+            SurfaceWaterPreviewStatus = TEXT("Surface Water preview droplet texture-array resources are incomplete. Coverage still renders, but masked detail may be missing until Render Profile Lookup Texture is rebuilt.");
             bSurfaceWaterPreviewStatusIsError = true;
         }
     }
@@ -1848,7 +1848,7 @@ void SDWCPartViewport::RefreshSurfaceWaterPreviewMaterial()
     }
     if (bMissingDropletMask)
     {
-        SurfaceWaterPreviewStatus += TEXT("\nSelected profile has no baked Droplet mask. Surface Water is mask-gated, so coverage resolves to zero. Assign a Droplet mask and re-bake Render Profile Data.");
+        SurfaceWaterPreviewStatus += TEXT("\nSelected profile has no baked Droplet mask. Surface Water is mask-gated, so coverage resolves to zero. Assign a Droplet mask and rebuild Render Profile Lookup Texture.");
         bSurfaceWaterPreviewStatusIsError = true;
     }
 

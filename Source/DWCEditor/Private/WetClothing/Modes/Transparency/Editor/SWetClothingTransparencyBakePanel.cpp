@@ -889,7 +889,7 @@ bool SWetClothingTransparencyBakePanel::RefreshModelState()
         Asset,
         Layer->TargetSurface.OuterMaterialSlotIndex))
     {
-        StatusMessage = TEXT("The selected Transparency Target Part is not DWC-ready. Enable the slot and run Generate Materials before editing or baking transparency.");
+        StatusMessage = TEXT("The selected Transparency Target Part is not DWC-ready. Enable the slot and use Build for Runtime > Generate Materials before editing or baking transparency.");
         PanelStatus = EDWCTransparencyPanelStatus::Warning;
     }
     else if (Layer->SourceType != EDWCTransparencySourceType::OtherSkeletalMeshComponents)
@@ -1380,7 +1380,7 @@ FReply SWetClothingTransparencyBakePanel::HandleGenerateTransparencyMapClicked()
         }
         if (!DWCEditorPreviewSlotUtils::IsCpuPreviewReady(Asset, Layer->TargetSurface.OuterMaterialSlotIndex))
         {
-            const FString Message = TEXT("The selected Transparency Target Part is not DWC-ready. Enable the slot and run Generate Materials before generating a Transparency Map.");
+            const FString Message = TEXT("The selected Transparency Target Part is not DWC-ready. Enable the slot and use Build for Runtime > Generate Materials before generating a Transparency Map.");
             StatusMessage = Message;
             PanelStatus = EDWCTransparencyPanelStatus::Warning;
             FMessageDialog::Open(EAppMsgType::Ok, FText::FromString(Message));
@@ -2314,7 +2314,7 @@ void SWetClothingTransparencyBakePanel::HandleLayerSelectionChanged(FLayerItemPt
         }
         if (!DWCEditorPreviewSlotUtils::IsCpuPreviewReady(Asset, Item->MaterialSlotIndex))
         {
-            StatusMessage = TEXT("The selected material slot is not DWC-ready. Enable the slot and run Generate Materials first.");
+            StatusMessage = TEXT("The selected material slot is not DWC-ready. Enable the slot and use Build for Runtime > Generate Materials first.");
             PanelStatus = EDWCTransparencyPanelStatus::Warning;
             return;
         }

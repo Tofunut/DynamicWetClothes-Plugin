@@ -23,6 +23,8 @@ struct FWetClothingUnifiedMaterialSetupResult
 class FWCAMaterialGenerator
 {
   public:
+    static constexpr int32 GeneratedMaterialGeneratorVersion = 1;
+
     struct FOptions
     {
         EDWCSimulationMode SimulationMode = EDWCSimulationMode::VertexCPU;
@@ -62,6 +64,19 @@ class FWCAMaterialGenerator
 
     static bool IsMaterialConfiguredForDwc(UMaterialInterface* MaterialInterface);
     static bool IsMaterialConfiguredForDwc(UMaterialInterface* MaterialInterface, const FOptions& Options);
+
+    /** Stable hash used by the editor to decide whether a generated set is current. */
+    static FString BuildGeneratedMaterialSignature(
+        const UWetClothingAsset* WetClothingAsset,
+        int32 MaterialSlotIndex,
+        UMaterialInterface* SourceMaterial);
+
+    /** Fast source/reference/signature check. Does not inspect the full generated graph. */
+    static bool IsGeneratedMaterialOverrideCurrent(
+        const UWetClothingAsset* WetClothingAsset,
+        int32 MaterialSlotIndex,
+        FString* OutReason = nullptr);
+
     /** Fast reference-only validation used by routine editor status refreshes. */
     static void ValidateGeneratedMaterialOverrideReferences(const UWetClothingAsset* WetClothingAsset, TArray<FString>& OutMessages);
 

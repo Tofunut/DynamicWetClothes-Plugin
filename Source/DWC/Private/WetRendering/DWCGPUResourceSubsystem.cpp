@@ -114,7 +114,7 @@ namespace
             UE_LOG(
                 LogDWC,
                 Warning,
-                TEXT("DWC refused authored %s texture '%s' for profile '%s' because it is %dx%d. The baked/generated %dx%d reference is missing; rebake Render Profile Data."),
+                TEXT("DWC refused authored %s texture '%s' for profile '%s' because it is %dx%d. The baked/generated %dx%d reference is missing; rebake Render Profile Lookup Texture."),
                 TextureRole,
                 *LoadedTexture->GetPathName(),
                 *ProfileIdentity,
@@ -139,7 +139,7 @@ namespace
             UE_LOG(
                 LogDWC,
                 Warning,
-                TEXT("DWC could not load authored %s texture '%s' for profile '%s'. Re-bake Render Profile Data after validating the 512x512 source texture."),
+                TEXT("DWC could not load authored %s texture '%s' for profile '%s'. Use Build for Runtime > Bake Render Profile Lookup Texture after validating the 512x512 source texture."),
                 TextureRole,
                 *AuthoredSourcePath.ToString(),
                 *ProfileIdentity);
@@ -149,7 +149,7 @@ namespace
         UE_LOG(
             LogDWC,
             Warning,
-            TEXT("DWC prepared %s texture is missing for profile '%s'. Non-editor builds do not load authored Surface Water textures; rebake Render Profile Data before cooking."),
+            TEXT("DWC prepared %s texture is missing for profile '%s'. Non-editor builds do not load authored Surface Water textures; rebake Render Profile Lookup Texture before cooking."),
             TextureRole,
             *ProfileIdentity);
         return nullptr;
@@ -733,7 +733,7 @@ int32 UDWCGPUResourceSubsystem::FTextureArrayRegistry::FindOrAdd(
         UE_LOG(
             LogDWC,
             Warning,
-            TEXT("DWC prepared render texture '%s' is %dx%d format %d, but its Texture2DArray requires %dx%d format %d. The profile uses neutral slice 0; rebake Render Profile Data to regenerate the shared 512 texture."),
+            TEXT("DWC prepared render texture '%s' is %dx%d format %d, but its Texture2DArray requires %dx%d format %d. The profile uses neutral slice 0; rebake Render Profile Lookup Texture to regenerate the shared 512 texture."),
             *Path,
             Texture->GetSizeX(),
             Texture->GetSizeY(),

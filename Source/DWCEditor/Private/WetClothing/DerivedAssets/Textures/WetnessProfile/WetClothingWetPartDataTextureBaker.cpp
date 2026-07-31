@@ -459,7 +459,7 @@ bool FWetClothingWetPartDataTextureBaker::Bake(
     }
     if (!WetClothingAsset->HasValidDataUVForLOD(WetClothingAsset->GetSimulationLODIndex()) || WetClothingAsset->GetDWCDataUVChannelIndex() == INDEX_NONE)
     {
-        OutErrorMessage = TEXT("Wet Part Data Textures require valid DWC Data UV. Rebuild DWC Data UV first.");
+        OutErrorMessage = TEXT("Wet Part Data Textures require valid sealed DWC Data UV. Create a new WCA if the stored layout is invalid.");
         return false;
     }
 

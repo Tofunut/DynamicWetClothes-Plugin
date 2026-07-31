@@ -434,7 +434,7 @@ bool FWetClothingSurfaceTextureNormalizer::ValidateTexture(
     }
 #else
     OutErrorMessage = FString::Printf(
-        TEXT("%s texture '%s' is not %dx%d. Automatic resizing is editor-only, so bake the generated Render Profile Data before cooking."),
+        TEXT("%s texture '%s' is not %dx%d. Automatic resizing is editor-only, so bake the generated Render Profile Lookup Texture before cooking."),
         TextureRole,
         *SourceTexture->GetPathName(),
         DWCSurfaceTextureNormalization::Resolution,

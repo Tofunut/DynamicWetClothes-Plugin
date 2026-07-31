@@ -39,6 +39,7 @@
 #include "Engine/SkeletalMesh.h"
 #include "Engine/Texture.h"
 #include "Misc/PackageName.h"
+#include "Misc/SecureHash.h"
 #include "Modules/ModuleManager.h"
 #include "ScopedTransaction.h"
 #include "UObject/Package.h"
@@ -2695,6 +2696,121 @@ UMaterialInterface* FWCAMaterialGenerator::ResolveGeneratedMaterialSource(
     return CandidateMaterial;
 }
 
+FString FWCAMaterialGenerator::BuildGeneratedMaterialSignature(
+    const UWetClothingAsset* WetClothingAsset,
+    const int32 MaterialSlotIndex,
+    UMaterialInterface* SourceMaterial)
+{
+    if (WetClothingAsset == nullptr || SourceMaterial == nullptr || MaterialSlotIndex == INDEX_NONE)
+    {
+        return FString();
+    }
+
+    const FOptions CPUOptions = MakeOptionsForAsset(
+        WetClothingAsset,
+        EDWCSimulationMode::VertexCPU,
+        MaterialSlotIndex);
+    const FOptions GPUOptions = MakeOptionsForAsset(
+        WetClothingAsset,
+        EDWCSimulationMode::WetnessMapGPU,
+        MaterialSlotIndex);
+
+    const FString Canonical = FString::Printf(
+        TEXT("Version=%d|Slot=%d|Source=%s|CPUDataUV=%d|CPUOriginalUV=%d|CPUSurfaceUV=%d|CPUUseSurface=%d|CPUEnableDataUV=%d|CPUWetMap=%d|GPUDataUV=%d|GPUOriginalUV=%d|GPUSurfaceUV=%d|GPUUseSurface=%d|GPUEnableDataUV=%d|GPUWetMap=%d"),
+        GeneratedMaterialGeneratorVersion,
+        MaterialSlotIndex,
+        *SourceMaterial->GetPathName(),
+        CPUOptions.DWCDataUVChannelIndex,
+        CPUOptions.OriginalUVChannelIndex,
+        CPUOptions.SurfaceWaterNormalUVChannelIndex,
+        CPUOptions.bUseSurfaceWater ? 1 : 0,
+        CPUOptions.bEnableDWCDataUVSampling ? 1 : 0,
+        CPUOptions.bConnectWetnessMapPath ? 1 : 0,
+        GPUOptions.DWCDataUVChannelIndex,
+        GPUOptions.OriginalUVChannelIndex,
+        GPUOptions.SurfaceWaterNormalUVChannelIndex,
+        GPUOptions.bUseSurfaceWater ? 1 : 0,
+        GPUOptions.bEnableDWCDataUVSampling ? 1 : 0,
+        GPUOptions.bConnectWetnessMapPath ? 1 : 0);
+    return FMD5::HashAnsiString(*Canonical);
+}
+
+bool FWCAMaterialGenerator::IsGeneratedMaterialOverrideCurrent(
+    const UWetClothingAsset* WetClothingAsset,
+    const int32 MaterialSlotIndex,
+    FString* OutReason)
+{
+    auto SetReason = [OutReason](const FString& Reason)
+    {
+        if (OutReason != nullptr)
+        {
+            *OutReason = Reason;
+        }
+    };
+
+    if (WetClothingAsset == nullptr)
+    {
+        SetReason(TEXT("The Wet Clothing Asset is unavailable."));
+        return false;
+    }
+
+    USkeletalMesh* RuntimeMesh = WetClothingAsset->GetRuntimeSkeletalMesh();
+    if (RuntimeMesh == nullptr || !RuntimeMesh->GetMaterials().IsValidIndex(MaterialSlotIndex))
+    {
+        SetReason(FString::Printf(TEXT("Slot %d is unavailable on the runtime mesh."), MaterialSlotIndex));
+        return false;
+    }
+
+    UMaterialInterface* SourceMaterial = ResolveGeneratedMaterialSource(
+        WetClothingAsset,
+        MaterialSlotIndex,
+        RuntimeMesh->GetMaterials()[MaterialSlotIndex].MaterialInterface);
+    if (SourceMaterial == nullptr)
+    {
+        SetReason(FString::Printf(TEXT("Slot %d has no source material."), MaterialSlotIndex));
+        return false;
+    }
+
+    const FWetClothingGeneratedWetMaterialOverride* MaterialOverride =
+        FindGeneratedWetMaterialOverride(*WetClothingAsset, MaterialSlotIndex);
+    if (MaterialOverride == nullptr ||
+        MaterialOverride->GeneratedMaterial == nullptr ||
+        MaterialOverride->CPUMaterialInstance == nullptr ||
+        MaterialOverride->GPUMaterialInstance == nullptr)
+    {
+        SetReason(FString::Printf(TEXT("Slot %d is missing a generated material or CPU/GPU permutation."), MaterialSlotIndex));
+        return false;
+    }
+
+    if (MaterialOverride->SourceMaterial != SourceMaterial)
+    {
+        SetReason(FString::Printf(TEXT("Slot %d references an outdated source material."), MaterialSlotIndex));
+        return false;
+    }
+
+    if (MaterialOverride->CPUMaterialInstance->GetMaterial() != MaterialOverride->GeneratedMaterial.Get() ||
+        MaterialOverride->GPUMaterialInstance->GetMaterial() != MaterialOverride->GeneratedMaterial.Get())
+    {
+        SetReason(FString::Printf(TEXT("Slot %d CPU/GPU permutations no longer share the recorded generated parent."), MaterialSlotIndex));
+        return false;
+    }
+
+    const FString ExpectedSignature = BuildGeneratedMaterialSignature(
+        WetClothingAsset,
+        MaterialSlotIndex,
+        SourceMaterial);
+    if (MaterialOverride->GeneratorVersion != GeneratedMaterialGeneratorVersion ||
+        ExpectedSignature.IsEmpty() ||
+        MaterialOverride->GenerationSignature != ExpectedSignature)
+    {
+        SetReason(FString::Printf(TEXT("Slot %d generated materials are out of date."), MaterialSlotIndex));
+        return false;
+    }
+
+    SetReason(FString());
+    return true;
+}
+
 void FWCAMaterialGenerator::ValidateGeneratedMaterialOverrideReferences(
     const UWetClothingAsset* WetClothingAsset,
     TArray<FString>&         OutMessages)
@@ -2778,6 +2894,14 @@ void FWCAMaterialGenerator::ValidateGeneratedMaterialOverrideReferences(
             OutMessages.Add(FString::Printf(
                 TEXT("Slot %d: CPU/GPU material permutations no longer share the recorded generated parent."),
                 MaterialSlotIndex));
+        }
+        else
+        {
+            FString StaleReason;
+            if (!IsGeneratedMaterialOverrideCurrent(WetClothingAsset, MaterialSlotIndex, &StaleReason))
+            {
+                OutMessages.Add(StaleReason);
+            }
         }
     }
 }
@@ -2871,6 +2995,13 @@ void FWCAMaterialGenerator::ValidateGeneratedMaterialOverrides(
             OutMessages.Add(FString::Printf(
                 TEXT("Slot %d: generated materials are out of date because the source material changed."),
                 MaterialSlotIndex));
+            continue;
+        }
+
+        FString StaleReason;
+        if (!IsGeneratedMaterialOverrideCurrent(WetClothingAsset, MaterialSlotIndex, &StaleReason))
+        {
+            OutMessages.Add(StaleReason);
             continue;
         }
 

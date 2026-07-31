@@ -37,7 +37,7 @@ namespace
         const FString AssetName = BuildTransparencyMapAssetName(Asset, AutoResult);
         if (PackagePath.IsEmpty())
         {
-            OutErrorMessage = TEXT("Could not resolve the generated Transparency Maps package path.");
+            OutErrorMessage = TEXT("Could not resolve the generated Transparency Textures package path.");
             return nullptr;
         }
 

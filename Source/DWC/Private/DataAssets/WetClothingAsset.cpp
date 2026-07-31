@@ -1858,6 +1858,15 @@ void UWetClothingAsset::PostLoad()
     bRuntimeBulkDataLoadFailed = false;
     bRuntimeBulkDataDirty = false;
 #if WITH_EDITORONLY_DATA
+    // Seal any legacy asset that already owns persistent UV/topology payloads before schema validation.
+    // Unsupported layouts remain inspectable but can never be regenerated in place.
+    const bool bHadPersistentDataUVLayout =
+        Metadata.DWCSkeletalMesh != nullptr &&
+        Metadata.DWCDataUVChannelIndex != INDEX_NONE &&
+        !Derived.Inline.DataUVMetadata.IsEmpty() &&
+        !Derived.Inline.OriginalUVTopologies.IsEmpty();
+    Metadata.bDataUVLayoutSealed = Metadata.bDataUVLayoutSealed || bHadPersistentDataUVLayout;
+
     if (Metadata.AssetDataVersion != CurrentAssetDataVersion)
     {
         // Unsupported asset schemas are invalidated and must be rebuilt with the current data contract.
@@ -1878,7 +1887,7 @@ void UWetClothingAsset::PostLoad()
         UE_LOG(
             LogDWC,
             Warning,
-            TEXT("WetClothingAsset: '%s' uses unsupported asset schema version %d (current: %d). Recreate or regenerate its DWC Data UV and runtime outputs."),
+            TEXT("WetClothingAsset: '%s' uses unsupported asset schema version %d (current: %d). Create a new WCA for this mesh, then rebuild its runtime outputs."),
             *GetNameSafe(this),
             Metadata.AssetDataVersion,
             CurrentAssetDataVersion);
@@ -1908,6 +1917,7 @@ void UWetClothingAsset::PostLoad()
                                          ? EDWCBakeStatus::Valid
                                          : EDWCBakeStatus::OutOfDate;
     }
+
 #endif
 #if WITH_EDITOR
     PendingRuntimeSaveOutputMask = 0;
@@ -2364,6 +2374,26 @@ bool UWetClothingAsset::InitializeNewAsset(
     const FDWCWetClothingAssetSetupSettings& InSettings,
     FString* OutErrorMessage)
 {
+    // Initialization is write-once. Reusing this API on an existing WCA would otherwise
+    // provide a back door for replacing the locked Original UV and island identity.
+    const bool bAlreadyInitialized =
+        Metadata.SourceSkeletalMesh != nullptr ||
+        Metadata.DWCSkeletalMesh != nullptr ||
+        Metadata.bDataUVLayoutSealed ||
+        Metadata.DWCDataUVChannelIndex != INDEX_NONE ||
+        !Derived.Inline.DataUVMetadata.IsEmpty();
+#if WITH_EDITORONLY_DATA
+    if (bAlreadyInitialized || !Derived.Inline.OriginalUVTopologies.IsEmpty())
+#else
+    if (bAlreadyInitialized)
+#endif
+    {
+        DWC::Error::SetMessage(
+            OutErrorMessage,
+            TEXT("This Wet Clothing Asset is already initialized. Create a new WCA instead of replacing its Original UV or DWC Data UV layout."));
+        return false;
+    }
+
     if (InSourceMesh == nullptr)
     {
         DWC::Error::SetMessage(OutErrorMessage, TEXT("No source skeletal mesh is assigned."));
@@ -2388,6 +2418,7 @@ bool UWetClothingAsset::InitializeNewAsset(
     Metadata.SetupSettings.SimulationLODIndex = RuntimeSimulationLODIndex;
     Metadata.SimulationLODIndex = RuntimeSimulationLODIndex;
     Metadata.DWCDataUVChannelIndex = INDEX_NONE;
+    Metadata.bDataUVLayoutSealed = false;
     Derived.Inline.DataUVMetadata.Reset();
     Metadata.AssetDataVersion = CurrentAssetDataVersion;
     Derived.Inline.SourceMeshSignature = BuildMeshContentSignature(InSourceMesh, GetSimulationLODIndex(), Metadata.OriginalUVChannelIndex);
@@ -2424,19 +2455,52 @@ bool UWetClothingAsset::ApplySetupSettings(
     FDWCWetClothingAssetSetupSettings NewSettings = InSettings;
     NewSettings.NormalizeMapResolutions();
     ClampSetupLODRangeToMesh(GetSourceSkeletalMesh(), NewSettings);
+
+    // Original UV defines persistent WCA island identity. It is selected only during asset creation
+    // and is immutable afterwards, including for callers that bypass the Asset Setup dialog.
+    if (NewSettings.OriginalUVChannelIndex != Metadata.OriginalUVChannelIndex)
+    {
+        DWC::Error::SetMessage(
+            OutChangeSummary,
+            FString::Printf(
+                TEXT("Original UV is locked to UV%d for this Wet Clothing Asset. Create a new WCA to use a different Original UV channel."),
+                Metadata.OriginalUVChannelIndex));
+        return false;
+    }
+    NewSettings.OriginalUVChannelIndex = Metadata.OriginalUVChannelIndex;
+
     if (!ValidateSetupUVChannels(GetSourceSkeletalMesh(), NewSettings, OutChangeSummary))
     {
         return false;
     }
 
     const FDWCWetClothingAssetSetupSettings PreviousSettings = Metadata.SetupSettings;
-    const int32 PreviousOriginalUVChannelIndex = Metadata.OriginalUVChannelIndex;
-    const bool bOriginalUVChanged = PreviousOriginalUVChannelIndex != NewSettings.OriginalUVChannelIndex;
     const bool bDataUVTargetChanged =
         PreviousSettings.PreferredDWCDataUVChannelIndex != NewSettings.PreferredDWCDataUVChannelIndex;
     const bool bLODRangeChanged =
         PreviousSettings.FirstGeneratedLODIndex != NewSettings.FirstGeneratedLODIndex ||
         PreviousSettings.LastGeneratedLODIndex != NewSettings.LastGeneratedLODIndex;
+
+    // A sealed WCA may select only LODs whose UV layout/topology was created during the initial commit.
+    // Expanding into an ungenerated LOD would require rebuilding island information, which is forbidden.
+    if (HasLockedDataUVLayout() && bLODRangeChanged)
+    {
+        for (int32 LODIndex = NewSettings.FirstGeneratedLODIndex;
+             LODIndex <= NewSettings.LastGeneratedLODIndex;
+             ++LODIndex)
+        {
+            if (FindDataUVMetadataForLOD(LODIndex) == nullptr || FindOriginalUVTopologyForLOD(LODIndex) == nullptr)
+            {
+                DWC::Error::SetMessage(
+                    OutChangeSummary,
+                    FString::Printf(
+                        TEXT("LOD%d has no sealed DWC Data UV/island payload. Create a new WCA to generate a different LOD mapping range."),
+                        LODIndex));
+                return false;
+            }
+        }
+    }
+
     const bool bCPUSimulationSettingChanged =
         PreviousSettings.bBuildCPUVertexSimulationData != NewSettings.bBuildCPUVertexSimulationData;
     const bool bGPUSimulationSettingChanged =
@@ -2451,41 +2515,22 @@ bool UWetClothingAsset::ApplySetupSettings(
         PreviousSettings.GetSurfaceWaterRTResolution() != NewSettings.GetSurfaceWaterRTResolution();
 
     Metadata.SetupSettings = NewSettings;
-    Metadata.OriginalUVChannelIndex = Metadata.SetupSettings.OriginalUVChannelIndex;
+    Metadata.SetupSettings.OriginalUVChannelIndex = Metadata.OriginalUVChannelIndex;
     Metadata.SetupSettings.SimulationLODIndex = RuntimeSimulationLODIndex;
     Metadata.SimulationLODIndex = RuntimeSimulationLODIndex;
     Authored.WrinkleData.BakeSettings.DefaultResolution = Metadata.SetupSettings.GetWrinkleMapResolution();
     Authored.TransparencyData.TransparencyBakeResolution = Metadata.SetupSettings.GetTransparencyMapResolution();
 
-    if (bOriginalUVChanged)
+    if (bDataUVTargetChanged)
     {
-        // Original UV is WCA-wide. Part entries do not duplicate the channel; only topology-bound
-        // island assignments and editor preview textures must be discarded.
-        for (FWetClothingAuthoredMaterialSlot& Slot : Authored.PartData.EditableWetPartData.MaterialSlots)
-        {
-            for (FWetClothingWetPartEntry& Entry : Slot.WetPartEntries)
-            {
-                Entry.AssignedUVIslandIDs.Reset();
-            }
-#if WITH_EDITORONLY_DATA
-            Slot.bHasSourceTextureSelection = false;
-            Slot.SourceTexture = nullptr;
-#endif
-        }
-    }
-
-    if (bOriginalUVChanged || bDataUVTargetChanged)
-    {
+        // The packed UV layout and Original-UV island records remain sealed. Only the destination
+        // channel is stale until the editor copies the existing values verbatim to the new channel.
         Derived.Inline.BakeState.GeneratedDataUV = Derived.Inline.DataUVMetadata.IsEmpty()
-            ? EDWCBakeStatus::Required
-            : EDWCBakeStatus::OutOfDate;
-        Derived.Inline.BakeState.OriginalUVTopology = Derived.Inline.OriginalUVTopologies.IsEmpty()
             ? EDWCBakeStatus::Required
             : EDWCBakeStatus::OutOfDate;
     }
 
     const bool bSimulationStructureChanged =
-        bOriginalUVChanged ||
         bDataUVTargetChanged ||
         bLODRangeChanged ||
         bCPUSimulationSettingChanged ||
@@ -2504,7 +2549,7 @@ bool UWetClothingAsset::ApplySetupSettings(
             : EDWCBakeStatus::Disabled;
     }
 
-    if (bOriginalUVChanged || bDataUVTargetChanged)
+    if (bDataUVTargetChanged)
     {
         MarkVisualBakeOutOfDate();
     }
@@ -2529,13 +2574,12 @@ bool UWetClothingAsset::ApplySetupSettings(
     }
 
     TArray<FString> Changes;
-    if (bOriginalUVChanged)
-    {
-        Changes.Add(FString::Printf(TEXT("Original UV changed: UV%d -> UV%d. Existing island assignments were cleared."), PreviousOriginalUVChannelIndex, Metadata.OriginalUVChannelIndex));
-    }
     if (bDataUVTargetChanged)
     {
-        Changes.Add(TEXT("DWC Data UV target changed. Rebuild is required."));
+        Changes.Add(FString::Printf(
+            TEXT("DWC Data UV channel changed: UV%d -> UV%d. The existing packed layout will be copied without rebuilding island topology."),
+            Metadata.DWCDataUVChannelIndex,
+            Metadata.SetupSettings.PreferredDWCDataUVChannelIndex));
     }
     if (bLODRangeChanged)
     {
@@ -2585,32 +2629,138 @@ bool UWetClothingAsset::ApplySetupSettings(
     return true;
 }
 
-void UWetClothingAsset::SetGeneratedDataUVTarget(USkeletalMesh* InRuntimeMesh, const int32 InDWCDataUVChannelIndex)
+bool UWetClothingAsset::HasLockedDataUVLayout() const
 {
+#if WITH_EDITORONLY_DATA
+    return Metadata.bDataUVLayoutSealed ||
+           (Metadata.DWCSkeletalMesh != nullptr &&
+            Metadata.DWCDataUVChannelIndex != INDEX_NONE &&
+            !Derived.Inline.DataUVMetadata.IsEmpty() &&
+            !Derived.Inline.OriginalUVTopologies.IsEmpty());
+#else
+    return false;
+#endif
+}
+
+bool UWetClothingAsset::CommitInitialDataUVLayout(
+    USkeletalMesh* InRuntimeMesh,
+    const int32 InDWCDataUVChannelIndex,
+    TArray<FDWCDataUVLODMetadata>&& InMetadata,
+    TArray<FDWCEditorUVTopologyData>&& InTopologies,
+    FString* OutErrorMessage)
+{
+#if WITH_EDITORONLY_DATA
+    const bool bHasAnyExistingLayoutPayload =
+        Metadata.bDataUVLayoutSealed ||
+        Metadata.DWCSkeletalMesh != nullptr ||
+        Metadata.DWCDataUVChannelIndex != INDEX_NONE ||
+        !Derived.Inline.DataUVMetadata.IsEmpty() ||
+        !Derived.Inline.OriginalUVTopologies.IsEmpty();
+    if (bHasAnyExistingLayoutPayload)
+    {
+        DWC::Error::SetMessage(
+            OutErrorMessage,
+            TEXT("DWC Data UV and Original UV island topology are write-once. Create a new WCA instead of rebuilding this layout."));
+        return false;
+    }
+    if (InRuntimeMesh == nullptr || InDWCDataUVChannelIndex < 0 || InDWCDataUVChannelIndex >= 8)
+    {
+        DWC::Error::SetMessage(OutErrorMessage, TEXT("The initial DWC Data UV target is invalid."));
+        return false;
+    }
+    if (InDWCDataUVChannelIndex == Metadata.OriginalUVChannelIndex)
+    {
+        DWC::Error::SetMessage(OutErrorMessage, TEXT("DWC Data UV cannot use the locked Original UV channel."));
+        return false;
+    }
+    if (InMetadata.IsEmpty() || InTopologies.IsEmpty())
+    {
+        DWC::Error::SetMessage(OutErrorMessage, TEXT("The initial DWC Data UV commit requires both metadata and Original UV topology payloads."));
+        return false;
+    }
+
     Metadata.DWCSkeletalMesh = InRuntimeMesh;
     Metadata.DWCDataUVChannelIndex = InDWCDataUVChannelIndex;
-    MarkSimulationBakeOutOfDate();
-}
-
-void UWetClothingAsset::SetDataUVMetadata(TArray<FDWCDataUVLODMetadata>&& InMetadata)
-{
+    Metadata.SetupSettings.PreferredDWCDataUVChannelIndex = InDWCDataUVChannelIndex;
     Derived.Inline.DataUVMetadata = MoveTemp(InMetadata);
-    Derived.Inline.BakeState.GeneratedDataUV = Derived.Inline.DataUVMetadata.IsEmpty() ? EDWCBakeStatus::Required : EDWCBakeStatus::Valid;
-    if (!Derived.Inline.DataUVMetadata.IsEmpty())
-    {
-        MarkBakeOutputGenerated(DWCBakeOutput::GeneratedDataUV);
-    }
+    Derived.Inline.OriginalUVTopologies = MoveTemp(InTopologies);
+    Metadata.bDataUVLayoutSealed = true;
+
+    Derived.Inline.BakeState.GeneratedDataUV = EDWCBakeStatus::Valid;
+    Derived.Inline.BakeState.OriginalUVTopology = EDWCBakeStatus::Valid;
+    MarkBakeOutputGenerated(DWCBakeOutput::GeneratedDataUV | DWCBakeOutput::OriginalUVTopology);
     MarkSimulationBakeOutOfDate();
+    Derived.Inline.BakeState.LastFailure.Reset();
+    MarkPackageDirty();
+    DWC::Error::SetMessage(OutErrorMessage, TEXT(""));
+    return true;
+#else
+    DWC::Error::SetMessage(OutErrorMessage, TEXT("Initial DWC Data UV commit is editor-only."));
+    return false;
+#endif
 }
 
-void UWetClothingAsset::SetOriginalUVTopologies(TArray<FDWCEditorUVTopologyData>&& InTopologies)
+bool UWetClothingAsset::CommitDataUVChannelRelocation(
+    const int32 InDWCDataUVChannelIndex,
+    FString* OutErrorMessage)
 {
-    Derived.Inline.OriginalUVTopologies = MoveTemp(InTopologies);
-    Derived.Inline.BakeState.OriginalUVTopology = Derived.Inline.OriginalUVTopologies.IsEmpty() ? EDWCBakeStatus::Required : EDWCBakeStatus::Valid;
-    if (!Derived.Inline.OriginalUVTopologies.IsEmpty())
+#if WITH_EDITORONLY_DATA
+    if (!HasLockedDataUVLayout())
     {
-        MarkBakeOutputGenerated(DWCBakeOutput::OriginalUVTopology);
+        DWC::Error::SetMessage(OutErrorMessage, TEXT("The WCA does not contain a sealed DWC Data UV layout to relocate."));
+        return false;
     }
+    if (InDWCDataUVChannelIndex < 0 || InDWCDataUVChannelIndex >= 8)
+    {
+        DWC::Error::SetMessage(OutErrorMessage, TEXT("The destination DWC Data UV channel is outside the supported UV0-UV7 range."));
+        return false;
+    }
+    if (InDWCDataUVChannelIndex == Metadata.OriginalUVChannelIndex)
+    {
+        DWC::Error::SetMessage(OutErrorMessage, TEXT("DWC Data UV cannot use the locked Original UV channel."));
+        return false;
+    }
+
+    TArray<FString> NewOutputSignatures;
+    NewOutputSignatures.Reserve(Derived.Inline.DataUVMetadata.Num());
+    for (const FDWCDataUVLODMetadata& LODMetadata : Derived.Inline.DataUVMetadata)
+    {
+        const FString Signature = BuildMeshContentSignature(
+            Metadata.DWCSkeletalMesh,
+            LODMetadata.LODIndex,
+            InDWCDataUVChannelIndex);
+        if (Signature.IsEmpty())
+        {
+            DWC::Error::SetMessage(
+                OutErrorMessage,
+                FString::Printf(TEXT("Could not validate relocated DWC Data UV on LOD%d."), LODMetadata.LODIndex));
+            return false;
+        }
+        NewOutputSignatures.Add(Signature);
+    }
+
+    Metadata.DWCDataUVChannelIndex = InDWCDataUVChannelIndex;
+    Metadata.SetupSettings.PreferredDWCDataUVChannelIndex = InDWCDataUVChannelIndex;
+    Metadata.bDataUVLayoutSealed = true;
+    for (int32 MetadataIndex = 0; MetadataIndex < Derived.Inline.DataUVMetadata.Num(); ++MetadataIndex)
+    {
+        FDWCDataUVLODMetadata& LODMetadata = Derived.Inline.DataUVMetadata[MetadataIndex];
+        LODMetadata.UVChannelIndex = InDWCDataUVChannelIndex;
+        LODMetadata.DataUVOutputSignature = NewOutputSignatures[MetadataIndex];
+    }
+
+    Derived.Inline.BakeState.GeneratedDataUV = EDWCBakeStatus::Valid;
+    MarkBakeOutputGenerated(DWCBakeOutput::GeneratedDataUV);
+    MarkSimulationBakeOutOfDate();
+    MarkVisualBakeOutOfDate();
+    Derived.Inline.BakeState.LastFailure.Reset();
+    MarkPackageDirty();
+    DWC::Error::SetMessage(OutErrorMessage, TEXT(""));
+    return true;
+#else
+    DWC::Error::SetMessage(OutErrorMessage, TEXT("DWC Data UV channel relocation is editor-only."));
+    return false;
+#endif
 }
 
 void UWetClothingAsset::MarkGeneratedDataUVOutOfDate()
@@ -3392,6 +3542,11 @@ void UWetClothingAsset::ClearRuntimeDataEditorSavePreparation()
     bSkipNextPreSaveRuntimeDataRebuild = false;
 }
 
+void UWetClothingAsset::SkipNextRuntimeDataPreSaveRebuild()
+{
+    bSkipNextPreSaveRuntimeDataRebuild = true;
+}
+
 void UWetClothingAsset::BeginRuntimeDataEditorSaveAttempt()
 {
     if (bRuntimeDataEditorSaveAttemptActive)
@@ -3871,7 +4026,7 @@ bool UWetClothingAsset::RebuildPrecomputedSimulationData(FString* OutErrorMessag
     {
         DWC::Error::SetMessage(
             OutErrorMessage,
-            TEXT("Original UV topology is missing or out of date. Rebuild DWC Data UV before rebuilding runtime data."));
+            TEXT("Original UV topology is missing or out of date. The sealed layout cannot be rebuilt; create a new WCA if its source topology changed."));
         ClearPrecomputedSimulationData();
         return false;
     }

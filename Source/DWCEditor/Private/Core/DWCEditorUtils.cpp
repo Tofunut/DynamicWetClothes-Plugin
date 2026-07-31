@@ -54,7 +54,7 @@ FOnDWCEditorAssetSaveAttemptFinished& DWCEditorUtils::OnAssetSaveAttemptFinished
     return GDWCEditorAssetSaveAttemptFinished;
 }
 
-bool DWCEditorUtils::SaveAsset(UObject* Asset)
+bool DWCEditorUtils::SaveAsset(UObject* Asset, const bool bPrepareRuntimeData)
 {
     if (Asset == nullptr)
     {
@@ -68,31 +68,41 @@ bool DWCEditorUtils::SaveAsset(UObject* Asset)
     {
         WetClothingAsset->BeginRuntimeDataEditorSaveAttempt();
 
-        FString RuntimePreparationError;
-        if (WetClothingAsset->CanPrepareRuntimeDataForEditorSave(&RuntimePreparationError))
+        if (bPrepareRuntimeData)
         {
-            if (!WetClothingAsset->PrepareRuntimeDataForEditorSave(&RuntimePreparationError))
+            FString RuntimePreparationError;
+            if (WetClothingAsset->CanPrepareRuntimeDataForEditorSave(&RuntimePreparationError))
+            {
+                if (!WetClothingAsset->PrepareRuntimeDataForEditorSave(&RuntimePreparationError))
+                {
+                    WetClothingAsset->CompleteRuntimeDataEditorSaveAttempt(false);
+                    ShowDWCEditorNotification(
+                        FText::FromString(RuntimePreparationError.IsEmpty()
+                            ? TEXT("Failed to prepare DWC precomputed simulation data for save.")
+                            : RuntimePreparationError),
+                        SNotificationItem::CS_Fail);
+                    GDWCEditorAssetSaveAttemptFinished.Broadcast(Asset, false);
+                    return false;
+                }
+            }
+            else if (HasRuntimeDataIssueForSave(*WetClothingAsset))
             {
                 WetClothingAsset->CompleteRuntimeDataEditorSaveAttempt(false);
                 ShowDWCEditorNotification(
                     FText::FromString(RuntimePreparationError.IsEmpty()
-                        ? TEXT("Failed to prepare DWC precomputed simulation data for save.")
+                        ? TEXT("DWC runtime data cannot be prepared for save.")
                         : RuntimePreparationError),
                     SNotificationItem::CS_Fail);
                 GDWCEditorAssetSaveAttemptFinished.Broadcast(Asset, false);
                 return false;
             }
         }
-        else if (HasRuntimeDataIssueForSave(*WetClothingAsset))
+        else
         {
-            WetClothingAsset->CompleteRuntimeDataEditorSaveAttempt(false);
-            ShowDWCEditorNotification(
-                FText::FromString(RuntimePreparationError.IsEmpty()
-                    ? TEXT("DWC runtime data cannot be prepared for save.")
-                    : RuntimePreparationError),
-                SNotificationItem::CS_Fail);
-            GDWCEditorAssetSaveAttemptFinished.Broadcast(Asset, false);
-            return false;
+            // A targeted runtime-data command has already rebuilt the selected segment.
+            // Preserve the other segment exactly as-is instead of running the aggregate
+            // pre-save rebuild and unexpectedly completing unrelated work.
+            WetClothingAsset->SkipNextRuntimeDataPreSaveRebuild();
         }
     }
     const double RuntimePreparationEndTime = FPlatformTime::Seconds();

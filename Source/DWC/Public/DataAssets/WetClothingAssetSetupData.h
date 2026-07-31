@@ -95,17 +95,17 @@ struct DWC_API FDWCWetClothingAssetSetupSettings
     bool bBuildGPUWetnessMapSimulationData = true;
 
     /** Serialized as int32 for compatibility with existing WCA assets. Creation/Setup dialogs expose enum proxies. */
-    UPROPERTY(VisibleAnywhere, Category = "Map Resolutions", meta = (DisplayName = "GPU Simulation"))
+    UPROPERTY(VisibleAnywhere, Category = "Texture Resolutions", meta = (DisplayName = "GPU Simulation"))
     int32 GPUSimulationMapResolution = 512;
 
     /** Runtime Surface Water render-target resolution. This is independent from the GPU wetness-map bake resolution. */
-    UPROPERTY(VisibleAnywhere, Category = "Map Resolutions", meta = (DisplayName = "Surface Water RT"))
+    UPROPERTY(VisibleAnywhere, Category = "Texture Resolutions", meta = (DisplayName = "Surface Water"))
     int32 SurfaceWaterRTResolution = 1024;
 
-    UPROPERTY(VisibleAnywhere, Category = "Map Resolutions", meta = (DisplayName = "Wrinkle"))
+    UPROPERTY(VisibleAnywhere, Category = "Texture Resolutions", meta = (DisplayName = "Wrinkle"))
     int32 WrinkleMapResolution = 1024;
 
-    UPROPERTY(VisibleAnywhere, Category = "Map Resolutions", meta = (DisplayName = "Transparency"))
+    UPROPERTY(VisibleAnywhere, Category = "Texture Resolutions", meta = (DisplayName = "Transparency"))
     int32 TransparencyMapResolution = 1024;
 
     /** Original UV channel on the DWC Prepared Skeletal Mesh used by Part Edit and Data UV generation. */
@@ -296,7 +296,7 @@ struct DWC_API FDWCAssetBakeState
     UPROPERTY(VisibleAnywhere, Category = "Runtime Data Status")
     EDWCBakeStatus GPURuntimeData = EDWCBakeStatus::Required;
 
-    /** Resolution-dependent GPU texel lookup and seam maps. Rebuilt explicitly from Bake Maps. */
+    /** Resolution-dependent GPU texel lookup and seam maps. Built as part of Build for Runtime > Build GPU Runtime Data. */
     UPROPERTY(VisibleAnywhere, Category = "Map Bake Status")
     EDWCBakeStatus GPUMaps = EDWCBakeStatus::Required;
 

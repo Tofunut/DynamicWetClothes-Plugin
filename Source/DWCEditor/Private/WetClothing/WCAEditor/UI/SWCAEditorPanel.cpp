@@ -2,7 +2,6 @@
 
 #include "DataAssets/WetClothingAsset.h"
 #include "IDetailsView.h"
-#include "Styling/AppStyle.h"
 #include "WetClothing/Modes/Part/Editor/SWetClothingPartEditorPanel.h"
 #include "WetClothing/DerivedAssets/Textures/WetnessProfile/WetClothingRenderProfileBakeService.h"
 #include "WetClothing/Modes/Transparency/Editor/SWetClothingTransparencyBakePanel.h"
@@ -13,31 +12,14 @@
 #include "WetClothing/Modes/Wrinkle/Editor/SWetWrinkleEditorPanel.h"
 #include "WetClothing/WCAEditor/WCAValidationReport.h"
 #include "WetClothing/WCAEditor/UI/Widgets/WCAEditorWidgets.h"
-#include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
-#include "Widgets/SBoxPanel.h"
 #include "Widgets/SNullWidget.h"
-#include "Widgets/Text/STextBlock.h"
 #include "UObject/Package.h"
 
 #define LOCTEXT_NAMESPACE "WCAEditorPanel"
 
 namespace
 {
-    FString BakeStatusToString(const EDWCBakeStatus Status)
-    {
-        switch (Status)
-        {
-        case EDWCBakeStatus::Disabled: return TEXT("Disabled");
-        case EDWCBakeStatus::Required: return TEXT("Required");
-        case EDWCBakeStatus::Valid: return TEXT("Valid");
-        case EDWCBakeStatus::ValidWithDiagnostics: return TEXT("Valid With Diagnostics");
-        case EDWCBakeStatus::OutOfDate: return TEXT("Out of Date");
-        case EDWCBakeStatus::Failed: return TEXT("Failed");
-        default: return TEXT("Unknown");
-        }
-    }
-
     void RaiseIssueSeverity(FWCAEditorIssueStatus& Status, const EWCAEditorStatusSeverity Severity)
     {
         if (static_cast<uint8>(Severity) > static_cast<uint8>(Status.Severity))
@@ -46,156 +28,12 @@ namespace
         }
     }
 
-    EWCAEditorStatusSeverity GetSeverityForStatus(
-        const EDWCBakeStatus Status,
-        const EWCAEditorStatusSeverity NonFailedSeverity = EWCAEditorStatusSeverity::Warning)
-    {
-        return Status == EDWCBakeStatus::Failed
-            ? EWCAEditorStatusSeverity::Error
-            : NonFailedSeverity;
-    }
-
-    EWCAEditorStatusSeverity GetRuntimeSeverity(const EDWCBakeStatus Status, const bool bHasPayload)
-    {
-        if (Status == EDWCBakeStatus::Failed)
-        {
-            return EWCAEditorStatusSeverity::Error;
-        }
-        if (Status == EDWCBakeStatus::Required && !bHasPayload)
-        {
-            return EWCAEditorStatusSeverity::Info;
-        }
-        return EWCAEditorStatusSeverity::Warning;
-    }
-
-    FString BuildRuntimeDataMessage(
-        const TCHAR* Label,
-        const EDWCBakeStatus Status,
-        const bool bHasPayload,
-        const bool bWasEverGenerated,
-        const bool bWasEverSaved,
-        const bool bAssetHasUnsavedChanges,
-        const bool bSavePending,
-        const FString& FailureDetails)
-    {
-        (void)bAssetHasUnsavedChanges;
-        const bool bHasPriorOutput = bHasPayload || bWasEverGenerated || bWasEverSaved;
-        if (DWCBuildStatus::IsUsable(Status) && bSavePending)
-        {
-            return FString::Printf(TEXT("%s: Generated and current, but not saved yet. Save the asset to persist it."), Label);
-        }
-        if (Status == EDWCBakeStatus::Required && !bHasPriorOutput)
-        {
-            return FString::Printf(TEXT("%s: Not generated yet. Save the asset to generate it."), Label);
-        }
-        if (Status == EDWCBakeStatus::Required)
-        {
-            return FString::Printf(TEXT("%s: Missing from the saved runtime payload. Save the asset to rebuild it."), Label);
-        }
-        if (Status == EDWCBakeStatus::OutOfDate)
-        {
-            return FString::Printf(TEXT("%s: Out of date. Save the asset to rebuild it."), Label);
-        }
-        if (Status == EDWCBakeStatus::Failed)
-        {
-            if (!FailureDetails.IsEmpty())
-            {
-                return FString::Printf(TEXT("%s: Failed. %s"), Label, *FailureDetails);
-            }
-            return FString::Printf(TEXT("%s: Failed. Check the failure details, then save the asset to rebuild it."), Label);
-        }
-        return FString::Printf(TEXT("%s: %s. Save the asset to rebuild it."), Label, *BakeStatusToString(Status));
-    }
-
-    FString BuildMapDataMessage(
-        const TCHAR* Label,
-        const EDWCBakeStatus Status,
-        const bool bWasEverGenerated,
-        const bool bWasEverSaved,
-        const bool bAssetHasUnsavedChanges,
-        const bool bSavePending)
-    {
-        if (DWCBuildStatus::IsUsable(Status) && bSavePending)
-        {
-            return FString::Printf(TEXT("%s: Baked and current, but not saved yet. Save the asset to persist it."), Label);
-        }
-        if (Status == EDWCBakeStatus::Required && !bWasEverGenerated && !bWasEverSaved)
-        {
-            return FString::Printf(TEXT("%s: Not baked yet. Use Bake Maps to generate it."), Label);
-        }
-        if (Status == EDWCBakeStatus::Required && !bWasEverSaved && bAssetHasUnsavedChanges)
-        {
-            return FString::Printf(TEXT("%s: Baked but not saved yet. Save the asset to persist it."), Label);
-        }
-        if (Status == EDWCBakeStatus::Required)
-        {
-            return FString::Printf(TEXT("%s: Missing from the saved bake outputs. Use Bake Maps to rebuild it."), Label);
-        }
-        if (Status == EDWCBakeStatus::OutOfDate)
-        {
-            return FString::Printf(TEXT("%s: Out of date. Use Bake Maps to rebuild it."), Label);
-        }
-        if (Status == EDWCBakeStatus::Failed)
-        {
-            return FString::Printf(TEXT("%s: Failed. Use Bake Maps to rebuild it."), Label);
-        }
-        return FString::Printf(TEXT("%s: %s. Use Bake Maps to rebuild it."), Label, *BakeStatusToString(Status));
-    }
-
-    bool ContainsFailureIndicator(const FWCAEditorIssueStatus& Status)
-    {
-        if (Status.bFailure)
-        {
-            return true;
-        }
-
-        auto MessagesContainFailure = [](const TArray<FString>& Messages)
-        {
-            for (const FString& Message : Messages)
-            {
-                if (Message.Contains(TEXT("Failed"), ESearchCase::IgnoreCase) ||
-                    Message.Contains(TEXT("Failure"), ESearchCase::IgnoreCase))
-                {
-                    return true;
-                }
-            }
-            return false;
-        };
-
-        return MessagesContainFailure(Status.GeneratedDataUVMessages) ||
-               MessagesContainFailure(Status.RuntimeMessages) ||
-               MessagesContainFailure(Status.MapMessages) ||
-               MessagesContainFailure(Status.MaterialMessages) ||
-               MessagesContainFailure(Status.FailureMessages);
-    }
-
-    EWCAEditorStatusSeverity NormalizeIssueSeverity(const FWCAEditorIssueStatus& Status)
-    {
-        if (ContainsFailureIndicator(Status))
-        {
-            return EWCAEditorStatusSeverity::Error;
-        }
-        return Status.Severity;
-    }
-
-    bool HasWrinkleContent(const UWetClothingAsset& Asset)
-    {
-        if (!Asset.Authored.WrinkleData.BakedWrinkleMaps.IsEmpty())
-        {
-            return true;
-        }
-        return !Asset.Authored.WrinkleData.EditablePatches.IsEmpty() ||
-               !Asset.Authored.WrinkleData.EditableProceduralRidgeStrokes.IsEmpty();
-    }
-
     void AppendIssueSection(TArray<FString>& Sections, const TCHAR* Heading, const TArray<FString>& Messages)
     {
-        if (Messages.IsEmpty())
+        if (!Messages.IsEmpty())
         {
-            return;
+            Sections.Add(FString::Printf(TEXT("%s\n%s"), Heading, *FString::Join(Messages, TEXT("\n"))));
         }
-
-        Sections.Add(FString::Printf(TEXT("%s\n%s"), Heading, *FString::Join(Messages, TEXT("\n"))));
     }
 
     EWCAEditorStatusSeverity ToEditorSeverity(const EWCAValidationSeverity Severity)
@@ -220,41 +58,48 @@ namespace
 
     void AddReportIssueToStatus(FWCAEditorIssueStatus& Status, const FWCAValidationIssue& Issue)
     {
+        ++Status.IssueCount;
         RaiseIssueSeverity(Status, ToEditorSeverity(Issue.Severity));
+
         TArray<FString>* TargetMessages = nullptr;
-        switch (Issue.Category)
+        switch (Issue.Section)
         {
-        case EWCAValidationIssueCategory::DataUV:
+        case EWCAValidationSection::DataUV:
             Status.bGeneratedDataUVIssue = true;
             TargetMessages = &Status.GeneratedDataUVMessages;
             break;
-
-        case EWCAValidationIssueCategory::Runtime:
+        case EWCAValidationSection::RuntimeData:
             Status.bRuntimeIssue = true;
             TargetMessages = &Status.RuntimeMessages;
             break;
-
-        case EWCAValidationIssueCategory::Material:
-            Status.bMaterialIssue = true;
-            TargetMessages = &Status.MaterialMessages;
+        case EWCAValidationSection::GeneratedMaterials:
+            Status.bGeneratedMaterialsIssue = true;
+            TargetMessages = &Status.GeneratedMaterialMessages;
             break;
-
-        case EWCAValidationIssueCategory::Failure:
+        case EWCAValidationSection::GPUSimulationMaps:
+            Status.bGPUMapsIssue = true;
+            TargetMessages = &Status.GPUMapMessages;
+            break;
+        case EWCAValidationSection::RenderProfileData:
+            Status.bRenderProfileIssue = true;
+            TargetMessages = &Status.RenderProfileMessages;
+            break;
+        case EWCAValidationSection::WrinkleMaps:
+            Status.bWrinkleMapsIssue = true;
+            TargetMessages = &Status.WrinkleMapMessages;
+            break;
+        case EWCAValidationSection::TransparencyMaps:
+            Status.bTransparencyMapsIssue = true;
+            TargetMessages = &Status.TransparencyMapMessages;
+            break;
+        case EWCAValidationSection::FailureDetails:
+        default:
             Status.bFailure = true;
             TargetMessages = &Status.FailureMessages;
             break;
-
-        case EWCAValidationIssueCategory::Map:
-        default:
-            Status.bMapIssue = true;
-            TargetMessages = &Status.MapMessages;
-            break;
         }
 
-        if (TargetMessages != nullptr)
-        {
-            TargetMessages->Add(BuildIssueStatusMessage(Issue));
-        }
+        TargetMessages->Add(BuildIssueStatusMessage(Issue));
     }
 }
 
@@ -263,9 +108,12 @@ FString FWCAEditorIssueStatus::BuildSummary() const
     TArray<FString> Sections;
     AppendIssueSection(Sections, TEXT("DWC Data UV"), GeneratedDataUVMessages);
     AppendIssueSection(Sections, TEXT("Runtime Data"), RuntimeMessages);
-    AppendIssueSection(Sections, TEXT("Texture Maps"), MapMessages);
-    AppendIssueSection(Sections, TEXT("Generated Materials"), MaterialMessages);
-    AppendIssueSection(Sections, TEXT("Failures"), FailureMessages);
+    AppendIssueSection(Sections, TEXT("Generated Materials"), GeneratedMaterialMessages);
+    AppendIssueSection(Sections, TEXT("GPU Runtime Data"), GPUMapMessages);
+    AppendIssueSection(Sections, TEXT("Render Profile Lookup Texture"), RenderProfileMessages);
+    AppendIssueSection(Sections, TEXT("Wrinkle Textures"), WrinkleMapMessages);
+    AppendIssueSection(Sections, TEXT("Transparency Textures"), TransparencyMapMessages);
+    AppendIssueSection(Sections, TEXT("Internal Failure"), FailureMessages);
     return FString::Join(Sections, TEXT("\n\n"));
 }
 
@@ -282,29 +130,10 @@ void SWCAEditorPanel::Construct(const FArguments& InArgs)
     WetClothingAsset = InArgs._WetClothingAsset;
     DetailsView = InArgs._DetailsView;
     OnStatusChanged = InArgs._OnStatusChanged;
-    CachedStatusText = FText::GetEmpty();
 
     ChildSlot
     [
-        SNew(SVerticalBox)
-        + SVerticalBox::Slot()
-        .AutoHeight()
-        .Padding(0.0f, 0.0f, 0.0f, 6.0f)
-        [
-            SNew(SBorder)
-            .Visibility(this, &SWCAEditorPanel::GetRuntimeReadyWarningVisibility)
-            .Padding(FMargin(10.0f, 6.0f))
-            .BorderImage(FAppStyle::Get().GetBrush(TEXT("Brushes.Panel")))
-            .BorderBackgroundColor(this, &SWCAEditorPanel::GetRuntimeReadyStatusBackgroundColor)
-            [
-                SNew(STextBlock)
-                .Text(this, &SWCAEditorPanel::GetRuntimeReadyWarningText)
-                .ColorAndOpacity(this, &SWCAEditorPanel::GetRuntimeReadyStatusTextColor)
-            ]
-        ]
-        + SVerticalBox::Slot()
-        .FillHeight(1.0f)
-        [SAssignNew(ModeContentBox, SBox)]
+        SAssignNew(ModeContentBox, SBox)
     ];
 
     {
@@ -439,22 +268,16 @@ FWCAEditorIssueStatus SWCAEditorPanel::CollectIssueStatus(
 
 void SWCAEditorPanel::UpdateCachedStatus(const bool bRefreshAssetState)
 {
-    const bool bPreviousStatusWarningVisible = bStatusWarningVisible;
+    const int32 PreviousIssueCount = CachedIssueCount;
     const EWCAEditorStatusSeverity PreviousStatusSeverity = CachedStatusSeverity;
-    const FText PreviousStatusText = CachedStatusText;
 
     const FWCAEditorIssueStatus Status = CollectIssueStatus(bRefreshAssetState, false);
-    bStatusWarningVisible = Status.HasIssues();
-    CachedStatusSeverity = NormalizeIssueSeverity(Status);
-    CachedStatusText = bStatusWarningVisible
-        ? FText::FromString(Status.BuildSummary())
-        : FText::GetEmpty();
+    CachedIssueCount = Status.IssueCount;
+    CachedStatusSeverity = Status.Severity;
 
     if (!bSuppressStatusChangedNotification &&
         OnStatusChanged.IsBound() &&
-        (bPreviousStatusWarningVisible != bStatusWarningVisible ||
-         PreviousStatusSeverity != CachedStatusSeverity ||
-         !PreviousStatusText.EqualTo(CachedStatusText)))
+        (PreviousIssueCount != CachedIssueCount || PreviousStatusSeverity != CachedStatusSeverity))
     {
         OnStatusChanged.Execute();
     }
@@ -470,7 +293,7 @@ bool SWCAEditorPanel::HasPendingVisualBakeTasks(FString* OutSummary) const
     }
     if (OutSummary)
     {
-        *OutSummary = PendingSections.IsEmpty() ? TEXT("Render profile data is up to date.") : FString::Join(PendingSections, TEXT("\n\n"));
+        *OutSummary = PendingSections.IsEmpty() ? TEXT("Render Profile Lookup Texture is up to date.") : FString::Join(PendingSections, TEXT("\n\n"));
     }
     return !PendingSections.IsEmpty();
 }
@@ -503,7 +326,7 @@ bool SWCAEditorPanel::BakePendingVisualAssets(FString& OutSummary, bool* OutHadW
         }
         else
         {
-            Failures.Add(FString::Printf(TEXT("Render Profile Data: %s"), *PartBakeSummary));
+            Failures.Add(FString::Printf(TEXT("Render Profile Lookup Texture: %s"), *PartBakeSummary));
         }
     }
 
@@ -517,7 +340,7 @@ bool SWCAEditorPanel::BakePendingVisualAssets(FString& OutSummary, bool* OutHadW
         return false;
     }
 
-    OutSummary = Sections.IsEmpty() ? TEXT("Render profile data is up to date.") : FString::Join(Sections, TEXT("\n\n"));
+    OutSummary = Sections.IsEmpty() ? TEXT("Render Profile Lookup Texture is up to date.") : FString::Join(Sections, TEXT("\n\n"));
     if (OutHadWarnings != nullptr)
     {
         *OutHadWarnings = bHadWarnings;
@@ -549,44 +372,6 @@ bool SWCAEditorPanel::SaveBakedVisualAssets() const
     bSaved &= FWetClothingRenderProfileBakeService::SaveBakedRenderProfileAssets(WetClothingAsset.Get());
     bSaved &= FDWCTransparencyAssetBakeService::SaveTransparencySetupAssets(WetClothingAsset.Get());
     return bSaved;
-}
-
-EVisibility SWCAEditorPanel::GetRuntimeReadyWarningVisibility() const
-{
-    return bStatusWarningVisible ? EVisibility::Visible : EVisibility::Collapsed;
-}
-
-FText SWCAEditorPanel::GetRuntimeReadyWarningText() const
-{
-    return CachedStatusText;
-}
-
-FSlateColor SWCAEditorPanel::GetRuntimeReadyStatusTextColor() const
-{
-    switch (CachedStatusSeverity)
-    {
-    case EWCAEditorStatusSeverity::Error:
-        return FSlateColor(FLinearColor(1.0f, 0.28f, 0.28f, 1.0f));
-    case EWCAEditorStatusSeverity::Warning:
-        return FSlateColor(FLinearColor(1.0f, 0.72f, 0.24f, 1.0f));
-    case EWCAEditorStatusSeverity::Info:
-    default:
-        return FSlateColor(FLinearColor(0.54f, 0.72f, 1.0f, 1.0f));
-    }
-}
-
-FSlateColor SWCAEditorPanel::GetRuntimeReadyStatusBackgroundColor() const
-{
-    switch (CachedStatusSeverity)
-    {
-    case EWCAEditorStatusSeverity::Error:
-        return FSlateColor(FLinearColor(0.24f, 0.03f, 0.03f, 1.0f));
-    case EWCAEditorStatusSeverity::Warning:
-        return FSlateColor(FLinearColor(0.22f, 0.14f, 0.02f, 1.0f));
-    case EWCAEditorStatusSeverity::Info:
-    default:
-        return FSlateColor(FLinearColor(0.04f, 0.09f, 0.18f, 1.0f));
-    }
 }
 
 void SWCAEditorPanel::SetEditorMode(const EWCAEditorMode NewMode)

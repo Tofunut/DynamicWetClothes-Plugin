@@ -34,25 +34,22 @@ struct FWCAMaterialSlotRowArgs
     TFunction<TSharedRef<SWidget>(int32)> BuildTrailingWidget;
 };
 
-struct FWCABakeMapsMenuArgs
+struct FWCARuntimeBuildMenuArgs
 {
-    EWCAEditorMode EditorMode = EWCAEditorMode::PartEdit;
-    FSimpleDelegate OnBakeAllMaps;
-    FSimpleDelegate OnBakeRenderProfileData;
-    FSimpleDelegate OnBakeGPUWetnessMapData;
-    FSimpleDelegate OnBakeWrinkleNormalMap;
-    FSimpleDelegate OnBakeTransparencyMaps;
-    FCanExecuteAction CanBakeAnyMaps;
-    FCanExecuteAction CanBakeRenderProfileData;
-    FCanExecuteAction CanBakeGPUWetnessMapData;
-    FCanExecuteAction CanBakeWrinkleNormalMap;
-    FCanExecuteAction CanBakeTransparencyMaps;
-};
-
-struct FWCAGenerateMaterialsMenuArgs
-{
-    UWetClothingAsset* WetClothingAsset = nullptr;
+    FSimpleDelegate OnBuildAllRequired;
+    FSimpleDelegate OnBuildCPURuntimeData;
+    FSimpleDelegate OnBuildGPURuntimeData;
     FSimpleDelegate OnGenerateMaterials;
+    FSimpleDelegate OnBuildRenderProfileData;
+    FSimpleDelegate OnBakeWrinkleTextures;
+    FSimpleDelegate OnBakeTransparencyTextures;
+    FCanExecuteAction CanBuildAllRequired;
+    FCanExecuteAction CanBuildCPURuntimeData;
+    FCanExecuteAction CanBuildGPURuntimeData;
+    FCanExecuteAction CanGenerateMaterials;
+    FCanExecuteAction CanBuildRenderProfileData;
+    FCanExecuteAction CanBakeWrinkleTextures;
+    FCanExecuteAction CanBakeTransparencyTextures;
 };
 
 class FWCAEditorWidgets
@@ -66,8 +63,7 @@ class FWCAEditorWidgets
         const TSharedRef<SWidget>& PreviewContent,
         const FOnWetClothingPreviewFocusClicked& OnFocusClicked,
         TSharedPtr<SWidget> ExtraToolbarContent = TSharedPtr<SWidget>());
-    static TSharedRef<SWidget> BuildBakeMapsMenu(const FWCABakeMapsMenuArgs& Args);
-    static TSharedRef<SWidget> BuildGenerateMaterialsMenu(const FWCAGenerateMaterialsMenuArgs& Args);
+    static TSharedRef<SWidget> BuildRuntimeBuildMenu(const FWCARuntimeBuildMenuArgs& Args);
 
     static FText GetUVDisplayModeLabel(EWCAUVDisplayMode DisplayMode);
     static TSharedRef<SWidget> GenerateUVDisplayModeComboItem(TSharedPtr<EWCAUVDisplayMode> Item);

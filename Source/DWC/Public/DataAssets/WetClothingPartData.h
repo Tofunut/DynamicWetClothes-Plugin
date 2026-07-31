@@ -321,6 +321,14 @@ struct DWC_API FWetClothingGeneratedWetMaterialOverride
     /** GPU shader permutation: DWC_UseGPUBackend = true. */
     UPROPERTY(VisibleAnywhere, Category = "Generated Wet Material")
     TObjectPtr<UMaterialInstanceConstant> GPUMaterialInstance = nullptr;
+
+    /** Hash of the source material and WCA material-generation inputs used for this set. */
+    UPROPERTY(VisibleAnywhere, Category = "Generated Wet Material")
+    FString GenerationSignature;
+
+    /** Material-generator contract version used to create this set. */
+    UPROPERTY(VisibleAnywhere, Category = "Generated Wet Material")
+    int32 GeneratorVersion = 0;
 };
 
 

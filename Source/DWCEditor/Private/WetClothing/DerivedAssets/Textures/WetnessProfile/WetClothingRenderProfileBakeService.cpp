@@ -128,7 +128,7 @@ namespace
                     ? ExpectedProfile.Entry->WetPartID
                     : INDEX_NONE;
                 PendingLines.Add(FString::Printf(
-                    TEXT("Wet Part %d in slot %d uses a profile that is missing from baked Render Profile Data."),
+                    TEXT("Wet Part %d in slot %d uses a profile that is missing from baked Render Profile Lookup Texture."),
                     WetPartID,
                     ExpectedProfile.MaterialSlotIndex));
                 continue;
@@ -171,7 +171,7 @@ namespace
                     true))
             {
                 PendingLines.Add(FString::Printf(
-                    TEXT("Profile '%s' requires a Render Profile Data rebake so its 512 Droplet normal reference is regenerated."),
+                    TEXT("Profile '%s' requires a Render Profile Lookup Texture rebake so its 512 Droplet normal reference is regenerated."),
                     *StableKey));
             }
             if (!SourcePathMatches(
@@ -184,46 +184,7 @@ namespace
                     false))
             {
                 PendingLines.Add(FString::Printf(
-                    TEXT("Profile '%s' requires a Render Profile Data rebake so its 512 Droplet mask reference is regenerated."),
-                    *StableKey));
-            }
-            if (!SourcePathMatches(
-                    Surface.DropletFlowNormalTexture,
-                    BakedProfile->SourceDropletFlowNormal) ||
-                !FWetClothingSurfaceTextureNormalizer::IsPreparedTextureReferenceCurrent(
-                    BakedProfile->NormalizedDropletFlowNormal,
-                    Surface.DropletFlowNormalTexture,
-                    TEXT("DropletFlowNormal"),
-                    true))
-            {
-                PendingLines.Add(FString::Printf(
-                    TEXT("Profile '%s' requires a Render Profile Data rebake so its Flow Droplet normal reference is regenerated."),
-                    *StableKey));
-            }
-            if (!SourcePathMatches(
-                    Surface.DropletFlowMaskTexture,
-                    BakedProfile->SourceDropletFlowMask) ||
-                !FWetClothingSurfaceTextureNormalizer::IsPreparedTextureReferenceCurrent(
-                    BakedProfile->NormalizedDropletFlowMask,
-                    Surface.DropletFlowMaskTexture,
-                    TEXT("DropletFlowMask"),
-                    false))
-            {
-                PendingLines.Add(FString::Printf(
-                    TEXT("Profile '%s' requires a Render Profile Data rebake so its Flow Droplet mask reference is regenerated."),
-                    *StableKey));
-            }
-            if (!SourcePathMatches(
-                    Surface.DropletFlowNoiseTexture,
-                    BakedProfile->SourceDropletFlowNoise) ||
-                !FWetClothingSurfaceTextureNormalizer::IsPreparedTextureReferenceCurrent(
-                    BakedProfile->NormalizedDropletFlowNoise,
-                    Surface.DropletFlowNoiseTexture,
-                    TEXT("DropletFlowNoise"),
-                    false))
-            {
-                PendingLines.Add(FString::Printf(
-                    TEXT("Profile '%s' requires a Render Profile Data rebake so its Flow Droplet noise reference is regenerated."),
+                    TEXT("Profile '%s' requires a Render Profile Lookup Texture rebake so its 512 Droplet mask reference is regenerated."),
                     *StableKey));
             }
         }
@@ -253,7 +214,7 @@ bool FWetClothingRenderProfileBakeService::HasPendingVisualBakeTasks(
     }
     else if (!WetClothingAsset->HasValidDataUVForLOD(WetClothingAsset->GetSimulationLODIndex()))
     {
-        PendingLines.Add(TEXT("DWC Data UV must be rebuilt before the Wet Part Data Texture can be baked."));
+        PendingLines.Add(TEXT("The sealed DWC Data UV is invalid; create a new WCA before building the Render Profile Lookup Texture."));
     }
     else
     {
@@ -346,7 +307,7 @@ bool FWetClothingRenderProfileBakeService::BakeRenderProfileDataAndUpdateMateria
     }
     if (!WetClothingAsset->HasValidDataUVForLOD(WetClothingAsset->GetSimulationLODIndex()))
     {
-        OutSummary = TEXT("Rebuild DWC Data UV before baking the Wet Part Data Texture.");
+        OutSummary = TEXT("The sealed DWC Data UV is invalid. Create a new WCA before building the Render Profile Lookup Texture.");
         return false;
     }
 

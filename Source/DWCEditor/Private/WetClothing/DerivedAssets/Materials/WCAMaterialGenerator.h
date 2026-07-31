@@ -44,6 +44,12 @@ class FWCAMaterialGenerator
         EDWCSimulationMode SimulationMode = EDWCSimulationMode::VertexCPU,
         int32 MaterialSlotIndex = INDEX_NONE);
 
+    /** Resolves the original source material consistently for generation, validation, and visual bakes. */
+    static UMaterialInterface* ResolveGeneratedMaterialSource(
+        const UWetClothingAsset* WetClothingAsset,
+        int32 MaterialSlotIndex,
+        UMaterialInterface* CandidateMaterial);
+
     /** Creates one shared DWC material graph and two static CPU/GPU MIC permutations. */
     static FWetClothingUnifiedMaterialSetupResult CreateOrUpdateUnifiedMaterialSet(
         UMaterialInterface* SourceMaterial,

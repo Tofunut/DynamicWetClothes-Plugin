@@ -1,25 +1,50 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "DataAssets/WetnessProfile.h"
 #include "WetClothingGPUData.generated.h"
 
-/** Deduplicated simulation parameters referenced by wettable triangles. */
+/**
+ * Serialized compatibility snapshot used by existing GPU runtime bulk data.
+ * New runtime code should use FResolvedAbsorbedWaterSimulationParameters.
+ */
 USTRUCT(BlueprintType)
 struct DWC_API FDWCGPUProfileParameters
 {
     GENERATED_BODY()
 
-    UPROPERTY(VisibleAnywhere, Category = "GPU Wet Map")
+    UPROPERTY(VisibleAnywhere, Category = "GPU Runtime Data")
     float AbsorptionMultiplier = 1.0f;
 
-    UPROPERTY(VisibleAnywhere, Category = "GPU Wet Map")
+    UPROPERTY(VisibleAnywhere, Category = "GPU Runtime Data")
     float SpreadRatePerSecond = 0.0f;
 
-    UPROPERTY(VisibleAnywhere, Category = "GPU Wet Map")
+    UPROPERTY(VisibleAnywhere, Category = "GPU Runtime Data")
     float DryRatePerSecond = 0.0f;
 
-    UPROPERTY(VisibleAnywhere, Category = "GPU Wet Map")
+    UPROPERTY(VisibleAnywhere, Category = "GPU Runtime Data")
     float GravityFlowStrength = 0.0f;
+
+    FDWCGPUProfileParameters() = default;
+
+    explicit FDWCGPUProfileParameters(
+        const FResolvedAbsorbedWaterSimulationParameters& Parameters)
+        : AbsorptionMultiplier(Parameters.AbsorptionMultiplier)
+        , SpreadRatePerSecond(Parameters.SpreadRatePerSecond)
+        , DryRatePerSecond(Parameters.DryRatePerSecond)
+        , GravityFlowStrength(Parameters.GravityFlowStrength)
+    {
+    }
+
+    FResolvedAbsorbedWaterSimulationParameters ToResolvedParameters() const
+    {
+        FResolvedAbsorbedWaterSimulationParameters Result;
+        Result.AbsorptionMultiplier = AbsorptionMultiplier;
+        Result.SpreadRatePerSecond = SpreadRatePerSecond;
+        Result.DryRatePerSecond = DryRatePerSecond;
+        Result.GravityFlowStrength = GravityFlowStrength;
+        return Result;
+    }
 
     bool Equals(const FDWCGPUProfileParameters& Other, float Tolerance = KINDA_SMALL_NUMBER) const
     {
@@ -192,8 +217,8 @@ struct DWC_API FDWCGPULODBakeData
 {
     GENERATED_BODY()
 
-    static constexpr int32 CurrentRuntimeDataVersion = 5;
-    static constexpr int32 CurrentMapBakeVersion = 6;
+    static constexpr int32 CurrentRuntimeDataVersion = 6;
+    static constexpr int32 CurrentMapBakeVersion = 7;
     static constexpr int32 CurrentBulkDataVersion = 5;
 
     UPROPERTY(VisibleAnywhere, Category = "GPU Runtime Data")
@@ -240,6 +265,10 @@ struct DWC_API FDWCGPULODBakeData
     UPROPERTY(VisibleAnywhere, Category = "GPU Map Bake")
     int32 MaterialSlotMapCount = 0;
 
+    /** Legacy serialized snapshot retained for runtime-bulk compatibility.
+     *  The GPU backend rebuilds current simulation profiles from the resolved
+     *  Wetness Profile and uploads them through its Structured Buffer.
+     */
     UPROPERTY(Transient, VisibleAnywhere, Category = "GPU Runtime Data")
     TArray<FDWCGPUProfileParameters> Profiles;
 

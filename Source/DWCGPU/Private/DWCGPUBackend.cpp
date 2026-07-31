@@ -67,14 +67,10 @@ uint32 FloatToBits(const float Value)
     return Bits;
 }
 
-FDWCGPUProfileParameters MakeRuntimeGPUProfile(const FWetnessProfileParameters& Parameters)
+FResolvedAbsorbedWaterSimulationParameters MakeRuntimeAbsorbedWaterSimulationProfile(
+    const FWetnessProfileParameters& Parameters)
 {
-    FDWCGPUProfileParameters Result;
-    Result.AbsorptionMultiplier = Parameters.GetAbsorptionMultiplier();
-    Result.SpreadRatePerSecond = Parameters.GetSpreadRatePerSecond();
-    Result.DryRatePerSecond = Parameters.GetDryRatePerSecond();
-    Result.GravityFlowStrength = Parameters.GetGravityFlowStrength();
-    return Result;
+    return Parameters.ResolveAbsorbedWaterSimulation();
 }
 
 FWetnessProfileParameters ResolveRuntimeWetnessProfileParameters(
@@ -121,7 +117,7 @@ FWetnessProfileParameters ResolveRuntimeWetnessProfileParameters(
 
 int32 FindOrAddGPUProfile(
     TArray<FVector4f>& Profiles,
-    const FDWCGPUProfileParameters& Candidate,
+    const FResolvedAbsorbedWaterSimulationParameters& Candidate,
     const float SurfaceFlowAdvectionSpeed,
     const float SpreadRateScale,
     const float DryRateScale,
@@ -854,7 +850,7 @@ bool FDWCGPUBackend::BuildStaticSimulationData()
     Data->TriangleCount = Baked.Triangles.Num();
     Data->Profiles.Reserve(FMath::Max(1, Baked.Profiles.Num()));
     const FWetClothingEditableWetPartData& WetPartData = Asset->Authored.PartData.EditableWetPartData;
-    TArray<FDWCGPUProfileParameters> CurrentAuthoredProfiles;
+    TArray<FResolvedAbsorbedWaterSimulationParameters> CurrentAuthoredProfiles;
     TArray<FWetnessProfileParameters> CurrentResolvedProfiles;
     TArray<float> CurrentSurfaceFlowAdvectionSpeeds;
     CurrentAuthoredProfiles.SetNum(WetPartData.Profiles.Num());
@@ -865,7 +861,8 @@ bool FDWCGPUBackend::BuildStaticSimulationData()
         FWetnessProfileParameters& ResolvedProfile = CurrentResolvedProfiles[ProfileIndex];
         ResolvedProfile =
             ResolveRuntimeWetnessProfileParameters(*Asset, ProfileIndex);
-        CurrentAuthoredProfiles[ProfileIndex] = MakeRuntimeGPUProfile(ResolvedProfile);
+        CurrentAuthoredProfiles[ProfileIndex] =
+            MakeRuntimeAbsorbedWaterSimulationProfile(ResolvedProfile);
         const FSurfaceWaterProfileParameters& Surface = ResolvedProfile.SurfaceWater;
         CurrentSurfaceFlowAdvectionSpeeds[ProfileIndex] =
             Surface.bEnabled && Surface.bEnableDropletFlow
@@ -1015,7 +1012,8 @@ bool FDWCGPUBackend::BuildStaticSimulationData()
             FloatToBits(DropletSpawnProbability),
             FloatToBits(RejectedWaterFraction));
 
-        const FDWCGPUProfileParameters& CurrentProfile = CurrentAuthoredProfiles[AuthoredProfileIndex];
+        const FResolvedAbsorbedWaterSimulationParameters& CurrentProfile =
+            CurrentAuthoredProfiles[AuthoredProfileIndex];
         const int32 RuntimeProfileIndex = FindOrAddGPUProfile(
             Data->Profiles,
             CurrentProfile,
@@ -3037,6 +3035,21 @@ FDWCGPUBackendStats FDWCGPUBackend::GetStats() const
     }
 
     return Stats;
+}
+
+void FDWCGPUBackend::GetDebugRenderTargets(TArray<FDWCGPURenderTargetDebugSnapshot>& OutSnapshots) const
+{
+    for (const FMaterialSlotRuntime& Slot : MaterialSlots)
+    {
+        FDWCGPURenderTargetDebugSnapshot& Snapshot = OutSnapshots.AddDefaulted_GetRef();
+        Snapshot.ReceiverGPUId = ReceiverGPUId;
+        Snapshot.MaterialSlotIndex = Slot.MaterialSlotIndex;
+        Snapshot.WetnessMapResolution = Slot.Resolution;
+        Snapshot.SurfaceWaterResolution = Slot.bUsesSurfaceWater ? Slot.SurfaceWaterResolution : 0;
+        Snapshot.WetnessMap = Slot.GetCurrentMap();
+        Snapshot.DropletsMap = Slot.bUsesSurfaceWater ? Slot.SurfaceDropletRT.Get() : nullptr;
+        Snapshot.RivuletsMap = Slot.bUsesSurfaceWater ? Slot.GetCurrentSurfaceFlowDropletMap() : nullptr;
+    }
 }
 
 void FDWCGPUBackend::Shutdown()

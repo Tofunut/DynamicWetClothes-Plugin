@@ -363,16 +363,18 @@ namespace
     FString MakeWetnessProfileParametersHash(const FWetnessProfileParameters& Parameters)
     {
         const FAbsorbedWetnessProfileParameters& Absorbed = Parameters.AbsorbedWetness;
+        const FResolvedAbsorbedWaterSimulationParameters AbsorbedSimulation =
+            Parameters.ResolveAbsorbedWaterSimulation();
         const FSurfaceWaterProfileParameters& Surface = Parameters.SurfaceWater;
 
         const FString AbsorbedKey = FString::Printf(
             TEXT("Abs{%d,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g}"),
             Absorbed.bEnabled ? 1 : 0,
             Parameters.GetAbsorptionFraction(),
-            Parameters.GetAbsorptionMultiplier(),
-            Parameters.GetSpreadRatePerSecond(),
-            Parameters.GetDryRatePerSecond(),
-            Parameters.GetGravityFlowStrength(),
+            AbsorbedSimulation.AbsorptionMultiplier,
+            AbsorbedSimulation.SpreadRatePerSecond,
+            AbsorbedSimulation.DryRatePerSecond,
+            AbsorbedSimulation.GravityFlowStrength,
             Parameters.GetAbsorbedDarkeningStrength(),
             Parameters.GetAbsorbedGlossinessStrength());
 
@@ -619,23 +621,28 @@ namespace
 
 
     void ResolveWetnessProfilesForDerivedInline(
-        const FWetClothingEditableWetPartData& WetPartData,
+        FWetClothingEditableWetPartData& WetPartData,
         TArray<FWetnessProfileParameters>& OutResolvedParameters)
     {
         OutResolvedParameters.Reset();
         OutResolvedParameters.Reserve(WetPartData.Profiles.Num());
 
-        for (const FWetPartProfileAssignment& ProfileAssignment : WetPartData.Profiles)
+        for (FWetPartProfileAssignment& ProfileAssignment : WetPartData.Profiles)
         {
             FWetnessProfileParameters Parameters = ProfileAssignment.Parameters;
+#if WITH_EDITOR
             if (ProfileAssignment.SourceProfile.IsValid())
             {
-                if (const UWetnessProfile* SourceProfile =
-                        Cast<UWetnessProfile>(ProfileAssignment.SourceProfile.TryLoad()))
+                UObject* SourceObject = ProfileAssignment.SourceProfile.ResolveObject();
+                if (SourceObject == nullptr)
+                {
+                    SourceObject = ProfileAssignment.SourceProfile.TryLoad();
+                }
+
+                if (const UWetnessProfile* SourceProfile = Cast<UWetnessProfile>(SourceObject))
                 {
                     Parameters = SourceProfile->GetParameters();
                 }
-#if WITH_EDITOR
                 else
                 {
                     UE_LOG(
@@ -644,8 +651,12 @@ namespace
                         TEXT("WetClothingAsset: Failed to resolve Wetness Profile '%s' while refreshing WCA snapshot. Using the WCA fallback profile."),
                         *ProfileAssignment.SourceProfile.ToString());
                 }
-#endif
             }
+#endif
+
+            // Keep the authored fallback and the derived runtime snapshot on the same revision.
+            // Non-editor builds never need to resolve the source profile asset.
+            ProfileAssignment.Parameters = Parameters;
             OutResolvedParameters.Add(Parameters);
         }
     }
@@ -1635,15 +1646,22 @@ bool UWetClothingAsset::DoesMaterialSlotUseSurfaceWater(const int32 MaterialSlot
         if (bHasAuthoredProfile)
         {
             const FWetPartProfileAssignment& ProfileAssignment = WetPartData.Profiles[ProfileIndex];
+#if WITH_EDITOR
             if (ProfileAssignment.SourceProfile.IsValid())
             {
-                if (const UWetnessProfile* SourceProfile =
-                        Cast<UWetnessProfile>(ProfileAssignment.SourceProfile.TryLoad()))
+                UObject* SourceObject = ProfileAssignment.SourceProfile.ResolveObject();
+                if (SourceObject == nullptr)
+                {
+                    SourceObject = ProfileAssignment.SourceProfile.TryLoad();
+                }
+
+                if (const UWetnessProfile* SourceProfile = Cast<UWetnessProfile>(SourceObject))
                 {
                     Parameters = SourceProfile->GetParameters();
                     bHasParameters = true;
                 }
             }
+#endif
             if (!bHasParameters)
             {
                 Parameters = Derived.Inline.ResolvedWetnessProfileParameters.IsValidIndex(ProfileIndex)

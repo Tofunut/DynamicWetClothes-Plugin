@@ -2275,7 +2275,13 @@ FWCAMaterialGenerator::FOptions FWCAMaterialGenerator::MakeOptionsForAsset(
                 FWetnessProfileParameters        Parameters = Profile != nullptr ? Profile->Parameters : FWetnessProfileParameters();
                 if (Profile != nullptr && Profile->SourceProfile.IsValid())
                 {
-                    if (const UWetnessProfile* SourceProfile = Cast<UWetnessProfile>(Profile->SourceProfile.TryLoad()))
+                    UObject* SourceObject = Profile->SourceProfile.ResolveObject();
+                    if (SourceObject == nullptr)
+                    {
+                        SourceObject = Profile->SourceProfile.TryLoad();
+                    }
+
+                    if (const UWetnessProfile* SourceProfile = Cast<UWetnessProfile>(SourceObject))
                     {
                         Parameters = SourceProfile->GetParameters();
                     }
@@ -2621,6 +2627,74 @@ bool FWCAMaterialGenerator::IsMaterialConfiguredForDwc(
            bConfiguredForSurfaceWater == bExpectSurfaceWater;
 }
 
+UMaterialInterface* FWCAMaterialGenerator::ResolveGeneratedMaterialSource(
+    const UWetClothingAsset* WetClothingAsset,
+    const int32 MaterialSlotIndex,
+    UMaterialInterface* CandidateMaterial)
+{
+    if (WetClothingAsset == nullptr)
+    {
+        return CandidateMaterial;
+    }
+
+    USkeletalMesh* RuntimeMesh = WetClothingAsset->GetRuntimeSkeletalMesh();
+    USkeletalMesh* SourceMesh = WetClothingAsset->GetSourceSkeletalMesh();
+    if (RuntimeMesh != nullptr && SourceMesh != nullptr &&
+        RuntimeMesh->GetMaterials().IsValidIndex(MaterialSlotIndex))
+    {
+        const TArray<FSkeletalMaterial>& SourceMaterials = SourceMesh->GetMaterials();
+        if (SourceMaterials.IsValidIndex(MaterialSlotIndex) &&
+            SourceMaterials[MaterialSlotIndex].MaterialInterface != nullptr)
+        {
+            return SourceMaterials[MaterialSlotIndex].MaterialInterface;
+        }
+
+        const FSkeletalMaterial& RuntimeMaterial = RuntimeMesh->GetMaterials()[MaterialSlotIndex];
+        for (const FSkeletalMaterial& SourceMaterial : SourceMaterials)
+        {
+            const bool bSlotNameMatches =
+                !RuntimeMaterial.MaterialSlotName.IsNone() &&
+                (SourceMaterial.MaterialSlotName == RuntimeMaterial.MaterialSlotName ||
+                 SourceMaterial.ImportedMaterialSlotName == RuntimeMaterial.MaterialSlotName);
+            const bool bImportedNameMatches =
+                !RuntimeMaterial.ImportedMaterialSlotName.IsNone() &&
+                (SourceMaterial.MaterialSlotName == RuntimeMaterial.ImportedMaterialSlotName ||
+                 SourceMaterial.ImportedMaterialSlotName == RuntimeMaterial.ImportedMaterialSlotName);
+            if ((bSlotNameMatches || bImportedNameMatches) &&
+                SourceMaterial.MaterialInterface != nullptr)
+            {
+                return SourceMaterial.MaterialInterface;
+            }
+        }
+    }
+
+    if (CandidateMaterial == nullptr)
+    {
+        return nullptr;
+    }
+
+    UMaterial* CandidateBase = CandidateMaterial->GetMaterial();
+    for (const FWetClothingGeneratedWetMaterialOverride& MaterialOverride :
+         WetClothingAsset->Derived.Inline.GeneratedWetMaterialOverrides)
+    {
+        UMaterialInterface* SourceMaterial = MaterialOverride.SourceMaterial.Get();
+        UMaterial* GeneratedMaterial = MaterialOverride.GeneratedMaterial.Get();
+        UMaterialInterface* CPUMaterialInstance = MaterialOverride.CPUMaterialInstance.Get();
+        UMaterialInterface* GPUMaterialInstance = MaterialOverride.GPUMaterialInstance.Get();
+        if (SourceMaterial != nullptr &&
+            (CandidateMaterial == SourceMaterial ||
+             CandidateMaterial == GeneratedMaterial ||
+             CandidateMaterial == CPUMaterialInstance ||
+             CandidateMaterial == GPUMaterialInstance ||
+             CandidateBase == GeneratedMaterial))
+        {
+            return SourceMaterial;
+        }
+    }
+
+    return CandidateMaterial;
+}
+
 void FWCAMaterialGenerator::ValidateGeneratedMaterialOverrideReferences(
     const UWetClothingAsset* WetClothingAsset,
     TArray<FString>&         OutMessages)
@@ -2637,7 +2711,7 @@ void FWCAMaterialGenerator::ValidateGeneratedMaterialOverrideReferences(
     if (WetClothingAsset->Derived.Inline.GeneratedEvaluateSurfaceAppearanceFunction == nullptr ||
         WetClothingAsset->Derived.Inline.GeneratedEvaluateSurfaceAppearanceFunction != ExpectedFunction)
     {
-        OutMessages.Add(TEXT("Generated Materials: MF_DWC_EvaluateSurfaceAppearance is missing or out of date. Use Generate Materials."));
+        OutMessages.Add(TEXT("MF_DWC_EvaluateSurfaceAppearance is missing or out of date."));
     }
 #endif
 
@@ -2656,7 +2730,7 @@ void FWCAMaterialGenerator::ValidateGeneratedMaterialOverrideReferences(
     USkeletalMesh* RuntimeMesh = WetClothingAsset->GetRuntimeSkeletalMesh();
     if (RuntimeMesh == nullptr)
     {
-        OutMessages.Add(TEXT("Generated Materials: Assign a runtime skeletal mesh before generating wet materials."));
+        OutMessages.Add(TEXT("Assign a runtime skeletal mesh before generating wet materials."));
         return;
     }
 
@@ -2671,7 +2745,10 @@ void FWCAMaterialGenerator::ValidateGeneratedMaterialOverrideReferences(
             continue;
         }
 
-        UMaterialInterface*                             SourceMaterial = Materials[MaterialSlotIndex].MaterialInterface;
+        UMaterialInterface* SourceMaterial = ResolveGeneratedMaterialSource(
+            WetClothingAsset,
+            MaterialSlotIndex,
+            Materials[MaterialSlotIndex].MaterialInterface);
         const FWetClothingGeneratedWetMaterialOverride* MaterialOverride =
             FindGeneratedWetMaterialOverride(*WetClothingAsset, MaterialSlotIndex);
         UMaterial*          GeneratedMaterial = MaterialOverride != nullptr ? MaterialOverride->GeneratedMaterial.Get() : nullptr;
@@ -2680,26 +2757,26 @@ void FWCAMaterialGenerator::ValidateGeneratedMaterialOverrideReferences(
 
         if (SourceMaterial == nullptr)
         {
-            OutMessages.Add(FString::Printf(TEXT("Slot %d: runtime mesh has no source material."), MaterialSlotIndex));
+            OutMessages.Add(FString::Printf(TEXT("Slot %d: source material could not be resolved."), MaterialSlotIndex));
         }
         else if (MaterialOverride == nullptr || GeneratedMaterial == nullptr ||
                  CPUMaterialInstance == nullptr || GPUMaterialInstance == nullptr)
         {
             OutMessages.Add(FString::Printf(
-                TEXT("Slot %d: missing unified generated DWC material or backend permutation. Use Generate Materials."),
+                TEXT("Slot %d: missing unified generated DWC material or backend permutation."),
                 MaterialSlotIndex));
         }
         else if (MaterialOverride->SourceMaterial != SourceMaterial)
         {
             OutMessages.Add(FString::Printf(
-                TEXT("Slot %d: generated materials reference an outdated source material. Use Generate Materials."),
+                TEXT("Slot %d: generated materials reference an outdated source material."),
                 MaterialSlotIndex));
         }
         else if (CPUMaterialInstance->GetMaterial() != GeneratedMaterial ||
                  GPUMaterialInstance->GetMaterial() != GeneratedMaterial)
         {
             OutMessages.Add(FString::Printf(
-                TEXT("Slot %d: CPU/GPU material permutations no longer share the recorded generated parent. Use Generate Materials."),
+                TEXT("Slot %d: CPU/GPU material permutations no longer share the recorded generated parent."),
                 MaterialSlotIndex));
         }
     }
@@ -2721,7 +2798,7 @@ void FWCAMaterialGenerator::ValidateGeneratedMaterialOverrides(
     if (WetClothingAsset->Derived.Inline.GeneratedEvaluateSurfaceAppearanceFunction == nullptr ||
         WetClothingAsset->Derived.Inline.GeneratedEvaluateSurfaceAppearanceFunction != ExpectedFunction)
     {
-        OutMessages.Add(TEXT("Generated Materials: MF_DWC_EvaluateSurfaceAppearance is missing or out of date. Use Generate Materials."));
+        OutMessages.Add(TEXT("MF_DWC_EvaluateSurfaceAppearance is missing or out of date."));
     }
 #endif
 
@@ -2734,7 +2811,7 @@ void FWCAMaterialGenerator::ValidateGeneratedMaterialOverrides(
     FString SharedFunctionError;
     if (!ValidateSurfaceAppearanceFunctions(SharedFunctionError))
     {
-        OutMessages.Add(TEXT("Generated Materials: ") + SharedFunctionError);
+        OutMessages.Add(SharedFunctionError);
     }
 
     const TArray<int32> WettableSlots = CollectWettableMaterialSlotIndices(*WetClothingAsset);
@@ -2746,7 +2823,7 @@ void FWCAMaterialGenerator::ValidateGeneratedMaterialOverrides(
     USkeletalMesh* RuntimeMesh = WetClothingAsset->GetRuntimeSkeletalMesh();
     if (RuntimeMesh == nullptr)
     {
-        OutMessages.Add(TEXT("Generated Materials: Assign a runtime skeletal mesh before generating wet materials."));
+        OutMessages.Add(TEXT("Assign a runtime skeletal mesh before generating wet materials."));
         return;
     }
 
@@ -2762,11 +2839,14 @@ void FWCAMaterialGenerator::ValidateGeneratedMaterialOverrides(
             continue;
         }
 
-        UMaterialInterface* SourceMaterial = Materials[MaterialSlotIndex].MaterialInterface;
+        UMaterialInterface* SourceMaterial = ResolveGeneratedMaterialSource(
+            WetClothingAsset,
+            MaterialSlotIndex,
+            Materials[MaterialSlotIndex].MaterialInterface);
         if (SourceMaterial == nullptr)
         {
             OutMessages.Add(FString::Printf(
-                TEXT("Slot %d: runtime mesh has no source material."),
+                TEXT("Slot %d: source material could not be resolved."),
                 MaterialSlotIndex));
             continue;
         }
@@ -2781,7 +2861,7 @@ void FWCAMaterialGenerator::ValidateGeneratedMaterialOverrides(
             CPUMaterialInstance == nullptr || GPUMaterialInstance == nullptr)
         {
             OutMessages.Add(FString::Printf(
-                TEXT("Slot %d: missing unified generated DWC material or backend permutation. Use Generate Materials."),
+                TEXT("Slot %d: missing unified generated DWC material or backend permutation."),
                 MaterialSlotIndex));
             continue;
         }
@@ -2789,7 +2869,7 @@ void FWCAMaterialGenerator::ValidateGeneratedMaterialOverrides(
         if (MaterialOverride->SourceMaterial != SourceMaterial)
         {
             OutMessages.Add(FString::Printf(
-                TEXT("Slot %d: generated materials are out of date because the runtime mesh source material changed. Use Generate Materials."),
+                TEXT("Slot %d: generated materials are out of date because the source material changed."),
                 MaterialSlotIndex));
             continue;
         }
@@ -2799,7 +2879,7 @@ void FWCAMaterialGenerator::ValidateGeneratedMaterialOverrides(
             (GPUMaterialInstance != nullptr && GPUMaterialInstance->GetMaterial() != GeneratedMaterial))
         {
             OutMessages.Add(FString::Printf(
-                TEXT("Slot %d: generated material permutations do not share the recorded unified parent. Use Generate Materials."),
+                TEXT("Slot %d: generated material permutations do not share the recorded unified parent."),
                 MaterialSlotIndex));
             continue;
         }
@@ -2816,7 +2896,7 @@ void FWCAMaterialGenerator::ValidateGeneratedMaterialOverrides(
         if (!IsMaterialConfiguredForDwc(CPUMaterialInstance, CPUOptions))
         {
             OutMessages.Add(FString::Printf(
-                TEXT("Slot %d: generated CPU material '%s' is missing DWC CPU material setup. Use Generate Materials."),
+                TEXT("Slot %d: generated CPU material '%s' is missing DWC CPU material setup."),
                 MaterialSlotIndex,
                 *GetNameSafe(CPUMaterialInstance)));
             continue;
@@ -2835,7 +2915,7 @@ void FWCAMaterialGenerator::ValidateGeneratedMaterialOverrides(
                                                            TEXT(" Missing runtime parameters: %s."),
                                                            *FString::Join(MissingGpuParameters, TEXT(", ")));
             OutMessages.Add(FString::Printf(
-                TEXT("Slot %d: generated GPU material '%s' is missing DWC GPU material setup or wetness-map parameters.%s Use Generate Materials."),
+                TEXT("Slot %d: generated GPU material '%s' is missing DWC GPU material setup or wetness-map parameters.%s"),
                 MaterialSlotIndex,
                 *GetNameSafe(GPUMaterialInstance),
                 *MissingParameterText));

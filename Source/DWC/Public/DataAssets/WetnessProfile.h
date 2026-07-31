@@ -7,6 +7,41 @@
 class UTexture2D;
 class USkeletalMesh;
 
+/**
+ * Runtime-ready Absorbed Water simulation parameters.
+ *
+ * These values are dynamic solver inputs. They are materialized from the
+ * authored profile when runtime simulation state or GPU compute buffers are
+ * rebuilt, and must not be treated as GPU Simulation Map bake dependencies.
+ */
+USTRUCT(BlueprintType)
+struct DWC_API FResolvedAbsorbedWaterSimulationParameters
+{
+    GENERATED_BODY()
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Absorbed Water|Simulation")
+    float AbsorptionMultiplier = 0.0f;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Absorbed Water|Simulation")
+    float SpreadRatePerSecond = 0.0f;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Absorbed Water|Simulation")
+    float DryRatePerSecond = 0.0f;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Absorbed Water|Simulation")
+    float GravityFlowStrength = 0.0f;
+
+    bool Equals(
+        const FResolvedAbsorbedWaterSimulationParameters& Other,
+        const float Tolerance = KINDA_SMALL_NUMBER) const
+    {
+        return FMath::IsNearlyEqual(AbsorptionMultiplier, Other.AbsorptionMultiplier, Tolerance) &&
+               FMath::IsNearlyEqual(SpreadRatePerSecond, Other.SpreadRatePerSecond, Tolerance) &&
+               FMath::IsNearlyEqual(DryRatePerSecond, Other.DryRatePerSecond, Tolerance) &&
+               FMath::IsNearlyEqual(GravityFlowStrength, Other.GravityFlowStrength, Tolerance);
+    }
+};
+
 USTRUCT(BlueprintType)
 struct DWC_API FAbsorbedWetnessProfileParameters
 {
@@ -16,26 +51,26 @@ struct DWC_API FAbsorbedWetnessProfileParameters
     bool bEnabled = true;
 
     /** Fraction of incoming water routed to the absorbed-wetness channel. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Absorbed Wetness", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Absorbed Wetness|Simulation", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float AbsorptionFraction = 0.5f;
 
     /** Absorption response multiplier. This is intentionally not a per-second rate. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Absorbed Wetness", meta = (ClampMin = "0.0", DisplayName = "Absorption Rate"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Absorbed Wetness|Simulation", meta = (ClampMin = "0.0", DisplayName = "Absorption Rate"))
     float AbsorptionRate = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Absorbed Wetness", meta = (ClampMin = "0.0"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Absorbed Wetness|Simulation", meta = (ClampMin = "0.0"))
     float SpreadRate = 6.5f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Absorbed Wetness", meta = (ClampMin = "0.0", ClampMax = "100.0", UIMin = "0.0", UIMax = "100.0", Units = "Percent", DisplayName = "Dry Rate"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Absorbed Wetness|Simulation", meta = (ClampMin = "0.0", ClampMax = "100.0", UIMin = "0.0", UIMax = "100.0", Units = "Percent", DisplayName = "Dry Rate"))
     float DryRate = 20.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Absorbed Wetness", meta = (ClampMin = "0.0", DisplayName = "Gravity Spread Bias"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Absorbed Wetness|Simulation", meta = (ClampMin = "0.0", DisplayName = "Gravity Spread Bias"))
     float GravityFlowStrength = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Absorbed Wetness|Rendering", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Absorbed Wetness|Rendering", meta = (ClampMin = "0.0", ClampMax = "3.0", UIMin = "0.0", UIMax = "3.0"))
     float AbsorbedDarkeningStrength = 0.5f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Absorbed Wetness|Rendering", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Absorbed Wetness|Rendering", meta = (ClampMin = "0.0", ClampMax = "3.0", UIMin = "0.0", UIMax = "3.0"))
     float AbsorbedGlossinessStrength = 0.5f;
 
     float GetDryRatePerSecond() const
@@ -55,86 +90,86 @@ struct DWC_API FSurfaceWaterProfileParameters
     bool bEnabled = false;
 
     /** Enables droplet stamp generation for this profile. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet", meta = (EditCondition = "false", EditConditionHides))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Simulation|Droplet", meta = (EditCondition = "false", EditConditionHides))
     bool bEnableDroplets = true;
 
     /** Legacy representation scale. Surface Water now routes all unabsorbed water to droplets. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Simulation", meta = (ClampMin = "0.0", ClampMax = "1.0", EditCondition = "false", EditConditionHides))
     float SurfaceRepresentationFraction = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Simulation|Droplet", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float DropletSpawnProbability = 0.5f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet", meta = (ClampMin = "0.01", Units = "s"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Simulation|Droplet", meta = (ClampMin = "0.01", Units = "s"))
     float DropletLifetimeSeconds = 5.0f;
 
     /** Half-size of stationary stamps written into the static Droplet RT. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet", meta = (ClampMin = "0.0", ClampMax = "256.0", DisplayName = "Static Stamp Size"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Simulation|Droplet", meta = (ClampMin = "0.0", ClampMax = "256.0", DisplayName = "Static Stamp Size"))
     float DropletRadiusPixels = 16.0f;
 
     /** Maximum number of concurrently alive static stamps for each Wet Part/profile. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet", meta = (ClampMin = "1", ClampMax = "4096", UIMin = "1", UIMax = "1024", DisplayName = "Max Active Stamps"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Simulation|Droplet", meta = (ClampMin = "1", ClampMax = "4096", UIMin = "1", UIMax = "1024", DisplayName = "Max Active Stamps"))
     int32 DropletMaxActiveStamps = 256;
 
     /** Enables independently stamped flowing droplets in the dedicated Flow Droplet RT. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet|Flow")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Simulation|Droplet|Flow")
     bool bEnableDropletFlow = false;
 
     /** Independent spawn probability for stamps written into the Flow Droplet RT. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet|Flow", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Simulation|Droplet|Flow", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float DropletFlowSpawnProbability = 0.5f;
 
     /** Lifetime of stamps written into the Flow Droplet RT. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet|Flow", meta = (ClampMin = "0.01", Units = "s"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Simulation|Droplet|Flow", meta = (ClampMin = "0.01", Units = "s"))
     float DropletFlowLifetimeSeconds = 5.0f;
 
     /** Horizontal half-size of stamps written into the Flow Droplet RT. Kept under the legacy name for asset compatibility. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet|Flow", meta = (ClampMin = "0.0", ClampMax = "256.0", DisplayName = "Flow Stamp Width"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Simulation|Droplet|Flow", meta = (ClampMin = "0.0", ClampMax = "256.0", DisplayName = "Flow Stamp Width"))
     float DropletFlowRadiusPixels = 16.0f;
 
     /** Vertical half-size of stamps written into the Flow Droplet RT. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet|Flow", meta = (ClampMin = "0.0", ClampMax = "256.0", DisplayName = "Flow Stamp Height"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Simulation|Droplet|Flow", meta = (ClampMin = "0.0", ClampMax = "256.0", DisplayName = "Flow Stamp Height"))
     float DropletFlowHeightPixels = 32.0f;
 
     /** Blends the independently selected flow contact toward a random point in the same UV triangle. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet|Flow", meta = (ClampMin = "0.0", ClampMax = "1.0", DisplayName = "Spawn Position Spread"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Simulation|Droplet|Flow", meta = (ClampMin = "0.0", ClampMax = "1.0", DisplayName = "Spawn Position Spread"))
     float DropletFlowSpawnPositionSpread = 0.35f;
 
     /** Maximum number of concurrently alive flow stamps for each Wet Part/profile. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet|Flow", meta = (ClampMin = "1", ClampMax = "4096", UIMin = "1", UIMax = "1024", DisplayName = "Max Active Stamps"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Simulation|Droplet|Flow", meta = (ClampMin = "1", ClampMax = "4096", UIMin = "1", UIMax = "1024", DisplayName = "Max Active Stamps"))
     int32 DropletFlowMaxActiveStamps = 256;
 
     /** Signed UV distance travelled per second. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet|Flow", meta = (ClampMin = "-4.0", ClampMax = "4.0", UIMin = "-1.0", UIMax = "1.0"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rendering|Droplet|Flow", meta = (ClampMin = "-4.0", ClampMax = "4.0", UIMin = "-1.0", UIMax = "1.0"))
     float DropletFlowSpeed = 0.25f;
 
     /** UV distance per second used to advect the Flow Droplet RT along pose-dependent surface gravity. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet|Flow", meta = (ClampMin = "0.0", ClampMax = "4.0", UIMin = "0.0", UIMax = "1.0"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Simulation|Droplet|Flow", meta = (ClampMin = "0.0", ClampMax = "4.0", UIMin = "0.0", UIMax = "1.0"))
     float DropletFlowAdvectionSpeed = 0.08f;
 
     /** Flow direction in UV space. 0 points along +U and 90 points along +V. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet|Flow", meta = (ClampMin = "-360.0", ClampMax = "360.0", UIMin = "-180.0", UIMax = "180.0", Units = "deg"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rendering|Droplet|Flow", meta = (ClampMin = "-360.0", ClampMax = "360.0", UIMin = "-180.0", UIMax = "180.0", Units = "deg"))
     float DropletFlowDirectionDegrees = 90.0f;
 
     /** Optional normal texture for flowing droplets. Empty falls back to the static Droplet normal. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet|Flow")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rendering|Droplet|Flow")
     TObjectPtr<UTexture2D> DropletFlowNormalTexture = nullptr;
 
     /** Optional mask texture for flowing droplets. Empty falls back to the static Droplet mask. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet|Flow")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rendering|Droplet|Flow")
     TObjectPtr<UTexture2D> DropletFlowMaskTexture = nullptr;
 
     /** Optional grayscale noise used to bend the flowing UV path sideways. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet|Flow")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rendering|Droplet|Flow")
     TObjectPtr<UTexture2D> DropletFlowNoiseTexture = nullptr;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet|Flow", meta = (ClampMin = "0.01", ClampMax = "64.0"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rendering|Droplet|Flow", meta = (ClampMin = "0.01", ClampMax = "64.0"))
     float DropletFlowNoiseTiling = 2.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet|Flow", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rendering|Droplet|Flow", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float DropletFlowNoiseStrength = 0.05f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet|Flow", meta = (ClampMin = "-4.0", ClampMax = "4.0", UIMin = "-1.0", UIMax = "1.0"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rendering|Droplet|Flow", meta = (ClampMin = "-4.0", ClampMax = "4.0", UIMin = "-1.0", UIMax = "1.0"))
     float DropletFlowNoiseSpeed = 0.15f;
 
     /** Roughness reached by fully visible surface water. */
@@ -162,35 +197,35 @@ struct DWC_API FSurfaceWaterProfileParameters
     float SurfaceWaterSpecular = 0.5f;
 
     /** Roughness reached by fully visible flowing droplets. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet|Flow|Rendering", meta=(ClampMin="0.0", ClampMax="1.0", DisplayName="Water Roughness"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rendering|Droplet|Flow", meta=(ClampMin="0.0", ClampMax="1.0", DisplayName="Water Roughness"))
     float DropletFlowTargetRoughness = 0.02f;
 
     /** Strength of the Flow Droplet roughness blend toward Water Roughness. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet|Flow|Rendering", meta=(ClampMin="0.0", ClampMax="1.0", DisplayName="Roughness Blend"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rendering|Droplet|Flow", meta=(ClampMin="0.0", ClampMax="1.0", DisplayName="Roughness Blend"))
     float DropletFlowRoughnessBlend = 0.85f;
 
     /** Overall Flow Droplet rendering strength after coverage is resolved. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet|Flow|Rendering", meta=(ClampMin="0.0", ClampMax="1.0", DisplayName="Total Strength"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rendering|Droplet|Flow", meta=(ClampMin="0.0", ClampMax="1.0", DisplayName="Total Strength"))
     float DropletFlowTotalStrength = 0.5f;
 
     /** How strongly flowing droplets modify the underlying Base Color. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet|Flow|Rendering", meta=(ClampMin="0.0", ClampMax="1.0", DisplayName="Color Blend"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rendering|Droplet|Flow", meta=(ClampMin="0.0", ClampMax="1.0", DisplayName="Color Blend"))
     float DropletFlowColorBlend = 1.0f;
 
     /** Normal-map strength for flowing droplets. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet|Flow|Rendering", meta=(ClampMin="0.0", ClampMax="3.0", DisplayName="Water Normal Strength"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rendering|Droplet|Flow", meta=(ClampMin="0.0", ClampMax="3.0", DisplayName="Water Normal Strength"))
     float DropletFlowNormalStrength = 3.0f;
 
     /** Specular reached by fully visible flowing droplets. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet|Flow|Rendering", meta=(ClampMin="0.0", ClampMax="1.0", DisplayName="Water Specular"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rendering|Droplet|Flow", meta=(ClampMin="0.0", ClampMax="1.0", DisplayName="Water Specular"))
     float DropletFlowSpecular = 0.5f;
 
     /** Optional profile override. Null disables the Droplet normal contribution. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet|Rendering")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rendering|Droplet")
     TObjectPtr<UTexture2D> DropletNormalTexture = nullptr;
 
     /** Optional mask used to localize the Droplet normal detail. Null means no authored mask. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet|Rendering")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Rendering|Droplet")
     TObjectPtr<UTexture2D> DropletMaskTexture = nullptr;
 
 };
@@ -228,6 +263,24 @@ struct DWC_API FWetnessProfileParameters
         return SurfaceWater.bEnabled;
     }
 
+    /**
+     * Resolves the authored Absorbed Water simulation settings into the exact
+     * values consumed by the CPU solver and GPU compute buffers.
+     */
+    FResolvedAbsorbedWaterSimulationParameters ResolveAbsorbedWaterSimulation() const
+    {
+        FResolvedAbsorbedWaterSimulationParameters Result;
+        Result.AbsorptionMultiplier = GetAbsorptionFraction() * AbsorptionMultiplierScale;
+        Result.SpreadRatePerSecond = FMath::Max(0.0f, AbsorbedWetness.SpreadRate);
+
+        const float DryPercentPerSecond = FMath::Clamp(AbsorbedWetness.DryRate, 0.0f, 100.0f);
+        const float RemainingFraction =
+            FMath::Max(1.0f - DryPercentPerSecond * 0.01f, KINDA_SMALL_NUMBER);
+        Result.DryRatePerSecond = -FMath::Loge(RemainingFraction);
+        Result.GravityFlowStrength = FMath::Max(0.0f, AbsorbedWetness.GravityFlowStrength);
+        return Result;
+    }
+
     float GetAbsorptionMultiplier() const
     {
         return GetAbsorptionFraction() * AbsorptionMultiplierScale;
@@ -255,14 +308,14 @@ struct DWC_API FWetnessProfileParameters
     float GetAbsorbedDarkeningStrength() const
     {
         return AbsorbedWetness.bEnabled
-                   ? FMath::Clamp(AbsorbedWetness.AbsorbedDarkeningStrength, 0.0f, 1.0f)
+                   ? FMath::Clamp(AbsorbedWetness.AbsorbedDarkeningStrength, 0.0f, 3.0f)
                    : 0.0f;
     }
 
     float GetAbsorbedGlossinessStrength() const
     {
         return AbsorbedWetness.bEnabled
-                   ? FMath::Clamp(AbsorbedWetness.AbsorbedGlossinessStrength, 0.0f, 1.0f)
+                   ? FMath::Clamp(AbsorbedWetness.AbsorbedGlossinessStrength, 0.0f, 3.0f)
                    : 0.0f;
     }
 

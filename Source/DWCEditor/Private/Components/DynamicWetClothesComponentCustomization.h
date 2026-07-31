@@ -53,6 +53,8 @@ private:
     EVisibility GetBindingApplyVisibility(int32 BindingIndex) const;
     bool CanApplyBinding(int32 BindingIndex) const;
     bool CanApplyAll() const;
+    bool CanOpenGPURenderTargetDebugger() const;
+    FReply HandleOpenGPURenderTargetDebugger();
     FReply HandleApplyBinding(int32 BindingIndex);
     FReply HandleApplyAll();
     bool ApplyBinding(int32 BindingIndex, bool bUseTransaction);

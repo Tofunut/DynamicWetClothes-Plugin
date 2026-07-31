@@ -153,7 +153,13 @@ bool FWetClothingWetPartDataTextureBaker::ResolveProfileParameters(
 {
     if (ProfileAssignment != nullptr && ProfileAssignment->SourceProfile.IsValid())
     {
-        if (const UWetnessProfile* Profile = Cast<UWetnessProfile>(ProfileAssignment->SourceProfile.TryLoad()))
+        UObject* SourceObject = ProfileAssignment->SourceProfile.ResolveObject();
+        if (SourceObject == nullptr)
+        {
+            SourceObject = ProfileAssignment->SourceProfile.TryLoad();
+        }
+
+        if (const UWetnessProfile* Profile = Cast<UWetnessProfile>(SourceObject))
         {
             OutParameters = Profile->GetParameters();
             FWetnessProfileEditorPolicy::SanitizeParameters(OutParameters);

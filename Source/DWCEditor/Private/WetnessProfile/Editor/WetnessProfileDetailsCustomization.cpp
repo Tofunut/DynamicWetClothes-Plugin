@@ -444,14 +444,14 @@ void FWetnessProfileDetailsCustomization::CustomizeDetails(IDetailLayoutBuilder&
             FindPropertyByPath(TEXT("Parameters.AbsorbedWetness.AbsorbedDarkeningStrength")),
             LOCTEXT("Darkening", "Darkening"),
             LOCTEXT("DarkeningTooltip", "How strongly absorbed water darkens the base color."),
-            0.0f, 1.0f, 0.0f, 1.0f, 0.01f, 100.0f, 1, LOCTEXT("PercentSuffix6", "%"),
+            0.0f, 3.0f, 0.0f, 3.0f, 0.01f, 100.0f, 1, LOCTEXT("PercentSuffix6", "%"),
             AbsorbedSettingsEnabled);
         AddFloatProperty(
             RenderingCategory,
             FindPropertyByPath(TEXT("Parameters.AbsorbedWetness.AbsorbedGlossinessStrength")),
             LOCTEXT("AbsorbedGlossiness", "Glossiness"),
             LOCTEXT("AbsorbedGlossinessTooltip", "How strongly absorbed water blends roughness toward the wet roughness target."),
-            0.0f, 1.0f, 0.0f, 1.0f, 0.01f, 100.0f, 1, LOCTEXT("PercentSuffixAbsorbedGlossiness", "%"),
+            0.0f, 3.0f, 0.0f, 3.0f, 0.01f, 100.0f, 1, LOCTEXT("PercentSuffixAbsorbedGlossiness", "%"),
             AbsorbedSettingsEnabled);
     }
 

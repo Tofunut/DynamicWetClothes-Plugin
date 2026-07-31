@@ -538,14 +538,11 @@ class FResolvedProfileParameterCache
     FWetnessProfileParameters DefaultParameters;
 };
 
-FDWCGPUProfileParameters MakeGPUProfile(const FWetnessProfileParameters& Parameters)
+FDWCGPUProfileParameters MakeSerializedGPUProfile(
+    const FWetnessProfileParameters& Parameters)
 {
-    FDWCGPUProfileParameters Result;
-    Result.AbsorptionMultiplier = Parameters.GetAbsorptionMultiplier();
-    Result.SpreadRatePerSecond = Parameters.GetSpreadRatePerSecond();
-    Result.DryRatePerSecond = Parameters.GetDryRatePerSecond();
-    Result.GravityFlowStrength = Parameters.GetGravityFlowStrength();
-    return Result;
+    return FDWCGPUProfileParameters(
+        Parameters.ResolveAbsorbedWaterSimulation());
 }
 
 int32 FindOrAddProfile(
@@ -1334,6 +1331,28 @@ void StoreCachedSignature(const FString& CacheKey, const FString& Signature)
     GGPUWetSignatureCache.Add(CacheKey, Signature);
 }
 
+/**
+ * Profile-derived values that can actually change the GPU map payload.
+ * Dynamic solver values intentionally do not belong to this type.
+ */
+struct FWetGPUMapProfileDependencies
+{
+    bool bRequiresSurfaceWaterLookup = false;
+
+    static FWetGPUMapProfileDependencies Resolve(
+        const FWetnessProfileParameters& Parameters)
+    {
+        FWetGPUMapProfileDependencies Result;
+        Result.bRequiresSurfaceWaterLookup = Parameters.SupportsSurfaceWater();
+        return Result;
+    }
+
+    void AddToSignature(FGPUWetMapSignatureBuilder& Builder) const
+    {
+        Builder.AddValue(bRequiresSurfaceWaterLookup ? 1 : 0);
+    }
+};
+
 void AddAuthoredWetPartDataToSignature(
     FGPUWetMapSignatureBuilder& Builder,
     const UWetClothingAsset& Asset)
@@ -1378,12 +1397,9 @@ void AddAuthoredWetPartDataToSignature(
             Builder.AddValue(Entry.WetPartID);
             Builder.AddValue(Entry.ProfileIndex);
             const FWetnessProfileParameters& ResolvedParameters = ProfileCache.Resolve(Entry.ProfileIndex);
-            const FDWCGPUProfileParameters GPUProfile = MakeGPUProfile(ResolvedParameters);
-            Builder.AddValue(ResolvedParameters.SupportsSurfaceWater() ? 1 : 0);
-            Builder.AddValue(GPUProfile.AbsorptionMultiplier);
-            Builder.AddValue(GPUProfile.SpreadRatePerSecond);
-            Builder.AddValue(GPUProfile.DryRatePerSecond);
-            Builder.AddValue(GPUProfile.GravityFlowStrength);
+            const FWetGPUMapProfileDependencies MapDependencies =
+                FWetGPUMapProfileDependencies::Resolve(ResolvedParameters);
+            MapDependencies.AddToSignature(Builder);
 
             TArray<int32> SortedIslandIDs = Entry.AssignedUVIslandIDs;
             SortedIslandIDs.Sort();
@@ -2105,7 +2121,8 @@ static bool BuildLODInternal(
             Triangle.RestSurfaceArea = RestSurfaceArea;
             Triangle.ProfileIndex = FindOrAddProfile(
                 Output.Profiles,
-                MakeGPUProfile(ProfileCache.Resolve(PartMetadata->AuthoredProfileIndex)));
+                MakeSerializedGPUProfile(
+                    ProfileCache.Resolve(PartMetadata->AuthoredProfileIndex)));
 
             IncidentTrianglesByVertex.FindOrAdd(V0).Add(TriangleID);
             IncidentTrianglesByVertex.FindOrAdd(V1).Add(TriangleID);

@@ -27,7 +27,7 @@ namespace DWCWetnessProfilePreviewMaterial
 namespace
 {
     constexpr const TCHAR* DynamicWetClothesPluginName = TEXT("DynamicWetClothes");
-    constexpr const TCHAR* PreviewMaterialAssetName = TEXT("M_DWC_WetnessProfilePreviewV13");
+    constexpr const TCHAR* PreviewMaterialAssetName = TEXT("M_DWC_WetnessProfilePreviewV14");
 
     enum class EPreviewMaterialCreationState : uint8
     {
@@ -263,7 +263,7 @@ namespace
             Material,
             TEXT("DWC Wetness Profile Preview Base Color"),
             TEXT(R"(
-float Absorbed = saturate(AbsorbedWater) * saturate(AbsorbedEnabled) * saturate(AbsorbedDarkeningStrength);
+float Absorbed = saturate(saturate(AbsorbedWater) * saturate(AbsorbedEnabled) * clamp(AbsorbedDarkeningStrength, 0.0, 3.0));
 float3 DryGray = float3(0.1, 0.1, 0.1);
 float3 AbsorbedGray = DryGray * lerp(1.0, 0.45, Absorbed);
 float EnabledSurface = saturate(SurfaceWater) * saturate(SurfaceEnabled);
@@ -330,7 +330,7 @@ float DropletMaskValue = saturate(Texture2DSampleLevel(DropletMaskTex, DropletMa
 float Coverage = Surface * saturate(DropletsEnabled) * DropletMaskValue;
 float ResponseSurface = (SurfaceWater > 1.0e-4 ? 1.0 : 0.0) * saturate(SurfaceEnabled);
 float ResponseCoverage = ResponseSurface * saturate(DropletsEnabled) * DropletMaskValue;
-float AbsorbedRoughness = lerp(0.72, 0.52, saturate(Absorbed * AbsorbedGlossinessStrength));
+float AbsorbedRoughness = lerp(0.72, 0.52, saturate(Absorbed * clamp(AbsorbedGlossinessStrength, 0.0, 3.0)));
 return saturate(lerp(AbsorbedRoughness, saturate(SurfaceTargetRoughness), saturate(ResponseCoverage * SurfaceRoughnessBlend * SurfaceTotalStrength)));
 )"),
             CMOT_Float1,

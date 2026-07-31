@@ -17,6 +17,7 @@ public:
     virtual bool ApplyWetAll(float Amount) override;
     virtual void Update(float DeltaSeconds) override;
     virtual FDWCGPUBackendStats GetStats() const override;
+    virtual void GetDebugRenderTargets(TArray<FDWCGPURenderTargetDebugSnapshot>& OutSnapshots) const override;
     virtual void Shutdown() override;
 
 private:

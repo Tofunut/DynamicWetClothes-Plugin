@@ -333,7 +333,7 @@ struct DWC_API FWetClothingLocalRenderProfile
     UPROPERTY(VisibleAnywhere, Category = "Wet Part Data Texture")
     FSoftObjectPath SourceProfile;
 
-    /** Resolved fallback used when the source profile is unavailable at runtime. */
+    /** Authoritative non-editor snapshot; editor/PIE may temporarily override it from SourceProfile. */
     UPROPERTY(VisibleAnywhere, Category = "Wet Part Data Texture")
     FWetnessProfileParameters Parameters;
 

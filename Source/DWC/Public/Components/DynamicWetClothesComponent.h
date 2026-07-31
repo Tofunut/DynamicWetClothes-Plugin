@@ -118,6 +118,7 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
     UFUNCTION(BlueprintPure, Category = "Wetness|GPU")
     int32 GetDWCReceiverGPUId(FName ReceiverId = NAME_None) const;
     void GetDWCReceiverGPUIds(TArray<int32>& OutReceiverGPUIds) const;
+    void GetGPUDebugRenderTargets(TArray<FDWCGPURenderTargetDebugSnapshot>& OutSnapshots) const;
 
     // Debug and quality LOD API.
     UFUNCTION(BlueprintCallable, Category = "Wetness|Debug")

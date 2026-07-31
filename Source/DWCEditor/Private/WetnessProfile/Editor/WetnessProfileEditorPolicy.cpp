@@ -14,8 +14,8 @@ namespace
     };
 
     // These are hard data-contract limits, not merely slider limits. The
-    // absorbed rendering strengths are packed directly into the render-profile
-    // LUT, so out-of-range values would produce invalid material results.
+    // absorbed rendering strengths are packed directly into the floating-point
+    // render-profile LUT, and the material clamps their final response.
     const FNumericRule NumericRules[] = {
         // Simulation | Absorbed Wetness
         { TEXT("Parameters.AbsorbedWetness.AbsorptionFraction"), 0.0, 1.0, 0.5 },
@@ -25,8 +25,8 @@ namespace
         { TEXT("Parameters.AbsorbedWetness.GravityFlowStrength"), 0.0, 10.0, 1.0 },
 
         // Rendering | Absorbed Wetness
-        { TEXT("Parameters.AbsorbedWetness.AbsorbedDarkeningStrength"), 0.0, 1.0, 0.5 },
-        { TEXT("Parameters.AbsorbedWetness.AbsorbedGlossinessStrength"), 0.0, 1.0, 0.5 },
+        { TEXT("Parameters.AbsorbedWetness.AbsorbedDarkeningStrength"), 0.0, 3.0, 0.5 },
+        { TEXT("Parameters.AbsorbedWetness.AbsorbedGlossinessStrength"), 0.0, 3.0, 0.5 },
 
         // Simulation | Surface Water
         { TEXT("Parameters.SurfaceWater.SurfaceRepresentationFraction"), 0.0, 1.0, 1.0 },

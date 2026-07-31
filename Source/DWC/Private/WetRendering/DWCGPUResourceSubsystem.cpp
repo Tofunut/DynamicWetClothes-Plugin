@@ -69,6 +69,18 @@ namespace
         const TCHAR* TextureRole,
         const bool bNormalMap)
     {
+        // Shipping/non-editor runtime data is self-contained. Only the prepared texture
+        // stored in BakedWetPartData may be uploaded to the shared Texture2DArray.
+        if (BakedArrayTexture != nullptr)
+        {
+            return BakedArrayTexture;
+        }
+
+        const FString ProfileIdentity = !LocalProfile.StableKey.IsEmpty()
+            ? LocalProfile.StableKey
+            : LocalProfile.SourceProfile.ToString();
+
+#if WITH_EDITOR
         const auto IsCompatibleAuthoredFallback = [bNormalMap](const UTexture2D* Texture)
         {
             const TextureCompressionSettings ExpectedCompression =
@@ -80,14 +92,8 @@ namespace
                    Texture->CompressionSettings == ExpectedCompression;
         };
 
-        // The generated/baked 512 texture is authoritative for Texture2DArray upload.
-        // The authored source is only a fallback when it already satisfies the same
-        // fixed-resolution contract. Never let a 1254 source initialize and lock the
-        // registry before its generated 512 copy is resolved.
-        if (BakedArrayTexture != nullptr)
-        {
-            return BakedArrayTexture;
-        }
+        // Editor preview may use an authored source only when it already satisfies the
+        // same fixed-resolution/format contract as the prepared array texture.
         if (IsCompatibleAuthoredFallback(AuthoredSourceTexture))
         {
             return AuthoredSourceTexture;
@@ -103,9 +109,6 @@ namespace
             LoadedTexture = Cast<UTexture2D>(AuthoredSourcePath.TryLoad());
         }
 
-        const FString ProfileIdentity = !LocalProfile.StableKey.IsEmpty()
-            ? LocalProfile.StableKey
-            : LocalProfile.SourceProfile.ToString();
         if (LoadedTexture != nullptr && !IsCompatibleAuthoredFallback(LoadedTexture))
         {
             UE_LOG(
@@ -126,7 +129,7 @@ namespace
             UE_LOG(
                 LogDWC,
                 Display,
-                TEXT("DWC loaded authored %s texture directly for Texture2DArray upload: profile='%s', texture='%s'."),
+                TEXT("DWC loaded authored %s texture directly for editor Texture2DArray preview: profile='%s', texture='%s'."),
                 TextureRole,
                 *ProfileIdentity,
                 *LoadedTexture->GetPathName());
@@ -142,6 +145,15 @@ namespace
                 *ProfileIdentity);
         }
         return LoadedTexture;
+#else
+        UE_LOG(
+            LogDWC,
+            Warning,
+            TEXT("DWC prepared %s texture is missing for profile '%s'. Non-editor builds do not load authored Surface Water textures; rebake Render Profile Data before cooking."),
+            TextureRole,
+            *ProfileIdentity);
+        return nullptr;
+#endif
     }
 
     FString ResolveProfileTextureIdentity(
@@ -335,8 +347,7 @@ namespace
     }
 
     TArray<FWetClothingLocalRenderProfile> MakeResolvedLocalRenderProfiles(
-        const UWetClothingAsset* WetClothingAsset,
-        const bool bResolveUnloadedProfiles)
+        const UWetClothingAsset* WetClothingAsset)
     {
         TArray<FWetClothingLocalRenderProfile> Profiles;
         if (WetClothingAsset == nullptr)
@@ -345,17 +356,18 @@ namespace
         }
 
         Profiles = WetClothingAsset->Derived.Inline.BakedWetPartData.LocalProfiles;
+#if WITH_EDITOR
+        // Editor/PIE reflects the latest Wetness Profile parameters while preserving the
+        // prepared 512 texture references stored in each baked local profile.
         for (FWetClothingLocalRenderProfile& Profile : Profiles)
         {
             FWetnessProfileParameters ResolvedParameters;
-            if (ResolveSourceProfileParameters(
-                    Profile.SourceProfile,
-                    bResolveUnloadedProfiles,
-                    ResolvedParameters))
+            if (ResolveSourceProfileParameters(Profile.SourceProfile, true, ResolvedParameters))
             {
                 ApplyResolvedSourceProfileParameters(Profile, ResolvedParameters);
             }
         }
+#endif
 
         return Profiles;
     }
@@ -453,13 +465,19 @@ namespace
             return false;
         }
 
-        const FWetPartProfileAssignment* SourceAssignment = WetPartData.FindProfile(*SourceEntry);
+        const int32 ProfileIndex = WetPartData.Profiles.IsValidIndex(SourceEntry->ProfileIndex)
+            ? SourceEntry->ProfileIndex
+            : 0;
+        const FWetPartProfileAssignment* SourceAssignment = WetPartData.FindProfile(ProfileIndex);
         if (SourceAssignment == nullptr)
         {
             return false;
         }
 
-        FWetnessProfileParameters Parameters = SourceAssignment->Parameters;
+        FWetnessProfileParameters Parameters =
+            WetClothingAsset->Derived.Inline.ResolvedWetnessProfileParameters.IsValidIndex(ProfileIndex)
+                ? WetClothingAsset->Derived.Inline.ResolvedWetnessProfileParameters[ProfileIndex]
+                : SourceAssignment->Parameters;
         bool bResolvedSourceProfile = false;
         if (bResolveSourceProfile && SourceAssignment->SourceProfile.IsValid())
         {
@@ -1562,7 +1580,7 @@ const FDWCAssetRenderProfileResources* UDWCGPUResourceSubsystem::AcquireAssetRes
     }
 
     const TArray<FWetClothingLocalRenderProfile> ResolvedLocalProfiles =
-        MakeResolvedLocalRenderProfiles(Asset, true);
+        MakeResolvedLocalRenderProfiles(Asset);
     const FString ResolvedProfileSignature =
         MakeResolvedProfileResourceSignature(ResolvedLocalProfiles);
 
@@ -1654,7 +1672,16 @@ const FDWCAssetRenderProfileResources* UDWCGPUResourceSubsystem::AcquireAssetRes
         }
 
         FWetClothingLocalRenderProfile FallbackProfile;
-        if (ResolveFallbackRenderProfile(Asset, Slot.MaterialSlotIndex, FallbackProfile, true))
+#if WITH_EDITOR
+        constexpr bool bResolveFallbackSourceProfile = true;
+#else
+        constexpr bool bResolveFallbackSourceProfile = false;
+#endif
+        if (ResolveFallbackRenderProfile(
+                Asset,
+                Slot.MaterialSlotIndex,
+                FallbackProfile,
+                bResolveFallbackSourceProfile))
         {
             Resources.FallbackRenderProfilesByMaterialSlot.Add(
                 Slot.MaterialSlotIndex,
@@ -1816,10 +1843,26 @@ void UDWCGPUResourceSubsystem::ApplyFallbackRenderProfileParameters(
     if (CachedProfile != nullptr)
     {
         Profile = *CachedProfile;
+#if WITH_EDITOR
+        FWetnessProfileParameters ResolvedParameters;
+        if (ResolveSourceProfileParameters(Profile.SourceProfile, true, ResolvedParameters))
+        {
+            ApplyResolvedSourceProfileParameters(Profile, ResolvedParameters);
+        }
+#endif
     }
     else
     {
-        ResolveFallbackRenderProfile(WetClothingAsset, MaterialSlotIndex, Profile, false);
+#if WITH_EDITOR
+        constexpr bool bResolveFallbackSourceProfile = true;
+#else
+        constexpr bool bResolveFallbackSourceProfile = false;
+#endif
+        ResolveFallbackRenderProfile(
+            WetClothingAsset,
+            MaterialSlotIndex,
+            Profile,
+            bResolveFallbackSourceProfile);
     }
 
     FFallbackRenderProfileSlices Slices;
@@ -2164,7 +2207,7 @@ bool UDWCGPUResourceSubsystem::ApplyPreviewRenderProfileFallback(
     }
 
     const TArray<FWetClothingLocalRenderProfile> ResolvedLocalProfiles =
-        MakeResolvedLocalRenderProfiles(Asset, true);
+        MakeResolvedLocalRenderProfiles(Asset);
     const int32 LocalProfileIndex = LocalProfileID - 1;
     if (!ResolvedLocalProfiles.IsValidIndex(LocalProfileIndex))
     {

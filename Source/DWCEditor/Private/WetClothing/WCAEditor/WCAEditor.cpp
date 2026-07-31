@@ -1364,66 +1364,6 @@ namespace
                Asset.IsMaterialSlotWettable(MaterialSlotIndex);
     }
 
-    UMaterialInterface* ResolveGeneratedMaterialSource(
-        const UWetClothingAsset& Asset,
-        const int32 MaterialSlotIndex,
-        UMaterialInterface* CandidateMaterial)
-    {
-        USkeletalMesh* RuntimeMesh = Asset.GetRuntimeSkeletalMesh();
-        USkeletalMesh* SourceMesh = Asset.GetSourceSkeletalMesh();
-        if (RuntimeMesh != nullptr && SourceMesh != nullptr && RuntimeMesh->GetMaterials().IsValidIndex(MaterialSlotIndex))
-        {
-            const TArray<FSkeletalMaterial>& SourceMaterials = SourceMesh->GetMaterials();
-            if (SourceMaterials.IsValidIndex(MaterialSlotIndex) &&
-                SourceMaterials[MaterialSlotIndex].MaterialInterface != nullptr)
-            {
-                return SourceMaterials[MaterialSlotIndex].MaterialInterface;
-            }
-
-            const FSkeletalMaterial& RuntimeMaterial = RuntimeMesh->GetMaterials()[MaterialSlotIndex];
-            for (const FSkeletalMaterial& SourceMaterial : SourceMaterials)
-            {
-                const bool bSlotNameMatches =
-                    !RuntimeMaterial.MaterialSlotName.IsNone() &&
-                    (SourceMaterial.MaterialSlotName == RuntimeMaterial.MaterialSlotName ||
-                     SourceMaterial.ImportedMaterialSlotName == RuntimeMaterial.MaterialSlotName);
-                const bool bImportedNameMatches =
-                    !RuntimeMaterial.ImportedMaterialSlotName.IsNone() &&
-                    (SourceMaterial.MaterialSlotName == RuntimeMaterial.ImportedMaterialSlotName ||
-                     SourceMaterial.ImportedMaterialSlotName == RuntimeMaterial.ImportedMaterialSlotName);
-                if ((bSlotNameMatches || bImportedNameMatches) && SourceMaterial.MaterialInterface != nullptr)
-                {
-                    return SourceMaterial.MaterialInterface;
-                }
-            }
-        }
-
-        if (CandidateMaterial == nullptr)
-        {
-            return nullptr;
-        }
-
-        UMaterial* CandidateBase = CandidateMaterial->GetMaterial();
-        for (const FWetClothingGeneratedWetMaterialOverride& MaterialOverride :
-             Asset.Derived.Inline.GeneratedWetMaterialOverrides)
-        {
-            UMaterialInterface* SourceMaterial = MaterialOverride.SourceMaterial.Get();
-            UMaterial* GeneratedMaterial = MaterialOverride.GeneratedMaterial.Get();
-            UMaterialInterface* CPUMaterialInstance = MaterialOverride.CPUMaterialInstance.Get();
-            UMaterialInterface* GPUMaterialInstance = MaterialOverride.GPUMaterialInstance.Get();
-            if (SourceMaterial != nullptr &&
-                (CandidateMaterial == SourceMaterial ||
-                 CandidateMaterial == GeneratedMaterial ||
-                 CandidateMaterial == CPUMaterialInstance ||
-                 CandidateMaterial == GPUMaterialInstance ||
-                 CandidateBase == GeneratedMaterial))
-            {
-                return SourceMaterial;
-            }
-        }
-        return CandidateMaterial;
-    }
-
     bool ResolveGeneratedWetMaterialsForAsset(
         UWetClothingAsset& Asset,
         FString& OutSummary,
@@ -1475,7 +1415,7 @@ namespace
             }
 
             UMaterialInterface* SourceMaterial =
-                ResolveGeneratedMaterialSource(Asset, MaterialSlotIndex, Materials[MaterialSlotIndex].MaterialInterface);
+                FWCAMaterialGenerator::ResolveGeneratedMaterialSource(&Asset, MaterialSlotIndex, Materials[MaterialSlotIndex].MaterialInterface);
             if (SourceMaterial == nullptr)
             {
                 Failures.Add(FString::Printf(TEXT("Slot %d has no source material."), MaterialSlotIndex));
@@ -2906,7 +2846,7 @@ FReply FWCAEditor::GenerateWetMaterials()
         }
 
         UMaterialInterface* SourceMaterial =
-            ResolveGeneratedMaterialSource(*Asset, MaterialSlotIndex, Materials[MaterialSlotIndex].MaterialInterface);
+            FWCAMaterialGenerator::ResolveGeneratedMaterialSource(Asset, MaterialSlotIndex, Materials[MaterialSlotIndex].MaterialInterface);
         if (SourceMaterial == nullptr)
         {
             Failures.Add(FString::Printf(TEXT("Slot %d has no source material."), MaterialSlotIndex));

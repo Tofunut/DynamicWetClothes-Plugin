@@ -20,7 +20,8 @@
 namespace DWCDataUVGeneratorInternal
 {
     static constexpr int32 InternalPackingResolution = 4096;
-    static constexpr int32 InternalPaddingPixels = 32; // Same normalized padding as the previous 8 / 1024 default.
+    static constexpr int32 InternalPaddingPixels = 32; // 2 output texels at the fixed 256x256 Wet Part Data resolution.
+    static constexpr int32 FixedWetPartDataResolution = 256;
     static constexpr double TransferDegenerateTriangleAreaTolerance = 1.0e-10;
 
     static void SetFailure(FDWCDataUVGenerationResult& Result, const FString& Message)
@@ -526,7 +527,8 @@ FDWCDataUVGenerationResult FDWCDataUVGenerator::GenerateForSkeletalMesh(
     int32 SourceUVChannelIndex,
     int32 PreferredUVChannelIndex,
     bool bAllowOverwriteExistingChannel,
-    int32 TargetMaterialSlotIndex)
+    int32 TargetMaterialSlotIndex,
+    const TSet<int32>* TargetMaterialSlotIndices)
 {
     using namespace DWCDataUVGeneratorInternal;
 
@@ -545,8 +547,6 @@ FDWCDataUVGenerationResult FDWCDataUVGenerator::GenerateForSkeletalMesh(
         SetFailure(Result, FString::Printf(TEXT("The target skeletal mesh does not expose editable mesh description data for LOD %d."), LODIndex));
         return Result;
     }
-
-    SkeletalMesh->Modify();
 
     FSkeletalMeshAttributes Attributes(*MeshDescription);
     Attributes.Register(true);
@@ -572,8 +572,9 @@ FDWCDataUVGenerationResult FDWCDataUVGenerator::GenerateForSkeletalMesh(
 
     if (SafePreferredUVChannelIndex >= ExistingUVChannelCount)
     {
+        // Reserve the channel index logically, but do not mutate MeshDescription until
+        // chart packing and fixed-resolution texel validation have succeeded.
         NewUVChannelIndex = SafePreferredUVChannelIndex;
-        VertexInstanceUVs.SetNumChannels(NewUVChannelIndex + 1);
     }
     else if (bAllowOverwriteExistingChannel)
     {
@@ -592,11 +593,12 @@ FDWCDataUVGenerationResult FDWCDataUVGenerator::GenerateForSkeletalMesh(
 
         NewUVChannelIndex = ExistingUVChannelCount;
         bAppendedBecausePreferredChannelWasOccupied = true;
-        VertexInstanceUVs.SetNumChannels(ExistingUVChannelCount + 1);
     }
 
     TArray<FDWCDataUVTriangle> Triangles;
     TMap<int32, TArray<int32>> SlotToTriangleIndices;
+    TMap<int32, int32> DegenerateUVTriangleCountBySlot;
+    TMap<int32, int32> InvalidUVTriangleCountBySlot;
     TSet<int32> ExcludedVertexInstanceIDs;
 
     for (const FTriangleID TriangleID : MeshDescription->Triangles().GetElementIDs())
@@ -607,7 +609,14 @@ FDWCDataUVGenerationResult FDWCDataUVGenerator::GenerateForSkeletalMesh(
             continue;
         }
 
-        if (TargetMaterialSlotIndex != INDEX_NONE && MaterialSlotIndex != TargetMaterialSlotIndex)
+        if (TargetMaterialSlotIndices != nullptr)
+        {
+            if (!TargetMaterialSlotIndices->Contains(MaterialSlotIndex))
+            {
+                continue;
+            }
+        }
+        else if (TargetMaterialSlotIndex != INDEX_NONE && MaterialSlotIndex != TargetMaterialSlotIndex)
         {
             continue;
         }
@@ -638,6 +647,7 @@ FDWCDataUVGenerationResult FDWCDataUVGenerator::GenerateForSkeletalMesh(
         if (!bSourceUVIsFinite)
         {
             ++Result.InvalidSourceUVTriangleCount;
+            ++InvalidUVTriangleCountBySlot.FindOrAdd(MaterialSlotIndex);
             for (const FVertexInstanceID VertexInstanceID : Triangle.VertexInstances)
             {
                 ExcludedVertexInstanceIDs.Add(VertexInstanceID.GetValue());
@@ -660,6 +670,7 @@ FDWCDataUVGenerationResult FDWCDataUVGenerator::GenerateForSkeletalMesh(
         if (FDWCUVGeometry::ComputeTriangleArea2D(Triangle.SourceUVs[0], Triangle.SourceUVs[1], Triangle.SourceUVs[2]) <= 1.0e-12)
         {
             ++Result.DegenerateSourceUVTriangleCount;
+            ++DegenerateUVTriangleCountBySlot.FindOrAdd(MaterialSlotIndex);
             for (const FVertexInstanceID VertexInstanceID : Triangle.VertexInstances)
             {
                 ExcludedVertexInstanceIDs.Add(VertexInstanceID.GetValue());
@@ -671,9 +682,28 @@ FDWCDataUVGenerationResult FDWCDataUVGenerator::GenerateForSkeletalMesh(
         SlotToTriangleIndices.FindOrAdd(MaterialSlotIndex).Add(TriangleArrayIndex);
     }
 
+    for (const TPair<int32, int32>& Pair : DegenerateUVTriangleCountBySlot)
+    {
+        if (Pair.Value > 0)
+        {
+            Result.WarningMaterialSlotIndices.Add(Pair.Key);
+        }
+    }
+    for (const TPair<int32, int32>& Pair : InvalidUVTriangleCountBySlot)
+    {
+        if (Pair.Value > 0)
+        {
+            Result.WarningMaterialSlotIndices.Add(Pair.Key);
+        }
+    }
+
     if (Triangles.Num() == 0)
     {
-        if (TargetMaterialSlotIndex != INDEX_NONE)
+        if (TargetMaterialSlotIndices != nullptr)
+        {
+            SetFailure(Result, TEXT("The selected Wettable material slots do not contain triangles that can be unwrapped."));
+        }
+        else if (TargetMaterialSlotIndex != INDEX_NONE)
         {
             SetFailure(Result, FString::Printf(TEXT("Material Slot %d does not contain triangles that can be unwrapped."), TargetMaterialSlotIndex));
         }
@@ -701,13 +731,18 @@ FDWCDataUVGenerationResult FDWCDataUVGenerator::GenerateForSkeletalMesh(
     Result.OriginalUVIslandCount = OriginalUVIslands.Num();
 
     TArray<FDWCDataUVChart> DataUVCharts;
-    FDWCDataUVChartBuilder::BuildNonOverlappingCharts(
-        Triangles,
-        OriginalUVIslands,
-        DataUVCharts,
-        Result.SplitOriginalUVIslandCount,
-        Result.SelfOverlapPairCount,
-        Result.TriangleFallbackChartCount);
+    int32 BudgetExceededMaterialSlotIndex = INDEX_NONE;
+    if (!FDWCDataUVChartBuilder::BuildNonOverlappingCharts(
+            Triangles,
+            OriginalUVIslands,
+            DataUVCharts,
+            Result.SplitOriginalUVIslandCount,
+            Result.SelfOverlapPairCount,
+            Result.WarningMaterialSlotIndices,
+            BudgetExceededMaterialSlotIndex))
+    {
+        Result.WarningMaterialSlotIndices.Add(BudgetExceededMaterialSlotIndex);
+    }
     const double ChartBuildEndTime = FPlatformTime::Seconds();
 
     if (DataUVCharts.Num() == 0)
@@ -716,8 +751,58 @@ FDWCDataUVGenerationResult FDWCDataUVGenerator::GenerateForSkeletalMesh(
         return Result;
     }
 
-    // A packed chart needs its own render corners. Without this split, a shared
-    // VertexInstance receives the UV of the last chart that writes to it.
+    // Validate the final chart layout with synthetic per-corner IDs before changing
+    // MeshDescription topology. This prevents a failed pack or overlap check from
+    // leaving even transient chart-boundary VertexInstance splits in the edited mesh.
+    TArray<FDWCDataUVTriangle> PackingTriangles = Triangles;
+    for (int32 TriangleIndex = 0; TriangleIndex < PackingTriangles.Num(); ++TriangleIndex)
+    {
+        for (int32 CornerIndex = 0; CornerIndex < 3; ++CornerIndex)
+        {
+            PackingTriangles[TriangleIndex].VertexInstances[CornerIndex] =
+                FVertexInstanceID(TriangleIndex * 3 + CornerIndex);
+        }
+    }
+
+    TArray<FDWCDataUVChart> ValidatedCharts = DataUVCharts;
+    TMap<int32, FVector2f> PackedUVBySyntheticCorner;
+    int32 PackingFailedMaterialSlotIndex = INDEX_NONE;
+    if (!FDWCDataUVPacker::Pack(
+            PackingTriangles,
+            ValidatedCharts,
+            InternalPackingResolution,
+            InternalPaddingPixels,
+            PackedUVBySyntheticCorner,
+            PackingFailedMaterialSlotIndex))
+    {
+        SetFailure(Result, FString::Printf(
+            TEXT("Material Slot %d cannot be packed while preserving the required Data UV gutter."),
+            PackingFailedMaterialSlotIndex));
+        return Result;
+    }
+
+    TSet<int32> ProblemMaterialSlots;
+    FString PackedValidationError;
+    if (!FDWCDataUVValidator::Validate(
+            PackingTriangles,
+            ValidatedCharts,
+            PackedUVBySyntheticCorner,
+            FixedWetPartDataResolution,
+            ProblemMaterialSlots,
+            PackedValidationError))
+    {
+        SetFailure(Result, FString::Printf(
+            TEXT("DWC Data UV generation failed final non-overlap validation: %s"),
+            *PackedValidationError));
+        return Result;
+    }
+    const double FinalPackAndValidateEndTime = FPlatformTime::Seconds();
+
+    DataUVCharts = MoveTemp(ValidatedCharts);
+
+    // Only a fully validated chart layout may modify the Prepared Mesh. Begin the
+    // transaction immediately before creating real render-corner seams.
+    SkeletalMesh->Modify();
     const FDWCDataUVSeamSplitResult SeamSplitResult = FDWCDataUVSeamSplitter::SplitChartBoundaries(
         *MeshDescription,
         Triangles,
@@ -732,48 +817,41 @@ FDWCDataUVGenerationResult FDWCDataUVGenerator::GenerateForSkeletalMesh(
     Result.ChartBoundarySplitVertexInstanceCount = SeamSplitResult.SplitVertexInstanceCount;
     const double SeamSplitEndTime = FPlatformTime::Seconds();
 
+    // Resolve the validated per-corner UVs onto the final chart-specific VertexInstances.
     TMap<int32, FVector2f> PackedUVByVertexInstance;
-    FDWCDataUVPacker::Pack(Triangles, DataUVCharts, InternalPackingResolution, InternalPaddingPixels, PackedUVByVertexInstance);
-
-    TSet<int32> ProblemMaterialSlots;
-    FString PackedValidationError;
-    if (!FDWCDataUVValidator::Validate(Triangles, DataUVCharts, PackedUVByVertexInstance, ProblemMaterialSlots, PackedValidationError))
+    for (int32 TriangleIndex = 0; TriangleIndex < Triangles.Num(); ++TriangleIndex)
     {
-        TArray<FDWCDataUVChart> FallbackCharts;
-        int32 ValidationFallbackChartCount = 0;
-        FDWCDataUVChartBuilder::BuildTriangleFallbackCharts(
-            Triangles,
-            DataUVCharts,
-            ProblemMaterialSlots,
-            FallbackCharts,
-            ValidationFallbackChartCount);
-        Result.TriangleFallbackChartCount += ValidationFallbackChartCount;
-        DataUVCharts = MoveTemp(FallbackCharts);
-
-        const FDWCDataUVSeamSplitResult FallbackSeamSplitResult =
-            FDWCDataUVSeamSplitter::SplitChartBoundaries(*MeshDescription, Triangles, DataUVCharts);
-        if (!FallbackSeamSplitResult.bSucceeded)
+        for (int32 CornerIndex = 0; CornerIndex < 3; ++CornerIndex)
         {
-            SetFailure(Result, FString::Printf(
-                TEXT("DWC Data UV fallback seam generation failed: %s"),
-                *FallbackSeamSplitResult.Message));
-            return Result;
-        }
-        Result.ChartBoundarySplitVertexInstanceCount +=
-            FallbackSeamSplitResult.SplitVertexInstanceCount;
+            const int32 SyntheticCornerIndex = TriangleIndex * 3 + CornerIndex;
+            const FVector2f* PackedUV = PackedUVBySyntheticCorner.Find(SyntheticCornerIndex);
+            if (PackedUV == nullptr)
+            {
+                SetFailure(Result, FString::Printf(
+                    TEXT("DWC Data UV packing omitted triangle %d corner %d."),
+                    TriangleIndex,
+                    CornerIndex));
+                return Result;
+            }
 
-        FDWCDataUVPacker::Pack(Triangles, DataUVCharts, InternalPackingResolution, InternalPaddingPixels, PackedUVByVertexInstance);
-        ProblemMaterialSlots.Reset();
-        PackedValidationError.Reset();
-        if (!FDWCDataUVValidator::Validate(Triangles, DataUVCharts, PackedUVByVertexInstance, ProblemMaterialSlots, PackedValidationError))
-        {
-            SetFailure(Result, FString::Printf(
-                TEXT("DWC Data UV generation failed final non-overlap validation: %s"),
-                *PackedValidationError));
-            return Result;
+            const int32 VertexInstanceIndex = Triangles[TriangleIndex].VertexInstances[CornerIndex].GetValue();
+            if (const FVector2f* ExistingUV = PackedUVByVertexInstance.Find(VertexInstanceIndex))
+            {
+                if (!FMath::IsNearlyEqual(ExistingUV->X, PackedUV->X, 1.0e-6f) ||
+                    !FMath::IsNearlyEqual(ExistingUV->Y, PackedUV->Y, 1.0e-6f))
+                {
+                    SetFailure(Result, FString::Printf(
+                        TEXT("A final Data UV VertexInstance received conflicting packed coordinates in material slot %d."),
+                        Triangles[TriangleIndex].MaterialSlotIndex));
+                    return Result;
+                }
+            }
+            else
+            {
+                PackedUVByVertexInstance.Add(VertexInstanceIndex, *PackedUV);
+            }
         }
     }
-    const double PackAndValidateEndTime = FPlatformTime::Seconds();
 
     // Topology edits may reallocate MeshDescription attribute storage. Reacquire the
     // writable UV reference and reassert the destination channel before committing.
@@ -781,6 +859,17 @@ FDWCDataUVGenerationResult FDWCDataUVGenerator::GenerateForSkeletalMesh(
     if (WritableVertexInstanceUVs.GetNumChannels() <= NewUVChannelIndex)
     {
         WritableVertexInstanceUVs.SetNumChannels(NewUVChannelIndex + 1);
+    }
+
+    // Batch generation owns the whole DWC channel. Clear every non-target corner so an
+    // overwritten preferred channel cannot leave unrelated source UV values looking like
+    // valid DWC data on Non-wettable slots.
+    if (TargetMaterialSlotIndices != nullptr)
+    {
+        for (const FVertexInstanceID VertexInstanceID : MeshDescription->VertexInstances().GetElementIDs())
+        {
+            WritableVertexInstanceUVs.Set(VertexInstanceID, NewUVChannelIndex, FVector2f::ZeroVector);
+        }
     }
 
     for (const TPair<int32, FVector2f>& Pair : PackedUVByVertexInstance)
@@ -817,9 +906,11 @@ FDWCDataUVGenerationResult FDWCDataUVGenerator::GenerateForSkeletalMesh(
     Result.MaterialSlotIndex = TargetMaterialSlotIndex;
     Result.DataUVChartCount = DataUVCharts.Num();
 
-    const FString TargetLabel = TargetMaterialSlotIndex != INDEX_NONE
-                                    ? FString::Printf(TEXT("Material Slot %d"), TargetMaterialSlotIndex)
-                                    : FString(TEXT("all material slots"));
+    const FString TargetLabel = TargetMaterialSlotIndices != nullptr
+                                    ? FString::Printf(TEXT("%d selected Wettable material slot(s)"), TargetMaterialSlotIndices->Num())
+                                    : TargetMaterialSlotIndex != INDEX_NONE
+                                        ? FString::Printf(TEXT("Material Slot %d"), TargetMaterialSlotIndex)
+                                        : FString(TEXT("all material slots"));
     if (bOverwritingExistingChannel)
     {
         Result.Message = FString::Printf(
@@ -850,26 +941,24 @@ FDWCDataUVGenerationResult FDWCDataUVGenerator::GenerateForSkeletalMesh(
     if (Result.HasWarnings())
     {
         Result.Message += FString::Printf(
-            TEXT(" Warnings: excluded %d degenerate source-UV triangle(s) and %d invalid source-UV triangle(s); split %d self-overlapping Original-UV island(s) across %d overlap pair(s); triangle fallback charts: %d. The source Skeletal Mesh was not modified."),
+            TEXT(" Warnings: excluded %d degenerate source-UV triangle(s); split %d self-overlapping Original-UV island(s) across %d overlap pair(s)."),
             Result.DegenerateSourceUVTriangleCount,
-            Result.InvalidSourceUVTriangleCount,
             Result.SplitOriginalUVIslandCount,
-            Result.SelfOverlapPairCount,
-            Result.TriangleFallbackChartCount);
+            Result.SelfOverlapPairCount);
     }
 
     Result.TriangleReadMilliseconds = (TriangleReadEndTime - GenerationStartTime) * 1000.0;
     Result.OriginalIslandBuildMilliseconds = (OriginalIslandBuildEndTime - TriangleReadEndTime) * 1000.0;
     Result.ChartBuildMilliseconds = (ChartBuildEndTime - OriginalIslandBuildEndTime) * 1000.0;
-    Result.SeamSplitMilliseconds = (SeamSplitEndTime - ChartBuildEndTime) * 1000.0;
-    Result.PackAndValidateMilliseconds = (PackAndValidateEndTime - SeamSplitEndTime) * 1000.0;
+    Result.PackAndValidateMilliseconds = (FinalPackAndValidateEndTime - ChartBuildEndTime) * 1000.0;
+    Result.SeamSplitMilliseconds = (SeamSplitEndTime - FinalPackAndValidateEndTime) * 1000.0;
     Result.Message += FString::Printf(
-        TEXT(" Timing (ms): triangle read %.1f, Original UV islands %.1f, overlap/chart split %.1f, seam split %.1f, pack/validate %.1f."),
+        TEXT(" Timing (ms): triangle read %.1f, Original UV islands %.1f, overlap/chart split %.1f, pack/validate %.1f, seam split %.1f."),
         Result.TriangleReadMilliseconds,
         Result.OriginalIslandBuildMilliseconds,
         Result.ChartBuildMilliseconds,
-        Result.SeamSplitMilliseconds,
-        Result.PackAndValidateMilliseconds);
+        Result.PackAndValidateMilliseconds,
+        Result.SeamSplitMilliseconds);
 
     return Result;
 }

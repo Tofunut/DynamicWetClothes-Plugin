@@ -286,7 +286,7 @@ TSharedRef<SWidget> FWetnessProfileEditor::BuildChannelCard(
                                                     [SNew(SBorder)
                                                          .Visibility(this, &FWetnessProfileEditor::GetChannelSelectedVisibility, Channel)
                                                          .BorderImage(FCoreStyle::Get().GetBrush(TEXT("WhiteBrush")))
-                                                         .BorderBackgroundColor(FLinearColor(0.0f, 0.48f, 0.9f, 1.0f))
+                                                         .BorderBackgroundColor(FStyleColors::Primary)
                                                          .Padding(FMargin(7.0f, 2.0f))
                                                              [SNew(STextBlock)
                                                                   .Text(LOCTEXT("SelectedChannelBadge", "SELECTED"))
@@ -377,7 +377,7 @@ FSlateColor FWetnessProfileEditor::GetChannelCardTint(const EWaterChannel Channe
 {
     if (Channel == ActiveChannel)
     {
-        return FSlateColor(FLinearColor(0.025f, 0.16f, 0.28f, 1.0f));
+        return FSlateColor(FStyleColors::Primary);
     }
     return FSlateColor(FLinearColor(0.055f, 0.055f, 0.055f, 1.0f));
 }
@@ -386,7 +386,7 @@ FSlateColor FWetnessProfileEditor::GetChannelCardOutlineTint(const EWaterChannel
 {
     if (Channel == ActiveChannel)
     {
-        return FSlateColor(FLinearColor(0.0f, 0.52f, 1.0f, 1.0f));
+        return FSlateColor(FStyleColors::Primary);
     }
     return FSlateColor(FLinearColor(0.13f, 0.13f, 0.13f, 1.0f));
 }
@@ -395,7 +395,7 @@ FSlateColor FWetnessProfileEditor::GetChannelTitleTint(const EWaterChannel Chann
 {
     if (Channel == ActiveChannel)
     {
-        return FSlateColor(FLinearColor(0.72f, 0.9f, 1.0f, 1.0f));
+        return FSlateColor(FStyleColors::Foreground);
     }
     return FSlateColor::UseForeground();
 }

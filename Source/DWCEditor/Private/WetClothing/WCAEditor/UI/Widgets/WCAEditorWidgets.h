@@ -30,7 +30,10 @@ struct FWCAMaterialSlotRowArgs
     FText AllSlotsTitle;
     bool bShowWettableToggle = true;
     FOnWettableMaterialSlotClicked OnWettableSlotClicked;
+    TFunction<bool(int32)> IsWettableToggleEnabled;
     TFunction<FText(int32)> GetMaterialSlotStatusText;
+    TFunction<FSlateColor(int32)> GetMaterialSlotStatusColor;
+    TFunction<FText(int32)> GetMaterialSlotStatusTooltip;
     TFunction<TSharedRef<SWidget>(int32)> BuildTrailingWidget;
 };
 

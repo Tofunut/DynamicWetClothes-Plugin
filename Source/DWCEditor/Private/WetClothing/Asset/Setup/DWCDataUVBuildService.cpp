@@ -74,6 +74,23 @@ FDWCDataUVBuildResult FDWCDataUVBuildService::Generate(
         FWCAGeneratedDataInvalidator::InvalidateDataUVInitialization(Asset, TouchedMesh);
     };
 
+    TSet<int32> WettableMaterialSlotIndices;
+    for (const FWetClothingAuthoredMaterialSlot& Slot : Asset.Authored.PartData.EditableWetPartData.MaterialSlots)
+    {
+        if (Slot.bIsWettableSlot && Slot.MaterialSlotIndex != INDEX_NONE)
+        {
+            WettableMaterialSlotIndices.Add(Slot.MaterialSlotIndex);
+        }
+    }
+    if (WettableMaterialSlotIndices.IsEmpty())
+    {
+        SetFailure(Result, TEXT("Select at least one Wettable material slot in Part Edit before generating DWC Data UV."));
+        return Result;
+    }
+
+    TArray<int32> SortedWettableMaterialSlotIndices = WettableMaterialSlotIndices.Array();
+    SortedWettableMaterialSlotIndices.Sort();
+
     USkeletalMesh* SourceMesh = Asset.GetSourceSkeletalMesh();
     if (SourceMesh == nullptr)
     {
@@ -153,7 +170,6 @@ FDWCDataUVBuildResult FDWCDataUVBuildService::Generate(
     int32 ExcludedTriangleCount = 0;
     int32 SplitOriginalUVIslandCount = 0;
     int32 SelfOverlapPairCount = 0;
-    int32 TriangleFallbackChartCount = 0;
     int32 ChartBoundarySplitVertexInstanceCount = 0;
     double TriangleReadMilliseconds = 0.0;
     double OriginalIslandBuildMilliseconds = 0.0;
@@ -204,7 +220,8 @@ FDWCDataUVBuildResult FDWCDataUVBuildService::Generate(
         Asset.GetOriginalUVChannelIndex(),
         DataUVChannelIndex,
         bAllowOverwriteExistingChannel,
-        INDEX_NONE);
+        INDEX_NONE,
+        &WettableMaterialSlotIndices);
     if (!CanonicalUVResult.bSucceeded)
     {
         SetFailure(Result, FString::Printf(
@@ -223,7 +240,8 @@ FDWCDataUVBuildResult FDWCDataUVBuildService::Generate(
             PreparedMesh,
             CanonicalDataUVLODIndex,
             OriginalUVTopology,
-            &TopologyError))
+            &TopologyError,
+            &WettableMaterialSlotIndices))
     {
         SetFailure(Result, FString::Printf(
             TEXT("LOD0 Original UV topology failed: %s"),
@@ -258,7 +276,8 @@ FDWCDataUVBuildResult FDWCDataUVBuildService::Generate(
                 Asset.GetOriginalUVChannelIndex(),
                 DataUVChannelIndex,
                 true,
-                INDEX_NONE);
+                INDEX_NONE,
+                &WettableMaterialSlotIndices);
             if (!UVResult.bSucceeded)
             {
                 SetFailure(Result, FString::Printf(
@@ -296,12 +315,18 @@ FDWCDataUVBuildResult FDWCDataUVBuildService::Generate(
                 *MetadataError));
             return Result;
         }
+        Metadata.GeneratedMaterialSlotIndices = SortedWettableMaterialSlotIndices;
+        Metadata.WarningMaterialSlotIndices = UVResult.WarningMaterialSlotIndices.Array();
+        Metadata.WarningMaterialSlotIndices.Sort();
 
         bGeneratedWithWarnings = bGeneratedWithWarnings || UVResult.HasWarnings();
+        for (const int32 WarningMaterialSlotIndex : UVResult.WarningMaterialSlotIndices)
+        {
+            Result.WarningMaterialSlotIndices.Add(WarningMaterialSlotIndex);
+        }
         ExcludedTriangleCount += UVResult.DegenerateSourceUVTriangleCount + UVResult.InvalidSourceUVTriangleCount;
         SplitOriginalUVIslandCount += UVResult.SplitOriginalUVIslandCount;
         SelfOverlapPairCount += UVResult.SelfOverlapPairCount;
-        TriangleFallbackChartCount += UVResult.TriangleFallbackChartCount;
         ChartBoundarySplitVertexInstanceCount += UVResult.ChartBoundarySplitVertexInstanceCount;
         TriangleReadMilliseconds += UVResult.TriangleReadMilliseconds;
         OriginalIslandBuildMilliseconds += UVResult.OriginalIslandBuildMilliseconds;
@@ -343,31 +368,30 @@ FDWCDataUVBuildResult FDWCDataUVBuildService::Generate(
     Result.ExcludedTriangleCount = ExcludedTriangleCount;
     Result.SplitOriginalUVIslandCount = SplitOriginalUVIslandCount;
     Result.SelfOverlapPairCount = SelfOverlapPairCount;
-    Result.TriangleFallbackChartCount = TriangleFallbackChartCount;
     Result.ChartBoundarySplitVertexInstanceCount = ChartBoundarySplitVertexInstanceCount;
     Result.Message = FString::Printf(
-        TEXT("Generated and sealed DWC Data UV channel %d for LOD%d-LOD%d of the DWC Prepared Skeletal Mesh, creating %d chart-boundary VertexInstance seam(s), with %d immutable LOD0 Original UV island record(s)."),
+        TEXT("Generated and sealed DWC Data UV channel %d for %d Wettable material slot(s), LOD%d-LOD%d of the DWC Prepared Skeletal Mesh, creating %d chart-boundary VertexInstance seam(s), with %d immutable LOD0 Original UV island record(s)."),
         DataUVChannelIndex,
+        SortedWettableMaterialSlotIndices.Num(),
         FirstLODIndex,
         LastLODIndex,
         Result.ChartBoundarySplitVertexInstanceCount,
         Result.OriginalUVIslandCount);
     Result.Message += FString::Printf(
-        TEXT("\nTiming across generated LODs (ms): triangle read %.1f, Original UV islands %.1f, overlap/chart split %.1f, seam split %.1f, pack/validate %.1f."),
+        TEXT("\nTiming across generated LODs (ms): triangle read %.1f, Original UV islands %.1f, overlap/chart split %.1f, pack/validate %.1f, seam split %.1f."),
         TriangleReadMilliseconds,
         OriginalIslandBuildMilliseconds,
         ChartBuildMilliseconds,
-        SeamSplitMilliseconds,
-        PackAndValidateMilliseconds);
+        PackAndValidateMilliseconds,
+        SeamSplitMilliseconds);
 
     if (Result.bGeneratedWithWarnings)
     {
         Result.Message += FString::Printf(
-            TEXT("\n\nDWC Data UV was generated with warnings. Excluded triangles: %d. Split self-overlapping Original UV islands: %d (%d overlap pair(s)). Triangle fallback charts: %d."),
+            TEXT("\n\nDWC Data UV was generated with warnings. Excluded triangles: %d. Split self-overlapping Original UV islands: %d (%d overlap pair(s))."),
             Result.ExcludedTriangleCount,
             Result.SplitOriginalUVIslandCount,
-            Result.SelfOverlapPairCount,
-            Result.TriangleFallbackChartCount);
+            Result.SelfOverlapPairCount);
     }
 
     return Result;

@@ -7,12 +7,13 @@
 class FDWCDataUVPacker
 {
 public:
-    static void Pack(
+    static bool Pack(
         const TArray<FDWCDataUVTriangle>& Triangles,
         TArray<FDWCDataUVChart>& Charts,
         int32 Resolution,
         int32 PaddingPixels,
-        TMap<int32, FVector2f>& OutPackedUVByVertexInstance);
+        TMap<int32, FVector2f>& OutPackedUVByVertexInstance,
+        int32& OutFailedMaterialSlotIndex);
 
 private:
     static void BuildRawChartUVs(

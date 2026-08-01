@@ -515,7 +515,7 @@ namespace
         const FWetClothingEditableWetPartData& WetPartData,
         const bool bIncludeEditorDisplayFields)
     {
-        FString Signature = TEXT("DWC_SourceData_v3");
+        FString Signature = TEXT("DWC_SourceData_v4");
 
         TArray<int32> SlotIndices;
         for (int32 SlotIndex = 0; SlotIndex < WetPartData.MaterialSlots.Num(); ++SlotIndex)
@@ -536,7 +536,13 @@ namespace
         int32 IncludedPartCount = 0;
         for (const int32 SlotIndex : SlotIndices)
         {
-            IncludedPartCount += WetPartData.MaterialSlots[SlotIndex].WetPartEntries.Num();
+            for (const FWetClothingWetPartEntry& Entry : WetPartData.MaterialSlots[SlotIndex].WetPartEntries)
+            {
+                if (bIncludeEditorDisplayFields || Entry.WetPartID != 0)
+                {
+                    ++IncludedPartCount;
+                }
+            }
         }
 
         Signature += FString::Printf(TEXT("|MaterialSlots=%d|WetPartEntries=%d"), SlotIndices.Num(), IncludedPartCount);
@@ -551,7 +557,10 @@ namespace
             TArray<int32> EntryIndices;
             for (int32 EntryIndex = 0; EntryIndex < Slot.WetPartEntries.Num(); ++EntryIndex)
             {
-                EntryIndices.Add(EntryIndex);
+                if (bIncludeEditorDisplayFields || Slot.WetPartEntries[EntryIndex].WetPartID != 0)
+                {
+                    EntryIndices.Add(EntryIndex);
+                }
             }
             EntryIndices.Sort(
                 [&Slot](const int32 A, const int32 B)
@@ -1640,6 +1649,11 @@ bool UWetClothingAsset::DoesMaterialSlotUseSurfaceWater(const int32 MaterialSlot
 
     for (const FWetClothingWetPartEntry& Entry : Slot->WetPartEntries)
     {
+        if (Entry.WetPartID == 0)
+        {
+            continue;
+        }
+
         const int32 ProfileIndex = WetPartData.Profiles.IsValidIndex(Entry.ProfileIndex)
             ? Entry.ProfileIndex
             : 0;
@@ -4068,14 +4082,12 @@ bool UWetClothingAsset::RebuildPrecomputedSimulationData(FString* OutErrorMessag
             return false;
         }
 
-        int32 DefaultEntryIndex = INDEX_NONE;
         TMap<int32, int32> AssignedUVIslandToEntryIndex;
         for (int32 EntryIndex = 0; EntryIndex < Slot.WetPartEntries.Num(); ++EntryIndex)
         {
             const FWetClothingWetPartEntry& Entry = Slot.WetPartEntries[EntryIndex];
             if (Entry.WetPartID == 0)
             {
-                DefaultEntryIndex = EntryIndex;
                 continue;
             }
 
@@ -4088,13 +4100,12 @@ bool UWetClothingAsset::RebuildPrecomputedSimulationData(FString* OutErrorMessag
         for (const FDWCRuntimeOriginalUVIsland& Island : Islands)
         {
             const int32* AssignedEntryIndex = AssignedUVIslandToEntryIndex.Find(Island.UVIslandID);
-            const int32 EffectiveEntryIndex = AssignedEntryIndex != nullptr ? *AssignedEntryIndex : DefaultEntryIndex;
-            if (!Slot.WetPartEntries.IsValidIndex(EffectiveEntryIndex))
+            if (AssignedEntryIndex == nullptr || !Slot.WetPartEntries.IsValidIndex(*AssignedEntryIndex))
             {
                 continue;
             }
 
-            const FWetClothingWetPartEntry& Entry = Slot.WetPartEntries[EffectiveEntryIndex];
+            const FWetClothingWetPartEntry& Entry = Slot.WetPartEntries[*AssignedEntryIndex];
             const int32 EffectiveProfileIndex = Authored.PartData.EditableWetPartData.Profiles.IsValidIndex(Entry.ProfileIndex)
                 ? Entry.ProfileIndex
                 : 0;

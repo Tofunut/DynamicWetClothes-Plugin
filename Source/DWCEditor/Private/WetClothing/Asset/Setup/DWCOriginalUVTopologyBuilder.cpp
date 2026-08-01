@@ -9,7 +9,8 @@ bool FDWCOriginalUVTopologyBuilder::BuildLOD(
     USkeletalMesh* PreparedMesh,
     const int32 LODIndex,
     FDWCEditorUVTopologyData& OutTopology,
-    FString* OutErrorMessage)
+    FString* OutErrorMessage,
+    const TSet<int32>* TargetMaterialSlotIndices)
 {
     OutTopology = FDWCEditorUVTopologyData();
     if (PreparedMesh == nullptr)
@@ -33,6 +34,11 @@ bool FDWCOriginalUVTopologyBuilder::BuildLOD(
 
     for (int32 MaterialSlotIndex = 0; MaterialSlotIndex < PreparedMesh->GetMaterials().Num(); ++MaterialSlotIndex)
     {
+        if (TargetMaterialSlotIndices != nullptr && !TargetMaterialSlotIndices->Contains(MaterialSlotIndex))
+        {
+            continue;
+        }
+
         TArray<FWetClothingAssetUVIsland> Islands;
         FString Error;
         if (!FWetClothingAssetMeshAnalyzer::BuildMaterialSlotUVIslands(

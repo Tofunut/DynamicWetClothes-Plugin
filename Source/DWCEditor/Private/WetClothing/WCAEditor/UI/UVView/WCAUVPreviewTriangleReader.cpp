@@ -2,6 +2,7 @@
 
 #include "DataAssets/WetClothingAsset.h"
 #include "Engine/SkeletalMesh.h"
+#include "WetClothing/Foundation/UV/DWCUVGeometry.h"
 #include "Rendering/SkeletalMeshLODRenderData.h"
 #include "Rendering/SkeletalMeshRenderData.h"
 #include "Utility/DWCDataUVBufferView.h"
@@ -58,7 +59,7 @@ namespace DWCUVPreviewTriangleReaderPrivate
                     continue;
                 }
 
-                FWCAUVPreviewSourceTriangle& Triangle = OutTriangles.AddDefaulted_GetRef();
+                FWCAUVPreviewSourceTriangle Triangle;
                 Triangle.TriangleID = TriangleIndex / 3;
                 Triangle.MaterialSlotIndex = Section.MaterialIndex;
                 for (int32 CornerIndex = 0; CornerIndex < 3; ++CornerIndex)
@@ -71,6 +72,23 @@ namespace DWCUVPreviewTriangleReaderPrivate
                             UVChannelIndex);
                     Triangle.LocalPositions[CornerIndex] =
                         LODData.StaticVertexBuffers.PositionVertexBuffer.VertexPosition(VertexIndex);
+                }
+
+                const FVector2D UV0(Triangle.UVs[0]);
+                const FVector2D UV1(Triangle.UVs[1]);
+                const FVector2D UV2(Triangle.UVs[2]);
+                const bool bUVsAreValid =
+                    FDWCUVGeometry::IsFiniteReasonableUV(UV0) &&
+                    FDWCUVGeometry::IsFiniteReasonableUV(UV1) &&
+                    FDWCUVGeometry::IsFiniteReasonableUV(UV2);
+                const bool bHasGeometryArea = FDWCUVGeometry::ComputeTriangleDoubleArea3D(
+                    FVector(Triangle.LocalPositions[0]),
+                    FVector(Triangle.LocalPositions[1]),
+                    FVector(Triangle.LocalPositions[2])) > 1.0e-10;
+                const bool bHasUVArea = FDWCUVGeometry::ComputeTriangleArea2D(UV0, UV1, UV2) > 1.0e-12;
+                if (bUVsAreValid && bHasGeometryArea && bHasUVArea)
+                {
+                    OutTriangles.Add(MoveTemp(Triangle));
                 }
             }
         }

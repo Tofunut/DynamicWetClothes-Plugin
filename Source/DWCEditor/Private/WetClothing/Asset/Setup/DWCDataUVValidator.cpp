@@ -20,6 +20,7 @@ bool FDWCDataUVValidator::Validate(
     const TArray<FDWCDataUVTriangle>& Triangles,
     const TArray<FDWCDataUVChart>& Charts,
     const TMap<int32, FVector2f>& PackedUVByVertexInstance,
+    const int32 /*OutputResolution*/,
     TSet<int32>& OutProblemMaterialSlots,
     FString& OutError)
 {

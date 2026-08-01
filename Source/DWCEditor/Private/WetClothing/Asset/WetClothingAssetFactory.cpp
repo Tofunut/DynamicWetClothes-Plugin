@@ -19,7 +19,6 @@
 #include "Styling/StyleColors.h"
 #include "ThumbnailRendering/ThumbnailManager.h"
 #include "UObject/UnrealType.h"
-#include "WetClothing/Asset/Setup/DWCDataUVBuildService.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SComboBox.h"
 #include "Widgets/Input/SSpinBox.h"
@@ -200,7 +199,7 @@ namespace
         const FText Warning = FText::Format(
             LOCTEXT(
                 "ConfirmExistingDataUVOverwrite",
-                "UV{0} already contains UV data.\n\nCreating the DWC Data UV in this channel will replace the existing UV{0} data on the target mesh.\n\nContinue?"),
+                "UV{0} already contains UV data.\n\nWhen Data UV is generated from Part Edit, the existing UV{0} data will be replaced on the DWC Prepared Mesh copy only. The source mesh remains unchanged.\n\nContinue?"),
             FText::AsNumber(DataUVChannelIndex));
         return FMessageDialog::Open(EAppMsgType::YesNo, Warning) == EAppReturnType::Yes;
     }
@@ -479,7 +478,7 @@ bool UWetClothingAssetFactory::ConfigureProperties()
                                 SNew(STextBlock)
                                 .AutoWrapText(true)
                                 .Font(FAppStyle::GetFontStyle(TEXT("SmallFont")))
-                                .ColorAndOpacity(FStyleColors::AccentBlue)
+                                .ColorAndOpacity(FStyleColors::Primary)
                                 .Text_Lambda([this]()
                                 {
                                     return PendingCreationSettings != nullptr
@@ -602,7 +601,7 @@ bool UWetClothingAssetFactory::ConfigureProperties()
                                        bUseRecommendedDWCDataUVChannel,
                                        PendingCreationSettings->PreferredDWCDataUVChannelIndex)
                                        ? FStyleColors::Error
-                                       : FStyleColors::AccentBlue;
+                                       : FStyleColors::Primary;
                         })
                         .Text_Lambda([this, &bUseRecommendedDWCDataUVChannel]()
                         {
@@ -731,7 +730,7 @@ bool UWetClothingAssetFactory::ConfigureProperties()
                         SNew(STextBlock)
                         .AutoWrapText(true)
                         .Font(FAppStyle::GetFontStyle(TEXT("SmallFont")))
-                        .ColorAndOpacity(FStyleColors::AccentBlue)
+                        .ColorAndOpacity(FStyleColors::Primary)
                         .Text_Lambda([this]()
                         {
                             if (PendingCreationSettings == nullptr)
@@ -838,7 +837,7 @@ UObject* UWetClothingAssetFactory::FactoryCreateNew(
 
     UWetClothingAsset* Asset = NewObject<UWetClothingAsset>(InParent, Class, Name, Flags | RF_Transactional);
     FScopedSlowTask SlowTask(
-        3.0f,
+        2.0f,
         FText::FromString(FString::Printf(TEXT("Creating Wet Clothing Asset %s..."), *Name.ToString())));
     SlowTask.MakeDialog(false);
 
@@ -846,25 +845,17 @@ UObject* UWetClothingAssetFactory::FactoryCreateNew(
     SlowTask.EnterProgressFrame(
         1.0f,
         LOCTEXT("CreateWCAInitializeProgress", "Initializing Wet Clothing Asset settings and default wet parts..."));
+    FDWCWetClothingAssetSetupSettings InitialSettings = PendingCreationSettings->BuildSettings();
+    InitialSettings.bAllowOverwritePreferredDWCDataUVChannel = bConfirmedOverwriteExistingDataUVChannel;
     if (!Asset->InitializeNewAsset(
             PendingCreationSettings->SourceSkeletalMesh,
-            PendingCreationSettings->BuildSettings(),
+            InitialSettings,
             &ErrorMessage))
     {
         UE_LOG(LogTemp, Error, TEXT("DWC: Failed to initialize Wet Clothing Asset: %s"), *ErrorMessage);
         PendingCreationSettings = nullptr;
         bConfirmedOverwriteExistingDataUVChannel = false;
         return nullptr;
-    }
-
-    SlowTask.EnterProgressFrame(
-        1.0f,
-        LOCTEXT("CreateWCAGenerateDataUVProgress", "Creating the DWC Prepared Skeletal Mesh and generating Data UV..."));
-    const FDWCDataUVBuildResult DataUVResult = FDWCDataUVBuildService::Generate(*Asset, true, bConfirmedOverwriteExistingDataUVChannel);
-    if (!DataUVResult.bSucceeded)
-    {
-        Asset->SetLastBakeFailure(DataUVResult.Message);
-        UE_LOG(LogTemp, Warning, TEXT("DWC: WCA was created but DWC Data UV generation failed: %s"), *DataUVResult.Message);
     }
 
     SlowTask.EnterProgressFrame(

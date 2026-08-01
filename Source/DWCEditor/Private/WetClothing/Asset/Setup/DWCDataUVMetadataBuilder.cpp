@@ -77,6 +77,11 @@ bool FDWCDataUVMetadataBuilder::BuildLOD(
         IslandsByMaterialSlot.SetNum(Mesh->GetMaterials().Num());
         for (int32 MaterialSlotIndex = 0; MaterialSlotIndex < Mesh->GetMaterials().Num(); ++MaterialSlotIndex)
         {
+            if (!Asset.IsMaterialSlotWettable(MaterialSlotIndex))
+            {
+                continue;
+            }
+
             TArray<FWetClothingAssetUVIsland>& Islands = IslandsByMaterialSlot[MaterialSlotIndex];
             FString TopologyError;
             if (!FWetClothingAssetMeshAnalyzer::BuildMaterialSlotUVIslands(

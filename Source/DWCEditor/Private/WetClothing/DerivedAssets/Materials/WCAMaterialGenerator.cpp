@@ -2267,6 +2267,11 @@ FWCAMaterialGenerator::FOptions FWCAMaterialGenerator::MakeOptionsForAsset(
 
             for (const FWetClothingWetPartEntry& Entry : SlotData.WetPartEntries)
             {
+                if (Entry.WetPartID == 0)
+                {
+                    continue;
+                }
+
                 const FWetPartProfileAssignment* Profile = EditableData.FindProfile(Entry);
                 FWetnessProfileParameters        Parameters = Profile != nullptr ? Profile->Parameters : FWetnessProfileParameters();
                 if (Profile != nullptr && Profile->SourceProfile.IsValid())

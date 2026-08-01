@@ -164,20 +164,14 @@ const FWetClothingWetPartEntry* ResolveWetPartForBakedTriangle(
         return nullptr;
     }
 
-    const FWetClothingWetPartEntry* DefaultPart = nullptr;
-    const FWetClothingWetPartEntry* IslandPart = nullptr;
     for (const FWetClothingWetPartEntry& Entry : Slot->WetPartEntries)
     {
-        if (Entry.WetPartID == 0 && DefaultPart == nullptr)
+        if (Entry.WetPartID != 0 && Entry.AssignedUVIslandIDs.Contains(Triangle.UVIslandID))
         {
-            DefaultPart = &Entry;
-        }
-        if (Entry.AssignedUVIslandIDs.Contains(Triangle.UVIslandID))
-        {
-            IslandPart = &Entry;
+            return &Entry;
         }
     }
-    return IslandPart != nullptr ? IslandPart : DefaultPart;
+    return nullptr;
 }
 
 int32 ResolveAuthoredProfileIndexForBakedTriangle(
@@ -191,7 +185,7 @@ int32 ResolveAuthoredProfileIndexForBakedTriangle(
             ? Part->ProfileIndex
             : 0;
     }
-    return WetPartData.Profiles.IsValidIndex(0) ? 0 : INDEX_NONE;
+    return INDEX_NONE;
 }
 
 struct alignas(16) FUint4GPU

@@ -14,7 +14,7 @@ struct FDWCDataUVBuildResult
     int32 ExcludedTriangleCount = 0;
     int32 SplitOriginalUVIslandCount = 0;
     int32 SelfOverlapPairCount = 0;
-    int32 TriangleFallbackChartCount = 0;
+    TSet<int32> WarningMaterialSlotIndices;
     int32 ChartBoundarySplitVertexInstanceCount = 0;
     FString Message;
 };

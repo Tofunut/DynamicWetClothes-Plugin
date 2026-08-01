@@ -20,7 +20,9 @@ struct FDWCDataUVGenerationResult
     int32 Degenerate3DTriangleCount = 0;
     int32 DegenerateSourceUVTriangleCount = 0;
     int32 InvalidSourceUVTriangleCount = 0;
-    int32 TriangleFallbackChartCount = 0;
+    /** Material slots that completed with non-fatal degenerate-UV or overlap-split warnings. */
+    TSet<int32> WarningMaterialSlotIndices;
+
     /** VertexInstances duplicated to make non-overlapping Data UV chart boundaries real seams. */
     int32 ChartBoundarySplitVertexInstanceCount = 0;
     int32 RenderVertexCount = 0;
@@ -33,8 +35,7 @@ struct FDWCDataUVGenerationResult
     /** 3D degenerate triangles are excluded automatically and are informational only. */
     int32 GetWarningCount() const
     {
-        return SplitOriginalUVIslandCount + DegenerateSourceUVTriangleCount + InvalidSourceUVTriangleCount +
-               TriangleFallbackChartCount;
+        return SplitOriginalUVIslandCount + DegenerateSourceUVTriangleCount + InvalidSourceUVTriangleCount;
     }
 
     bool HasWarnings() const
@@ -55,7 +56,8 @@ public:
         int32 SourceUVChannelIndex,
         int32 PreferredUVChannelIndex,
         bool bAllowOverwriteExistingChannel = false,
-        int32 TargetMaterialSlotIndex = INDEX_NONE);
+        int32 TargetMaterialSlotIndex = INDEX_NONE,
+        const TSet<int32>* TargetMaterialSlotIndices = nullptr);
 
     static FDWCDataUVGenerationResult TransferFromSourceLOD(
         USkeletalMesh* SkeletalMesh,

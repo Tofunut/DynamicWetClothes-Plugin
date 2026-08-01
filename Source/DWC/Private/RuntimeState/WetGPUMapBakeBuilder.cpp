@@ -648,40 +648,29 @@ bool BuildOriginalUVTrianglePartLookupForLOD(
 
         for (const FWetClothingWetPartEntry& Entry : Slot.WetPartEntries)
         {
-            const int32 ProfileIndex = WetPartData.Profiles.IsValidIndex(Entry.ProfileIndex)
-                ? Entry.ProfileIndex
-                : 0;
             if (Entry.WetPartID == 0)
             {
-                if (OutDefaultProfileByMaterial.Contains(Slot.MaterialSlotIndex))
+                continue;
+            }
+
+            const int32 ProfileIndex = WetPartData.Profiles.IsValidIndex(Entry.ProfileIndex)
+                ? Entry.ProfileIndex
+                : INDEX_NONE;
+            TMap<int32, int32>& ProfileByIsland =
+                ProfileByIslandByMaterial.FindOrAdd(Slot.MaterialSlotIndex);
+            for (const int32 IslandID : Entry.AssignedUVIslandIDs)
+            {
+                if (ProfileByIsland.Contains(IslandID))
                 {
                     SetGPUMapBakeError(
                         OutErrorMessage,
                         FString::Printf(
-                            TEXT("Wettable material slot %d has more than one default Wet Part entry."),
+                            TEXT("Original-UV island %d in material slot %d is assigned to more than one Wet Part."),
+                            IslandID,
                             Slot.MaterialSlotIndex));
                     return false;
                 }
-                OutDefaultProfileByMaterial.Add(Slot.MaterialSlotIndex, ProfileIndex);
-            }
-            else
-            {
-                TMap<int32, int32>& ProfileByIsland =
-                    ProfileByIslandByMaterial.FindOrAdd(Slot.MaterialSlotIndex);
-                for (const int32 IslandID : Entry.AssignedUVIslandIDs)
-                {
-                    if (ProfileByIsland.Contains(IslandID))
-                    {
-                        SetGPUMapBakeError(
-                            OutErrorMessage,
-                            FString::Printf(
-                                TEXT("Original-UV island %d in material slot %d is assigned to more than one Wet Part."),
-                                IslandID,
-                                Slot.MaterialSlotIndex));
-                        return false;
-                    }
-                    ProfileByIsland.Add(IslandID, ProfileIndex);
-                }
+                ProfileByIsland.Add(IslandID, ProfileIndex);
             }
         }
     }
@@ -694,10 +683,6 @@ bool BuildOriginalUVTrianglePartLookupForLOD(
         }
 
         int32 ProfileIndex = INDEX_NONE;
-        if (const int32* DefaultProfile = OutDefaultProfileByMaterial.Find(Island.MaterialSlotIndex))
-        {
-            ProfileIndex = *DefaultProfile;
-        }
         if (const TMap<int32, int32>* ByIsland = ProfileByIslandByMaterial.Find(Island.MaterialSlotIndex))
         {
             if (const int32* OverrideProfile = ByIsland->Find(Island.IslandID))
@@ -707,13 +692,7 @@ bool BuildOriginalUVTrianglePartLookupForLOD(
         }
         if (!WetPartData.Profiles.IsValidIndex(ProfileIndex))
         {
-            SetGPUMapBakeError(
-                OutErrorMessage,
-                FString::Printf(
-                    TEXT("Wettable material slot %d has Original-UV island %d with no valid default or explicit Wet Part profile."),
-                    Island.MaterialSlotIndex,
-                    Island.IslandID));
-            return false;
+            continue;
         }
 
         for (const int32 TriangleID : Island.TriangleIndices)
@@ -2016,24 +1995,13 @@ static bool BuildLODInternal(
         for (int32 IndexOffset = FirstIndex; IndexOffset + 2 < LastIndex; IndexOffset += 3)
         {
             const int32 RenderTriangleID = IndexOffset / 3;
-            ++ValidationSummary.TotalWettableTriangles;
             const FTrianglePartMetadata* PartMetadata = TrianglePartLookup.Find(RenderTriangleID);
-            FTrianglePartMetadata FallbackPartMetadata;
             if (PartMetadata == nullptr)
             {
-                ++ValidationSummary.DegenerateOriginalUVTriangles;
-                RecordExampleTriangle(RenderTriangleID);
-                if (const int32* DefaultProfile = DefaultProfileByMaterial.Find(Section.MaterialIndex))
-                {
-                    FallbackPartMetadata.IslandID = INDEX_NONE;
-                    FallbackPartMetadata.AuthoredProfileIndex = *DefaultProfile;
-                    PartMetadata = &FallbackPartMetadata;
-                }
-                else
-                {
-                    continue;
-                }
+                // Part Default and otherwise unassigned islands are editor-only and intentionally omitted.
+                continue;
             }
+            ++ValidationSummary.TotalWettableTriangles;
 
             const int32 V0 = static_cast<int32>(IndexBuffer[IndexOffset]);
             const int32 V1 = static_cast<int32>(IndexBuffer[IndexOffset + 1]);

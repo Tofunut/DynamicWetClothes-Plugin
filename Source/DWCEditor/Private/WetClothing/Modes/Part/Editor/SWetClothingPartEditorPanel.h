@@ -76,6 +76,7 @@ class SWetClothingPartEditorPanel : public SCompoundWidget
     FString                              GetAssignedProfileLabel(const FWetClothingWetPartEntry& Entry) const;
     TMap<int32, int32>                   BuildUVIslandWetPartIDMap() const;
     TMap<int32, FLinearColor>            BuildUVIslandColorMap() const;
+    TMap<int32, FLinearColor>            BuildPreviewUVIslandColorMap() const;
     TSet<int32>                          BuildHiddenUVIslandIDSet() const;
 
     void ApplyIslandSelection(const TArray<int32>& HitUVIslandIDs, bool bAppendSelection);
@@ -113,6 +114,7 @@ class SWetClothingPartEditorPanel : public SCompoundWidget
     void                      HandleAssignWetPartSelectionChanged(FWetPartEntryPtr Item, ESelectInfo::Type SelectInfo);
     FReply                    HandleAddWetPartClicked();
     FReply                    HandleRemoveWetPartClicked();
+    FReply                    HandleResetWetPartClicked(FWetPartEntryPtr Item);
     bool                      IsWetPartRemoveEnabled() const;
     bool                      IsAutoPartitionEnabled() const;
     bool                      HasAutoPartitionDataToReplace() const;
@@ -128,6 +130,17 @@ class SWetClothingPartEditorPanel : public SCompoundWidget
     FText                                          GetMaterialSlotCountText() const;
     FText                                          GetSelectedMaterialSlotText() const;
     FText                                          GetMaterialSlotStatusText(int32 MaterialSlotIndex) const;
+    FSlateColor                                    GetMaterialSlotStatusColor(int32 MaterialSlotIndex) const;
+    FText                                          GetMaterialSlotStatusTooltip(int32 MaterialSlotIndex) const;
+    bool                                           IsMaterialSlotIncludedInDataUVLayout(int32 MaterialSlotIndex) const;
+    bool                                           DoesMaterialSlotHaveDataUVWarnings(int32 MaterialSlotIndex) const;
+    EVisibility                                    GetDataUVUpdateBarVisibility() const;
+    FText                                          GetPendingDataUVUpdateText() const;
+    FText                                          GetUpdateDataUVButtonText() const;
+    bool                                           IsUpdateDataUVEnabled() const;
+    bool                                           CanRevertDataUVChanges() const;
+    FReply                                         HandleUpdateDataUVClicked();
+    FReply                                         HandleRevertDataUVChangesClicked();
     FText                                          GetSelectedTextureText() const;
     FText                                          GetRenderProfileBakeSourceText() const;
     FText                                          GetRenderProfileBakeSlotsText() const;
@@ -185,6 +198,8 @@ class SWetClothingPartEditorPanel : public SCompoundWidget
     EVisibility                                    GetSingleCirclePreviewVisibility() const;
     ECheckBoxState                                 GetShowPartColorsCheckState() const;
     void                                           HandleShowPartColorsChanged(ECheckBoxState NewState);
+    float                                          GetPartColorIntensity() const;
+    void                                           HandlePartColorIntensityChanged(float InValue);
     float                                          GetSelectionLineThicknessScale() const;
     void                                           HandleSelectionLineThicknessChanged(float InValue);
     FReply                                         HandleFocusPreviewClicked();
@@ -242,6 +257,10 @@ class SWetClothingPartEditorPanel : public SCompoundWidget
     int32                                              SelectedWetPartID = INDEX_NONE;
     int32                                              SelectedAssignWetPartID = INDEX_NONE;
     bool                                               bShowPartColorsInPreview = true;
+    float                                              PartColorIntensity = 1.0f;
+    TMap<int32, bool>                                  PendingWettableOriginalStates;
+    TSet<int32>                                        FailedDataUVSlotIndices;
+    FString                                            LastDataUVUpdateError;
     EDWCSurfaceWaterTilingPreviewCoverageMode           SurfaceWaterPreviewCoverageMode = EDWCSurfaceWaterTilingPreviewCoverageMode::FullPart;
     EDWCSurfaceWaterTilingPreviewDisplayMode            SurfaceWaterPreviewDisplayMode = EDWCSurfaceWaterTilingPreviewDisplayMode::Lit;
     TWeakPtr<SWindow>                                  SurfaceWaterTilingWindow;

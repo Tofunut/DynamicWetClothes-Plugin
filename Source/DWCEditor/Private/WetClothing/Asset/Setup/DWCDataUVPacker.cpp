@@ -176,7 +176,7 @@ namespace DWCDataUVPackerPrivate
         return true;
     }
 
-    static void PackRecordsInGrid(
+    static bool PackRecordsInGrid(
         TArray<FPackingRecord>& Records,
         const FVector2D& AtlasMin,
         const FVector2D& AtlasSize,
@@ -184,7 +184,7 @@ namespace DWCDataUVPackerPrivate
     {
         if (Records.IsEmpty())
         {
-            return;
+            return true;
         }
 
         Records.Sort(
@@ -200,9 +200,12 @@ namespace DWCDataUVPackerPrivate
         const FVector2D CellSize(
             AtlasSize.X / static_cast<double>(ColumnCount),
             AtlasSize.Y / static_cast<double>(RowCount));
-        const double CellPadding = FMath::Min(
-            IslandPaddingUV,
-            FMath::Max(FMath::Min(CellSize.X, CellSize.Y) * 0.25, 0.0));
+        const double MaxCellPadding = FMath::Max(FMath::Min(CellSize.X, CellSize.Y) * 0.25, 0.0);
+        if (IslandPaddingUV > MaxCellPadding + 1.0e-9)
+        {
+            return false;
+        }
+        const double CellPadding = IslandPaddingUV;
         const FVector2D ContentCellSize(
             FMath::Max(CellSize.X - CellPadding * 2.0, 1.0e-7),
             FMath::Max(CellSize.Y - CellPadding * 2.0, 1.0e-7));
@@ -222,6 +225,8 @@ namespace DWCDataUVPackerPrivate
             Record.PackedMin = CellMin + FVector2D(CellPadding, CellPadding) +
                 (ContentCellSize - Record.PackedSize) * 0.5;
         }
+
+        return true;
     }
 
     static bool PackRecordsWithMaximumScale(
@@ -323,17 +328,19 @@ void FDWCDataUVPacker::BuildRawChartUVs(
     }
 }
 
-void FDWCDataUVPacker::Pack(
+bool FDWCDataUVPacker::Pack(
     const TArray<FDWCDataUVTriangle>& Triangles,
     TArray<FDWCDataUVChart>& Charts,
     const int32 Resolution,
     const int32 PaddingPixels,
-    TMap<int32, FVector2f>& OutPackedUVByVertexInstance)
+    TMap<int32, FVector2f>& OutPackedUVByVertexInstance,
+    int32& OutFailedMaterialSlotIndex)
 {
     OutPackedUVByVertexInstance.Reset();
+    OutFailedMaterialSlotIndex = INDEX_NONE;
     if (Charts.IsEmpty())
     {
-        return;
+        return true;
     }
 
     for (FDWCDataUVChart& Chart : Charts)
@@ -367,7 +374,13 @@ void FDWCDataUVPacker::Pack(
         const double MaxReasonablePaddingUV = SlotChartIndices.Num() > 0
             ? 0.45 / (FMath::Sqrt(static_cast<double>(SlotChartIndices.Num())) + 1.0)
             : 0.0;
-        const double PaddingUV = FMath::Clamp(RequestedPaddingUV, 0.0, MaxReasonablePaddingUV);
+        if (RequestedPaddingUV > MaxReasonablePaddingUV + 1.0e-9)
+        {
+            OutFailedMaterialSlotIndex = MaterialSlotIndex;
+            OutPackedUVByVertexInstance.Reset();
+            return false;
+        }
+        const double PaddingUV = FMath::Max(RequestedPaddingUV, 0.0);
         const double BorderPaddingUV = PaddingUV;
         const double IslandPaddingUV = PaddingUV;
 
@@ -409,7 +422,7 @@ void FDWCDataUVPacker::Pack(
             // MaxRects performs free-rectangle pruning for every record and every scale
             // retry. A pathological overlap split can create thousands of charts; use a
             // deterministic bounded path before that work becomes superlinear.
-            DWCDataUVPackerPrivate::PackRecordsInGrid(
+            bPacked = DWCDataUVPackerPrivate::PackRecordsInGrid(
                 Records,
                 AtlasMin,
                 AtlasSize,
@@ -424,18 +437,11 @@ void FDWCDataUVPacker::Pack(
                 IslandPaddingUV);
         }
 
-        if (!bPacked && PaddingUV > 0.0)
-        {
-            bPacked = DWCDataUVPackerPrivate::PackRecordsWithMaximumScale(
-                Records,
-                FVector2D::ZeroVector,
-                FVector2D(1.0, 1.0),
-                0.0);
-        }
-
         if (!bPacked)
         {
-            continue;
+            OutFailedMaterialSlotIndex = MaterialSlotIndex;
+            OutPackedUVByVertexInstance.Reset();
+            return false;
         }
 
         for (const DWCDataUVPackerPrivate::FPackingRecord& Record : Records)
@@ -468,4 +474,6 @@ void FDWCDataUVPacker::Pack(
             }
         }
     }
+
+    return true;
 }

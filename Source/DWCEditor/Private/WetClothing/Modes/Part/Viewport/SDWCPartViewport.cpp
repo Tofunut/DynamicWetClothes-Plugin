@@ -609,6 +609,10 @@ void SDWCPartViewport::RefreshPreviewMesh()
     if (UWetClothingAsset* WetClothingAssetPtr = WetClothingAsset.Get())
     {
         TargetMesh = WetClothingAssetPtr->GetRuntimeSkeletalMesh();
+        if (TargetMesh == nullptr)
+        {
+            TargetMesh = WetClothingAssetPtr->GetSourceSkeletalMesh();
+        }
     }
 
     if (PreviewMeshComponent->GetSkeletalMeshAsset() == TargetMesh && TargetMesh != nullptr)
@@ -805,6 +809,18 @@ void SDWCPartViewport::SetShowWetPartColors(const bool bInShowWetPartColors)
     RefreshWetPartOverlayMesh();
 }
 
+void SDWCPartViewport::SetWetPartColorIntensity(const float InIntensity)
+{
+    const float NewIntensity = FMath::Clamp(InIntensity, 0.0f, 1.0f);
+    if (FMath::IsNearlyEqual(WetPartColorIntensity, NewIntensity))
+    {
+        return;
+    }
+
+    WetPartColorIntensity = NewIntensity;
+    RefreshWetPartOverlayMesh();
+}
+
 void SDWCPartViewport::SetPreviewWetPart(const int32 MaterialSlotIndex, const int32 WetPartID)
 {
     if (PreviewMaterialSlotIndex == MaterialSlotIndex && PreviewWetPartID == WetPartID)
@@ -929,7 +945,7 @@ void SDWCPartViewport::RefreshWetPartOverlayMesh()
 
     // Surface Water is rendered on the original skeletal mesh through the
     // selected slot's transient DWC preview material. Procedural geometry remains editor-overlay only.
-    if (bSurfaceWaterTilingPreview || !bShowWetPartColors)
+    if (bSurfaceWaterTilingPreview || !bShowWetPartColors || WetPartColorIntensity <= KINDA_SMALL_NUMBER)
     {
         WetPartOverlayComponent->MarkRenderStateDirty();
         RequestViewportRedraw();
@@ -949,7 +965,7 @@ void SDWCPartViewport::RefreshWetPartOverlayMesh()
     {
         const int32* WetPartID = CurrentWetPartIslandAssignments.Find(Island.UVIslandID);
         const FLinearColor* IslandColor = CurrentWetPartIslandColors.Find(Island.UVIslandID);
-        if (WetPartID == nullptr || *WetPartID == 0 || IslandColor == nullptr)
+        if (WetPartID == nullptr || IslandColor == nullptr)
         {
             continue;
         }
@@ -971,7 +987,8 @@ void SDWCPartViewport::RefreshWetPartOverlayMesh()
                     Vertices.Add(UVTriangle.LocalPositions[CornerIndex] + OffsetNormal * NormalOffset);
                     Normals.Add(OffsetNormal);
                     UVs.Add(UVTriangle.UVs[CornerIndex]);
-                    VertexColors.Add(*IslandColor);
+                    const FLinearColor DisplayColor = FMath::Lerp(FLinearColor::White, *IslandColor, WetPartColorIntensity);
+                    VertexColors.Add(DisplayColor);
                 }
 
                 Indices.Add(BaseVertexIndex);

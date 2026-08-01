@@ -228,18 +228,20 @@ bool FDWCDataUVChartBuilder::BuildOverlapConflictGraph(
     return true;
 }
 
-void FDWCDataUVChartBuilder::BuildNonOverlappingCharts(
+bool FDWCDataUVChartBuilder::BuildNonOverlappingCharts(
     const TArray<FDWCDataUVTriangle>& Triangles,
     const TArray<FDWCDataUVChart>& OriginalUVIslands,
     TArray<FDWCDataUVChart>& OutCharts,
     int32& OutSplitOriginalUVIslandCount,
     int32& OutOverlapPairCount,
-    int32& OutCandidateBudgetFallbackChartCount)
+    TSet<int32>& OutSplitMaterialSlotIndices,
+    int32& OutBudgetExceededMaterialSlotIndex)
 {
     OutCharts.Reset();
     OutSplitOriginalUVIslandCount = 0;
     OutOverlapPairCount = 0;
-    OutCandidateBudgetFallbackChartCount = 0;
+    OutSplitMaterialSlotIndices.Reset();
+    OutBudgetExceededMaterialSlotIndex = INDEX_NONE;
 
     for (const FDWCDataUVChart& OriginalUVIsland : OriginalUVIslands)
     {
@@ -253,6 +255,7 @@ void FDWCDataUVChartBuilder::BuildNonOverlappingCharts(
         if (!bConflictGraphWithinBudget)
         {
             ++OutSplitOriginalUVIslandCount;
+            OutSplitMaterialSlotIndices.Add(OriginalUVIsland.MaterialSlotIndex);
             for (const int32 TriangleIndex : OriginalUVIsland.TriangleIndices)
             {
                 if (!Triangles.IsValidIndex(TriangleIndex))
@@ -263,7 +266,6 @@ void FDWCDataUVChartBuilder::BuildNonOverlappingCharts(
                 FDWCDataUVChart& TriangleChart = OutCharts.AddDefaulted_GetRef();
                 TriangleChart.MaterialSlotIndex = OriginalUVIsland.MaterialSlotIndex;
                 TriangleChart.TriangleIndices.Add(TriangleIndex);
-                ++OutCandidateBudgetFallbackChartCount;
             }
             continue;
         }
@@ -276,6 +278,7 @@ void FDWCDataUVChartBuilder::BuildNonOverlappingCharts(
         }
 
         ++OutSplitOriginalUVIslandCount;
+        OutSplitMaterialSlotIndices.Add(OriginalUVIsland.MaterialSlotIndex);
 
         TArray<int32> ColoringOrder;
         ColoringOrder.Reserve(OriginalUVIsland.TriangleIndices.Num());
@@ -345,56 +348,7 @@ void FDWCDataUVChartBuilder::BuildNonOverlappingCharts(
             }
         }
     }
+
+    return true;
 }
 
-void FDWCDataUVChartBuilder::BuildTriangleFallbackCharts(
-    const TArray<FDWCDataUVTriangle>& Triangles,
-    const TArray<FDWCDataUVChart>& ExistingCharts,
-    const TSet<int32>& MaterialSlotsToReplace,
-    TArray<FDWCDataUVChart>& OutCharts,
-    int32& OutFallbackChartCount)
-{
-    OutCharts.Reset();
-    OutFallbackChartCount = 0;
-
-    TMap<int32, TSet<int32>> TriangleIndicesByMaterial;
-    for (const FDWCDataUVChart& Chart : ExistingCharts)
-    {
-        if (!MaterialSlotsToReplace.Contains(Chart.MaterialSlotIndex))
-        {
-            OutCharts.Add(Chart);
-            continue;
-        }
-
-        TSet<int32>& TriangleSet = TriangleIndicesByMaterial.FindOrAdd(Chart.MaterialSlotIndex);
-        for (const int32 TriangleIndex : Chart.TriangleIndices)
-        {
-            if (Triangles.IsValidIndex(TriangleIndex))
-            {
-                TriangleSet.Add(TriangleIndex);
-            }
-        }
-    }
-
-    TArray<int32> SortedMaterialSlots;
-    TriangleIndicesByMaterial.GetKeys(SortedMaterialSlots);
-    SortedMaterialSlots.Sort();
-    for (const int32 MaterialSlotIndex : SortedMaterialSlots)
-    {
-        TArray<int32> SortedTriangleIndices;
-        for (const int32 TriangleIndex : TriangleIndicesByMaterial.FindChecked(MaterialSlotIndex))
-        {
-            SortedTriangleIndices.Add(TriangleIndex);
-        }
-        SortedTriangleIndices.Sort();
-
-        for (const int32 TriangleIndex : SortedTriangleIndices)
-        {
-            FDWCDataUVChart TriangleChart;
-            TriangleChart.MaterialSlotIndex = MaterialSlotIndex;
-            TriangleChart.TriangleIndices.Add(TriangleIndex);
-            OutCharts.Add(MoveTemp(TriangleChart));
-            ++OutFallbackChartCount;
-        }
-    }
-}

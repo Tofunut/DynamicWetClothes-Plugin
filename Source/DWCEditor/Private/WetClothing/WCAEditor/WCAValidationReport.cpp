@@ -543,7 +543,8 @@ namespace
 
             for (const FWetClothingWetPartEntry& Entry : Slot.WetPartEntries)
             {
-                if (Entry.AssignedUVIslandIDs.IsEmpty() ||
+                if (Entry.WetPartID == 0 ||
+                    Entry.AssignedUVIslandIDs.IsEmpty() ||
                     ReportedProfileIndices.Contains(Entry.ProfileIndex))
                 {
                     continue;

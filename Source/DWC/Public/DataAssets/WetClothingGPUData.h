@@ -221,8 +221,8 @@ struct DWC_API FDWCGPULODBakeData
 {
     GENERATED_BODY()
 
-    static constexpr int32 CurrentRuntimeDataVersion = 6;
-    static constexpr int32 CurrentMapBakeVersion = 7;
+    static constexpr int32 CurrentRuntimeDataVersion = 7;
+    static constexpr int32 CurrentMapBakeVersion = 8;
     static constexpr int32 CurrentBulkDataVersion = 6;
 
     UPROPERTY(VisibleAnywhere, Category = "GPU Runtime Data")

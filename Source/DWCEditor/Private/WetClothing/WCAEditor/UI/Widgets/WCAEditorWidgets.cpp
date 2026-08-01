@@ -54,6 +54,11 @@ namespace
         {
             for (const FWetClothingWetPartEntry& Entry : SlotData->WetPartEntries)
             {
+                if (Entry.WetPartID == 0)
+                {
+                    continue;
+                }
+
                 const FWetPartProfileAssignment* Profile = EditableData.FindProfile(Entry);
                 if (Profile == nullptr || !Profile->SourceProfile.IsValid())
                 {
@@ -627,14 +632,6 @@ TSharedRef<ITableRow> FWCAEditorWidgets::GenerateMaterialSlotRow(
         ThumbnailWidget = Thumbnail->MakeThumbnailWidget(ThumbnailConfig);
     }
 
-    // Keep the second 52x52 cell intentionally empty. Building per-slot UV wireframes here
-    // forced mesh/UV analysis during routine list refreshes and made WCA editor opening scale
-    // with mesh complexity. Detailed UV inspection belongs in the dedicated UV view.
-    TSharedRef<SWidget> SlotPreviewWidget =
-        SNew(SBox)
-        .WidthOverride(52.0f)
-        .HeightOverride(52.0f);
-
     TSharedRef<SHorizontalBox> RowContent = SNew(SHorizontalBox);
 
     RowContent->AddSlot()
@@ -645,18 +642,6 @@ TSharedRef<ITableRow> FWCAEditorWidgets::GenerateMaterialSlotRow(
                  .WidthOverride(52.0f)
                  .HeightOverride(52.0f)
                      [ThumbnailWidget]];
-
-    if (!bIsAllSlotsRow)
-    {
-        RowContent->AddSlot()
-            .AutoWidth()
-            .VAlign(VAlign_Center)
-            .Padding(0.0f, 0.0f, 8.0f, 0.0f)
-                [SNew(SBox)
-                     .WidthOverride(52.0f)
-                     .HeightOverride(52.0f)
-                         [SlotPreviewWidget]];
-    }
 
     RowContent->AddSlot()
         .FillWidth(1.0f)
@@ -693,26 +678,48 @@ TSharedRef<ITableRow> FWCAEditorWidgets::GenerateMaterialSlotRow(
 
     if (!bIsAllSlotsRow)
     {
-        const FText StatusText = Args.GetMaterialSlotStatusText ? Args.GetMaterialSlotStatusText(MaterialSlotIndex) : FText::GetEmpty();
         RowContent->AddSlot()
             .AutoWidth()
             .VAlign(VAlign_Center)
-            .Padding(0.0f, 0.0f, 10.0f, 0.0f)
-                [SNew(STextBlock)
-                     .Text(StatusText)
+            .Padding(0.0f, 0.0f, 4.0f, 0.0f)
+                [SNew(SBox)
+                     .WidthOverride(64.0f)
+                     .HAlign(HAlign_Center)
+                     .VAlign(VAlign_Center)
+                         [SNew(STextBlock)
+                     .Text_Lambda([GetStatusText = Args.GetMaterialSlotStatusText, MaterialSlotIndex]()
+                     {
+                         return GetStatusText ? GetStatusText(MaterialSlotIndex) : FText::GetEmpty();
+                     })
+                     .ToolTipText_Lambda([GetTooltip = Args.GetMaterialSlotStatusTooltip, MaterialSlotIndex]()
+                     {
+                         return GetTooltip ? GetTooltip(MaterialSlotIndex) : FText::GetEmpty();
+                     })
                      .Font(FAppStyle::GetFontStyle(TEXT("SmallFont")))
-                     .ColorAndOpacity(FSlateColor(FLinearColor(0.58f, 0.58f, 0.58f, 1.0f)))];
+                     .ColorAndOpacity_Lambda([GetStatusColor = Args.GetMaterialSlotStatusColor, MaterialSlotIndex]()
+                     {
+                         return GetStatusColor
+                             ? GetStatusColor(MaterialSlotIndex)
+                             : FSlateColor(FStyleColors::Foreground);
+                     })]];
 
         if (Args.bShowWettableToggle)
         {
             RowContent->AddSlot()
                 .AutoWidth()
                 .VAlign(VAlign_Center)
-                .Padding(0.0f, 0.0f, 2.0f, 0.0f)
-                    [SNew(SButton)
+                    [SNew(SBox)
+                         .WidthOverride(76.0f)
+                         .HAlign(HAlign_Center)
+                         .VAlign(VAlign_Center)
+                             [SNew(SButton)
                          .ButtonStyle(FAppStyle::Get(), TEXT("NoBorder"))
                          .ContentPadding(FMargin(4.0f, 2.0f))
                          .ToolTipText(NSLOCTEXT("WetClothingEditorCommonWidgets", "WettableSlotTooltip", "Toggle whether this material slot can be wetted."))
+                         .IsEnabled_Lambda([IsToggleEnabled = Args.IsWettableToggleEnabled, MaterialSlotIndex]()
+                         {
+                             return !IsToggleEnabled || IsToggleEnabled(MaterialSlotIndex);
+                         })
                          .OnClicked_Lambda([OnClicked = Args.OnWettableSlotClicked, MaterialSlotIndex]()
                          {
                              return OnClicked.IsBound() ? OnClicked.Execute(MaterialSlotIndex) : FReply::Handled();
@@ -736,7 +743,7 @@ TSharedRef<ITableRow> FWCAEditorWidgets::GenerateMaterialSlotRow(
                                                return bWettable
                                                           ? FSlateColor(FLinearColor(0.35f, 0.85f, 1.0f, 1.0f))
                                                           : FSlateColor(FLinearColor(1.0f, 0.36f, 0.36f, 1.0f));
-                                           })]]];
+                                           })]]]];
         }
 
         if (Args.BuildTrailingWidget)

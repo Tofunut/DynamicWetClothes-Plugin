@@ -91,6 +91,7 @@ namespace
     {
         return Slot.bIsWettableSlot &&
                Slot.MaterialSlotIndex != INDEX_NONE &&
+               Entry.WetPartID != 0 &&
                !Entry.AssignedUVIslandIDs.IsEmpty();
     }
 

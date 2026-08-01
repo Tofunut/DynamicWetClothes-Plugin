@@ -29,6 +29,7 @@ namespace
     {
         return SlotData.bIsWettableSlot &&
                SlotData.MaterialSlotIndex != INDEX_NONE &&
+               Entry.WetPartID != 0 &&
                !Entry.AssignedUVIslandIDs.IsEmpty();
     }
 

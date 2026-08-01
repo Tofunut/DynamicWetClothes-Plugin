@@ -12,20 +12,15 @@ public:
         const TMap<int32, TArray<int32>>& TriangleIndicesByMaterialSlot,
         TArray<FDWCDataUVChart>& OutOriginalUVIslands);
 
-    static void BuildNonOverlappingCharts(
+    static bool BuildNonOverlappingCharts(
         const TArray<FDWCDataUVTriangle>& Triangles,
         const TArray<FDWCDataUVChart>& OriginalUVIslands,
         TArray<FDWCDataUVChart>& OutCharts,
         int32& OutSplitOriginalUVIslandCount,
         int32& OutOverlapPairCount,
-        int32& OutCandidateBudgetFallbackChartCount);
+        TSet<int32>& OutSplitMaterialSlotIndices,
+        int32& OutBudgetExceededMaterialSlotIndex);
 
-    static void BuildTriangleFallbackCharts(
-        const TArray<FDWCDataUVTriangle>& Triangles,
-        const TArray<FDWCDataUVChart>& ExistingCharts,
-        const TSet<int32>& MaterialSlotsToReplace,
-        TArray<FDWCDataUVChart>& OutCharts,
-        int32& OutFallbackChartCount);
 
 private:
     static void BuildOriginalUVIslandsForSlot(

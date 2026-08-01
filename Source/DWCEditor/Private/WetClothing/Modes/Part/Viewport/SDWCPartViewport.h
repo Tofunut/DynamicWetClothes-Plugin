@@ -68,6 +68,7 @@ class SDWCPartViewport : public SEditorViewport, public FGCObject
     void  SetWetPartIslandAssignments(const TMap<int32, int32>& InUVIslandToWetPartID, const TMap<int32, FLinearColor>& InIslandColors);
     void  ClearWetPartIslandColors();
     void  SetShowWetPartColors(bool bInShowWetPartColors);
+    void  SetWetPartColorIntensity(float InIntensity);
     void  SetPreviewWetPart(int32 MaterialSlotIndex, int32 WetPartID);
     void  SetPreviewWetness(float AbsorbedWetness, float SurfaceWater);
     void  SetSurfaceWaterPreviewDropletsEnabled(bool bInDropletsEnabled);
@@ -152,6 +153,7 @@ class SDWCPartViewport : public SEditorViewport, public FGCObject
     int32                                        SurfaceWaterPreviewNormalUVChannel = INDEX_NONE;
     bool                                         bSurfaceWaterTilingPreview = false;
     bool                                         bShowWetPartColors = true;
+    float                                        WetPartColorIntensity = 1.0f;
     EDWCSurfaceWaterTilingPreviewCoverageMode    SurfaceWaterPreviewCoverageMode = EDWCSurfaceWaterTilingPreviewCoverageMode::FullPart;
     float                                        PreviewAbsorbedWetness = 0.0f;
     float                                        PreviewSurfaceWater = 1.0f;

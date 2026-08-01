@@ -65,7 +65,7 @@ namespace
         static const FSlateRoundedBoxBrush UncheckedBrush(FStyleColors::Header, 4.0f);
         static const FSlateRoundedBoxBrush UncheckedHoveredBrush(FStyleColors::Hover, 4.0f);
         static const FSlateRoundedBoxBrush UncheckedPressedBrush(FStyleColors::Recessed, 4.0f);
-        static const FSlateRoundedBoxBrush CheckedBrush(FStyleColors::AccentBlue, 4.0f);
+        static const FSlateRoundedBoxBrush CheckedBrush(FStyleColors::Primary, 4.0f);
         static const FSlateRoundedBoxBrush CheckedHoveredBrush(FStyleColors::PrimaryHover, 4.0f);
 
         static const FCheckBoxStyle Style =
@@ -268,7 +268,7 @@ namespace
             return FStyleColors::Warning;
         }
 
-        return FStyleColors::AccentBlue;
+        return FStyleColors::Primary;
     }
 
     bool IsAssetSetupUVSelectionValid(
@@ -2190,7 +2190,7 @@ namespace
                                             SNew(STextBlock)
                                             .Text(LOCTEXT("AssetSetupSourceMeshUnchanged", "ⓘ The source mesh will not be modified."))
                                             .Font(FAppStyle::GetFontStyle(TEXT("NormalFont")))
-                                            .ColorAndOpacity(FStyleColors::AccentBlue)
+                                            .ColorAndOpacity(FStyleColors::Primary)
                                         ]
                                     ]
                                 ]
@@ -2217,9 +2217,9 @@ namespace
                                             .AutoWrapText(true)
                                             .Text(LOCTEXT(
                                                 "AssetSetupLockedUVLayoutInfo",
-                                                "ⓘ Original UV and island topologywill not be modified."))
+                                                "ⓘ Original UV and island topology will not be modified."))
                                             .Font(FAppStyle::GetFontStyle(TEXT("NormalFont")))
-                                            .ColorAndOpacity(FStyleColors::AccentBlue)
+                                            .ColorAndOpacity(FStyleColors::Primary)
                                         ]
                                         + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 5.0f, 0.0f, 0.0f)
                                         [
@@ -2341,13 +2341,22 @@ namespace
                                 const bool bRequiresDataUVRelocation = DoesAssetSetupRequireDataUVRelocation(
                                     Asset,
                                     PendingSettings);
-                                if (bRequiresDataUVRelocation &&
+                                const FDWCWetClothingAssetSetupSettings& ExistingSettings = Asset.GetSetupSettings();
+                                const int32 SourceUVChannelCount = GetAssetSetupSkeletalMeshUVChannelCount(
+                                    Asset.GetSourceSkeletalMesh(),
+                                    0);
+                                const bool bDeferredInitialBuildNeedsOverwriteConsent =
+                                    !Asset.HasLockedDataUVLayout() &&
+                                    PendingSettings.PreferredDWCDataUVChannelIndex < SourceUVChannelCount &&
+                                    !(PendingSettings.PreferredDWCDataUVChannelIndex == ExistingSettings.PreferredDWCDataUVChannelIndex &&
+                                      ExistingSettings.bAllowOverwritePreferredDWCDataUVChannel);
+                                if ((bRequiresDataUVRelocation || bDeferredInitialBuildNeedsOverwriteConsent) &&
                                     !ConfirmAssetSetupDataUVOverwrite(
                                         Asset.GetSourceSkeletalMesh(),
                                         PendingSettings.OriginalUVChannelIndex,
                                         PendingSettings.PreferredDWCDataUVChannelIndex,
                                         Asset.GetDWCDataUVChannelIndex(),
-                                        true,
+                                        bRequiresDataUVRelocation,
                                         OutAllowOverwriteExistingDataUVChannel))
                                 {
                                     return FReply::Handled();
@@ -3094,6 +3103,14 @@ void FWCAEditor::HandleAssetSetupClicked()
     }
 
     const FDWCWetClothingAssetSetupSettings PreviousSettings = Asset->GetSetupSettings();
+    if (!Asset->HasLockedDataUVLayout())
+    {
+        const bool bPreferredChannelUnchanged =
+            NewSettings.PreferredDWCDataUVChannelIndex == PreviousSettings.PreferredDWCDataUVChannelIndex;
+        NewSettings.bAllowOverwritePreferredDWCDataUVChannel =
+            bAllowOverwriteExistingDataUVChannel ||
+            (bPreferredChannelUnchanged && PreviousSettings.bAllowOverwritePreferredDWCDataUVChannel);
+    }
     const bool bRequiresDataUVRelocation = DoesAssetSetupRequireDataUVRelocation(*Asset, NewSettings);
 
     // Apply non-channel settings while the WCA still references its current sealed Data UV channel.

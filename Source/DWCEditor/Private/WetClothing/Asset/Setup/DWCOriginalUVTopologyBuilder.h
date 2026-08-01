@@ -15,5 +15,6 @@ public:
         USkeletalMesh* PreparedMesh,
         int32 LODIndex,
         FDWCEditorUVTopologyData& OutTopology,
-        FString* OutErrorMessage = nullptr);
+        FString* OutErrorMessage = nullptr,
+        const TSet<int32>* TargetMaterialSlotIndices = nullptr);
 };

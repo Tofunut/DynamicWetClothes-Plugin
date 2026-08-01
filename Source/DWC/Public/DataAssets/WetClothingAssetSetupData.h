@@ -115,6 +115,10 @@ struct DWC_API FDWCWetClothingAssetSetupSettings
     UPROPERTY(EditAnywhere, Category = "Mesh", meta = (ClampMin = "0", ClampMax = "3"))
     int32 PreferredDWCDataUVChannelIndex = 1;
 
+    /** Creation/setup confirmation for replacing an occupied preferred channel on the DWC Prepared Mesh only. */
+    UPROPERTY()
+    bool bAllowOverwritePreferredDWCDataUVChannel = false;
+
     UPROPERTY(EditAnywhere, Category = "Mesh|LOD Mapping Range", meta = (DisplayName = "First Mapped LOD", ClampMin = "0"))
     int32 FirstGeneratedLODIndex = 0;
 
@@ -208,6 +212,14 @@ struct DWC_API FDWCDataUVLODMetadata
 
     UPROPERTY(VisibleAnywhere, Category = "DWC Data UV")
     int32 UVChannelIndex = INDEX_NONE;
+
+    /** Material slots included in this immutable Data UV layout. Empty means all slots for legacy assets. */
+    UPROPERTY(VisibleAnywhere, Category = "DWC Data UV")
+    TArray<int32> GeneratedMaterialSlotIndices;
+
+    /** Included slots whose generated layout completed with non-fatal UV warnings. */
+    UPROPERTY(VisibleAnywhere, Category = "DWC Data UV")
+    TArray<int32> WarningMaterialSlotIndices;
 
     /** Signature of the mesh inputs used to generate this output. */
     UPROPERTY(VisibleAnywhere, Category = "DWC Data UV")

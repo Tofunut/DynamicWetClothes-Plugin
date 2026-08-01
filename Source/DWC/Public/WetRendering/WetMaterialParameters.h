@@ -28,6 +28,8 @@ namespace DWCWetMaterialParameters
     DWC_API const FName& UnderColorBlendStrength();
     DWC_API const FName& SurfaceDroplet1RT();
     DWC_API const FName& SurfaceDroplet2RT();
+    DWC_API const FName& Droplet1RenderingEnabled();
+    DWC_API const FName& Droplet2RenderingEnabled();
     DWC_API const FName& SurfaceWaterTexelSize();
 
 

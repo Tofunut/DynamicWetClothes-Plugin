@@ -118,6 +118,15 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
     void SetDryRateScale(float InDryRateScale);
     UFUNCTION(BlueprintPure, Category = "Wetness")
     float GetDryRateScale() const { return WetnessSettings.DryRateScale; }
+    /** Toggles only Droplet1's material contribution. Stamping, simulation, and drying continue. */
+    UFUNCTION(BlueprintCallable, Category = "Wetness|Rendering")
+    void SetDroplet1RenderingEnabled(bool bEnabled);
+    /** Toggles only Droplet2's material contribution. Stamping, simulation, and drying continue. */
+    UFUNCTION(BlueprintCallable, Category = "Wetness|Rendering")
+    void SetDroplet2RenderingEnabled(bool bEnabled);
+    /** Toggles both droplet visuals through the two independent rendering setters. */
+    UFUNCTION(BlueprintCallable, Category = "Wetness|Rendering")
+    void SetDropletRenderingEnabled(bool bEnabled);
     UFUNCTION(BlueprintCallable, Category = "Wetness|GPU")
     bool ClearGPUPendingWetnessMaps();
     bool GetWetnessWorldBounds(FBox& OutBounds) const;
@@ -297,6 +306,9 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
 
   private:
     // Runtime mode state.
+    bool bDroplet1RenderingEnabled = true;
+    bool bDroplet2RenderingEnabled = true;
+
     UPROPERTY(Transient)
     EDWCSimulationMode ActiveSimulationMode = EDWCSimulationMode::VertexCPU;
 

@@ -1048,6 +1048,14 @@ namespace
             {
                 OutMissingParameters.Add(DWCWetMaterialParameters::SurfaceDroplet2RT().ToString());
             }
+            if (!MaterialInterfaceHasScalarParameter(MaterialInterface, DWCWetMaterialParameters::Droplet1RenderingEnabled()))
+            {
+                OutMissingParameters.Add(DWCWetMaterialParameters::Droplet1RenderingEnabled().ToString());
+            }
+            if (!MaterialInterfaceHasScalarParameter(MaterialInterface, DWCWetMaterialParameters::Droplet2RenderingEnabled()))
+            {
+                OutMissingParameters.Add(DWCWetMaterialParameters::Droplet2RenderingEnabled().ToString());
+            }
             if (!MaterialInterfaceHasTextureParameter(MaterialInterface, DWCWetMaterialParameters::DropletMaskTextureArray()))
             {
                 OutMissingParameters.Add(DWCWetMaterialParameters::DropletMaskTextureArray().ToString());

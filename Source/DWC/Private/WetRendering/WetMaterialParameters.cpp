@@ -29,6 +29,8 @@ namespace DWCWetMaterialParameters
     DWC_DEFINE_MATERIAL_PARAMETER(UnderColorBlendStrength, "DWC_UnderColorBlendStrength")
     DWC_DEFINE_MATERIAL_PARAMETER(SurfaceDroplet1RT, "DWC_SurfaceDroplet1RT")
     DWC_DEFINE_MATERIAL_PARAMETER(SurfaceDroplet2RT, "DWC_SurfaceDroplet2RT")
+    DWC_DEFINE_MATERIAL_PARAMETER(Droplet1RenderingEnabled, "DWC_Droplet1RenderingEnabled")
+    DWC_DEFINE_MATERIAL_PARAMETER(Droplet2RenderingEnabled, "DWC_Droplet2RenderingEnabled")
     DWC_DEFINE_MATERIAL_PARAMETER(SurfaceWaterTexelSize, "DWC_SurfaceWaterTexelSize")
 
     #undef DWC_DEFINE_MATERIAL_PARAMETER

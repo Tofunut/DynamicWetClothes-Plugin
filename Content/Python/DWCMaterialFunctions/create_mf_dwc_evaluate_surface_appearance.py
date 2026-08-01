@@ -232,17 +232,28 @@ return lerp(WetBaseColor, TransparencyColor, Alpha);
         group="DWC Surface Water",
         description="Editor preview only: direct Surface Water wetness.",
     )
+    droplet1_rendering_enabled = c.scalar_parameter(
+        mf, "DWC_Droplet1RenderingEnabled", 1.0, 1900, -1900,
+        group="DWC Surface Water",
+        description="Runtime visual-only toggle for Droplet1. Simulation, stamping, and drying continue unchanged.",
+    )
+    droplet2_rendering_enabled = c.scalar_parameter(
+        mf, "DWC_Droplet2RenderingEnabled", 1.0, 1900, -1500,
+        group="DWC Surface Water",
+        description="Runtime visual-only toggle for Droplet2. Simulation, stamping, and drying continue unchanged.",
+    )
     raw_cov_use = c.named_usage(mf, raw_coverage_decl, 3000, -2450)
     effective_coverage = c.custom_expression(
         mf,
-        "return PreviewOverride > 0.5 ? saturate(PreviewAmount) : saturate(Coverage);",
+        "float SelectedCoverage = PreviewOverride > 0.5 ? saturate(PreviewAmount) : saturate(Coverage);\nreturn saturate(RenderingEnabled) * SelectedCoverage;",
         [
             ("PreviewOverride", preview_override, ("", "Result")),
             ("PreviewAmount", preview_amount, ("", "Result")),
             ("Coverage", raw_cov_use, ("", "Result")),
+            ("RenderingEnabled", droplet1_rendering_enabled, ("", "Result")),
         ],
         "float1", 4200, -2450,
-        "Select preview or runtime droplet coverage before authored mask gating.",
+        "Select preview or runtime Droplet1 coverage, then apply its visual-only runtime toggle.",
     )
     effective_coverage_decl = c.named_declaration(mf, "SURFACE_EffectiveDropletCoverage", effective_coverage, ("", "Result"), 5400, -2450)
 
@@ -251,15 +262,17 @@ return lerp(WetBaseColor, TransparencyColor, Alpha);
         """
 float RuntimeCoverage = saturate(Coverage);
 float PreviewCoverage = saturate(PreviewAmount);
-return PreviewOverride > 0.5 ? PreviewCoverage : RuntimeCoverage;
+float SelectedCoverage = PreviewOverride > 0.5 ? PreviewCoverage : RuntimeCoverage;
+return saturate(RenderingEnabled) * SelectedCoverage;
 """,
         [
             ("PreviewOverride", preview_override, ("", "Result")),
             ("PreviewAmount", preview_amount, ("", "Result")),
             ("Coverage", c.named_usage(mf, raw_flow_coverage_decl, 3000, -2050), ("", "Result")),
+            ("RenderingEnabled", droplet2_rendering_enabled, ("", "Result")),
         ],
         "float1", 4200, -1900,
-        "Preview or runtime coverage from the independent Droplet2 RT.",
+        "Select preview or runtime Droplet2 coverage, then apply its visual-only runtime toggle.",
     )
     effective_flow_coverage_decl = c.named_declaration(
         mf, "SURFACE_EffectiveFlowDropletCoverage", effective_flow_coverage, ("", "Result"), 5400, -1900
@@ -420,7 +433,9 @@ float2 DetailXY = StaticXY * StaticWeight + FlowXY * FlowWeight;
 DetailXY /= max(WeightSum, 1.0e-5);
 float DropletWeight = 1.0 - (1.0 - StaticWeight) * (1.0 - FlowWeight);
 float2 CombinedXY = DetailXY * DropletWeight;
-return normalize(float3(CombinedXY, 1.0));
+float3 Base = normalize(BaseNormal);
+float3 DropletDetail = normalize(float3(CombinedXY, 1.0));
+return normalize(float3(Base.xy + DropletDetail.xy, Base.z * DropletDetail.z));
 """,
         [
             ("BaseNormal", c.named_usage(mf, wrinkle_decl, 4400, -500), ("", "Result")),
@@ -550,8 +565,8 @@ return normalize(float3(CombinedXY, 1.0));
         mf,
         "return max(saturate(Droplet1Amount), saturate(Droplet2Amount));",
         [
-            ("Droplet1Amount", c.named_usage(mf, wetness_decl, 10100, 2050), ("", "Result")),
-            ("Droplet2Amount", c.named_usage(mf, flow_wetness_decl, 10100, 2400), ("", "Result")),
+            ("Droplet1Amount", c.named_usage(mf, effective_coverage_decl, 10100, 2050), ("", "Result")),
+            ("Droplet2Amount", c.named_usage(mf, effective_flow_coverage_decl, 10100, 2400), ("", "Result")),
         ],
         "float1", 10900, 2300,
         "Expose the union of independent Droplet1 and Droplet2 RT wetness values.",

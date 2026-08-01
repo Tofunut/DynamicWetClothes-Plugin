@@ -486,6 +486,8 @@ FWetRenderStageArgs UDynamicWetClothesComponent::MakeWetRenderStageArgs(FDWCWetM
     Args.bShowSurfaceWaterDebugColors =
         bShowSurfaceWaterDebugColors &&
         IsGPUWetnessMode(GetActiveSimulationMode());
+    Args.bDroplet1RenderingEnabled = bDroplet1RenderingEnabled;
+    Args.bDroplet2RenderingEnabled = bDroplet2RenderingEnabled;
     Args.bGPUWetnessMode = IsGPUWetnessMode(GetActiveSimulationMode());
     Args.LODIndex = UWetClothingAsset::RuntimeSimulationLODIndex;
     return Args;
@@ -630,6 +632,60 @@ bool UDynamicWetClothesComponent::ApplyWetSurface(
 void UDynamicWetClothesComponent::SetDryRateScale(const float InDryRateScale)
 {
     WetnessSettings.DryRateScale = FMath::Max(0.0f, InDryRateScale);
+}
+
+void UDynamicWetClothesComponent::SetDroplet1RenderingEnabled(const bool bEnabled)
+{
+    if (bDroplet1RenderingEnabled == bEnabled)
+    {
+        return;
+    }
+
+    bDroplet1RenderingEnabled = bEnabled;
+    for (const TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver : Receivers)
+    {
+        if (!Receiver.IsValid() ||
+            !Receiver->SharedRuntimeData.IsValid() ||
+            !Receiver->SimulationState.IsValid() ||
+            !Receiver->RenderStage.IsValid())
+        {
+            continue;
+        }
+
+        FWetRenderStageArgs RenderArgs = MakeWetRenderStageArgs(*Receiver);
+        Receiver->RenderStage->ApplyWetMaterialParameters(RenderArgs);
+    }
+    bWetRenderDirty = true;
+}
+
+void UDynamicWetClothesComponent::SetDroplet2RenderingEnabled(const bool bEnabled)
+{
+    if (bDroplet2RenderingEnabled == bEnabled)
+    {
+        return;
+    }
+
+    bDroplet2RenderingEnabled = bEnabled;
+    for (const TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver : Receivers)
+    {
+        if (!Receiver.IsValid() ||
+            !Receiver->SharedRuntimeData.IsValid() ||
+            !Receiver->SimulationState.IsValid() ||
+            !Receiver->RenderStage.IsValid())
+        {
+            continue;
+        }
+
+        FWetRenderStageArgs RenderArgs = MakeWetRenderStageArgs(*Receiver);
+        Receiver->RenderStage->ApplyWetMaterialParameters(RenderArgs);
+    }
+    bWetRenderDirty = true;
+}
+
+void UDynamicWetClothesComponent::SetDropletRenderingEnabled(const bool bEnabled)
+{
+    SetDroplet1RenderingEnabled(bEnabled);
+    SetDroplet2RenderingEnabled(bEnabled);
 }
 
 bool UDynamicWetClothesComponent::ClearGPUPendingWetnessMaps()

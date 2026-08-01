@@ -144,6 +144,18 @@ void FWetRenderStage::ApplyWetMaterialParameters(FWetRenderStageArgs& Receiver)
                 DWCWetMaterialParameters::WetPartDebugStrength(),
                 Receiver.bShowWetPartDebugColors ? 1.0f : 0.0f);
         }
+        if (!DWCWetMaterialParameters::Droplet1RenderingEnabled().IsNone())
+        {
+            MID->SetScalarParameterValue(
+                DWCWetMaterialParameters::Droplet1RenderingEnabled(),
+                Receiver.bDroplet1RenderingEnabled ? 1.0f : 0.0f);
+        }
+        if (!DWCWetMaterialParameters::Droplet2RenderingEnabled().IsNone())
+        {
+            MID->SetScalarParameterValue(
+                DWCWetMaterialParameters::Droplet2RenderingEnabled(),
+                Receiver.bDroplet2RenderingEnabled ? 1.0f : 0.0f);
+        }
         if (Receiver.bGPUWetnessMode)
         {
             if (!DWCWetMaterialParameters::SurfaceWaterDebugStrength().IsNone())

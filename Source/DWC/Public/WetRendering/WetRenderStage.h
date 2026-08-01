@@ -31,6 +31,8 @@ struct DWC_API FWetRenderStageArgs
     FAbsorbedWetnessSimulationState* SimulationState = nullptr;
     bool bShowWetPartDebugColors = false;
     bool bShowSurfaceWaterDebugColors = false;
+    bool bDroplet1RenderingEnabled = true;
+    bool bDroplet2RenderingEnabled = true;
     bool bGPUWetnessMode = false;
 
     TArray<TObjectPtr<UMaterialInstanceDynamic>>* WetMaterialInstances = nullptr;

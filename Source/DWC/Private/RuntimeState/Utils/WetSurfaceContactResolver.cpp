@@ -25,7 +25,6 @@ struct FWetAreaCandidate
     float PickWeight = 1.0f;
 };
 
-constexpr float GPUWetAreaNormalExposureMinInfluence = 0.05f;
 constexpr int32 GPUWetAreaNormalExposureCandidateMultiplier = 3;
 constexpr int32 GPUWetAreaNormalExposureMinCandidateCount = 128;
 constexpr float GPUWetAreaNormalExposurePickPower = 2.0f;
@@ -722,7 +721,8 @@ bool FWetSurfaceContactResolver::ResolveWetArea(
                 *Args.WetnessSettings);
         }
 
-        const float EffectiveExposure = FMath::Clamp(RawExposure, GPUWetAreaNormalExposureMinInfluence, 1.0f);
+        const float MinInfluence = FMath::Clamp(Args.WetnessSettings->RainExposureMinInfluence, 0.0f, 1.0f);
+        const float EffectiveExposure = FMath::Clamp(RawExposure, MinInfluence, 1.0f);
         Candidates.Add({
             TriangleID,
             EffectiveExposure,

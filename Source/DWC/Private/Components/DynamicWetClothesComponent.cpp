@@ -629,6 +629,30 @@ bool UDynamicWetClothesComponent::ApplyWetSurface(
     return FWetApplicationStage::ApplyWetSurface(Context, WaterSurfaceData, Amount, bApplyMaterial);
 }
 
+void UDynamicWetClothesComponent::SetDryRateScale(const float InDryRateScale)
+{
+    WetnessSettings.DryRateScale = FMath::Max(0.0f, InDryRateScale);
+}
+
+bool UDynamicWetClothesComponent::ClearGPUPendingWetnessMaps()
+{
+    PendingWetContacts.Reset();
+    bPendingWetContactsApplyMaterial = false;
+
+    bool bClearedAny = false;
+    for (const TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver : Receivers)
+    {
+        if (!Receiver.IsValid() || !Receiver->GPUBackend.IsValid())
+        {
+            continue;
+        }
+
+        Receiver->GPUBackend->ClearPendingWetnessMaps();
+        bClearedAny = true;
+    }
+    return bClearedAny;
+}
+
 bool UDynamicWetClothesComponent::GetWetnessWorldBounds(FBox& OutBounds) const
 {
     OutBounds = FBox(ForceInit);

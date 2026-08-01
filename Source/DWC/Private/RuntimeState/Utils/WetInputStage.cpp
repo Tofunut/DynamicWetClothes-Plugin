@@ -48,7 +48,6 @@ namespace
         float Amount = 0.0f;
     };
 
-    constexpr float WetAreaNormalExposureMinInfluence = 0.05f;
     constexpr int32 WetAreaNormalExposureCandidateMultiplier = 3;
     constexpr int32 WetAreaNormalExposureMinCandidateCount = 128;
     constexpr float WetAreaNormalExposurePickPower = 2.0f;
@@ -936,7 +935,10 @@ bool FWetInputStage::ApplyWetArea(FWetInputStageArgs&    Receiver,
                 bWantsNormalExposure,
                 bHasSkinnedNormals,
                 VertexIndex);
-            const float EffectiveExposure = FMath::Clamp(RawExposure, WetAreaNormalExposureMinInfluence, 1.0f);
+            const float MinInfluence = Receiver.WetnessSettings
+                                           ? FMath::Clamp(Receiver.WetnessSettings->RainExposureMinInfluence, 0.0f, 1.0f)
+                                           : 0.05f;
+            const float EffectiveExposure = FMath::Clamp(RawExposure, MinInfluence, 1.0f);
             Candidates.Add({
                 VertexIndex,
                 EffectiveExposure,

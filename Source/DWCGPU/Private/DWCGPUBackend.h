@@ -15,6 +15,7 @@ public:
     virtual bool EnqueueResolvedContacts(const TArray<FDWCResolvedSurfaceContact>& Contacts) override;
     virtual bool EnqueueSurfaceStamps(const TArray<FDWCSurfaceStampRequest>& Stamps) override;
     virtual bool ApplyWetAll(float Amount) override;
+    virtual void ClearPendingWetnessMaps() override;
     virtual void Update(float DeltaSeconds) override;
     virtual FDWCGPUBackendStats GetStats() const override;
     virtual void GetDebugRenderTargets(TArray<FDWCGPURenderTargetDebugSnapshot>& OutSnapshots) const override;

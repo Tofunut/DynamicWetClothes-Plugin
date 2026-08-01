@@ -14,6 +14,7 @@ StructuredBuffer<uint> TriangleProfileIndices;
 int2 TextureSize;
 float DeltaSeconds;
 float MaxWetness;
+float DryRateScale;
 float CapillaryImmediateAbsorptionFraction;
 
 static const int DWCNeighborCount = 8;
@@ -297,7 +298,7 @@ void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
     const uint ProfileIndex =
         TriangleProfileIndices[CenterLookup.x];
     const float DryRate =
-        max(Profiles[ProfileIndex].y, 0.0);
+        max(Profiles[ProfileIndex].y * max(DryRateScale, 0.0), 0.0);
     NewWetness =
         max(NewWetness, 0.0) *
         exp(-DryRate * max(DeltaSeconds, 0.0));

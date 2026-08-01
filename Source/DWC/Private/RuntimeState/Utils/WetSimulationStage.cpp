@@ -55,7 +55,8 @@ namespace
 float FWetSimulationStageArgs::GetDryRatePerSecond() const
 {
     const FWetnessProfileParameters* Parameters = FindFirstVertexParameters(RuntimeData);
-    return Parameters ? Parameters->GetDryRatePerSecond() : 1.0f;
+    const float DryRateScale = WetnessSettings != nullptr ? FMath::Max(0.0f, WetnessSettings->DryRateScale) : 1.0f;
+    return (Parameters ? Parameters->GetDryRatePerSecond() : 1.0f) * DryRateScale;
 }
 
 float FWetSimulationStageArgs::GetSpreadRatePerSecond() const
@@ -75,9 +76,13 @@ float FWetSimulationStageArgs::GetDryRatePerSecondForVertex(const int32 VertexIn
     const FWetnessProfileParameters* Parameters = RuntimeData != nullptr
                                                      ? RuntimeData->GetWetnessProfileParameters(VertexIndex)
                                                      : nullptr;
-    return Parameters != nullptr
-               ? Parameters->GetDryRatePerSecond()
-               : GetDryRatePerSecond();
+    if (Parameters == nullptr)
+    {
+        return GetDryRatePerSecond();
+    }
+
+    const float DryRateScale = WetnessSettings != nullptr ? FMath::Max(0.0f, WetnessSettings->DryRateScale) : 1.0f;
+    return Parameters->GetDryRatePerSecond() * DryRateScale;
 }
 
 float FWetSimulationStageArgs::GetSpreadRatePerSecondForVertex(const int32 VertexIndex) const

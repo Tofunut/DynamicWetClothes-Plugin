@@ -1754,6 +1754,61 @@ bool FDWCGPUBackend::ApplyWetAll(const float Amount)
     return true;
 }
 
+void FDWCGPUBackend::ClearPendingWetnessMaps()
+{
+    if (!bInitialized)
+    {
+        return;
+    }
+
+    PendingContacts.Reset();
+    PendingWetAllAmount = 0.0f;
+
+    TArray<FTextureRenderTargetResource*> PendingResources;
+    PendingResources.Reserve(MaterialSlots.Num() * 2);
+    for (FMaterialSlotRuntime& Slot : MaterialSlots)
+    {
+        for (const TStrongObjectPtr<UTextureRenderTarget2D>& PendingMap : Slot.PendingWetnessMaps)
+        {
+            if (UTextureRenderTarget2D* RenderTarget = PendingMap.Get())
+            {
+                if (FTextureRenderTargetResource* Resource = RenderTarget->GameThread_GetRenderTargetResource())
+                {
+                    PendingResources.Add(Resource);
+                }
+            }
+        }
+    }
+
+    if (PendingResources.IsEmpty())
+    {
+        return;
+    }
+
+    ENQUEUE_RENDER_COMMAND(DWCClearPendingWetnessMaps)(
+        [PendingResources = MoveTemp(PendingResources)](FRHICommandListImmediate& RHICmdList) mutable
+        {
+            FRDGBuilder GraphBuilder(RHICmdList);
+            for (FTextureRenderTargetResource* Resource : PendingResources)
+            {
+                if (Resource == nullptr || Resource->GetRenderTargetTexture() == nullptr)
+                {
+                    continue;
+                }
+
+                TRefCountPtr<IPooledRenderTarget> External = CreateRenderTarget(
+                    Resource->GetRenderTargetTexture(),
+                    TEXT("DWC.ClearPendingWetnessMap"));
+                FRDGTextureRef Texture = GraphBuilder.RegisterExternalTexture(External);
+                AddClearUAVPass(
+                    GraphBuilder,
+                    GraphBuilder.CreateUAV(Texture),
+                    FLinearColor::Black);
+            }
+            GraphBuilder.Execute();
+        });
+}
+
 void FDWCGPUBackend::Update(const float DeltaSeconds)
 {
     if (!bInitialized)
@@ -1808,6 +1863,10 @@ void FDWCGPUBackend::DispatchSimulation(
     int32 TotalAbsorptionDispatches = 0;
     int32 TotalBinnedAbsorptionContacts = 0;
     int32 TotalSurfaceStampDispatches = 0;
+    const UDynamicWetClothesComponent* Component = OwnerComponent.Get();
+    const float DryRateScaleValue = Component != nullptr
+                                        ? FMath::Max(0.0f, Component->WetnessSettings.DryRateScale)
+                                        : FMath::Max(0.0f, DryRateScale);
 
     for (int32 SlotRuntimeIndex = 0; SlotRuntimeIndex < MaterialSlots.Num(); ++SlotRuntimeIndex)
     {
@@ -2090,7 +2149,7 @@ void FDWCGPUBackend::DispatchSimulation(
 
     FDWCWorkloadStats::RecordGPUBackendUpdateSubmitted();
     ENQUEUE_RENDER_COMMAND(DWCFullWetMapSimulation)(
-        [MeshObject, StaticData, RTState, SharedStaticResources, SlotDispatches = MoveTemp(SlotDispatches), DeltaSeconds, MaxWetnessValue, CapillaryImmediateAbsorptionFractionValue, SurfaceTimeSeconds, WorldGravityDirection, ReceiverBoundsMinValue, ReceiverBoundsMaxValue, ReceiverLocalToWorldValue, SimulationLODIndex, ReceiverGPUIdValue = ReceiverGPUId, bUseEightDirectionDiffusion = bUseEightDirectionDiffusion](FRHICommandListImmediate& RHICmdList) mutable
+        [MeshObject, StaticData, RTState, SharedStaticResources, SlotDispatches = MoveTemp(SlotDispatches), DeltaSeconds, MaxWetnessValue, DryRateScaleValue, CapillaryImmediateAbsorptionFractionValue, SurfaceTimeSeconds, WorldGravityDirection, ReceiverBoundsMinValue, ReceiverBoundsMaxValue, ReceiverLocalToWorldValue, SimulationLODIndex, ReceiverGPUIdValue = ReceiverGPUId, bUseEightDirectionDiffusion = bUseEightDirectionDiffusion](FRHICommandListImmediate& RHICmdList) mutable
         {
             if (!StaticData.IsValid() || !RTState.IsValid())
             {
@@ -2835,6 +2894,7 @@ void FDWCGPUBackend::DispatchSimulation(
                     DiffuseParameters->TextureSize = FIntPoint(SlotDispatch.Resolution, SlotDispatch.Resolution);
                     DiffuseParameters->DeltaSeconds = DeltaSeconds;
                     DiffuseParameters->MaxWetness = MaxWetnessValue;
+                    DiffuseParameters->DryRateScale = DryRateScaleValue;
                     DiffuseParameters->CapillaryImmediateAbsorptionFraction =
                         CapillaryImmediateAbsorptionFractionValue;
                     DiffuseParameters->SourceWetnessTexture = InputAppliedTexture;
@@ -2865,6 +2925,7 @@ void FDWCGPUBackend::DispatchSimulation(
                     DiffuseParameters->TextureSize = FIntPoint(SlotDispatch.Resolution, SlotDispatch.Resolution);
                     DiffuseParameters->DeltaSeconds = DeltaSeconds;
                     DiffuseParameters->MaxWetness = MaxWetnessValue;
+                    DiffuseParameters->DryRateScale = DryRateScaleValue;
                     DiffuseParameters->CapillaryImmediateAbsorptionFraction =
                         CapillaryImmediateAbsorptionFractionValue;
                     DiffuseParameters->SourceWetnessTexture = InputAppliedTexture;

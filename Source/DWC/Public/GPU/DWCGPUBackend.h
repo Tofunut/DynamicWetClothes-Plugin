@@ -73,6 +73,7 @@ public:
     virtual bool EnqueueResolvedContacts(const TArray<FDWCResolvedSurfaceContact>& Contacts) = 0;
     virtual bool EnqueueSurfaceStamps(const TArray<FDWCSurfaceStampRequest>& Stamps) = 0;
     virtual bool ApplyWetAll(float Amount) = 0;
+    virtual void ClearPendingWetnessMaps() = 0;
     virtual void Update(float DeltaSeconds) = 0;
     virtual FDWCGPUBackendStats GetStats() const = 0;
     virtual void GetDebugRenderTargets(TArray<FDWCGPURenderTargetDebugSnapshot>& OutSnapshots) const = 0;

@@ -114,6 +114,12 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
     bool ApplyWetArea(const FDWCWetAreaData& AreaData, bool bApplyMaterial = true);
     UFUNCTION(BlueprintCallable, Category = "Wetness")
     bool ApplyWetSurface(const FDWCWaterSurfaceData& WaterSurfaceData, float Amount, bool bApplyMaterial = true);
+    UFUNCTION(BlueprintCallable, Category = "Wetness")
+    void SetDryRateScale(float InDryRateScale);
+    UFUNCTION(BlueprintPure, Category = "Wetness")
+    float GetDryRateScale() const { return WetnessSettings.DryRateScale; }
+    UFUNCTION(BlueprintCallable, Category = "Wetness|GPU")
+    bool ClearGPUPendingWetnessMaps();
     bool GetWetnessWorldBounds(FBox& OutBounds) const;
     UFUNCTION(BlueprintPure, Category = "Wetness|GPU")
     int32 GetDWCReceiverGPUId(FName ReceiverId = NAME_None) const;
@@ -214,7 +220,7 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
     UPROPERTY(EditAnywhere, Category = "Wetness")
     TArray<TObjectPtr<UWetClothingAsset>> WetClothingAssets;
 
-    UPROPERTY(EditAnywhere, Category = "Wetness", meta = (ShowOnlyInnerProperties))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness", meta = (ShowOnlyInnerProperties))
     FWetClothingSettings WetnessSettings;
 
     /** Selected per component instance and locked when BeginPlay starts. */

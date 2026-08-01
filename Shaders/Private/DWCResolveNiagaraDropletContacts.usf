@@ -157,7 +157,6 @@ void MainCS(
         const bool bSupportsFlow =
             FlowDropletSettings.x > 0.0 &&
             FlowDropletSettings.y > 0.0 &&
-            FlowDropletSettings.z > 0.0 &&
             FlowDropletSettings.w > 0.0;
         if (SurfaceMetadata.y == 0u ||
             RejectedWaterFraction <= 0.0 ||
@@ -253,7 +252,6 @@ void MainCS(
     const bool bSupportsFlow =
         FlowDropletSettings.x > 0.0 &&
         FlowDropletSettings.y > 0.0 &&
-        FlowDropletSettings.z > 0.0 &&
         FlowSpawnProbability > 0.0;
     if (bSupportsFlow &&
         DWC_ContactRandom(ContactIndex, ContactAndRadius.xyz, 0x297a2d39u) <

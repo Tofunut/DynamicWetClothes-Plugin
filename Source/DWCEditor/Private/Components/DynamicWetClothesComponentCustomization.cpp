@@ -43,8 +43,8 @@ namespace
     enum class EDWCDebugRTKind : uint8
     {
         Wetness,
-        Droplets,
-        Rivulets
+        Droplet1,
+        Droplet2
     };
 
     enum class EDWCDebugChannel : uint8
@@ -139,10 +139,10 @@ namespace
         {
         case EDWCDebugRTKind::Wetness:
             return LOCTEXT("DebugRTWetness", "Wetness");
-        case EDWCDebugRTKind::Droplets:
-            return LOCTEXT("DebugRTDroplets", "Droplets");
-        case EDWCDebugRTKind::Rivulets:
-            return LOCTEXT("DebugRTRivulets", "Rivulets");
+        case EDWCDebugRTKind::Droplet1:
+            return LOCTEXT("DebugRTDroplet1", "Droplet1");
+        case EDWCDebugRTKind::Droplet2:
+            return LOCTEXT("DebugRTDroplet2", "Droplet2");
         default:
             return FText::GetEmpty();
         }
@@ -301,12 +301,12 @@ namespace
                     + SHorizontalBox::Slot()
                     .AutoWidth()
                     [
-                        BuildRTKindButton(EDWCDebugRTKind::Droplets)
+                        BuildRTKindButton(EDWCDebugRTKind::Droplet1)
                     ]
                     + SHorizontalBox::Slot()
                     .AutoWidth()
                     [
-                        BuildRTKindButton(EDWCDebugRTKind::Rivulets)
+                        BuildRTKindButton(EDWCDebugRTKind::Droplet2)
                     ]
                     + SHorizontalBox::Slot()
                     .AutoWidth()
@@ -514,10 +514,10 @@ namespace
             {
             case EDWCDebugRTKind::Wetness:
                 return Snapshot.WetnessMap.Get();
-            case EDWCDebugRTKind::Droplets:
-                return Snapshot.DropletsMap.Get();
-            case EDWCDebugRTKind::Rivulets:
-                return Snapshot.RivuletsMap.Get();
+            case EDWCDebugRTKind::Droplet1:
+                return Snapshot.Droplet1Map.Get();
+            case EDWCDebugRTKind::Droplet2:
+                return Snapshot.Droplet2Map.Get();
             default:
                 return nullptr;
             }

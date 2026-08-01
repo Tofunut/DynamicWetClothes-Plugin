@@ -34,22 +34,18 @@ private:
         bool bUsesSurfaceWater = false;
         TArray<TStrongObjectPtr<UTextureRenderTarget2D>> WetnessMaps;
         TArray<TStrongObjectPtr<UTextureRenderTarget2D>> PendingWetnessMaps;
-        TStrongObjectPtr<UTextureRenderTarget2D> SurfaceDropletRT;
-        TArray<TStrongObjectPtr<UTextureRenderTarget2D>> SurfaceFlowDropletRTs;
+        TStrongObjectPtr<UTextureRenderTarget2D> SurfaceDroplet1RT;
+        TStrongObjectPtr<UTextureRenderTarget2D> SurfaceDroplet2RT;
         int32 CurrentTextureIndex = 0;
         int32 CurrentPendingTextureIndex = 0;
-        int32 CurrentSurfaceFlowTextureIndex = 0;
         TWeakObjectPtr<UMaterialInstanceDynamic> MaterialInstance;
 
         UTextureRenderTarget2D* GetCurrentMap() const;
         UTextureRenderTarget2D* GetNextMap() const;
         UTextureRenderTarget2D* GetCurrentPendingMap() const;
         UTextureRenderTarget2D* GetNextPendingMap() const;
-        UTextureRenderTarget2D* GetCurrentSurfaceFlowDropletMap() const;
-        UTextureRenderTarget2D* GetNextSurfaceFlowDropletMap() const;
         void SwapMaps();
         void SwapPendingMaps();
-        void SwapSurfaceFlowDropletMaps();
     };
 
     bool BuildStaticSimulationData();
@@ -74,7 +70,6 @@ private:
     TArray<FMaterialSlotRuntime> MaterialSlots;
     TArray<FDWCResolvedSurfaceContact> PendingContacts;
     TArray<FDWCSurfaceStampRequest> PendingSurfaceStamps;
-    TMap<uint64, TArray<float>> ActiveSurfaceStampExpiryTimes;
     TArray<FVector2f> DebugVertexDataUVs;
     TArray<int32> DebugVertexMaterialSlots;
     float PendingWetAllAmount = 0.0f;

@@ -541,8 +541,10 @@ class FResolvedProfileParameterCache
 FDWCGPUProfileParameters MakeSerializedGPUProfile(
     const FWetnessProfileParameters& Parameters)
 {
-    return FDWCGPUProfileParameters(
+    FDWCGPUProfileParameters Result(
         Parameters.ResolveAbsorbedWaterSimulation());
+    Result.DropletDryRatePerSecond = Parameters.GetDropletDryRatePerSecond();
+    return Result;
 }
 
 int32 FindOrAddProfile(

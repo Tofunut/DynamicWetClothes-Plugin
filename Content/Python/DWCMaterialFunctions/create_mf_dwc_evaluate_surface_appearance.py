@@ -44,7 +44,6 @@ def build() -> None:
         ("Wetness", "scalar", (0.0,), "Resolved absorbed wetness."),
         ("DWCDataUV", "vector2", (0.0, 0.0), "DWC Data UV for runtime maps."),
         ("SurfaceWaterNormalUV", "vector2", (0.0, 0.0), "Mesh UV for droplet detail."),
-        ("SurfaceTime", "scalar", (0.0,), "Runtime time used for droplet lifetime fade."),
         ("WetDarkeningStrength", "scalar", (0.35,), "Absorbed wetness darkening strength."),
         ("WetRoughness", "scalar", (0.12,), "Absorbed wetness target roughness."),
         ("WrinkleNormal", "vector3", (0.0, 0.0, 1.0), "Baked wrinkle tangent normal."),
@@ -75,31 +74,24 @@ def build() -> None:
     profile_outputs = [
         "AbsorbedDarkeningStrength",
         "AbsorbedGlossinessStrength",
-        "DropletNormalSlice",
-        "DropletFlowEnabled",
-        "SurfaceWaterNormalStrength",
-        "SurfaceWaterRoughnessBlend",
-        "DropletFlowSpeed",
-        "SurfaceWaterSpecular",
-        "SurfaceWaterTargetRoughness",
-        "SurfaceWaterTotalStrength",
-        "SurfaceWaterColorBlend",
-        "DropletMaskSlice",
-        "DropletFlowNoiseSlice",
-        "DropletFlowDirectionDegrees",
-        "DropletFlowNoiseTiling",
-        "DropletFlowNoiseStrength",
-        "DropletFlowNoiseSpeed",
-        "DropletFlowNormalSlice",
-        "DropletFlowMaskSlice",
-        "DropletFlowTotalStrength",
-        "DropletFlowTargetRoughness",
-        "DropletFlowRoughnessBlend",
-        "DropletFlowSpecular",
-        "DropletFlowColorBlend",
-        "DropletFlowNormalStrength",
-        "DropletDetailSize",
-        "DropletFlowDetailSize",
+        "Droplet1NormalSlice",
+        "Droplet1NormalStrength",
+        "Droplet1RoughnessBlend",
+        "Droplet1Specular",
+        "Droplet1TargetRoughness",
+        "Droplet1TotalStrength",
+        "Droplet1ColorBlend",
+        "Droplet1MaskSlice",
+        "Droplet2NormalSlice",
+        "Droplet2MaskSlice",
+        "Droplet2TotalStrength",
+        "Droplet2TargetRoughness",
+        "Droplet2RoughnessBlend",
+        "Droplet2Specular",
+        "Droplet2ColorBlend",
+        "Droplet2NormalStrength",
+        "Droplet1DetailSize",
+        "Droplet2DetailSize",
     ]
     profile_declarations: dict[str, object] = {}
     for i, name in enumerate(profile_outputs):
@@ -186,124 +178,48 @@ return lerp(WetBaseColor, TransparencyColor, Alpha);
     )
     absorbed_color_decl = c.named_declaration(mf, "ABSORBED_FinalBaseColor", transparent_color, ("", "Result"), -2550, 1450)
 
-    # Droplet state RT. There is one state texture and no feature-type switch.
+    # Single-channel Surface Water wetness. Dry Rate updates R every frame on the GPU.
     rt_uv = c.named_usage(mf, declarations["DWCDataUV"], -850, -5250)
     droplet_rt = c.texture2d_parameter(
-        mf, "DWC_SurfaceDropletRT", data_fallback, -250, -5250,
+        mf, "DWC_SurfaceDroplet1RT", data_fallback, -250, -5250,
         sampler_type=c.linear_color_sampler(), group="DWC Surface Water",
-        description="Droplet state RT: R=stamp region amount, G=spawn time, B=lifetime, A=reserved.",
+        description="Single-channel Droplet1 RT: R=Wetness. Dry Rate fades the value out on the GPU.",
     )
     c.try_connect(rt_uv, ("", "Result"), droplet_rt, ("Coordinates", "UVs"))
-    droplet_amount = c.component_mask(mf, droplet_rt, "R", "R", 450, -5500)
-    droplet_spawn = c.component_mask(mf, droplet_rt, "G", "G", 450, -4850)
-    droplet_lifetime = c.component_mask(mf, droplet_rt, "B", "B", 450, -4200)
-    amount_decl = c.named_declaration(mf, "SURFACE_DropletAmount", droplet_amount, ("", "Result"), 1200, -5500)
-    spawn_decl = c.named_declaration(mf, "SURFACE_DropletSpawnTime", droplet_spawn, ("", "Result"), 1200, -4850)
-    lifetime_decl = c.named_declaration(mf, "SURFACE_DropletLifetime", droplet_lifetime, ("", "Result"), 1200, -4200)
-
-    lifetime_fade_inputs = [
-        ("SpawnTime", c.named_usage(mf, spawn_decl, 1900, -5000), ("", "Result")),
-        ("Lifetime", c.named_usage(mf, lifetime_decl, 1900, -4450), ("", "Result")),
-        ("SurfaceTime", c.named_usage(mf, declarations["SurfaceTime"], 1900, -3900), ("", "Result")),
-    ]
-    lifetime_fade = c.custom_expression(
-        mf,
-        """
-float Age = max(SurfaceTime - SpawnTime, 0.0);
-float SafeLifetime = max(Lifetime, 0.01);
-float FadeDuration = min(0.35, SafeLifetime * 0.15);
-float FadeStart = max(SafeLifetime - FadeDuration, 0.0);
-return 1.0 - smoothstep(FadeStart, SafeLifetime, Age);
-""",
-        lifetime_fade_inputs,
-        "float1", 3100, -5000,
-        "Keep droplets fully visible for most of their lifetime and fade only near the end.",
+    droplet_wetness = c.component_mask(mf, droplet_rt, "R", "R", 450, -5500)
+    wetness_decl = c.named_declaration(
+        mf, "SURFACE_DropletWetness", droplet_wetness, ("", "Result"), 1200, -5500
     )
-    lifetime_fade_decl = c.named_declaration(mf, "SURFACE_DropletLifetimeFade", lifetime_fade, ("", "Result"), 4300, -5000)
-
-    visible_amount = c.custom_expression(
-        mf,
-        "return saturate(Amount * LifetimeFade);",
-        [
-            ("Amount", c.named_usage(mf, amount_decl, 3100, -5550), ("", "Result")),
-            ("LifetimeFade", c.named_usage(mf, lifetime_fade_decl, 3100, -5000), ("", "Result")),
-        ],
-        "float1", 4300, -5550,
-        "Compute lifetime-faded RT amount before visibility threshold or authored mask gating.",
+    raw_coverage_decl = c.named_declaration(
+        mf, "SURFACE_RawDropletWetness", droplet_wetness, ("", "Result"), 3100, -4450
     )
-    visible_amount_decl = c.named_declaration(mf, "SURFACE_DropletVisibleAmount", visible_amount, ("", "Result"), 5400, -5550)
 
-    coverage_inputs = [
-        ("VisibleAmount", c.named_usage(mf, visible_amount_decl, 1900, -5550), ("", "Result")),
-    ]
-    raw_coverage = c.custom_expression(
-        mf,
-        """
-return VisibleAmount > 1.0e-4 ? 1.0 : 0.0;
-""",
-        coverage_inputs,
-        "float1", 3100, -4450,
-        "Treat any live droplet state as visible coverage; Total Strength controls visual intensity.",
-    )
-    raw_coverage_decl = c.named_declaration(mf, "SURFACE_RawDropletCoverage", raw_coverage, ("", "Result"), 4300, -4450)
-
-    # Flow stamps live in an independent RT and retain their own lifetime.
+    # Droplet2 uses the same stationary single-channel Wetness contract in an independent RT.
     flow_rt_uv = c.named_usage(mf, declarations["DWCDataUV"], -850, -3550)
     flow_droplet_rt = c.texture2d_parameter(
-        mf, "DWC_SurfaceFlowDropletRT", data_fallback, -250, -3550,
+        mf, "DWC_SurfaceDroplet2RT", data_fallback, -250, -3550,
         sampler_type=c.linear_color_sampler(), group="DWC Surface Water",
-        description="Independent Flow Droplet state RT: R=amount, G=spawn time, B=lifetime.",
+        description="Single-channel Droplet2 RT: R=Wetness. Dry Rate fades the value out on the GPU.",
     )
     c.try_connect(flow_rt_uv, ("", "Result"), flow_droplet_rt, ("Coordinates", "UVs"))
-    flow_amount = c.component_mask(mf, flow_droplet_rt, "R", "R", 450, -3500)
-    flow_spawn = c.component_mask(mf, flow_droplet_rt, "G", "G", 450, -3050)
-    flow_lifetime = c.component_mask(mf, flow_droplet_rt, "B", "B", 450, -2600)
-    flow_amount_decl = c.named_declaration(mf, "SURFACE_FlowDropletAmount", flow_amount, ("", "Result"), 1200, -3500)
-    flow_spawn_decl = c.named_declaration(mf, "SURFACE_FlowDropletSpawnTime", flow_spawn, ("", "Result"), 1200, -3050)
-    flow_lifetime_decl = c.named_declaration(mf, "SURFACE_FlowDropletLifetime", flow_lifetime, ("", "Result"), 1200, -2600)
-    flow_lifetime_fade = c.custom_expression(
-        mf,
-        """
-float Age = max(SurfaceTime - SpawnTime, 0.0);
-float SafeLifetime = max(Lifetime, 0.01);
-float FadeDuration = min(0.35, SafeLifetime * 0.15);
-float FadeStart = max(SafeLifetime - FadeDuration, 0.0);
-return 1.0 - smoothstep(FadeStart, SafeLifetime, Age);
-""",
-        [
-            ("SpawnTime", c.named_usage(mf, flow_spawn_decl, 1900, -3500), ("", "Result")),
-            ("Lifetime", c.named_usage(mf, flow_lifetime_decl, 1900, -3050), ("", "Result")),
-            ("SurfaceTime", c.named_usage(mf, declarations["SurfaceTime"], 1900, -2600), ("", "Result")),
-        ],
-        "float1", 3100, -3250,
-        "Fade independently stamped Flow Droplets near the end of their lifetime.",
+    flow_wetness = c.component_mask(mf, flow_droplet_rt, "R", "R", 450, -3500)
+    flow_wetness_decl = c.named_declaration(
+        mf, "SURFACE_FlowDropletWetness", flow_wetness, ("", "Result"), 1200, -3500
     )
-    flow_lifetime_fade_decl = c.named_declaration(
-        mf, "SURFACE_FlowDropletLifetimeFade", flow_lifetime_fade, ("", "Result"), 4300, -3250
-    )
-    flow_visible_amount = c.custom_expression(
+    flow_visible_wetness = c.custom_expression(
         mf,
-        "return saturate(Amount * LifetimeFade * FlowEnabled);",
+        "return saturate(Wetness);",
         [
-            ("Amount", c.named_usage(mf, flow_amount_decl, 3100, -3800), ("", "Result")),
-            ("LifetimeFade", c.named_usage(mf, flow_lifetime_fade_decl, 3100, -3350), ("", "Result")),
-            ("FlowEnabled", c.named_usage(mf, profile_declarations["DropletFlowEnabled"], 3100, -2900), ("", "Result")),
+            ("Wetness", c.named_usage(mf, flow_wetness_decl, 3100, -3800), ("", "Result")),
         ],
         "float1", 4300, -3800,
-        "Resolve visible Flow RT amount without affecting stationary stamps.",
+        "Resolve Droplet2 RT wetness independently from Droplet1 stamps.",
     )
-    flow_visible_amount_decl = c.named_declaration(
-        mf, "SURFACE_FlowDropletVisibleAmount", flow_visible_amount, ("", "Result"), 5400, -3800
-    )
-    raw_flow_coverage = c.custom_expression(
-        mf,
-        "return VisibleAmount > 1.0e-4 ? 1.0 : 0.0;",
-        [("VisibleAmount", c.named_usage(mf, flow_visible_amount_decl, 5700, -3800), ("", "Result"))],
-        "float1", 6600, -3800,
-        "Convert live Flow RT state to binary stamp-region coverage.",
+    flow_visible_wetness_decl = c.named_declaration(
+        mf, "SURFACE_FlowDropletVisibleWetness", flow_visible_wetness, ("", "Result"), 5400, -3800
     )
     raw_flow_coverage_decl = c.named_declaration(
-        mf, "SURFACE_RawFlowDropletCoverage", raw_flow_coverage, ("", "Result"), 7600, -3800
+        mf, "SURFACE_RawFlowDropletWetness", flow_visible_wetness, ("", "Result"), 6600, -3800
     )
 
     preview_override = c.scalar_parameter(
@@ -314,12 +230,12 @@ return 1.0 - smoothstep(FadeStart, SafeLifetime, Age);
     preview_amount = c.scalar_parameter(
         mf, "DWC_PreviewSurfaceWaterAmount", 0.0, 1900, -2300,
         group="DWC Surface Water",
-        description="Editor preview only: direct droplet amount.",
+        description="Editor preview only: direct Surface Water wetness.",
     )
     raw_cov_use = c.named_usage(mf, raw_coverage_decl, 3000, -2450)
     effective_coverage = c.custom_expression(
         mf,
-        "return PreviewOverride > 0.5 ? (PreviewAmount > 1.0e-4 ? 1.0 : 0.0) : saturate(Coverage);",
+        "return PreviewOverride > 0.5 ? saturate(PreviewAmount) : saturate(Coverage);",
         [
             ("PreviewOverride", preview_override, ("", "Result")),
             ("PreviewAmount", preview_amount, ("", "Result")),
@@ -334,17 +250,16 @@ return 1.0 - smoothstep(FadeStart, SafeLifetime, Age);
         mf,
         """
 float RuntimeCoverage = saturate(Coverage);
-float PreviewCoverage = PreviewAmount > 1.0e-4 ? 1.0 : 0.0;
-return saturate(FlowEnabled) * (PreviewOverride > 0.5 ? PreviewCoverage : RuntimeCoverage);
+float PreviewCoverage = saturate(PreviewAmount);
+return PreviewOverride > 0.5 ? PreviewCoverage : RuntimeCoverage;
 """,
         [
             ("PreviewOverride", preview_override, ("", "Result")),
             ("PreviewAmount", preview_amount, ("", "Result")),
             ("Coverage", c.named_usage(mf, raw_flow_coverage_decl, 3000, -2050), ("", "Result")),
-            ("FlowEnabled", c.named_usage(mf, profile_declarations["DropletFlowEnabled"], 3000, -1600), ("", "Result")),
         ],
         "float1", 4200, -1900,
-        "Preview or runtime coverage from the independent Flow Droplet RT.",
+        "Preview or runtime coverage from the independent Droplet2 RT.",
     )
     effective_flow_coverage_decl = c.named_declaration(
         mf, "SURFACE_EffectiveFlowDropletCoverage", effective_flow_coverage, ("", "Result"), 5400, -1900
@@ -352,35 +267,27 @@ return saturate(FlowEnabled) * (PreviewOverride > 0.5 ? PreviewCoverage : Runtim
 
     normal_call = c.function_call(
         mf, normal_function, 800, -900,
-        "Sample stationary detail and noise-panned Flow Droplet detail.",
+        "Sample stationary Droplet1 and Droplet2 detail.",
     )
     normal_inputs = [
         ("SurfaceWaterNormalUV", declarations["SurfaceWaterNormalUV"]),
-        ("DropletDetailSize", profile_declarations["DropletDetailSize"]),
-        ("DropletFlowDetailSize", profile_declarations["DropletFlowDetailSize"]),
-        ("DropletMaskSlice", profile_declarations["DropletMaskSlice"]),
-        ("DropletNormalSlice", profile_declarations["DropletNormalSlice"]),
-        ("DropletFlowEnabled", profile_declarations["DropletFlowEnabled"]),
-        ("DropletFlowSpeed", profile_declarations["DropletFlowSpeed"]),
-        ("DropletFlowDirectionDegrees", profile_declarations["DropletFlowDirectionDegrees"]),
-        ("DropletFlowNoiseTiling", profile_declarations["DropletFlowNoiseTiling"]),
-        ("DropletFlowNoiseStrength", profile_declarations["DropletFlowNoiseStrength"]),
-        ("DropletFlowNoiseSpeed", profile_declarations["DropletFlowNoiseSpeed"]),
-        ("DropletFlowNoiseSlice", profile_declarations["DropletFlowNoiseSlice"]),
-        ("DropletFlowMaskSlice", profile_declarations["DropletFlowMaskSlice"]),
-        ("DropletFlowNormalSlice", profile_declarations["DropletFlowNormalSlice"]),
-        ("SurfaceTime", declarations["SurfaceTime"]),
+        ("Droplet1DetailSize", profile_declarations["Droplet1DetailSize"]),
+        ("Droplet2DetailSize", profile_declarations["Droplet2DetailSize"]),
+        ("Droplet1MaskSlice", profile_declarations["Droplet1MaskSlice"]),
+        ("Droplet1NormalSlice", profile_declarations["Droplet1NormalSlice"]),
+        ("Droplet2MaskSlice", profile_declarations["Droplet2MaskSlice"]),
+        ("Droplet2NormalSlice", profile_declarations["Droplet2NormalSlice"]),
     ]
     for i, (input_name, declaration) in enumerate(normal_inputs):
         usage = c.named_usage(mf, declaration, -1800 + (i % 2) * 850, -1450 + (i // 2) * 520)
         c.try_connect(usage, ("", "Result"), normal_call, input_name)
-    droplet_mask_decl = c.named_declaration(mf, "SURFACE_DropletMask", normal_call, "DropletMask", 2100, -1150)
-    droplet_normal_decl = c.named_declaration(mf, "SURFACE_DropletNormal", normal_call, "DropletNormal", 2100, -450)
+    droplet_mask_decl = c.named_declaration(mf, "SURFACE_Droplet1Mask", normal_call, "Droplet1Mask", 2100, -1150)
+    droplet_normal_decl = c.named_declaration(mf, "SURFACE_Droplet1Normal", normal_call, "Droplet1Normal", 2100, -450)
     flow_droplet_mask_decl = c.named_declaration(
-        mf, "SURFACE_FlowDropletMask", normal_call, "FlowDropletMask", 2100, 250
+        mf, "SURFACE_Droplet2Mask", normal_call, "Droplet2Mask", 2100, 250
     )
     flow_droplet_normal_decl = c.named_declaration(
-        mf, "SURFACE_FlowDropletNormal", normal_call, "FlowDropletNormal", 2100, 950
+        mf, "SURFACE_Droplet2Normal", normal_call, "Droplet2Normal", 2100, 950
     )
 
     static_visible_coverage = c.custom_expression(
@@ -404,7 +311,7 @@ return saturate(FlowEnabled) * (PreviewOverride > 0.5 ? PreviewCoverage : Runtim
             ("Mask", c.named_usage(mf, flow_droplet_mask_decl, 5700, -550), ("", "Result")),
         ],
         "float1", 6600, -900,
-        "Gate independent Flow Droplet RT coverage by its panned mask.",
+        "Gate Droplet2 RT coverage by its authored mask.",
     )
     flow_coverage_decl = c.named_declaration(
         mf, "SURFACE_FlowCoverage", flow_visible_coverage, ("", "Result"), 7600, -900
@@ -417,7 +324,7 @@ return saturate(FlowEnabled) * (PreviewOverride > 0.5 ? PreviewCoverage : Runtim
             ("FlowCoverage", c.named_usage(mf, flow_coverage_decl, 7800, -1000), ("", "Result")),
         ],
         "float1", 8600, -1300,
-        "Union stationary and flowing stamp coverage without coupling their RT state.",
+        "Union Droplet1 and Droplet2 coverage without coupling their RT state.",
     )
     surface_coverage_decl = c.named_declaration(
         mf, "SURFACE_Coverage", combined_coverage, ("", "Result"), 9400, -1300
@@ -437,7 +344,7 @@ return max(StaticBrush, FlowBrush);
             ("FlowMask", c.named_usage(mf, flow_droplet_mask_decl, 5700, 1200), ("", "Result")),
         ],
         "float1", 6600, 600,
-        "Union stationary and panned Flow Droplet visual brushes.",
+        "Union Droplet1 and Droplet2 visual brushes.",
     )
     visual_brush_decl = c.named_declaration(mf, "SURFACE_VisualBrush", visual_brush, ("", "Result"), 7600, 600)
 
@@ -464,17 +371,17 @@ return float4(
         [
             ("StaticCoverage", c.named_usage(mf, static_coverage_decl, 7950, 900), ("", "Result")),
             ("FlowCoverage", c.named_usage(mf, flow_coverage_decl, 7950, 1250), ("", "Result")),
-            ("StaticTotalStrength", c.named_usage(mf, profile_declarations["SurfaceWaterTotalStrength"], 7950, 1600), ("", "Result")),
-            ("FlowTotalStrength", c.named_usage(mf, profile_declarations["DropletFlowTotalStrength"], 7950, 1950), ("", "Result")),
-            ("StaticTargetRoughness", c.named_usage(mf, profile_declarations["SurfaceWaterTargetRoughness"], 7950, 2300), ("", "Result")),
-            ("FlowTargetRoughness", c.named_usage(mf, profile_declarations["DropletFlowTargetRoughness"], 7950, 2650), ("", "Result")),
-            ("StaticRoughnessBlend", c.named_usage(mf, profile_declarations["SurfaceWaterRoughnessBlend"], 7950, 3000), ("", "Result")),
-            ("FlowRoughnessBlend", c.named_usage(mf, profile_declarations["DropletFlowRoughnessBlend"], 7950, 3350), ("", "Result")),
-            ("StaticSpecular", c.named_usage(mf, profile_declarations["SurfaceWaterSpecular"], 7950, 3700), ("", "Result")),
-            ("FlowSpecular", c.named_usage(mf, profile_declarations["DropletFlowSpecular"], 7950, 4050), ("", "Result")),
+            ("StaticTotalStrength", c.named_usage(mf, profile_declarations["Droplet1TotalStrength"], 7950, 1600), ("", "Result")),
+            ("FlowTotalStrength", c.named_usage(mf, profile_declarations["Droplet2TotalStrength"], 7950, 1950), ("", "Result")),
+            ("StaticTargetRoughness", c.named_usage(mf, profile_declarations["Droplet1TargetRoughness"], 7950, 2300), ("", "Result")),
+            ("FlowTargetRoughness", c.named_usage(mf, profile_declarations["Droplet2TargetRoughness"], 7950, 2650), ("", "Result")),
+            ("StaticRoughnessBlend", c.named_usage(mf, profile_declarations["Droplet1RoughnessBlend"], 7950, 3000), ("", "Result")),
+            ("FlowRoughnessBlend", c.named_usage(mf, profile_declarations["Droplet2RoughnessBlend"], 7950, 3350), ("", "Result")),
+            ("StaticSpecular", c.named_usage(mf, profile_declarations["Droplet1Specular"], 7950, 3700), ("", "Result")),
+            ("FlowSpecular", c.named_usage(mf, profile_declarations["Droplet2Specular"], 7950, 4050), ("", "Result")),
         ],
         "float4", 9300, 2500,
-        "Resolve independently authored stationary and Flow Droplet appearance into one response.",
+        "Resolve independently authored Droplet1 and Droplet2 appearance into one response.",
     )
 
     surface_color_response = c.custom_expression(
@@ -489,13 +396,13 @@ return saturate(1.0 - (1.0 - StaticResponse) * (1.0 - FlowResponse));
         [
             ("StaticCoverage", c.named_usage(mf, static_coverage_decl, 9650, 900), ("", "Result")),
             ("FlowCoverage", c.named_usage(mf, flow_coverage_decl, 9650, 1250), ("", "Result")),
-            ("StaticTotalStrength", c.named_usage(mf, profile_declarations["SurfaceWaterTotalStrength"], 9650, 1600), ("", "Result")),
-            ("FlowTotalStrength", c.named_usage(mf, profile_declarations["DropletFlowTotalStrength"], 9650, 1950), ("", "Result")),
-            ("StaticColorBlend", c.named_usage(mf, profile_declarations["SurfaceWaterColorBlend"], 9650, 2300), ("", "Result")),
-            ("FlowColorBlend", c.named_usage(mf, profile_declarations["DropletFlowColorBlend"], 9650, 2650), ("", "Result")),
+            ("StaticTotalStrength", c.named_usage(mf, profile_declarations["Droplet1TotalStrength"], 9650, 1600), ("", "Result")),
+            ("FlowTotalStrength", c.named_usage(mf, profile_declarations["Droplet2TotalStrength"], 9650, 1950), ("", "Result")),
+            ("StaticColorBlend", c.named_usage(mf, profile_declarations["Droplet1ColorBlend"], 9650, 2300), ("", "Result")),
+            ("FlowColorBlend", c.named_usage(mf, profile_declarations["Droplet2ColorBlend"], 9650, 2650), ("", "Result")),
         ],
         "float1", 10800, 1750,
-        "Resolve independently authored stationary and Flow Droplet Base Color response.",
+        "Resolve independently authored Droplet1 and Droplet2 Base Color response.",
     )
 
     surface_normal = c.custom_expression(
@@ -521,13 +428,13 @@ return normalize(float3(CombinedXY, 1.0));
             ("FlowDropletNormal", c.named_usage(mf, flow_droplet_normal_decl, 4400, 600), ("", "Result")),
             ("StaticCoverage", c.named_usage(mf, static_coverage_decl, 4400, 1150), ("", "Result")),
             ("FlowCoverage", c.named_usage(mf, flow_coverage_decl, 4400, 1700), ("", "Result")),
-            ("StaticNormalStrength", c.named_usage(mf, profile_declarations["SurfaceWaterNormalStrength"], 4400, 2250), ("", "Result")),
-            ("FlowNormalStrength", c.named_usage(mf, profile_declarations["DropletFlowNormalStrength"], 4400, 2800), ("", "Result")),
-            ("StaticTotalStrength", c.named_usage(mf, profile_declarations["SurfaceWaterTotalStrength"], 4400, 3350), ("", "Result")),
-            ("FlowTotalStrength", c.named_usage(mf, profile_declarations["DropletFlowTotalStrength"], 4400, 3900), ("", "Result")),
+            ("StaticNormalStrength", c.named_usage(mf, profile_declarations["Droplet1NormalStrength"], 4400, 2250), ("", "Result")),
+            ("FlowNormalStrength", c.named_usage(mf, profile_declarations["Droplet2NormalStrength"], 4400, 2800), ("", "Result")),
+            ("StaticTotalStrength", c.named_usage(mf, profile_declarations["Droplet1TotalStrength"], 4400, 3350), ("", "Result")),
+            ("FlowTotalStrength", c.named_usage(mf, profile_declarations["Droplet2TotalStrength"], 4400, 3900), ("", "Result")),
         ],
         "float3", 6000, 2050,
-        "Blend stationary and independently panned Flow Droplet normals.",
+        "Blend Droplet1 and Droplet2 normals.",
     )
     surface_normal_decl = c.named_declaration(mf, "SURFACE_NormalRaw", surface_normal, ("", "Result"), 7600, 2050)
 
@@ -587,7 +494,7 @@ return normalize(float3(CombinedXY, 1.0));
         disabled_appearance, ("", "Result"),
         10700, 2250,
         group="DWC Surface Water",
-        description="Compile independently authored static and Flow Droplet appearance only for slots that use Surface Water.",
+        description="Compile independently authored Droplet1 and Droplet2 appearance only for slots that use Surface Water.",
     )
     selected_target_roughness = c.custom_expression(
         mf, "return Packed.r;",
@@ -611,7 +518,7 @@ return normalize(float3(CombinedXY, 1.0));
         mf, "return Packed.a;",
         [("Packed", selected_appearance, ("", "Result"))],
         "float1", 11700, 3150,
-        "Decode the combined static and Flow Droplet appearance response.",
+        "Decode the combined Droplet1 and Droplet2 appearance response.",
     )
     selected_target_roughness_decl = c.named_declaration(
         mf, "SURFACE_SelectedTargetRoughness", selected_target_roughness, ("", "Result"), 12700, 2100
@@ -634,21 +541,20 @@ return normalize(float3(CombinedXY, 1.0));
         disabled_color_response, ("", "Result"),
         11700, 3500,
         group="DWC Surface Water",
-        description="Compile independently authored static and Flow Droplet Base Color response only for slots that use Surface Water.",
+        description="Compile independently authored Droplet1 and Droplet2 Base Color response only for slots that use Surface Water.",
     )
     selected_color_response_decl = c.named_declaration(
         mf, "SURFACE_SelectedColorResponse", selected_color_response, ("", "Result"), 12700, 3500
     )
     enabled_amount_use = c.custom_expression(
         mf,
-        "return max(saturate(StaticAmount), saturate(FlowAmount) * saturate(FlowEnabled));",
+        "return max(saturate(Droplet1Amount), saturate(Droplet2Amount));",
         [
-            ("StaticAmount", c.named_usage(mf, amount_decl, 10100, 2050), ("", "Result")),
-            ("FlowAmount", c.named_usage(mf, flow_amount_decl, 10100, 2400), ("", "Result")),
-            ("FlowEnabled", c.named_usage(mf, profile_declarations["DropletFlowEnabled"], 10100, 2750), ("", "Result")),
+            ("Droplet1Amount", c.named_usage(mf, wetness_decl, 10100, 2050), ("", "Result")),
+            ("Droplet2Amount", c.named_usage(mf, flow_wetness_decl, 10100, 2400), ("", "Result")),
         ],
         "float1", 10900, 2300,
-        "Expose the union of independent stationary and Flow Droplet RT amounts.",
+        "Expose the union of independent Droplet1 and Droplet2 RT wetness values.",
     )
     disabled_amount_zero = c.scalar_constant(mf, 0.0, 10600, 2750, "Disabled Surface Water droplet amount")
     selected_amount = c.static_switch_parameter(
@@ -657,10 +563,10 @@ return normalize(float3(CombinedXY, 1.0));
         disabled_amount_zero, ("", "Result"),
         11600, 2450,
         group="DWC Surface Water",
-        description="Compile raw Surface Water droplet amount only for slots that use Surface Water.",
+        description="Compile Surface Water droplet wetness only for slots that use Surface Water.",
     )
     selected_amount_decl = c.named_declaration(
-        mf, "SURFACE_SelectedDropletAmount", selected_amount, ("", "Result"), 12600, 2450
+        mf, "SURFACE_SelectedDropletWetness", selected_amount, ("", "Result"), 12600, 2450
     )
     enabled_brush_use = c.named_usage(mf, visual_brush_decl, 10600, 3300)
     disabled_brush_zero = c.scalar_constant(mf, 0.0, 10600, 3850, "Disabled Surface Water visual droplet brush")
@@ -675,30 +581,6 @@ return normalize(float3(CombinedXY, 1.0));
     selected_brush_decl = c.named_declaration(
         mf, "SURFACE_SelectedDropletBrush", selected_brush, ("", "Result"), 12600, 3550
     )
-    enabled_lifetime_fade_use = c.custom_expression(
-        mf,
-        "return max(saturate(StaticFade), saturate(FlowFade) * saturate(FlowEnabled));",
-        [
-            ("StaticFade", c.named_usage(mf, lifetime_fade_decl, 10100, 4250), ("", "Result")),
-            ("FlowFade", c.named_usage(mf, flow_lifetime_fade_decl, 10100, 4600), ("", "Result")),
-            ("FlowEnabled", c.named_usage(mf, profile_declarations["DropletFlowEnabled"], 10100, 4950), ("", "Result")),
-        ],
-        "float1", 10900, 4500,
-        "Expose the union of independent stationary and Flow Droplet lifetime fades.",
-    )
-    disabled_lifetime_fade_zero = c.scalar_constant(mf, 0.0, 10600, 4950, "Disabled Surface Water lifetime fade")
-    selected_lifetime_fade = c.static_switch_parameter(
-        mf, "DWC_UseSurfaceWater", False,
-        enabled_lifetime_fade_use, ("", "Result"),
-        disabled_lifetime_fade_zero, ("", "Result"),
-        11600, 4650,
-        group="DWC Surface Water",
-        description="Compile raw Surface Water droplet lifetime fade only for slots that use Surface Water.",
-    )
-    selected_lifetime_fade_decl = c.named_declaration(
-        mf, "SURFACE_SelectedDropletLifetimeFade", selected_lifetime_fade, ("", "Result"), 12600, 4650
-    )
-
     # Final outputs.
     final_color = c.custom_expression(
         mf,
@@ -775,9 +657,8 @@ return saturate(lerp(NonMetalWater, MetalWater, Metal));
         ("Normal", final_normal_decl, "Final tangent-space Normal."),
         ("SurfaceCoverage", selected_coverage_decl, "Visible mask-gated droplet coverage, or zero when compiled out."),
         ("DropletCoverage", selected_coverage_decl, "Visible mask-gated droplet coverage, or zero when compiled out."),
-        ("DropletAmount", selected_amount_decl, "Raw droplet RT amount, or zero when Surface Water is compiled out."),
+        ("DropletWetness", selected_amount_decl, "Single-channel droplet Wetness, or zero when Surface Water is compiled out."),
         ("DropletBrush", selected_brush_decl, "Visual mask-shaped droplet brush, or zero when Surface Water is compiled out."),
-        ("DropletLifetimeFade", selected_lifetime_fade_decl, "Raw droplet lifetime fade, or zero when Surface Water is compiled out."),
     ]
     for i, (name, declaration, description) in enumerate(outputs):
         use = c.named_usage(mf, declaration, 13700, -4200 + i * 1100)

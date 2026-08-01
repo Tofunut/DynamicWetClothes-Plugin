@@ -39,13 +39,10 @@ namespace
         return FString::Printf(
             TEXT("AbsorbedDarkening=%.9g|")
             TEXT("AbsorbedGlossiness=%.9g|")
-            TEXT("DropletsEnabled=%d|DropletSpawn=%.9g|DropletLifetime=%.9g|DropletRadius=%.9g|DropletMax=%d|")
-            TEXT("DropletNormal=%s|DropletMask=%s|")
-            TEXT("FlowEnabled=%d|FlowSpawn=%.9g|FlowLifetime=%.9g|FlowWidth=%.9g|")
-            TEXT("FlowHeight=%.9g|FlowPositionSpread=%.9g|FlowMax=%d|")
-            TEXT("FlowSpeed=%.9g|FlowAdvectionSpeed=%.9g|FlowDirection=%.9g|")
-            TEXT("FlowNormal=%s|FlowMask=%s|FlowNoise=%s|")
-            TEXT("FlowNoiseTiling=%.9g|FlowNoiseStrength=%.9g|FlowNoiseSpeed=%.9g|")
+            TEXT("SurfaceEnabled=%d|Droplet1Spawn=%.9g|Droplet1Width=%.9g|Droplet1Height=%.9g|")
+            TEXT("Droplet1Normal=%s|Droplet1Mask=%s|")
+            TEXT("Droplet2Spawn=%.9g|Droplet2Width=%.9g|Droplet2Height=%.9g|Droplet2SpawnSpread=%.9g|")
+            TEXT("Droplet2Normal=%s|Droplet2Mask=%s|")
             TEXT("SurfaceWaterTargetRoughness=%.9g|")
             TEXT("SurfaceWaterNormalStrength=%.9g|")
             TEXT("SurfaceWaterRoughnessBlend=%.9g|")
@@ -59,27 +56,16 @@ namespace
             Parameters.GetAbsorbedGlossinessStrength(),
             Surface.bEnabled ? 1 : 0,
             Surface.DropletSpawnProbability,
-            Surface.DropletLifetimeSeconds,
             Surface.DropletRadiusPixels,
-            Surface.DropletMaxActiveStamps,
+            Surface.DropletHeightPixels,
             *MakeTextureBuildKey(Surface.DropletNormalTexture),
             *MakeTextureBuildKey(Surface.DropletMaskTexture),
-            Surface.bEnableDropletFlow ? 1 : 0,
             Surface.DropletFlowSpawnProbability,
-            Surface.DropletFlowLifetimeSeconds,
             Surface.DropletFlowRadiusPixels,
             Surface.DropletFlowHeightPixels,
             Surface.DropletFlowSpawnPositionSpread,
-            Surface.DropletFlowMaxActiveStamps,
-            Surface.DropletFlowSpeed,
-            Surface.DropletFlowAdvectionSpeed,
-            Surface.DropletFlowDirectionDegrees,
             *MakeTextureBuildKey(Surface.DropletFlowNormalTexture),
             *MakeTextureBuildKey(Surface.DropletFlowMaskTexture),
-            *MakeTextureBuildKey(Surface.DropletFlowNoiseTexture),
-            Surface.DropletFlowNoiseTiling,
-            Surface.DropletFlowNoiseStrength,
-            Surface.DropletFlowNoiseSpeed,
             Surface.SurfaceWaterTargetRoughness,
             Surface.SurfaceWaterNormalStrength,
             Surface.SurfaceWaterRoughnessBlend,
@@ -524,7 +510,6 @@ bool FWetClothingWetPartDataTextureBaker::Bake(
             LocalProfile.Parameters.SurfaceWater.DropletMaskTexture = nullptr;
             LocalProfile.Parameters.SurfaceWater.DropletFlowNormalTexture = nullptr;
             LocalProfile.Parameters.SurfaceWater.DropletFlowMaskTexture = nullptr;
-            LocalProfile.Parameters.SurfaceWater.DropletFlowNoiseTexture = nullptr;
             LocalIDByStableKey.Add(StableKey, LocalProfileID);
         }
         LocalIDByEntry.Add(Entry, LocalProfileID);

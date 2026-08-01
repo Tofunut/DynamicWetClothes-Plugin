@@ -42,9 +42,12 @@ private:
     void HandlePreviewAbsorbedWaterPercentChanged(float InPercent);
     FText GetPreviewAbsorbedWaterPercentText() const;
 
-    float GetPreviewDropletDetailSize() const;
-    void HandlePreviewDropletDetailSizeChanged(float InValue);
-    FText GetPreviewDropletDetailSizeText() const;
+    float GetPreviewDroplet1DetailSize() const;
+    void HandlePreviewDroplet1DetailSizeChanged(float InValue);
+    FText GetPreviewDroplet1DetailSizeText() const;
+    float GetPreviewDroplet2DetailSize() const;
+    void HandlePreviewDroplet2DetailSizeChanged(float InValue);
+    FText GetPreviewDroplet2DetailSizeText() const;
 
     TSharedRef<SWidget> GeneratePreviewModeWidget(TSharedPtr<SWetnessProfileViewport::EPreviewMode> InMode) const;
     void HandlePreviewModeChanged(TSharedPtr<SWetnessProfileViewport::EPreviewMode> InMode, ESelectInfo::Type SelectInfo);
@@ -63,5 +66,6 @@ private:
     TArray<TSharedPtr<SWetnessProfileViewport::EPreviewMode>> PreviewModeItems;
     TSharedPtr<SWetnessProfileViewport::EPreviewMode> SelectedPreviewModeItem;
 
-    float PreviewDropletDetailSize = 1.0f;
+    float PreviewDroplet1DetailSize = 1.0f;
+    float PreviewDroplet2DetailSize = 1.0f;
 };

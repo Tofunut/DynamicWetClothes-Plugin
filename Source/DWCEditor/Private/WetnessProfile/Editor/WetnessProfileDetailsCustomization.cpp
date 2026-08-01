@@ -363,13 +363,9 @@ void FWetnessProfileDetailsCustomization::CustomizeDetails(IDetailLayoutBuilder&
         FindPropertyByPath(TEXT("Parameters.AbsorbedWetness.bEnabled"));
     const TSharedPtr<IPropertyHandle> SurfaceEnabled =
         FindPropertyByPath(TEXT("Parameters.SurfaceWater.bEnabled"));
-    const TSharedPtr<IPropertyHandle> DropletFlowEnabled =
-        FindPropertyByPath(TEXT("Parameters.SurfaceWater.bEnableDropletFlow"));
 
     const TAttribute<bool> AbsorbedSettingsEnabled = EnabledWhen(AbsorbedEnabled);
     const TAttribute<bool> SurfaceSettingsEnabled = EnabledWhen(SurfaceEnabled);
-    const TAttribute<bool> DropletFlowSettingsEnabled =
-        EnabledWhenBoth(SurfaceEnabled, DropletFlowEnabled);
 
     const bool bShowAbsorbed = Mode != EWetnessProfileDetailsMode::SurfaceWater;
     const bool bShowSurface = Mode != EWetnessProfileDetailsMode::AbsorbedWater;
@@ -484,132 +480,79 @@ void FWetnessProfileDetailsCustomization::CustomizeDetails(IDetailLayoutBuilder&
             ECategoryPriority::Important);
         ConfigurePrimaryCategory(SimulationCategory, BaseSortOrder + 5);
 
-        AddFloatProperty(
-            SimulationCategory,
-            FindPropertyByPath(TEXT("Parameters.SurfaceWater.DropletSpawnProbability")),
-            LOCTEXT("DropletSpawnChance", "Spawn Chance"),
-            LOCTEXT("DropletSpawnChanceTooltip", "Chance that eligible surface water produces a droplet stamp."),
-            0.05f, 1.0f, 0.05f, 1.0f, 0.01f, 100.0f, 1, LOCTEXT("PercentSuffix3", "%"),
-            SurfaceSettingsEnabled);
         AddMappedFloatProperty(
             SimulationCategory,
-            FindPropertyByPath(TEXT("Parameters.SurfaceWater.DropletRadiusPixels")),
-            LOCTEXT("DropletStampSize", "Static Stamp Size"),
-            LOCTEXT("DropletStampSizeTooltip", "Base size of the surface-water stamp coverage. Wet Parts can override this with a local scale."),
-            12.5f, 100.0f, 12.5f, 100.0f, 1.0f, 1, LOCTEXT("PercentSuffixDropletSize", "%"),
-            MakeSquaredRawToPercent(64.0f), MakeSquaredPercentToRaw(64.0f), 1.0f, 256.0f,
-            SurfaceSettingsEnabled);
-        AddFloatProperty(
-            SimulationCategory,
-            FindPropertyByPath(TEXT("Parameters.SurfaceWater.DropletLifetimeSeconds")),
-            LOCTEXT("DropletLifetime", "Lifetime"),
-            LOCTEXT("DropletLifetimeTooltip", "Time before a droplet stamp fully fades."),
-            0.25f, 120.0f, 0.25f, 30.0f, 0.1f, 1.0f, 2, LOCTEXT("SecondsSuffix1", "s"),
-            SurfaceSettingsEnabled);
-        AddDefaultProperty(
-            SimulationCategory,
-            FindPropertyByPath(TEXT("Parameters.SurfaceWater.DropletMaxActiveStamps")),
-            LOCTEXT("DropletMaxActiveStamps", "Max Active Stamps"),
-            LOCTEXT("DropletMaxActiveStampsTooltip", "Maximum number of simultaneously alive stationary stamps for each Wet Part and profile."),
+            FindPropertyByPath(TEXT("Parameters.SurfaceWater.DropletDryRate")),
+            LOCTEXT("DropletDryRate", "Droplet Dry Rate"),
+            LOCTEXT("DropletDryRateTooltip", "Shared fade-out rate for wetness in both the Droplet1 and Droplet2 render targets."),
+            0.0f, 100.0f, 0.0f, 100.0f, 1.0f, 1, LOCTEXT("PercentSuffixDropletDryRate", "%"),
+            MakeMidpointRawToPercent(20.0f, 40.0f), MakeMidpointPercentToRaw(20.0f, 40.0f), 0.0f, 100.0f,
             SurfaceSettingsEnabled);
 
-        IDetailGroup& DropletFlowGroup = SimulationCategory.AddGroup(
-            TEXT("DWCDropletFlow"),
-            LOCTEXT("DropletFlowGroup", "Droplet Flow"),
+        IDetailGroup& Droplet1Group = SimulationCategory.AddGroup(
+            TEXT("DWCDroplet1"),
+            LOCTEXT("Droplet1Group", "Droplet1"),
             false,
             true);
-        ConfigureSurfaceTypeGroupHeader(
-            DropletFlowGroup,
-            DropletFlowEnabled,
-            LOCTEXT("DropletFlowTitle", "Droplet Flow"),
-            LOCTEXT("DropletFlowDescription", "Uses an independent Flow Droplet RT and pans only those stamps with noise distortion."),
-            SurfaceSettingsEnabled,
-            FLinearColor(0.035f, 0.085f, 0.12f, 1.0f));
         AddFloatProperty(
-            DropletFlowGroup,
+            Droplet1Group,
+            FindPropertyByPath(TEXT("Parameters.SurfaceWater.DropletSpawnProbability")),
+            LOCTEXT("Droplet1SpawnChance", "Spawn Chance"),
+            LOCTEXT("Droplet1SpawnChanceTooltip", "Chance that eligible surface water produces a Droplet1 stamp."),
+            0.0f, 1.0f, 0.0f, 1.0f, 0.01f, 100.0f, 1, LOCTEXT("PercentSuffixDroplet1Spawn", "%"),
+            SurfaceSettingsEnabled);
+        AddMappedFloatProperty(
+            Droplet1Group,
+            FindPropertyByPath(TEXT("Parameters.SurfaceWater.DropletRadiusPixels")),
+            LOCTEXT("Droplet1StampWidth", "Stamp Width"),
+            LOCTEXT("Droplet1StampWidthTooltip", "Horizontal half-size of Droplet1 stamps. Wet Parts can apply a local scale."),
+            0.0f, 100.0f, 0.0f, 100.0f, 1.0f, 1, LOCTEXT("PercentSuffixDroplet1Width", "%"),
+            MakeSquaredRawToPercent(64.0f), MakeSquaredPercentToRaw(64.0f), 0.0f, 256.0f,
+            SurfaceSettingsEnabled);
+        AddMappedFloatProperty(
+            Droplet1Group,
+            FindPropertyByPath(TEXT("Parameters.SurfaceWater.DropletHeightPixels")),
+            LOCTEXT("Droplet1StampHeight", "Stamp Height"),
+            LOCTEXT("Droplet1StampHeightTooltip", "Vertical half-size of Droplet1 stamps. Wet Parts can apply a local scale."),
+            0.0f, 100.0f, 0.0f, 100.0f, 1.0f, 1, LOCTEXT("PercentSuffixDroplet1Height", "%"),
+            MakeSquaredRawToPercent(64.0f), MakeSquaredPercentToRaw(64.0f), 0.0f, 256.0f,
+            SurfaceSettingsEnabled);
+
+        IDetailGroup& Droplet2Group = SimulationCategory.AddGroup(
+            TEXT("DWCDroplet2"),
+            LOCTEXT("Droplet2Group", "Droplet2"),
+            false,
+            true);
+        AddFloatProperty(
+            Droplet2Group,
             FindPropertyByPath(TEXT("Parameters.SurfaceWater.DropletFlowSpawnProbability")),
-            LOCTEXT("DropletFlowSpawnChance", "Spawn Chance"),
-            LOCTEXT("DropletFlowSpawnChanceTooltip", "Independent chance that eligible surface water produces a flowing stamp."),
-            0.0f, 1.0f, 0.0f, 1.0f, 0.01f, 100.0f, 1, LOCTEXT("PercentSuffixFlowSpawn", "%"),
-            DropletFlowSettingsEnabled);
+            LOCTEXT("Droplet2SpawnChance", "Spawn Chance"),
+            LOCTEXT("Droplet2SpawnChanceTooltip", "Independent chance that eligible surface water produces a Droplet2 stamp."),
+            0.0f, 1.0f, 0.0f, 1.0f, 0.01f, 100.0f, 1, LOCTEXT("PercentSuffixDroplet2Spawn", "%"),
+            SurfaceSettingsEnabled);
         AddMappedFloatProperty(
-            DropletFlowGroup,
+            Droplet2Group,
             FindPropertyByPath(TEXT("Parameters.SurfaceWater.DropletFlowRadiusPixels")),
-            LOCTEXT("DropletFlowStampWidth", "Stamp Width"),
-            LOCTEXT("DropletFlowStampWidthTooltip", "Horizontal half-size of stamps written to the Flow Droplet RT."),
-            0.0f, 100.0f, 0.0f, 100.0f, 1.0f, 1, LOCTEXT("PercentSuffixFlowSize", "%"),
+            LOCTEXT("Droplet2StampWidth", "Stamp Width"),
+            LOCTEXT("Droplet2StampWidthTooltip", "Horizontal half-size of stamps written to the Droplet2 RT."),
+            0.0f, 100.0f, 0.0f, 100.0f, 1.0f, 1, LOCTEXT("PercentSuffixDroplet2Width", "%"),
             MakeSquaredRawToPercent(64.0f), MakeSquaredPercentToRaw(64.0f), 0.0f, 256.0f,
-            DropletFlowSettingsEnabled);
+            SurfaceSettingsEnabled);
         AddMappedFloatProperty(
-            DropletFlowGroup,
+            Droplet2Group,
             FindPropertyByPath(TEXT("Parameters.SurfaceWater.DropletFlowHeightPixels")),
-            LOCTEXT("DropletFlowStampHeight", "Stamp Height"),
-            LOCTEXT("DropletFlowStampHeightTooltip", "Vertical half-size of stamps written to the Flow Droplet RT."),
-            0.0f, 100.0f, 0.0f, 100.0f, 1.0f, 1, LOCTEXT("PercentSuffixFlowHeight", "%"),
+            LOCTEXT("Droplet2StampHeight", "Stamp Height"),
+            LOCTEXT("Droplet2StampHeightTooltip", "Vertical half-size of stamps written to the Droplet2 RT."),
+            0.0f, 100.0f, 0.0f, 100.0f, 1.0f, 1, LOCTEXT("PercentSuffixDroplet2Height", "%"),
             MakeSquaredRawToPercent(64.0f), MakeSquaredPercentToRaw(64.0f), 0.0f, 256.0f,
-            DropletFlowSettingsEnabled);
+            SurfaceSettingsEnabled);
         AddFloatProperty(
-            DropletFlowGroup,
+            Droplet2Group,
             FindPropertyByPath(TEXT("Parameters.SurfaceWater.DropletFlowSpawnPositionSpread")),
-            LOCTEXT("DropletFlowSpawnPositionSpread", "Spawn Position Spread"),
-            LOCTEXT("DropletFlowSpawnPositionSpreadTooltip", "Separates Flow stamps from stationary stamps by independently sampling eligible contacts and spreading within the same UV triangle."),
-            0.0f, 1.0f, 0.0f, 1.0f, 0.01f, 100.0f, 1, LOCTEXT("PercentSuffixFlowPositionSpread", "%"),
-            DropletFlowSettingsEnabled);
-        AddFloatProperty(
-            DropletFlowGroup,
-            FindPropertyByPath(TEXT("Parameters.SurfaceWater.DropletFlowLifetimeSeconds")),
-            LOCTEXT("DropletFlowLifetime", "Lifetime"),
-            LOCTEXT("DropletFlowLifetimeTooltip", "Time before a flowing stamp fully fades."),
-            0.01f, 120.0f, 0.01f, 30.0f, 0.1f, 1.0f, 2, LOCTEXT("SecondsSuffixFlowLifetime", "s"),
-            DropletFlowSettingsEnabled);
-        AddDefaultProperty(
-            DropletFlowGroup,
-            FindPropertyByPath(TEXT("Parameters.SurfaceWater.DropletFlowMaxActiveStamps")),
-            LOCTEXT("DropletFlowMaxActiveStamps", "Max Active Stamps"),
-            LOCTEXT("DropletFlowMaxActiveStampsTooltip", "Maximum number of simultaneously alive flow stamps for each Wet Part and profile."),
-            DropletFlowSettingsEnabled);
-        AddFloatProperty(
-            DropletFlowGroup,
-            FindPropertyByPath(TEXT("Parameters.SurfaceWater.DropletFlowSpeed")),
-            LOCTEXT("DropletFlowSpeed", "Speed"),
-            LOCTEXT("DropletFlowSpeedTooltip", "Signed UV panning speed for the detail pattern inside Flow Droplet stamps."),
-            -4.0f, 4.0f, -1.0f, 1.0f, 0.01f, 1.0f, 3, LOCTEXT("UVPerSecondSuffix", "UV/s"),
-            DropletFlowSettingsEnabled);
-        AddFloatProperty(
-            DropletFlowGroup,
-            FindPropertyByPath(TEXT("Parameters.SurfaceWater.DropletFlowAdvectionSpeed")),
-            LOCTEXT("DropletFlowAdvectionSpeed", "Advection Speed"),
-            LOCTEXT("DropletFlowAdvectionSpeedTooltip", "Moves the Flow Droplet RT itself along pose-dependent surface gravity computed by the GPU simulation."),
-            0.0f, 4.0f, 0.0f, 1.0f, 0.005f, 1.0f, 3, LOCTEXT("AdvectionUVPerSecondSuffix", "UV/s"),
-            DropletFlowSettingsEnabled);
-        AddFloatProperty(
-            DropletFlowGroup,
-            FindPropertyByPath(TEXT("Parameters.SurfaceWater.DropletFlowDirectionDegrees")),
-            LOCTEXT("DropletFlowDirection", "Direction"),
-            LOCTEXT("DropletFlowDirectionTooltip", "Flow direction in UV space. 0 is +U and 90 is +V."),
-            -360.0f, 360.0f, -180.0f, 180.0f, 1.0f, 1.0f, 1, LOCTEXT("DegreesSuffix", "deg"),
-            DropletFlowSettingsEnabled);
-        AddFloatProperty(
-            DropletFlowGroup,
-            FindPropertyByPath(TEXT("Parameters.SurfaceWater.DropletFlowNoiseTiling")),
-            LOCTEXT("DropletFlowNoiseTiling", "Noise Tiling"),
-            LOCTEXT("DropletFlowNoiseTilingTooltip", "UV tiling of the Flow Noise Texture."),
-            0.01f, 64.0f, 0.01f, 16.0f, 0.01f, 1.0f, 2, FText::GetEmpty(),
-            DropletFlowSettingsEnabled);
-        AddFloatProperty(
-            DropletFlowGroup,
-            FindPropertyByPath(TEXT("Parameters.SurfaceWater.DropletFlowNoiseStrength")),
-            LOCTEXT("DropletFlowNoiseStrength", "Noise Strength"),
-            LOCTEXT("DropletFlowNoiseStrengthTooltip", "Amount of sideways UV bending from the Flow Noise Texture."),
-            0.0f, 1.0f, 0.0f, 1.0f, 0.01f, 100.0f, 1, LOCTEXT("PercentSuffixFlowNoise", "%"),
-            DropletFlowSettingsEnabled);
-        AddFloatProperty(
-            DropletFlowGroup,
-            FindPropertyByPath(TEXT("Parameters.SurfaceWater.DropletFlowNoiseSpeed")),
-            LOCTEXT("DropletFlowNoiseSpeed", "Noise Speed"),
-            LOCTEXT("DropletFlowNoiseSpeedTooltip", "Signed UV panning speed used to animate the noise field."),
-            -4.0f, 4.0f, -1.0f, 1.0f, 0.01f, 1.0f, 3, LOCTEXT("NoiseUVPerSecondSuffix", "UV/s"),
-            DropletFlowSettingsEnabled);
+            LOCTEXT("Droplet2SpawnSpreadRate", "Spawn Spread Rate"),
+            LOCTEXT("Droplet2SpawnSpreadRateTooltip", "Spreads Droplet2 spawn positions within the same eligible UV triangle."),
+            0.0f, 1.0f, 0.0f, 1.0f, 0.01f, 100.0f, 1, LOCTEXT("PercentSuffixDroplet2Spread", "%"),
+            SurfaceSettingsEnabled);
 
         IDetailCategoryBuilder& RenderingCategory = DetailBuilder.EditCategory(
             TEXT("DWCSurfaceRendering"),
@@ -619,8 +562,8 @@ void FWetnessProfileDetailsCustomization::CustomizeDetails(IDetailLayoutBuilder&
             ECategoryPriority::Important);
         ConfigurePrimaryCategory(RenderingCategory, BaseSortOrder + 10);
         IDetailGroup& StaticRenderingGroup = RenderingCategory.AddGroup(
-            TEXT("DWCStaticDropletRendering"),
-            LOCTEXT("StaticDropletRenderingGroup", "Static Droplet"),
+            TEXT("DWCDroplet1Rendering"),
+            LOCTEXT("Droplet1RenderingGroup", "Droplet1"),
             false,
             true);
 
@@ -635,14 +578,14 @@ void FWetnessProfileDetailsCustomization::CustomizeDetails(IDetailLayoutBuilder&
             StaticRenderingGroup,
             FindPropertyByPath(TEXT("Parameters.SurfaceWater.SurfaceWaterColorBlend")),
             LOCTEXT("SurfaceColorBlend", "Color Blend"),
-            LOCTEXT("SurfaceColorBlendTooltip", "How strongly Static Droplet coverage modifies the underlying Base Color. This does not affect normal, roughness, or specular."),
+            LOCTEXT("SurfaceColorBlendTooltip", "How strongly Droplet1 coverage modifies the underlying Base Color. This does not affect normal, roughness, or specular."),
             0.0f, 1.0f, 0.0f, 1.0f, 0.01f, 100.0f, 1, LOCTEXT("PercentSuffixSurfaceColorBlend", "%"),
             SurfaceSettingsEnabled);
         AddMappedFloatProperty(
             StaticRenderingGroup,
             FindPropertyByPath(TEXT("Parameters.SurfaceWater.SurfaceWaterNormalStrength")),
             LOCTEXT("SurfaceNormalStrength", "Water Normal Strength"),
-            LOCTEXT("SurfaceNormalStrengthTooltip", "Static Droplet normal-map strength. 100% is the authored normal texture strength."),
+            LOCTEXT("SurfaceNormalStrengthTooltip", "Droplet1 normal-map strength. 100% is the authored normal texture strength."),
             0.0f, 300.0f, 0.0f, 300.0f, 1.0f, 1, LOCTEXT("PercentSuffix7", "%"),
             MakeLinearRawToPercent(1.0f, 300.0f), MakeLinearPercentToRaw(1.0f, 300.0f), 0.0f, 3.0f,
             SurfaceSettingsEnabled);
@@ -669,53 +612,53 @@ void FWetnessProfileDetailsCustomization::CustomizeDetails(IDetailLayoutBuilder&
             SurfaceSettingsEnabled);
 
         IDetailGroup& FlowRenderingGroup = RenderingCategory.AddGroup(
-            TEXT("DWCDropletFlowRendering"),
-            LOCTEXT("DropletFlowRenderingGroup", "Droplet Flow"),
+            TEXT("DWCDroplet2Rendering"),
+            LOCTEXT("Droplet2RenderingGroup", "Droplet2"),
             false,
             true);
         AddFloatProperty(
             FlowRenderingGroup,
             FindPropertyByPath(TEXT("Parameters.SurfaceWater.DropletFlowTotalStrength")),
             LOCTEXT("DropletFlowTotalStrength", "Total Strength"),
-            LOCTEXT("DropletFlowTotalStrengthTooltip", "Overall Flow Droplet rendering strength after its coverage is resolved."),
+            LOCTEXT("DropletFlowTotalStrengthTooltip", "Overall Droplet2 rendering strength after its coverage is resolved."),
             0.0f, 1.0f, 0.0f, 1.0f, 0.01f, 100.0f, 1, LOCTEXT("PercentSuffixFlowTotalStrength", "%"),
-            DropletFlowSettingsEnabled);
+            SurfaceSettingsEnabled);
         AddFloatProperty(
             FlowRenderingGroup,
             FindPropertyByPath(TEXT("Parameters.SurfaceWater.DropletFlowColorBlend")),
             LOCTEXT("DropletFlowColorBlend", "Color Blend"),
-            LOCTEXT("DropletFlowColorBlendTooltip", "How strongly Flow Droplet coverage modifies the underlying Base Color. This does not affect normal, roughness, or specular."),
+            LOCTEXT("DropletFlowColorBlendTooltip", "How strongly Droplet2 coverage modifies the underlying Base Color. This does not affect normal, roughness, or specular."),
             0.0f, 1.0f, 0.0f, 1.0f, 0.01f, 100.0f, 1, LOCTEXT("PercentSuffixFlowColorBlend", "%"),
-            DropletFlowSettingsEnabled);
+            SurfaceSettingsEnabled);
         AddMappedFloatProperty(
             FlowRenderingGroup,
             FindPropertyByPath(TEXT("Parameters.SurfaceWater.DropletFlowNormalStrength")),
             LOCTEXT("DropletFlowNormalStrength", "Water Normal Strength"),
-            LOCTEXT("DropletFlowNormalStrengthTooltip", "Flow Droplet normal-map strength. 100% is the authored normal texture strength."),
+            LOCTEXT("DropletFlowNormalStrengthTooltip", "Droplet2 normal-map strength. 100% is the authored normal texture strength."),
             0.0f, 300.0f, 0.0f, 300.0f, 1.0f, 1, LOCTEXT("PercentSuffixFlowNormalStrength", "%"),
             MakeLinearRawToPercent(1.0f, 300.0f), MakeLinearPercentToRaw(1.0f, 300.0f), 0.0f, 3.0f,
-            DropletFlowSettingsEnabled);
+            SurfaceSettingsEnabled);
         AddFloatProperty(
             FlowRenderingGroup,
             FindPropertyByPath(TEXT("Parameters.SurfaceWater.DropletFlowTargetRoughness")),
             LOCTEXT("DropletFlowWaterRoughness", "Water Roughness"),
-            LOCTEXT("DropletFlowWaterRoughnessTooltip", "Target roughness reached inside Flow Droplet coverage."),
+            LOCTEXT("DropletFlowWaterRoughnessTooltip", "Target roughness reached inside Droplet2 coverage."),
             0.0f, 1.0f, 0.0f, 1.0f, 0.01f, 100.0f, 1, LOCTEXT("PercentSuffixFlowRoughness", "%"),
-            DropletFlowSettingsEnabled);
+            SurfaceSettingsEnabled);
         AddFloatProperty(
             FlowRenderingGroup,
             FindPropertyByPath(TEXT("Parameters.SurfaceWater.DropletFlowRoughnessBlend")),
             LOCTEXT("DropletFlowRoughnessBlend", "Roughness Blend"),
-            LOCTEXT("DropletFlowRoughnessBlendTooltip", "How strongly Flow Droplet coverage blends from source roughness to its Water Roughness."),
+            LOCTEXT("DropletFlowRoughnessBlendTooltip", "How strongly Droplet2 coverage blends from source roughness to its Water Roughness."),
             0.0f, 1.0f, 0.0f, 1.0f, 0.01f, 100.0f, 1, LOCTEXT("PercentSuffixFlowRoughnessBlend", "%"),
-            DropletFlowSettingsEnabled);
+            SurfaceSettingsEnabled);
         AddFloatProperty(
             FlowRenderingGroup,
             FindPropertyByPath(TEXT("Parameters.SurfaceWater.DropletFlowSpecular")),
             LOCTEXT("DropletFlowWaterSpecular", "Water Specular"),
-            LOCTEXT("DropletFlowWaterSpecularTooltip", "Target specular reached inside Flow Droplet coverage."),
+            LOCTEXT("DropletFlowWaterSpecularTooltip", "Target specular reached inside Droplet2 coverage."),
             0.0f, 1.0f, 0.0f, 1.0f, 0.01f, 100.0f, 1, LOCTEXT("PercentSuffixFlowSpecular", "%"),
-            DropletFlowSettingsEnabled);
+            SurfaceSettingsEnabled);
 
         IDetailCategoryBuilder& DetailTexturesCategory = DetailBuilder.EditCategory(
             TEXT("DWCSurfaceDetailTextures"),
@@ -726,8 +669,8 @@ void FWetnessProfileDetailsCustomization::CustomizeDetails(IDetailLayoutBuilder&
         ConfigurePrimaryCategory(DetailTexturesCategory, BaseSortOrder + 15);
 
         IDetailGroup& DropletTexturesGroup = DetailTexturesCategory.AddGroup(
-            TEXT("DWCDropletTextures"),
-            LOCTEXT("DropletTexturesGroup", "Droplets"),
+            TEXT("DWCDroplet1Textures"),
+            LOCTEXT("Droplet1TexturesGroup", "Droplet1"),
             false,
             true);
         AddDefaultProperty(
@@ -744,28 +687,22 @@ void FWetnessProfileDetailsCustomization::CustomizeDetails(IDetailLayoutBuilder&
             SurfaceSettingsEnabled);
 
         IDetailGroup& DropletFlowTexturesGroup = DetailTexturesCategory.AddGroup(
-            TEXT("DWCDropletFlowTextures"),
-            LOCTEXT("DropletFlowTexturesGroup", "Droplet Flow"),
+            TEXT("DWCDroplet2Textures"),
+            LOCTEXT("Droplet2TexturesGroup", "Droplet2"),
             false,
             true);
         AddDefaultProperty(
             DropletFlowTexturesGroup,
             FindPropertyByPath(TEXT("Parameters.SurfaceWater.DropletFlowNormalTexture")),
             LOCTEXT("DropletFlowNormal", "Normal Texture"),
-            LOCTEXT("DropletFlowNormalTooltip", "Normal texture used only by Flow Droplets. Empty falls back to the stationary Droplet normal."),
-            DropletFlowSettingsEnabled);
+            LOCTEXT("DropletFlowNormalTooltip", "Normal texture used by Droplet2. Empty falls back to the Droplet1 normal."),
+            SurfaceSettingsEnabled);
         AddDefaultProperty(
             DropletFlowTexturesGroup,
             FindPropertyByPath(TEXT("Parameters.SurfaceWater.DropletFlowMaskTexture")),
             LOCTEXT("DropletFlowMask", "Mask Texture"),
-            LOCTEXT("DropletFlowMaskTooltip", "Mask texture used only by Flow Droplets. Empty falls back to the stationary Droplet mask."),
-            DropletFlowSettingsEnabled);
-        AddDefaultProperty(
-            DropletFlowTexturesGroup,
-            FindPropertyByPath(TEXT("Parameters.SurfaceWater.DropletFlowNoiseTexture")),
-            LOCTEXT("DropletFlowNoise", "Noise Texture"),
-            LOCTEXT("DropletFlowNoiseTooltip", "Grayscale texture used to bend the flowing UV path sideways."),
-            DropletFlowSettingsEnabled);
+            LOCTEXT("DropletFlowMaskTooltip", "Mask texture used by Droplet2. Empty falls back to the Droplet1 mask."),
+            SurfaceSettingsEnabled);
 
     }
 }

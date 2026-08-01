@@ -19,11 +19,8 @@ struct DWC_API FDWCSurfaceStampRequest
     FVector2f UV = FVector2f::ZeroVector;
     FVector2f HalfSizePixels = FVector2f::ZeroVector;
     float Amount = 0.0f;
-    float LifetimeSeconds = 0.0f;
     int32 MaterialSlotIndex = INDEX_NONE;
-    int32 MaxActiveStamps = 256;
-    uint64 StampGroupId = 0;
-    bool bFlowing = false;
+    bool bDroplet2 = false;
 };
 
 struct DWC_API FDWCGPUBackendInitArgs
@@ -58,8 +55,8 @@ struct DWC_API FDWCGPURenderTargetDebugSnapshot
     int32 WetnessMapResolution = 0;
     int32 SurfaceWaterResolution = 0;
     TWeakObjectPtr<UTextureRenderTarget2D> WetnessMap;
-    TWeakObjectPtr<UTextureRenderTarget2D> DropletsMap;
-    TWeakObjectPtr<UTextureRenderTarget2D> RivuletsMap;
+    TWeakObjectPtr<UTextureRenderTarget2D> Droplet1Map;
+    TWeakObjectPtr<UTextureRenderTarget2D> Droplet2Map;
 };
 
 /** DWC-facing interface. It intentionally contains no RHI/RenderCore types. */

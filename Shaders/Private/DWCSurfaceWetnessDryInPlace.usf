@@ -1,0 +1,54 @@
+#include "/Engine/Public/Platform.ush"
+
+RWTexture2D<float> Surface;
+
+StructuredBuffer<uint4> TexelLookup;
+StructuredBuffer<float4> Profiles;
+StructuredBuffer<uint> TriangleProfileIndices;
+
+int2 TextureSize;
+float DeltaSeconds;
+
+uint Flatten(int2 Texel)
+{
+    return (uint)(Texel.y * TextureSize.x + Texel.x);
+}
+
+bool IsInside(int2 Texel)
+{
+    return all(Texel >= 0) && all(Texel < TextureSize);
+}
+
+bool IsValidLookup(uint4 Lookup)
+{
+    return Lookup.w != 0u && Lookup.x != 0xffffffffu;
+}
+
+[numthreads(8, 8, 1)]
+void MainCS(uint3 DispatchThreadID : SV_DispatchThreadID)
+{
+    const int2 Texel = int2(DispatchThreadID.xy);
+    if (!IsInside(Texel))
+    {
+        return;
+    }
+
+    const uint4 Lookup = TexelLookup[Flatten(Texel)];
+    if (!IsValidLookup(Lookup))
+    {
+        Surface[Texel] = 0.0;
+        return;
+    }
+
+    const uint ProfileIndex = TriangleProfileIndices[Lookup.x];
+    const float DryRate = max(Profiles[ProfileIndex].w, 0.0);
+    float Wetness = saturate(Surface[Texel]);
+    Wetness *= exp(-DryRate * max(DeltaSeconds, 0.0));
+    if (!isfinite(Wetness))
+    {
+        Wetness = 0.0;
+    }
+
+    Wetness = saturate(Wetness);
+    Surface[Texel] = Wetness;
+}

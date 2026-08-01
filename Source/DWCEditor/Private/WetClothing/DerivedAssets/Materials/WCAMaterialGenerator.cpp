@@ -236,35 +236,39 @@ namespace
         static const TArray<FName> RenderProfileOutputs = {
             TEXT("AbsorbedDarkeningStrength"),
             TEXT("AbsorbedGlossinessStrength"),
-            TEXT("DropletMaskSlice"),
-            TEXT("DropletNormalSlice"),
-            TEXT("SurfaceWaterNormalStrength"),
-            TEXT("SurfaceWaterRoughnessBlend"),
-            TEXT("SurfaceWaterSpecular"),
-            TEXT("SurfaceWaterTargetRoughness"),
-            TEXT("SurfaceWaterTotalStrength"),
-            TEXT("SurfaceWaterColorBlend"),
-            TEXT("DropletFlowRoughnessBlend"),
-            TEXT("DropletFlowSpecular"),
-            TEXT("DropletFlowTargetRoughness"),
-            TEXT("DropletFlowTotalStrength"),
-            TEXT("DropletFlowColorBlend"),
-            TEXT("DropletFlowNormalStrength"),
-            TEXT("DropletDetailSize"),
-            TEXT("DropletFlowDetailSize")
+            TEXT("Droplet1NormalSlice"),
+            TEXT("Droplet1NormalStrength"),
+            TEXT("Droplet1RoughnessBlend"),
+            TEXT("Droplet1Specular"),
+            TEXT("Droplet1MaskSlice"),
+            TEXT("Droplet1TargetRoughness"),
+            TEXT("Droplet1TotalStrength"),
+            TEXT("Droplet2NormalSlice"),
+            TEXT("Droplet2MaskSlice"),
+            TEXT("Droplet2TotalStrength"),
+            TEXT("Droplet2TargetRoughness"),
+            TEXT("Droplet2RoughnessBlend"),
+            TEXT("Droplet2Specular"),
+            TEXT("Droplet1ColorBlend"),
+            TEXT("Droplet2ColorBlend"),
+            TEXT("Droplet2NormalStrength"),
+            TEXT("Droplet1DetailSize"),
+            TEXT("Droplet2DetailSize")
         };
         static const TArray<FName> SurfaceNormalInputs = {
             TEXT("SurfaceWaterNormalUV"),
-            TEXT("DropletMaskSlice"), TEXT("DropletNormalSlice"),
-            TEXT("DropletDetailSize"), TEXT("DropletFlowDetailSize")
+            TEXT("Droplet1DetailSize"), TEXT("Droplet2DetailSize"),
+            TEXT("Droplet1MaskSlice"), TEXT("Droplet1NormalSlice"),
+            TEXT("Droplet2MaskSlice"), TEXT("Droplet2NormalSlice")
         };
         static const TArray<FName> SurfaceNormalOutputs = {
-            TEXT("DropletMask"), TEXT("DropletNormal")
+            TEXT("Droplet1Mask"), TEXT("Droplet1Normal"),
+            TEXT("Droplet2Mask"), TEXT("Droplet2Normal")
         };
         static const TArray<FName> DebugWetPartInputs = {
             TEXT("BaseColor"), TEXT("VertexColorRGB"), TEXT("VertexColorAlpha"),
             TEXT("WetnessMask"), TEXT("WetPartDebugStrength"),
-            TEXT("DropletAmount"), TEXT("DropletBrush"), TEXT("DropletLifetimeFade"),
+            TEXT("DropletBrush"),
             TEXT("SurfaceWaterDebugStrength"),
             TEXT("DropletDebugColor")
         };
@@ -273,7 +277,7 @@ namespace
         };
         static const TArray<FName> EvaluateInputs = {
             TEXT("BaseColor"), TEXT("BaseRoughness"), TEXT("BaseSpecular"), TEXT("BaseMetallic"), TEXT("BaseNormal"),
-            TEXT("Wetness"), TEXT("DWCDataUV"), TEXT("SurfaceWaterNormalUV"), TEXT("SurfaceTime"),
+            TEXT("Wetness"), TEXT("DWCDataUV"), TEXT("SurfaceWaterNormalUV"),
             TEXT("WetDarkeningStrength"), TEXT("WetRoughness"),
             TEXT("WrinkleNormal"), TEXT("UseWrinkleNormalMap"), TEXT("WrinkleStrength"),
             TEXT("WrinkleWetnessMin"), TEXT("WrinkleWetnessMax"),
@@ -283,7 +287,7 @@ namespace
         static const TArray<FName> EvaluateOutputs = {
             TEXT("BaseColor"), TEXT("Roughness"), TEXT("Specular"), TEXT("Normal"),
             TEXT("SurfaceCoverage"), TEXT("DropletCoverage"),
-            TEXT("DropletAmount"), TEXT("DropletBrush"), TEXT("DropletLifetimeFade")
+            TEXT("DropletWetness"), TEXT("DropletBrush")
         };
 
         bool bValid = true;
@@ -1036,13 +1040,13 @@ namespace
         }
         if (bRequireSurfaceWater)
         {
-            if (!MaterialInterfaceHasTextureParameter(MaterialInterface, DWCWetMaterialParameters::SurfaceDropletRT()))
+            if (!MaterialInterfaceHasTextureParameter(MaterialInterface, DWCWetMaterialParameters::SurfaceDroplet1RT()))
             {
-                OutMissingParameters.Add(DWCWetMaterialParameters::SurfaceDropletRT().ToString());
+                OutMissingParameters.Add(DWCWetMaterialParameters::SurfaceDroplet1RT().ToString());
             }
-            if (!MaterialInterfaceHasTextureParameter(MaterialInterface, DWCWetMaterialParameters::SurfaceFlowDropletRT()))
+            if (!MaterialInterfaceHasTextureParameter(MaterialInterface, DWCWetMaterialParameters::SurfaceDroplet2RT()))
             {
-                OutMissingParameters.Add(DWCWetMaterialParameters::SurfaceFlowDropletRT().ToString());
+                OutMissingParameters.Add(DWCWetMaterialParameters::SurfaceDroplet2RT().ToString());
             }
             if (!MaterialInterfaceHasTextureParameter(MaterialInterface, DWCWetMaterialParameters::DropletMaskTextureArray()))
             {
@@ -1051,10 +1055,6 @@ namespace
             if (!MaterialInterfaceHasTextureParameter(MaterialInterface, DWCWetMaterialParameters::DropletNormalTextureArray()))
             {
                 OutMissingParameters.Add(DWCWetMaterialParameters::DropletNormalTextureArray().ToString());
-            }
-            if (!MaterialInterfaceHasTextureParameter(MaterialInterface, DWCWetMaterialParameters::DropletFlowNoiseTextureArray()))
-            {
-                OutMissingParameters.Add(DWCWetMaterialParameters::DropletFlowNoiseTextureArray().ToString());
             }
         }
         if (!MaterialInterfaceHasTextureParameter(MaterialInterface, DWCWetMaterialParameters::WetPartDataTexture()))
@@ -1729,13 +1729,6 @@ namespace
             Material, TEXT("DWC_WetDarkeningStrength"), 0.35f, -2140, -420);
         UMaterialExpressionScalarParameter* WetRoughness = CreateScalarParameter(
             Material, TEXT("DWC_WetRoughness"), 0.12f, -2140, -320);
-        UMaterialExpressionScalarParameter* SurfaceTime = FindOrCreateScalarParameter(
-            Material,
-            DWCWetMaterialParameters::SurfaceWaterTime(),
-            0.0f,
-            -1660,
-            1240);
-
         UMaterialExpressionTextureSampleParameter2D* WrinkleNormalMap = FindOrCreateTextureSampleParameter(
             Material, TEXT("DWC_WrinkleNormalMap"), -1900, 260);
         UMaterialExpressionScalarParameter* UseWrinkleNormalMap = FindOrCreateScalarParameter(
@@ -1769,7 +1762,7 @@ namespace
             Evaluate == nullptr || DebugWetPart == nullptr || VertexColor == nullptr || DWCDataUV == nullptr ||
             SurfaceWaterNormalUV == nullptr || WetnessMap == nullptr || WetnessSourceSwitch == nullptr ||
             WetDarkeningStrength == nullptr || WetRoughness == nullptr ||
-            SurfaceTime == nullptr || WrinkleNormalMap == nullptr ||
+            WrinkleNormalMap == nullptr ||
             UseWrinkleNormalMap == nullptr || WrinkleStrength == nullptr ||
             WrinkleWetnessMin == nullptr || WrinkleWetnessMax == nullptr ||
             TransparencyMap == nullptr || UseTransparencyMap == nullptr ||
@@ -1797,8 +1790,6 @@ namespace
         bConnected &= ConnectChecked(WetRoughness, FString(), Evaluate, TEXT("WetRoughness"), FailureReasons);
         bConnected &= ConnectChecked(DWCDataUV, FString(), Evaluate, TEXT("DWCDataUV"), FailureReasons);
         bConnected &= ConnectChecked(SurfaceWaterNormalUV, FString(), Evaluate, TEXT("SurfaceWaterNormalUV"), FailureReasons);
-        bConnected &= ConnectChecked(SurfaceTime, FString(), Evaluate, TEXT("SurfaceTime"), FailureReasons);
-
         bConnected &= ConnectChecked(WrinkleNormalMap, TEXT("RGB"), Evaluate, TEXT("WrinkleNormal"), FailureReasons);
         bConnected &= ConnectChecked(UseWrinkleNormalMap, FString(), Evaluate, TEXT("UseWrinkleNormalMap"), FailureReasons);
         bConnected &= ConnectChecked(WrinkleStrength, FString(), Evaluate, TEXT("WrinkleStrength"), FailureReasons);
@@ -1817,18 +1808,16 @@ namespace
         FString NormalResultOutput;
         FString SurfaceCoverageOutput;
         FString DropletCoverageOutput;
-        FString DropletAmountOutput;
+        FString DropletWetnessOutput;
         FString DropletBrushOutput;
-        FString DropletLifetimeFadeOutput;
         bConnected &= ResolveRequiredOutputName(Evaluate, TEXT("BaseColor"), BaseColorResultOutput);
         bConnected &= ResolveRequiredOutputName(Evaluate, TEXT("Roughness"), RoughnessResultOutput);
         bConnected &= ResolveRequiredOutputName(Evaluate, TEXT("Specular"), SpecularResultOutput);
         bConnected &= ResolveRequiredOutputName(Evaluate, TEXT("Normal"), NormalResultOutput);
         bConnected &= ResolveRequiredOutputName(Evaluate, TEXT("SurfaceCoverage"), SurfaceCoverageOutput);
         bConnected &= ResolveRequiredOutputName(Evaluate, TEXT("DropletCoverage"), DropletCoverageOutput);
-        bConnected &= ResolveRequiredOutputName(Evaluate, TEXT("DropletAmount"), DropletAmountOutput);
+        bConnected &= ResolveRequiredOutputName(Evaluate, TEXT("DropletWetness"), DropletWetnessOutput);
         bConnected &= ResolveRequiredOutputName(Evaluate, TEXT("DropletBrush"), DropletBrushOutput);
-        bConnected &= ResolveRequiredOutputName(Evaluate, TEXT("DropletLifetimeFade"), DropletLifetimeFadeOutput);
         if (!bConnected)
         {
             FailureReasons.Add(TEXT("MF_DWC_EvaluateSurfaceAppearance does not expose the required contract."));
@@ -1870,9 +1859,7 @@ namespace
         bConnected &= ConnectChecked(VertexColor, TEXT("A"), DebugWetPart, TEXT("VertexColorAlpha"), FailureReasons);
         bConnected &= ConnectChecked(WetnessSourceSwitch, FString(), DebugWetPart, TEXT("WetnessMask"), FailureReasons);
         bConnected &= ConnectChecked(WetPartDebugStrength, FString(), DebugWetPart, TEXT("WetPartDebugStrength"), FailureReasons);
-        bConnected &= ConnectChecked(Evaluate, DropletAmountOutput, DebugWetPart, TEXT("DropletAmount"), FailureReasons);
         bConnected &= ConnectChecked(Evaluate, DropletBrushOutput, DebugWetPart, TEXT("DropletBrush"), FailureReasons);
-        bConnected &= ConnectChecked(Evaluate, DropletLifetimeFadeOutput, DebugWetPart, TEXT("DropletLifetimeFade"), FailureReasons);
         bConnected &= ConnectChecked(SurfaceWaterDebugStrength, FString(), DebugWetPart, TEXT("SurfaceWaterDebugStrength"), FailureReasons);
         bConnected &= ConnectChecked(DropletDebugColor, FString(), DebugWetPart, TEXT("DropletDebugColor"), FailureReasons);
         bConnected &= ConnectChecked(MetallicInput, MetallicOutputName, MetallicLayer, TEXT("BaseMetallic"), FailureReasons);

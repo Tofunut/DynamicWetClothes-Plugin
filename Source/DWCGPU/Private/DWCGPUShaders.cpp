@@ -70,14 +70,14 @@ bool FDWCSeamGatherCS::ShouldCompilePermutation(const FGlobalShaderPermutationPa
     return ShouldCompileDWC(Parameters);
 }
 
-IMPLEMENT_GLOBAL_SHADER(FDWCSurfaceFlowAdvectionCS, "/DWCGPU/DWCSurfaceFlowAdvection.usf", "MainCS", SF_Compute);
-bool FDWCSurfaceFlowAdvectionCS::ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
+IMPLEMENT_GLOBAL_SHADER(FDWCSurfaceDropletStampCS, "/DWCGPU/DWCSurfaceDropletStamp.usf", "MainCS", SF_Compute);
+bool FDWCSurfaceDropletStampCS::ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
 {
     return ShouldCompileDWC(Parameters);
 }
 
-IMPLEMENT_GLOBAL_SHADER(FDWCSurfaceDropletStampCS, "/DWCGPU/DWCSurfaceDropletStamp.usf", "MainCS", SF_Compute);
-bool FDWCSurfaceDropletStampCS::ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
+IMPLEMENT_GLOBAL_SHADER(FDWCSurfaceWetnessDryInPlaceCS, "/DWCGPU/DWCSurfaceWetnessDryInPlace.usf", "MainCS", SF_Compute);
+bool FDWCSurfaceWetnessDryInPlaceCS::ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
 {
     return ShouldCompileDWC(Parameters);
 }

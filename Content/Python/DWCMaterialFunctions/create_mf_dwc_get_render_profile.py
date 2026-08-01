@@ -49,7 +49,7 @@ def build() -> None:
     profile_id = c.texture2d_parameter(
         mf, "DWC_WetPartDataTexture", data_fallback, -5950, -1450,
         sampler_type=c.linear_color_sampler(), group="DWC Render Profile",
-        description="Slot-local Wet Part data. R=Local Profile ID, G=Static Droplet Size, B=Flow Droplet Size, A=reserved.",
+        description="Slot-local Wet Part data. R=Local Profile ID, G=Droplet1 Detail Size, B=Droplet2 Detail Size, A=reserved.",
     )
     c.try_connect(data_uv_use, ("", "Result"), profile_id, ("Coordinates", "UVs"))
     profile_id_r = c.component_mask(mf, profile_id, "R", "R", -5350, -1450)
@@ -62,10 +62,10 @@ def build() -> None:
         "return lerp(0.0, 4.0, saturate(Encoded));",
         [("Encoded", droplet_detail_encoded, ("", "Result"))],
         "float1", -4700, -850,
-        "Decode the Part-local Droplet Detail Size from the G channel.",
+        "Decode the Part-local Droplet1 Detail Size from the G channel.",
     )
     droplet_detail_decl = c.named_declaration(
-        mf, "PART_DropletDetailSize", droplet_detail, ("", "Result"), -4000, -850
+        mf, "PART_Droplet1DetailSize", droplet_detail, ("", "Result"), -4000, -850
     )
     droplet_flow_detail_encoded = c.component_mask(mf, profile_id, "B", "B", -5350, -250)
     droplet_flow_detail = c.custom_expression(
@@ -73,10 +73,10 @@ def build() -> None:
         "return lerp(0.0, 4.0, saturate(Encoded));",
         [("Encoded", droplet_flow_detail_encoded, ("", "Result"))],
         "float1", -4700, -250,
-        "Decode the Part-local Flow Droplet Size from the B channel.",
+        "Decode the Part-local Droplet2 Detail Size from the B channel.",
     )
     droplet_flow_detail_decl = c.named_declaration(
-        mf, "PART_DropletFlowDetailSize", droplet_flow_detail, ("", "Result"), -4000, -250
+        mf, "PART_Droplet2DetailSize", droplet_flow_detail, ("", "Result"), -4000, -250
     )
 
     # 1-3 Local Profile ID Decode
@@ -126,9 +126,9 @@ def build() -> None:
     )
     fallback_defaults = [
         (0.5, 0.5, 0.0, 0.0),
-        (1.0, 0.5, 0.25, 0.5),
+        (1.0, 0.5, 0.0, 0.5),
         (0.0, 0.0, 0.02, 0.5),
-        (90.0, 2.0, 0.05, 0.15),
+        (0.0, 0.0, 0.0, 0.0),
         (0.0, 0.0, 0.0, 0.0),
         (0.5, 0.02, 0.85, 0.5),
         (1.0, 1.0, 3.0, 0.0),
@@ -180,29 +180,22 @@ def build() -> None:
     packed_outputs = [
         ("AbsorbedDarkeningStrength", 0, "R"),
         ("AbsorbedGlossinessStrength", 0, "G"),
-        ("DropletNormalSlice", 0, "B"),
-        ("DropletFlowEnabled", 0, "A"),
-        ("SurfaceWaterNormalStrength", 1, "R"),
-        ("SurfaceWaterRoughnessBlend", 1, "G"),
-        ("DropletFlowSpeed", 1, "B"),
-        ("SurfaceWaterSpecular", 1, "A"),
-        ("DropletMaskSlice", 2, "R"),
-        ("DropletFlowNoiseSlice", 2, "G"),
-        ("SurfaceWaterTargetRoughness", 2, "B"),
-        ("SurfaceWaterTotalStrength", 2, "A"),
-        ("DropletFlowDirectionDegrees", 3, "R"),
-        ("DropletFlowNoiseTiling", 3, "G"),
-        ("DropletFlowNoiseStrength", 3, "B"),
-        ("DropletFlowNoiseSpeed", 3, "A"),
-        ("DropletFlowNormalSlice", 4, "R"),
-        ("DropletFlowMaskSlice", 4, "G"),
-        ("DropletFlowTotalStrength", 5, "R"),
-        ("DropletFlowTargetRoughness", 5, "G"),
-        ("DropletFlowRoughnessBlend", 5, "B"),
-        ("DropletFlowSpecular", 5, "A"),
-        ("SurfaceWaterColorBlend", 6, "R"),
-        ("DropletFlowColorBlend", 6, "G"),
-        ("DropletFlowNormalStrength", 6, "B"),
+        ("Droplet1NormalSlice", 0, "B"),
+        ("Droplet1NormalStrength", 1, "R"),
+        ("Droplet1RoughnessBlend", 1, "G"),
+        ("Droplet1Specular", 1, "A"),
+        ("Droplet1MaskSlice", 2, "R"),
+        ("Droplet1TargetRoughness", 2, "B"),
+        ("Droplet1TotalStrength", 2, "A"),
+        ("Droplet2NormalSlice", 4, "R"),
+        ("Droplet2MaskSlice", 4, "G"),
+        ("Droplet2TotalStrength", 5, "R"),
+        ("Droplet2TargetRoughness", 5, "G"),
+        ("Droplet2RoughnessBlend", 5, "B"),
+        ("Droplet2Specular", 5, "A"),
+        ("Droplet1ColorBlend", 6, "R"),
+        ("Droplet2ColorBlend", 6, "G"),
+        ("Droplet2NormalStrength", 6, "B"),
     ]
     profile_decls: dict[str, object] = {}
     for output_index, (name, texel_index, channel) in enumerate(packed_outputs):
@@ -212,41 +205,34 @@ def build() -> None:
         profile_decls[name] = c.named_declaration(
             mf, f"PROFILE_{name}", mask, ("", "Result"), 6700, y
         )
-    profile_decls["DropletDetailSize"] = droplet_detail_decl
-    profile_decls["DropletFlowDetailSize"] = droplet_flow_detail_decl
+    profile_decls["Droplet1DetailSize"] = droplet_detail_decl
+    profile_decls["Droplet2DetailSize"] = droplet_flow_detail_decl
 
     ordered_outputs = [name for name, _, _ in packed_outputs] + [
-        "DropletDetailSize",
-        "DropletFlowDetailSize",
+        "Droplet1DetailSize",
+        "Droplet2DetailSize",
     ]
     descriptions = {
         "AbsorbedDarkeningStrength": "Absorbed wetness base-color darkening strength.",
         "AbsorbedGlossinessStrength": "Absorbed wetness roughness blend strength.",
-        "DropletNormalSlice": "Stationary Droplet normal Texture2DArray slice.",
-        "DropletFlowEnabled": "Whether the independently stamped Flow Droplet path is enabled.",
-        "SurfaceWaterNormalStrength": "Common surface-water detail-normal strength.",
-        "SurfaceWaterRoughnessBlend": "Surface-water roughness blend strength.",
-        "DropletFlowSpeed": "Signed Flow Droplet panning speed in UV per second.",
-        "SurfaceWaterSpecular": "Wet surface target specular.",
-        "DropletMaskSlice": "Stationary Droplet mask Texture2DArray slice.",
-        "DropletFlowNoiseSlice": "Flow noise Texture2DArray slice.",
-        "SurfaceWaterTargetRoughness": "Wet surface target roughness.",
-        "SurfaceWaterTotalStrength": "Overall Surface Water rendering response strength.",
-        "DropletFlowDirectionDegrees": "Flow direction in UV-space degrees.",
-        "DropletFlowNoiseTiling": "Flow noise UV tiling.",
-        "DropletFlowNoiseStrength": "Flow noise sideways bend strength.",
-        "DropletFlowNoiseSpeed": "Signed Flow noise panning speed.",
-        "DropletFlowNormalSlice": "Flow Droplet normal Texture2DArray slice.",
-        "DropletFlowMaskSlice": "Flow Droplet mask Texture2DArray slice.",
-        "DropletFlowTotalStrength": "Overall Flow Droplet rendering response strength.",
-        "DropletFlowTargetRoughness": "Flow Droplet target roughness.",
-        "DropletFlowRoughnessBlend": "Flow Droplet roughness blend strength.",
-        "DropletFlowSpecular": "Flow Droplet target specular.",
-        "SurfaceWaterColorBlend": "Stationary Droplet Base Color blend strength.",
-        "DropletFlowColorBlend": "Flow Droplet Base Color blend strength.",
-        "DropletFlowNormalStrength": "Flow Droplet detail-normal strength.",
-        "DropletDetailSize": "Part-local physical-looking size of the stationary Droplet detail pattern.",
-        "DropletFlowDetailSize": "Part-local physical-looking size of the Flow Droplet detail pattern.",
+        "Droplet1NormalSlice": "Droplet1 normal Texture2DArray slice.",
+        "Droplet1NormalStrength": "Droplet1 detail-normal strength.",
+        "Droplet1RoughnessBlend": "Droplet1 roughness blend strength.",
+        "Droplet1Specular": "Droplet1 target specular.",
+        "Droplet1MaskSlice": "Droplet1 mask Texture2DArray slice.",
+        "Droplet1TargetRoughness": "Droplet1 target roughness.",
+        "Droplet1TotalStrength": "Overall Droplet1 rendering response strength.",
+        "Droplet2NormalSlice": "Droplet2 normal Texture2DArray slice.",
+        "Droplet2MaskSlice": "Droplet2 mask Texture2DArray slice.",
+        "Droplet2TotalStrength": "Overall Droplet2 rendering response strength.",
+        "Droplet2TargetRoughness": "Droplet2 target roughness.",
+        "Droplet2RoughnessBlend": "Droplet2 roughness blend strength.",
+        "Droplet2Specular": "Droplet2 target specular.",
+        "Droplet1ColorBlend": "Droplet1 Base Color blend strength.",
+        "Droplet2ColorBlend": "Droplet2 Base Color blend strength.",
+        "Droplet2NormalStrength": "Droplet2 detail-normal strength.",
+        "Droplet1DetailSize": "Part-local size of the Droplet1 detail pattern.",
+        "Droplet2DetailSize": "Part-local size of the Droplet2 detail pattern.",
     }
     for output_index, name in enumerate(ordered_outputs):
         y = -2100 + output_index * 230

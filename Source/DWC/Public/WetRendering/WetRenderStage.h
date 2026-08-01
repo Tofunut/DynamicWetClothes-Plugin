@@ -43,8 +43,6 @@ struct DWC_API FWetRenderStageArgs
     float TransparencyWetnessMax = DWCWetMaterialParameters::DefaultTransparencyWetnessMax();
     bool bEnableTransparency = true;
 
-    float SurfaceWaterTimeSeconds = 0.0f;
-
     FLinearColor UnderColor = FLinearColor(0.8f, 0.55f, 0.42f, 1.0f);
     float        UnderColorBlendStrength = 0.3f;
     int32 LODIndex = 0;

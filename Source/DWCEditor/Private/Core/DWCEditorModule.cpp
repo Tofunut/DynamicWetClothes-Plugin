@@ -1,12 +1,16 @@
 #include "Core/DWCEditorStyle.h"
 #include "Core/DWCSkeletalMeshMaterialSlotExtractor.h"
 #include "Components/DynamicWetClothesComponentCustomization.h"
+#include "DataAssets/WetnessProfile.h"
+#include "Editor.h"
 #include "Engine/SkeletalMesh.h"
 #include "HAL/IConsoleManager.h"
 #include "Modules/ModuleManager.h"
 #include "PropertyEditorModule.h"
 #include "WetClothing/DerivedAssets/Materials/WCAMaterialGenerator.h"
+#include "WetClothing/DerivedAssets/Textures/WetnessProfile/WetClothingSurfaceTextureNormalizer.h"
 #include "WetnessProfile/Editor/WetnessProfileDetailsCustomization.h"
+#include "UObject/UnrealType.h"
 
 class FDWCEditorModule : public IModuleInterface
 {
@@ -38,10 +42,19 @@ class FDWCEditorModule : public IModuleInterface
             ECVF_Default);
 
         FDWCSkeletalMeshMaterialSlotExtractor::RegisterContentBrowserMenu(this);
+        ObjectPropertyChangedHandle = FCoreUObjectDelegates::OnObjectPropertyChanged.AddRaw(
+            this,
+            &FDWCEditorModule::HandleObjectPropertyChanged);
     }
 
     virtual void ShutdownModule() override
     {
+        if (ObjectPropertyChangedHandle.IsValid())
+        {
+            FCoreUObjectDelegates::OnObjectPropertyChanged.Remove(ObjectPropertyChangedHandle);
+            ObjectPropertyChangedHandle.Reset();
+        }
+
         FDWCSkeletalMeshMaterialSlotExtractor::UnregisterContentBrowserMenu(this);
 
         if (ExtractSkeletalMeshMaterialSlotCommand != nullptr)
@@ -68,6 +81,60 @@ class FDWCEditorModule : public IModuleInterface
     }
 
   private:
+    void PrepareWetnessProfileTextures(UWetnessProfile& WetnessProfile)
+    {
+        FWetClothingLocalRenderProfile PreparedProfile;
+        PreparedProfile.SourceProfile = FSoftObjectPath(&WetnessProfile);
+        PreparedProfile.Parameters = WetnessProfile.GetParameters();
+        FString ErrorMessage;
+        if (!FWetClothingSurfaceTextureNormalizer::PrepareProfileTextures(
+                WetnessProfile.GetParameters(),
+                PreparedProfile,
+                ErrorMessage))
+        {
+            UE_LOG(
+                LogTemp,
+                Warning,
+                TEXT("DWC could not prepare changed WP textures: profile='%s', error='%s'."),
+                *WetnessProfile.GetPathName(),
+                *ErrorMessage);
+            return;
+        }
+
+        WetnessProfile.SetPreparedSurfaceTextures(
+            PreparedProfile.NormalizedDropletNormal,
+            PreparedProfile.NormalizedDropletMask,
+            PreparedProfile.NormalizedDropletFlowNormal,
+            PreparedProfile.NormalizedDropletFlowMask);
+        WetnessProfile.MarkPackageDirty();
+    }
+
+    void HandleObjectPropertyChanged(
+        UObject* ObjectBeingModified,
+        FPropertyChangedEvent& PropertyChangedEvent)
+    {
+        UWetnessProfile* WetnessProfile = Cast<UWetnessProfile>(ObjectBeingModified);
+        if (WetnessProfile == nullptr || WetnessProfile->HasAnyFlags(RF_ClassDefaultObject) ||
+            (GEditor != nullptr && GEditor->PlayWorld != nullptr))
+        {
+            return;
+        }
+
+        const FName PropertyName = PropertyChangedEvent.GetPropertyName();
+        const bool bTextureReferenceChanged =
+            PropertyName.IsNone() ||
+            PropertyName == GET_MEMBER_NAME_CHECKED(FSurfaceWaterProfileParameters, DropletNormalTexture) ||
+            PropertyName == GET_MEMBER_NAME_CHECKED(FSurfaceWaterProfileParameters, DropletMaskTexture) ||
+            PropertyName == GET_MEMBER_NAME_CHECKED(FSurfaceWaterProfileParameters, DropletFlowNormalTexture) ||
+            PropertyName == GET_MEMBER_NAME_CHECKED(FSurfaceWaterProfileParameters, DropletFlowMaskTexture);
+        if (!bTextureReferenceChanged)
+        {
+            return;
+        }
+
+        PrepareWetnessProfileTextures(*WetnessProfile);
+    }
+
     void ValidateSurfaceAppearanceFunctions()
     {
         FString ErrorMessage;
@@ -113,6 +180,7 @@ class FDWCEditorModule : public IModuleInterface
 
     IConsoleObject* ValidateSurfaceAppearanceFunctionsCommand = nullptr;
     IConsoleObject* ExtractSkeletalMeshMaterialSlotCommand = nullptr;
+    FDelegateHandle ObjectPropertyChangedHandle;
 
 };
 

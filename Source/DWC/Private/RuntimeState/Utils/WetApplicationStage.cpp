@@ -26,7 +26,7 @@ namespace
         int32 FlowCandidateTriangleID = INDEX_NONE;
         FSurfaceWaterProfileParameters Profile;
         float DropletRadiusScale = 1.0f;
-        float DropletFlowSizeScale = 1.0f;
+        float Droplet2SizeScale = 1.0f;
         bool bHasProfile = false;
         bool bHasFlowCandidate = false;
     };
@@ -51,21 +51,6 @@ namespace
                 GetTypeHash(Key.ProfileIndex));
         }
     };
-
-    uint64 MakeSurfaceStampGroupId(
-        const FGPUSurfaceWaterAccumulatorKey& Key,
-        const bool bFlowing)
-    {
-        const uint64 MaterialSlotBits =
-            static_cast<uint64>(static_cast<uint32>(Key.MaterialSlotIndex) & 0x7fffu);
-        const uint64 WetPartBits =
-            static_cast<uint64>(static_cast<uint32>(Key.WetPartID));
-        const uint64 ProfileBits = static_cast<uint64>(Key.ProfileIndex);
-        return (bFlowing ? (1ull << 63) : 0ull) |
-               (MaterialSlotBits << 48) |
-               (WetPartBits << 16) |
-               ProfileBits;
-    }
 
     int32 GetDominantTriangleVertexIndex(
         const FDWCGPUBakedTriangle& Triangle,
@@ -207,7 +192,7 @@ namespace
             Accumulator.MaterialSlotIndex = Contact.MaterialSlotIndex;
             Accumulator.TotalSurfaceAmount += SurfaceAmount;
 
-            // Flow stamps use a weighted reservoir sample instead of reusing the static stamp's strongest contact.
+            // Droplet2 uses a weighted reservoir sample instead of reusing Droplet1's strongest contact.
             Accumulator.FlowSelectionWeight += SurfaceAmount;
             if (!Accumulator.bHasFlowCandidate ||
                 RandomStream.FRand() * Accumulator.FlowSelectionWeight < SurfaceAmount)
@@ -224,7 +209,7 @@ namespace
                 Accumulator.BestUV = Contact.ContactUV;
                 Accumulator.Profile = SurfaceProfile;
                 Accumulator.DropletRadiusScale = WetPart->SurfaceWater.GetResolvedDropletStampSizeScale();
-                Accumulator.DropletFlowSizeScale = WetPart->SurfaceWater.GetResolvedDropletFlowStampSizeScale();
+                Accumulator.Droplet2SizeScale = WetPart->SurfaceWater.GetResolvedDropletFlowStampSizeScale();
                 Accumulator.bHasProfile = true;
             }
         }
@@ -247,16 +232,14 @@ namespace
                 FDWCSurfaceStampRequest& Request = Requests.AddDefaulted_GetRef();
                 Request.MaterialSlotIndex = Accumulator.MaterialSlotIndex;
                 Request.UV = Accumulator.BestUV;
-                Request.HalfSizePixels = FVector2f(FMath::Max(0.5f, Surface.DropletRadiusPixels * Accumulator.DropletRadiusScale));
+                Request.HalfSizePixels = FVector2f(
+                    FMath::Max(0.5f, Surface.DropletRadiusPixels * Accumulator.DropletRadiusScale),
+                    FMath::Max(0.5f, Surface.DropletHeightPixels * Accumulator.DropletRadiusScale));
                 Request.Amount = Accumulator.TotalSurfaceAmount;
-                Request.LifetimeSeconds = FMath::Max(0.01f, Surface.DropletLifetimeSeconds);
-                Request.MaxActiveStamps = FMath::Clamp(Surface.DropletMaxActiveStamps, 1, 4096);
-                Request.StampGroupId = MakeSurfaceStampGroupId(Pair.Key, false);
-                Request.bFlowing = false;
+                Request.bDroplet2 = false;
             }
 
-            if (Surface.bEnableDropletFlow &&
-                Surface.DropletFlowRadiusPixels > 0.0f &&
+            if (Surface.DropletFlowRadiusPixels > 0.0f &&
                 Surface.DropletFlowHeightPixels > 0.0f &&
                 Accumulator.bHasFlowCandidate &&
                 RandomStream.FRand() < FMath::Clamp(Surface.DropletFlowSpawnProbability, 0.0f, 1.0f))
@@ -273,13 +256,10 @@ namespace
                         RandomStream);
                 }
                 Request.HalfSizePixels = FVector2f(
-                    FMath::Max(0.5f, Surface.DropletFlowRadiusPixels * Accumulator.DropletFlowSizeScale),
-                    FMath::Max(0.5f, Surface.DropletFlowHeightPixels * Accumulator.DropletFlowSizeScale));
+                    FMath::Max(0.5f, Surface.DropletFlowRadiusPixels * Accumulator.Droplet2SizeScale),
+                    FMath::Max(0.5f, Surface.DropletFlowHeightPixels * Accumulator.Droplet2SizeScale));
                 Request.Amount = Accumulator.TotalSurfaceAmount;
-                Request.LifetimeSeconds = FMath::Max(0.01f, Surface.DropletFlowLifetimeSeconds);
-                Request.MaxActiveStamps = FMath::Clamp(Surface.DropletFlowMaxActiveStamps, 1, 4096);
-                Request.StampGroupId = MakeSurfaceStampGroupId(Pair.Key, true);
-                Request.bFlowing = true;
+                Request.bDroplet2 = true;
             }
 
         }

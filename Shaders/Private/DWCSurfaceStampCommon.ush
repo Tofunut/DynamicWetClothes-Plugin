@@ -44,43 +44,20 @@ float DWC_StampBrush(float2 LocalPosition)
     return 1.0 - smoothstep(0.55, 1.0, Radius);
 }
 
-float DWC_VisibleSurfaceAmount(float4 State, float CurrentTimeSeconds)
-{
-    if (State.b <= 0.0)
-    {
-        return 0.0;
-    }
-
-    const float Age = max(CurrentTimeSeconds - State.g, 0.0);
-    const float Lifetime = max(State.b, 0.01);
-    const float FadeDuration = min(0.35, Lifetime * 0.15);
-    const float FadeStart = max(Lifetime - FadeDuration, 0.0);
-    const float Fade = 1.0 - smoothstep(FadeStart, Lifetime, Age);
-    return State.r * Fade;
-}
-
 void DWC_WriteDropletStamp(
     int2 Pixel,
     float Brush,
-    float StampAmount,
-    float StampTimeSeconds,
-    float StampLifetimeSeconds,
-    RWTexture2D<float4> TargetSurface)
+    float StampWetness,
+    RWTexture2D<float> TargetSurface)
 {
     if (Brush <= 0.0) return;
 
-    const float4 Existing = TargetSurface[Pixel];
-    const float ExistingVisibleAmount =
-        DWC_VisibleSurfaceAmount(Existing, StampTimeSeconds);
+    const float ExistingWetness = saturate(TargetSurface[Pixel]);
     const float StampRegion = smoothstep(0.0, 0.12, saturate(Brush));
-    const float NewAmount = saturate(max(ExistingVisibleAmount, StampRegion * StampAmount));
+    const float NewWetness = saturate(ExistingWetness + StampRegion * StampWetness);
 
-    // RGB stores only stamp state; authored mask/normal textures define the rendered droplet shape.
-    TargetSurface[Pixel] = float4(
-        NewAmount,
-        StampTimeSeconds,
-        StampLifetimeSeconds,
-        0.0);
+    // The single R channel is normalized Surface Water wetness. Drying is applied every frame.
+    TargetSurface[Pixel] = NewWetness;
 }
 
 

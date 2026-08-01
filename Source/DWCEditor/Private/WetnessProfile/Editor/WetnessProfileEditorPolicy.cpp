@@ -29,23 +29,14 @@ namespace
         { TEXT("Parameters.AbsorbedWetness.AbsorbedGlossinessStrength"), 0.0, 3.0, 0.5 },
 
         // Simulation | Surface Water
-        { TEXT("Parameters.SurfaceWater.SurfaceRepresentationFraction"), 0.0, 1.0, 1.0 },
+        { TEXT("Parameters.SurfaceWater.DropletDryRate"), 0.0, 100.0, 20.0 },
         { TEXT("Parameters.SurfaceWater.DropletSpawnProbability"), 0.0, 1.0, 0.5 },
-        { TEXT("Parameters.SurfaceWater.DropletLifetimeSeconds"), 0.01, 120.0, 5.0 },
         { TEXT("Parameters.SurfaceWater.DropletRadiusPixels"), 0.0, 256.0, 16.0 },
-        { TEXT("Parameters.SurfaceWater.DropletMaxActiveStamps"), 1.0, 4096.0, 256.0 },
+        { TEXT("Parameters.SurfaceWater.DropletHeightPixels"), 0.0, 256.0, 16.0 },
         { TEXT("Parameters.SurfaceWater.DropletFlowSpawnProbability"), 0.0, 1.0, 0.5 },
-        { TEXT("Parameters.SurfaceWater.DropletFlowLifetimeSeconds"), 0.01, 120.0, 5.0 },
         { TEXT("Parameters.SurfaceWater.DropletFlowRadiusPixels"), 0.0, 256.0, 16.0 },
         { TEXT("Parameters.SurfaceWater.DropletFlowHeightPixels"), 0.0, 256.0, 32.0 },
         { TEXT("Parameters.SurfaceWater.DropletFlowSpawnPositionSpread"), 0.0, 1.0, 0.35 },
-        { TEXT("Parameters.SurfaceWater.DropletFlowMaxActiveStamps"), 1.0, 4096.0, 256.0 },
-        { TEXT("Parameters.SurfaceWater.DropletFlowSpeed"), -4.0, 4.0, 0.25 },
-        { TEXT("Parameters.SurfaceWater.DropletFlowAdvectionSpeed"), 0.0, 4.0, 0.08 },
-        { TEXT("Parameters.SurfaceWater.DropletFlowDirectionDegrees"), -360.0, 360.0, 90.0 },
-        { TEXT("Parameters.SurfaceWater.DropletFlowNoiseTiling"), 0.01, 64.0, 2.0 },
-        { TEXT("Parameters.SurfaceWater.DropletFlowNoiseStrength"), 0.0, 1.0, 0.05 },
-        { TEXT("Parameters.SurfaceWater.DropletFlowNoiseSpeed"), -4.0, 4.0, 0.15 },
 
         // Rendering | Surface Water
         { TEXT("Parameters.SurfaceWater.SurfaceWaterTotalStrength"), 0.0, 1.0, 0.5 },
@@ -64,7 +55,6 @@ namespace
 
     constexpr float MinRenderableRejectedWaterFraction = 0.05f;
     constexpr float MinRenderableDropletSpawnProbability = 0.05f;
-    constexpr float MinRenderableDropletLifetimeSeconds = 0.25f;
     constexpr float MinRenderableDropletRadiusPixels = 1.0f;
 
     const FNumericRule* FindNumericRule(const FString& PropertyPath)
@@ -374,67 +364,36 @@ namespace
         }
 
         bool bChanged = false;
-        if (!Surface.bEnableDroplets)
-        {
-            Surface.bEnableDroplets = true;
-            bChanged = true;
-            if (OutChanges != nullptr)
-            {
-                OutChanges->Add(TEXT("Surface Water droplets: disabled -> enabled"));
-            }
-        }
-
-        if (!FMath::IsNearlyEqual(Surface.SurfaceRepresentationFraction, 1.0f))
-        {
-            const float Original = Surface.SurfaceRepresentationFraction;
-            Surface.SurfaceRepresentationFraction = 1.0f;
-            bChanged = true;
-            if (OutChanges != nullptr)
-            {
-                OutChanges->Add(FString::Printf(
-                    TEXT("Surface Water routing: %.3f -> 1.000"),
-                    Original));
-            }
-        }
-
         bChanged |= ClampRenderableFloat(
             Surface.DropletSpawnProbability,
             MinRenderableDropletSpawnProbability,
             TEXT("Droplet spawn chance"),
             OutChanges);
         bChanged |= ClampRenderableFloat(
-            Surface.DropletLifetimeSeconds,
-            MinRenderableDropletLifetimeSeconds,
-            TEXT("Droplet lifetime"),
-            OutChanges);
-        bChanged |= ClampRenderableFloat(
             Surface.DropletRadiusPixels,
             MinRenderableDropletRadiusPixels,
-            TEXT("Droplet size"),
+            TEXT("Droplet1 width"),
             OutChanges);
-        if (Surface.bEnableDropletFlow)
-        {
-            bChanged |= ClampRenderableFloat(
-                Surface.DropletFlowSpawnProbability,
-                MinRenderableDropletSpawnProbability,
-                TEXT("Flow Droplet spawn chance"),
-                OutChanges);
-            bChanged |= ClampRenderableFloat(
-                Surface.DropletFlowLifetimeSeconds,
-                MinRenderableDropletLifetimeSeconds,
-                TEXT("Flow Droplet lifetime"),
-                OutChanges);
-            bChanged |= ClampRenderableFloat(
-                Surface.DropletFlowRadiusPixels,
-                MinRenderableDropletRadiusPixels,
-                TEXT("Flow Droplet width"),
-                OutChanges);
-            bChanged |= ClampRenderableFloat(
-                Surface.DropletFlowHeightPixels,
-                MinRenderableDropletRadiusPixels,
-                TEXT("Flow Droplet height"),
-                OutChanges);
-        }
+        bChanged |= ClampRenderableFloat(
+            Surface.DropletHeightPixels,
+            MinRenderableDropletRadiusPixels,
+            TEXT("Droplet1 height"),
+            OutChanges);
+        bChanged |= ClampRenderableFloat(
+            Surface.DropletFlowSpawnProbability,
+            MinRenderableDropletSpawnProbability,
+            TEXT("Droplet2 spawn chance"),
+            OutChanges);
+        bChanged |= ClampRenderableFloat(
+            Surface.DropletFlowRadiusPixels,
+            MinRenderableDropletRadiusPixels,
+            TEXT("Droplet2 width"),
+            OutChanges);
+        bChanged |= ClampRenderableFloat(
+            Surface.DropletFlowHeightPixels,
+            MinRenderableDropletRadiusPixels,
+            TEXT("Droplet2 height"),
+            OutChanges);
 
         if (Parameters.AbsorbedWetness.bEnabled)
         {
@@ -484,50 +443,40 @@ namespace
                 Surface.DropletSpawnProbability * 100.0f,
                 MinRenderableDropletSpawnProbability * 100.0f));
         }
-        if (Surface.DropletLifetimeSeconds < MinRenderableDropletLifetimeSeconds)
-        {
-            OutIssues.Add(FString::Printf(
-                TEXT("Droplet lifetime is %.2fs; values below %.2fs can disappear before preview/render updates."),
-                Surface.DropletLifetimeSeconds,
-                MinRenderableDropletLifetimeSeconds));
-        }
         if (Surface.DropletRadiusPixels < MinRenderableDropletRadiusPixels)
         {
             OutIssues.Add(FString::Printf(
-                TEXT("Droplet size is %.2f RT pixel(s); values below %.2f cannot produce a stable stamp."),
+                TEXT("Droplet1 width is %.2f RT pixel(s); values below %.2f cannot produce a stable stamp."),
                 Surface.DropletRadiusPixels,
                 MinRenderableDropletRadiusPixels));
         }
-        if (Surface.bEnableDropletFlow)
+        if (Surface.DropletHeightPixels < MinRenderableDropletRadiusPixels)
         {
-            if (Surface.DropletFlowSpawnProbability < MinRenderableDropletSpawnProbability)
-            {
-                OutIssues.Add(FString::Printf(
-                    TEXT("Flow Droplet spawn chance is %.1f%%; values below %.1f%% can prevent flow stamps from spawning."),
-                    Surface.DropletFlowSpawnProbability * 100.0f,
-                    MinRenderableDropletSpawnProbability * 100.0f));
-            }
-            if (Surface.DropletFlowLifetimeSeconds < MinRenderableDropletLifetimeSeconds)
-            {
-                OutIssues.Add(FString::Printf(
-                    TEXT("Flow Droplet lifetime is %.2fs; values below %.2fs can disappear before render updates."),
-                    Surface.DropletFlowLifetimeSeconds,
-                    MinRenderableDropletLifetimeSeconds));
-            }
-            if (Surface.DropletFlowRadiusPixels < MinRenderableDropletRadiusPixels)
-            {
-                OutIssues.Add(FString::Printf(
-                    TEXT("Flow Droplet width is %.2f RT pixel(s); values below %.2f cannot produce a stable stamp."),
-                    Surface.DropletFlowRadiusPixels,
-                    MinRenderableDropletRadiusPixels));
-            }
-            if (Surface.DropletFlowHeightPixels < MinRenderableDropletRadiusPixels)
-            {
-                OutIssues.Add(FString::Printf(
-                    TEXT("Flow Droplet height is %.2f RT pixel(s); values below %.2f cannot produce a stable stamp."),
-                    Surface.DropletFlowHeightPixels,
-                    MinRenderableDropletRadiusPixels));
-            }
+            OutIssues.Add(FString::Printf(
+                TEXT("Droplet1 height is %.2f RT pixel(s); values below %.2f cannot produce a stable stamp."),
+                Surface.DropletHeightPixels,
+                MinRenderableDropletRadiusPixels));
+        }
+        if (Surface.DropletFlowSpawnProbability < MinRenderableDropletSpawnProbability)
+        {
+            OutIssues.Add(FString::Printf(
+                TEXT("Droplet2 spawn chance is %.1f%%; values below %.1f%% can prevent stamps from spawning."),
+                Surface.DropletFlowSpawnProbability * 100.0f,
+                MinRenderableDropletSpawnProbability * 100.0f));
+        }
+        if (Surface.DropletFlowRadiusPixels < MinRenderableDropletRadiusPixels)
+        {
+            OutIssues.Add(FString::Printf(
+                TEXT("Droplet2 width is %.2f RT pixel(s); values below %.2f cannot produce a stable stamp."),
+                Surface.DropletFlowRadiusPixels,
+                MinRenderableDropletRadiusPixels));
+        }
+        if (Surface.DropletFlowHeightPixels < MinRenderableDropletRadiusPixels)
+        {
+            OutIssues.Add(FString::Printf(
+                TEXT("Droplet2 height is %.2f RT pixel(s); values below %.2f cannot produce a stable stamp."),
+                Surface.DropletFlowHeightPixels,
+                MinRenderableDropletRadiusPixels));
         }
     }
 }

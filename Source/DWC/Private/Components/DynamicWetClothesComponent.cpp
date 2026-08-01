@@ -487,8 +487,6 @@ FWetRenderStageArgs UDynamicWetClothesComponent::MakeWetRenderStageArgs(FDWCWetM
         bShowSurfaceWaterDebugColors &&
         IsGPUWetnessMode(GetActiveSimulationMode());
     Args.bGPUWetnessMode = IsGPUWetnessMode(GetActiveSimulationMode());
-    Args.SurfaceWaterTimeSeconds =
-        Args.bGPUWetnessMode && GetWorld() != nullptr ? GetWorld()->GetTimeSeconds() : 0.0f;
     Args.LODIndex = UWetClothingAsset::RuntimeSimulationLODIndex;
     return Args;
 }

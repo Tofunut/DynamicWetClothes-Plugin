@@ -169,7 +169,7 @@ class DWC_API UWetClothingAsset : public UDataAsset
     static constexpr int32 CurrentAssetDataVersion = 11;
     static constexpr int32 FirstAssetVersionWithSerializedRuntimeBulkData = 4;
     static constexpr int32 CurrentPrecomputedSimulationDataVersion = 10;
-    static constexpr int32 CurrentRuntimeBulkDataVersion = 6;
+    static constexpr int32 CurrentRuntimeBulkDataVersion = 7;
     static constexpr int32 RuntimeSimulationLODIndex = 0;
 
     virtual void Serialize(FArchive& Ar) override;

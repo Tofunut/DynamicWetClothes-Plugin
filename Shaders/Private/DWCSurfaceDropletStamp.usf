@@ -2,7 +2,7 @@
 #include "/DWCGPU/DWCSurfaceStampCommon.ush"
 
 StructuredBuffer<uint4> TexelLookup;
-RWTexture2D<float4> TargetSurface;
+RWTexture2D<float> TargetSurface;
 
 int2 TextureSize;
 uint TriangleCount;
@@ -12,8 +12,6 @@ float2 StampUV;
 float2 StampCenterPixels;
 float2 StampHalfSizePixels;
 float StampAmount;
-float StampTimeSeconds;
-float StampLifetimeSeconds;
 
 [numthreads(8, 8, 1)]
 void MainCS(uint3 DispatchThreadID : SV_DispatchThreadID)
@@ -38,7 +36,5 @@ void MainCS(uint3 DispatchThreadID : SV_DispatchThreadID)
         Pixel,
         DWC_StampBrush(Local),
         StampAmount,
-        StampTimeSeconds,
-        StampLifetimeSeconds,
         TargetSurface);
 }

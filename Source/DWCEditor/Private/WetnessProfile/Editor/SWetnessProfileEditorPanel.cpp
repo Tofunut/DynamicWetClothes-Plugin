@@ -26,7 +26,8 @@
 
 namespace
 {
-    const FName PreviewDropletDetailSizeMetadataKey(TEXT("DWC.Preview.DropletDetailSize"));
+    const FName PreviewDroplet1DetailSizeMetadataKey(TEXT("DWC.Preview.DropletDetailSize"));
+    const FName PreviewDroplet2DetailSizeMetadataKey(TEXT("DWC.Preview.Droplet2DetailSize"));
 
     float ReadFloatMetadata(
         const UWetnessProfile* Profile,
@@ -371,10 +372,19 @@ TSharedRef<SWidget> SWetnessProfileEditorPanel::BuildPreviewDetailSizeSection()
         + SVerticalBox::Slot()
               .AutoHeight()
                   [BuildDetailSlider(
-                      LOCTEXT("PreviewDropletDetailSizeLabel", "Detail Size"),
-                      TAttribute<float>::Create(TAttribute<float>::FGetter::CreateSP(this, &SWetnessProfileEditorPanel::GetPreviewDropletDetailSize)),
-                      FOnFloatValueChanged::CreateSP(this, &SWetnessProfileEditorPanel::HandlePreviewDropletDetailSizeChanged),
-                      TAttribute<FText>::Create(TAttribute<FText>::FGetter::CreateSP(this, &SWetnessProfileEditorPanel::GetPreviewDropletDetailSizeText)))];
+                      LOCTEXT("PreviewDroplet1DetailSizeLabel", "Droplet1 Detail Size"),
+                      TAttribute<float>::Create(TAttribute<float>::FGetter::CreateSP(this, &SWetnessProfileEditorPanel::GetPreviewDroplet1DetailSize)),
+                      FOnFloatValueChanged::CreateSP(this, &SWetnessProfileEditorPanel::HandlePreviewDroplet1DetailSizeChanged),
+                      TAttribute<FText>::Create(TAttribute<FText>::FGetter::CreateSP(this, &SWetnessProfileEditorPanel::GetPreviewDroplet1DetailSizeText)))]
+
+        + SVerticalBox::Slot()
+              .AutoHeight()
+              .Padding(0.0f, 6.0f, 0.0f, 0.0f)
+                  [BuildDetailSlider(
+                      LOCTEXT("PreviewDroplet2DetailSizeLabel", "Droplet2 Detail Size"),
+                      TAttribute<float>::Create(TAttribute<float>::FGetter::CreateSP(this, &SWetnessProfileEditorPanel::GetPreviewDroplet2DetailSize)),
+                      FOnFloatValueChanged::CreateSP(this, &SWetnessProfileEditorPanel::HandlePreviewDroplet2DetailSizeChanged),
+                      TAttribute<FText>::Create(TAttribute<FText>::FGetter::CreateSP(this, &SWetnessProfileEditorPanel::GetPreviewDroplet2DetailSizeText)))];
 }
 
 TSharedRef<SWidget> SWetnessProfileEditorPanel::GeneratePreviewModeWidget(
@@ -506,34 +516,61 @@ FText SWetnessProfileEditorPanel::GetPreviewAbsorbedWaterPercentText() const
         FText::AsNumber(FMath::RoundToInt(GetPreviewAbsorbedWaterPercent())));
 }
 
-float SWetnessProfileEditorPanel::GetPreviewDropletDetailSize() const
+float SWetnessProfileEditorPanel::GetPreviewDroplet1DetailSize() const
 {
-    return PreviewDropletDetailSize;
+    return PreviewDroplet1DetailSize;
 }
 
-void SWetnessProfileEditorPanel::HandlePreviewDropletDetailSizeChanged(const float InValue)
+void SWetnessProfileEditorPanel::HandlePreviewDroplet1DetailSizeChanged(const float InValue)
 {
     const float NewValue = FMath::Clamp(InValue, 0.0f, 4.0f);
-    if (FMath::IsNearlyEqual(NewValue, PreviewDropletDetailSize))
+    if (FMath::IsNearlyEqual(NewValue, PreviewDroplet1DetailSize))
     {
         return;
     }
 
-    PreviewDropletDetailSize = NewValue;
+    PreviewDroplet1DetailSize = NewValue;
     PersistPreviewDetailSizes();
     ApplyPreviewSettingsToViewport();
 }
 
-FText SWetnessProfileEditorPanel::GetPreviewDropletDetailSizeText() const
+FText SWetnessProfileEditorPanel::GetPreviewDroplet1DetailSizeText() const
 {
-    return FormatPreviewFloat(PreviewDropletDetailSize);
+    return FormatPreviewFloat(PreviewDroplet1DetailSize);
+}
+
+float SWetnessProfileEditorPanel::GetPreviewDroplet2DetailSize() const
+{
+    return PreviewDroplet2DetailSize;
+}
+
+void SWetnessProfileEditorPanel::HandlePreviewDroplet2DetailSizeChanged(const float InValue)
+{
+    const float NewValue = FMath::Clamp(InValue, 0.0f, 4.0f);
+    if (FMath::IsNearlyEqual(NewValue, PreviewDroplet2DetailSize))
+    {
+        return;
+    }
+
+    PreviewDroplet2DetailSize = NewValue;
+    PersistPreviewDetailSizes();
+    ApplyPreviewSettingsToViewport();
+}
+
+FText SWetnessProfileEditorPanel::GetPreviewDroplet2DetailSizeText() const
+{
+    return FormatPreviewFloat(PreviewDroplet2DetailSize);
 }
 
 void SWetnessProfileEditorPanel::LoadPersistedPreviewSettings()
 {
     const UWetnessProfile* Profile = WetnessProfile.Get();
-    PreviewDropletDetailSize = FMath::Clamp(
-        ReadFloatMetadata(Profile, PreviewDropletDetailSizeMetadataKey, 1.0f),
+    PreviewDroplet1DetailSize = FMath::Clamp(
+        ReadFloatMetadata(Profile, PreviewDroplet1DetailSizeMetadataKey, 1.0f),
+        0.0f,
+        4.0f);
+    PreviewDroplet2DetailSize = FMath::Clamp(
+        ReadFloatMetadata(Profile, PreviewDroplet2DetailSizeMetadataKey, 1.0f),
         0.0f,
         4.0f);
 }
@@ -547,7 +584,8 @@ void SWetnessProfileEditorPanel::PersistPreviewDetailSizes()
     }
 
     Profile->Modify();
-    WriteFloatMetadata(Profile, PreviewDropletDetailSizeMetadataKey, PreviewDropletDetailSize);
+    WriteFloatMetadata(Profile, PreviewDroplet1DetailSizeMetadataKey, PreviewDroplet1DetailSize);
+    WriteFloatMetadata(Profile, PreviewDroplet2DetailSizeMetadataKey, PreviewDroplet2DetailSize);
     Profile->MarkPackageDirty();
 }
 
@@ -558,7 +596,7 @@ void SWetnessProfileEditorPanel::ApplyPreviewSettingsToViewport()
         return;
     }
 
-    PreviewViewport->SetPreviewDropletDetailSize(PreviewDropletDetailSize);
+    PreviewViewport->SetPreviewDropletDetailSizes(PreviewDroplet1DetailSize, PreviewDroplet2DetailSize);
     PreviewViewport->SetPreviewSurfaceWater(1.0f);
     if (SelectedPreviewModeItem.IsValid())
     {

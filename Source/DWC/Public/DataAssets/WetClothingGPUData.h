@@ -25,6 +25,9 @@ struct DWC_API FDWCGPUProfileParameters
     UPROPERTY(VisibleAnywhere, Category = "GPU Runtime Data")
     float GravityFlowStrength = 0.0f;
 
+    UPROPERTY(VisibleAnywhere, Category = "GPU Runtime Data")
+    float DropletDryRatePerSecond = 0.0f;
+
     FDWCGPUProfileParameters() = default;
 
     explicit FDWCGPUProfileParameters(
@@ -51,7 +54,8 @@ struct DWC_API FDWCGPUProfileParameters
         return FMath::IsNearlyEqual(AbsorptionMultiplier, Other.AbsorptionMultiplier, Tolerance) &&
                FMath::IsNearlyEqual(SpreadRatePerSecond, Other.SpreadRatePerSecond, Tolerance) &&
                FMath::IsNearlyEqual(DryRatePerSecond, Other.DryRatePerSecond, Tolerance) &&
-               FMath::IsNearlyEqual(GravityFlowStrength, Other.GravityFlowStrength, Tolerance);
+               FMath::IsNearlyEqual(GravityFlowStrength, Other.GravityFlowStrength, Tolerance) &&
+               FMath::IsNearlyEqual(DropletDryRatePerSecond, Other.DropletDryRatePerSecond, Tolerance);
     }
 };
 
@@ -219,7 +223,7 @@ struct DWC_API FDWCGPULODBakeData
 
     static constexpr int32 CurrentRuntimeDataVersion = 6;
     static constexpr int32 CurrentMapBakeVersion = 7;
-    static constexpr int32 CurrentBulkDataVersion = 5;
+    static constexpr int32 CurrentBulkDataVersion = 6;
 
     UPROPERTY(VisibleAnywhere, Category = "GPU Runtime Data")
     int32 RuntimeDataVersion = 0;

@@ -379,17 +379,15 @@ namespace
             Parameters.GetAbsorbedGlossinessStrength());
 
         const FString SurfaceKeyHead = FString::Printf(
-            TEXT("Surf{%d,%d,%.9g,%.9g,%.9g,%.9g,%d,"),
+            TEXT("Surf{%d,Dry{%.9g},D1{%.9g,%.9g,%.9g},"),
             Surface.bEnabled ? 1 : 0,
-            Surface.bEnabled ? 1 : 0,
-            1.0,
+            Parameters.GetDropletDryRatePerSecond(),
             Surface.DropletSpawnProbability,
-            Surface.DropletLifetimeSeconds,
             Surface.DropletRadiusPixels,
-            Surface.DropletMaxActiveStamps);
+            Surface.DropletHeightPixels);
 
         const FString SurfaceKeyTail = FString::Printf(
-            TEXT("%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%s,%s,Flow{%d,%.9g,%.9g,%.9g,%.9g,%.9g,%d,%.9g,%.9g,%.9g,%s,%s,%s,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g}}"),
+            TEXT("D1Render{%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%s,%s},D2{%.9g,%.9g,%.9g,%.9g},D2Render{%s,%s,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g}}"),
             Surface.SurfaceWaterTargetRoughness,
             Surface.SurfaceWaterNormalStrength,
             Surface.SurfaceWaterRoughnessBlend,
@@ -398,22 +396,12 @@ namespace
             Surface.SurfaceWaterSpecular,
             *GetPathNameSafe(Surface.DropletNormalTexture.Get()),
             *GetPathNameSafe(Surface.DropletMaskTexture.Get()),
-            Surface.bEnableDropletFlow ? 1 : 0,
             Surface.DropletFlowSpawnProbability,
-            Surface.DropletFlowLifetimeSeconds,
             Surface.DropletFlowRadiusPixels,
             Surface.DropletFlowHeightPixels,
             Surface.DropletFlowSpawnPositionSpread,
-            Surface.DropletFlowMaxActiveStamps,
-            Surface.DropletFlowSpeed,
-            Surface.DropletFlowAdvectionSpeed,
-            Surface.DropletFlowDirectionDegrees,
             *GetPathNameSafe(Surface.DropletFlowNormalTexture.Get()),
             *GetPathNameSafe(Surface.DropletFlowMaskTexture.Get()),
-            *GetPathNameSafe(Surface.DropletFlowNoiseTexture.Get()),
-            Surface.DropletFlowNoiseTiling,
-            Surface.DropletFlowNoiseStrength,
-            Surface.DropletFlowNoiseSpeed,
             Surface.DropletFlowTargetRoughness,
             Surface.DropletFlowRoughnessBlend,
             Surface.DropletFlowTotalStrength,
@@ -919,21 +907,36 @@ namespace
         SerializeBoneOptimizationCache(Ar, Data.BoneOptimizationCache);
     }
 
-    void SerializeGPUProfile(FArchive& Ar, FDWCGPUProfileParameters& Profile)
+    void SerializeGPUProfile(
+        FArchive& Ar,
+        FDWCGPUProfileParameters& Profile,
+        const int32 PayloadVersion)
     {
         Ar << Profile.AbsorptionMultiplier;
         Ar << Profile.SpreadRatePerSecond;
         Ar << Profile.DryRatePerSecond;
         Ar << Profile.GravityFlowStrength;
+        if (PayloadVersion >= 7)
+        {
+            Ar << Profile.DropletDryRatePerSecond;
+        }
+        else if (Ar.IsLoading())
+        {
+            Profile.DropletDryRatePerSecond = Profile.DryRatePerSecond;
+        }
     }
 
-    void SkipGPUProfile(FArchive& Ar)
+    void SkipGPUProfile(FArchive& Ar, const int32 PayloadVersion)
     {
         float Value = 0.0f;
         Ar << Value;
         Ar << Value;
         Ar << Value;
         Ar << Value;
+        if (PayloadVersion >= 7)
+        {
+            Ar << Value;
+        }
     }
 
     void SerializeGPUTriangle(
@@ -1155,13 +1158,13 @@ namespace
         SerializeOrSkipArrayWithProgress<FDWCGPUProfileParameters>(
             Ar,
             Data.Profiles,
-            [](FArchive& InnerAr, FDWCGPUProfileParameters& Profile)
+            [PayloadVersion](FArchive& InnerAr, FDWCGPUProfileParameters& Profile)
             {
-                SerializeGPUProfile(InnerAr, Profile);
+                SerializeGPUProfile(InnerAr, Profile, PayloadVersion);
             },
-            [](FArchive& InnerAr)
+            [PayloadVersion](FArchive& InnerAr)
             {
-                SkipGPUProfile(InnerAr);
+                SkipGPUProfile(InnerAr, PayloadVersion);
             },
             bLoadPayload,
             SlowTask,

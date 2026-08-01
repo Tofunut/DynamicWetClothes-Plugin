@@ -472,21 +472,15 @@ bool FWetClothingSurfaceTextureNormalizer::ValidateProfileTextures(
     }
     if (!ValidateTexture(
             Surface.DropletFlowNormalTexture,
-            TEXT("Droplet flow normal"),
+            TEXT("Droplet2 normal"),
             true,
             false,
             OutErrorMessage) ||
         !ValidateTexture(
             Surface.DropletFlowMaskTexture,
-            TEXT("Droplet flow mask"),
+            TEXT("Droplet2 mask"),
             false,
             false,
-            OutErrorMessage) ||
-        !ValidateTexture(
-            Surface.DropletFlowNoiseTexture,
-            TEXT("Droplet flow noise"),
-            false,
-            true,
             OutErrorMessage))
     {
         return false;
@@ -559,15 +553,10 @@ bool FWetClothingSurfaceTextureNormalizer::PrepareProfileTextures(
     InOutLocalProfile.SourceDropletFlowMask = Surface.DropletFlowMaskTexture != nullptr
         ? FSoftObjectPath(Surface.DropletFlowMaskTexture.Get())
         : FSoftObjectPath();
-    InOutLocalProfile.SourceDropletFlowNoise = Surface.DropletFlowNoiseTexture != nullptr
-        ? FSoftObjectPath(Surface.DropletFlowNoiseTexture.Get())
-        : FSoftObjectPath();
-
     UTexture2D* PreparedNormal = nullptr;
     UTexture2D* PreparedMask = nullptr;
     UTexture2D* PreparedFlowNormal = nullptr;
     UTexture2D* PreparedFlowMask = nullptr;
-    UTexture2D* PreparedFlowNoise = nullptr;
     if (!NormalizeTexture(
             Surface.DropletNormalTexture,
             TEXT("DropletNormal"),
@@ -595,13 +584,6 @@ bool FWetClothingSurfaceTextureNormalizer::PrepareProfileTextures(
             false,
             false,
             PreparedFlowMask,
-            OutErrorMessage) ||
-        !NormalizeTexture(
-            Surface.DropletFlowNoiseTexture,
-            TEXT("DropletFlowNoise"),
-            false,
-            true,
-            PreparedFlowNoise,
             OutErrorMessage))
     {
         return false;
@@ -611,7 +593,6 @@ bool FWetClothingSurfaceTextureNormalizer::PrepareProfileTextures(
     InOutLocalProfile.NormalizedDropletMask = PreparedMask;
     InOutLocalProfile.NormalizedDropletFlowNormal = PreparedFlowNormal;
     InOutLocalProfile.NormalizedDropletFlowMask = PreparedFlowMask;
-    InOutLocalProfile.NormalizedDropletFlowNoise = PreparedFlowNoise;
     OutErrorMessage.Reset();
     return true;
 }

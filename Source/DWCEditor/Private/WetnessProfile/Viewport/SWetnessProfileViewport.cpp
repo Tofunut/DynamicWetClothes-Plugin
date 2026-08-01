@@ -255,15 +255,20 @@ void SWetnessProfileViewport::SetPreviewSurfaceWater(float InAmount)
     RefreshPreviewMaterialParameters();
 }
 
-void SWetnessProfileViewport::SetPreviewDropletDetailSize(const float InDropletDetailSize)
+void SWetnessProfileViewport::SetPreviewDropletDetailSizes(
+    const float InDroplet1DetailSize,
+    const float InDroplet2DetailSize)
 {
-    const float NewDropletDetailSize = FMath::Clamp(InDropletDetailSize, 0.0f, 4.0f);
-    if (FMath::IsNearlyEqual(PreviewDropletDetailSize, NewDropletDetailSize))
+    const float NewDroplet1DetailSize = FMath::Clamp(InDroplet1DetailSize, 0.0f, 4.0f);
+    const float NewDroplet2DetailSize = FMath::Clamp(InDroplet2DetailSize, 0.0f, 4.0f);
+    if (FMath::IsNearlyEqual(PreviewDroplet1DetailSize, NewDroplet1DetailSize) &&
+        FMath::IsNearlyEqual(PreviewDroplet2DetailSize, NewDroplet2DetailSize))
     {
         return;
     }
 
-    PreviewDropletDetailSize = NewDropletDetailSize;
+    PreviewDroplet1DetailSize = NewDroplet1DetailSize;
+    PreviewDroplet2DetailSize = NewDroplet2DetailSize;
     RefreshPreviewMaterialParameters();
 }
 
@@ -453,8 +458,8 @@ void SWetnessProfileViewport::InitializePreviewComponents()
         TEXT("DWC_WetnessProfilePreviewWetPartData"),
         FColor(
             0u,
-            EncodePreviewDetailSize(PreviewDropletDetailSize),
-            EncodePreviewDetailSize(PreviewDropletDetailSize),
+            EncodePreviewDetailSize(PreviewDroplet1DetailSize),
+            EncodePreviewDetailSize(PreviewDroplet2DetailSize),
             255u));
     PreviewSurfaceDropletTexture = CreateSinglePixelPreviewTexture(
         GetTransientPackage(),
@@ -737,7 +742,7 @@ void SWetnessProfileViewport::RefreshPreviewMaterialParameters()
             FMath::Clamp(Surface.DropletRadiusPixels, 1.0f, 256.0f));
         PreviewMaterialInstance->SetScalarParameterValue(
             DropletDetailSizeParameter,
-            FMath::Clamp(PreviewDropletDetailSize, 0.0f, 4.0f));
+            FMath::Clamp(PreviewDroplet1DetailSize, 0.0f, 4.0f));
         PreviewMaterialInstance->SetScalarParameterValue(
             DebugModeParameter,
             static_cast<float>(PreviewMode));
@@ -777,8 +782,8 @@ void SWetnessProfileViewport::RefreshGeneratedPreviewMaterialParameters()
         PreviewWetPartDataTexture,
         FColor(
             0u,
-            EncodePreviewDetailSize(PreviewDropletDetailSize),
-            EncodePreviewDetailSize(PreviewDropletDetailSize),
+            EncodePreviewDetailSize(PreviewDroplet1DetailSize),
+            EncodePreviewDetailSize(PreviewDroplet2DetailSize),
             255u));
     WriteSinglePixelTexture(PreviewSurfaceDropletTexture, MakeScalarPreviewColor(PreviewSurfaceWater));
     WriteSinglePixelTexture(PreviewSurfaceFlowDropletTexture, MakeScalarPreviewColor(PreviewSurfaceWater));
@@ -787,22 +792,18 @@ void SWetnessProfileViewport::RefreshGeneratedPreviewMaterialParameters()
         Parameters.GetAbsorbedDarkeningStrength(),
         Parameters.GetAbsorbedGlossinessStrength(),
         0.0f,
-        Surface.bEnabled && Surface.bEnableDropletFlow ? 1.0f : 0.0f);
+        0.0f);
     const FLinearColor FallbackProfile1(
         FMath::Clamp(Surface.SurfaceWaterNormalStrength, 0.0f, 3.0f),
         FMath::Clamp(Surface.SurfaceWaterRoughnessBlend, 0.0f, 1.0f),
-        Surface.DropletFlowSpeed,
+        0.0f,
         FMath::Clamp(Surface.SurfaceWaterSpecular, 0.0f, 1.0f));
     const FLinearColor FallbackProfile2(
         0.0f,
         0.0f,
         FMath::Clamp(Surface.SurfaceWaterTargetRoughness, 0.0f, 1.0f),
         FMath::Clamp(Surface.SurfaceWaterTotalStrength, 0.0f, 1.0f));
-    const FLinearColor FallbackProfile3(
-        Surface.DropletFlowDirectionDegrees,
-        FMath::Max(Surface.DropletFlowNoiseTiling, 0.01f),
-        FMath::Clamp(Surface.DropletFlowNoiseStrength, 0.0f, 1.0f),
-        Surface.DropletFlowNoiseSpeed);
+    const FLinearColor FallbackProfile3 = FLinearColor::Black;
     const FLinearColor FallbackProfile4(0.0f, 0.0f, 0.0f, 0.0f);
     const FLinearColor FallbackProfile5(
         FMath::Clamp(Surface.DropletFlowTotalStrength, 0.0f, 1.0f),
@@ -853,13 +854,10 @@ void SWetnessProfileViewport::RefreshGeneratedPreviewMaterialParameters()
 
         PreviewMID->SetTextureParameterValue(DWCWetMaterialParameters::WetnessMap(), PreviewWetnessMapTexture);
         PreviewMID->SetTextureParameterValue(DWCWetMaterialParameters::WetPartDataTexture(), PreviewWetPartDataTexture);
-        PreviewMID->SetTextureParameterValue(DWCWetMaterialParameters::SurfaceDropletRT(), PreviewSurfaceDropletTexture);
+        PreviewMID->SetTextureParameterValue(DWCWetMaterialParameters::SurfaceDroplet1RT(), PreviewSurfaceDropletTexture);
         PreviewMID->SetTextureParameterValue(
-            DWCWetMaterialParameters::SurfaceFlowDropletRT(),
+            DWCWetMaterialParameters::SurfaceDroplet2RT(),
             PreviewSurfaceFlowDropletTexture);
-        PreviewMID->SetScalarParameterValue(
-            DWCWetMaterialParameters::SurfaceWaterTime(),
-            PreviewAnimationTime);
         PreviewMID->SetScalarParameterValue(DWCWetMaterialParameters::SurfaceWaterTexelSize(), 1.0f);
         PreviewMID->SetScalarParameterValue(DWCWetMaterialParameters::UseRenderProfileLUT(), 0.0f);
         const bool bAppliedProfileTextures =
@@ -897,15 +895,6 @@ void SWetnessProfileViewport::RefreshGeneratedPreviewMaterialParameters()
 
 void SWetnessProfileViewport::RefreshGeneratedPreviewAnimationTime()
 {
-    for (UMaterialInstanceDynamic* PreviewMID : GeneratedPreviewDynamicMaterials)
-    {
-        if (PreviewMID != nullptr)
-        {
-            PreviewMID->SetScalarParameterValue(
-                DWCWetMaterialParameters::SurfaceWaterTime(),
-                PreviewAnimationTime);
-        }
-    }
 }
 
 void SWetnessProfileViewport::UpdateRealtimeState()
@@ -925,7 +914,7 @@ FText SWetnessProfileViewport::GetOverlayText() const
     return FText::Format(
         LOCTEXT(
             "PreviewHint",
-            "Wetness Profile Preview\nAbsorbed Wetness {0}%  |  Static/Flow Strength {1}%/{6}%\nDarkening {2}%  |  Absorbed Glossiness {3}%\nStatic/Flow Normal {4}%/{8}%  |  Roughness Blend {5}%/{7}%"),
+            "Wetness Profile Preview\nAbsorbed Wetness {0}%  |  Droplet1/Droplet2 Strength {1}%/{6}%\nDarkening {2}%  |  Absorbed Glossiness {3}%\nDroplet1/Droplet2 Normal {4}%/{8}%  |  Roughness Blend {5}%/{7}%"),
         FText::AsNumber(FMath::RoundToInt(PreviewAbsorbedWater * 100.0f)),
         FText::AsNumber(FMath::RoundToInt(FMath::Clamp(Surface.SurfaceWaterTotalStrength, 0.0f, 1.0f) * 100.0f)),
         FText::AsNumber(FMath::RoundToInt(Parameters.GetAbsorbedDarkeningStrength() * 100.0f)),

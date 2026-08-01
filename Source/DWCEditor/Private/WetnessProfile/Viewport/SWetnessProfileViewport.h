@@ -56,8 +56,7 @@ class SWetnessProfileViewport : public SEditorViewport, public FGCObject
 
     void SetPreviewSurfaceWater(float InAmount);
 
-    void SetPreviewDropletDetailSize(float InDropletDetailSize);
-    float GetPreviewDropletDetailSize() const { return PreviewDropletDetailSize; }
+    void SetPreviewDropletDetailSizes(float InDroplet1DetailSize, float InDroplet2DetailSize);
 
     void SetPreviewMode(EPreviewMode InPreviewMode);
     EPreviewMode GetPreviewMode() const { return PreviewMode; }
@@ -119,7 +118,8 @@ class SWetnessProfileViewport : public SEditorViewport, public FGCObject
     bool bPreviewAnimationEnabled = true;
     float PreviewAbsorbedWater = 0.5f;
     float PreviewSurfaceWater = 1.0f;
-    float PreviewDropletDetailSize = 1.0f;
+    float PreviewDroplet1DetailSize = 1.0f;
+    float PreviewDroplet2DetailSize = 1.0f;
     EPreviewMode PreviewMode = EPreviewMode::Lit;
     float PreviewAnimationSpeed = 1.0f;
     float PreviewAnimationTime = 0.0f;

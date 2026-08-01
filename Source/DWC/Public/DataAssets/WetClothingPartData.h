@@ -47,28 +47,28 @@ struct DWC_API FWetPartSurfaceWaterSettings
 {
     GENERATED_BODY()
 
-    /** Uses a part-local stamp-size scale instead of the Wetness Profile default. */
-    UPROPERTY(EditAnywhere, Category = "Surface Water")
+    /** Uses a part-local Droplet1 stamp-size scale instead of the Wetness Profile default. */
+    UPROPERTY(EditAnywhere, Category = "Surface Water", meta = (DisplayName = "Override Droplet1 Stamp Size"))
     bool bOverrideDropletStampSize = false;
 
-    /** Multiplies the Wetness Profile Droplet Stamp Size before the GPU stamp is recorded. */
-    UPROPERTY(EditAnywhere, Category = "Surface Water", meta = (ClampMin = "0.25", ClampMax = "4.0", UIMin = "0.25", UIMax = "4.0", DisplayName = "Droplet Stamp Size Scale", EditCondition = "bOverrideDropletStampSize"))
+    /** Multiplies the Wetness Profile Droplet1 Stamp Width and Height before the GPU stamp is recorded. */
+    UPROPERTY(EditAnywhere, Category = "Surface Water", meta = (ClampMin = "0.25", ClampMax = "4.0", UIMin = "0.25", UIMax = "4.0", DisplayName = "Droplet1 Stamp Size Scale", EditCondition = "bOverrideDropletStampSize"))
     float DropletRadiusScale = 1.0f;
 
-    /** Uses a part-local Flow stamp-size scale instead of the Wetness Profile default. */
-    UPROPERTY(EditAnywhere, Category = "Surface Water")
+    /** Uses a part-local Droplet2 stamp-size scale instead of the Wetness Profile default. */
+    UPROPERTY(EditAnywhere, Category = "Surface Water", meta = (DisplayName = "Override Droplet2 Stamp Size"))
     bool bOverrideDropletFlowStampSize = false;
 
-    /** Multiplies both Flow Stamp Width and Height while preserving their Profile-authored aspect ratio. */
-    UPROPERTY(EditAnywhere, Category = "Surface Water", meta = (ClampMin = "0.25", ClampMax = "4.0", UIMin = "0.25", UIMax = "4.0", DisplayName = "Flow Stamp Size Scale", EditCondition = "bOverrideDropletFlowStampSize"))
+    /** Multiplies both Droplet2 Stamp Width and Height while preserving their Profile-authored aspect ratio. */
+    UPROPERTY(EditAnywhere, Category = "Surface Water", meta = (ClampMin = "0.25", ClampMax = "4.0", UIMin = "0.25", UIMax = "4.0", DisplayName = "Droplet2 Stamp Size Scale", EditCondition = "bOverrideDropletFlowStampSize"))
     float DropletFlowSizeScale = 1.0f;
 
-    /** Physical-looking size of the repeating stationary Droplet detail-normal pattern. */
-    UPROPERTY(EditAnywhere, Category = "Surface Water", meta = (ClampMin = "0.0", ClampMax = "4.0", UIMin = "0.0", UIMax = "4.0", DisplayName = "Static Droplet Size"))
+    /** Physical-looking size of the repeating Droplet1 detail-normal pattern. */
+    UPROPERTY(EditAnywhere, Category = "Surface Water", meta = (ClampMin = "0.0", ClampMax = "4.0", UIMin = "0.0", UIMax = "4.0", DisplayName = "Droplet1 Detail Size"))
     float DropletDetailSize = 1.0f;
 
-    /** Physical-looking size of the independently repeating Flow Droplet detail-normal pattern. */
-    UPROPERTY(EditAnywhere, Category = "Surface Water", meta = (ClampMin = "0.0", ClampMax = "4.0", UIMin = "0.0", UIMax = "4.0", DisplayName = "Flow Droplet Size"))
+    /** Physical-looking size of the independently repeating Droplet2 detail-normal pattern. */
+    UPROPERTY(EditAnywhere, Category = "Surface Water", meta = (ClampMin = "0.0", ClampMax = "4.0", UIMin = "0.0", UIMax = "4.0", DisplayName = "Droplet2 Detail Size"))
     float DropletFlowDetailSize = 1.0f;
 
     float GetResolvedDropletStampSizeScale() const
@@ -362,9 +362,6 @@ struct DWC_API FWetClothingLocalRenderProfile
     UPROPERTY(VisibleAnywhere, Category = "Wet Part Data Texture|Surface Texture")
     FSoftObjectPath SourceDropletFlowMask;
 
-    UPROPERTY(VisibleAnywhere, Category = "Wet Part Data Texture|Surface Texture")
-    FSoftObjectPath SourceDropletFlowNoise;
-
     /** Array-compatible authored textures retained as hard references for runtime Texture2DArray upload. */
     UPROPERTY(VisibleAnywhere, Category = "Wet Part Data Texture|Surface Texture")
     TObjectPtr<UTexture2D> NormalizedDropletNormal = nullptr;
@@ -378,9 +375,6 @@ struct DWC_API FWetClothingLocalRenderProfile
     UPROPERTY(VisibleAnywhere, Category = "Wet Part Data Texture|Surface Texture")
     TObjectPtr<UTexture2D> NormalizedDropletFlowMask = nullptr;
 
-    UPROPERTY(VisibleAnywhere, Category = "Wet Part Data Texture|Surface Texture")
-    TObjectPtr<UTexture2D> NormalizedDropletFlowNoise = nullptr;
-
 };
 
 USTRUCT(BlueprintType)
@@ -391,7 +385,7 @@ struct DWC_API FWetClothingBakedWetPartDataSlotTexture
     UPROPERTY(VisibleAnywhere, Category = "Wet Part Data Texture")
     int32 MaterialSlotIndex = INDEX_NONE;
 
-    /** Point-sampled Wet Part data: R=Local Profile ID, G=Static Droplet Size, B=Flow Droplet Size, A=reserved. */
+    /** Point-sampled Wet Part data: R=Local Profile ID, G=Droplet1 Detail Size, B=Droplet2 Detail Size, A=reserved. */
     UPROPERTY(VisibleAnywhere, Category = "Wet Part Data Texture")
     TObjectPtr<UTexture2D> WetPartDataTexture = nullptr;
 

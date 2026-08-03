@@ -75,12 +75,12 @@ struct DWC_API FWCADerivedInlineData
     UPROPERTY(VisibleAnywhere, Category = "Wet Clothing|Generated Assets")
     TArray<FWetClothingGeneratedWetMaterialOverride> GeneratedWetMaterialOverrides;
 
-    /** Current render-profile lookup baked in DWC Data UV space. */
+    /** Current render-profile lookup baked in DWC UV Channel space. */
     UPROPERTY(VisibleAnywhere, Category = "Wet Clothing|Wet Part Data Texture")
     FWetClothingBakedWetPartData BakedWetPartData;
 
-    /** Metadata only. UV coordinates live exclusively in the prepared mesh's DWC Data UV channel. */
-    UPROPERTY(VisibleAnywhere, Category = "Wet Clothing|DWC Data UV")
+    /** Metadata only. UV coordinates live exclusively in the prepared mesh's DWC UV Channel. */
+    UPROPERTY(VisibleAnywhere, Category = "Wet Clothing|DWC UV Channel")
     TArray<FDWCDataUVLODMetadata> DataUVMetadata;
 
 #if WITH_EDITORONLY_DATA
@@ -98,6 +98,14 @@ struct DWC_API FWCADerivedInlineData
 
     UPROPERTY(VisibleAnywhere, Category = "Wet Clothing|Validation")
     FDWCTriangleValidationSummary ValidationSummary;
+
+    /** Material slots whose latest explicit DWC UV Channel generation attempt failed. */
+    UPROPERTY(VisibleAnywhere, Category = "Wet Clothing|DWC UV Channel")
+    TArray<int32> FailedDataUVMaterialSlotIndices;
+
+    /** Most recent explicit DWC UV Channel generation failure shown by Part Edit. */
+    UPROPERTY(VisibleAnywhere, Category = "Wet Clothing|DWC UV Channel")
+    FString LastDataUVGenerationFailure;
 #endif
 };
 
@@ -148,7 +156,7 @@ struct DWC_API FWCAMetadata
     UPROPERTY(VisibleAnywhere, Category = "Wet Clothing|Mesh")
     int32 DWCDataUVChannelIndex = INDEX_NONE;
 
-    /** Set after the first successful Data UV commit. The packed layout and Original UV island identities never rebuild afterwards. */
+    /** Set after the first successful DWC UV Channel commit. The packed layout and Original UV island identities never rebuild afterwards. */
     UPROPERTY(VisibleAnywhere, Category = "Wet Clothing|Mesh")
     bool bDataUVLayoutSealed = false;
 
@@ -181,11 +189,19 @@ class DWC_API UWetClothingAsset : public UDataAsset
     bool InitializeNewAsset(USkeletalMesh* InSourceMesh, const FDWCWetClothingAssetSetupSettings& InSettings, FString* OutErrorMessage = nullptr);
     bool ApplySetupSettings(const FDWCWetClothingAssetSetupSettings& InSettings, FString* OutChangeSummary = nullptr);
 
-    /** True after the first successful DWC Data UV build seals the Original UV topology and packed layout. */
+    /** True after the first successful DWC UV Channel build seals the Original UV topology and packed layout. */
     bool HasLockedDataUVLayout() const;
 
-    /** Atomically stores and seals the first successful Data UV layout. This API refuses every later replacement attempt. */
+    /** Atomically stores and seals the first successful DWC UV Channel layout. This API refuses every later replacement attempt. */
     bool CommitInitialDataUVLayout(
+        USkeletalMesh* InRuntimeMesh,
+        int32 InDWCDataUVChannelIndex,
+        TArray<FDWCDataUVLODMetadata>&& InMetadata,
+        TArray<FDWCEditorUVTopologyData>&& InTopologies,
+        FString* OutErrorMessage = nullptr);
+
+    /** Atomically replaces an existing generated DWC UV Channel layout after a deliberate editor rebuild. */
+    bool ReplaceDataUVLayout(
         USkeletalMesh* InRuntimeMesh,
         int32 InDWCDataUVChannelIndex,
         TArray<FDWCDataUVLODMetadata>&& InMetadata,

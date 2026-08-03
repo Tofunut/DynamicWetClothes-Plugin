@@ -20,7 +20,7 @@ public:
     UPROPERTY(EditAnywhere, Category = "Mesh", meta = (DisplayName = "Original UV Channel", ClampMin = "0", ClampMax = "7"))
     int32 OriginalUVChannelIndex = 0;
 
-    UPROPERTY(EditAnywhere, Category = "Mesh", meta = (DisplayName = "Preferred DWC Data UV Channel", ClampMin = "0", ClampMax = "3"))
+    UPROPERTY(EditAnywhere, Category = "Mesh", meta = (DisplayName = "Preferred DWC UV Channel", ClampMin = "0", ClampMax = "3"))
     int32 PreferredDWCDataUVChannelIndex = 1;
 
     UPROPERTY(EditAnywhere, Category = "Mesh|LOD Mapping Range", meta = (DisplayName = "First Mapped LOD", ClampMin = "0"))
@@ -77,7 +77,7 @@ public:
     UPROPERTY(EditAnywhere, Category = "Mesh", meta = (DisplayName = "Original UV Channel", ClampMin = "0", ClampMax = "7"))
     int32 OriginalUVChannelIndex = 0;
 
-    UPROPERTY(EditAnywhere, Category = "Mesh", meta = (DisplayName = "Preferred DWC Data UV Channel", ClampMin = "0", ClampMax = "3"))
+    UPROPERTY(EditAnywhere, Category = "Mesh", meta = (DisplayName = "Preferred DWC UV Channel", ClampMin = "0", ClampMax = "3"))
     int32 PreferredDWCDataUVChannelIndex = 1;
 
     UPROPERTY(EditAnywhere, Category = "Mesh|LOD Mapping Range", meta = (DisplayName = "First Mapped LOD", ClampMin = "0"))

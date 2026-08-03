@@ -3,7 +3,7 @@
 #include "CoreMinimal.h"
 #include "DWCDataUVGenerationTypes.h"
 
-/** Packs transient Data UV charts independently per material slot into the unit square. */
+/** Packs transient DWC UV Channel charts independently per material slot into the unit square. */
 class FDWCDataUVPacker
 {
 public:

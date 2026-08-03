@@ -42,7 +42,7 @@ void SWetWrinklePalettePanel::Construct(const FArguments& InArgs)
                                      "No wrinkle normal textures were found in the configured paths."))
                                  .Visibility_Lambda([this]()
                                  {
-                                     return VisibleItems.IsEmpty()
+                                     return AllItems.IsEmpty()
                                          ? EVisibility::HitTestInvisible
                                          : EVisibility::Collapsed;
                                  })]]];

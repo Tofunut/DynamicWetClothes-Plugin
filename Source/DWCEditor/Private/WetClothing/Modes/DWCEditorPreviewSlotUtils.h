@@ -9,6 +9,37 @@
 /** Editor preview uses the CPU backend only; GPU material instances are not a prerequisite. */
 namespace DWCEditorPreviewSlotUtils
 {
+    inline bool IsDataUVSlotIncluded(
+        const UWetClothingAsset* WetClothingAsset,
+        const int32 MaterialSlotIndex)
+    {
+        if (WetClothingAsset == nullptr ||
+            MaterialSlotIndex == INDEX_NONE ||
+            !WetClothingAsset->HasLockedDataUVLayout())
+        {
+            return false;
+        }
+
+        const FDWCDataUVLODMetadata* Metadata =
+            WetClothingAsset->FindDataUVMetadataForLOD(UWetClothingAsset::RuntimeSimulationLODIndex);
+        if (Metadata == nullptr)
+        {
+            return false;
+        }
+
+        return Metadata->GeneratedMaterialSlotIndices.IsEmpty() ||
+               Metadata->GeneratedMaterialSlotIndices.Contains(MaterialSlotIndex);
+    }
+
+    inline bool IsWrinkleAuthoringReady(
+        const UWetClothingAsset* WetClothingAsset,
+        const int32 MaterialSlotIndex)
+    {
+        return WetClothingAsset != nullptr &&
+               WetClothingAsset->IsMaterialSlotWettable(MaterialSlotIndex) &&
+               IsDataUVSlotIncluded(WetClothingAsset, MaterialSlotIndex);
+    }
+
     inline const FWetClothingGeneratedWetMaterialOverride* FindGeneratedWetMaterialOverride(
         const UWetClothingAsset* WetClothingAsset,
         const int32 MaterialSlotIndex)

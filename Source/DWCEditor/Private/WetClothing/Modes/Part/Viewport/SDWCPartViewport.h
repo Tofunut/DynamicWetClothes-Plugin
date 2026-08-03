@@ -7,7 +7,6 @@
 
 class FAdvancedPreviewScene;
 class FDWCPartViewportClient;
-class STextBlock;
 class UWetClothingAsset;
 class UMaterial;
 class UMaterialInterface;
@@ -102,8 +101,6 @@ class SDWCPartViewport : public SEditorViewport, public FGCObject
     void                CacheOriginalMaterials();
     void                RestoreOriginalMaterials();
     UMaterialInterface* ResolveWetPartOverlayMaterial();
-    FText               GetViewportHintText() const;
-    FSlateColor         GetViewportHintTextColor() const;
 
   private:
     TWeakObjectPtr<UWetClothingAsset>           WetClothingAsset;
@@ -164,5 +161,4 @@ class SDWCPartViewport : public SEditorViewport, public FGCObject
     float                                        SelectionOverlayThicknessScale = 1.0f;
     FString                                      SurfaceWaterPreviewStatus;
     bool                                         bSurfaceWaterPreviewStatusIsError = false;
-    TSharedPtr<STextBlock>                       OverlayText;
 };

@@ -78,7 +78,7 @@ namespace
         }
 
         return FText::Format(
-            LOCTEXT("LODRangeInfo", "Available LODs: LOD0 - LOD{0}. DWC Data UV and Original UV topology will be generated for LOD{1} - LOD{2}."),
+            LOCTEXT("LODRangeInfo", "Available LODs: LOD0 - LOD{0}. DWC UV Channel and Original UV topology will be generated for LOD{1} - LOD{2}."),
             FText::AsNumber(LODCount - 1),
             FText::AsNumber(FirstLODIndex),
             FText::AsNumber(LastLODIndex));
@@ -187,7 +187,7 @@ namespace
                 EAppMsgType::Ok,
                 LOCTEXT(
                     "DataUVMatchesOriginalUVError",
-                    "The DWC Data UV channel cannot be the same as the Original UV channel."));
+                    "The DWC UV Channel cannot be the same as the Original UV channel."));
             return false;
         }
 
@@ -199,7 +199,7 @@ namespace
         const FText Warning = FText::Format(
             LOCTEXT(
                 "ConfirmExistingDataUVOverwrite",
-                "UV{0} already contains UV data.\n\nWhen Data UV is generated from Part Edit, the existing UV{0} data will be replaced on the DWC Prepared Mesh copy only. The source mesh remains unchanged.\n\nContinue?"),
+                "UV{0} already contains UV data.\n\nWhen DWC UV Channel is generated from Part Edit, the existing UV{0} data will be replaced on the DWC Prepared Mesh copy only. The source mesh remains unchanged.\n\nContinue?"),
             FText::AsNumber(DataUVChannelIndex));
         return FMessageDialog::Open(EAppMsgType::YesNo, Warning) == EAppReturnType::Yes;
     }
@@ -226,7 +226,7 @@ namespace
         if (SourceUVChannelCount <= 0)
         {
             return FText::Format(
-                LOCTEXT("PreferredDWCDataUVInfoNoMesh", "DWC Data UV will be generated into UV{0}."),
+                LOCTEXT("PreferredDWCDataUVInfoNoMesh", "DWC UV Channel will be generated into UV{0}."),
                 FText::AsNumber(PreferredDWCDataUVChannelIndex));
         }
 
@@ -503,7 +503,7 @@ bool UWetClothingAssetFactory::ConfigureProperties()
                     .AutoHeight()
                     [
                         SNew(STextBlock)
-                        .Text(LOCTEXT("DWCUVChannelSectionLabel", "DWC Data UV"))
+                        .Text(LOCTEXT("DWCUVChannelSectionLabel", "DWC UV Channel"))
                         .Font(FAppStyle::GetFontStyle(TEXT("NormalFontBold")))
                     ]
                     + SVerticalBox::Slot()
@@ -526,7 +526,7 @@ bool UWetClothingAssetFactory::ConfigureProperties()
                         .VAlign(VAlign_Center)
                         [
                             SNew(STextBlock)
-                            .Text(LOCTEXT("PreferredDWCDataUVChannelLabel", "Preferred DWC Data UV Channel"))
+                            .Text(LOCTEXT("PreferredDWCDataUVChannelLabel", "Preferred DWC UV Channel"))
                         ]
                         + SHorizontalBox::Slot()
                         .AutoWidth()

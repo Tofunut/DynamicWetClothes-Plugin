@@ -117,7 +117,7 @@ FDWCPreparedMeshResolveResult FDWCPreparedMeshResolver::Resolve(
     USkeletalMesh* PreparedMesh = Cast<USkeletalMesh>(DuplicatedObject);
     if (PreparedMesh == nullptr)
     {
-        return Failure(TEXT("Failed to duplicate the Source Mesh for DWC Data UV generation."));
+        return Failure(TEXT("Failed to duplicate the Source Mesh for DWC UV Channel generation."));
     }
 
     FAssetRegistryModule::AssetCreated(PreparedMesh);

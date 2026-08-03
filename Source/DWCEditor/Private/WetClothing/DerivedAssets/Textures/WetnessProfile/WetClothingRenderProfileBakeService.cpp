@@ -241,7 +241,7 @@ bool FWetClothingRenderProfileBakeService::HasPendingVisualBakeTasks(
     }
     else if (!WetClothingAsset->HasValidDataUVForLOD(WetClothingAsset->GetSimulationLODIndex()))
     {
-        PendingLines.Add(TEXT("The sealed DWC Data UV is invalid; create a new WCA before building the Render Profile Lookup Texture."));
+        PendingLines.Add(TEXT("The sealed DWC UV Channel is invalid; create a new WCA before building the Render Profile Lookup Texture."));
     }
     else
     {
@@ -288,7 +288,7 @@ bool FWetClothingRenderProfileBakeService::HasPendingVisualBakeTasks(
             }
             else if (Baked.DataUVChannelIndex != WetClothingAsset->GetDWCDataUVChannelIndex())
             {
-                PendingLines.Add(TEXT("Wet Part Data Texture was built for an old DWC Data UV channel."));
+                PendingLines.Add(TEXT("Wet Part Data Texture was built for an old DWC UV Channel."));
             }
             else if (Baked.Resolution != DWCWetPartDataTextureBake::Resolution ||
                      Baked.PaddingPixels != DWCWetPartDataTextureBake::PaddingPixels ||
@@ -329,12 +329,12 @@ bool FWetClothingRenderProfileBakeService::BakeRenderProfileDataAndUpdateMateria
 
     if (WetClothingAsset == nullptr || WetClothingAsset->GetRuntimeSkeletalMesh() == nullptr)
     {
-        OutSummary = TEXT("Assign a Source Skeletal Mesh and generate DWC Data UV before baking render profile data.");
+        OutSummary = TEXT("Assign a Source Skeletal Mesh and generate DWC UV Channel before baking render profile data.");
         return false;
     }
     if (!WetClothingAsset->HasValidDataUVForLOD(WetClothingAsset->GetSimulationLODIndex()))
     {
-        OutSummary = TEXT("The sealed DWC Data UV is invalid. Create a new WCA before building the Render Profile Lookup Texture.");
+        OutSummary = TEXT("The sealed DWC UV Channel is invalid. Create a new WCA before building the Render Profile Lookup Texture.");
         return false;
     }
 
@@ -445,7 +445,7 @@ bool FWetClothingRenderProfileBakeService::BakeRenderProfileDataAndUpdateMateria
             SlotResult.PaintedPixelCount));
     }
     Sections.Add(FString::Printf(
-        TEXT("Wet Part Data Textures:\n- %s\n- DWC Data UV channel %d\n- %d local profiles\n- %d total painted pixels"),
+        TEXT("Wet Part Data Textures:\n- %s\n- DWC UV Channel %d\n- %d local profiles\n- %d total painted pixels"),
         *FString::Join(WetPartDataTextureLines, TEXT("\n- ")),
         WetClothingAsset->GetDWCDataUVChannelIndex(),
         WetPartDataResult.LocalProfileCount,

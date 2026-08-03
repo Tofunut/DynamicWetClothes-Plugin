@@ -1,4 +1,4 @@
-﻿#include "WetClothing/DerivedAssets/Materials/WCAMaterialGenerator.h"
+#include "WetClothing/DerivedAssets/Materials/WCAMaterialGenerator.h"
 
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetToolsModule.h"
@@ -454,7 +454,7 @@ namespace
         const TArray<FString> InputNames =
             UMaterialEditingLibrary::GetMaterialExpressionInputNames(Expression);
 
-        // ??已???용뮉 ??μ뵬 疫꿸퀡????낆젾???????롫뮉 ?紐껊굡
+        // ??��???�뒗 ??�씪 湲곕????�젰???????�뒗 ?몃뱶
         if (InputName.IsEmpty())
         {
             return InputNames.IsEmpty();
@@ -1200,7 +1200,7 @@ namespace
         {
             if (UMaterialExpressionTextureCoordinate* TextureCoordinate = Cast<UMaterialExpressionTextureCoordinate>(Expression))
             {
-                if (TextureCoordinate->Desc == TEXT("DWC Data UV"))
+                if (TextureCoordinate->Desc == TEXT("DWC UV Channel"))
                 {
                     TextureCoordinate->CoordinateIndex = DWCDataUVChannelIndex;
                     return TextureCoordinate;
@@ -1213,7 +1213,7 @@ namespace
         if (TextureCoordinate != nullptr)
         {
             TextureCoordinate->CoordinateIndex = DWCDataUVChannelIndex;
-            TextureCoordinate->Desc = TEXT("DWC Data UV");
+            TextureCoordinate->Desc = TEXT("DWC UV Channel");
         }
         return TextureCoordinate;
     }
@@ -1380,7 +1380,7 @@ namespace
     {
         if (TextureCoordinate == nullptr || TextureSample == nullptr)
         {
-            FailureReasons.Add(TEXT("DWC Data UV connection requires a texture coordinate node and a texture sample node."));
+            FailureReasons.Add(TEXT("DWC UV Channel connection requires a texture coordinate node and a texture sample node."));
             return false;
         }
 
@@ -1396,7 +1396,7 @@ namespace
         }
 
         FailureReasons.Add(FString::Printf(
-            TEXT("Failed to connect the DWC Data UV texture coordinate to the texture sample. Available texture sample inputs: %s"),
+            TEXT("Failed to connect the DWC UV Channel texture coordinate to the texture sample. Available texture sample inputs: %s"),
             *JoinPinNames(InputNames)));
         return false;
     }
@@ -2326,7 +2326,7 @@ FWetClothingUnifiedMaterialSetupResult FWCAMaterialGenerator::CreateOrUpdateUnif
 
     if (Options.DWCDataUVChannelIndex < 0 || Options.DWCDataUVChannelIndex > 7)
     {
-        Result.Message = TEXT("Unified DWC material generation requires a valid DWC Data UV channel.");
+        Result.Message = TEXT("Unified DWC material generation requires a valid DWC UV Channel.");
         return Result;
     }
     if (Options.bUseSurfaceWater &&

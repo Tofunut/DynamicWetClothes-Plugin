@@ -110,7 +110,7 @@ bool FDWCRevealBakeSurfaceBuilder::BuildReferencePoseSurface(
             }
 
             FDWCRevealBakeSurfaceTriangle Triangle;
-            // Keep this as the render-buffer triangle id. DWC Data UV metadata,
+            // Keep this as the render-buffer triangle id. DWC UV Channel metadata,
             // island clip buffers, and editor hit tests all key by this id.
             Triangle.TriangleIndex = Index / 3;
             Triangle.MaterialSlotIndex = Section.MaterialIndex;

@@ -40,14 +40,14 @@ FDWCDataUVSeamSplitResult FDWCDataUVSeamSplitter::SplitChartBoundaries(
         {
             if (!Triangles.IsValidIndex(TriangleIndex))
             {
-                SetFailure(Result, TEXT("A Data UV chart references an invalid triangle."));
+                SetFailure(Result, TEXT("A DWC UV Channel chart references an invalid triangle."));
                 return Result;
             }
 
             if (const int32* ExistingChartIndex = ChartIndexByTriangle.Find(TriangleIndex))
             {
                 SetFailure(Result, FString::Printf(
-                    TEXT("Triangle %d belongs to more than one Data UV chart (%d and %d)."),
+                    TEXT("Triangle %d belongs to more than one DWC UV Channel chart (%d and %d)."),
                     TriangleIndex,
                     *ExistingChartIndex,
                     ChartIndex));
@@ -61,7 +61,7 @@ FDWCDataUVSeamSplitResult FDWCDataUVSeamSplitter::SplitChartBoundaries(
                 MeshDescription.GetPolygonVertexInstances(PolygonID).Num() != 3 ||
                 TriangleIndexByPolygon.Contains(PolygonID.GetValue()))
             {
-                SetFailure(Result, TEXT("DWC Data UV seam splitting requires triangulated mesh polygons."));
+                SetFailure(Result, TEXT("DWC UV Channel seam splitting requires triangulated mesh polygons."));
                 return Result;
             }
             TriangleIndexByPolygon.Add(PolygonID.GetValue(), TriangleIndex);
@@ -70,7 +70,7 @@ FDWCDataUVSeamSplitResult FDWCDataUVSeamSplitter::SplitChartBoundaries(
             {
                 if (VertexInstanceID.GetValue() == INDEX_NONE)
                 {
-                    SetFailure(Result, TEXT("A Data UV triangle references an invalid VertexInstance."));
+                    SetFailure(Result, TEXT("A DWC UV Channel triangle references an invalid VertexInstance."));
                     return Result;
                 }
 
@@ -152,7 +152,7 @@ FDWCDataUVSeamSplitResult FDWCDataUVSeamSplitter::SplitChartBoundaries(
                 MakeChartVertexInstanceKey(ChartIndex, OriginalVertexInstanceID.GetValue()));
             if (ReplacementVertexInstanceID == nullptr)
             {
-                SetFailure(Result, TEXT("Failed to resolve a chart-specific Data UV VertexInstance."));
+                SetFailure(Result, TEXT("Failed to resolve a chart-specific DWC UV Channel VertexInstance."));
                 return Result;
             }
 
@@ -175,7 +175,7 @@ FDWCDataUVSeamSplitResult FDWCDataUVSeamSplitter::SplitChartBoundaries(
         const TArrayView<const FTriangleID> RebuiltTriangleIDs = MeshDescription.GetPolygonTriangles(PolygonID);
         if (RebuiltTriangleIDs.Num() != 1)
         {
-            SetFailure(Result, TEXT("DWC Data UV seam splitting could not rebuild a triangulated polygon."));
+            SetFailure(Result, TEXT("DWC UV Channel seam splitting could not rebuild a triangulated polygon."));
             return Result;
         }
         Triangle.TriangleID = RebuiltTriangleIDs[0];

@@ -51,17 +51,18 @@ void FDWCEditorStyle::Initialize()
     SetPngBrush(*StyleSet, TEXT("ClassIcon.WetnessProfile"), TEXT("AssetIcons/WetnessProfile_128"), Icon16x16);
     SetPngBrush(*StyleSet, TEXT("ClassThumbnail.WetnessProfile"), TEXT("AssetIcons/WetnessProfile_128"), Thumbnail64x64);
 
-    SetSvgBrush(*StyleSet, TEXT("DWCEditor.BuildForRuntime"), TEXT("EditorIcons/BuildForRuntime_128"), ToolbarIconSize);
-    SetSvgBrush(*StyleSet, TEXT("DWCEditor.BuildForRuntime.Small"), TEXT("EditorIcons/BuildForRuntime_128"), Icon20x20);
+    SetSvgBrush(*StyleSet, TEXT("DWCEditor.BuildForRuntime"), TEXT("EditorIcons/BuildForRuntime_400"), ToolbarIconSize);
+    SetSvgBrush(*StyleSet, TEXT("DWCEditor.BuildForRuntime.Small"), TEXT("EditorIcons/BuildForRuntime_400"), Icon20x20);
 
-    SetSvgBrush(*StyleSet, TEXT("DWCEditor.UVTool.Select"), TEXT("EditorIcons/SelectClick_20"), Icon20x20);
-    SetSvgBrush(*StyleSet, TEXT("DWCEditor.UVTool.BoxSelect"), TEXT("EditorIcons/SelectBox_20"), Icon20x20);
-    SetSvgBrush(*StyleSet, TEXT("DWCEditor.UVTool.EllipseSelect"), TEXT("EditorIcons/SelectEllipse_20"), Icon20x20);
-    SetSvgBrush(*StyleSet, TEXT("DWCEditor.UVTool.LassoSelect"), TEXT("EditorIcons/SelectLasso_20"), Icon20x20);
+    SetSvgBrush(*StyleSet, TEXT("DWCEditor.UVTool.Select"), TEXT("EditorIcons/SelectClick_400"), Icon24x24);
+    SetSvgBrush(*StyleSet, TEXT("DWCEditor.UVTool.BoxSelect"), TEXT("EditorIcons/SelectBox_400"), Icon24x24);
+    SetSvgBrush(*StyleSet, TEXT("DWCEditor.UVTool.EllipseSelect"), TEXT("EditorIcons/SelectEllipse_400"), Icon24x24);
+    SetSvgBrush(*StyleSet, TEXT("DWCEditor.UVTool.LassoSelect"), TEXT("EditorIcons/SelectLasso_400"), Icon24x24);
     SetSvgBrush(*StyleSet, TEXT("DWCEditor.MagicWandTool"), TEXT("EditorIcons/MagicWandTool"), Icon20x20);
     SetSvgBrush(*StyleSet, TEXT("DWCEditor.MagicWandTool.Large"), TEXT("EditorIcons/MagicWandTool"), ModeIconSize);
     SetSvgBrush(*StyleSet, TEXT("DWCEditor.AutoPartitioning"), TEXT("EditorIcons/MagicWandTool"), Icon20x20);
     SetSvgBrush(*StyleSet, TEXT("DWCEditor.Bake"), TEXT("EditorIcons/Bake_400"), Icon24x24);
+    SetSvgBrush(*StyleSet, TEXT("DWCEditor.SurfaceWaterTiling"), TEXT("EditorIcons/SurfaceWaterTiling"), Icon20x20);
     SetSvgBrush(*StyleSet, TEXT("DWCEditor.Status.Error"), TEXT("EditorIcons/StatusError"), Icon16x16);
     SetSvgBrush(*StyleSet, TEXT("DWCEditor.Validation.Failure"), TEXT("EditorIcons/ValidationFailure"), Icon24x24);
     SetSvgBrush(*StyleSet, TEXT("DWCEditor.Validation.Diagnostics"), TEXT("EditorIcons/ValidationDiagnostics"), Icon24x24);

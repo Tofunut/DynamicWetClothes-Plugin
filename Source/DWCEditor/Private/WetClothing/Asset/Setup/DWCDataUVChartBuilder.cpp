@@ -9,6 +9,23 @@ namespace DWCDataUVChartBuilderPrivate
     // that work bounded; dense stacked UV shells otherwise grow quadratically.
     static constexpr int64 MaxSpatialCellInsertionsPerIsland = 1000000;
     static constexpr int64 MaxCandidatePairInsertionsPerIsland = 1000000;
+
+    FDWCDataUVSlotWarning& FindOrAddSlotWarning(
+        TArray<FDWCDataUVSlotWarning>& SlotWarnings,
+        const int32 MaterialSlotIndex)
+    {
+        for (FDWCDataUVSlotWarning& SlotWarning : SlotWarnings)
+        {
+            if (SlotWarning.MaterialSlotIndex == MaterialSlotIndex)
+            {
+                return SlotWarning;
+            }
+        }
+
+        FDWCDataUVSlotWarning& SlotWarning = SlotWarnings.AddDefaulted_GetRef();
+        SlotWarning.MaterialSlotIndex = MaterialSlotIndex;
+        return SlotWarning;
+    }
 }
 
 void FDWCDataUVChartBuilder::BuildOriginalUVIslands(
@@ -234,14 +251,11 @@ bool FDWCDataUVChartBuilder::BuildNonOverlappingCharts(
     TArray<FDWCDataUVChart>& OutCharts,
     int32& OutSplitOriginalUVIslandCount,
     int32& OutOverlapPairCount,
-    TSet<int32>& OutSplitMaterialSlotIndices,
-    int32& OutBudgetExceededMaterialSlotIndex)
+    TArray<FDWCDataUVSlotWarning>& InOutSlotWarnings)
 {
     OutCharts.Reset();
     OutSplitOriginalUVIslandCount = 0;
     OutOverlapPairCount = 0;
-    OutSplitMaterialSlotIndices.Reset();
-    OutBudgetExceededMaterialSlotIndex = INDEX_NONE;
 
     for (const FDWCDataUVChart& OriginalUVIsland : OriginalUVIslands)
     {
@@ -254,8 +268,10 @@ bool FDWCDataUVChartBuilder::BuildNonOverlappingCharts(
             IslandOverlapPairCount);
         if (!bConflictGraphWithinBudget)
         {
-            ++OutSplitOriginalUVIslandCount;
-            OutSplitMaterialSlotIndices.Add(OriginalUVIsland.MaterialSlotIndex);
+            FDWCDataUVSlotWarning& Warning = DWCDataUVChartBuilderPrivate::FindOrAddSlotWarning(
+                InOutSlotWarnings,
+                OriginalUVIsland.MaterialSlotIndex);
+            ++Warning.BudgetFallbackIslandCount;
             for (const int32 TriangleIndex : OriginalUVIsland.TriangleIndices)
             {
                 if (!Triangles.IsValidIndex(TriangleIndex))
@@ -278,7 +294,11 @@ bool FDWCDataUVChartBuilder::BuildNonOverlappingCharts(
         }
 
         ++OutSplitOriginalUVIslandCount;
-        OutSplitMaterialSlotIndices.Add(OriginalUVIsland.MaterialSlotIndex);
+        FDWCDataUVSlotWarning& Warning = DWCDataUVChartBuilderPrivate::FindOrAddSlotWarning(
+            InOutSlotWarnings,
+            OriginalUVIsland.MaterialSlotIndex);
+        ++Warning.SplitOriginalUVIslandCount;
+        Warning.SelfOverlapPairCount += IslandOverlapPairCount;
 
         TArray<int32> ColoringOrder;
         ColoringOrder.Reserve(OriginalUVIsland.TriangleIndices.Num());

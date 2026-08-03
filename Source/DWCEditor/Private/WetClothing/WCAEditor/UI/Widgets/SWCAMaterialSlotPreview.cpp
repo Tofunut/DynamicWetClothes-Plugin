@@ -116,12 +116,17 @@ int32 SWCAMaterialSlotPreview::OnPaint(
 
     const FSlateRenderTransform RenderTransform = AllottedGeometry.GetAccumulatedRenderTransform();
     const FSlateResourceHandle  ResourceHandle = FSlateApplication::Get().GetRenderer()->GetResourceHandle(*WhiteBrush);
+    bool bHasVisibleTextureVariation = false;
     if (ResourceHandle.IsValid())
     {
         TArray<FSlateVertex> FillVerts;
         TArray<SlateIndex>   FillIndices;
         FillVerts.Reserve(ProjectedTriangles.Num() * 3);
         FillIndices.Reserve(ProjectedTriangles.Num() * 3);
+        FLinearColor MinSampleColor(FLT_MAX, FLT_MAX, FLT_MAX, 1.0f);
+        FLinearColor MaxSampleColor(-FLT_MAX, -FLT_MAX, -FLT_MAX, 1.0f);
+        double SampleSaturationSum = 0.0;
+        int32 SampleCount = 0;
 
         for (const FProjectedTriangle& ProjectedTriangle : ProjectedTriangles)
         {
@@ -130,28 +135,51 @@ int32 SWCAMaterialSlotPreview::OnPaint(
             for (int32 CornerIndex = 0; CornerIndex < 3; ++CornerIndex)
             {
                 const FVector2D PaintedPosition = (ProjectedTriangle.Positions[CornerIndex] - MinPoint) * UniformScale + Offset;
-                FColor          VertexColor = FLinearColor(0.28f, 0.28f, 0.28f, 1.0f).ToFColor(true);
+                FColor          VertexColor = FLinearColor::White.ToFColor(true);
+                const FVector2D PreviewUV(
+                    ProjectedTriangle.UVs[CornerIndex].X - FMath::FloorToDouble(ProjectedTriangle.UVs[CornerIndex].X),
+                    ProjectedTriangle.UVs[CornerIndex].Y - FMath::FloorToDouble(ProjectedTriangle.UVs[CornerIndex].Y));
 
                 if (PreviewTextureData.IsValid())
                 {
-                    const FVector2D UV(
-                        ProjectedTriangle.UVs[CornerIndex].X - FMath::FloorToDouble(ProjectedTriangle.UVs[CornerIndex].X),
-                        ProjectedTriangle.UVs[CornerIndex].Y - FMath::FloorToDouble(ProjectedTriangle.UVs[CornerIndex].Y));
-                    const int32 SampleX = FMath::RoundToInt(UV.X * (PreviewTextureData.Width - 1));
-                    const int32 SampleY = FMath::RoundToInt((1.0f - UV.Y) * (PreviewTextureData.Height - 1));
-                    VertexColor = PreviewTextureData.GetLinearColor(SampleX, SampleY).ToFColor(true);
+                    const int32 SampleX = FMath::RoundToInt(PreviewUV.X * (PreviewTextureData.Width - 1));
+                    const int32 SampleY = FMath::RoundToInt((1.0f - PreviewUV.Y) * (PreviewTextureData.Height - 1));
+                    const FLinearColor SampleColor = PreviewTextureData.GetLinearColor(SampleX, SampleY);
+                    VertexColor = SampleColor.ToFColor(true);
+                    MinSampleColor.R = FMath::Min(MinSampleColor.R, SampleColor.R);
+                    MinSampleColor.G = FMath::Min(MinSampleColor.G, SampleColor.G);
+                    MinSampleColor.B = FMath::Min(MinSampleColor.B, SampleColor.B);
+                    MaxSampleColor.R = FMath::Max(MaxSampleColor.R, SampleColor.R);
+                    MaxSampleColor.G = FMath::Max(MaxSampleColor.G, SampleColor.G);
+                    MaxSampleColor.B = FMath::Max(MaxSampleColor.B, SampleColor.B);
+                    SampleSaturationSum += SampleColor.LinearRGBToHSV().G;
+                    ++SampleCount;
+                }
+                else
+                {
+                    VertexColor = FLinearColor(0.28f, 0.28f, 0.28f, 1.0f).ToFColor(true);
                 }
 
                 FillVerts.Add(FSlateVertex::Make<ESlateVertexRounding::Disabled>(
                     RenderTransform,
                     FVector2f(PaintedPosition),
-                    FVector2f::ZeroVector,
+                    FVector2f(PreviewUV),
                     VertexColor));
             }
 
             FillIndices.Add(StartVertexIndex);
             FillIndices.Add(StartVertexIndex + 1);
             FillIndices.Add(StartVertexIndex + 2);
+        }
+
+        if (SampleCount > 0)
+        {
+            const float ChannelRange = FMath::Max3(
+                MaxSampleColor.R - MinSampleColor.R,
+                MaxSampleColor.G - MinSampleColor.G,
+                MaxSampleColor.B - MinSampleColor.B);
+            const double AverageSaturation = SampleSaturationSum / SampleCount;
+            bHasVisibleTextureVariation = ChannelRange > 0.08f || AverageSaturation > 0.08;
         }
 
         FSlateDrawElement::MakeCustomVerts(
@@ -166,7 +194,7 @@ int32 SWCAMaterialSlotPreview::OnPaint(
             ESlateDrawEffect::None);
     }
 
-    if (bDrawWireframe)
+    if (bDrawWireframe || !bHasVisibleTextureVariation)
     {
         TSet<uint64> DrawnEdgeKeys;
         const FLinearColor LineColor(0.96f, 0.96f, 0.96f, 1.0f);

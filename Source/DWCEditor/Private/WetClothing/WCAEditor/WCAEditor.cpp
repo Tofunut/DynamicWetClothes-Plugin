@@ -98,7 +98,7 @@ namespace
         }
 
         FString Summary = FString::Printf(
-            TEXT("Simulation Source LOD: LOD0\nOriginal UV: UV%d\nDWC Data UV: UV%d\n\n"),
+            TEXT("Simulation Source LOD: LOD0\nOriginal UV: UV%d\nDWC UV Channel: UV%d\n\n"),
             OriginalUVChannelIndex,
             PreferredDWCDataUVChannelIndex);
 
@@ -174,7 +174,7 @@ namespace
         }
 
         return FText::Format(
-            LOCTEXT("AssetSetupLODRangeInfo", "Available LODs: LOD0 - LOD{0}. DWC Data UV and Original UV topology will be generated for LOD{1} - LOD{2}."),
+            LOCTEXT("AssetSetupLODRangeInfo", "Available LODs: LOD0 - LOD{0}. DWC UV Channel and Original UV topology will be generated for LOD{1} - LOD{2}."),
             FText::AsNumber(LODCount - 1),
             FText::AsNumber(FirstLODIndex),
             FText::AsNumber(LastLODIndex));
@@ -230,7 +230,7 @@ namespace
         {
             return LOCTEXT(
                 "AssetSetupDataUVMatchesOriginal",
-                "DWC Data UV cannot use the Original UV channel.");
+                "DWC UV Channel cannot use the Original UV channel.");
         }
 
         const int32 UVChannelCount = GetAssetSetupSkeletalMeshUVChannelCount(Mesh, 0);
@@ -299,7 +299,7 @@ namespace
                 EAppMsgType::Ok,
                 LOCTEXT(
                     "AssetSetupInvalidUVSelection",
-                    "Select an existing Original UV channel and a different DWC Data UV channel."));
+                    "Select an existing Original UV channel and a different DWC UV Channel."));
             return false;
         }
 
@@ -319,7 +319,7 @@ namespace
         const FText Warning = FText::Format(
             LOCTEXT(
                 "AssetSetupConfirmDataUVOverwrite",
-                "UV{0} already contains UV data.\n\nWriting DWC Data UV to this channel will replace the existing UV{0} data on the target mesh.\n\nContinue?"),
+                "UV{0} already contains UV data.\n\nWriting DWC UV Channel to this channel will replace the existing UV{0} data on the target mesh.\n\nContinue?"),
             FText::AsNumber(DataUVChannelIndex));
         OutConfirmedOverwrite =
             FMessageDialog::Open(EAppMsgType::YesNo, Warning) == EAppReturnType::Yes;
@@ -949,7 +949,7 @@ namespace
     {
         switch (Section)
         {
-        case EWCAValidationSection::DataUV: return LOCTEXT("ValidationSectionDataUV", "DWC Data UV");
+        case EWCAValidationSection::DataUV: return LOCTEXT("ValidationSectionDataUV", "DWC UV Channel");
         case EWCAValidationSection::RuntimeData: return LOCTEXT("ValidationSectionRuntimeData", "Runtime Data");
         case EWCAValidationSection::GeneratedMaterials: return LOCTEXT("ValidationSectionGeneratedMaterials", "Generated Materials");
         case EWCAValidationSection::GPUSimulationMaps: return LOCTEXT("ValidationSectionGPUData", "GPU Runtime Data");
@@ -966,7 +966,7 @@ namespace
         switch (Section)
         {
         case EWCAValidationSection::DataUV:
-            return FDWCEditorStyle::GetBrush(TEXT("ClassIcon.WetClothingAsset"));
+            return FAppStyle::GetBrush(TEXT("ClassIcon.SkeletalMesh"));
         case EWCAValidationSection::RuntimeData:
         case EWCAValidationSection::GPUSimulationMaps:
             return FAppStyle::GetBrush(TEXT("ClassIcon.DataAsset"));
@@ -1077,7 +1077,7 @@ namespace
         {
         case EWCAValidationSection::DataUV:
             Checks = {
-                LOCTEXT("ValidationCheckDataUVAvailability", "DWC Data UV availability and build version"),
+                LOCTEXT("ValidationCheckDataUVAvailability", "DWC UV Channel availability and build version"),
                 LOCTEXT("ValidationCheckOriginalUVTopology", "Original UV topology data"),
                 LOCTEXT("ValidationCheckPreparedMeshCompatibility", "Prepared mesh and UV-channel compatibility")
             };
@@ -1099,7 +1099,7 @@ namespace
         case EWCAValidationSection::GPUSimulationMaps:
             Checks = {
                 LOCTEXT("ValidationCheckGPUDataAvailability", "GPU Runtime Data simulation lookup availability"),
-                LOCTEXT("ValidationCheckGPUDataSignature", "Build signature and DWC Data UV compatibility"),
+                LOCTEXT("ValidationCheckGPUDataSignature", "Build signature and DWC UV Channel compatibility"),
                 LOCTEXT("ValidationCheckGPUDataSaveState", "Unsaved GPU Runtime Data simulation lookup")
             };
             break;
@@ -1173,7 +1173,7 @@ namespace
                 [
                     SNew(STextBlock)
                     .Text(FText::Format(
-                        LOCTEXT("ValidationSectionCheckItemFormat", "• {0}"),
+                        LOCTEXT("ValidationSectionCheckItemFormat", "??{0}"),
                         Check))
                     .AutoWrapText(true)
                     .ColorAndOpacity(FSlateColor(FStyleColors::ForegroundHover))
@@ -1416,7 +1416,7 @@ namespace
     TSharedRef<SWidget> BuildValidationDiagnosticsSection(const FDWCTriangleValidationSummary& Summary, const FString& Examples)
     {
         const FString TooltipString = FString::Printf(
-            TEXT("Total wettable triangles: %d\nCPU usable: %d\nGPU usable: %d\nOriginal UV unavailable/degenerate: %d\nDWC Data UV degenerate: %d\nInvalid/out-of-range UV: %d\n3D degenerate excluded: %d\nExample triangle indices: %s"),
+            TEXT("Total wettable triangles: %d\nCPU usable: %d\nGPU usable: %d\nOriginal UV unavailable/degenerate: %d\nDWC UV Channel degenerate: %d\nInvalid/out-of-range UV: %d\n3D degenerate excluded: %d\nExample triangle indices: %s"),
             Summary.TotalWettableTriangles,
             Summary.CPUUsableTriangles,
             Summary.GPUUsableTriangles,
@@ -1927,7 +1927,7 @@ namespace
                 GetEffectiveDataUVChannel());
         };
 
-        const FSlateColor ReadyColor(FLinearColor(0.28f, 0.78f, 0.38f, 1.0f));
+        const FSlateColor ReadyColor(FLinearColor(0.24f, 0.78f, 0.38f, 1.0f));
         const FSlateColor WarningColor(FLinearColor(1.0f, 0.62f, 0.12f, 1.0f));
         const FSlateColor MissingColor(FLinearColor(1.0f, 0.24f, 0.18f, 1.0f));
 
@@ -1966,7 +1966,7 @@ namespace
                 }
                 return DoesAssetSetupRequireDataUVRelocation(Asset, BuildPendingSettings())
                     ? LOCTEXT("AssetSetupPreparedMeshRelocation", "! UV Relocation Required")
-                    : LOCTEXT("AssetSetupPreparedMeshReady", "✓ Ready");
+                    : LOCTEXT("AssetSetupPreparedMeshReady", "??Ready");
             })
             .ColorAndOpacity_Lambda([&Asset, &BuildPendingSettings, ReadyColor, WarningColor, MissingColor]()
             {
@@ -1982,7 +1982,7 @@ namespace
 
         StatusGrid->AddSlot(0, 2).Padding(0.0f, 3.0f, 20.0f, 3.0f)
         [
-            SNew(STextBlock).Text(LOCTEXT("AssetSetupDataUVStatusLabel", "DWC Data UV")).ColorAndOpacity(FStyleColors::ForegroundHover)
+            SNew(STextBlock).Text(LOCTEXT("AssetSetupDataUVStatusLabel", "DWC UV Channel")).ColorAndOpacity(FStyleColors::ForegroundHover)
         ];
         StatusGrid->AddSlot(1, 2).Padding(0.0f, 3.0f, 16.0f, 3.0f)
         [
@@ -2001,7 +2001,7 @@ namespace
                     return LOCTEXT("AssetSetupDataUVRelocation", "! Relocation Required");
                 }
                 return Asset.HasValidDataUVForLOD(Asset.GetSimulationLODIndex())
-                    ? LOCTEXT("AssetSetupDataUVReady", "✓ Ready")
+                    ? LOCTEXT("AssetSetupDataUVReady", "??Ready")
                     : LOCTEXT("AssetSetupDataUVMissing", "× Missing");
             })
             .ColorAndOpacity_Lambda([&Asset, &BuildPendingSettings, ReadyColor, WarningColor, MissingColor]()
@@ -2023,7 +2023,7 @@ namespace
             SNew(STextBlock).Text_Lambda([SetupObject]()
             {
                 return FText::Format(
-                    LOCTEXT("AssetSetupMappedLODsValue", "LOD{0} – LOD{1}"),
+                    LOCTEXT("AssetSetupMappedLODsValue", "LOD{0} ??LOD{1}"),
                     FText::AsNumber(SetupObject->FirstGeneratedLODIndex),
                     FText::AsNumber(SetupObject->LastGeneratedLODIndex));
             })
@@ -2048,7 +2048,7 @@ namespace
 
         MeshGrid->AddSlot(0, 1).Padding(0.0f, 4.0f, 20.0f, 4.0f)
         [
-            SNew(STextBlock).Text(LOCTEXT("AssetSetupPreferredDataUVChannel", "DWC Data UV Channel"))
+            SNew(STextBlock).Text(LOCTEXT("AssetSetupPreferredDataUVChannel", "DWC UV Channel"))
         ];
         MeshGrid->AddSlot(1, 1).Padding(0.0f, 4.0f)
         [
@@ -2188,7 +2188,7 @@ namespace
                                         + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 8.0f, 0.0f, 0.0f)
                                         [
                                             SNew(STextBlock)
-                                            .Text(LOCTEXT("AssetSetupSourceMeshUnchanged", "ⓘ The source mesh will not be modified."))
+                                            .Text(LOCTEXT("AssetSetupSourceMeshUnchanged", "??The source mesh will not be modified."))
                                             .Font(FAppStyle::GetFontStyle(TEXT("NormalFont")))
                                             .ColorAndOpacity(FStyleColors::Primary)
                                         ]
@@ -2217,7 +2217,7 @@ namespace
                                             .AutoWrapText(true)
                                             .Text(LOCTEXT(
                                                 "AssetSetupLockedUVLayoutInfo",
-                                                "ⓘ Original UV and island topology will not be modified."))
+                                                "??Original UV and island topology will not be modified."))
                                             .Font(FAppStyle::GetFontStyle(TEXT("NormalFont")))
                                             .ColorAndOpacity(FStyleColors::Primary)
                                         ]
@@ -2327,13 +2327,13 @@ namespace
                             {
                                 if (!HasValidPendingSettings())
                                 {
-                                    return LOCTEXT("AssetSetupInvalidSettingsTooltip", "Select a DWC Data UV channel different from the locked Original UV channel.");
+                                    return LOCTEXT("AssetSetupInvalidSettingsTooltip", "Select a DWC UV Channel different from the locked Original UV channel.");
                                 }
                                 if (!HasPendingChanges())
                                 {
                                     return LOCTEXT("AssetSetupNoChangesTooltip", "No setup changes to apply.");
                                 }
-                                return LOCTEXT("AssetSetupApplyChangesTooltip", "Apply setup changes. A DWC Data UV channel change copies the sealed layout without rebuilding islands.");
+                                return LOCTEXT("AssetSetupApplyChangesTooltip", "Apply setup changes. A DWC UV Channel change copies the sealed layout without rebuilding islands.");
                             })
                             .OnClicked_Lambda([&Asset, SetupObject, &BuildPendingSettings, &Result, &OutAllowOverwriteExistingDataUVChannel, Dialog]()
                             {
@@ -2407,7 +2407,7 @@ namespace
 
         if (!Asset.HasValidDataUVForLOD(Asset.GetSimulationLODIndex()))
         {
-            OutFailure = TEXT("Generated Materials: valid sealed DWC Data UV is required. Create a new WCA if the stored layout is invalid.");
+            OutFailure = TEXT("Generated Materials: valid sealed DWC UV Channel is required. Create a new WCA if the stored layout is invalid.");
             return false;
         }
 
@@ -2540,7 +2540,7 @@ namespace
 
         if (!Asset.HasValidDataUVForLOD(Asset.GetSimulationLODIndex()))
         {
-            OutFailure = TEXT("Transparency Textures: valid sealed DWC Data UV is required. Create a new WCA if the stored layout is invalid.");
+            OutFailure = TEXT("Transparency Textures: valid sealed DWC UV Channel is required. Create a new WCA if the stored layout is invalid.");
             Asset.SetTransparencyBakeStatus(EDWCBakeStatus::Failed, OutFailure);
             return false;
         }
@@ -3113,7 +3113,7 @@ void FWCAEditor::HandleAssetSetupClicked()
     }
     const bool bRequiresDataUVRelocation = DoesAssetSetupRequireDataUVRelocation(*Asset, NewSettings);
 
-    // Apply non-channel settings while the WCA still references its current sealed Data UV channel.
+    // Apply non-channel settings while the WCA still references its current sealed DWC UV Channel.
     // RelocateChannel updates the preferred channel only after the prepared-mesh copy succeeds.
     FDWCWetClothingAssetSetupSettings SettingsToApply = NewSettings;
     if (bRequiresDataUVRelocation)
@@ -3172,17 +3172,6 @@ void FWCAEditor::HandleInitializeGeneratedDataUVClicked()
         return;
     }
 
-    if (Asset->HasLockedDataUVLayout())
-    {
-        FMessageDialog::Open(
-            EAppMsgType::Ok,
-            LOCTEXT(
-                "DataUVLayoutLockedMessage",
-                "This WCA's Original UV, packed Data UV layout, and island topology are locked.\n\nUse Asset Setup only to relocate the existing DWC Data UV to another channel. Create a new WCA to use different Original UV or island topology."));
-        return;
-    }
-
-    // Only assets whose initial Data UV creation did not complete may enter the generation path.
     FWCAGeneratedDataInvalidator::InvalidateAsset(*Asset);
 
     bool bAllowOverwriteExistingDataUVChannel = false;
@@ -3214,11 +3203,11 @@ void FWCAEditor::InitializeGeneratedDataUV(
     Asset->Modify();
     FScopedSlowTask SlowTask(
         2.0f,
-        FText::FromString(FString::Printf(TEXT("Initializing DWC Data UV for %s..."), *GetNameSafe(Asset))));
+        FText::FromString(FString::Printf(TEXT("Initializing DWC UV Channel for %s..."), *GetNameSafe(Asset))));
     SlowTask.MakeDialog(false);
     SlowTask.EnterProgressFrame(
         1.0f,
-        LOCTEXT("GenerateDataUVBuildProgress", "Building and sealing initial DWC mesh UV data..."));
+        LOCTEXT("GenerateDataUVBuildProgress", "Building DWC mesh UV data..."));
     const FDWCDataUVBuildResult Result = FDWCDataUVBuildService::Generate(
         *Asset,
         false,
@@ -3915,7 +3904,7 @@ bool FWCAEditor::HasMaterialGenerationPrerequisites(FText* OutFailureReason) con
 
     if (!Asset->HasValidDataUVForLOD(Asset->GetSimulationLODIndex()))
     {
-        SetFailure(LOCTEXT("GenerateMaterialsNoDataUVTooltip", "DWC Data UV must be generated first."));
+        SetFailure(LOCTEXT("GenerateMaterialsNoDataUVTooltip", "DWC UV Channel must be generated first."));
         return false;
     }
 
@@ -4016,7 +4005,7 @@ FReply FWCAEditor::GenerateWetMaterials()
         FMessageDialog::Open(
             EAppMsgCategory::Warning,
             EAppMsgType::Ok,
-            LOCTEXT("GenerateMaterialsNoDataUV", "Generate DWC Data UV before generating wet materials."));
+            LOCTEXT("GenerateMaterialsNoDataUV", "Generate DWC UV Channel before generating wet materials."));
         return FReply::Handled();
     }
 
@@ -4239,7 +4228,7 @@ bool FWCAEditor::ResolveIssuesAndSave(FString& OutFailure, FString* OutSuccessSu
     {
         SlowTask.EnterProgressFrame(
             1.0f,
-            LOCTEXT("ResolveIssuesGenerateDataUVProgress", "Initializing DWC Data UV for an asset that has no sealed layout..."));
+            LOCTEXT("ResolveIssuesGenerateDataUVProgress", "Initializing DWC UV Channel for an asset that has no sealed layout..."));
         const FDWCDataUVBuildResult DataUVResult = FDWCDataUVBuildService::Generate(*Asset, false, false, true);
         if (!DataUVResult.bSucceeded)
         {
@@ -4248,8 +4237,8 @@ bool FWCAEditor::ResolveIssuesAndSave(FString& OutFailure, FString* OutSuccessSu
             return false;
         }
         ResolveSummaries.Add(DataUVResult.Message.IsEmpty()
-            ? TEXT("Initialized and sealed DWC Data UV.")
-            : FString::Printf(TEXT("DWC Data UV: %s"), *DataUVResult.Message));
+            ? TEXT("Initialized and sealed DWC UV Channel.")
+            : FString::Printf(TEXT("DWC UV Channel: %s"), *DataUVResult.Message));
     }
 
     const bool bRuntimeBackendEnabled =

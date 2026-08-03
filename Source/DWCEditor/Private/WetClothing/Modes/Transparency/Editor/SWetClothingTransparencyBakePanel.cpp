@@ -882,7 +882,7 @@ bool SWetClothingTransparencyBakePanel::RefreshModelState()
     }
     else if (!HasUsableTransparencyDataUV())
     {
-        StatusMessage = TEXT("Generate the DWC Data UV before configuring Transparency Target Parts.");
+        StatusMessage = TEXT("Generate the DWC UV Channel before configuring Transparency Target Parts.");
         PanelStatus = EDWCTransparencyPanelStatus::Warning;
     }
     else if (!DWCEditorPreviewSlotUtils::IsCpuPreviewReady(
@@ -1372,7 +1372,7 @@ FReply SWetClothingTransparencyBakePanel::HandleGenerateTransparencyMapClicked()
     {
         if (!HasUsableTransparencyDataUV())
         {
-            const FString Message = TEXT("Generate the DWC Data UV before generating a Transparency Map.");
+            const FString Message = TEXT("Generate the DWC UV Channel before generating a Transparency Map.");
             StatusMessage = Message;
             PanelStatus = EDWCTransparencyPanelStatus::Warning;
             FMessageDialog::Open(EAppMsgType::Ok, FText::FromString(Message));
@@ -2077,7 +2077,7 @@ void SWetClothingTransparencyBakePanel::UpdateInnerSourceStatus()
     }
     if (Layer->SourceType == EDWCTransparencySourceType::ManualColorOrTexture)
     {
-        InnerSourceStatusMessage = TEXT("Base reveal color and Reveal Color Paint are written directly to the target DWC Data UV. No ray projection is used.");
+        InnerSourceStatusMessage = TEXT("Base reveal color and Reveal Color Paint are written directly to the target DWC UV Channel. No ray projection is used.");
         return;
     }
     if (Asset->Authored.TransparencyData.SourceBlueprintClass.IsNull())
@@ -2308,7 +2308,7 @@ void SWetClothingTransparencyBakePanel::HandleLayerSelectionChanged(FLayerItemPt
         }
         if (DataUVChannel == INDEX_NONE)
         {
-            StatusMessage = TEXT("Generate the DWC Data UV before selecting a Transparency Target Part.");
+            StatusMessage = TEXT("Generate the DWC UV Channel before selecting a Transparency Target Part.");
             PanelStatus = EDWCTransparencyPanelStatus::Warning;
             return;
         }

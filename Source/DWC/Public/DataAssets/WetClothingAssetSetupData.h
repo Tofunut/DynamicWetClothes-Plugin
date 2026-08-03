@@ -108,7 +108,7 @@ struct DWC_API FDWCWetClothingAssetSetupSettings
     UPROPERTY(VisibleAnywhere, Category = "Texture Resolutions", meta = (DisplayName = "Transparency"))
     int32 TransparencyMapResolution = 1024;
 
-    /** Original UV channel on the DWC Prepared Skeletal Mesh used by Part Edit and Data UV generation. */
+    /** Original UV channel on the DWC Prepared Skeletal Mesh used by Part Edit and DWC UV Channel generation. */
     UPROPERTY(VisibleAnywhere, Category = "Mesh")
     int32 OriginalUVChannelIndex = 0;
 
@@ -194,39 +194,72 @@ struct DWC_API FDWCEditorUVTopologyData
 };
 
 USTRUCT(BlueprintType)
+struct DWC_API FDWCDataUVSlotWarning
+{
+    GENERATED_BODY()
+
+    UPROPERTY(VisibleAnywhere, Category = "DWC UV Channel")
+    int32 MaterialSlotIndex = INDEX_NONE;
+
+    UPROPERTY(VisibleAnywhere, Category = "DWC UV Channel")
+    int32 DegenerateSourceUVTriangleCount = 0;
+
+    UPROPERTY(VisibleAnywhere, Category = "DWC UV Channel")
+    int32 InvalidSourceUVTriangleCount = 0;
+
+    UPROPERTY(VisibleAnywhere, Category = "DWC UV Channel")
+    int32 SplitOriginalUVIslandCount = 0;
+
+    UPROPERTY(VisibleAnywhere, Category = "DWC UV Channel")
+    int32 SelfOverlapPairCount = 0;
+
+    UPROPERTY(VisibleAnywhere, Category = "DWC UV Channel")
+    int32 BudgetFallbackIslandCount = 0;
+
+    bool HasWarnings() const
+    {
+        return DegenerateSourceUVTriangleCount > 0 ||
+            InvalidSourceUVTriangleCount > 0 ||
+            SplitOriginalUVIslandCount > 0 ||
+            SelfOverlapPairCount > 0 ||
+            BudgetFallbackIslandCount > 0;
+    }
+};
+
+USTRUCT(BlueprintType)
 struct DWC_API FDWCDataUVLODMetadata
 {
     GENERATED_BODY()
 
-    UPROPERTY(VisibleAnywhere, Category = "DWC Data UV")
+    UPROPERTY(VisibleAnywhere, Category = "DWC UV Channel")
     bool bIsValid = false;
 
-    UPROPERTY(VisibleAnywhere, Category = "DWC Data UV")
+    UPROPERTY(VisibleAnywhere, Category = "DWC UV Channel")
     int32 LODIndex = 0;
 
-    UPROPERTY(VisibleAnywhere, Category = "DWC Data UV")
+    UPROPERTY(VisibleAnywhere, Category = "DWC UV Channel")
     int32 RenderVertexCount = 0;
 
-    UPROPERTY(VisibleAnywhere, Category = "DWC Data UV")
+    UPROPERTY(VisibleAnywhere, Category = "DWC UV Channel")
     int32 MaterialSlotCount = 0;
 
-    UPROPERTY(VisibleAnywhere, Category = "DWC Data UV")
+    UPROPERTY(VisibleAnywhere, Category = "DWC UV Channel")
     int32 UVChannelIndex = INDEX_NONE;
 
-    /** Material slots included in this immutable Data UV layout. Empty means all slots for legacy assets. */
-    UPROPERTY(VisibleAnywhere, Category = "DWC Data UV")
+    /** Material slots included in this immutable DWC UV Channel layout. Empty means all slots for legacy assets. */
+    UPROPERTY(VisibleAnywhere, Category = "DWC UV Channel")
     TArray<int32> GeneratedMaterialSlotIndices;
 
-    /** Included slots whose generated layout completed with non-fatal UV warnings. */
-    UPROPERTY(VisibleAnywhere, Category = "DWC Data UV")
-    TArray<int32> WarningMaterialSlotIndices;
+    /** Per-slot details for non-fatal DWC UV Channel warnings. Empty on legacy assets. */
+    UPROPERTY(VisibleAnywhere, Category = "DWC UV Channel")
+    TArray<FDWCDataUVSlotWarning> SlotWarnings;
 
     /** Signature of the mesh inputs used to generate this output. */
-    UPROPERTY(VisibleAnywhere, Category = "DWC Data UV")
+    UPROPERTY(VisibleAnywhere, Category = "DWC UV Channel")
     FString MeshInputSignature;
 
-    /** Signature of the actual DWC Data UV channel stored on DWCSkeletalMesh. */
-    UPROPERTY(VisibleAnywhere, Category = "DWC Data UV")
+    /** Signature of the actual DWC UV Channel stored on DWCSkeletalMesh. */
+    UPROPERTY(VisibleAnywhere, Category = "DWC UV Channel")
     FString DataUVOutputSignature;
 
     /**
@@ -234,11 +267,11 @@ struct DWC_API FDWCDataUVLODMetadata
      * Editor surface hit tests use this compact lookup without rebuilding UV connectivity.
      */
 #if WITH_EDITORONLY_DATA
-    UPROPERTY(VisibleAnywhere, Category = "DWC Data UV")
+    UPROPERTY(VisibleAnywhere, Category = "DWC UV Channel")
     TArray<int32> DataUVIslandIDByTriangleID;
 #endif
 
-    UPROPERTY(VisibleAnywhere, Category = "DWC Data UV")
+    UPROPERTY(VisibleAnywhere, Category = "DWC UV Channel")
     int32 GeneratorVersion = 1;
 };
 

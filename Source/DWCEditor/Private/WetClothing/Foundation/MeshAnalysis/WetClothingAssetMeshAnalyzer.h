@@ -40,7 +40,7 @@ class FWetClothingAssetMeshAnalyzer
         TArray<FWetClothingAssetUVIsland>& OutIslands,
         FString*                           OutErrorMessage = nullptr);
 
-    /** Builds UV islands from the WCA-owned generated DWC Data UV payload. */
+    /** Builds UV islands from the WCA-owned generated DWC UV Channel payload. */
     static bool BuildMaterialSlotDataUVIslands(
         const UWetClothingAsset&           WetClothingAsset,
         int32                              LODIndex,

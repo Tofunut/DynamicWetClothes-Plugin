@@ -413,7 +413,7 @@ struct DWC_API FWetClothingWrinkleData
 {
     GENERATED_BODY()
 
-    // DWC Data UV channel used by wet wrinkle maps. The channel is generated during WCA Setup.
+    // DWC UV Channel used by wet wrinkle maps. The channel is generated during WCA Setup.
     UPROPERTY(EditAnywhere, Category = "Editable")
     int32 WrinkleUVChannelIndex = 0;
 

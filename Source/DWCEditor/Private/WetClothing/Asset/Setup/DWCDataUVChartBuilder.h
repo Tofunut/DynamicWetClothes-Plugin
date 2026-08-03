@@ -1,9 +1,10 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "DataAssets/WetClothingAssetSetupData.h"
 #include "DWCDataUVGenerationTypes.h"
 
-/** Converts persistent Original UV connectivity into transient non-overlapping Data UV charts. */
+/** Converts persistent Original UV connectivity into transient non-overlapping DWC UV Channel charts. */
 class FDWCDataUVChartBuilder
 {
 public:
@@ -18,8 +19,7 @@ public:
         TArray<FDWCDataUVChart>& OutCharts,
         int32& OutSplitOriginalUVIslandCount,
         int32& OutOverlapPairCount,
-        TSet<int32>& OutSplitMaterialSlotIndices,
-        int32& OutBudgetExceededMaterialSlotIndex);
+        TArray<FDWCDataUVSlotWarning>& InOutSlotWarnings);
 
 
 private:

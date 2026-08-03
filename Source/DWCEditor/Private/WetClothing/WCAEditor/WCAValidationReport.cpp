@@ -221,7 +221,7 @@ namespace
         if (Detail.Contains(TEXT("out of date"), ESearchCase::IgnoreCase) ||
             Detail.Contains(TEXT("outdated"), ESearchCase::IgnoreCase) ||
             Detail.Contains(TEXT("old authored data"), ESearchCase::IgnoreCase) ||
-            Detail.Contains(TEXT("old DWC Data UV"), ESearchCase::IgnoreCase) ||
+            Detail.Contains(TEXT("old DWC UV Channel"), ESearchCase::IgnoreCase) ||
             Detail.Contains(TEXT("rebake"), ESearchCase::IgnoreCase) ||
             Detail.Contains(TEXT("regenerated"), ESearchCase::IgnoreCase))
         {
@@ -462,12 +462,12 @@ namespace
                     "PreparedMeshAction",
                     "The prepared mesh is missing. Create a new WCA from the intended Source Skeletal Mesh.");
             }
-            else if (Line.Contains(TEXT("DWC Data UV must be rebuilt"), ESearchCase::IgnoreCase) ||
-                     Line.Contains(TEXT("sealed DWC Data UV is invalid"), ESearchCase::IgnoreCase))
+            else if (Line.Contains(TEXT("DWC UV Channel must be rebuilt"), ESearchCase::IgnoreCase) ||
+                     Line.Contains(TEXT("sealed DWC UV Channel is invalid"), ESearchCase::IgnoreCase))
             {
                 Section = EWCAValidationSection::DataUV;
                 FixKind = bDataUVLayoutLocked ? EWCAValidationFixKind::Manual : EWCAValidationFixKind::InitializeDataUV;
-                Title = NSLOCTEXT("WCAValidationReport", "DWCDataUVTitle", "DWC Data UV");
+                Title = NSLOCTEXT("WCAValidationReport", "DWCDataUVTitle", "DWC UV Channel");
                 RequiredAction = bDataUVLayoutLocked
                     ? NSLOCTEXT(
                         "WCAValidationReport",
@@ -476,7 +476,7 @@ namespace
                     : NSLOCTEXT(
                         "WCAValidationReport",
                         "DWCDataUVInitializeAction",
-                        "Initialize DWC Data UV for this asset.");
+                        "Initialize DWC UV Channel for this asset.");
                 if (HasIssueForSectionAndContext(Report, Section, FText::GetEmpty()))
                 {
                     continue;
@@ -636,7 +636,7 @@ bool FWCAValidationReport::HasAutoResolvableIssues() const
 FString FWCAValidationReport::BuildSummary() const
 {
     TArray<FString> Sections;
-    AppendIssueSection(Sections, TEXT("DWC Data UV"), *this, EWCAValidationSection::DataUV, false);
+    AppendIssueSection(Sections, TEXT("DWC UV Channel"), *this, EWCAValidationSection::DataUV, false);
     AppendIssueSection(Sections, TEXT("Runtime Data"), *this, EWCAValidationSection::RuntimeData, false);
     AppendIssueSection(Sections, TEXT("Generated Materials"), *this, EWCAValidationSection::GeneratedMaterials, false);
     AppendIssueSection(Sections, TEXT("GPU Runtime Data"), *this, EWCAValidationSection::GPUSimulationMaps, false);
@@ -650,7 +650,7 @@ FString FWCAValidationReport::BuildSummary() const
 FString FWCAValidationReport::BuildManualIssueSummary() const
 {
     TArray<FString> Sections;
-    AppendIssueSection(Sections, TEXT("DWC Data UV"), *this, EWCAValidationSection::DataUV, true);
+    AppendIssueSection(Sections, TEXT("DWC UV Channel"), *this, EWCAValidationSection::DataUV, true);
     AppendIssueSection(Sections, TEXT("Runtime Data"), *this, EWCAValidationSection::RuntimeData, true);
     AppendIssueSection(Sections, TEXT("Generated Materials"), *this, EWCAValidationSection::GeneratedMaterials, true);
     AppendIssueSection(Sections, TEXT("GPU Runtime Data"), *this, EWCAValidationSection::GPUSimulationMaps, true);
@@ -736,14 +736,14 @@ FWCAValidationReport BuildWCAValidationReport(
     AddBakeStatusIssueIfRequired(
         Report,
         TEXT("DWCDataUV"),
-        NSLOCTEXT("WCAValidationReport", "DWCDataUVTitle", "DWC Data UV"),
+        NSLOCTEXT("WCAValidationReport", "DWCDataUVTitle", "DWC UV Channel"),
         State.GeneratedDataUV,
         EWCAValidationSection::DataUV,
         bDataUVLayoutLocked ? EWCAValidationFixKind::Manual : EWCAValidationFixKind::InitializeDataUV,
         bDataUVLayoutLocked
             ? NSLOCTEXT("WCAValidationReport", "DWCDataUVLockedAction", "The sealed UV layout cannot be rebuilt. Create a new WCA if the prepared mesh or UV layout changed.")
-            : NSLOCTEXT("WCAValidationReport", "DWCDataUVInitializeAction", "Initialize DWC Data UV for this asset."),
-        FString::Printf(TEXT("DWC Data UV: %s.%s"),
+            : NSLOCTEXT("WCAValidationReport", "DWCDataUVInitializeAction", "Initialize DWC UV Channel for this asset."),
+        FString::Printf(TEXT("DWC UV Channel: %s.%s"),
             *BakeStatusToString(State.GeneratedDataUV),
             bDataUVLayoutLocked ? TEXT(" The stored packed layout is immutable") : TEXT("")));
 
@@ -756,7 +756,7 @@ FWCAValidationReport BuildWCAValidationReport(
         bDataUVLayoutLocked ? EWCAValidationFixKind::Manual : EWCAValidationFixKind::InitializeDataUV,
         bDataUVLayoutLocked
             ? NSLOCTEXT("WCAValidationReport", "OriginalUVTopologyLockedAction", "Original UV island topology is locked. Create a new WCA to generate different topology.")
-            : NSLOCTEXT("WCAValidationReport", "OriginalUVTopologyInitializeAction", "Initialize DWC Data UV and Original UV topology."),
+            : NSLOCTEXT("WCAValidationReport", "OriginalUVTopologyInitializeAction", "Initialize DWC UV Channel and Original UV topology."),
         FString::Printf(TEXT("Original UV Topology: %s.%s"),
             *BakeStatusToString(State.OriginalUVTopology),
             bDataUVLayoutLocked ? TEXT(" The stored island identities are immutable") : TEXT("")));

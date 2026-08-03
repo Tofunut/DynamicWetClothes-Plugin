@@ -1,5 +1,5 @@
 /*
- *  Skeletal Mesh, LOD, UV Channel, Material Slot 조합별 UV Island 분석 결과를 캐싱합니다.
+ *  Skeletal Mesh, LOD, UV Channel, Material Slot 조합�?UV Island 분석 결과�?캐싱?�니??
  */
 
 #include "WCAUVIslandViewCache.h"
@@ -93,7 +93,7 @@ bool FWCAUVIslandViewCache::GetMaterialSlotUVIslands(
 
     if (SkeletalMesh == nullptr)
     {
-        FWetClothingAssetMeshAnalyzer::SetError(OutErrorMessage, TEXT("Generate the DWC Data UV to inspect its UV islands."));
+        FWetClothingAssetMeshAnalyzer::SetError(OutErrorMessage, TEXT("Generate the DWC UV Channel to inspect its UV islands."));
         return false;
     }
 

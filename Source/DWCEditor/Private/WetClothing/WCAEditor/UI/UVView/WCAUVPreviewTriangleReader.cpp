@@ -204,7 +204,7 @@ bool FWCAUVPreviewTriangleReader::ReadFromDataUV(
     const FDWCDataUVLODMetadata* Metadata = Asset.FindDataUVMetadataForLOD(LODIndex);
     if (Metadata == nullptr || !Metadata->bIsValid)
     {
-        DWC::Error::SetMessage(OutErrorMessage, TEXT("DWC Data UV metadata is missing for the requested LOD."));
+        DWC::Error::SetMessage(OutErrorMessage, TEXT("DWC UV Channel metadata is missing for the requested LOD."));
         return false;
     }
 
@@ -226,7 +226,7 @@ bool FWCAUVPreviewTriangleReader::ReadFromDataUV(
     {
         DWC::Error::SetMessage(
             OutErrorMessage,
-            *FString::Printf(TEXT("DWC Data UV does not match render vertices. %s"), *DataUVError));
+            *FString::Printf(TEXT("DWC UV Channel does not match render vertices. %s"), *DataUVError));
         return false;
     }
 
@@ -237,7 +237,7 @@ bool FWCAUVPreviewTriangleReader::ReadFromDataUV(
         Asset.GetDWCDataUVChannelIndex());
     if (CurrentSignature.IsEmpty() || Metadata->DataUVOutputSignature != CurrentSignature)
     {
-        DWC::Error::SetMessage(OutErrorMessage, TEXT("DWC Data UV metadata is out of date."));
+        DWC::Error::SetMessage(OutErrorMessage, TEXT("DWC UV Channel metadata is out of date."));
         return false;
     }
 #endif

@@ -106,7 +106,7 @@ namespace
 FString FWCAEditorIssueStatus::BuildSummary() const
 {
     TArray<FString> Sections;
-    AppendIssueSection(Sections, TEXT("DWC Data UV"), GeneratedDataUVMessages);
+    AppendIssueSection(Sections, TEXT("DWC UV Channel"), GeneratedDataUVMessages);
     AppendIssueSection(Sections, TEXT("Runtime Data"), RuntimeMessages);
     AppendIssueSection(Sections, TEXT("Generated Materials"), GeneratedMaterialMessages);
     AppendIssueSection(Sections, TEXT("GPU Runtime Data"), GPUMapMessages);

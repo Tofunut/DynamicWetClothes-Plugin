@@ -41,8 +41,8 @@ struct FWetClothingWetPartDataTextureBakeResult
  * Builds a WCA-wide local profile table and one Wet Part Data Texture per material slot.
  *
  * Authored membership is resolved from Original UV island IDs. Each assigned
- * TriangleID is then rasterized with the matching triangle's DWC Data UVs, so
- * both the baked lookup and the runtime material sample use the Data UV channel.
+ * TriangleID is then rasterized with the matching triangle's DWC UV Channels, so
+ * both the baked lookup and the runtime material sample use the DWC UV Channel.
  */
 class FWetClothingWetPartDataTextureBaker
 {

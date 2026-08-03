@@ -2,7 +2,7 @@
 
 #include "CoreMinimal.h"
 
-/** Shared UV geometry predicates used by Data UV chart construction and validation. */
+/** Shared UV geometry predicates used by DWC UV Channel chart construction and validation. */
 class FDWCUVGeometry
 {
 public:

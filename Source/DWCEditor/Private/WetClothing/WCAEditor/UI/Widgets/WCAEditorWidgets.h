@@ -34,6 +34,13 @@ struct FWCAMaterialSlotRowArgs
     TFunction<FText(int32)> GetMaterialSlotStatusText;
     TFunction<FSlateColor(int32)> GetMaterialSlotStatusColor;
     TFunction<FText(int32)> GetMaterialSlotStatusTooltip;
+    TFunction<bool(int32)> ShouldShowMaterialSlotStatusInfo;
+    TFunction<FReply(int32)> OnMaterialSlotStatusInfoClicked;
+    TFunction<FText(int32)> GetMaterialSlotWarningText;
+    TFunction<FSlateColor(int32)> GetMaterialSlotRowBackgroundColor;
+    TFunction<FSlateColor(int32)> GetMaterialSlotRowAccentColor;
+    TFunction<TSharedRef<SWidget>(int32)> BuildThumbnailWidget;
+    TFunction<TSharedRef<SWidget>(int32)> BuildLeadingWidget;
     TFunction<TSharedRef<SWidget>(int32)> BuildTrailingWidget;
 };
 

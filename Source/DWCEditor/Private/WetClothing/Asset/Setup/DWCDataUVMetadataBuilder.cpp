@@ -42,7 +42,7 @@ bool FDWCDataUVMetadataBuilder::BuildLOD(
         if (OutErrorMessage)
         {
             *OutErrorMessage = FString::Printf(
-                TEXT("LOD%d does not contain DWC Data UV channel %d."),
+                TEXT("LOD%d does not contain DWC UV Channel %d."),
                 LODIndex,
                 DataUVChannelIndex);
         }
@@ -66,7 +66,7 @@ bool FDWCDataUVMetadataBuilder::BuildLOD(
 
     if (OutMetadata.MeshInputSignature.IsEmpty() || OutMetadata.DataUVOutputSignature.IsEmpty())
     {
-        if (OutErrorMessage) *OutErrorMessage = FString::Printf(TEXT("LOD%d DWC Data UV signature is empty."), LODIndex);
+        if (OutErrorMessage) *OutErrorMessage = FString::Printf(TEXT("LOD%d DWC UV Channel signature is empty."), LODIndex);
         return false;
     }
 
@@ -95,7 +95,7 @@ bool FDWCDataUVMetadataBuilder::BuildLOD(
                 if (OutErrorMessage)
                 {
                     *OutErrorMessage = FString::Printf(
-                        TEXT("LOD%d DWC Data UV topology failed for material slot %d: %s"),
+                        TEXT("LOD%d DWC UV Channel topology failed for material slot %d: %s"),
                         LODIndex,
                         MaterialSlotIndex,
                         *TopologyError);

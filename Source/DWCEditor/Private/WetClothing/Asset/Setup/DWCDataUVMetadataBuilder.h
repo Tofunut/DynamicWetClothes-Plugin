@@ -6,7 +6,7 @@
 class USkeletalMesh;
 class UWetClothingAsset;
 
-/** Builds the small persistent metadata describing one generated Data UV LOD payload. */
+/** Builds the small persistent metadata describing one generated DWC UV Channel LOD payload. */
 class FDWCDataUVMetadataBuilder
 {
 public:

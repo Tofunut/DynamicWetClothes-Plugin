@@ -685,12 +685,12 @@ namespace
         }
         if (Settings.PreferredDWCDataUVChannelIndex < 0 || Settings.PreferredDWCDataUVChannelIndex > 3)
         {
-            DWC::Error::SetMessage(OutErrorMessage, TEXT("DWC Data UV Channel must be between UV0 and UV3."));
+            DWC::Error::SetMessage(OutErrorMessage, TEXT("DWC UV Channel must be between UV0 and UV3."));
             return false;
         }
         if (Settings.PreferredDWCDataUVChannelIndex == Settings.OriginalUVChannelIndex)
         {
-            DWC::Error::SetMessage(OutErrorMessage, TEXT("DWC Data UV Channel cannot be the same as Original UV Channel."));
+            DWC::Error::SetMessage(OutErrorMessage, TEXT("DWC UV Channel cannot be the same as Original UV Channel."));
             return false;
         }
         return true;
@@ -2407,7 +2407,7 @@ bool UWetClothingAsset::InitializeNewAsset(
     {
         DWC::Error::SetMessage(
             OutErrorMessage,
-            TEXT("This Wet Clothing Asset is already initialized. Create a new WCA instead of replacing its Original UV or DWC Data UV layout."));
+            TEXT("This Wet Clothing Asset is already initialized. Create a new WCA instead of replacing its Original UV or DWC UV Channel layout."));
         return false;
     }
 
@@ -2427,7 +2427,7 @@ bool UWetClothingAsset::InitializeNewAsset(
 
     Metadata.SourceSkeletalMesh = InSourceMesh;
     Metadata.SetupSettings = NormalizedSettings;
-    // The source mesh is immutable input. A dedicated prepared mesh is created by the Data UV build service.
+    // The source mesh is immutable input. A dedicated prepared mesh is created by the DWC UV Channel build service.
     Metadata.DWCSkeletalMesh = nullptr;
     Authored.WrinkleData.BakeSettings.DefaultResolution = Metadata.SetupSettings.GetWrinkleMapResolution();
     Authored.TransparencyData.TransparencyBakeResolution = Metadata.SetupSettings.GetTransparencyMapResolution();
@@ -2511,7 +2511,7 @@ bool UWetClothingAsset::ApplySetupSettings(
                 DWC::Error::SetMessage(
                     OutChangeSummary,
                     FString::Printf(
-                        TEXT("LOD%d has no sealed DWC Data UV/island payload. Create a new WCA to generate a different LOD mapping range."),
+                        TEXT("LOD%d has no sealed DWC UV Channel/island payload. Create a new WCA to generate a different LOD mapping range."),
                         LODIndex));
                 return false;
             }
@@ -2594,7 +2594,7 @@ bool UWetClothingAsset::ApplySetupSettings(
     if (bDataUVTargetChanged)
     {
         Changes.Add(FString::Printf(
-            TEXT("DWC Data UV channel changed: UV%d -> UV%d. The existing packed layout will be copied without rebuilding island topology."),
+            TEXT("DWC UV Channel changed: UV%d -> UV%d. The existing packed layout will be copied without rebuilding island topology."),
             Metadata.DWCDataUVChannelIndex,
             Metadata.SetupSettings.PreferredDWCDataUVChannelIndex));
     }
@@ -2677,22 +2677,22 @@ bool UWetClothingAsset::CommitInitialDataUVLayout(
     {
         DWC::Error::SetMessage(
             OutErrorMessage,
-            TEXT("DWC Data UV and Original UV island topology are write-once. Create a new WCA instead of rebuilding this layout."));
+            TEXT("DWC UV Channel and Original UV island topology are write-once. Create a new WCA instead of rebuilding this layout."));
         return false;
     }
     if (InRuntimeMesh == nullptr || InDWCDataUVChannelIndex < 0 || InDWCDataUVChannelIndex >= 8)
     {
-        DWC::Error::SetMessage(OutErrorMessage, TEXT("The initial DWC Data UV target is invalid."));
+        DWC::Error::SetMessage(OutErrorMessage, TEXT("The initial DWC UV Channel target is invalid."));
         return false;
     }
     if (InDWCDataUVChannelIndex == Metadata.OriginalUVChannelIndex)
     {
-        DWC::Error::SetMessage(OutErrorMessage, TEXT("DWC Data UV cannot use the locked Original UV channel."));
+        DWC::Error::SetMessage(OutErrorMessage, TEXT("DWC UV Channel cannot use the locked Original UV channel."));
         return false;
     }
     if (InMetadata.IsEmpty() || InTopologies.IsEmpty())
     {
-        DWC::Error::SetMessage(OutErrorMessage, TEXT("The initial DWC Data UV commit requires both metadata and Original UV topology payloads."));
+        DWC::Error::SetMessage(OutErrorMessage, TEXT("The initial DWC UV Channel commit requires both metadata and Original UV topology payloads."));
         return false;
     }
 
@@ -2712,7 +2712,60 @@ bool UWetClothingAsset::CommitInitialDataUVLayout(
     DWC::Error::SetMessage(OutErrorMessage, TEXT(""));
     return true;
 #else
-    DWC::Error::SetMessage(OutErrorMessage, TEXT("Initial DWC Data UV commit is editor-only."));
+    DWC::Error::SetMessage(OutErrorMessage, TEXT("Initial DWC UV Channel commit is editor-only."));
+    return false;
+#endif
+}
+
+bool UWetClothingAsset::ReplaceDataUVLayout(
+    USkeletalMesh* InRuntimeMesh,
+    const int32 InDWCDataUVChannelIndex,
+    TArray<FDWCDataUVLODMetadata>&& InMetadata,
+    TArray<FDWCEditorUVTopologyData>&& InTopologies,
+    FString* OutErrorMessage)
+{
+#if WITH_EDITORONLY_DATA
+    if (!HasLockedDataUVLayout())
+    {
+        DWC::Error::SetMessage(
+            OutErrorMessage,
+            TEXT("The WCA does not contain a DWC UV Channel layout to rebuild."));
+        return false;
+    }
+    if (InRuntimeMesh == nullptr || InDWCDataUVChannelIndex < 0 || InDWCDataUVChannelIndex >= 8)
+    {
+        DWC::Error::SetMessage(OutErrorMessage, TEXT("The rebuilt DWC UV Channel target is invalid."));
+        return false;
+    }
+    if (InDWCDataUVChannelIndex == Metadata.OriginalUVChannelIndex)
+    {
+        DWC::Error::SetMessage(OutErrorMessage, TEXT("DWC UV Channel cannot use the locked Original UV channel."));
+        return false;
+    }
+    if (InMetadata.IsEmpty() || InTopologies.IsEmpty())
+    {
+        DWC::Error::SetMessage(OutErrorMessage, TEXT("The rebuilt DWC UV Channel commit requires both metadata and Original UV topology payloads."));
+        return false;
+    }
+
+    Metadata.DWCSkeletalMesh = InRuntimeMesh;
+    Metadata.DWCDataUVChannelIndex = InDWCDataUVChannelIndex;
+    Metadata.SetupSettings.PreferredDWCDataUVChannelIndex = InDWCDataUVChannelIndex;
+    Derived.Inline.DataUVMetadata = MoveTemp(InMetadata);
+    Derived.Inline.OriginalUVTopologies = MoveTemp(InTopologies);
+    Metadata.bDataUVLayoutSealed = true;
+
+    Derived.Inline.BakeState.GeneratedDataUV = EDWCBakeStatus::Valid;
+    Derived.Inline.BakeState.OriginalUVTopology = EDWCBakeStatus::Valid;
+    MarkBakeOutputGenerated(DWCBakeOutput::GeneratedDataUV | DWCBakeOutput::OriginalUVTopology);
+    MarkSimulationBakeOutOfDate();
+    MarkVisualBakeOutOfDate();
+    Derived.Inline.BakeState.LastFailure.Reset();
+    MarkPackageDirty();
+    DWC::Error::SetMessage(OutErrorMessage, TEXT(""));
+    return true;
+#else
+    DWC::Error::SetMessage(OutErrorMessage, TEXT("DWC UV Channel replacement is editor-only."));
     return false;
 #endif
 }
@@ -2724,17 +2777,17 @@ bool UWetClothingAsset::CommitDataUVChannelRelocation(
 #if WITH_EDITORONLY_DATA
     if (!HasLockedDataUVLayout())
     {
-        DWC::Error::SetMessage(OutErrorMessage, TEXT("The WCA does not contain a sealed DWC Data UV layout to relocate."));
+        DWC::Error::SetMessage(OutErrorMessage, TEXT("The WCA does not contain a sealed DWC UV Channel layout to relocate."));
         return false;
     }
     if (InDWCDataUVChannelIndex < 0 || InDWCDataUVChannelIndex >= 8)
     {
-        DWC::Error::SetMessage(OutErrorMessage, TEXT("The destination DWC Data UV channel is outside the supported UV0-UV7 range."));
+        DWC::Error::SetMessage(OutErrorMessage, TEXT("The destination DWC UV Channel is outside the supported UV0-UV7 range."));
         return false;
     }
     if (InDWCDataUVChannelIndex == Metadata.OriginalUVChannelIndex)
     {
-        DWC::Error::SetMessage(OutErrorMessage, TEXT("DWC Data UV cannot use the locked Original UV channel."));
+        DWC::Error::SetMessage(OutErrorMessage, TEXT("DWC UV Channel cannot use the locked Original UV channel."));
         return false;
     }
 
@@ -2750,7 +2803,7 @@ bool UWetClothingAsset::CommitDataUVChannelRelocation(
         {
             DWC::Error::SetMessage(
                 OutErrorMessage,
-                FString::Printf(TEXT("Could not validate relocated DWC Data UV on LOD%d."), LODMetadata.LODIndex));
+                FString::Printf(TEXT("Could not validate relocated DWC UV Channel on LOD%d."), LODMetadata.LODIndex));
             return false;
         }
         NewOutputSignatures.Add(Signature);
@@ -2775,7 +2828,7 @@ bool UWetClothingAsset::CommitDataUVChannelRelocation(
     DWC::Error::SetMessage(OutErrorMessage, TEXT(""));
     return true;
 #else
-    DWC::Error::SetMessage(OutErrorMessage, TEXT("DWC Data UV channel relocation is editor-only."));
+    DWC::Error::SetMessage(OutErrorMessage, TEXT("DWC UV Channel relocation is editor-only."));
     return false;
 #endif
 }
@@ -3123,11 +3176,11 @@ bool UWetClothingAsset::RebuildGPURuntimeData(FString* OutErrorMessage)
     RemoveNonSimulationGPULODData(Derived.Bulk.GPURuntimeData);
     SlowTask.EnterProgressFrame(
         0.5f,
-        FText::FromString(FString::Printf(TEXT("Checking generated DWC Data UV for LOD%d before GPU runtime rebuild..."), LODIndex)));
+        FText::FromString(FString::Printf(TEXT("Checking generated DWC UV Channel for LOD%d before GPU runtime rebuild..."), LODIndex)));
 
     if (!HasValidDataUVForLOD(LODIndex))
     {
-        DWC::Error::SetMessage(OutErrorMessage, FString::Printf(TEXT("Generate valid DWC Data UV payloads for LOD%d before rebuilding GPU runtime data."), LODIndex));
+        DWC::Error::SetMessage(OutErrorMessage, FString::Printf(TEXT("Generate valid DWC UV Channel payloads for LOD%d before rebuilding GPU runtime data."), LODIndex));
         return false;
     }
 
@@ -3528,7 +3581,7 @@ bool UWetClothingAsset::CanPrepareRuntimeDataForEditorSave(FString* OutSkipReaso
             });
         if (!bHasMappedDataUV)
         {
-            DWC::Error::SetMessage(OutSkipReason, TEXT("DWC Data UV has not been generated for every mapped LOD yet."));
+            DWC::Error::SetMessage(OutSkipReason, TEXT("DWC UV Channel has not been generated for every mapped LOD yet."));
             return false;
         }
     }

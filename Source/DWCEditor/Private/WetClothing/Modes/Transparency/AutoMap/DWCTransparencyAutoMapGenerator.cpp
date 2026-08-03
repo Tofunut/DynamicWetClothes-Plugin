@@ -361,7 +361,7 @@ bool FDWCTransparencyAutoMapGenerator::BuildTargetSurfaceBuffers(
     }
     if (OuterSamples.IsEmpty())
     {
-        OutErrorMessage = TEXT("No target texel samples were generated. Check the selected target slot and DWC Data UV channel.");
+        OutErrorMessage = TEXT("No target texel samples were generated. Check the selected target slot and DWC UV Channel.");
         return false;
     }
 
@@ -631,7 +631,7 @@ bool FDWCTransparencyAutoMapGenerator::GenerateBaseRevealColorMap(
     }
     if (OuterSamples.IsEmpty())
     {
-        OutSummary = TEXT("No target texel samples were generated. Check the selected target slot and DWC Data UV channel.");
+        OutSummary = TEXT("No target texel samples were generated. Check the selected target slot and DWC UV Channel.");
         return false;
     }
 
@@ -725,7 +725,7 @@ bool FDWCTransparencyAutoMapGenerator::GenerateBaseRevealColorMap(
     if (OverlappedPixelCount > 0)
     {
         OutWarnings.Add(FString::Printf(
-            TEXT("The target DWC Data UV contains %d genuinely overlapping rasterized pixel(s). Rebuild and inspect the DWC Data UV before editing transparency."),
+            TEXT("The target DWC UV Channel contains %d genuinely overlapping rasterized pixel(s). Rebuild and inspect the DWC UV Channel before editing transparency."),
             OverlappedPixelCount));
     }
 
@@ -804,7 +804,7 @@ bool FDWCTransparencyAutoMapGenerator::GenerateSameMesh(
     }
     if (OuterSamples.IsEmpty())
     {
-        OutSummary = TEXT("No outer texel samples were generated. Check the selected target slot and DWC Data UV channel.");
+        OutSummary = TEXT("No outer texel samples were generated. Check the selected target slot and DWC UV Channel.");
         return false;
     }
 
@@ -1020,7 +1020,7 @@ bool FDWCTransparencyAutoMapGenerator::GenerateSameMesh(
     if (OverlappedPixelCount > 0)
     {
         OutWarnings.Add(FString::Printf(
-            TEXT("The target DWC Data UV contains %d genuinely overlapping rasterized pixel(s). Rebuild and inspect the DWC Data UV before editing transparency."),
+            TEXT("The target DWC UV Channel contains %d genuinely overlapping rasterized pixel(s). Rebuild and inspect the DWC UV Channel before editing transparency."),
             OverlappedPixelCount));
     }
 

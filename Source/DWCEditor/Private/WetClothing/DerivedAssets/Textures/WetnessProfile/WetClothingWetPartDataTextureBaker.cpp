@@ -446,7 +446,7 @@ bool FWetClothingWetPartDataTextureBaker::Bake(
     }
     if (!WetClothingAsset->HasValidDataUVForLOD(WetClothingAsset->GetSimulationLODIndex()) || WetClothingAsset->GetDWCDataUVChannelIndex() == INDEX_NONE)
     {
-        OutErrorMessage = TEXT("Wet Part Data Textures require valid sealed DWC Data UV. Create a new WCA if the stored layout is invalid.");
+        OutErrorMessage = TEXT("Wet Part Data Textures require valid sealed DWC UV Channel. Create a new WCA if the stored layout is invalid.");
         return false;
     }
 
@@ -628,7 +628,7 @@ bool FWetClothingWetPartDataTextureBaker::Bake(
         if (SlotPaintedPixelCount <= 0)
         {
             OutErrorMessage = FString::Printf(
-                TEXT("Wet Part Data Texture slot %d did not rasterize any DWC Data UV pixels."),
+                TEXT("Wet Part Data Texture slot %d did not rasterize any DWC UV Channel pixels."),
                 MaterialSlotIndex);
             return false;
         }

@@ -2700,7 +2700,7 @@ void SWetWrinkleViewport::ApplyMaterialSlotVisibility()
         {
             const FSkelMeshRenderSection& Section = LODData.RenderSections[SectionIndex];
             const bool bShowSection = BrushSettings.MaterialSlotIndex == INDEX_NONE
-                                          ? DWCEditorPreviewSlotUtils::IsCpuPreviewReady(WetClothingAsset.Get(), Section.MaterialIndex)
+                                          ? DWCEditorPreviewSlotUtils::IsWrinkleAuthoringReady(WetClothingAsset.Get(), Section.MaterialIndex)
                                           : Section.MaterialIndex == BrushSettings.MaterialSlotIndex;
             PreviewMeshComponent->ShowMaterialSection(Section.MaterialIndex, SectionIndex, bShowSection, LODIndex);
         }

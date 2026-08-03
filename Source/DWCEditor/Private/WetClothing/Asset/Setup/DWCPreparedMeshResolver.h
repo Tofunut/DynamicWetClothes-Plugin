@@ -16,7 +16,7 @@ struct FDWCPreparedMeshResolveResult
     }
 };
 
-/** Resolves or creates the persistent Skeletal Mesh that owns the generated DWC Data UV coordinates. */
+/** Resolves or creates the persistent Skeletal Mesh that owns the generated DWC UV Channel coordinates. */
 class FDWCPreparedMeshResolver
 {
 public:

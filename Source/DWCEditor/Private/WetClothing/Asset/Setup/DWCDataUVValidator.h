@@ -3,7 +3,7 @@
 #include "CoreMinimal.h"
 #include "DWCDataUVGenerationTypes.h"
 
-/** Final validation for packed Data UV coordinates before they are committed to the mesh. */
+/** Final validation for packed DWC UV Channel coordinates before they are committed to the mesh. */
 class FDWCDataUVValidator
 {
 public:

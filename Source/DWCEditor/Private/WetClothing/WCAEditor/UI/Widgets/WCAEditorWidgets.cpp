@@ -17,10 +17,12 @@
 #include "Widgets/Input/SSlider.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
+#include "Widgets/SOverlay.h"
 #include "Widgets/Layout/SScrollBox.h"
 #include "Widgets/Layout/SSeparator.h"
 #include "Widgets/Images/SImage.h"
 #include "Widgets/SBoxPanel.h"
+#include "Widgets/SNullWidget.h"
 #include "Widgets/Text/STextBlock.h"
 #include "Widgets/Views/STableRow.h"
 
@@ -198,6 +200,8 @@ TSharedRef<SWidget> FWCAEditorWidgets::BuildUVViewTextureSelector(
                 OnSelectionChanged(Item, SelectInfo);
             }
         })
+        .ComboBoxStyle(&FAppStyle::Get().GetWidgetStyle<FComboBoxStyle>(TEXT("ComboBox")))
+        .ButtonStyle(FAppStyle::Get(), TEXT("Button"))
         .MaxListHeight(360.0f)
         .ContentPadding(FMargin(6.0f, 4.0f))
             [SAssignNew(LocalSelectedContentBox, SBox)
@@ -437,11 +441,22 @@ TSharedRef<SWidget> FWCAEditorWidgets::BuildUVViewOptionsButton(
         ];
 
     return SNew(SComboButton)
-        .ContentPadding(FMargin(8.0f, 3.0f))
+        .HasDownArrow(true)
+        .ButtonStyle(FAppStyle::Get(), TEXT("Button"))
+        .ContentPadding(FMargin(6.0f, 3.0f))
+        .ToolTipText(NSLOCTEXT("WetClothingEditorCommonWidgets", "UVViewOptionsButtonTooltip", "View options"))
         .ButtonContent()
         [
-            SNew(STextBlock)
-            .Text(NSLOCTEXT("WetClothingEditorCommonWidgets", "UVViewOptionsButton", "View"))
+            SNew(SBox)
+            .WidthOverride(20.0f)
+            .HeightOverride(18.0f)
+            .HAlign(HAlign_Center)
+            .VAlign(VAlign_Center)
+            [
+                SNew(SImage)
+                .DesiredSizeOverride(FVector2D(16.0f, 16.0f))
+                .Image(FAppStyle::GetBrush(TEXT("Icons.Visible")))
+            ]
         ]
         .MenuContent()
         [
@@ -592,34 +607,26 @@ TSharedRef<ITableRow> FWCAEditorWidgets::GenerateMaterialSlotRow(
     const int32 MaterialSlotIndex = Item.IsValid() ? Item->SlotIndex : INDEX_NONE;
     const bool  bIsAllSlotsRow = Item.IsValid() && MaterialSlotIndex == INDEX_NONE;
     UMaterialInterface* MaterialObject = !bIsAllSlotsRow && Item.IsValid() ? Item->Material.Get() : nullptr;
+    const FText SlotIDText = bIsAllSlotsRow
+                                 ? NSLOCTEXT("WetClothingEditorCommonWidgets", "AllMaterialSlotsSlotID", "All")
+                                 : Item.IsValid()
+                                 ? FText::AsNumber(MaterialSlotIndex)
+                                 : FText::FromString(TEXT("-"));
     const FText SlotTitle = bIsAllSlotsRow
                                 ? (Args.AllSlotsTitle.IsEmpty()
                                        ? NSLOCTEXT("WetClothingEditorCommonWidgets", "AllMaterialSlotsTitle", "All Slots")
                                        : Args.AllSlotsTitle)
                                 : Item.IsValid()
-                                ? FText::Format(
-                                      NSLOCTEXT("WetClothingEditorCommonWidgets", "MaterialSlotThumbnailTitle", "[{0}] {1}"),
-                                      FText::AsNumber(MaterialSlotIndex),
-                                      FText::FromName(Item->SlotName))
+                                ? FText::FromName(Item->SlotName)
                                 : NSLOCTEXT("WetClothingEditorCommonWidgets", "InvalidMaterialSlotTitle", "Invalid Material Slot");
     TSharedRef<SWidget> ThumbnailWidget =
         SNew(SBorder)
         .BorderImage(FAppStyle::Get().GetBrush(TEXT("WhiteBrush")))
         .BorderBackgroundColor(FLinearColor(0.06f, 0.06f, 0.06f, 1.0f));
+    TSharedPtr<SWidget> MaterialThumbnailWidget;
+    bool bShowPairedThumbnails = false;
 
-    if (bIsAllSlotsRow && Args.GeneratedDataUV != nullptr && Args.ThumbnailPool.IsValid())
-    {
-        TSharedPtr<FAssetThumbnail> MeshThumbnail = MakeShared<FAssetThumbnail>(Args.GeneratedDataUV, 48, 48, Args.ThumbnailPool);
-        if (Args.ThumbnailSink != nullptr)
-        {
-            Args.ThumbnailSink->Add(MeshThumbnail);
-        }
-
-        FAssetThumbnailConfig ThumbnailConfig;
-        ThumbnailConfig.bAllowFadeIn = false;
-        ThumbnailWidget = MeshThumbnail->MakeThumbnailWidget(ThumbnailConfig);
-    }
-    else if (MaterialObject != nullptr && Args.ThumbnailPool.IsValid())
+    if (MaterialObject != nullptr && Args.ThumbnailPool.IsValid())
     {
         TSharedPtr<FAssetThumbnail> Thumbnail = MakeShared<FAssetThumbnail>(MaterialObject, 48, 48, Args.ThumbnailPool);
         if (Args.ThumbnailSink != nullptr)
@@ -629,19 +636,82 @@ TSharedRef<ITableRow> FWCAEditorWidgets::GenerateMaterialSlotRow(
 
         FAssetThumbnailConfig ThumbnailConfig;
         ThumbnailConfig.bAllowFadeIn = false;
-        ThumbnailWidget = Thumbnail->MakeThumbnailWidget(ThumbnailConfig);
+        MaterialThumbnailWidget = Thumbnail->MakeThumbnailWidget(ThumbnailConfig);
+    }
+
+    if (!bIsAllSlotsRow && Args.BuildThumbnailWidget)
+    {
+        const TSharedRef<SWidget> SlotPreviewWidget = Args.BuildThumbnailWidget(MaterialSlotIndex);
+        if (MaterialThumbnailWidget.IsValid())
+        {
+            bShowPairedThumbnails = true;
+            ThumbnailWidget =
+                SNew(SHorizontalBox)
+
+                + SHorizontalBox::Slot()
+                .AutoWidth()
+                .VAlign(VAlign_Center)
+                .Padding(0.0f, 0.0f, 12.0f, 0.0f)
+                [
+                    SNew(SBox)
+                    .WidthOverride(48.0f)
+                    .HeightOverride(48.0f)
+                    [
+                        MaterialThumbnailWidget.ToSharedRef()
+                    ]
+                ]
+
+                + SHorizontalBox::Slot()
+                .AutoWidth()
+                .VAlign(VAlign_Center)
+                [
+                    SNew(SBox)
+                    .WidthOverride(48.0f)
+                    .HeightOverride(48.0f)
+                    [
+                        SlotPreviewWidget
+                    ]
+                ];
+        }
+        else
+        {
+            ThumbnailWidget = SlotPreviewWidget;
+        }
+    }
+    else if (MaterialThumbnailWidget.IsValid())
+    {
+        ThumbnailWidget = MaterialThumbnailWidget.ToSharedRef();
     }
 
     TSharedRef<SHorizontalBox> RowContent = SNew(SHorizontalBox);
+
+    if (Args.BuildLeadingWidget)
+    {
+        RowContent->AddSlot()
+            .AutoWidth()
+            .VAlign(VAlign_Center)
+            [
+                SNew(SBox)
+                .WidthOverride(48.0f)
+                .HAlign(HAlign_Center)
+                .VAlign(VAlign_Center)
+                [
+                    Args.BuildLeadingWidget(MaterialSlotIndex)
+                ]
+            ];
+    }
 
     RowContent->AddSlot()
         .AutoWidth()
         .VAlign(VAlign_Center)
         .Padding(0.0f, 0.0f, 8.0f, 0.0f)
             [SNew(SBox)
-                 .WidthOverride(52.0f)
-                 .HeightOverride(52.0f)
-                     [ThumbnailWidget]];
+                 .WidthOverride(42.0f)
+                 .HAlign(HAlign_Center)
+                 .VAlign(VAlign_Center)
+                     [SNew(STextBlock)
+                          .Text(SlotIDText)
+                          .Font(FAppStyle::GetFontStyle(TEXT("NormalFontBold")))]];
 
     RowContent->AddSlot()
         .FillWidth(1.0f)
@@ -660,63 +730,136 @@ TSharedRef<ITableRow> FWCAEditorWidgets::GenerateMaterialSlotRow(
                    .AutoHeight()
                    .Padding(0.0f, 3.0f, 0.0f, 0.0f)
                        [SNew(STextBlock)
-                            .Text_Lambda([WetClothingAsset = Args.WetClothingAsset, MaterialSlotIndex, bIsAllSlotsRow]()
+                            .Text_Lambda([GetWarningText = Args.GetMaterialSlotWarningText, WetClothingAsset = Args.WetClothingAsset, MaterialSlotIndex, bIsAllSlotsRow]()
                             {
-                                return !bIsAllSlotsRow
-                                           ? GetWettableSlotMissingProfileWarningText(WetClothingAsset, MaterialSlotIndex)
-                                           : FText::GetEmpty();
+                                if (bIsAllSlotsRow)
+                                {
+                                    return FText::GetEmpty();
+                                }
+                                return GetWarningText
+                                    ? GetWarningText(MaterialSlotIndex)
+                                    : GetWettableSlotMissingProfileWarningText(WetClothingAsset, MaterialSlotIndex);
                             })
                             .Font(FAppStyle::GetFontStyle(TEXT("SmallFont")))
                             .ColorAndOpacity(FSlateColor(FLinearColor(1.0f, 0.78f, 0.18f, 1.0f)))
-                            .Visibility_Lambda([WetClothingAsset = Args.WetClothingAsset, MaterialSlotIndex, bIsAllSlotsRow]()
+                            .Visibility_Lambda([GetWarningText = Args.GetMaterialSlotWarningText, WetClothingAsset = Args.WetClothingAsset, MaterialSlotIndex, bIsAllSlotsRow]()
                             {
-                                return !bIsAllSlotsRow && !GetWettableSlotMissingProfileWarningText(WetClothingAsset, MaterialSlotIndex).IsEmpty()
-                                           ? EVisibility::Visible
-                                           : EVisibility::Collapsed;
+                                if (bIsAllSlotsRow)
+                                {
+                                    return EVisibility::Collapsed;
+                                }
+                                const FText WarningText = GetWarningText
+                                    ? GetWarningText(MaterialSlotIndex)
+                                    : GetWettableSlotMissingProfileWarningText(WetClothingAsset, MaterialSlotIndex);
+                                return WarningText.IsEmpty()
+                                    ? EVisibility::Collapsed
+                                    : EVisibility::Visible;
                             })
                             .OverflowPolicy(ETextOverflowPolicy::Ellipsis)]];
 
-    if (!bIsAllSlotsRow)
+    RowContent->AddSlot()
+        .AutoWidth()
+        .VAlign(VAlign_Center)
+        .Padding(0.0f, 0.0f, 10.0f, 0.0f)
+            [SNew(SBox)
+                 .WidthOverride(112.0f)
+                 .HeightOverride(52.0f)
+                 .HAlign(HAlign_Center)
+                 .VAlign(VAlign_Center)
+                     [bIsAllSlotsRow
+                         ? StaticCastSharedRef<SWidget>(SNew(STextBlock)
+                             .Text(FText::FromString(TEXT("-")))
+                             .Font(FAppStyle::GetFontStyle(TEXT("SmallFont"))))
+                         : ThumbnailWidget]];
+
+    RowContent->AddSlot()
+        .AutoWidth()
+        .VAlign(VAlign_Fill)
+        .Padding(0.0f, 4.0f, 12.0f, 4.0f)
+            [SNew(SBox)
+                 .WidthOverride(1.0f)
+                     [SNew(SBorder)
+                          .BorderImage(FAppStyle::Get().GetBrush(TEXT("WhiteBrush")))
+                          .BorderBackgroundColor(FLinearColor(1.0f, 1.0f, 1.0f, 0.12f))
+                          .Padding(0.0f)]];
+
+    RowContent->AddSlot()
+        .AutoWidth()
+        .VAlign(VAlign_Center)
+            [SNew(SBox)
+                 .WidthOverride(72.0f)
+                 .HAlign(HAlign_Center)
+                 .VAlign(VAlign_Center)
+                     [SNew(SHorizontalBox)
+
+                      + SHorizontalBox::Slot()
+                            .AutoWidth()
+                            .VAlign(VAlign_Center)
+                                [SNew(STextBlock)
+                                     .Text_Lambda([GetStatusText = Args.GetMaterialSlotStatusText, MaterialSlotIndex, bIsAllSlotsRow]()
+                                     {
+                                         return bIsAllSlotsRow
+                                                    ? FText::FromString(TEXT("-"))
+                                                    : GetStatusText ? GetStatusText(MaterialSlotIndex) : FText::GetEmpty();
+                                     })
+                                     .ToolTipText_Lambda([GetTooltip = Args.GetMaterialSlotStatusTooltip, MaterialSlotIndex, bIsAllSlotsRow]()
+                                     {
+                                         return !bIsAllSlotsRow && GetTooltip ? GetTooltip(MaterialSlotIndex) : FText::GetEmpty();
+                                     })
+                                     .Font(FAppStyle::GetFontStyle(TEXT("SmallFont")))
+                                     .ColorAndOpacity_Lambda([GetStatusColor = Args.GetMaterialSlotStatusColor, MaterialSlotIndex, bIsAllSlotsRow]()
+                                     {
+                                         return !bIsAllSlotsRow && GetStatusColor
+                                             ? GetStatusColor(MaterialSlotIndex)
+                                             : FSlateColor(FStyleColors::Foreground);
+                                     })]
+
+                      + SHorizontalBox::Slot()
+                            .AutoWidth()
+                            .VAlign(VAlign_Center)
+                            .Padding(4.0f, 0.0f, 0.0f, 0.0f)
+                                [SNew(SButton)
+                                     .ButtonStyle(FAppStyle::Get(), TEXT("NoBorder"))
+                                     .ContentPadding(FMargin(1.0f))
+                                     .Visibility_Lambda([ShouldShowInfo = Args.ShouldShowMaterialSlotStatusInfo, MaterialSlotIndex, bIsAllSlotsRow]()
+                                     {
+                                         return !bIsAllSlotsRow && ShouldShowInfo && ShouldShowInfo(MaterialSlotIndex)
+                                                    ? EVisibility::Visible
+                                                    : EVisibility::Collapsed;
+                                     })
+                                     .ToolTipText_Lambda([GetTooltip = Args.GetMaterialSlotStatusTooltip, MaterialSlotIndex]()
+                                     {
+                                         return GetTooltip ? GetTooltip(MaterialSlotIndex) : FText::GetEmpty();
+                                     })
+                                     .OnClicked_Lambda([OnClicked = Args.OnMaterialSlotStatusInfoClicked, MaterialSlotIndex]()
+                                     {
+                                         return OnClicked
+                                                    ? OnClicked(MaterialSlotIndex)
+                                                    : FReply::Handled();
+                                     })
+                                         [SNew(SImage)
+                                              .DesiredSizeOverride(FVector2D(14.0f, 14.0f))
+                                              .Image(FAppStyle::GetBrush(TEXT("ClassIcon.PointLightComponent")))
+                                              .ColorAndOpacity(FSlateColor(FStyleColors::AccentYellow))]]]];
+
+    if (Args.bShowWettableToggle)
     {
         RowContent->AddSlot()
             .AutoWidth()
             .VAlign(VAlign_Center)
-            .Padding(0.0f, 0.0f, 4.0f, 0.0f)
                 [SNew(SBox)
-                     .WidthOverride(64.0f)
+                     .WidthOverride(76.0f)
                      .HAlign(HAlign_Center)
                      .VAlign(VAlign_Center)
-                         [SNew(STextBlock)
-                     .Text_Lambda([GetStatusText = Args.GetMaterialSlotStatusText, MaterialSlotIndex]()
-                     {
-                         return GetStatusText ? GetStatusText(MaterialSlotIndex) : FText::GetEmpty();
-                     })
-                     .ToolTipText_Lambda([GetTooltip = Args.GetMaterialSlotStatusTooltip, MaterialSlotIndex]()
-                     {
-                         return GetTooltip ? GetTooltip(MaterialSlotIndex) : FText::GetEmpty();
-                     })
-                     .Font(FAppStyle::GetFontStyle(TEXT("SmallFont")))
-                     .ColorAndOpacity_Lambda([GetStatusColor = Args.GetMaterialSlotStatusColor, MaterialSlotIndex]()
-                     {
-                         return GetStatusColor
-                             ? GetStatusColor(MaterialSlotIndex)
-                             : FSlateColor(FStyleColors::Foreground);
-                     })]];
-
-        if (Args.bShowWettableToggle)
-        {
-            RowContent->AddSlot()
-                .AutoWidth()
-                .VAlign(VAlign_Center)
-                    [SNew(SBox)
-                         .WidthOverride(76.0f)
-                         .HAlign(HAlign_Center)
-                         .VAlign(VAlign_Center)
-                             [SNew(SButton)
-                         .ButtonStyle(FAppStyle::Get(), TEXT("NoBorder"))
-                         .ContentPadding(FMargin(4.0f, 2.0f))
-                         .ToolTipText(NSLOCTEXT("WetClothingEditorCommonWidgets", "WettableSlotTooltip", "Toggle whether this material slot can be wetted."))
-                         .IsEnabled_Lambda([IsToggleEnabled = Args.IsWettableToggleEnabled, MaterialSlotIndex]()
+                         [bIsAllSlotsRow
+                             ? StaticCastSharedRef<SWidget>(SNew(STextBlock)
+                                 .Text(FText::FromString(TEXT("-")))
+                                 .Font(FAppStyle::GetFontStyle(TEXT("SmallFont"))))
+                             : StaticCastSharedRef<SWidget>(SNew(SButton)
+                          .ButtonStyle(FAppStyle::Get(), TEXT("NoBorder"))
+                          .ContentPadding(FMargin(4.0f, 2.0f))
+                          .ToolTipText(NSLOCTEXT("WetClothingEditorCommonWidgets", "WettableSlotTooltip", "Toggle whether this material slot can be wetted."))
+                          .IsEnabled_Lambda([IsToggleEnabled = Args.IsWettableToggleEnabled, MaterialSlotIndex]()
                          {
                              return !IsToggleEnabled || IsToggleEnabled(MaterialSlotIndex);
                          })
@@ -740,26 +883,80 @@ TSharedRef<ITableRow> FWCAEditorWidgets::GenerateMaterialSlotRow(
                                            .ColorAndOpacity_Lambda([Item]()
                                            {
                                                const bool bWettable = Item.IsValid() && Item->bIsWettableSlot;
-                                               return bWettable
+                                           return bWettable
                                                           ? FSlateColor(FLinearColor(0.35f, 0.85f, 1.0f, 1.0f))
                                                           : FSlateColor(FLinearColor(1.0f, 0.36f, 0.36f, 1.0f));
-                                           })]]]];
-        }
-
-        if (Args.BuildTrailingWidget)
-        {
-            RowContent->AddSlot()
-                .AutoWidth()
-                .VAlign(VAlign_Center)
-                [
-                    Args.BuildTrailingWidget(MaterialSlotIndex)
-                ];
-        }
+                                           })]])]];
     }
 
+    if (!bIsAllSlotsRow && Args.BuildTrailingWidget)
+    {
+        RowContent->AddSlot()
+            .AutoWidth()
+            .VAlign(VAlign_Center)
+            [
+                Args.BuildTrailingWidget(MaterialSlotIndex)
+            ];
+    }
+
+    TSharedRef<SOverlay> DecoratedRowContent = SNew(SOverlay)
+
+        + SOverlay::Slot()
+        [
+            RowContent
+        ]
+
+        + SOverlay::Slot()
+        .HAlign(HAlign_Left)
+        .VAlign(VAlign_Fill)
+        [
+            SNew(SBox)
+            .WidthOverride(3.0f)
+            [
+                SNew(SBorder)
+                .BorderImage(FAppStyle::Get().GetBrush(TEXT("WhiteBrush")))
+                .BorderBackgroundColor_Lambda(
+                    [GetAccentColor = Args.GetMaterialSlotRowAccentColor, MaterialSlotIndex, bIsAllSlotsRow]()
+                    {
+                        return !bIsAllSlotsRow && GetAccentColor
+                            ? GetAccentColor(MaterialSlotIndex)
+                            : FSlateColor(FLinearColor::Transparent);
+                    })
+                .Padding(0.0f)
+            ]
+        ]
+
+        + SOverlay::Slot()
+        .HAlign(HAlign_Fill)
+        .VAlign(VAlign_Bottom)
+        [
+            SNew(SBox)
+            .HeightOverride(1.0f)
+            [
+                SNew(SBorder)
+                .BorderImage(FAppStyle::Get().GetBrush(TEXT("WhiteBrush")))
+                .BorderBackgroundColor(FLinearColor(1.0f, 1.0f, 1.0f, 0.10f))
+                .Padding(0.0f)
+            ]
+        ];
+
     return SNew(STableRow<TSharedPtr<FWCAMaterialSlotItem>>, OwnerTable)
-        .Padding(4.0f)
-            [RowContent];
+        .Padding(0.0f)
+        [
+            SNew(SBorder)
+            .BorderImage(FAppStyle::Get().GetBrush(TEXT("WhiteBrush")))
+            .BorderBackgroundColor_Lambda(
+                [GetBackgroundColor = Args.GetMaterialSlotRowBackgroundColor, MaterialSlotIndex, bIsAllSlotsRow]()
+                {
+                    return !bIsAllSlotsRow && GetBackgroundColor
+                        ? GetBackgroundColor(MaterialSlotIndex)
+                        : FSlateColor(FLinearColor::Transparent);
+                })
+            .Padding(4.0f)
+            [
+                DecoratedRowContent
+            ]
+        ];
 }
 
 TSharedRef<ITableRow> FWCAEditorWidgets::GeneratePartMapRow(

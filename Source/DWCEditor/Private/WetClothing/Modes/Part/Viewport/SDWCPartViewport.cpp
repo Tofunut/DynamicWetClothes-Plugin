@@ -1,4 +1,4 @@
-﻿#include "SDWCPartViewport.h"
+#include "SDWCPartViewport.h"
 
 #include "DataAssets/WetClothingAsset.h"
 #include "DataAssets/WetnessProfile.h"
@@ -27,8 +27,6 @@
 #include "WetClothing/DerivedAssets/Textures/WetnessProfile/WetClothingWetPartDataTextureBaker.h"
 #include "WetClothing/DerivedAssets/Textures/WetnessProfile/WetClothingSurfaceTextureNormalizer.h"
 #include "WetClothing/Modes/DWCPreviewViewportToolbarUtils.h"
-#include "Widgets/Layout/SBorder.h"
-#include "Widgets/Text/STextBlock.h"
 
 #define LOCTEXT_NAMESPACE "WetClothingAssetViewport"
 
@@ -622,10 +620,6 @@ void SDWCPartViewport::RefreshPreviewMesh()
             RefreshSurfaceWaterPreviewMaterial();
         }
         RefreshMaterialSectionVisibility();
-        if (OverlayText.IsValid())
-        {
-            OverlayText->SetText(GetViewportHintText());
-        }
 
         RequestViewportRedraw();
         return;
@@ -675,11 +669,6 @@ void SDWCPartViewport::RefreshPreviewMesh()
     }
     RefreshMaterialSectionVisibility();
 
-    if (OverlayText.IsValid())
-    {
-        OverlayText->SetText(GetViewportHintText());
-    }
-
     if (ViewportClient.IsValid())
     {
         ViewportClient->SetPreviewMeshComponent(PreviewMeshComponent);
@@ -703,10 +692,6 @@ void SDWCPartViewport::SetHighlightedMaterialSlot(const int32 SlotIndex)
     {
         RefreshSurfaceWaterPreviewMaterial();
     }
-    if (OverlayText.IsValid())
-    {
-        OverlayText->SetText(GetViewportHintText());
-    }
     RequestViewportRedraw();
 }
 
@@ -714,10 +699,6 @@ void SDWCPartViewport::ClearMaterialSlotHighlight()
 {
     CurrentHighlightedMaterialSlot = INDEX_NONE;
     RefreshMaterialSectionVisibility();
-    if (OverlayText.IsValid())
-    {
-        OverlayText->SetText(GetViewportHintText());
-    }
     RequestViewportRedraw();
 }
 
@@ -924,11 +905,6 @@ void SDWCPartViewport::SetSurfaceWaterTilingPreviewDisplayMode(
     if (SurfaceWaterPreviewMaterial != nullptr)
     {
         ApplySurfaceWaterPreviewRenderOverrides();
-        if (OverlayText.IsValid())
-        {
-            OverlayText->SetText(GetViewportHintText());
-            OverlayText->SetColorAndOpacity(GetViewportHintTextColor());
-        }
         RequestViewportRedraw();
     }
 }
@@ -1252,7 +1228,7 @@ bool SDWCPartViewport::BuildSurfaceWaterPreviewTextures(FString& OutErrorMessage
                 &DataUVError))
         {
             OutErrorMessage = DataUVError.IsEmpty()
-                ? TEXT("Could not rebuild the selected slot's DWC Data UV triangles.")
+                ? TEXT("Could not rebuild the selected slot's DWC UV Channel triangles.")
                 : DataUVError;
             return false;
         }
@@ -1516,22 +1492,12 @@ void SDWCPartViewport::RefreshSurfaceWaterPreviewDynamicTextures()
     {
         SurfaceWaterPreviewStatus = TextureError;
         bSurfaceWaterPreviewStatusIsError = true;
-        if (OverlayText.IsValid())
-        {
-            OverlayText->SetText(GetViewportHintText());
-            OverlayText->SetColorAndOpacity(GetViewportHintTextColor());
-        }
         RequestViewportRedraw();
         return;
     }
 
     ApplySurfaceWaterPreviewTextureParameters();
     PreviewMeshComponent->MarkRenderStateDirty();
-    if (OverlayText.IsValid())
-    {
-        OverlayText->SetText(GetViewportHintText());
-        OverlayText->SetColorAndOpacity(GetViewportHintTextColor());
-    }
     RequestViewportRedraw();
 }
 
@@ -1848,11 +1814,6 @@ void SDWCPartViewport::RefreshSurfaceWaterPreviewMaterial()
         bSurfaceWaterPreviewStatusIsError = true;
     }
 
-    if (OverlayText.IsValid())
-    {
-        OverlayText->SetText(GetViewportHintText());
-        OverlayText->SetColorAndOpacity(GetViewportHintTextColor());
-    }
     RequestViewportRedraw();
 }
 
@@ -1992,17 +1953,6 @@ void SDWCPartViewport::PopulateViewportOverlays(TSharedRef<SOverlay> Overlay)
 {
     SEditorViewport::PopulateViewportOverlays(Overlay);
 
-    Overlay->AddSlot()
-        .VAlign(VAlign_Top)
-        .HAlign(HAlign_Left)
-        .Padding(8.0f)
-            [SNew(SBorder)
-                 .BorderImage(FAppStyle::Get().GetBrush("FloatingBorder"))
-                 .Padding(6.0f)
-                     [SAssignNew(OverlayText, STextBlock)
-                          .Text(this, &SDWCPartViewport::GetViewportHintText)
-                          .ColorAndOpacity(this, &SDWCPartViewport::GetViewportHintTextColor)
-                          .AutoWrapText(true)]];
 }
 
 void SDWCPartViewport::OnFocusViewportToSelection()
@@ -2067,45 +2017,5 @@ UMaterialInterface* SDWCPartViewport::ResolveWetPartOverlayMaterial()
     return WetPartOverlayMaterial;
 }
 
-
-FText SDWCPartViewport::GetViewportHintText() const
-{
-    if (bSurfaceWaterTilingPreview)
-    {
-        FString Hint = TEXT("Surface Water Tiling uses a transient DWC preview material on the original skeletal mesh.");
-        if (CurrentHighlightedMaterialSlot != INDEX_NONE)
-        {
-            Hint += FString::Printf(TEXT("\nPreviewing material slot %d."), CurrentHighlightedMaterialSlot);
-        }
-        else
-        {
-            Hint += TEXT("\nSelect a wettable material slot and Wet Part.");
-        }
-
-        if (!SurfaceWaterPreviewStatus.IsEmpty())
-        {
-            Hint += TEXT("\n") + SurfaceWaterPreviewStatus;
-        }
-        return FText::FromString(Hint);
-    }
-
-    FString Hint = TEXT("Left click islands in the preview to select them. Hold Shift to add to the current island selection.");
-    if (CurrentHighlightedMaterialSlot != INDEX_NONE)
-    {
-        Hint += FString::Printf(TEXT("\nShowing only material slot %d."), CurrentHighlightedMaterialSlot);
-    }
-    else
-    {
-        Hint += TEXT("\nSelect a material slot from the list to isolate it.");
-    }
-    return FText::FromString(Hint);
-}
-
-FSlateColor SDWCPartViewport::GetViewportHintTextColor() const
-{
-    return bSurfaceWaterTilingPreview
-        ? GetSurfaceWaterPreviewStatusColor()
-        : FSlateColor(FStyleColors::ForegroundHover);
-}
 
 #undef LOCTEXT_NAMESPACE

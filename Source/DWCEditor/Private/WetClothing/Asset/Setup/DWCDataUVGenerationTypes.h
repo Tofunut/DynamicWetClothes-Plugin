@@ -14,7 +14,7 @@ struct FDWCDataUVTriangle
     FVector2D SourceUVs[3] = { FVector2D::ZeroVector, FVector2D::ZeroVector, FVector2D::ZeroVector };
 };
 
-/** Transient packing unit in generated Data UV space. Not the persistent Original UV island record. */
+/** Transient packing unit in generated DWC UV Channel space. Not the persistent Original UV island record. */
 struct FDWCDataUVChart
 {
     int32 MaterialSlotIndex = INDEX_NONE;

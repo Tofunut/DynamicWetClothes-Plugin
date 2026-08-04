@@ -2822,7 +2822,7 @@ FReply SWetClothingPartEditorPanel::HandleApplyMaterialSetupClicked()
     FString ResultMessage = MaterialSet.Message;
     const bool bSucceeded =
         MaterialSet.bSucceeded && MaterialSet.GeneratedMaterial != nullptr &&
-        MaterialSet.CPUMaterialInstance != nullptr && MaterialSet.GPUMaterialInstance != nullptr;
+        MaterialSet.GeneratedMaterialInstance != nullptr;
 
     if (bSucceeded && SourceMaterial != nullptr)
     {
@@ -2859,8 +2859,7 @@ FReply SWetClothingPartEditorPanel::HandleApplyMaterialSetupClicked()
 
                         ExistingOverride->SourceMaterial = SourceMaterial;
                         ExistingOverride->GeneratedMaterial = MaterialSet.GeneratedMaterial;
-                        ExistingOverride->CPUMaterialInstance = MaterialSet.CPUMaterialInstance;
-                        ExistingOverride->GPUMaterialInstance = MaterialSet.GPUMaterialInstance;
+                        ExistingOverride->GeneratedMaterialInstance = MaterialSet.GeneratedMaterialInstance;
                         FWCAEditorWidgets::MarkMaterialSlotWettable(WetClothingAssetPtr, MaterialIndex);
                     }
                     WetClothingAssetPtr->MarkPackageDirty();
@@ -2879,8 +2878,8 @@ FReply SWetClothingPartEditorPanel::HandleApplyMaterialSetupClicked()
                     ResultMessage += FString::Printf(
                         TEXT("\nStored shared '%s', CPU '%s', and GPU '%s' as runtime wet material overrides for %d material slot(s) on '%s': %s."),
                         *MaterialSet.GeneratedMaterial->GetName(),
-                        *MaterialSet.CPUMaterialInstance->GetName(),
-                        *MaterialSet.GPUMaterialInstance->GetName(),
+                        *MaterialSet.GeneratedMaterialInstance->GetName(),
+                        *MaterialSet.GeneratedMaterialInstance->GetName(),
                         AssignedSlotIndices.Num(),
                         *GeneratedDataUV->GetName(),
                         *AssignedSlotText);

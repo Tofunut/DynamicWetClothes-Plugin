@@ -14,8 +14,7 @@ struct FWetClothingUnifiedMaterialSetupResult
     bool bSucceeded = false;
     bool bAlreadyConfigured = false;
     UMaterial* GeneratedMaterial = nullptr;
-    UMaterialInstanceConstant* CPUMaterialInstance = nullptr;
-    UMaterialInstanceConstant* GPUMaterialInstance = nullptr;
+    UMaterialInstanceConstant* GeneratedMaterialInstance = nullptr;
     UMaterialFunctionInterface* EvaluateSurfaceAppearanceFunction = nullptr;
     FString Message;
 };
@@ -23,7 +22,7 @@ struct FWetClothingUnifiedMaterialSetupResult
 class FWCAMaterialGenerator
 {
   public:
-    static constexpr int32 GeneratedMaterialGeneratorVersion = 1;
+    static constexpr int32 GeneratedMaterialGeneratorVersion = 2;
 
     struct FOptions
     {
@@ -52,7 +51,7 @@ class FWCAMaterialGenerator
         int32 MaterialSlotIndex,
         UMaterialInterface* CandidateMaterial);
 
-    /** Creates one shared DWC material graph and two static CPU/GPU MIC permutations. */
+    /** Creates one shared DWC material graph and one runtime-selectable MIC. */
     static FWetClothingUnifiedMaterialSetupResult CreateOrUpdateUnifiedMaterialSet(
         UMaterialInterface* SourceMaterial,
         const FOptions& Options = FOptions());

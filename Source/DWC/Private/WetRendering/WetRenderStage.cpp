@@ -9,6 +9,7 @@
 #include "WetSimulation/AbsorbedWetness/AbsorbedWetnessSimulationState.h"
 #include "WetRendering/WetVertexColorBuffer.h"
 #include "WetRendering/DWCGPUResourceSubsystem.h"
+#include "Runtime/Engine/Public/Materials/MaterialInstanceDynamic.h"
 #include "Engine/World.h"
 #include "Runtime/Engine/Public/Rendering/SkeletalMeshLODRenderData.h"
 #include "Runtime/Engine/Public/Rendering/SkeletalMeshRenderData.h"
@@ -100,8 +101,14 @@ void FWetRenderStage::InitializeWetMaterialInstance(FWetRenderStageArgs& Receive
 
     for (int32 MaterialIdx = 0; MaterialIdx < MaterialCount; ++MaterialIdx)
     {
-        UMaterialInstanceDynamic* MID =
-            Receiver.TargetSkeletalMesh->CreateAndSetMaterialInstanceDynamic(MaterialIdx);
+        UMaterialInterface* ParentMaterial = Receiver.TargetSkeletalMesh->GetMaterial(MaterialIdx);
+        UMaterialInstanceDynamic* MID = UMaterialInstanceDynamic::Create(
+            ParentMaterial,
+            Receiver.TargetSkeletalMesh);
+        if (MID != nullptr)
+        {
+            Receiver.TargetSkeletalMesh->SetMaterial(MaterialIdx, MID);
+        }
 
         (*Receiver.WetMaterialInstances)[MaterialIdx] = MID;
     }
@@ -138,6 +145,12 @@ void FWetRenderStage::ApplyWetMaterialParameters(FWetRenderStageArgs& Receiver)
             continue;
         }
         ++UpdatedMaterialCount;
+        if (!DWCWetMaterialParameters::UseGPUBackend().IsNone())
+        {
+            MID->SetScalarParameterValue(
+                DWCWetMaterialParameters::UseGPUBackend(),
+                Receiver.bGPUWetnessMode ? 1.0f : 0.0f);
+        }
         if (!DWCWetMaterialParameters::WetPartDebugStrength().IsNone())
         {
             MID->SetScalarParameterValue(
@@ -254,7 +267,8 @@ void FWetRenderStage::ApplyWetWrinkleNormalMapParameters(FWetRenderStageArgs& Re
             }
 
             const FWetWrinkleResolvedNormalMap ResolvedWrinkleMap =
-                Receiver.WetClothingAsset->Authored.WrinkleData.ResolveRuntimeWrinkleNormalMap(MaterialSlotIndex);
+                Receiver.WetClothingAsset->Authored.WrinkleData.ResolveRuntimeWrinkleNormalMap(
+                    MaterialSlotIndex);
             if (!ResolvedWrinkleMap.IsValid() || ResolvedWrinkleMap.Texture == nullptr)
             {
                 continue;
@@ -410,17 +424,22 @@ void FWetRenderStage::ApplyWetTransparencyMapParameters(FWetRenderStageArgs& Rec
                 continue;
             }
 
-            const FWetClothingBakedTransparencyMap* BakedMap =
-                Receiver.WetClothingAsset->Authored.TransparencyData.FindRuntimeBakedTransparencyMap(MaterialSlotIndex);
-            if (BakedMap == nullptr || BakedMap->TransparencyMap == nullptr)
+            const FWetClothingTransparencyLayerData* Layer =
+                Receiver.WetClothingAsset->Authored.TransparencyData.TransparencyLayers.FindByPredicate(
+                    [MaterialSlotIndex](const FWetClothingTransparencyLayerData& Candidate)
+                    {
+                        return Candidate.TargetSurface.OuterMaterialSlotIndex == MaterialSlotIndex;
+                    });
+            if (Layer == nullptr)
             {
                 continue;
             }
 
-            const int32 DataUVChannelIndex = Receiver.WetClothingAsset->GetDWCDataUVChannelIndex();
-            if (DataUVChannelIndex < 0 || DataUVChannelIndex > 3)
+            const FWetClothingBakedTransparencyMap* BakedMap =
+                Receiver.WetClothingAsset->Authored.TransparencyData.FindRuntimeBakedTransparencyMap(
+                    MaterialSlotIndex);
+            if (BakedMap == nullptr || BakedMap->TransparencyMap == nullptr)
             {
-
                 continue;
             }
 
@@ -448,7 +467,9 @@ void FWetRenderStage::ApplyWetTransparencyMapParameters(FWetRenderStageArgs& Rec
             }
             if (!DWCWetMaterialParameters::TransparencyUVChannel().IsNone())
             {
-                MID->SetScalarParameterValue(DWCWetMaterialParameters::TransparencyUVChannel(), static_cast<float>(DataUVChannelIndex));
+                MID->SetScalarParameterValue(
+                    DWCWetMaterialParameters::TransparencyUVChannel(),
+                    static_cast<float>(Receiver.WetClothingAsset->GetDWCDataUVChannelIndex()));
             }
 
             bTransparencyMapAssigned[MaterialSlotIndex] = true;

@@ -1591,7 +1591,7 @@ void SDWCPartViewport::RefreshSurfaceWaterPreviewMaterial()
                 PreviewOptions);
         if (!PreviewMaterialSet.bSucceeded ||
             PreviewMaterialSet.GeneratedMaterial == nullptr ||
-            PreviewMaterialSet.GPUMaterialInstance == nullptr)
+            PreviewMaterialSet.GeneratedMaterialInstance == nullptr)
         {
             SurfaceWaterPreviewStatus = FString::Printf(
                 TEXT("Could not create the transient DWC Surface Water tiling preview material for slot %d. %s"),
@@ -1603,7 +1603,7 @@ void SDWCPartViewport::RefreshSurfaceWaterPreviewMaterial()
         }
 
         SurfaceWaterPreviewBaseMaterial = PreviewMaterialSet.GeneratedMaterial;
-        SurfaceWaterPreviewStaticMaterial = PreviewMaterialSet.GPUMaterialInstance;
+        SurfaceWaterPreviewStaticMaterial = PreviewMaterialSet.GeneratedMaterialInstance;
         SurfaceWaterPreviewMaterial = UMaterialInstanceDynamic::Create(
             SurfaceWaterPreviewStaticMaterial,
             GetTransientPackage());

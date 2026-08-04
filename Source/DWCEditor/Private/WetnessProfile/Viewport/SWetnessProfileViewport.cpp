@@ -571,7 +571,7 @@ void SWetnessProfileViewport::RebuildGeneratedSpherePreviewMaterial()
         FWCAMaterialGenerator::CreateTransientUnifiedPreviewMaterial(SourceMaterial, Options);
     if (!PreviewMaterialSet.bSucceeded ||
         PreviewMaterialSet.GeneratedMaterial == nullptr ||
-        PreviewMaterialSet.GPUMaterialInstance == nullptr)
+        PreviewMaterialSet.GeneratedMaterialInstance == nullptr)
     {
         UE_LOG(
             LogTemp,
@@ -590,19 +590,19 @@ void SWetnessProfileViewport::RebuildGeneratedSpherePreviewMaterial()
     }
 
     UMaterialInstanceDynamic* PreviewMID = UMaterialInstanceDynamic::Create(
-        PreviewMaterialSet.GPUMaterialInstance,
+        PreviewMaterialSet.GeneratedMaterialInstance,
         GetTransientPackage());
     if (PreviewMID == nullptr)
     {
         SetPreviewMaterialOnMesh(PreviewMeshComponent, SourceMaterial);
         GeneratedPreviewMaterials.Add(PreviewMaterialSet.GeneratedMaterial);
-        GeneratedPreviewMaterialInstances.Add(PreviewMaterialSet.GPUMaterialInstance);
+        GeneratedPreviewMaterialInstances.Add(PreviewMaterialSet.GeneratedMaterialInstance);
         GeneratedPreviewDynamicMaterials.Add(nullptr);
         return;
     }
 
     GeneratedPreviewMaterials.Add(PreviewMaterialSet.GeneratedMaterial);
-    GeneratedPreviewMaterialInstances.Add(PreviewMaterialSet.GPUMaterialInstance);
+    GeneratedPreviewMaterialInstances.Add(PreviewMaterialSet.GeneratedMaterialInstance);
     GeneratedPreviewDynamicMaterials.Add(PreviewMID);
     PreviewMeshComponent->SetMaterial(0, PreviewMID);
     bGeneratedSpherePreviewMaterialValid = true;
@@ -663,7 +663,7 @@ void SWetnessProfileViewport::RebuildGeneratedPreviewMaterials(USkeletalMesh* Sk
             FWCAMaterialGenerator::CreateTransientUnifiedPreviewMaterial(SourceMaterial, Options);
         if (!PreviewMaterialSet.bSucceeded ||
             PreviewMaterialSet.GeneratedMaterial == nullptr ||
-            PreviewMaterialSet.GPUMaterialInstance == nullptr)
+            PreviewMaterialSet.GeneratedMaterialInstance == nullptr)
         {
             UE_LOG(
                 LogTemp,
@@ -680,19 +680,19 @@ void SWetnessProfileViewport::RebuildGeneratedPreviewMaterials(USkeletalMesh* Sk
         }
 
         UMaterialInstanceDynamic* PreviewMID = UMaterialInstanceDynamic::Create(
-            PreviewMaterialSet.GPUMaterialInstance,
+            PreviewMaterialSet.GeneratedMaterialInstance,
             GetTransientPackage());
         if (PreviewMID == nullptr)
         {
             PreviewSkeletalMeshComponent->SetMaterial(MaterialIndex, SourceMaterial);
             GeneratedPreviewMaterials.Add(PreviewMaterialSet.GeneratedMaterial);
-            GeneratedPreviewMaterialInstances.Add(PreviewMaterialSet.GPUMaterialInstance);
+            GeneratedPreviewMaterialInstances.Add(PreviewMaterialSet.GeneratedMaterialInstance);
             GeneratedPreviewDynamicMaterials.Add(nullptr);
             continue;
         }
 
         GeneratedPreviewMaterials.Add(PreviewMaterialSet.GeneratedMaterial);
-        GeneratedPreviewMaterialInstances.Add(PreviewMaterialSet.GPUMaterialInstance);
+        GeneratedPreviewMaterialInstances.Add(PreviewMaterialSet.GeneratedMaterialInstance);
         GeneratedPreviewDynamicMaterials.Add(PreviewMID);
         PreviewSkeletalMeshComponent->SetMaterial(MaterialIndex, PreviewMID);
     }

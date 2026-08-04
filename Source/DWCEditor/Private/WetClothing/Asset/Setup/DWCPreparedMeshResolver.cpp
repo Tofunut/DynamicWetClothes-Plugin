@@ -49,6 +49,34 @@ namespace DWCPreparedMeshResolverPrivate
         ObjectsToDelete.Add(ExistingMesh);
         return ObjectTools::DeleteObjects(ObjectsToDelete, false) > 0;
     }
+
+    void ApplyExistingGeneratedMaterials(UWetClothingAsset& Asset, USkeletalMesh& Mesh)
+    {
+        for (const FWetClothingGeneratedWetMaterialOverride& MaterialOverride :
+             Asset.Derived.Inline.GeneratedWetMaterialOverrides)
+        {
+            if (MaterialOverride.MaterialSlotIndex == INDEX_NONE ||
+                MaterialOverride.GeneratedMaterialInstance == nullptr ||
+                !Mesh.GetMaterials().IsValidIndex(MaterialOverride.MaterialSlotIndex))
+            {
+                continue;
+            }
+
+            UMaterialInterface* CurrentMaterial =
+                Mesh.GetMaterials()[MaterialOverride.MaterialSlotIndex].MaterialInterface;
+            const bool bIsExpectedSource = CurrentMaterial == nullptr ||
+                CurrentMaterial == MaterialOverride.SourceMaterial ||
+                CurrentMaterial == MaterialOverride.GeneratedMaterial ||
+                CurrentMaterial == MaterialOverride.GeneratedMaterialInstance;
+            if (!bIsExpectedSource)
+            {
+                continue;
+            }
+
+            UMaterialInterface* GeneratedMaterial = MaterialOverride.GeneratedMaterialInstance.Get();
+            Mesh.GetMaterials()[MaterialOverride.MaterialSlotIndex].MaterialInterface = GeneratedMaterial;
+        }
+    }
 }
 
 FDWCPreparedMeshResolveResult FDWCPreparedMeshResolver::Resolve(
@@ -119,6 +147,10 @@ FDWCPreparedMeshResolveResult FDWCPreparedMeshResolver::Resolve(
     {
         return Failure(TEXT("Failed to duplicate the Source Mesh for DWC UV Channel generation."));
     }
+
+    // Reuse generated material instances on a newly created DWC mesh without
+    // replacing an unrelated material explicitly assigned by the user.
+    ApplyExistingGeneratedMaterials(Asset, *PreparedMesh);
 
     FAssetRegistryModule::AssetCreated(PreparedMesh);
     PreparedMesh->MarkPackageDirty();

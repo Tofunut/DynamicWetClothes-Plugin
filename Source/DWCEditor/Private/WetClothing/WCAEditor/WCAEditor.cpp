@@ -2567,7 +2567,7 @@ namespace
             const FWetClothingUnifiedMaterialSetupResult MaterialSet =
                 FWCAMaterialGenerator::CreateOrUpdateUnifiedMaterialSet(SourceMaterial, MaterialSetupOptions);
             if (!MaterialSet.bSucceeded || MaterialSet.GeneratedMaterial == nullptr ||
-                MaterialSet.CPUMaterialInstance == nullptr || MaterialSet.GPUMaterialInstance == nullptr)
+                MaterialSet.GeneratedMaterialInstance == nullptr)
             {
                 Failures.Add(FString::Printf(
                     TEXT("Slot %d: %s"),
@@ -2588,8 +2588,7 @@ namespace
 #endif
             ExistingOverride->SourceMaterial = SourceMaterial;
             ExistingOverride->GeneratedMaterial = MaterialSet.GeneratedMaterial;
-            ExistingOverride->CPUMaterialInstance = MaterialSet.CPUMaterialInstance;
-            ExistingOverride->GPUMaterialInstance = MaterialSet.GPUMaterialInstance;
+            ExistingOverride->GeneratedMaterialInstance = MaterialSet.GeneratedMaterialInstance;
             ExistingOverride->GeneratorVersion = FWCAMaterialGenerator::GeneratedMaterialGeneratorVersion;
             ExistingOverride->GenerationSignature = FWCAMaterialGenerator::BuildGeneratedMaterialSignature(
                 &Asset,
@@ -4255,7 +4254,7 @@ FText FWCAEditor::GetGenerateMaterialsTooltip() const
 
     return LOCTEXT(
         "GenerateMaterialsRequiredTooltip",
-        "Generate or update the shared DWC material and CPU/GPU permutations for wettable slots.");
+        "Generate or update the shared DWC material and runtime instance for wettable slots.");
 }
 
 FReply FWCAEditor::HandleGenerateMaterialsClicked()
@@ -4355,13 +4354,12 @@ FReply FWCAEditor::GenerateWetMaterials()
         const bool bHadCompleteOverride =
             ExistingOverride != nullptr &&
             ExistingOverride->GeneratedMaterial != nullptr &&
-            ExistingOverride->CPUMaterialInstance != nullptr &&
-            ExistingOverride->GPUMaterialInstance != nullptr;
+            ExistingOverride->GeneratedMaterialInstance != nullptr;
 
         SlowTask.EnterProgressFrame(
             1.0f,
             FText::FromString(FString::Printf(
-                TEXT("Generating shared material and CPU/GPU permutations for slot %d from '%s'..."),
+                TEXT("Generating shared material and runtime instance for slot %d from '%s'..."),
                 MaterialSlotIndex,
                 *GetNameSafe(SourceMaterial))));
 
@@ -4373,7 +4371,7 @@ FReply FWCAEditor::GenerateWetMaterials()
         const FWetClothingUnifiedMaterialSetupResult MaterialSet =
             FWCAMaterialGenerator::CreateOrUpdateUnifiedMaterialSet(SourceMaterial, MaterialSetupOptions);
         if (!MaterialSet.bSucceeded || MaterialSet.GeneratedMaterial == nullptr ||
-            MaterialSet.CPUMaterialInstance == nullptr || MaterialSet.GPUMaterialInstance == nullptr)
+            MaterialSet.GeneratedMaterialInstance == nullptr)
         {
             Failures.Add(FString::Printf(
                 TEXT("Slot %d: %s"),
@@ -4394,21 +4392,32 @@ FReply FWCAEditor::GenerateWetMaterials()
 #endif
         ExistingOverride->SourceMaterial = SourceMaterial;
         ExistingOverride->GeneratedMaterial = MaterialSet.GeneratedMaterial;
-        ExistingOverride->CPUMaterialInstance = MaterialSet.CPUMaterialInstance;
-        ExistingOverride->GPUMaterialInstance = MaterialSet.GPUMaterialInstance;
+        ExistingOverride->GeneratedMaterialInstance = MaterialSet.GeneratedMaterialInstance;
         ExistingOverride->GeneratorVersion = FWCAMaterialGenerator::GeneratedMaterialGeneratorVersion;
         ExistingOverride->GenerationSignature = FWCAMaterialGenerator::BuildGeneratedMaterialSignature(
             Asset,
             MaterialSlotIndex,
             SourceMaterial);
+
+        UMaterialInterface* CurrentMaterial = RuntimeMesh->GetMaterials()[MaterialSlotIndex].MaterialInterface;
+        const bool bCanApplyGeneratedMaterial = CurrentMaterial == nullptr ||
+            CurrentMaterial == SourceMaterial ||
+            (ExistingOverride != nullptr &&
+                (CurrentMaterial == ExistingOverride->GeneratedMaterial ||
+                 CurrentMaterial == ExistingOverride->GeneratedMaterialInstance));
+        if (bCanApplyGeneratedMaterial)
+        {
+            RuntimeMesh->GetMaterials()[MaterialSlotIndex].MaterialInterface = MaterialSet.GeneratedMaterialInstance;
+            RuntimeMesh->MarkPackageDirty();
+        }
         bUpdatedAnyMaterial = true;
 
         UpdatedMaterials.Add(FString::Printf(
             TEXT("Slot %d -> shared %s, CPU %s, GPU %s (%s)"),
             MaterialSlotIndex,
             *GetNameSafe(MaterialSet.GeneratedMaterial),
-            *GetNameSafe(MaterialSet.CPUMaterialInstance),
-            *GetNameSafe(MaterialSet.GPUMaterialInstance),
+            *GetNameSafe(MaterialSet.GeneratedMaterialInstance),
+            *GetNameSafe(MaterialSet.GeneratedMaterialInstance),
             bHadCompleteOverride || MaterialSet.bAlreadyConfigured
                 ? TEXT("overwritten/refreshed")
                 : TEXT("created")));

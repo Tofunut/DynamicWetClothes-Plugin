@@ -424,7 +424,8 @@ void UDWCStatsSubsystem::CollectStats(FDWCStatsSnapshot& OutSnapshot)
                     }
 
                     const FWetWrinkleResolvedNormalMap WrinkleMap =
-                        WetClothingAsset->Authored.WrinkleData.ResolveRuntimeWrinkleNormalMap(MaterialSlotIndex);
+                        WetClothingAsset->Authored.WrinkleData.ResolveRuntimeWrinkleNormalMap(
+                            MaterialSlotIndex);
                     if (WrinkleMap.IsValid() &&
                         WrinkleMap.Texture != nullptr)
                     {
@@ -436,8 +437,20 @@ void UDWCStatsSubsystem::CollectStats(FDWCStatsSnapshot& OutSnapshot)
                             OutSnapshot.WrinkleTextureGPUBytes);
                     }
 
+                    const FWetClothingTransparencyLayerData* TransparencyLayer =
+                        WetClothingAsset->Authored.TransparencyData.TransparencyLayers.FindByPredicate(
+                            [MaterialSlotIndex](const FWetClothingTransparencyLayerData& Candidate)
+                            {
+                                return Candidate.TargetSurface.OuterMaterialSlotIndex == MaterialSlotIndex;
+                            });
+                    if (TransparencyLayer == nullptr)
+                    {
+                        continue;
+                    }
+
                     const FWetClothingBakedTransparencyMap* TransparencyMap =
-                        WetClothingAsset->Authored.TransparencyData.FindRuntimeBakedTransparencyMap(MaterialSlotIndex);
+                        WetClothingAsset->Authored.TransparencyData.FindRuntimeBakedTransparencyMap(
+                            MaterialSlotIndex);
                     if (TransparencyMap == nullptr ||
                         TransparencyMap->TransparencyMap == nullptr)
                     {

@@ -149,8 +149,7 @@ bool DWCEditorUtils::SaveAsset(UObject* Asset, const bool bPrepareRuntimeData)
              WetClothingAsset->Derived.Inline.GeneratedWetMaterialOverrides)
         {
             AddDirtyGeneratedPackage(MaterialOverride.GeneratedMaterial.Get());
-            AddDirtyGeneratedPackage(MaterialOverride.CPUMaterialInstance.Get());
-            AddDirtyGeneratedPackage(MaterialOverride.GPUMaterialInstance.Get());
+            AddDirtyGeneratedPackage(MaterialOverride.GeneratedMaterialInstance.Get());
         }
 
         for (const FWetClothingBakedWetPartDataSlotTexture& SlotTexture :

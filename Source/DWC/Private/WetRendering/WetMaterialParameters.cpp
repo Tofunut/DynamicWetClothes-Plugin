@@ -22,6 +22,7 @@ namespace DWCWetMaterialParameters
     DWC_DEFINE_MATERIAL_PARAMETER(SurfaceWaterNormalFlipY, "DWC_SurfaceWaterNormalFlipY")
     DWC_DEFINE_MATERIAL_PARAMETER(UseSurfaceWater, "DWC_UseSurfaceWater")
     DWC_DEFINE_MATERIAL_PARAMETER(UseDropletNormal, "DWC_UseDropletNormal")
+    DWC_DEFINE_MATERIAL_PARAMETER(UseGPUBackend, "DWC_UseGPUBackend")
     DWC_DEFINE_MATERIAL_PARAMETER(WetPartDebugStrength, "DWC_WetPartDebugStrength")
     DWC_DEFINE_MATERIAL_PARAMETER(SurfaceWaterDebugStrength, "DWC_SurfaceWaterDebugStrength")
     DWC_DEFINE_MATERIAL_PARAMETER(SurfaceWaterDebugDropletColor, "DWC_SurfaceWaterDebugDropletColor")

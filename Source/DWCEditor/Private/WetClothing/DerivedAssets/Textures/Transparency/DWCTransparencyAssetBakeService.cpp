@@ -31,8 +31,7 @@ bool FDWCTransparencyAssetBakeService::SaveTransparencySetupAssets(UWetClothingA
          WetClothingAsset->Derived.Inline.GeneratedWetMaterialOverrides)
     {
         AddPackageForObject(MaterialOverride.GeneratedMaterial.Get(), PackagesToSave);
-        AddPackageForObject(MaterialOverride.CPUMaterialInstance.Get(), PackagesToSave);
-        AddPackageForObject(MaterialOverride.GPUMaterialInstance.Get(), PackagesToSave);
+        AddPackageForObject(MaterialOverride.GeneratedMaterialInstance.Get(), PackagesToSave);
     }
 
     for (const FWetClothingTransparencyLayerData& Layer :

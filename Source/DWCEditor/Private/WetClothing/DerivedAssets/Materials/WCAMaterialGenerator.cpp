@@ -22,6 +22,7 @@
 #include "Materials/MaterialExpressionFunctionInput.h"
 #include "Materials/MaterialExpressionFunctionOutput.h"
 #include "Materials/MaterialExpressionMaterialFunctionCall.h"
+#include "Materials/MaterialExpressionIf.h"
 #include "Materials/MaterialExpressionLinearInterpolate.h"
 #include "Materials/MaterialExpressionScalarParameter.h"
 #include "Materials/MaterialExpressionOneMinus.h"
@@ -51,6 +52,7 @@ namespace
 {
     constexpr const TCHAR* DynamicWetClothesPluginName = TEXT("DynamicWetClothes");
     constexpr const TCHAR* GeneratedDwcUnifiedMaterialSuffix = TEXT("_DWC");
+    constexpr const TCHAR* GeneratedDwcUnifiedInstanceSuffix = TEXT("_DWC");
     constexpr const TCHAR* GeneratedDwcUnifiedCpuInstanceSuffix = TEXT("_DWC_CPU");
     constexpr const TCHAR* GeneratedDwcUnifiedGpuInstanceSuffix = TEXT("_DWC_GPU");
     constexpr const TCHAR* DwcEvaluateSurfaceAppearanceFunction = TEXT("MF_DWC_EvaluateSurfaceAppearance");
@@ -303,12 +305,10 @@ namespace
         {
             UMaterialInterface* SourceMaterial = MaterialOverride.SourceMaterial.Get();
             UMaterial*          GeneratedMaterial = MaterialOverride.GeneratedMaterial.Get();
-            UMaterialInterface* CPUMaterialInstance = MaterialOverride.CPUMaterialInstance.Get();
-            UMaterialInterface* GPUMaterialInstance = MaterialOverride.GPUMaterialInstance.Get();
+            UMaterialInterface* GeneratedMaterialInstance = MaterialOverride.GeneratedMaterialInstance.Get();
             if (SourceMaterial != nullptr &&
                 (CandidateMaterial == GeneratedMaterial ||
-                 CandidateMaterial == CPUMaterialInstance ||
-                 CandidateMaterial == GPUMaterialInstance ||
+                 CandidateMaterial == GeneratedMaterialInstance ||
                  CandidateBase == GeneratedMaterial))
             {
                 return SourceMaterial;
@@ -1156,6 +1156,7 @@ namespace
     FString StripKnownDwcSuffix(const FString& PackageName)
     {
         static const TCHAR* KnownSuffixes[] = {
+            GeneratedDwcUnifiedInstanceSuffix,
             GeneratedDwcUnifiedCpuInstanceSuffix,
             GeneratedDwcUnifiedGpuInstanceSuffix,
             GeneratedDwcUnifiedMaterialSuffix
@@ -1341,7 +1342,7 @@ namespace
 
 namespace
 {
-    const FName DwcUseGpuBackendParameterName(TEXT("DWC_UseGPUBackend"));
+    const FName DwcUseGpuBackendParameterName = DWCWetMaterialParameters::UseGPUBackend();
 
     FString GetDwcGeneratedAssetStem(const FString& InAssetName)
     {
@@ -1356,6 +1357,7 @@ namespace
         }
 
         static const TCHAR* KnownSuffixes[] = {
+            GeneratedDwcUnifiedInstanceSuffix,
             GeneratedDwcUnifiedCpuInstanceSuffix,
             GeneratedDwcUnifiedGpuInstanceSuffix,
             GeneratedDwcUnifiedMaterialSuffix
@@ -1432,52 +1434,27 @@ namespace
         return Folder / FString::Printf(TEXT("MI_%s%s"), *AssetStem, BackendSuffix);
     }
 
-    UMaterialExpressionStaticSwitchParameter* CreateDwcBackendStaticSwitch(
-        UMaterial*   Material,
-        const int32  NodePosX,
-        const int32  NodePosY,
-        const TCHAR* Description)
+    UMaterialExpressionIf* CreateDwcBackendRuntimeSelector(
+        UMaterial*  Material,
+        const int32 NodePosX,
+        const int32 NodePosY)
     {
-        UMaterialExpressionStaticSwitchParameter* Switch = Cast<UMaterialExpressionStaticSwitchParameter>(
+        UMaterialExpressionIf* Selector = Cast<UMaterialExpressionIf>(
             UMaterialEditingLibrary::CreateMaterialExpression(
                 Material,
-                UMaterialExpressionStaticSwitchParameter::StaticClass(),
+                UMaterialExpressionIf::StaticClass(),
                 NodePosX,
                 NodePosY));
-        if (Switch != nullptr)
+        if (Selector != nullptr)
         {
-            // SetParameterName updates the material parameter bookkeeping; assigning
-            // ParameterName directly can leave the editor parameter cache stale.
-            Switch->SetParameterName(DwcUseGpuBackendParameterName);
-            Switch->DefaultValue = false;
-            Switch->Group = TEXT("DWC Backend");
-            Switch->Desc = Description;
-            Switch->UpdateParameterGuid(false, false);
-            Material->UpdateExpressionParameterName(Switch);
+            Selector->ConstB = 0.5f;
         }
-        return Switch;
+        return Selector;
     }
 
-    bool HasDwcBackendStaticSwitchParameter(const UMaterial* Material)
+    bool HasDwcBackendRuntimeParameter(const UMaterial* Material)
     {
-        if (Material == nullptr)
-        {
-            return false;
-        }
-
-        TArray<FMaterialParameterInfo> ParameterInfos;
-        TArray<FGuid>                  ParameterIds;
-        const_cast<UMaterial*>(Material)->GetAllStaticSwitchParameterInfo(ParameterInfos, ParameterIds);
-        for (int32 Index = 0; Index < ParameterInfos.Num(); ++Index)
-        {
-            if (ParameterInfos[Index].Name == DwcUseGpuBackendParameterName &&
-                ParameterInfos[Index].Association == EMaterialParameterAssociation::GlobalParameter &&
-                ParameterIds.IsValidIndex(Index) && ParameterIds[Index].IsValid())
-            {
-                return true;
-            }
-        }
-        return false;
+        return FindScalarParameter(const_cast<UMaterial*>(Material), DwcUseGpuBackendParameterName) != nullptr;
     }
 
     bool IsUnifiedDwcMaterial(const UMaterial* Material)
@@ -1503,7 +1480,7 @@ namespace
                 DwcDebugWetPartColorFunction);
         return Evaluate != nullptr &&
                DebugWetPart != nullptr &&
-               HasDwcBackendStaticSwitchParameter(Material) &&
+               HasDwcBackendRuntimeParameter(Material) &&
                FindTextureSampleParameter(
                    const_cast<UMaterial*>(Material),
                    DWCWetMaterialParameters::TransparencyMap()) != nullptr;
@@ -1602,11 +1579,9 @@ namespace
         UMaterialExpressionVertexColor* VertexColor = FindOrCreateVertexColor(Material, -2600, -520);
         UMaterialExpressionTextureSampleParameter2D* WetnessMap =
             FindOrCreateGPUWetnessMapParameter(Material, -1900, 820);
-        UMaterialExpressionStaticSwitchParameter* WetnessSourceSwitch = CreateDwcBackendStaticSwitch(
-            Material,
-            -1520,
-            -720,
-            TEXT("Selects the compiled CPU/GPU absorbed-wetness source before the shared appearance evaluation."));
+        UMaterialExpressionScalarParameter* UseGPUBackend = FindOrCreateScalarParameter(
+            Material, DwcUseGpuBackendParameterName, 0.0f, -1900, 660);
+        UMaterialExpressionIf* WetnessSourceSwitch = CreateDwcBackendRuntimeSelector(Material, -1520, -720);
 
         if (MetallicLayer == nullptr || DebugWetPart == nullptr || VertexColor == nullptr ||
             WetnessMap == nullptr || WetnessSourceSwitch == nullptr)
@@ -1615,6 +1590,15 @@ namespace
             return false;
         }
 
+        bool bSelectorConnected = true;
+        bSelectorConnected &= ConnectChecked(UseGPUBackend, FString(), WetnessSourceSwitch, TEXT("A"), FailureReasons);
+        bSelectorConnected &= ConnectChecked(WetnessMap, TEXT("A"), WetnessSourceSwitch, TEXT("A > B"), FailureReasons);
+        bSelectorConnected &= ConnectChecked(VertexColor, TEXT("A"), WetnessSourceSwitch, TEXT("A < B"), FailureReasons);
+        bSelectorConnected &= ConnectChecked(VertexColor, TEXT("A"), WetnessSourceSwitch, TEXT("A == B"), FailureReasons);
+        if (!bSelectorConnected)
+        {
+            return false;
+        }
         FDWCSurfaceGraphBuildRequest SurfaceBuildRequest;
         SurfaceBuildRequest.Material = Material;
         SurfaceBuildRequest.DWCDataUVChannelIndex = Options.DWCDataUVChannelIndex;
@@ -1636,8 +1620,6 @@ namespace
         EnsureUnifiedDwcGraphComments(Material);
         bool bConnected = true;
         bConnected &= ConnectTextureCoordinateChecked(DWCDataUV, WetnessMap, FailureReasons);
-        bConnected &= ConnectChecked(WetnessMap, TEXT("R"), WetnessSourceSwitch, TEXT("True"), FailureReasons);
-        bConnected &= ConnectChecked(VertexColor, TEXT("R"), WetnessSourceSwitch, TEXT("False"), FailureReasons);
 
         const FString& BaseColorResultOutput = SurfaceGraph.Outputs.BaseColor.OutputName;
         const FString& RoughnessResultOutput = SurfaceGraph.Outputs.Roughness.OutputName;
@@ -1855,16 +1837,15 @@ return LitBaseColor;
         return DuplicatedMaterial;
     }
 
-    bool SetDwcStaticSwitchOverrides(
+    bool SetDwcSurfaceWaterStaticSwitchOverride(
         UMaterialInstanceConstant* Instance,
         UMaterialInterface*        GeneratedParent,
-        const bool                 bUseGPUBackend,
         const bool                 bUseSurfaceWater,
         FString&                   OutErrorMessage)
     {
         if (Instance == nullptr || GeneratedParent == nullptr)
         {
-            OutErrorMessage = TEXT("DWC static permutation setup requires an instance and parent material.");
+            OutErrorMessage = TEXT("DWC surface-water setup requires an instance and parent material.");
             return false;
         }
 
@@ -1877,20 +1858,33 @@ return LitBaseColor;
         TArray<FGuid>                  ParameterIds;
         GeneratedParent->GetAllStaticSwitchParameterInfo(ParameterInfos, ParameterIds);
 
-        struct FDesiredSwitch
+        const FName SurfaceWaterParameterName = DWCWetMaterialParameters::UseSurfaceWater();
+        int32 ParameterIndex = INDEX_NONE;
+        for (int32 Index = 0; Index < ParameterInfos.Num(); ++Index)
         {
-            FName Name;
-            bool  Value = false;
-        };
-        const FDesiredSwitch DesiredSwitches[] = {
-            { DwcUseGpuBackendParameterName, bUseGPUBackend },
-            { DWCWetMaterialParameters::UseSurfaceWater(), bUseSurfaceWater }
-        };
-        const FName LegacyProfileSwitches[] = {
-            DWCWetMaterialParameters::UseDropletNormal()
-        };
+            if (ParameterInfos[Index].Name == SurfaceWaterParameterName &&
+                ParameterInfos[Index].Association == EMaterialParameterAssociation::GlobalParameter)
+            {
+                ParameterIndex = Index;
+                break;
+            }
+        }
+
+        if (ParameterIndex == INDEX_NONE || !ParameterIds.IsValidIndex(ParameterIndex) ||
+            !ParameterIds[ParameterIndex].IsValid())
+        {
+            OutErrorMessage = FString::Printf(
+                TEXT("Parent material '%s' does not expose a valid %s static parameter."),
+                *GetPathNameSafe(GeneratedParent),
+                *SurfaceWaterParameterName.ToString());
+            return false;
+        }
 
         FStaticParameterSet StaticParameters = Instance->GetStaticParameters();
+        const FName LegacyProfileSwitches[] = {
+            DwcUseGpuBackendParameterName,
+            DWCWetMaterialParameters::UseDropletNormal()
+        };
         StaticParameters.StaticSwitchParameters.RemoveAll(
             [&LegacyProfileSwitches](const FStaticSwitchParameter& Parameter)
             {
@@ -1904,49 +1898,25 @@ return LitBaseColor;
                 return false;
             });
 
-        for (const FDesiredSwitch& Desired : DesiredSwitches)
-        {
-            int32 ParameterIndex = INDEX_NONE;
-            for (int32 Index = 0; Index < ParameterInfos.Num(); ++Index)
-            {
-                if (ParameterInfos[Index].Name == Desired.Name &&
-                    ParameterInfos[Index].Association == EMaterialParameterAssociation::GlobalParameter)
+        FStaticSwitchParameter* ExistingParameter =
+            StaticParameters.StaticSwitchParameters.FindByPredicate(
+                [&](const FStaticSwitchParameter& Parameter)
                 {
-                    ParameterIndex = Index;
-                    break;
-                }
-            }
-
-            if (ParameterIndex == INDEX_NONE || !ParameterIds.IsValidIndex(ParameterIndex) ||
-                !ParameterIds[ParameterIndex].IsValid())
-            {
-                OutErrorMessage = FString::Printf(
-                    TEXT("Parent material '%s' does not expose a valid %s static parameter."),
-                    *GetPathNameSafe(GeneratedParent),
-                    *Desired.Name.ToString());
-                return false;
-            }
-
-            FStaticSwitchParameter* ExistingParameter =
-                StaticParameters.StaticSwitchParameters.FindByPredicate(
-                    [&](const FStaticSwitchParameter& Parameter)
-                    {
-                        return Parameter.ParameterInfo == ParameterInfos[ParameterIndex];
-                    });
-            if (ExistingParameter != nullptr)
-            {
-                ExistingParameter->Value = Desired.Value;
-                ExistingParameter->bOverride = true;
-                ExistingParameter->ExpressionGUID = ParameterIds[ParameterIndex];
-            }
-            else
-            {
-                StaticParameters.StaticSwitchParameters.Add(FStaticSwitchParameter(
-                    ParameterInfos[ParameterIndex],
-                    Desired.Value,
-                    true,
-                    ParameterIds[ParameterIndex]));
-            }
+                    return Parameter.ParameterInfo == ParameterInfos[ParameterIndex];
+                });
+        if (ExistingParameter != nullptr)
+        {
+            ExistingParameter->Value = bUseSurfaceWater;
+            ExistingParameter->bOverride = true;
+            ExistingParameter->ExpressionGUID = ParameterIds[ParameterIndex];
+        }
+        else
+        {
+            StaticParameters.StaticSwitchParameters.Add(FStaticSwitchParameter(
+                ParameterInfos[ParameterIndex],
+                bUseSurfaceWater,
+                true,
+                ParameterIds[ParameterIndex]));
         }
 
         Instance->UpdateStaticPermutation(StaticParameters, nullptr);
@@ -2022,22 +1992,20 @@ return LitBaseColor;
             Instance->SetParentEditorOnly(GeneratedParent);
         }
 
-        FString StaticSwitchError;
-        if (!SetDwcStaticSwitchOverrides(
+        Instance->SetScalarParameterValueEditorOnly(
+            FMaterialParameterInfo(DwcUseGpuBackendParameterName),
+            bUseGPUBackend ? 1.0f : 0.0f);
+        FString SurfaceWaterSwitchError;
+        if (!SetDwcSurfaceWaterStaticSwitchOverride(
                 Instance,
                 GeneratedParent,
-                bUseGPUBackend,
-                bUseGPUBackend && Options.bUseSurfaceWater,
-                StaticSwitchError))
+                Options.bUseSurfaceWater,
+                SurfaceWaterSwitchError))
         {
             OutErrorMessage = FString::Printf(
-                TEXT("Could not set DWC static switches on '%s'. %s"),
+                TEXT("Could not set DWC surface-water static switch on '%s'. %s"),
                 *ObjectPath,
-                *StaticSwitchError);
-
-            // Do not immediately garbage a newly created material asset here. Material
-            // compilation and editor refresh can still hold references to it. Leaving the
-            // deterministic output unreferenced is safe and lets the next Generate repair it.
+                *SurfaceWaterSwitchError);
             return nullptr;
         }
 
@@ -2202,52 +2170,35 @@ FWetClothingUnifiedMaterialSetupResult FWCAMaterialGenerator::CreateOrUpdateUnif
         return Result;
     }
 
-    FString                    CPUError;
-    FString                    GPUError;
-    bool                       bReusedCPU = false;
-    bool                       bReusedGPU = false;
-    UMaterialInstanceConstant* CPUInstance = CreateOrUpdateBackendMaterialInstance(
+    FString                    InstanceError;
+    bool                       bReusedInstance = false;
+    UMaterialInstanceConstant* RuntimeInstance = CreateOrUpdateBackendMaterialInstance(
         SourceMaterial,
         GeneratedMaterial,
-        GeneratedDwcUnifiedCpuInstanceSuffix,
+        GeneratedDwcUnifiedInstanceSuffix,
         UnifiedOptions,
         false,
-        CPUError,
-        bReusedCPU);
-    UMaterialInstanceConstant* GPUInstance = CreateOrUpdateBackendMaterialInstance(
-        SourceMaterial,
-        GeneratedMaterial,
-        GeneratedDwcUnifiedGpuInstanceSuffix,
-        UnifiedOptions,
-        true,
-        GPUError,
-        bReusedGPU);
+        InstanceError,
+        bReusedInstance);
 
-    if (CPUInstance == nullptr || GPUInstance == nullptr)
+    if (RuntimeInstance == nullptr)
     {
-        // Keep deterministic generated assets alive on failure. Shader compilation and
-        // Material Editor refresh can retain transient references; immediate MarkAsGarbage
-        // caused an access violation in MaterialEditor.dll. The WCA override is not updated,
-        // and the next Generate operation reuses and repairs these outputs in place.
-
         Result.Message = FString::Printf(
-            TEXT("Generated the shared DWC material, but backend instance generation failed. CPU: %s GPU: %s"),
-            CPUError.IsEmpty() ? TEXT("OK") : *CPUError,
-            GPUError.IsEmpty() ? TEXT("OK") : *GPUError);
+            TEXT("Generated the shared DWC material, but runtime instance generation failed. %s"),
+            *InstanceError);
         return Result;
     }
 
     Result.bSucceeded = true;
-    Result.bAlreadyConfigured = bReusedBase && bReusedCPU && bReusedGPU;
+    Result.bAlreadyConfigured = bReusedBase && bReusedInstance;
     Result.GeneratedMaterial = GeneratedMaterial;
-    Result.CPUMaterialInstance = CPUInstance;
-    Result.GPUMaterialInstance = GPUInstance;
+    Result.GeneratedMaterialInstance = RuntimeInstance;
+    Result.GeneratedMaterialInstance = RuntimeInstance;
     Result.Message = FString::Printf(
-        TEXT("%s unified DWC material '%s' with CPU '%s' and GPU '%s' permutations."),
+        TEXT("%s unified DWC material '%s' with runtime instance '%s'."),
         Result.bAlreadyConfigured ? TEXT("Refreshed") : TEXT("Created"),
         *GetNameSafe(GeneratedMaterial),
-        *GetNameSafe(CPUInstance),
-        *GetNameSafe(GPUInstance));
+        *GetNameSafe(RuntimeInstance));
     return Result;
 }
 
@@ -2356,17 +2307,19 @@ FWetClothingUnifiedMaterialSetupResult FWCAMaterialGenerator::CreateTransientUni
         PreviewInstance->SetParentEditorOnly(PreviewMaterial);
     }
 
-    FString StaticSwitchError;
-    if (!SetDwcStaticSwitchOverrides(
+    PreviewInstance->SetScalarParameterValueEditorOnly(
+        FMaterialParameterInfo(DwcUseGpuBackendParameterName),
+        1.0f);
+    FString SurfaceWaterSwitchError;
+    if (!SetDwcSurfaceWaterStaticSwitchOverride(
             PreviewInstance,
             PreviewMaterial,
             true,
-            true,
-            StaticSwitchError))
+            SurfaceWaterSwitchError))
     {
         Result.Message = FString::Printf(
-            TEXT("Could not set DWC preview static switches. %s"),
-            *StaticSwitchError);
+            TEXT("Could not set DWC preview surface-water static switch. %s"),
+            *SurfaceWaterSwitchError);
         PreviewInstance->MarkAsGarbage();
         PreviewMaterial->MarkAsGarbage();
         return Result;
@@ -2377,7 +2330,7 @@ FWetClothingUnifiedMaterialSetupResult FWCAMaterialGenerator::CreateTransientUni
 
     Result.bSucceeded = true;
     Result.GeneratedMaterial = PreviewMaterial;
-    Result.GPUMaterialInstance = PreviewInstance;
+    Result.GeneratedMaterialInstance = PreviewInstance;
     Result.Message = FString::Printf(
         TEXT("Created transient DWC preview material for '%s'."),
         *GetNameSafe(SourceMaterial));
@@ -2427,25 +2380,7 @@ bool FWCAMaterialGenerator::IsMaterialConfiguredForDwc(
         return false;
     }
 
-    const UMaterialInstanceConstant* Instance = Cast<UMaterialInstanceConstant>(MaterialInterface);
-    if (Instance == nullptr)
-    {
-        return true;
-    }
-
-    UMaterialInstanceConstant* MutableInstance = const_cast<UMaterialInstanceConstant*>(Instance);
-    const bool                 bConfiguredForGPU = UMaterialEditingLibrary::GetMaterialInstanceStaticSwitchParameterValue(
-        MutableInstance,
-        DwcUseGpuBackendParameterName,
-        EMaterialParameterAssociation::GlobalParameter);
-    const bool bConfiguredForSurfaceWater = UMaterialEditingLibrary::GetMaterialInstanceStaticSwitchParameterValue(
-        MutableInstance,
-        DWCWetMaterialParameters::UseSurfaceWater(),
-        EMaterialParameterAssociation::GlobalParameter);
-    const bool bExpectGPU = Options.SimulationMode == EDWCSimulationMode::WetnessMapGPU;
-    const bool bExpectSurfaceWater = bExpectGPU && Options.bUseSurfaceWater;
-    return bConfiguredForGPU == bExpectGPU &&
-           bConfiguredForSurfaceWater == bExpectSurfaceWater;
+    return FindScalarParameter(Material, DwcUseGpuBackendParameterName) != nullptr;
 }
 
 UMaterialInterface* FWCAMaterialGenerator::ResolveGeneratedMaterialSource(
@@ -2500,13 +2435,11 @@ UMaterialInterface* FWCAMaterialGenerator::ResolveGeneratedMaterialSource(
     {
         UMaterialInterface* SourceMaterial = MaterialOverride.SourceMaterial.Get();
         UMaterial* GeneratedMaterial = MaterialOverride.GeneratedMaterial.Get();
-        UMaterialInterface* CPUMaterialInstance = MaterialOverride.CPUMaterialInstance.Get();
-        UMaterialInterface* GPUMaterialInstance = MaterialOverride.GPUMaterialInstance.Get();
+        UMaterialInterface* GeneratedMaterialInstance = MaterialOverride.GeneratedMaterialInstance.Get();
         if (SourceMaterial != nullptr &&
             (CandidateMaterial == SourceMaterial ||
              CandidateMaterial == GeneratedMaterial ||
-             CandidateMaterial == CPUMaterialInstance ||
-             CandidateMaterial == GPUMaterialInstance ||
+             CandidateMaterial == GeneratedMaterialInstance ||
              CandidateBase == GeneratedMaterial))
         {
             return SourceMaterial;
@@ -2595,10 +2528,10 @@ bool FWCAMaterialGenerator::IsGeneratedMaterialOverrideCurrent(
         FindGeneratedWetMaterialOverride(*WetClothingAsset, MaterialSlotIndex);
     if (MaterialOverride == nullptr ||
         MaterialOverride->GeneratedMaterial == nullptr ||
-        MaterialOverride->CPUMaterialInstance == nullptr ||
-        MaterialOverride->GPUMaterialInstance == nullptr)
+        MaterialOverride->GeneratedMaterialInstance == nullptr ||
+        MaterialOverride->GeneratedMaterialInstance == nullptr)
     {
-        SetReason(FString::Printf(TEXT("Slot %d is missing a generated material or CPU/GPU permutation."), MaterialSlotIndex));
+        SetReason(FString::Printf(TEXT("Slot %d is missing a generated material or runtime instance."), MaterialSlotIndex));
         return false;
     }
 
@@ -2608,10 +2541,10 @@ bool FWCAMaterialGenerator::IsGeneratedMaterialOverrideCurrent(
         return false;
     }
 
-    if (MaterialOverride->CPUMaterialInstance->GetMaterial() != MaterialOverride->GeneratedMaterial.Get() ||
-        MaterialOverride->GPUMaterialInstance->GetMaterial() != MaterialOverride->GeneratedMaterial.Get())
+    if (MaterialOverride->GeneratedMaterialInstance->GetMaterial() != MaterialOverride->GeneratedMaterial.Get() ||
+        MaterialOverride->GeneratedMaterialInstance->GetMaterial() != MaterialOverride->GeneratedMaterial.Get())
     {
-        SetReason(FString::Printf(TEXT("Slot %d CPU/GPU permutations no longer share the recorded generated parent."), MaterialSlotIndex));
+        SetReason(FString::Printf(TEXT("Slot %d runtime material instance no longer uses the recorded generated parent."), MaterialSlotIndex));
         return false;
     }
 
@@ -2688,18 +2621,17 @@ void FWCAMaterialGenerator::ValidateGeneratedMaterialOverrideReferences(
         const FWetClothingGeneratedWetMaterialOverride* MaterialOverride =
             FindGeneratedWetMaterialOverride(*WetClothingAsset, MaterialSlotIndex);
         UMaterial*          GeneratedMaterial = MaterialOverride != nullptr ? MaterialOverride->GeneratedMaterial.Get() : nullptr;
-        UMaterialInterface* CPUMaterialInstance = MaterialOverride != nullptr ? MaterialOverride->CPUMaterialInstance.Get() : nullptr;
-        UMaterialInterface* GPUMaterialInstance = MaterialOverride != nullptr ? MaterialOverride->GPUMaterialInstance.Get() : nullptr;
+        UMaterialInterface* GeneratedMaterialInstance = MaterialOverride != nullptr ? MaterialOverride->GeneratedMaterialInstance.Get() : nullptr;
 
         if (SourceMaterial == nullptr)
         {
             OutMessages.Add(FString::Printf(TEXT("Slot %d: source material could not be resolved."), MaterialSlotIndex));
         }
         else if (MaterialOverride == nullptr || GeneratedMaterial == nullptr ||
-                 CPUMaterialInstance == nullptr || GPUMaterialInstance == nullptr)
+                 GeneratedMaterialInstance == nullptr)
         {
             OutMessages.Add(FString::Printf(
-                TEXT("Slot %d: missing unified generated DWC material or backend permutation."),
+                TEXT("Slot %d: missing unified generated DWC material or runtime instance."),
                 MaterialSlotIndex));
         }
         else if (MaterialOverride->SourceMaterial != SourceMaterial)
@@ -2708,11 +2640,11 @@ void FWCAMaterialGenerator::ValidateGeneratedMaterialOverrideReferences(
                 TEXT("Slot %d: generated materials reference an outdated source material."),
                 MaterialSlotIndex));
         }
-        else if (CPUMaterialInstance->GetMaterial() != GeneratedMaterial ||
-                 GPUMaterialInstance->GetMaterial() != GeneratedMaterial)
+        else if (GeneratedMaterialInstance->GetMaterial() != GeneratedMaterial ||
+                 GeneratedMaterialInstance->GetMaterial() != GeneratedMaterial)
         {
             OutMessages.Add(FString::Printf(
-                TEXT("Slot %d: CPU/GPU material permutations no longer share the recorded generated parent."),
+                TEXT("Slot %d: runtime material instance no longer uses the recorded generated parent."),
                 MaterialSlotIndex));
         }
         else
@@ -2798,14 +2730,13 @@ void FWCAMaterialGenerator::ValidateGeneratedMaterialOverrides(
         const FWetClothingGeneratedWetMaterialOverride* MaterialOverride =
             FindGeneratedWetMaterialOverride(*WetClothingAsset, MaterialSlotIndex);
         UMaterial*          GeneratedMaterial = MaterialOverride != nullptr ? MaterialOverride->GeneratedMaterial.Get() : nullptr;
-        UMaterialInterface* CPUMaterialInstance = MaterialOverride != nullptr ? MaterialOverride->CPUMaterialInstance.Get() : nullptr;
-        UMaterialInterface* GPUMaterialInstance = MaterialOverride != nullptr ? MaterialOverride->GPUMaterialInstance.Get() : nullptr;
+        UMaterialInterface* GeneratedMaterialInstance = MaterialOverride != nullptr ? MaterialOverride->GeneratedMaterialInstance.Get() : nullptr;
 
         if (MaterialOverride == nullptr || GeneratedMaterial == nullptr ||
-            CPUMaterialInstance == nullptr || GPUMaterialInstance == nullptr)
+            GeneratedMaterialInstance == nullptr)
         {
             OutMessages.Add(FString::Printf(
-                TEXT("Slot %d: missing unified generated DWC material or backend permutation."),
+                TEXT("Slot %d: missing unified generated DWC material or runtime instance."),
                 MaterialSlotIndex));
             continue;
         }
@@ -2826,11 +2757,10 @@ void FWCAMaterialGenerator::ValidateGeneratedMaterialOverrides(
         }
 
         if (!IsUnifiedDwcMaterial(GeneratedMaterial) ||
-            (CPUMaterialInstance != nullptr && CPUMaterialInstance->GetMaterial() != GeneratedMaterial) ||
-            (GPUMaterialInstance != nullptr && GPUMaterialInstance->GetMaterial() != GeneratedMaterial))
+            (GeneratedMaterialInstance != nullptr && GeneratedMaterialInstance->GetMaterial() != GeneratedMaterial))
         {
             OutMessages.Add(FString::Printf(
-                TEXT("Slot %d: generated material permutations do not share the recorded unified parent."),
+                TEXT("Slot %d: generated material instance does not use the recorded unified parent."),
                 MaterialSlotIndex));
             continue;
         }
@@ -2844,20 +2774,20 @@ void FWCAMaterialGenerator::ValidateGeneratedMaterialOverrides(
             EDWCSimulationMode::WetnessMapGPU,
             MaterialSlotIndex);
 
-        if (!IsMaterialConfiguredForDwc(CPUMaterialInstance, CPUOptions))
+        if (!IsMaterialConfiguredForDwc(GeneratedMaterialInstance, CPUOptions))
         {
             OutMessages.Add(FString::Printf(
-                TEXT("Slot %d: generated CPU material '%s' is missing DWC CPU material setup."),
+                TEXT("Slot %d: generated runtime material '%s' is missing DWC material setup."),
                 MaterialSlotIndex,
-                *GetNameSafe(CPUMaterialInstance)));
+                *GetNameSafe(GeneratedMaterialInstance)));
             continue;
         }
 
-        if (!IsMaterialConfiguredForDwc(GPUMaterialInstance, GPUOptions))
+        if (!IsMaterialConfiguredForDwc(GeneratedMaterialInstance, GPUOptions))
         {
             TArray<FString> MissingGpuParameters;
             AppendMissingGpuRuntimeMaterialParameters(
-                GPUMaterialInstance,
+                GeneratedMaterialInstance,
                 GPUOptions.bUseSurfaceWater,
                 MissingGpuParameters);
             const FString MissingParameterText = MissingGpuParameters.IsEmpty()
@@ -2866,9 +2796,9 @@ void FWCAMaterialGenerator::ValidateGeneratedMaterialOverrides(
                                                            TEXT(" Missing runtime parameters: %s."),
                                                            *FString::Join(MissingGpuParameters, TEXT(", ")));
             OutMessages.Add(FString::Printf(
-                TEXT("Slot %d: generated GPU material '%s' is missing DWC GPU material setup or wetness-map parameters.%s"),
+                TEXT("Slot %d: generated runtime material '%s' is missing DWC GPU wetness-map parameters.%s"),
                 MaterialSlotIndex,
-                *GetNameSafe(GPUMaterialInstance),
+                *GetNameSafe(GeneratedMaterialInstance),
                 *MissingParameterText));
         }
     }

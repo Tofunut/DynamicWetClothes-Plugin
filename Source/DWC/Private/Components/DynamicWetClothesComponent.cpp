@@ -19,11 +19,13 @@
 #include "RuntimeState/Utils/WetSimulationStage.h"
 #include "WetSimulation/AbsorbedWetness/AbsorbedWetnessSimulationState.h"
 #include "Engine/SkeletalMesh.h"
+#include "UObject/UObjectGlobals.h"
 #include "UObject/UnrealType.h"
 #include "Engine/Texture2D.h"
 #include "Engine/World.h"
 #include "Materials/MaterialInterface.h"
 #include "Materials/MaterialInstanceConstant.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "Modules/ModuleManager.h"
 #include "Profiling/DWCStatsSubsystem.h"
 #include "TimerManager.h"
@@ -47,6 +49,21 @@ namespace
     bool IsGPUWetnessMode(const EDWCSimulationMode Mode)
     {
         return Mode == EDWCSimulationMode::WetnessMapGPU;
+    }
+
+    bool ShouldApplyGeneratedWetMaterialOverride(
+        UMaterialInterface* CurrentMaterial,
+        const FWetClothingGeneratedWetMaterialOverride& MaterialOverride,
+        const UMaterialInterface* WetMaterial)
+    {
+        if (CurrentMaterial == nullptr || CurrentMaterial == WetMaterial)
+        {
+            return true;
+        }
+
+        return CurrentMaterial == MaterialOverride.SourceMaterial ||
+               CurrentMaterial == MaterialOverride.GeneratedMaterial ||
+               CurrentMaterial == MaterialOverride.GeneratedMaterialInstance;
     }
 
     int32 MakeDWCReceiverGPUId(const FName ReceiverId)
@@ -107,6 +124,7 @@ void UDynamicWetClothesComponent::BeginPlay()
     StartWetnessTimers();
     UpdateRenderLOD();
     RequestContinuousCpuSkinningTasks();
+    SetComponentTickEnabled(HasPendingCpuSkinningTasks() || HasPendingLODVertexColorTransferTasks());
 }
 
 void UDynamicWetClothesComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -141,6 +159,7 @@ void UDynamicWetClothesComponent::EndPlay(const EEndPlayReason::Type EndPlayReas
     }
     Receivers.Reset();
     bSimulationModeLocked = false;
+    SetComponentTickEnabled(false);
 
     Super::EndPlay(EndPlayReason);
 }
@@ -559,9 +578,7 @@ void UDynamicWetClothesComponent::ApplyGeneratedWetMaterialOverrides()
 
         for (const FWetClothingGeneratedWetMaterialOverride& MaterialOverride : ReceiverWetClothingAsset->Derived.Inline.GeneratedWetMaterialOverrides)
         {
-            UMaterialInterface* WetMaterial = GetActiveSimulationMode() == EDWCSimulationMode::WetnessMapGPU
-                ? static_cast<UMaterialInterface*>(MaterialOverride.GPUMaterialInstance.Get())
-                : static_cast<UMaterialInterface*>(MaterialOverride.CPUMaterialInstance.Get());
+            UMaterialInterface* WetMaterial = MaterialOverride.GeneratedMaterialInstance.Get();
 
             if (MaterialOverride.MaterialSlotIndex == INDEX_NONE ||
                 WetMaterial == nullptr ||
@@ -581,11 +598,14 @@ void UDynamicWetClothesComponent::ApplyGeneratedWetMaterialOverrides()
                 continue;
             }
 
+            UMaterialInterface* CurrentMaterial = OverrideTargetMesh->GetMaterial(MaterialOverride.MaterialSlotIndex);
+            if (!ShouldApplyGeneratedWetMaterialOverride(CurrentMaterial, MaterialOverride, WetMaterial))
+            {
+                continue;
+            }
+
             OverrideTargetMesh->SetMaterial(MaterialOverride.MaterialSlotIndex, WetMaterial);
-
-
         }
-
     }
 }
 
@@ -1132,19 +1152,21 @@ void UDynamicWetClothesComponent::UpdateWetRendering()
             continue;
         }
 
+        FWetRenderStageArgs RenderArgs = MakeWetRenderStageArgs(*Receiver);
+
         const bool bHadDirtyWetVertexColors = Receiver->SimulationState->DirtyWetVertexIndices.Num() > 0;
         if (!Receiver->bWetRenderDirty && Receiver->SimulationState->DirtyWetVertexIndices.Num() == 0)
         {
             continue;
         }
 
-        FWetRenderStageArgs RenderArgs = MakeWetRenderStageArgs(*Receiver);
         if (Receiver->bWetRenderDirty)
         {
             Receiver->RenderStage->ApplyWetMaterialParameters(RenderArgs);
         }
 
-        if (!IsGPUWetnessMode(GetActiveSimulationMode()) && !ShouldUpdateCPUWetnessRendering(*Receiver))
+        if (!IsGPUWetnessMode(GetActiveSimulationMode()) &&
+            !ShouldUpdateCPUWetnessRendering(*Receiver))
         {
             Receiver->bWetRenderDirty = false;
             continue;

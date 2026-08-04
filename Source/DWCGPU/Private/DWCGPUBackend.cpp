@@ -1372,6 +1372,143 @@ bool FDWCGPUBackend::BuildDebugVertexLookup()
     return true;
 }
 
+bool FDWCGPUBackend::BindMaterialSlot(FMaterialSlotRuntime& Slot)
+{
+    USkeletalMeshComponent* MeshComponent = TargetSkeletalMesh.Get();
+    if (MeshComponent == nullptr || WetMaterialInstances == nullptr)
+    {
+        return false;
+    }
+
+    if (Slot.MaterialSlotIndex < 0 || Slot.MaterialSlotIndex >= MeshComponent->GetNumMaterials())
+    {
+        UE_LOG(
+            LogDWCGPU,
+            Warning,
+            TEXT("DWCGPU: Baked material slot %d is out of range for mesh '%s' (%d materials). Use Build for Runtime > Build GPU Runtime Data again for the current runtime mesh."),
+            Slot.MaterialSlotIndex,
+            *GetNameSafe(MeshComponent),
+            MeshComponent->GetNumMaterials());
+        return false;
+    }
+
+    UMaterialInterface* CurrentMaterial = MeshComponent->GetMaterial(Slot.MaterialSlotIndex);
+    UMaterialInstanceDynamic* MID = WetMaterialInstances->IsValidIndex(Slot.MaterialSlotIndex)
+        ? (*WetMaterialInstances)[Slot.MaterialSlotIndex]
+        : nullptr;
+    if (MID == nullptr || CurrentMaterial != MID)
+    {
+        MID = UMaterialInstanceDynamic::Create(CurrentMaterial, MeshComponent);
+        if (MID != nullptr)
+        {
+            MeshComponent->SetMaterial(Slot.MaterialSlotIndex, MID);
+        }
+        if (WetMaterialInstances->IsValidIndex(Slot.MaterialSlotIndex))
+        {
+            (*WetMaterialInstances)[Slot.MaterialSlotIndex] = MID;
+        }
+    }
+
+    if (MID == nullptr)
+    {
+        UE_LOG(
+            LogDWCGPU,
+            Warning,
+            TEXT("DWCGPU: Could not create a dynamic material instance for mesh '%s' slot %d."),
+            *GetNameSafe(MeshComponent),
+            Slot.MaterialSlotIndex);
+        return false;
+    }
+
+    const bool bHasWetnessMapParameter = MaterialHasTextureParameter(MID, WetnessMapParameterName);
+    const bool bHasDroplet1RTParameter = MaterialHasTextureParameter(MID, DWCWetMaterialParameters::SurfaceDroplet1RT());
+    const bool bHasDroplet2RTParameter =
+        MaterialHasTextureParameter(MID, DWCWetMaterialParameters::SurfaceDroplet2RT());
+    const bool bHasWetPartDataParameter = MaterialHasTextureParameter(MID, DWCWetMaterialParameters::WetPartDataTexture());
+    const bool bHasProfileRemapParameter = MaterialHasTextureParameter(MID, DWCWetMaterialParameters::ProfileRemapLUT());
+    const bool bHasGlobalProfileParameter = MaterialHasTextureParameter(MID, DWCWetMaterialParameters::GlobalRenderProfileLUT());
+    const bool bHasGlobalTexelSizeParameter = MaterialHasScalarParameter(MID, DWCWetMaterialParameters::GlobalRenderProfileTexelSize());
+    const bool bHasUseGPUBackendParameter = MaterialHasScalarParameter(MID, DWCWetMaterialParameters::UseGPUBackend());
+
+    TArray<FString> MissingParameters;
+    if (!bHasWetnessMapParameter) MissingParameters.Add(WetnessMapParameterName.ToString());
+    if (Slot.bUsesSurfaceWater && !bHasDroplet1RTParameter)
+    {
+        MissingParameters.Add(DWCWetMaterialParameters::SurfaceDroplet1RT().ToString());
+    }
+    if (Slot.bUsesSurfaceWater && !bHasDroplet2RTParameter)
+    {
+        MissingParameters.Add(DWCWetMaterialParameters::SurfaceDroplet2RT().ToString());
+    }
+    if (!bHasWetPartDataParameter) MissingParameters.Add(DWCWetMaterialParameters::WetPartDataTexture().ToString());
+    if (!bHasProfileRemapParameter) MissingParameters.Add(DWCWetMaterialParameters::ProfileRemapLUT().ToString());
+    if (!bHasGlobalProfileParameter) MissingParameters.Add(DWCWetMaterialParameters::GlobalRenderProfileLUT().ToString());
+    if (!bHasGlobalTexelSizeParameter) MissingParameters.Add(DWCWetMaterialParameters::GlobalRenderProfileTexelSize().ToString());
+    if (!bHasUseGPUBackendParameter) MissingParameters.Add(DWCWetMaterialParameters::UseGPUBackend().ToString());
+
+    if (UE_LOG_ACTIVE(LogDWCGPU, VeryVerbose))
+    {
+        UE_LOG(
+            LogDWCGPU,
+            Log,
+            TEXT("DWCGPU: Slot %d material binding check. MID='%s', resolution=%d, missingParameters=%d, currentMap='%s'."),
+            Slot.MaterialSlotIndex,
+            *GetNameSafe(MID),
+            Slot.Resolution,
+            MissingParameters.Num(),
+            *GetNameSafe(Slot.GetCurrentMap()));
+    }
+    if (!MissingParameters.IsEmpty())
+    {
+        UE_LOG(
+            LogDWCGPU,
+            Warning,
+            TEXT("DWCGPU: Material '%s' on mesh '%s' slot %d does not satisfy the GPU wetness/profile contract. Missing parameters: %s. Run the three DWC material-function Python scripts, validate the functions, and regenerate the DWC material so Wet Part data and all dynamic RTs use the WCA DWC Data UV channel."),
+            *GetNameSafe(MID),
+            *GetNameSafe(MeshComponent),
+            Slot.MaterialSlotIndex,
+            *FString::Join(MissingParameters, TEXT(", ")));
+        return false;
+    }
+
+    MID->SetTextureParameterValue(WetnessMapParameterName, Slot.GetCurrentMap());
+    MID->SetTextureParameterValue(
+        DWCWetMaterialParameters::SurfaceDroplet1RT(),
+        Slot.bUsesSurfaceWater ? Slot.SurfaceDroplet1RT.Get() : nullptr);
+    MID->SetTextureParameterValue(
+        DWCWetMaterialParameters::SurfaceDroplet2RT(),
+        Slot.bUsesSurfaceWater ? Slot.SurfaceDroplet2RT.Get() : nullptr);
+    MID->SetScalarParameterValue(
+        DWCWetMaterialParameters::SurfaceWaterTexelSize(),
+        Slot.bUsesSurfaceWater && Slot.SurfaceWaterResolution > 0
+            ? 1.0f / static_cast<float>(Slot.SurfaceWaterResolution)
+            : 0.0f);
+    MID->SetScalarParameterValue(DWCWetMaterialParameters::UseGPUBackend(), 1.0f);
+    Slot.MaterialInstance = MID;
+    UE_LOG(
+        LogDWCGPU,
+        Log,
+        TEXT("DWCGPU: Render binding active. Mesh='%s', slot=%d, MID='%s', wetnessRT='%s', resolution=%d, textureParam='%s'."),
+        *GetNameSafe(MeshComponent),
+        Slot.MaterialSlotIndex,
+        *GetNameSafe(MID),
+        *GetNameSafe(Slot.GetCurrentMap()),
+        Slot.Resolution,
+        *WetnessMapParameterName.ToString());
+    if (UE_LOG_ACTIVE(LogDWCGPU, VeryVerbose))
+    {
+        UE_LOG(
+            LogDWCGPU,
+            Log,
+            TEXT("DWCGPU: Slot %d bound GPU wetness render target '%s' to '%s'."),
+            Slot.MaterialSlotIndex,
+            *GetNameSafe(Slot.GetCurrentMap()),
+            *WetnessMapParameterName.ToString());
+    }
+
+    return true;
+}
+
 bool FDWCGPUBackend::CreateSlotResources()
 {
     USkeletalMeshComponent* MeshComponent = TargetSkeletalMesh.Get();
@@ -1464,129 +1601,8 @@ bool FDWCGPUBackend::CreateSlotResources()
                 FName(*FString::Printf(TEXT("DWC_SurfaceDroplet2RT_Slot%d"), Slot.MaterialSlotIndex)));
         }
 
-        if (Slot.MaterialSlotIndex >= 0 && Slot.MaterialSlotIndex < MeshComponent->GetNumMaterials())
+        if (!BindMaterialSlot(Slot))
         {
-            UMaterialInstanceDynamic* MID = WetMaterialInstances->IsValidIndex(Slot.MaterialSlotIndex)
-                ? (*WetMaterialInstances)[Slot.MaterialSlotIndex]
-                : nullptr;
-            if (!MID)
-            {
-                MID = MeshComponent->CreateAndSetMaterialInstanceDynamic(Slot.MaterialSlotIndex);
-                if (WetMaterialInstances->IsValidIndex(Slot.MaterialSlotIndex))
-                {
-                    (*WetMaterialInstances)[Slot.MaterialSlotIndex] = MID;
-                }
-            }
-
-            if (MID)
-            {
-                const bool bHasWetnessMapParameter = MaterialHasTextureParameter(MID, WetnessMapParameterName);
-                const bool bHasDroplet1RTParameter = MaterialHasTextureParameter(MID, DWCWetMaterialParameters::SurfaceDroplet1RT());
-                const bool bHasDroplet2RTParameter =
-                    MaterialHasTextureParameter(MID, DWCWetMaterialParameters::SurfaceDroplet2RT());
-                const bool bHasWetPartDataParameter = MaterialHasTextureParameter(MID, DWCWetMaterialParameters::WetPartDataTexture());
-                const bool bHasProfileRemapParameter = MaterialHasTextureParameter(MID, DWCWetMaterialParameters::ProfileRemapLUT());
-                const bool bHasGlobalProfileParameter = MaterialHasTextureParameter(MID, DWCWetMaterialParameters::GlobalRenderProfileLUT());
-                const bool bHasGlobalTexelSizeParameter = MaterialHasScalarParameter(MID, DWCWetMaterialParameters::GlobalRenderProfileTexelSize());
-
-                // Droplet normal arrays may be statically compiled out per material slot,
-                // so their absence is not a runtime contract failure.
-                TArray<FString> MissingParameters;
-                if (!bHasWetnessMapParameter) MissingParameters.Add(WetnessMapParameterName.ToString());
-                if (Slot.bUsesSurfaceWater && !bHasDroplet1RTParameter)
-                {
-                    MissingParameters.Add(DWCWetMaterialParameters::SurfaceDroplet1RT().ToString());
-                }
-                if (Slot.bUsesSurfaceWater && !bHasDroplet2RTParameter)
-                {
-                    MissingParameters.Add(DWCWetMaterialParameters::SurfaceDroplet2RT().ToString());
-                }
-                if (!bHasWetPartDataParameter) MissingParameters.Add(DWCWetMaterialParameters::WetPartDataTexture().ToString());
-                if (!bHasProfileRemapParameter) MissingParameters.Add(DWCWetMaterialParameters::ProfileRemapLUT().ToString());
-                if (!bHasGlobalProfileParameter) MissingParameters.Add(DWCWetMaterialParameters::GlobalRenderProfileLUT().ToString());
-                if (!bHasGlobalTexelSizeParameter) MissingParameters.Add(DWCWetMaterialParameters::GlobalRenderProfileTexelSize().ToString());
-
-                if (UE_LOG_ACTIVE(LogDWCGPU, VeryVerbose))
-                {
-                    UE_LOG(
-                        LogDWCGPU,
-                        Log,
-                        TEXT("DWCGPU: Slot %d material binding check. MID='%s', sourceMaterial='%s', resolution=%d, missingParameters=%d, currentMap='%s'."),
-                        Slot.MaterialSlotIndex,
-                        *GetNameSafe(MID),
-                        *GetNameSafe(MeshComponent->GetMaterial(Slot.MaterialSlotIndex)),
-                        Slot.Resolution,
-                        MissingParameters.Num(),
-                        *GetNameSafe(Slot.GetCurrentMap()));
-                }
-                if (!MissingParameters.IsEmpty())
-                {
-                    UE_LOG(
-                        LogDWCGPU,
-                        Warning,
-                        TEXT("DWCGPU: Material '%s' on mesh '%s' slot %d does not satisfy the GPU wetness/profile contract. Missing parameters: %s. Run the three DWC material-function Python scripts, validate the functions, and regenerate the DWC material so Wet Part data and all dynamic RTs use the WCA DWC Data UV channel."),
-                        *GetNameSafe(MID),
-                        *GetNameSafe(MeshComponent),
-                        Slot.MaterialSlotIndex,
-                        *FString::Join(MissingParameters, TEXT(", ")));
-                    bAllMaterialBindingsValid = false;
-                    continue;
-                }
-
-                MID->SetTextureParameterValue(WetnessMapParameterName, Slot.GetCurrentMap());
-                MID->SetTextureParameterValue(
-                    DWCWetMaterialParameters::SurfaceDroplet1RT(),
-                    Slot.bUsesSurfaceWater ? Slot.SurfaceDroplet1RT.Get() : nullptr);
-                MID->SetTextureParameterValue(
-                    DWCWetMaterialParameters::SurfaceDroplet2RT(),
-                    Slot.bUsesSurfaceWater ? Slot.SurfaceDroplet2RT.Get() : nullptr);
-                MID->SetScalarParameterValue(
-                    DWCWetMaterialParameters::SurfaceWaterTexelSize(),
-                    Slot.bUsesSurfaceWater && Slot.SurfaceWaterResolution > 0
-                        ? 1.0f / static_cast<float>(Slot.SurfaceWaterResolution)
-                        : 0.0f);
-                Slot.MaterialInstance = MID;
-                UE_LOG(
-                    LogDWCGPU,
-                    Log,
-                    TEXT("DWCGPU: Render binding active. Mesh='%s', slot=%d, MID='%s', wetnessRT='%s', resolution=%d, textureParam='%s'."),
-                    *GetNameSafe(MeshComponent),
-                    Slot.MaterialSlotIndex,
-                    *GetNameSafe(MID),
-                    *GetNameSafe(Slot.GetCurrentMap()),
-                    Slot.Resolution,
-                    *WetnessMapParameterName.ToString());
-                if (UE_LOG_ACTIVE(LogDWCGPU, VeryVerbose))
-                {
-                    UE_LOG(
-                        LogDWCGPU,
-                        Log,
-                        TEXT("DWCGPU: Slot %d bound GPU wetness render target '%s' to '%s'."),
-                        Slot.MaterialSlotIndex,
-                        *GetNameSafe(Slot.GetCurrentMap()),
-                        *WetnessMapParameterName.ToString());
-                }
-            }
-            else
-            {
-                UE_LOG(
-                    LogDWCGPU,
-                    Warning,
-                    TEXT("DWCGPU: Could not create a dynamic material instance for mesh '%s' slot %d."),
-                    *GetNameSafe(MeshComponent),
-                    Slot.MaterialSlotIndex);
-                bAllMaterialBindingsValid = false;
-            }
-        }
-        else
-        {
-            UE_LOG(
-                LogDWCGPU,
-                Warning,
-                TEXT("DWCGPU: Baked material slot %d is out of range for mesh '%s' (%d materials). Use Build for Runtime > Build GPU Runtime Data again for the current runtime mesh."),
-                Slot.MaterialSlotIndex,
-                *GetNameSafe(MeshComponent),
-                MeshComponent->GetNumMaterials());
             bAllMaterialBindingsValid = false;
         }
     }
@@ -2027,6 +2043,11 @@ void FDWCGPUBackend::DispatchSimulation(
         FMaterialSlotRuntime& Slot = MaterialSlots[SlotDispatch.SlotRuntimeIndex];
         Slot.SwapMaps();
         Slot.SwapPendingMaps();
+        if (MeshComponent->GetMaterial(Slot.MaterialSlotIndex) != Slot.MaterialInstance.Get() &&
+            !BindMaterialSlot(Slot))
+        {
+            continue;
+        }
         if (UMaterialInstanceDynamic* MID = Slot.MaterialInstance.Get())
         {
             MID->SetTextureParameterValue(WetnessMapParameterName, Slot.GetCurrentMap());

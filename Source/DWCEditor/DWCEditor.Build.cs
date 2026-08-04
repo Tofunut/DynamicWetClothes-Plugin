@@ -9,6 +9,7 @@ public class DWCEditor : ModuleRules
 		PrivateDependencyModuleNames.AddRange(
 			new string[]
 			{
+				"ApplicationCore",
 				"AdvancedPreviewScene",
 				"AppFramework",
 				"AssetDefinition",

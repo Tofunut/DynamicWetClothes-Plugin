@@ -272,8 +272,7 @@ bool FWetClothingRenderProfileBakeService::HasPendingVisualBakeTasks(
                     Materials[MaterialSlotIndex].MaterialInterface);
                 if (Override == nullptr ||
                     Override->GeneratedMaterial == nullptr ||
-                    Override->CPUMaterialInstance == nullptr ||
-                    Override->GPUMaterialInstance == nullptr ||
+                    Override->GeneratedMaterialInstance == nullptr ||
                     Override->SourceMaterial != SourceMaterial)
                 {
                     PendingLines.Add(FString::Printf(TEXT("Unified wet material setup is required for slot %d."), MaterialSlotIndex));
@@ -385,8 +384,7 @@ bool FWetClothingRenderProfileBakeService::BakeRenderProfileDataAndUpdateMateria
             FWCAMaterialGenerator::CreateOrUpdateUnifiedMaterialSet(SourceMaterial, Options);
         if (!MaterialSet.bSucceeded ||
             MaterialSet.GeneratedMaterial == nullptr ||
-            MaterialSet.CPUMaterialInstance == nullptr ||
-            MaterialSet.GPUMaterialInstance == nullptr)
+            MaterialSet.GeneratedMaterialInstance == nullptr)
         {
             Warnings.Add(FString::Printf(
                 TEXT("Slot %d material setup failed: %s"),
@@ -408,15 +406,14 @@ bool FWetClothingRenderProfileBakeService::BakeRenderProfileDataAndUpdateMateria
         }
         Override->SourceMaterial = SourceMaterial;
         Override->GeneratedMaterial = MaterialSet.GeneratedMaterial;
-        Override->CPUMaterialInstance = MaterialSet.CPUMaterialInstance;
-        Override->GPUMaterialInstance = MaterialSet.GPUMaterialInstance;
+        Override->GeneratedMaterialInstance = MaterialSet.GeneratedMaterialInstance;
 
         UpdatedMaterials.Add(FString::Printf(
             TEXT("Slot %d -> %s / %s / %s"),
             MaterialSlotIndex,
             *GetNameSafe(MaterialSet.GeneratedMaterial),
-            *GetNameSafe(MaterialSet.CPUMaterialInstance),
-            *GetNameSafe(MaterialSet.GPUMaterialInstance)));
+            *GetNameSafe(MaterialSet.GeneratedMaterialInstance),
+            *GetNameSafe(MaterialSet.GeneratedMaterialInstance)));
     }
 
     FWetClothingWetPartDataTextureBakeResult WetPartDataResult;
@@ -509,8 +506,7 @@ bool FWetClothingRenderProfileBakeService::SaveBakedRenderProfileAssets(UWetClot
     for (const FWetClothingGeneratedWetMaterialOverride& Override : WetClothingAsset->Derived.Inline.GeneratedWetMaterialOverrides)
     {
         AddRenderProfilePackageForObject(Override.GeneratedMaterial.Get(), PackagesToSave);
-        AddRenderProfilePackageForObject(Override.CPUMaterialInstance.Get(), PackagesToSave);
-        AddRenderProfilePackageForObject(Override.GPUMaterialInstance.Get(), PackagesToSave);
+        AddRenderProfilePackageForObject(Override.GeneratedMaterialInstance.Get(), PackagesToSave);
     }
 
     // Save the shared surface-appearance function recorded by this WCA.

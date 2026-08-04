@@ -39,7 +39,7 @@ bool UDWCMaterialSetupEditorLibrary::RepairGeneratedWetMaterials(
         const FWetClothingUnifiedMaterialSetupResult Result =
             FWCAMaterialGenerator::CreateOrUpdateUnifiedMaterialSet(SourceMaterial, Options);
         if (!Result.bSucceeded || !Result.GeneratedMaterial ||
-            !Result.CPUMaterialInstance || !Result.GPUMaterialInstance)
+            !Result.GeneratedMaterialInstance)
         {
             Messages.Add(FString::Printf(
                 TEXT("Slot %d failed: %s"),
@@ -49,15 +49,14 @@ bool UDWCMaterialSetupEditorLibrary::RepairGeneratedWetMaterials(
         }
 
         MaterialOverride.GeneratedMaterial = Result.GeneratedMaterial;
-        MaterialOverride.CPUMaterialInstance = Result.CPUMaterialInstance;
-        MaterialOverride.GPUMaterialInstance = Result.GPUMaterialInstance;
+        MaterialOverride.GeneratedMaterialInstance = Result.GeneratedMaterialInstance;
         ++RepairedCount;
         Messages.Add(FString::Printf(
             TEXT("Slot %d repaired: shared=%s CPU=%s GPU=%s (%s)"),
             MaterialOverride.MaterialSlotIndex,
             *GetNameSafe(Result.GeneratedMaterial),
-            *GetNameSafe(Result.CPUMaterialInstance),
-            *GetNameSafe(Result.GPUMaterialInstance),
+            *GetNameSafe(Result.GeneratedMaterialInstance),
+            *GetNameSafe(Result.GeneratedMaterialInstance),
             *Result.Message));
     }
 

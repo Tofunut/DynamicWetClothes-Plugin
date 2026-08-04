@@ -20,6 +20,7 @@ namespace DWCWetMaterialParameters
     DWC_API const FName& SurfaceWaterNormalFlipY();
     DWC_API const FName& UseSurfaceWater();
     DWC_API const FName& UseDropletNormal();
+    DWC_API const FName& UseGPUBackend();
 
     DWC_API const FName& WetPartDebugStrength();
     DWC_API const FName& SurfaceWaterDebugStrength();

@@ -52,6 +52,7 @@ private:
     bool AcquireSharedStaticResources();
     bool BuildDebugVertexLookup();
     bool CreateSlotResources();
+    bool BindMaterialSlot(FMaterialSlotRuntime& Slot);
     void DispatchSimulation(
         TArray<FDWCResolvedSurfaceContact>&& Contacts,
         TArray<FDWCSurfaceStampRequest>&& SurfaceStamps,

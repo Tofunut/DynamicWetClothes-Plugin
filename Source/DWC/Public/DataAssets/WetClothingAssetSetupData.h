@@ -23,11 +23,72 @@ namespace DWCBuildStatus
     }
 }
 
+UENUM(BlueprintType)
+enum class EDWCDataUVResultSeverity : uint8
+{
+    Ready UMETA(DisplayName = "Ready"),
+    ReadyWithNotes UMETA(DisplayName = "Ready With Notes"),
+    ReadyWithWarnings UMETA(DisplayName = "Ready With Warnings"),
+    Failed UMETA(DisplayName = "Failed")
+};
+
+namespace DWCDataUVResultSeverity
+{
+    FORCEINLINE int32 Rank(const EDWCDataUVResultSeverity Severity)
+    {
+        switch (Severity)
+        {
+        case EDWCDataUVResultSeverity::Ready: return 0;
+        case EDWCDataUVResultSeverity::ReadyWithNotes: return 1;
+        case EDWCDataUVResultSeverity::ReadyWithWarnings: return 2;
+        case EDWCDataUVResultSeverity::Failed: return 3;
+        default: return 3;
+        }
+    }
+
+    FORCEINLINE EDWCDataUVResultSeverity Max(
+        const EDWCDataUVResultSeverity A,
+        const EDWCDataUVResultSeverity B)
+    {
+        return Rank(A) >= Rank(B) ? A : B;
+    }
+}
+
+UENUM()
+enum class EDWCDataUVSlotLODResultState : uint8
+{
+    Ready,
+    NotPresent,
+    NotCommitted,
+    NotGenerated,
+    Failed
+};
+
+USTRUCT()
+struct DWC_API FDWCDataUVSlotLODResult
+{
+    GENERATED_BODY()
+
+    UPROPERTY(VisibleAnywhere, Category = "DWC UV Channel")
+    int32 MaterialSlotIndex = INDEX_NONE;
+
+    UPROPERTY(VisibleAnywhere, Category = "DWC UV Channel")
+    int32 LODIndex = INDEX_NONE;
+
+    UPROPERTY(VisibleAnywhere, Category = "DWC UV Channel")
+    EDWCDataUVSlotLODResultState State = EDWCDataUVSlotLODResultState::NotGenerated;
+
+    UPROPERTY(VisibleAnywhere, Category = "DWC UV Channel")
+    FString Message;
+};
+
 namespace DWCGeneratedDataVersion
 {
-    // Version 7 makes the DWC Prepared Skeletal Mesh the sole source for generated UV metadata
-    // and Original UV topology. Source meshes are used only to create the prepared mesh copy.
-    static constexpr int32 DataUV = 7;
+    // Version 10 preserves the version-9 topology/packing policy and adds persistent
+    // per-slot result severity plus visible-surface exclusion diagnostics. Packed
+    // degenerate triangles within the configured coverage limits are excluded from
+    // DWC-derived data instead of failing the complete LOD.
+    static constexpr int32 DataUV = 10;
     static constexpr int32 OriginalUVTopology = 7;
 }
 
@@ -89,7 +150,7 @@ struct DWC_API FDWCWetClothingAssetSetupSettings
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, Category = "Simulation Data")
-    bool bBuildCPUVertexSimulationData = true;
+    bool bBuildCPUVertexSimulationData = false;
 
     UPROPERTY(EditAnywhere, Category = "Simulation Data")
     bool bBuildGPUWetnessMapSimulationData = true;
@@ -202,10 +263,34 @@ struct DWC_API FDWCDataUVSlotWarning
     int32 MaterialSlotIndex = INDEX_NONE;
 
     UPROPERTY(VisibleAnywhere, Category = "DWC UV Channel")
+    int32 Degenerate3DTriangleCount = 0;
+
+    UPROPERTY(VisibleAnywhere, Category = "DWC UV Channel")
     int32 DegenerateSourceUVTriangleCount = 0;
 
     UPROPERTY(VisibleAnywhere, Category = "DWC UV Channel")
     int32 InvalidSourceUVTriangleCount = 0;
+
+    UPROPERTY(VisibleAnywhere, Category = "DWC UV Channel")
+    int32 PackedDegenerateTriangleCount = 0;
+
+    UPROPERTY(VisibleAnywhere, Category = "DWC UV Channel")
+    int32 ExcludedVisibleTriangleCount = 0;
+
+    UPROPERTY(VisibleAnywhere, Category = "DWC UV Channel")
+    double TotalValid3DSurfaceArea = 0.0;
+
+    UPROPERTY(VisibleAnywhere, Category = "DWC UV Channel")
+    double ExcludedVisible3DSurfaceArea = 0.0;
+
+    UPROPERTY(VisibleAnywhere, Category = "DWC UV Channel")
+    double ExcludedVisible3DSurfaceRatio = 0.0;
+
+    UPROPERTY(VisibleAnywhere, Category = "DWC UV Channel")
+    double LargestConnectedExcluded3DSurfaceArea = 0.0;
+
+    UPROPERTY(VisibleAnywhere, Category = "DWC UV Channel")
+    double LargestConnectedExcluded3DSurfaceRatio = 0.0;
 
     UPROPERTY(VisibleAnywhere, Category = "DWC UV Channel")
     int32 SplitOriginalUVIslandCount = 0;
@@ -216,10 +301,17 @@ struct DWC_API FDWCDataUVSlotWarning
     UPROPERTY(VisibleAnywhere, Category = "DWC UV Channel")
     int32 BudgetFallbackIslandCount = 0;
 
+    UPROPERTY(VisibleAnywhere, Category = "DWC UV Channel")
+    EDWCDataUVResultSeverity ResultSeverity = EDWCDataUVResultSeverity::Ready;
+
     bool HasWarnings() const
     {
-        return DegenerateSourceUVTriangleCount > 0 ||
+        return ResultSeverity != EDWCDataUVResultSeverity::Ready ||
+            Degenerate3DTriangleCount > 0 ||
+            DegenerateSourceUVTriangleCount > 0 ||
             InvalidSourceUVTriangleCount > 0 ||
+            PackedDegenerateTriangleCount > 0 ||
+            ExcludedVisibleTriangleCount > 0 ||
             SplitOriginalUVIslandCount > 0 ||
             SelfOverlapPairCount > 0 ||
             BudgetFallbackIslandCount > 0;

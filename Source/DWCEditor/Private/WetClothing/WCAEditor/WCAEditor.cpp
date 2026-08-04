@@ -15,6 +15,7 @@
 #include "WetClothing/WCAEditor/WCAGeneratedDataInvalidator.h"
 #include "WetClothing/WCAEditor/WCAValidationReport.h"
 #include "WetClothing/Asset/Setup/DWCDataUVBuildService.h"
+#include "WetClothing/WCAEditor/UI/WCAReportDialogs.h"
 #include "WetClothing/WCAEditor/UI/SWCAEditorPanel.h"
 #include "DetailsViewArgs.h"
 #include "Engine/SkeletalMesh.h"
@@ -64,6 +65,7 @@ namespace
     constexpr int32 MaxDWCDataUVChannelIndex = 3;
     constexpr int32 WCAReportDialogFontSize = 10;
     const FLinearColor InfoIconTint(0.32f, 0.65f, 1.0f, 1.0f);
+    const FLinearColor WarningIconTint(1.0f, 0.78f, 0.18f, 1.0f);
 
     const FCheckBoxStyle& GetWetClothingModeToggleStyle()
     {
@@ -270,7 +272,7 @@ namespace
 
         if (DataUVChannelIndex < UVChannelCount)
         {
-            return FStyleColors::Warning;
+            return FSlateColor(WarningIconTint);
         }
 
         return FSlateColor(InfoIconTint);
@@ -1069,7 +1071,7 @@ namespace
         case EWCAValidationSeverity::Error:
             return FSlateColor(FLinearColor(1.0f, 0.22f, 0.16f, 1.0f));
         case EWCAValidationSeverity::Warning:
-            return FSlateColor(FLinearColor(1.0f, 0.64f, 0.12f, 1.0f));
+            return FSlateColor(WarningIconTint);
         case EWCAValidationSeverity::Info:
         default:
             return FSlateColor(FLinearColor(0.32f, 0.65f, 1.0f, 1.0f));
@@ -1994,7 +1996,7 @@ namespace
         };
 
         const FSlateColor ReadyColor(FLinearColor(0.24f, 0.78f, 0.38f, 1.0f));
-        const FSlateColor WarningColor(FLinearColor(1.0f, 0.62f, 0.12f, 1.0f));
+        const FSlateColor WarningColor(WarningIconTint);
         const FSlateColor MissingColor(FLinearColor(1.0f, 0.24f, 0.18f, 1.0f));
 
         TSharedRef<SGridPanel> StatusGrid = SNew(SGridPanel);
@@ -2567,7 +2569,7 @@ namespace
             const FWetClothingUnifiedMaterialSetupResult MaterialSet =
                 FWCAMaterialGenerator::CreateOrUpdateUnifiedMaterialSet(SourceMaterial, MaterialSetupOptions);
             if (!MaterialSet.bSucceeded || MaterialSet.GeneratedMaterial == nullptr ||
-                MaterialSet.GeneratedMaterialInstance == nullptr)
+                MaterialSet.CPUMaterialInstance == nullptr || MaterialSet.GPUMaterialInstance == nullptr)
             {
                 Failures.Add(FString::Printf(
                     TEXT("Slot %d: %s"),
@@ -2588,7 +2590,8 @@ namespace
 #endif
             ExistingOverride->SourceMaterial = SourceMaterial;
             ExistingOverride->GeneratedMaterial = MaterialSet.GeneratedMaterial;
-            ExistingOverride->GeneratedMaterialInstance = MaterialSet.GeneratedMaterialInstance;
+            ExistingOverride->CPUMaterialInstance = MaterialSet.CPUMaterialInstance;
+            ExistingOverride->GPUMaterialInstance = MaterialSet.GPUMaterialInstance;
             ExistingOverride->GeneratorVersion = FWCAMaterialGenerator::GeneratedMaterialGeneratorVersion;
             ExistingOverride->GenerationSignature = FWCAMaterialGenerator::BuildGeneratedMaterialSignature(
                 &Asset,
@@ -2695,6 +2698,15 @@ namespace
                 return false;
             }
 
+            Layer.AutoBakeMetadata.AutoBakeGuid = FGuid::NewGuid();
+            Layer.AutoBakeMetadata.BuildSignature = AutoResult.BuildSignature;
+            Layer.AutoBakeMetadata.LODIndex = AutoResult.LODIndex;
+            Layer.AutoBakeMetadata.Resolution = AutoResult.Resolution.X;
+            Layer.AutoBakeMetadata.PaddingPixels = Asset.Authored.TransparencyData.TransparencyPaddingPixels;
+            Layer.AutoBakeMetadata.ValidHitCount = AutoResult.ValidHitCount;
+            Layer.AutoBakeMetadata.NoHitCount = AutoResult.NoHitCount;
+            Layer.MarkFinalBakeStale();
+
             FDWCTransparencyEditedMapBakeResult BakeResult;
             FString BakeError;
             if (!FDWCTransparencyEditedMapBaker::Bake(Asset, Layer, AutoResult, BakeResult, BakeError))
@@ -2707,20 +2719,13 @@ namespace
                 return false;
             }
 
-            Layer.AutoBakeMetadata.AutoBakeGuid = FGuid::NewGuid();
-            Layer.AutoBakeMetadata.BuildSignature = AutoResult.BuildSignature;
-            Layer.AutoBakeMetadata.Resolution = AutoResult.Resolution.X;
-            Layer.AutoBakeMetadata.PaddingPixels = Asset.Authored.TransparencyData.TransparencyPaddingPixels;
-            Layer.AutoBakeMetadata.ValidHitCount = AutoResult.ValidHitCount;
-            Layer.AutoBakeMetadata.NoHitCount = AutoResult.NoHitCount;
-
             ++BakedLayerCount;
             BakedLayerSummaries.Add(FString::Printf(
                 TEXT("%s (Slot %d, UV%d, LOD%d) -> %s"),
                 *Layer.TargetSurface.OuterMaterialSlotName.ToString(),
                 MaterialSlotIndex,
-                Asset.GetDWCDataUVChannelIndex(),
-                0,
+                Layer.TargetSurface.OuterUVChannel,
+                AutoResult.LODIndex,
                 *GetPathNameSafe(BakeResult.TransparencyMap)));
 
             for (const FString& Warning : GenerateWarnings)
@@ -3039,6 +3044,7 @@ void FWCAEditor::Initialize(const EToolkitMode::Type Mode, const TSharedPtr<IToo
 {
     check(InWetClothingAsset != nullptr);
 
+    const double InitializeStartTime = FPlatformTime::Seconds();
     WetClothingAsset = InWetClothingAsset;
     InWetClothingAsset->ReleaseLoadedRuntimeBulkPayloadForEditor();
 
@@ -3074,6 +3080,12 @@ void FWCAEditor::Initialize(const EToolkitMode::Type Mode, const TSharedPtr<IToo
     AddToolbarExtender(ToolbarExtender);
 
     RegenerateMenusAndToolbars();
+    UE_LOG(
+        LogTemp,
+        Display,
+        TEXT("WCAEditor Initialize: '%s' completed in %.2f ms."),
+        *GetNameSafe(InWetClothingAsset),
+        (FPlatformTime::Seconds() - InitializeStartTime) * 1000.0);
 }
 
 void FWCAEditor::RegisterTabSpawners(const TSharedRef<FTabManager>& InTabManager)
@@ -3387,6 +3399,105 @@ void FWCAEditor::HandleAssetSetupClicked()
             (bPreferredChannelUnchanged && PreviousSettings.bAllowOverwritePreferredDWCDataUVChannel);
     }
     const bool bRequiresDataUVRelocation = DoesAssetSetupRequireDataUVRelocation(*Asset, NewSettings);
+    const bool bLODRangeChanged =
+        PreviousSettings.FirstGeneratedLODIndex != NewSettings.FirstGeneratedLODIndex ||
+        PreviousSettings.LastGeneratedLODIndex != NewSettings.LastGeneratedLODIndex;
+    const bool bGPUSimulationSettingChanged =
+        PreviousSettings.bBuildGPUWetnessMapSimulationData !=
+        NewSettings.bBuildGPUWetnessMapSimulationData;
+    const bool bCPUSimulationDisabled =
+        PreviousSettings.bBuildCPUVertexSimulationData && !NewSettings.bBuildCPUVertexSimulationData;
+    const bool bGPUSimulationDisabled =
+        PreviousSettings.bBuildGPUWetnessMapSimulationData && !NewSettings.bBuildGPUWetnessMapSimulationData;
+
+    TOptional<FDWCLODRangeUpdateReport> LODRangeReport;
+    TArray<int32> AddedLODIndices;
+    TArray<int32> LODIndicesRequiringGeneration;
+    auto HasUnresolvedDataUVResultForLOD = [Asset](const int32 LODIndex)
+    {
+#if WITH_EDITORONLY_DATA
+        return Asset->Derived.Inline.LastDataUVSlotLODResults.ContainsByPredicate(
+            [LODIndex](const FDWCDataUVSlotLODResult& Result)
+            {
+                return Result.LODIndex == LODIndex &&
+                    (Result.State == EDWCDataUVSlotLODResultState::Failed ||
+                     Result.State == EDWCDataUVSlotLODResultState::NotCommitted ||
+                     Result.State == EDWCDataUVSlotLODResultState::NotGenerated);
+            });
+#else
+        return false;
+#endif
+    };
+    if (bLODRangeChanged)
+    {
+        FDWCLODRangeUpdateReport Report;
+        Report.PreviousFirstLODIndex = PreviousSettings.FirstGeneratedLODIndex;
+        Report.PreviousLastLODIndex = PreviousSettings.LastGeneratedLODIndex;
+        Report.RequestedFirstLODIndex = NewSettings.FirstGeneratedLODIndex;
+        Report.RequestedLastLODIndex = NewSettings.LastGeneratedLODIndex;
+        Report.ActiveFirstLODIndex = NewSettings.FirstGeneratedLODIndex;
+        Report.ActiveLastLODIndex = NewSettings.LastGeneratedLODIndex;
+
+        for (int32 LODIndex = PreviousSettings.FirstGeneratedLODIndex;
+             LODIndex <= PreviousSettings.LastGeneratedLODIndex;
+             ++LODIndex)
+        {
+            if (LODIndex >= NewSettings.FirstGeneratedLODIndex &&
+                LODIndex <= NewSettings.LastGeneratedLODIndex)
+            {
+                Report.RetainedLODIndices.Add(LODIndex);
+            }
+            else
+            {
+                Report.RemovedLODIndices.Add(LODIndex);
+            }
+        }
+        for (int32 LODIndex = NewSettings.FirstGeneratedLODIndex;
+             LODIndex <= NewSettings.LastGeneratedLODIndex;
+             ++LODIndex)
+        {
+            if (LODIndex < PreviousSettings.FirstGeneratedLODIndex ||
+                LODIndex > PreviousSettings.LastGeneratedLODIndex)
+            {
+                AddedLODIndices.Add(LODIndex);
+                if (Asset->FindDataUVMetadataForLOD(LODIndex) != nullptr &&
+                    Asset->HasValidDataUVForLOD(LODIndex) &&
+                    !HasUnresolvedDataUVResultForLOD(LODIndex))
+                {
+                    Report.ReusedLODIndices.Add(LODIndex);
+                }
+            }
+        }
+        if (NewSettings.bBuildGPUWetnessMapSimulationData)
+        {
+            const bool bGPUWasJustEnabled =
+                !PreviousSettings.bBuildGPUWetnessMapSimulationData &&
+                NewSettings.bBuildGPUWetnessMapSimulationData;
+            for (int32 LODIndex = NewSettings.FirstGeneratedLODIndex;
+                 LODIndex <= NewSettings.LastGeneratedLODIndex;
+                 ++LODIndex)
+            {
+                const bool bIsNewlyAdded = AddedLODIndices.Contains(LODIndex);
+                if (!bIsNewlyAdded && !bGPUWasJustEnabled)
+                {
+                    continue;
+                }
+
+                const bool bHasReusablePayload =
+                    Asset->FindDataUVMetadataForLOD(LODIndex) != nullptr &&
+                    Asset->HasValidDataUVForLOD(LODIndex) &&
+                    !HasUnresolvedDataUVResultForLOD(LODIndex);
+                if (!bHasReusablePayload)
+                {
+                    LODIndicesRequiringGeneration.AddUnique(LODIndex);
+                    Report.RetainedLODIndices.Remove(LODIndex);
+                }
+            }
+            LODIndicesRequiringGeneration.Sort();
+        }
+
+        LODRangeReport = MoveTemp(Report);
+    }
 
     // Apply non-channel settings while the WCA still references its current sealed DWC UV Channel.
     // RelocateChannel updates the preferred channel only after the prepared-mesh copy succeeds.
@@ -3405,6 +3516,145 @@ void FWCAEditor::HandleAssetSetupClicked()
             EAppMsgType::Ok,
             FText::FromString(ChangeSummary.IsEmpty() ? TEXT("Failed to apply Wet Clothing Asset setup settings.") : ChangeSummary));
         return;
+    }
+
+    FString RangeSyncSummary;
+    if (Asset->HasLockedDataUVLayout() && bLODRangeChanged && LODRangeReport.IsSet())
+    {
+        FDWCLODRangeUpdateReport& Report = LODRangeReport.GetValue();
+        TArray<int32> GeneratedThisAttempt;
+        TArray<int32> FailedThisAttempt;
+
+        if (NewSettings.bBuildGPUWetnessMapSimulationData)
+        {
+            for (const int32 LODIndex : LODIndicesRequiringGeneration)
+            {
+                FDWCDataUVBuildOptions BuildOptions;
+                BuildOptions.TargetLODIndices.Add(LODIndex);
+                BuildOptions.bMergeWithExistingLayout = true;
+                // Commit successful material slots for this LOD even when another slot fails.
+                // The range remains unchanged until every required slot succeeds, but completed
+                // LOD payloads stay available for reuse on the next attempt.
+                BuildOptions.bRequireAllMaterialSlots = false;
+                const FDWCDataUVBuildResult LODResult = FDWCDataUVBuildService::Generate(
+                    *Asset,
+                    false,
+                    true,
+                    false,
+                    &BuildOptions);
+
+                const bool bLODComplete =
+                    LODResult.bSucceeded && LODResult.FailedMaterialSlotIndices.IsEmpty();
+                FDWCLODRangeUpdateLODDetail& Detail = Report.LODDetails.AddDefaulted_GetRef();
+                Detail.LODIndex = LODIndex;
+                Detail.bSucceeded = bLODComplete;
+                Detail.bHasNotes = bLODComplete &&
+                    LODResult.ResultSeverity == EDWCDataUVResultSeverity::ReadyWithNotes;
+                Detail.bHasWarnings = bLODComplete &&
+                    LODResult.ResultSeverity == EDWCDataUVResultSeverity::ReadyWithWarnings;
+                Detail.Message = LODResult.Message;
+
+                if (bLODComplete)
+                {
+                    GeneratedThisAttempt.Add(LODIndex);
+                }
+                else
+                {
+                    FailedThisAttempt.Add(LODIndex);
+                }
+            }
+        }
+
+        if (!FailedThisAttempt.IsEmpty())
+        {
+            FString RevertSummary;
+            Asset->ApplySetupSettings(PreviousSettings, &RevertSummary);
+            Report.bApplied = false;
+            Report.ActiveFirstLODIndex = PreviousSettings.FirstGeneratedLODIndex;
+            Report.ActiveLastLODIndex = PreviousSettings.LastGeneratedLODIndex;
+            Report.PreparedLODIndices = GeneratedThisAttempt;
+            for (const int32 ReusedLODIndex : Report.ReusedLODIndices)
+            {
+                Report.PreparedLODIndices.AddUnique(ReusedLODIndex);
+            }
+            Report.PreparedLODIndices.Sort();
+            Report.FailedLODIndices = MoveTemp(FailedThisAttempt);
+            Report.FailedLODIndices.Sort();
+            Report.GeneratedLODIndices.Reset();
+            Report.ReusedLODIndices.Reset();
+            Report.RemovedLODIndices.Reset();
+            Asset->SetLastBakeFailure(TEXT("The requested LOD range was not activated because one or more LODs failed DWC UV generation."));
+            RefreshAssetStateAndEditor();
+            WCAReportDialogs::OpenLODRangeUpdateDialog(Report);
+            return;
+        }
+
+        // A successful range update only needs detail cards for generated LODs that
+        // produced diagnostics. Plain Ready results are already summarized above.
+        Report.LODDetails.RemoveAll(
+            [](const FDWCLODRangeUpdateLODDetail& Detail)
+            {
+                return Detail.bSucceeded && !Detail.bHasNotes && !Detail.bHasWarnings;
+            });
+        Report.GeneratedLODIndices = MoveTemp(GeneratedThisAttempt);
+        Report.GeneratedLODIndices.Sort();
+        Report.bApplied = true;
+        Report.ActiveFirstLODIndex = NewSettings.FirstGeneratedLODIndex;
+        Report.ActiveLastLODIndex = NewSettings.LastGeneratedLODIndex;
+
+        TSet<int32> RetainedPayloadLODIndices;
+        RetainedPayloadLODIndices.Add(UWetClothingAsset::RuntimeSimulationLODIndex);
+        if (NewSettings.bBuildGPUWetnessMapSimulationData)
+        {
+            for (int32 LODIndex = NewSettings.FirstGeneratedLODIndex;
+                 LODIndex <= NewSettings.LastGeneratedLODIndex;
+                 ++LODIndex)
+            {
+                RetainedPayloadLODIndices.Add(LODIndex);
+            }
+        }
+        Asset->PruneDataUVLODData(RetainedPayloadLODIndices);
+    }
+    else if (Asset->HasLockedDataUVLayout() && bGPUSimulationSettingChanged)
+    {
+        FDWCDataUVBuildOptions BuildOptions;
+        BuildOptions.bRequireAllMaterialSlots = true;
+        const FDWCDataUVBuildResult RangeSyncResult = FDWCDataUVBuildService::Generate(
+            *Asset,
+            false,
+            true,
+            false,
+            &BuildOptions);
+        if (!RangeSyncResult.bSucceeded)
+        {
+            FString RevertSummary;
+            Asset->ApplySetupSettings(PreviousSettings, &RevertSummary);
+            Asset->SetLastBakeFailure(RangeSyncResult.Message);
+            RefreshAssetStateAndEditor();
+            WCAReportDialogs::OpenDWCDataUVBuildFailureDialog(
+                RangeSyncResult,
+                Asset,
+                RangeSyncResult.PreparedMesh != nullptr
+                    ? RangeSyncResult.PreparedMesh
+                    : Asset->GetRuntimeSkeletalMesh(),
+                TSet<int32>());
+            return;
+        }
+        RangeSyncSummary = RangeSyncResult.Message;
+    }
+    else if (bLODRangeChanged && LODRangeReport.IsSet())
+    {
+        // No sealed layout exists yet. The range setting changed, but there is no DWC UV payload to regenerate.
+        LODRangeReport.GetValue().bApplied = true;
+    }
+
+    if (bCPUSimulationDisabled)
+    {
+        Asset->ClearPrecomputedSimulationData();
+    }
+    if (bGPUSimulationDisabled)
+    {
+        Asset->ClearGPUWetMapData();
     }
     FWCAGeneratedDataInvalidator::InvalidateAsset(*Asset);
     Asset->MarkPackageDirty();
@@ -3425,17 +3675,57 @@ void FWCAEditor::HandleAssetSetupClicked()
 
         Asset->MarkPackageDirty();
         RefreshAssetStateAndEditor();
-        const FString CombinedSummary = ChangeSummary.IsEmpty() || ChangeSummary == TEXT("Wet Clothing setup settings are unchanged.")
-            ? RelocationResult.Message
-            : ChangeSummary + TEXT("\n") + RelocationResult.Message;
-        FMessageDialog::Open(EAppMsgType::Ok, FText::FromString(CombinedSummary));
+        if (LODRangeReport.IsSet())
+        {
+            TArray<FString> AdditionalParts;
+            if (!ChangeSummary.IsEmpty() && ChangeSummary != TEXT("Wet Clothing setup settings are unchanged."))
+            {
+                AdditionalParts.Add(ChangeSummary);
+            }
+            AdditionalParts.Add(RelocationResult.Message);
+            LODRangeReport.GetValue().AdditionalSummary = FString::Join(AdditionalParts, TEXT("\n"));
+            WCAReportDialogs::OpenLODRangeUpdateDialog(LODRangeReport.GetValue());
+        }
+        else
+        {
+            TArray<FString> SummaryParts;
+            if (!ChangeSummary.IsEmpty() && ChangeSummary != TEXT("Wet Clothing setup settings are unchanged."))
+            {
+                SummaryParts.Add(ChangeSummary);
+            }
+            if (!RangeSyncSummary.IsEmpty())
+            {
+                SummaryParts.Add(RangeSyncSummary);
+            }
+            SummaryParts.Add(RelocationResult.Message);
+            FMessageDialog::Open(EAppMsgType::Ok, FText::FromString(FString::Join(SummaryParts, TEXT("\n"))));
+        }
         return;
     }
 
     RefreshAssetStateAndEditor();
+    if (LODRangeReport.IsSet())
+    {
+        if (!ChangeSummary.IsEmpty() && ChangeSummary != TEXT("Wet Clothing setup settings are unchanged."))
+        {
+            LODRangeReport.GetValue().AdditionalSummary = ChangeSummary;
+        }
+        WCAReportDialogs::OpenLODRangeUpdateDialog(LODRangeReport.GetValue());
+        return;
+    }
+
+    TArray<FString> SummaryParts;
     if (!ChangeSummary.IsEmpty())
     {
-        FMessageDialog::Open(EAppMsgType::Ok, FText::FromString(ChangeSummary));
+        SummaryParts.Add(ChangeSummary);
+    }
+    if (!RangeSyncSummary.IsEmpty())
+    {
+        SummaryParts.Add(RangeSyncSummary);
+    }
+    if (!SummaryParts.IsEmpty())
+    {
+        FMessageDialog::Open(EAppMsgType::Ok, FText::FromString(FString::Join(SummaryParts, TEXT("\n"))));
     }
 }
 
@@ -3476,6 +3766,14 @@ void FWCAEditor::InitializeGeneratedDataUV(
     }
 
     Asset->Modify();
+    TSet<int32> IncludedMaterialSlotIndices;
+    for (const FWetClothingAuthoredMaterialSlot& SlotState : Asset->Authored.PartData.EditableWetPartData.MaterialSlots)
+    {
+        if (SlotState.bIsWettableSlot && SlotState.MaterialSlotIndex != INDEX_NONE)
+        {
+            IncludedMaterialSlotIndices.Add(SlotState.MaterialSlotIndex);
+        }
+    }
     FScopedSlowTask SlowTask(
         2.0f,
         FText::FromString(FString::Printf(TEXT("Initializing DWC UV Channel for %s..."), *GetNameSafe(Asset))));
@@ -3494,10 +3792,11 @@ void FWCAEditor::InitializeGeneratedDataUV(
         // Generate() already invalidated transient derived data. Refresh the editor as well so
         // panels do not keep local copies of pre-initialization UV view data after a failed initial build.
         RefreshAssetStateAndEditor();
-        FMessageDialog::Open(
-            EAppMsgCategory::Error,
-            EAppMsgType::Ok,
-            FText::FromString(Result.Message));
+        WCAReportDialogs::OpenDWCDataUVBuildFailureDialog(
+            Result,
+            Asset,
+            Result.PreparedMesh != nullptr ? Result.PreparedMesh : Asset->GetRuntimeSkeletalMesh(),
+            IncludedMaterialSlotIndices);
         return;
     }
 
@@ -3508,10 +3807,11 @@ void FWCAEditor::InitializeGeneratedDataUV(
     RefreshAssetStateAndEditor();
     if (Result.bGeneratedWithWarnings)
     {
-        FMessageDialog::Open(
-            EAppMsgCategory::Warning,
-            EAppMsgType::Ok,
-            FText::FromString(Result.Message));
+        WCAReportDialogs::OpenDWCDataUVBuildResultDialog(
+            Result,
+            Asset,
+            Result.PreparedMesh != nullptr ? Result.PreparedMesh : Asset->GetRuntimeSkeletalMesh(),
+            IncludedMaterialSlotIndices);
     }
     else
     {
@@ -4254,7 +4554,7 @@ FText FWCAEditor::GetGenerateMaterialsTooltip() const
 
     return LOCTEXT(
         "GenerateMaterialsRequiredTooltip",
-        "Generate or update the shared DWC material and runtime instance for wettable slots.");
+        "Generate or update the shared DWC material and CPU/GPU permutations for wettable slots.");
 }
 
 FReply FWCAEditor::HandleGenerateMaterialsClicked()
@@ -4354,12 +4654,13 @@ FReply FWCAEditor::GenerateWetMaterials()
         const bool bHadCompleteOverride =
             ExistingOverride != nullptr &&
             ExistingOverride->GeneratedMaterial != nullptr &&
-            ExistingOverride->GeneratedMaterialInstance != nullptr;
+            ExistingOverride->CPUMaterialInstance != nullptr &&
+            ExistingOverride->GPUMaterialInstance != nullptr;
 
         SlowTask.EnterProgressFrame(
             1.0f,
             FText::FromString(FString::Printf(
-                TEXT("Generating shared material and runtime instance for slot %d from '%s'..."),
+                TEXT("Generating shared material and CPU/GPU permutations for slot %d from '%s'..."),
                 MaterialSlotIndex,
                 *GetNameSafe(SourceMaterial))));
 
@@ -4371,7 +4672,7 @@ FReply FWCAEditor::GenerateWetMaterials()
         const FWetClothingUnifiedMaterialSetupResult MaterialSet =
             FWCAMaterialGenerator::CreateOrUpdateUnifiedMaterialSet(SourceMaterial, MaterialSetupOptions);
         if (!MaterialSet.bSucceeded || MaterialSet.GeneratedMaterial == nullptr ||
-            MaterialSet.GeneratedMaterialInstance == nullptr)
+            MaterialSet.CPUMaterialInstance == nullptr || MaterialSet.GPUMaterialInstance == nullptr)
         {
             Failures.Add(FString::Printf(
                 TEXT("Slot %d: %s"),
@@ -4392,32 +4693,21 @@ FReply FWCAEditor::GenerateWetMaterials()
 #endif
         ExistingOverride->SourceMaterial = SourceMaterial;
         ExistingOverride->GeneratedMaterial = MaterialSet.GeneratedMaterial;
-        ExistingOverride->GeneratedMaterialInstance = MaterialSet.GeneratedMaterialInstance;
+        ExistingOverride->CPUMaterialInstance = MaterialSet.CPUMaterialInstance;
+        ExistingOverride->GPUMaterialInstance = MaterialSet.GPUMaterialInstance;
         ExistingOverride->GeneratorVersion = FWCAMaterialGenerator::GeneratedMaterialGeneratorVersion;
         ExistingOverride->GenerationSignature = FWCAMaterialGenerator::BuildGeneratedMaterialSignature(
             Asset,
             MaterialSlotIndex,
             SourceMaterial);
-
-        UMaterialInterface* CurrentMaterial = RuntimeMesh->GetMaterials()[MaterialSlotIndex].MaterialInterface;
-        const bool bCanApplyGeneratedMaterial = CurrentMaterial == nullptr ||
-            CurrentMaterial == SourceMaterial ||
-            (ExistingOverride != nullptr &&
-                (CurrentMaterial == ExistingOverride->GeneratedMaterial ||
-                 CurrentMaterial == ExistingOverride->GeneratedMaterialInstance));
-        if (bCanApplyGeneratedMaterial)
-        {
-            RuntimeMesh->GetMaterials()[MaterialSlotIndex].MaterialInterface = MaterialSet.GeneratedMaterialInstance;
-            RuntimeMesh->MarkPackageDirty();
-        }
         bUpdatedAnyMaterial = true;
 
         UpdatedMaterials.Add(FString::Printf(
             TEXT("Slot %d -> shared %s, CPU %s, GPU %s (%s)"),
             MaterialSlotIndex,
             *GetNameSafe(MaterialSet.GeneratedMaterial),
-            *GetNameSafe(MaterialSet.GeneratedMaterialInstance),
-            *GetNameSafe(MaterialSet.GeneratedMaterialInstance),
+            *GetNameSafe(MaterialSet.CPUMaterialInstance),
+            *GetNameSafe(MaterialSet.GPUMaterialInstance),
             bHadCompleteOverride || MaterialSet.bAlreadyConfigured
                 ? TEXT("overwritten/refreshed")
                 : TEXT("created")));

@@ -2526,34 +2526,9 @@ bool UWetClothingAsset::ApplySetupSettings(
         PreviousSettings.FirstGeneratedLODIndex != NewSettings.FirstGeneratedLODIndex ||
         PreviousSettings.LastGeneratedLODIndex != NewSettings.LastGeneratedLODIndex;
 
-    // A sealed WCA may activate only LODs whose DWC UV metadata was created during the initial commit.
-    // Original UV topology is canonical LOD0 data and is intentionally stored only once, so it must not
-    // be required separately for every mapped LOD. Data outside the active range remains retained.
-    if (HasLockedDataUVLayout() && bLODRangeChanged)
-    {
-        if (FindOriginalUVTopologyForLOD(RuntimeSimulationLODIndex) == nullptr)
-        {
-            DWC::Error::SetMessage(
-                OutChangeSummary,
-                TEXT("The sealed LOD0 Original UV topology is missing. Create a new WCA to rebuild the DWC UV layout."));
-            return false;
-        }
-
-        for (int32 LODIndex = NewSettings.FirstGeneratedLODIndex;
-             LODIndex <= NewSettings.LastGeneratedLODIndex;
-             ++LODIndex)
-        {
-            if (FindDataUVMetadataForLOD(LODIndex) == nullptr)
-            {
-                DWC::Error::SetMessage(
-                    OutChangeSummary,
-                    FString::Printf(
-                        TEXT("LOD%d has no retained DWC UV data. The active LOD mapping range can only use LODs generated for this WCA."),
-                        LODIndex));
-                return false;
-            }
-        }
-    }
+    // A sealed WCA may change its active range. The editor synchronizes the retained
+    // per-LOD DWC UV metadata after these settings are accepted instead of blocking the
+    // change merely because newly included LODs have not been generated yet.
 
     const bool bCPUSimulationSettingChanged =
         PreviousSettings.bBuildCPUVertexSimulationData != NewSettings.bBuildCPUVertexSimulationData;
@@ -2634,15 +2609,6 @@ bool UWetClothingAsset::ApplySetupSettings(
             TEXT("DWC UV Channel changed: UV%d -> UV%d. The existing packed layout will be copied without rebuilding island topology."),
             Metadata.DWCDataUVChannelIndex,
             Metadata.SetupSettings.PreferredDWCDataUVChannelIndex));
-    }
-    if (bLODRangeChanged)
-    {
-        Changes.Add(FString::Printf(
-            TEXT("Active LOD mapping range changed: LOD%d-LOD%d -> LOD%d-LOD%d. Retained DWC UV data is unchanged; runtime mapping rebuild is required."),
-            PreviousSettings.FirstGeneratedLODIndex,
-            PreviousSettings.LastGeneratedLODIndex,
-            Metadata.SetupSettings.FirstGeneratedLODIndex,
-            Metadata.SetupSettings.LastGeneratedLODIndex));
     }
     if (bCPUSimulationSettingChanged)
     {
@@ -2867,6 +2833,62 @@ bool UWetClothingAsset::CommitDataUVChannelRelocation(
 #else
     DWC::Error::SetMessage(OutErrorMessage, TEXT("DWC UV Channel relocation is editor-only."));
     return false;
+#endif
+}
+
+int32 UWetClothingAsset::PruneDataUVLODData(const TSet<int32>& RetainedLODIndices)
+{
+#if WITH_EDITORONLY_DATA
+    const int32 RemovedMetadataCount = Derived.Inline.DataUVMetadata.RemoveAll(
+        [&RetainedLODIndices](const FDWCDataUVLODMetadata& Metadata)
+        {
+            return !RetainedLODIndices.Contains(Metadata.LODIndex);
+        });
+
+    Derived.Inline.LastDataUVSlotLODResults.RemoveAll(
+        [&RetainedLODIndices](const FDWCDataUVSlotLODResult& Result)
+        {
+            return !RetainedLODIndices.Contains(Result.LODIndex);
+        });
+
+    TSet<int32> RemainingFailedSlots;
+    for (const FDWCDataUVSlotLODResult& Result : Derived.Inline.LastDataUVSlotLODResults)
+    {
+        if (Result.State == EDWCDataUVSlotLODResultState::Failed &&
+            Result.MaterialSlotIndex != INDEX_NONE)
+        {
+            RemainingFailedSlots.Add(Result.MaterialSlotIndex);
+        }
+    }
+    Derived.Inline.FailedDataUVMaterialSlotIndices = RemainingFailedSlots.Array();
+    Derived.Inline.FailedDataUVMaterialSlotIndices.Sort();
+    if (RemainingFailedSlots.IsEmpty())
+    {
+        Derived.Inline.LastDataUVGenerationFailure.Reset();
+    }
+
+    const int32 RemovedGPUDataCount = Derived.Bulk.GPURuntimeData.RemoveAll(
+        [&RetainedLODIndices](const FDWCGPULODBakeData& Data)
+        {
+            return !RetainedLODIndices.Contains(Data.LODIndex);
+        });
+
+    const int32 RemovedVertexColorDataCount = Derived.Bulk.LODVertexColorRuntimeData.RemoveAll(
+        [&RetainedLODIndices](const FWCALODVertexColorRuntimeData& Data)
+        {
+            return Data.TargetLODIndex != INDEX_NONE &&
+                !RetainedLODIndices.Contains(Data.TargetLODIndex);
+        });
+
+    if (RemovedMetadataCount > 0 || RemovedGPUDataCount > 0 || RemovedVertexColorDataCount > 0)
+    {
+        MarkSimulationBakeOutOfDate();
+        MarkVisualBakeOutOfDate();
+        MarkPackageDirty();
+    }
+    return RemovedMetadataCount;
+#else
+    return 0;
 #endif
 }
 

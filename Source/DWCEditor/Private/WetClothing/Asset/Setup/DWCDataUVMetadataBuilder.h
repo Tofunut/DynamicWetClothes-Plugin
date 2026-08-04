@@ -16,5 +16,6 @@ public:
         int32 LODIndex,
         int32 DataUVChannelIndex,
         FDWCDataUVLODMetadata& OutMetadata,
-        FString* OutErrorMessage = nullptr);
+        FString* OutErrorMessage = nullptr,
+        const TSet<int32>* GeneratedMaterialSlotIndices = nullptr);
 };

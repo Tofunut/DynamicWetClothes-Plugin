@@ -24,13 +24,18 @@ bool FDWCDataUVValidator::Validate(
     const int32 /*OutputResolution*/,
     TSet<int32>& OutProblemMaterialSlots,
     FString& OutError,
-    FDWCDataUVValidationFailure* OutFailure)
+    FDWCDataUVValidationFailure* OutFailure,
+    TArray<FDWCDataUVValidationExclusion>* OutDegenerateExclusions)
 {
     OutProblemMaterialSlots.Reset();
     OutError.Reset();
     if (OutFailure != nullptr)
     {
         *OutFailure = FDWCDataUVValidationFailure();
+    }
+    if (OutDegenerateExclusions != nullptr)
+    {
+        OutDegenerateExclusions->Reset();
     }
 
     TMap<int32, TSet<int32>> TriangleIndicesByMaterial;
@@ -113,14 +118,12 @@ bool FDWCDataUVValidator::Validate(
                 PackedTriangle.UVs[0],
                 PackedTriangle.UVs[1],
                 PackedTriangle.UVs[2]);
-            if (!bValidCoordinates || PackedArea <= 1.0e-12)
+            if (!bValidCoordinates)
             {
                 OutProblemMaterialSlots.Add(MaterialPair.Key);
-                const TCHAR* Reason = bValidCoordinates
-                    ? TEXT("packed triangle area is below tolerance")
-                    : TEXT("packed UV coordinate is non-finite or outside 0-1 range");
+                const TCHAR* Reason = TEXT("packed UV coordinate is non-finite or outside 0-1 range");
                 OutError = FString::Printf(
-                    TEXT("Generated DWC UV contains an invalid or degenerate packed triangle in material slot %d: mesh triangle id %d, generator triangle index %d, chart %d, packed area %.12g, reason: %s, packed UVs ((%.9g, %.9g), (%.9g, %.9g), (%.9g, %.9g))."),
+                    TEXT("Generated DWC UV contains an invalid packed triangle in material slot %d: mesh triangle id %d, generator triangle index %d, chart %d, packed area %.12g, reason: %s, packed UVs ((%.9g, %.9g), (%.9g, %.9g), (%.9g, %.9g))."),
                     MaterialPair.Key,
                     PackedTriangle.MeshTriangleID,
                     PackedTriangle.SourceTriangleIndex,
@@ -145,6 +148,23 @@ bool FDWCDataUVValidator::Validate(
                     OutFailure->PackedUVs[0] = PackedTriangle.UVs[0];
                     OutFailure->PackedUVs[1] = PackedTriangle.UVs[1];
                     OutFailure->PackedUVs[2] = PackedTriangle.UVs[2];
+                }
+                continue;
+            }
+
+            if (PackedArea <= 1.0e-12)
+            {
+                if (OutDegenerateExclusions != nullptr)
+                {
+                    FDWCDataUVValidationExclusion& Exclusion = OutDegenerateExclusions->AddDefaulted_GetRef();
+                    Exclusion.MaterialSlotIndex = MaterialPair.Key;
+                    Exclusion.MeshTriangleID = PackedTriangle.MeshTriangleID;
+                    Exclusion.GeneratorTriangleIndex = PackedTriangle.SourceTriangleIndex;
+                    Exclusion.ChartIndex = PackedTriangle.ChartIndex;
+                    Exclusion.PackedArea = PackedArea;
+                    Exclusion.PackedUVs[0] = PackedTriangle.UVs[0];
+                    Exclusion.PackedUVs[1] = PackedTriangle.UVs[1];
+                    Exclusion.PackedUVs[2] = PackedTriangle.UVs[2];
                 }
                 continue;
             }

@@ -27,6 +27,57 @@ namespace DWCDataUVBuildServicePrivate
         Result.Message = Message;
     }
 
+    void PersistLastSlotLODResults(
+        UWetClothingAsset& Asset,
+        const FDWCDataUVBuildResult& Result,
+        const bool bMergeWithExisting)
+    {
+#if WITH_EDITORONLY_DATA
+        if (!bMergeWithExisting)
+        {
+            Asset.Derived.Inline.LastDataUVSlotLODResults = Result.SlotLODResults;
+        }
+        else
+        {
+            for (const FDWCDataUVSlotLODResult& NewRecord : Result.SlotLODResults)
+            {
+                Asset.Derived.Inline.LastDataUVSlotLODResults.RemoveAll(
+                    [&NewRecord](const FDWCDataUVSlotLODResult& ExistingRecord)
+                    {
+                        return ExistingRecord.MaterialSlotIndex == NewRecord.MaterialSlotIndex &&
+                            ExistingRecord.LODIndex == NewRecord.LODIndex;
+                    });
+                Asset.Derived.Inline.LastDataUVSlotLODResults.Add(NewRecord);
+            }
+        }
+        Asset.Derived.Inline.LastDataUVSlotLODResults.Sort(
+            [](const FDWCDataUVSlotLODResult& A, const FDWCDataUVSlotLODResult& B)
+            {
+                return A.MaterialSlotIndex == B.MaterialSlotIndex
+                    ? A.LODIndex < B.LODIndex
+                    : A.MaterialSlotIndex < B.MaterialSlotIndex;
+            });
+#endif
+    }
+
+    void RefreshPersistedFailedSlots(UWetClothingAsset& Asset)
+    {
+#if WITH_EDITORONLY_DATA
+        TSet<int32> FailedSlotSet;
+        for (const FDWCDataUVSlotLODResult& Record : Asset.Derived.Inline.LastDataUVSlotLODResults)
+        {
+            if (Record.State == EDWCDataUVSlotLODResultState::Failed &&
+                Record.MaterialSlotIndex != INDEX_NONE)
+            {
+                FailedSlotSet.Add(Record.MaterialSlotIndex);
+            }
+        }
+
+        Asset.Derived.Inline.FailedDataUVMaterialSlotIndices = FailedSlotSet.Array();
+        Asset.Derived.Inline.FailedDataUVMaterialSlotIndices.Sort();
+#endif
+    }
+
     FDWCDataUVSlotWarning& FindOrAddSlotWarning(
         TArray<FDWCDataUVSlotWarning>& SlotWarnings,
         const int32 MaterialSlotIndex)
@@ -58,11 +109,28 @@ namespace DWCDataUVBuildServicePrivate
             FDWCDataUVSlotWarning& OutWarning = FindOrAddSlotWarning(
                 OutWarnings,
                 InWarning.MaterialSlotIndex);
+            OutWarning.Degenerate3DTriangleCount += InWarning.Degenerate3DTriangleCount;
             OutWarning.DegenerateSourceUVTriangleCount += InWarning.DegenerateSourceUVTriangleCount;
             OutWarning.InvalidSourceUVTriangleCount += InWarning.InvalidSourceUVTriangleCount;
+            OutWarning.PackedDegenerateTriangleCount += InWarning.PackedDegenerateTriangleCount;
+            OutWarning.ExcludedVisibleTriangleCount += InWarning.ExcludedVisibleTriangleCount;
+            OutWarning.TotalValid3DSurfaceArea += InWarning.TotalValid3DSurfaceArea;
+            OutWarning.ExcludedVisible3DSurfaceArea += InWarning.ExcludedVisible3DSurfaceArea;
+            OutWarning.ExcludedVisible3DSurfaceRatio = FMath::Max(
+                OutWarning.ExcludedVisible3DSurfaceRatio,
+                InWarning.ExcludedVisible3DSurfaceRatio);
+            OutWarning.LargestConnectedExcluded3DSurfaceArea = FMath::Max(
+                OutWarning.LargestConnectedExcluded3DSurfaceArea,
+                InWarning.LargestConnectedExcluded3DSurfaceArea);
+            OutWarning.LargestConnectedExcluded3DSurfaceRatio = FMath::Max(
+                OutWarning.LargestConnectedExcluded3DSurfaceRatio,
+                InWarning.LargestConnectedExcluded3DSurfaceRatio);
             OutWarning.SplitOriginalUVIslandCount += InWarning.SplitOriginalUVIslandCount;
             OutWarning.SelfOverlapPairCount += InWarning.SelfOverlapPairCount;
             OutWarning.BudgetFallbackIslandCount += InWarning.BudgetFallbackIslandCount;
+            OutWarning.ResultSeverity = DWCDataUVResultSeverity::Max(
+                OutWarning.ResultSeverity,
+                InWarning.ResultSeverity);
         }
     }
 
@@ -99,7 +167,7 @@ namespace DWCDataUVBuildServicePrivate
     {
         TArray<FString> Lines;
         Lines.Add(FString::Printf(
-            TEXT("[DWC UV Channel Warning] Slot %d (%s)"),
+            TEXT("[DWC UV Channel Diagnostic] Slot %d (%s)"),
             Warning.MaterialSlotIndex,
             *ResolveMaterialSlotName(SkeletalMesh, Warning.MaterialSlotIndex)));
         if (Warning.DegenerateSourceUVTriangleCount > 0)
@@ -108,20 +176,35 @@ namespace DWCDataUVBuildServicePrivate
                 TEXT("- Degenerate Source UV triangles excluded: %d"),
                 Warning.DegenerateSourceUVTriangleCount));
         }
+        if (Warning.Degenerate3DTriangleCount > 0)
+        {
+            Lines.Add(FString::Printf(
+                TEXT("- Zero-area 3D triangles excluded: %d"),
+                Warning.Degenerate3DTriangleCount));
+        }
+        if (Warning.PackedDegenerateTriangleCount > 0)
+        {
+            Lines.Add(FString::Printf(
+                TEXT("- Near-degenerate packed triangles excluded: %d"),
+                Warning.PackedDegenerateTriangleCount));
+        }
         if (Warning.InvalidSourceUVTriangleCount > 0)
         {
             Lines.Add(FString::Printf(
                 TEXT("- Invalid Source UV triangles excluded: %d"),
                 Warning.InvalidSourceUVTriangleCount));
         }
+        if (Warning.SelfOverlapPairCount > 0)
+        {
+            Lines.Add(FString::Printf(
+                TEXT("- Overlapping Source UV triangle pairs separated: %d"),
+                Warning.SelfOverlapPairCount));
+        }
         if (Warning.SplitOriginalUVIslandCount > 0)
         {
             Lines.Add(FString::Printf(
-                TEXT("- Self-overlapping Original UV islands: %d"),
+                TEXT("- Physical Source UV shells split across packing charts: %d"),
                 Warning.SplitOriginalUVIslandCount));
-            Lines.Add(FString::Printf(
-                TEXT("- Overlapping triangle pairs: %d"),
-                Warning.SelfOverlapPairCount));
         }
         if (Warning.BudgetFallbackIslandCount > 0)
         {
@@ -129,22 +212,48 @@ namespace DWCDataUVBuildServicePrivate
                 TEXT("- Overlap analysis safety-budget fallbacks: %d"),
                 Warning.BudgetFallbackIslandCount));
         }
+        if (Warning.ExcludedVisibleTriangleCount > 0)
+        {
+            Lines.Add(FString::Printf(
+                TEXT("- Excluded visible 3D surface: %.6f%% (largest connected region %.6f%%)"),
+                Warning.ExcludedVisible3DSurfaceRatio * 100.0,
+                Warning.LargestConnectedExcluded3DSurfaceRatio * 100.0));
+        }
 
         TArray<FString> Results;
+        if (Warning.Degenerate3DTriangleCount > 0)
+        {
+            Results.Add(TEXT("zero-area 3D triangles were excluded without visible coverage loss"));
+        }
         if (Warning.DegenerateSourceUVTriangleCount > 0 || Warning.InvalidSourceUVTriangleCount > 0)
         {
             Results.Add(TEXT("problem triangles were excluded before chart generation"));
         }
-        if (Warning.SplitOriginalUVIslandCount > 0)
+        if (Warning.PackedDegenerateTriangleCount > 0)
         {
-            Results.Add(TEXT("self-overlapping islands were automatically split into non-overlapping charts"));
+            Results.Add(TEXT("near-degenerate packed triangles were excluded from DWC-derived data"));
+        }
+        if (Warning.SelfOverlapPairCount > 0 || Warning.SplitOriginalUVIslandCount > 0)
+        {
+            Results.Add(TEXT("self-overlapping physical Source UV shells were separated into topology-connected conflict-free charts, then safe adjacent fragments were merged"));
         }
         if (Warning.BudgetFallbackIslandCount > 0)
         {
             Results.Add(TEXT("budget fallback islands were conservatively split into individual triangle charts"));
         }
-        Lines.Add(FString::Printf(TEXT("- Result: %s"), *FString::Join(Results, TEXT("; "))));
-        Lines.Add(TEXT("- Usability: Generated DWC UV Channel remains usable; review the source UVs if this was unexpected."));
+        if (!Results.IsEmpty())
+        {
+            Lines.Add(FString::Printf(TEXT("- Result: %s"), *FString::Join(Results, TEXT("; "))));
+        }
+        Lines.Add(FString::Printf(
+            TEXT("- Status: %s"),
+            Warning.ResultSeverity == EDWCDataUVResultSeverity::ReadyWithWarnings
+                ? TEXT("Ready with warnings")
+                : Warning.ResultSeverity == EDWCDataUVResultSeverity::ReadyWithNotes
+                    ? TEXT("Ready with notes")
+                    : Warning.ResultSeverity == EDWCDataUVResultSeverity::Failed
+                        ? TEXT("Failed")
+                        : TEXT("Ready")));
         return FString::Join(Lines, TEXT("\n"));
     }
 
@@ -208,16 +317,21 @@ FDWCDataUVBuildResult FDWCDataUVBuildService::Generate(
     UWetClothingAsset& Asset,
     const bool bForceNewAsset,
     const bool bAllowOverwriteExistingDataUVChannel,
-    const bool bUsePreferredDataUVChannel)
+    const bool bUsePreferredDataUVChannel,
+    const FDWCDataUVBuildOptions* Options)
 {
     using namespace DWCDataUVBuildServicePrivate;
 
     FDWCDataUVBuildResult Result;
     USkeletalMesh* TouchedMesh = Asset.GetRuntimeSkeletalMesh();
     const bool bReplacingExistingLayout = Asset.HasLockedDataUVLayout();
+    const bool bMergeWithExistingLayout =
+        Options != nullptr && Options->bMergeWithExistingLayout && bReplacingExistingLayout;
+    const bool bRequireAllMaterialSlots =
+        Options != nullptr && Options->bRequireAllMaterialSlots;
 
-    // DWC UV Channel generation is an invalidation boundary. Validation failure, user cancellation, and
-    // partial generation failure leave the previously committed island/layout payload intact.
+    // DWC UV Channel generation is an invalidation boundary. Complete build failure leaves the
+    // previously committed payload intact; per-slot failures are isolated and successful slots commit.
     FWCAGeneratedDataInvalidator::InvalidateDataUVInitialization(Asset, TouchedMesh);
     ON_SCOPE_EXIT
     {
@@ -279,13 +393,36 @@ FDWCDataUVBuildResult FDWCDataUVBuildService::Generate(
     }
 
     TArray<int32> PayloadLODIndices;
-    PayloadLODIndices.Reserve(LastLODIndex - FirstLODIndex + 2);
-    PayloadLODIndices.Add(CanonicalDataUVLODIndex);
-    for (int32 LODIndex = FirstLODIndex; LODIndex <= LastLODIndex; ++LODIndex)
+    if (Options != nullptr && !Options->TargetLODIndices.IsEmpty())
     {
-        PayloadLODIndices.AddUnique(LODIndex);
+        const int32 LastAvailableLODIndex = RenderData->LODRenderData.Num() - 1;
+        for (const int32 RequestedLODIndex : Options->TargetLODIndices)
+        {
+            if (RequestedLODIndex >= 0 && RequestedLODIndex <= LastAvailableLODIndex)
+            {
+                PayloadLODIndices.AddUnique(RequestedLODIndex);
+            }
+        }
+        PayloadLODIndices.Sort();
+        if (PayloadLODIndices.IsEmpty())
+        {
+            SetFailure(Result, TEXT("No valid target LOD was supplied for DWC UV generation."));
+            return Result;
+        }
     }
-    PayloadLODIndices.Sort();
+    else
+    {
+        PayloadLODIndices.Reserve(LastLODIndex - FirstLODIndex + 2);
+        PayloadLODIndices.Add(CanonicalDataUVLODIndex);
+        if (Asset.GetSetupSettings().bBuildGPUWetnessMapSimulationData)
+        {
+            for (int32 LODIndex = FirstLODIndex; LODIndex <= LastLODIndex; ++LODIndex)
+            {
+                PayloadLODIndices.AddUnique(LODIndex);
+            }
+        }
+        PayloadLODIndices.Sort();
+    }
     Result.TargetLODIndices = PayloadLODIndices;
     Result.WettableMaterialSlotCount = SortedWettableMaterialSlotIndices.Num();
 
@@ -319,13 +456,32 @@ FDWCDataUVBuildResult FDWCDataUVBuildService::Generate(
     }
 
     TArray<FDWCDataUVLODMetadata> DataUVMetadata;
-    DataUVMetadata.Reserve(PayloadLODIndices.Num());
     TArray<FDWCEditorUVTopologyData> OriginalUVTopologies;
-    OriginalUVTopologies.Reserve(1);
+    if (bMergeWithExistingLayout)
+    {
+        DataUVMetadata = Asset.GetDataUVMetadata();
+        DataUVMetadata.RemoveAll(
+            [&PayloadLODIndices](const FDWCDataUVLODMetadata& Metadata)
+            {
+                return PayloadLODIndices.Contains(Metadata.LODIndex);
+            });
+#if WITH_EDITORONLY_DATA
+        OriginalUVTopologies = Asset.Derived.Inline.OriginalUVTopologies;
+#endif
+    }
+    DataUVMetadata.Reserve(DataUVMetadata.Num() + PayloadLODIndices.Num());
+    OriginalUVTopologies.Reserve(FMath::Max(1, OriginalUVTopologies.Num()));
 
     int32 ExcludedTriangleCount = 0;
+    int32 Degenerate3DTriangleCount = 0;
     int32 DegenerateSourceUVTriangleCount = 0;
     int32 InvalidSourceUVTriangleCount = 0;
+    int32 PackedDegenerateTriangleCount = 0;
+    int32 ExcludedVisibleTriangleCount = 0;
+    double ExcludedVisible3DSurfaceArea = 0.0;
+    double ExcludedVisible3DSurfaceRatio = 0.0;
+    double LargestConnectedExcluded3DSurfaceArea = 0.0;
+    double LargestConnectedExcluded3DSurfaceRatio = 0.0;
     int32 SplitOriginalUVIslandCount = 0;
     int32 SelfOverlapPairCount = 0;
     int32 BudgetFallbackIslandCount = 0;
@@ -337,19 +493,9 @@ FDWCDataUVBuildResult FDWCDataUVBuildService::Generate(
     double SeamSplitMilliseconds = 0.0;
     double PackAndValidateMilliseconds = 0.0;
     bool bGeneratedWithWarnings = false;
+    EDWCDataUVResultSeverity OverallSeverity = EDWCDataUVResultSeverity::Ready;
     TArray<FDWCDataUVLODWarning> LODWarnings;
     TArray<int32> GeneratedLODIndices;
-    auto AddNonCanonicalLODWarning = [&LODWarnings, &bGeneratedWithWarnings](
-        const int32 LODIndex,
-        const FString& Summary,
-        const FString& TechnicalDetails)
-    {
-        bGeneratedWithWarnings = true;
-        FDWCDataUVLODWarning& Warning = LODWarnings.AddDefaulted_GetRef();
-        Warning.LODIndex = LODIndex;
-        Warning.Summary = Summary;
-        Warning.TechnicalDetails = TechnicalDetails;
-    };
 
     int32 DataUVChannelIndex = Asset.GetDWCDataUVChannelIndex();
     if (DataUVChannelIndex == INDEX_NONE ||
@@ -389,113 +535,332 @@ FDWCDataUVBuildResult FDWCDataUVBuildService::Generate(
         return Result;
     }
 
-    FDWCDataUVGenerationResult CanonicalUVResult = FDWCDataUVGenerator::GenerateForSkeletalMesh(
-        PreparedMesh,
-        CanonicalDataUVLODIndex,
-        Asset.GetOriginalUVChannelIndex(),
-        DataUVChannelIndex,
-        bAllowOverwriteExistingChannel,
-        INDEX_NONE,
-        &WettableMaterialSlotIndices);
-    if (!CanonicalUVResult.bSucceeded)
-    {
-        Result.FailedMaterialSlotIndices = CanonicalUVResult.FailedMaterialSlotIndices;
-        Result.FailureLODIndex = CanonicalDataUVLODIndex;
-        Result.ValidationFailure = CanonicalUVResult.ValidationFailure;
-        SetFailure(Result, FString::Printf(
-            TEXT("LOD0 DWC UV Channel generation failed: %s"),
-            *CanonicalUVResult.Message));
-        return Result;
-    }
+    // Material slots own independent 0-1 DWC UV layouts. Build each slot as its own
+    // all-LOD transaction so a failure in one slot cannot roll back other successful slots.
+    TSet<int32> SuccessfulMaterialSlotIndices;
+    TMap<int32, TArray<FDWCDataUVGenerationResult>> SuccessfulResultsByLOD;
+    TArray<FString> SlotFailureMessages;
+    bool bResolvedDataUVChannel = false;
 
-    DataUVChannelIndex = CanonicalUVResult.UVChannelIndex;
-    UWetClothingAsset::ClearMeshContentSignatureCache();
-
-    FDWCEditorUVTopologyData OriginalUVTopology;
-    FString TopologyError;
-    if (!FDWCOriginalUVTopologyBuilder::BuildLOD(
-            Asset,
-            PreparedMesh,
-            CanonicalDataUVLODIndex,
-            OriginalUVTopology,
-            &TopologyError,
-            &WettableMaterialSlotIndices))
+    auto AddSlotLODResult = [&Result](
+        const int32 MaterialSlotIndex,
+        const int32 LODIndex,
+        const EDWCDataUVSlotLODResultState State,
+        const FString& Message = FString())
     {
-        Result.FailureLODIndex = CanonicalDataUVLODIndex;
-        SetFailure(Result, FString::Printf(
-            TEXT("LOD0 Original UV topology failed: %s"),
-            *TopologyError));
-        return Result;
-    }
-    OriginalUVTopologies.Add(MoveTemp(OriginalUVTopology));
+        FDWCDataUVSlotLODResult& Record = Result.SlotLODResults.AddDefaulted_GetRef();
+        Record.MaterialSlotIndex = MaterialSlotIndex;
+        Record.LODIndex = LODIndex;
+        Record.State = State;
+        Record.Message = Message;
+    };
 
-    for (const int32 LODIndex : PayloadLODIndices)
+    for (const int32 MaterialSlotIndex : SortedWettableMaterialSlotIndices)
     {
-        CurrentRenderData = PreparedMesh->GetResourceForRendering();
-        if (CurrentRenderData == nullptr || !CurrentRenderData->LODRenderData.IsValidIndex(LODIndex))
+        FDWCPreparedMeshEditTransaction SlotEditTransaction(PreparedMesh);
+        bool bCapturedSlotTransaction = true;
+        int32 CaptureFailureLOD = INDEX_NONE;
+        FString CaptureFailureMessage;
+        for (const int32 LODIndex : PayloadLODIndices)
         {
-            if (LODIndex != CanonicalDataUVLODIndex)
+            FString SlotTransactionError;
+            if (!SlotEditTransaction.CaptureEditableLOD(LODIndex, &SlotTransactionError))
             {
-                AddNonCanonicalLODWarning(
+                bCapturedSlotTransaction = false;
+                CaptureFailureLOD = LODIndex;
+                CaptureFailureMessage = SlotTransactionError;
+                Result.FailedMaterialSlotIndices.Add(MaterialSlotIndex);
+                if (Result.FailureLODIndex == INDEX_NONE)
+                {
+                    Result.FailureLODIndex = LODIndex;
+                }
+                SlotFailureMessages.Add(FString::Printf(
+                    TEXT("Material Slot %d failed at LOD%d: %s"),
+                    MaterialSlotIndex,
                     LODIndex,
-                    TEXT("Render data unavailable"),
-                    TEXT("Render data is unavailable, so this non-LOD0 DWC UV Channel data was skipped. LOD0 remains generated."));
-                continue;
+                    *SlotTransactionError));
+                break;
             }
-            SetFailure(Result, FString::Printf(TEXT("The DWC Prepared Skeletal Mesh has no LOD%d render data."), LODIndex));
-            return Result;
+        }
+        if (!bCapturedSlotTransaction)
+        {
+            for (const int32 LODIndex : PayloadLODIndices)
+            {
+                AddSlotLODResult(
+                    MaterialSlotIndex,
+                    LODIndex,
+                    LODIndex == CaptureFailureLOD
+                        ? EDWCDataUVSlotLODResultState::Failed
+                        : EDWCDataUVSlotLODResultState::NotGenerated,
+                    LODIndex == CaptureFailureLOD ? CaptureFailureMessage : FString());
+            }
+            SlotEditTransaction.Rollback();
+            UWetClothingAsset::ClearMeshContentSignatureCache();
+            continue;
         }
 
-        if (CurrentRenderData->LODRenderData[LODIndex].GetNumVertices() <= 0)
-        {
-            if (LODIndex != CanonicalDataUVLODIndex)
-            {
-                AddNonCanonicalLODWarning(
-                    LODIndex,
-                    TEXT("No render vertices"),
-                    TEXT("Render data has no vertices, so this non-LOD0 DWC UV Channel data was skipped. LOD0 remains generated."));
-                continue;
-            }
-            SetFailure(Result, FString::Printf(TEXT("The DWC Prepared Skeletal Mesh LOD%d has no vertices."), LODIndex));
-            return Result;
-        }
+        bool bSlotSucceeded = true;
+        bool bSlotGeneratedPayload = false;
+        int32 CandidateDataUVChannelIndex = DataUVChannelIndex;
+        TArray<FDWCDataUVGenerationResult> SlotLODGenerationResults;
+        SlotLODGenerationResults.Reserve(PayloadLODIndices.Num());
+        TArray<FDWCDataUVSlotLODResult> SlotOutcomeRecords;
+        SlotOutcomeRecords.Reserve(PayloadLODIndices.Num());
 
-        FDWCDataUVGenerationResult UVResult = CanonicalUVResult;
-        if (LODIndex != CanonicalDataUVLODIndex)
+        auto AddLocalOutcome = [&SlotOutcomeRecords, MaterialSlotIndex](
+            const int32 LODIndex,
+            const EDWCDataUVSlotLODResultState State,
+            const FString& Message = FString())
         {
-            // A DWC UV Channel chart boundary is render topology, not just a UV value. Generate
-            // each target LOD so it receives its own VertexInstance seams.
-            UVResult = FDWCDataUVGenerator::GenerateForSkeletalMesh(
+            FDWCDataUVSlotLODResult& Record = SlotOutcomeRecords.AddDefaulted_GetRef();
+            Record.MaterialSlotIndex = MaterialSlotIndex;
+            Record.LODIndex = LODIndex;
+            Record.State = State;
+            Record.Message = Message;
+        };
+
+        for (const int32 LODIndex : PayloadLODIndices)
+        {
+            CurrentRenderData = PreparedMesh->GetResourceForRendering();
+            if (CurrentRenderData == nullptr || !CurrentRenderData->LODRenderData.IsValidIndex(LODIndex))
+            {
+                bSlotSucceeded = false;
+                Result.FailedMaterialSlotIndices.Add(MaterialSlotIndex);
+                if (Result.FailureLODIndex == INDEX_NONE)
+                {
+                    Result.FailureLODIndex = LODIndex;
+                }
+                const FString FailureMessage = TEXT("Render data is unavailable.");
+                AddLocalOutcome(LODIndex, EDWCDataUVSlotLODResultState::Failed, FailureMessage);
+                SlotFailureMessages.Add(FString::Printf(
+                    TEXT("Material Slot %d failed at LOD%d: %s"),
+                    MaterialSlotIndex,
+                    LODIndex,
+                    *FailureMessage));
+                break;
+            }
+
+            if (CurrentRenderData->LODRenderData[LODIndex].GetNumVertices() <= 0)
+            {
+                bSlotSucceeded = false;
+                Result.FailedMaterialSlotIndices.Add(MaterialSlotIndex);
+                if (Result.FailureLODIndex == INDEX_NONE)
+                {
+                    Result.FailureLODIndex = LODIndex;
+                }
+                const FString FailureMessage = TEXT("The LOD has no vertices.");
+                AddLocalOutcome(LODIndex, EDWCDataUVSlotLODResultState::Failed, FailureMessage);
+                SlotFailureMessages.Add(FString::Printf(
+                    TEXT("Material Slot %d failed at LOD%d: %s"),
+                    MaterialSlotIndex,
+                    LODIndex,
+                    *FailureMessage));
+                break;
+            }
+
+            const bool bAllowOverwriteForSlot =
+                bAllowOverwriteExistingChannel ||
+                bResolvedDataUVChannel ||
+                LODIndex != CanonicalDataUVLODIndex;
+            FDWCDataUVGenerationResult UVResult = FDWCDataUVGenerator::GenerateForSkeletalMesh(
                 PreparedMesh,
                 LODIndex,
                 Asset.GetOriginalUVChannelIndex(),
-                DataUVChannelIndex,
-                true,
-                INDEX_NONE,
-                &WettableMaterialSlotIndices);
+                CandidateDataUVChannelIndex,
+                bAllowOverwriteForSlot,
+                MaterialSlotIndex,
+                nullptr);
             if (!UVResult.bSucceeded)
             {
-                AddNonCanonicalLODWarning(
+                bSlotSucceeded = false;
+                Result.FailedMaterialSlotIndices.Add(MaterialSlotIndex);
+                if (Result.FailureLODIndex == INDEX_NONE)
+                {
+                    Result.FailureLODIndex = LODIndex;
+                    Result.ValidationFailure = UVResult.ValidationFailure;
+                }
+                AddLocalOutcome(LODIndex, EDWCDataUVSlotLODResultState::Failed, UVResult.Message);
+                SlotFailureMessages.Add(FString::Printf(
+                    TEXT("Material Slot %d failed at LOD%d: %s"),
+                    MaterialSlotIndex,
                     LODIndex,
-                    TEXT("Validation failed"),
-                    FString::Printf(
-                        TEXT("DWC UV Channel generation did not pass validation, so this LOD was skipped instead of failing the whole build. Original failure: %s"),
-                        *UVResult.Message));
-                continue;
+                    *UVResult.Message));
+                break;
             }
-            if (UVResult.UVChannelIndex != DataUVChannelIndex)
+
+            if (UVResult.bTargetSlotNotPresent)
             {
-                AddNonCanonicalLODWarning(
-                    LODIndex,
-                    TEXT("Unexpected UV channel"),
-                    FString::Printf(
-                        TEXT("Generated DWC UV Channel %d, but this asset requires UV%d. This LOD was skipped; LOD0 remains generated."),
-                        UVResult.UVChannelIndex,
-                        DataUVChannelIndex));
+                AddLocalOutcome(LODIndex, EDWCDataUVSlotLODResultState::NotPresent, UVResult.Message);
+                SlotLODGenerationResults.Add(MoveTemp(UVResult));
                 continue;
             }
 
+            if (!bSlotGeneratedPayload)
+            {
+                CandidateDataUVChannelIndex = UVResult.UVChannelIndex;
+                bSlotGeneratedPayload = true;
+            }
+            else if (UVResult.UVChannelIndex != CandidateDataUVChannelIndex)
+            {
+                bSlotSucceeded = false;
+                Result.FailedMaterialSlotIndices.Add(MaterialSlotIndex);
+                if (Result.FailureLODIndex == INDEX_NONE)
+                {
+                    Result.FailureLODIndex = LODIndex;
+                }
+                const FString FailureMessage = FString::Printf(
+                    TEXT("Generated UV%d, but the asset requires UV%d."),
+                    UVResult.UVChannelIndex,
+                    CandidateDataUVChannelIndex);
+                AddLocalOutcome(LODIndex, EDWCDataUVSlotLODResultState::Failed, FailureMessage);
+                SlotFailureMessages.Add(FString::Printf(
+                    TEXT("Material Slot %d failed at LOD%d: %s"),
+                    MaterialSlotIndex,
+                    LODIndex,
+                    *FailureMessage));
+                break;
+            }
+
+            AddLocalOutcome(LODIndex, EDWCDataUVSlotLODResultState::Ready);
             UWetClothingAsset::ClearMeshContentSignatureCache();
+            SlotLODGenerationResults.Add(MoveTemp(UVResult));
+        }
+
+        if (!bSlotSucceeded || SlotLODGenerationResults.Num() != PayloadLODIndices.Num())
+        {
+            // Generated LODs in this slot were provisional. A later failure rolls those
+            // changes back, while LODs that were genuinely absent remain Not Present.
+            for (FDWCDataUVSlotLODResult& Record : SlotOutcomeRecords)
+            {
+                if (Record.State == EDWCDataUVSlotLODResultState::Ready)
+                {
+                    Record.State = EDWCDataUVSlotLODResultState::NotCommitted;
+                    Record.Message = TEXT("Generated successfully, but was not committed because another LOD in this material slot failed.");
+                }
+            }
+            for (const int32 LODIndex : PayloadLODIndices)
+            {
+                if (!SlotOutcomeRecords.ContainsByPredicate(
+                        [LODIndex](const FDWCDataUVSlotLODResult& Record)
+                        {
+                            return Record.LODIndex == LODIndex;
+                        }))
+                {
+                    AddLocalOutcome(LODIndex, EDWCDataUVSlotLODResultState::NotGenerated);
+                }
+            }
+            Result.SlotLODResults.Append(MoveTemp(SlotOutcomeRecords));
+            SlotEditTransaction.Rollback();
+            UWetClothingAsset::ClearMeshContentSignatureCache();
+            continue;
+        }
+
+        SlotEditTransaction.Commit();
+        Result.SlotLODResults.Append(MoveTemp(SlotOutcomeRecords));
+
+        // A slot that is absent from every mapped LOD needs no DWC payload and is not a failure.
+        if (!bSlotGeneratedPayload)
+        {
+            continue;
+        }
+
+        if (!bResolvedDataUVChannel)
+        {
+            DataUVChannelIndex = CandidateDataUVChannelIndex;
+            bResolvedDataUVChannel = true;
+        }
+        SuccessfulMaterialSlotIndices.Add(MaterialSlotIndex);
+        for (int32 ResultIndex = 0; ResultIndex < SlotLODGenerationResults.Num(); ++ResultIndex)
+        {
+            SuccessfulResultsByLOD.FindOrAdd(PayloadLODIndices[ResultIndex]).Add(MoveTemp(SlotLODGenerationResults[ResultIndex]));
+        }
+    }
+
+    if (bRequireAllMaterialSlots && !Result.FailedMaterialSlotIndices.IsEmpty())
+    {
+        Result.ResultSeverity = EDWCDataUVResultSeverity::Failed;
+        const FString FailureDetails = SlotFailureMessages.IsEmpty()
+            ? TEXT("One or more material slots failed to generate DWC UV data.")
+            : FString::Join(SlotFailureMessages, TEXT("\n"));
+        SetFailure(Result, FString::Printf(
+            TEXT("DWC UV generation was not committed because %d material slot(s) failed.\n%s"),
+            Result.FailedMaterialSlotIndices.Num(),
+            *FailureDetails));
+#if WITH_EDITORONLY_DATA
+        PersistLastSlotLODResults(Asset, Result, bMergeWithExistingLayout);
+        RefreshPersistedFailedSlots(Asset);
+        Asset.Derived.Inline.LastDataUVGenerationFailure = Result.Message;
+        Asset.MarkPackageDirty();
+#endif
+        return Result;
+    }
+
+    if (SuccessfulMaterialSlotIndices.IsEmpty())
+    {
+        Result.ResultSeverity = EDWCDataUVResultSeverity::Failed;
+        const FString FailureDetails = SlotFailureMessages.IsEmpty()
+            ? TEXT("No material slot produced a usable DWC UV layout.")
+            : FString::Join(SlotFailureMessages, TEXT("\n"));
+        SetFailure(Result, FString::Printf(
+            TEXT("DWC UV generation failed for all %d material slot(s) in the build.\n%s"),
+            SortedWettableMaterialSlotIndices.Num(),
+            *FailureDetails));
+#if WITH_EDITORONLY_DATA
+        PersistLastSlotLODResults(Asset, Result, bMergeWithExistingLayout);
+        RefreshPersistedFailedSlots(Asset);
+        Asset.Derived.Inline.LastDataUVGenerationFailure = Result.Message;
+        Asset.MarkPackageDirty();
+#endif
+        return Result;
+    }
+
+    TArray<int32> SortedSuccessfulMaterialSlotIndices = SuccessfulMaterialSlotIndices.Array();
+    SortedSuccessfulMaterialSlotIndices.Sort();
+    Result.GeneratedMaterialSlotIndices = SuccessfulMaterialSlotIndices;
+
+    const bool bMustBuildOriginalUVTopology =
+        OriginalUVTopologies.IsEmpty() || PayloadLODIndices.Contains(CanonicalDataUVLODIndex);
+    if (bMustBuildOriginalUVTopology)
+    {
+        OriginalUVTopologies.RemoveAll(
+            [](const FDWCEditorUVTopologyData& Topology)
+            {
+                return Topology.LODIndex == CanonicalDataUVLODIndex;
+            });
+
+        FDWCEditorUVTopologyData OriginalUVTopology;
+        FString TopologyError;
+        if (!FDWCOriginalUVTopologyBuilder::BuildLOD(
+                Asset,
+                PreparedMesh,
+                CanonicalDataUVLODIndex,
+                OriginalUVTopology,
+                &TopologyError,
+                &SuccessfulMaterialSlotIndices))
+        {
+            Result.GeneratedMaterialSlotIndices.Reset();
+            Result.FailedMaterialSlotIndices = WettableMaterialSlotIndices;
+            Result.FailureLODIndex = CanonicalDataUVLODIndex;
+            SetFailure(Result, FString::Printf(
+                TEXT("LOD0 Original UV topology failed for the successfully generated slots: %s"),
+                *TopologyError));
+            return Result;
+        }
+        OriginalUVTopologies.Add(MoveTemp(OriginalUVTopology));
+    }
+
+    for (const int32 LODIndex : PayloadLODIndices)
+    {
+        const TArray<FDWCDataUVGenerationResult>* LODResults = SuccessfulResultsByLOD.Find(LODIndex);
+        if (LODResults == nullptr || LODResults->Num() != SuccessfulMaterialSlotIndices.Num())
+        {
+            Result.GeneratedMaterialSlotIndices.Reset();
+            Result.FailedMaterialSlotIndices = WettableMaterialSlotIndices;
+            Result.FailureLODIndex = LODIndex;
+            SetFailure(Result, FString::Printf(
+                TEXT("LOD%d did not retain a complete result for every successful material slot."),
+                LODIndex));
+            return Result;
         }
 
         FDWCDataUVLODMetadata& Metadata = DataUVMetadata.AddDefaulted_GetRef();
@@ -506,55 +871,90 @@ FDWCDataUVBuildResult FDWCDataUVBuildService::Generate(
                 LODIndex,
                 DataUVChannelIndex,
                 Metadata,
-                &MetadataError))
+                &MetadataError,
+                &SuccessfulMaterialSlotIndices))
         {
-            if (LODIndex != CanonicalDataUVLODIndex)
-            {
-                DataUVMetadata.RemoveAt(DataUVMetadata.Num() - 1);
-                AddNonCanonicalLODWarning(
-                    LODIndex,
-                    TEXT("Metadata build failed"),
-                    FString::Printf(
-                        TEXT("DWC UV Channel metadata could not be built, so this LOD was skipped. LOD0 remains generated. Original failure: %s"),
-                        *MetadataError));
-                continue;
-            }
+            DataUVMetadata.RemoveAt(DataUVMetadata.Num() - 1);
+            Result.GeneratedMaterialSlotIndices.Reset();
+            Result.FailedMaterialSlotIndices = WettableMaterialSlotIndices;
+            Result.FailureLODIndex = LODIndex;
             SetFailure(Result, FString::Printf(
                 TEXT("LOD%d generated invalid DWC UV Channel metadata: %s"),
                 LODIndex,
                 *MetadataError));
             return Result;
         }
-        Metadata.GeneratedMaterialSlotIndices = SortedWettableMaterialSlotIndices;
-        Metadata.SlotWarnings = UVResult.SlotWarnings;
-        Metadata.SlotWarnings.Sort(
+
+        Metadata.GeneratedMaterialSlotIndices = SortedSuccessfulMaterialSlotIndices;
+        TArray<FDWCDataUVSlotWarning> LODSlotWarnings;
+        for (const FDWCDataUVGenerationResult& UVResult : *LODResults)
+        {
+            MergeSlotWarnings(LODSlotWarnings, UVResult.SlotWarnings);
+            bGeneratedWithWarnings = bGeneratedWithWarnings || UVResult.HasWarnings();
+            OverallSeverity = DWCDataUVResultSeverity::Max(OverallSeverity, UVResult.ResultSeverity);
+            MergeSlotWarnings(SlotWarnings, UVResult.SlotWarnings);
+            Degenerate3DTriangleCount += UVResult.Degenerate3DTriangleCount;
+            DegenerateSourceUVTriangleCount += UVResult.DegenerateSourceUVTriangleCount;
+            InvalidSourceUVTriangleCount += UVResult.InvalidSourceUVTriangleCount;
+            PackedDegenerateTriangleCount += UVResult.PackedDegenerateTriangleCount;
+            ExcludedVisibleTriangleCount += UVResult.ExcludedVisibleTriangleCount;
+            ExcludedVisible3DSurfaceArea += UVResult.ExcludedVisible3DSurfaceArea;
+            ExcludedVisible3DSurfaceRatio = FMath::Max(ExcludedVisible3DSurfaceRatio, UVResult.ExcludedVisible3DSurfaceRatio);
+            LargestConnectedExcluded3DSurfaceArea = FMath::Max(
+                LargestConnectedExcluded3DSurfaceArea,
+                UVResult.LargestConnectedExcluded3DSurfaceArea);
+            LargestConnectedExcluded3DSurfaceRatio = FMath::Max(
+                LargestConnectedExcluded3DSurfaceRatio,
+                UVResult.LargestConnectedExcluded3DSurfaceRatio);
+            ExcludedTriangleCount += UVResult.Degenerate3DTriangleCount +
+                UVResult.DegenerateSourceUVTriangleCount +
+                UVResult.InvalidSourceUVTriangleCount +
+                UVResult.PackedDegenerateTriangleCount;
+            SplitOriginalUVIslandCount += UVResult.SplitOriginalUVIslandCount;
+            SelfOverlapPairCount += UVResult.SelfOverlapPairCount;
+            BudgetFallbackIslandCount += GetBudgetFallbackIslandCount(UVResult.SlotWarnings);
+            ChartBoundarySplitVertexInstanceCount += UVResult.ChartBoundarySplitVertexInstanceCount;
+            TriangleReadMilliseconds += UVResult.TriangleReadMilliseconds;
+            OriginalIslandBuildMilliseconds += UVResult.OriginalIslandBuildMilliseconds;
+            ChartBuildMilliseconds += UVResult.ChartBuildMilliseconds;
+            SeamSplitMilliseconds += UVResult.SeamSplitMilliseconds;
+            PackAndValidateMilliseconds += UVResult.PackAndValidateMilliseconds;
+        }
+        LODSlotWarnings.Sort(
             [](const FDWCDataUVSlotWarning& A, const FDWCDataUVSlotWarning& B)
             {
                 return A.MaterialSlotIndex < B.MaterialSlotIndex;
-        });
+            });
+        Metadata.SlotWarnings = MoveTemp(LODSlotWarnings);
         GeneratedLODIndices.Add(LODIndex);
+    }
 
-        bGeneratedWithWarnings = bGeneratedWithWarnings || UVResult.HasWarnings();
-        MergeSlotWarnings(SlotWarnings, UVResult.SlotWarnings);
-        DegenerateSourceUVTriangleCount += UVResult.DegenerateSourceUVTriangleCount;
-        InvalidSourceUVTriangleCount += UVResult.InvalidSourceUVTriangleCount;
-        ExcludedTriangleCount += UVResult.DegenerateSourceUVTriangleCount + UVResult.InvalidSourceUVTriangleCount;
-        SplitOriginalUVIslandCount += UVResult.SplitOriginalUVIslandCount;
-        SelfOverlapPairCount += UVResult.SelfOverlapPairCount;
-        BudgetFallbackIslandCount += GetBudgetFallbackIslandCount(UVResult.SlotWarnings);
-        ChartBoundarySplitVertexInstanceCount += UVResult.ChartBoundarySplitVertexInstanceCount;
-        TriangleReadMilliseconds += UVResult.TriangleReadMilliseconds;
-        OriginalIslandBuildMilliseconds += UVResult.OriginalIslandBuildMilliseconds;
-        ChartBuildMilliseconds += UVResult.ChartBuildMilliseconds;
-        SeamSplitMilliseconds += UVResult.SeamSplitMilliseconds;
-        PackAndValidateMilliseconds += UVResult.PackAndValidateMilliseconds;
+    if (!Result.FailedMaterialSlotIndices.IsEmpty())
+    {
+        bGeneratedWithWarnings = true;
+        OverallSeverity = DWCDataUVResultSeverity::Max(
+            OverallSeverity,
+            EDWCDataUVResultSeverity::ReadyWithWarnings);
     }
 
     if (DataUVMetadata.IsEmpty())
     {
+        Result.GeneratedMaterialSlotIndices.Reset();
+        Result.FailedMaterialSlotIndices = WettableMaterialSlotIndices;
         SetFailure(Result, TEXT("The DWC Prepared Skeletal Mesh produced no DWC UV Channel payloads."));
         return Result;
     }
+
+    DataUVMetadata.Sort(
+        [](const FDWCDataUVLODMetadata& A, const FDWCDataUVLODMetadata& B)
+        {
+            return A.LODIndex < B.LODIndex;
+        });
+    OriginalUVTopologies.Sort(
+        [](const FDWCEditorUVTopologyData& A, const FDWCEditorUVTopologyData& B)
+        {
+            return A.LODIndex < B.LODIndex;
+        });
 
     int32 OriginalUVIslandCount = 0;
     for (const FDWCEditorUVTopologyData& Topology : OriginalUVTopologies)
@@ -562,8 +962,8 @@ FDWCDataUVBuildResult FDWCDataUVBuildService::Generate(
         OriginalUVIslandCount += Topology.Islands.Num();
     }
 
-    // Commit the canonical layout plus every non-LOD0 payload that completed successfully.
-    // Failed non-LOD0 payloads remain explicit warnings and do not invalidate usable LODs.
+    // Every successful material slot has completed all required LODs at this point.
+    // Commit the successful slot set while retaining per-slot failures as diagnostics.
     FString CommitError;
     const bool bCommitSucceeded = bReplacingExistingLayout
         ? Asset.ReplaceDataUVLayout(
@@ -580,6 +980,8 @@ FDWCDataUVBuildResult FDWCDataUVBuildService::Generate(
             &CommitError);
     if (!bCommitSucceeded)
     {
+        Result.GeneratedMaterialSlotIndices.Reset();
+        Result.FailedMaterialSlotIndices = WettableMaterialSlotIndices;
         SetFailure(Result, CommitError.IsEmpty() ? TEXT("Failed to commit the DWC UV Channel layout.") : CommitError);
         return Result;
     }
@@ -599,10 +1001,19 @@ FDWCDataUVBuildResult FDWCDataUVBuildService::Generate(
             return A.LODIndex < B.LODIndex;
         });
     Result.OriginalUVIslandCount = OriginalUVIslandCount;
-    Result.bGeneratedWithWarnings = bGeneratedWithWarnings;
+    Result.bGeneratedWithWarnings =
+        bGeneratedWithWarnings || OverallSeverity != EDWCDataUVResultSeverity::Ready;
+    Result.ResultSeverity = OverallSeverity;
     Result.ExcludedTriangleCount = ExcludedTriangleCount;
+    Result.Degenerate3DTriangleCount = Degenerate3DTriangleCount;
     Result.DegenerateSourceUVTriangleCount = DegenerateSourceUVTriangleCount;
     Result.InvalidSourceUVTriangleCount = InvalidSourceUVTriangleCount;
+    Result.PackedDegenerateTriangleCount = PackedDegenerateTriangleCount;
+    Result.ExcludedVisibleTriangleCount = ExcludedVisibleTriangleCount;
+    Result.ExcludedVisible3DSurfaceArea = ExcludedVisible3DSurfaceArea;
+    Result.ExcludedVisible3DSurfaceRatio = ExcludedVisible3DSurfaceRatio;
+    Result.LargestConnectedExcluded3DSurfaceArea = LargestConnectedExcluded3DSurfaceArea;
+    Result.LargestConnectedExcluded3DSurfaceRatio = LargestConnectedExcluded3DSurfaceRatio;
     Result.SplitOriginalUVIslandCount = SplitOriginalUVIslandCount;
     Result.SelfOverlapPairCount = SelfOverlapPairCount;
     Result.BudgetFallbackIslandCount = BudgetFallbackIslandCount;
@@ -625,9 +1036,10 @@ FDWCDataUVBuildResult FDWCDataUVBuildService::Generate(
     const FString SkippedLODText = BuildLODList(SkippedLODIndices);
     const TCHAR* Operation = bReplacingExistingLayout ? TEXT("Rebuilt") : TEXT("Generated and sealed");
     Result.Message = FString::Printf(
-        TEXT("%s DWC UV Channel %d for %d Wettable material slot(s). Generated %d of %d target LOD(s): %s. Created %d chart-boundary VertexInstance seam(s), with %d LOD0 Original UV island record(s)."),
+        TEXT("%s DWC UV Channel %d for %d of %d material slot(s) in the build. Generated %d of %d target LOD(s): %s. Created %d chart-boundary VertexInstance seam(s), with %d LOD0 Original UV island record(s)."),
         Operation,
         DataUVChannelIndex,
+        SuccessfulMaterialSlotIndices.Num(),
         SortedWettableMaterialSlotIndices.Num(),
         Result.GeneratedLODIndices.Num(),
         Result.TargetLODIndices.Num(),
@@ -637,6 +1049,23 @@ FDWCDataUVBuildResult FDWCDataUVBuildService::Generate(
     if (!SkippedLODIndices.IsEmpty())
     {
         Result.Message += FString::Printf(TEXT(" Skipped LOD(s): %s."), *SkippedLODText);
+    }
+    if (!Result.FailedMaterialSlotIndices.IsEmpty())
+    {
+        TArray<int32> FailedSlots = Result.FailedMaterialSlotIndices.Array();
+        FailedSlots.Sort();
+        TArray<FString> FailedSlotLabels;
+        for (const int32 FailedSlotIndex : FailedSlots)
+        {
+            FailedSlotLabels.Add(FString::Printf(TEXT("Slot %d (%s)"), FailedSlotIndex, *ResolveMaterialSlotName(PreparedMesh, FailedSlotIndex)));
+        }
+        Result.Message += FString::Printf(
+            TEXT(" Successful slots were committed. Failed slot(s): %s."),
+            *FString::Join(FailedSlotLabels, TEXT(", ")));
+        if (!SlotFailureMessages.IsEmpty())
+        {
+            Result.Message += TEXT("\n\n") + FString::Join(SlotFailureMessages, TEXT("\n"));
+        }
     }
 
     Result.TimingSummary = FString::Printf(
@@ -650,14 +1079,28 @@ FDWCDataUVBuildResult FDWCDataUVBuildService::Generate(
 
     if (Result.bGeneratedWithWarnings)
     {
-        Result.Message += FString::Printf(
-            TEXT("\n\nDWC UV Channel was generated with warnings. Excluded triangles: %d (degenerate Source UV: %d, invalid Source UV: %d). Split self-overlapping Original UV islands: %d (%d overlap pair(s)). Budget fallback islands: %d."),
-            Result.ExcludedTriangleCount,
-            Result.DegenerateSourceUVTriangleCount,
-            Result.InvalidSourceUVTriangleCount,
-            Result.SplitOriginalUVIslandCount,
-            Result.SelfOverlapPairCount,
-            Result.BudgetFallbackIslandCount);
+        const bool bHasGenerationDiagnostics =
+            Result.ExcludedTriangleCount > 0 ||
+            Result.SelfOverlapPairCount > 0 ||
+            Result.SplitOriginalUVIslandCount > 0 ||
+            Result.BudgetFallbackIslandCount > 0 ||
+            !Result.SlotWarnings.IsEmpty() ||
+            !Result.LODWarnings.IsEmpty();
+        if (bHasGenerationDiagnostics)
+        {
+            Result.Message += FString::Printf(
+                TEXT("\n\nDWC UV Channel was generated with diagnostics. Excluded triangles: %d (3D degenerate: %d, degenerate Source UV: %d, invalid Source UV: %d, packed degenerate: %d). Excluded visible surface ratio: %.6f%%; largest connected excluded region: %.6f%%. Separated overlapping Source UV triangle pairs: %d. Original UV islands split across packing charts: %d. Budget fallback islands: %d."),
+                Result.ExcludedTriangleCount,
+                Result.Degenerate3DTriangleCount,
+                Result.DegenerateSourceUVTriangleCount,
+                Result.InvalidSourceUVTriangleCount,
+                Result.PackedDegenerateTriangleCount,
+                Result.ExcludedVisible3DSurfaceRatio * 100.0,
+                Result.LargestConnectedExcluded3DSurfaceRatio * 100.0,
+                Result.SelfOverlapPairCount,
+                Result.SplitOriginalUVIslandCount,
+                Result.BudgetFallbackIslandCount);
+        }
 
         for (const FDWCDataUVLODWarning& LODWarning : Result.LODWarnings)
         {
@@ -679,9 +1122,32 @@ FDWCDataUVBuildResult FDWCDataUVBuildService::Generate(
 
             const FString SlotWarningLogText = BuildSlotWarningLogText(SlotWarning, PreparedMesh);
             Result.Message += TEXT("\n\n") + SlotWarningLogText;
-            UE_LOG(LogDWC, Warning, TEXT("%s"), *SlotWarningLogText);
+            if (SlotWarning.ResultSeverity == EDWCDataUVResultSeverity::ReadyWithWarnings)
+            {
+                UE_LOG(LogDWC, Warning, TEXT("%s"), *SlotWarningLogText);
+            }
+            else
+            {
+                UE_LOG(LogDWC, Display, TEXT("%s"), *SlotWarningLogText);
+            }
         }
     }
+
+#if WITH_EDITORONLY_DATA
+    {
+        PersistLastSlotLODResults(Asset, Result, bMergeWithExistingLayout);
+        RefreshPersistedFailedSlots(Asset);
+        if (!Result.FailedMaterialSlotIndices.IsEmpty())
+        {
+            Asset.Derived.Inline.LastDataUVGenerationFailure = Result.Message;
+        }
+        else if (Asset.Derived.Inline.FailedDataUVMaterialSlotIndices.IsEmpty())
+        {
+            Asset.Derived.Inline.LastDataUVGenerationFailure.Reset();
+        }
+        Asset.MarkPackageDirty();
+    }
+#endif
 
     return Result;
 }

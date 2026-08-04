@@ -39,6 +39,7 @@ namespace
     constexpr int32 RecommendedDWCDataUVSelection = INDEX_NONE;
     constexpr int32 MaxDWCDataUVChannelIndex = 3;
     const FLinearColor InfoIconTint(0.32f, 0.65f, 1.0f, 1.0f);
+    const FLinearColor WarningIconTint(1.0f, 0.78f, 0.18f, 1.0f);
 
     int32 GetSkeletalMeshUVChannelCount(const USkeletalMesh* Mesh, const int32 LODIndex)
     {
@@ -319,7 +320,7 @@ namespace
             OriginalUVChannelIndex,
             bUseRecommendedDWCDataUVChannel,
             PreferredDWCDataUVChannelIndex)
-            ? FStyleColors::Warning
+            ? FSlateColor(WarningIconTint)
             : FSlateColor(InfoIconTint);
     }
 
@@ -470,6 +471,7 @@ bool UWetClothingAssetFactory::ConfigureProperties()
     {
         const FName PropertyName = PropertyAndParent.Property.GetFName();
         return PropertyName != GET_MEMBER_NAME_CHECKED(UWetClothingAssetCreationSettings, SourceSkeletalMesh) &&
+               PropertyName != GET_MEMBER_NAME_CHECKED(UWetClothingAssetCreationSettings, OriginalUVChannelIndex) &&
                PropertyName != GET_MEMBER_NAME_CHECKED(UWetClothingAssetCreationSettings, PreferredDWCDataUVChannelIndex) &&
                PropertyName != GET_MEMBER_NAME_CHECKED(UWetClothingAssetCreationSettings, FirstGeneratedLODIndex) &&
                PropertyName != GET_MEMBER_NAME_CHECKED(UWetClothingAssetCreationSettings, LastGeneratedLODIndex);
@@ -687,6 +689,48 @@ bool UWetClothingAssetFactory::ConfigureProperties()
                         .VAlign(VAlign_Center)
                         [
                             SNew(STextBlock)
+                            .Text(LOCTEXT("OriginalUVChannelLabel", "Original UV Channel"))
+                        ]
+                        + SHorizontalBox::Slot()
+                        .AutoWidth()
+                        .VAlign(VAlign_Center)
+                        [
+                            SNew(SBox)
+                            .WidthOverride(180.0f)
+                            [
+                                SNew(SSpinBox<int32>)
+                                .IsEnabled_Lambda(HasSourceMesh)
+                                .MinValue(0)
+                                .MaxValue(7)
+                                .MinSliderValue(0)
+                                .MaxSliderValue(7)
+                                .Value_Lambda([this]()
+                                {
+                                    return PendingCreationSettings != nullptr
+                                        ? PendingCreationSettings->OriginalUVChannelIndex
+                                        : 0;
+                                })
+                                .OnValueChanged_Lambda([this](const int32 NewValue)
+                                {
+                                    if (PendingCreationSettings == nullptr)
+                                    {
+                                        return;
+                                    }
+                                    PendingCreationSettings->OriginalUVChannelIndex = FMath::Clamp(NewValue, 0, 7);
+                                })
+                            ]
+                        ]
+                    ]
+                    + SVerticalBox::Slot()
+                    .AutoHeight()
+                    .Padding(0.0f, 10.0f, 0.0f, 0.0f)
+                    [
+                        SNew(SHorizontalBox)
+                        + SHorizontalBox::Slot()
+                        .FillWidth(1.0f)
+                        .VAlign(VAlign_Center)
+                        [
+                            SNew(STextBlock)
                             .Text(LOCTEXT("PreferredDWCDataUVChannelLabel", "Preferred DWC UV Channel"))
                         ]
                         + SHorizontalBox::Slot()
@@ -886,7 +930,12 @@ bool UWetClothingAssetFactory::ConfigureProperties()
                                 .IsEnabled_Lambda(HasSourceMesh)
                                 .ToolTipText_Lambda(GetSourceMeshRequiredTooltip)
                                 .MinValue(0)
+                                .MinSliderValue(0)
                                 .MaxValue_Lambda([this]()
+                                {
+                                    return FMath::Max(0, GetSkeletalMeshLODCount(PendingCreationSettings != nullptr ? PendingCreationSettings->SourceSkeletalMesh : nullptr) - 1);
+                                })
+                                .MaxSliderValue_Lambda([this]()
                                 {
                                     return FMath::Max(0, GetSkeletalMeshLODCount(PendingCreationSettings != nullptr ? PendingCreationSettings->SourceSkeletalMesh : nullptr) - 1);
                                 })
@@ -895,6 +944,15 @@ bool UWetClothingAssetFactory::ConfigureProperties()
                                     return PendingCreationSettings != nullptr ? PendingCreationSettings->FirstGeneratedLODIndex : 0;
                                 })
                                 .OnValueChanged_Lambda([this](int32 NewValue)
+                                {
+                                    if (PendingCreationSettings == nullptr)
+                                    {
+                                        return;
+                                    }
+                                    PendingCreationSettings->FirstGeneratedLODIndex = NewValue;
+                                    ClampLODRangeForMesh(PendingCreationSettings->SourceSkeletalMesh, PendingCreationSettings->FirstGeneratedLODIndex, PendingCreationSettings->LastGeneratedLODIndex);
+                                })
+                                .OnValueCommitted_Lambda([this](int32 NewValue, ETextCommit::Type)
                                 {
                                     if (PendingCreationSettings == nullptr)
                                     {
@@ -932,7 +990,15 @@ bool UWetClothingAssetFactory::ConfigureProperties()
                                 {
                                     return PendingCreationSettings != nullptr ? PendingCreationSettings->FirstGeneratedLODIndex : 0;
                                 })
+                                .MinSliderValue_Lambda([this]()
+                                {
+                                    return PendingCreationSettings != nullptr ? PendingCreationSettings->FirstGeneratedLODIndex : 0;
+                                })
                                 .MaxValue_Lambda([this]()
+                                {
+                                    return FMath::Max(0, GetSkeletalMeshLODCount(PendingCreationSettings != nullptr ? PendingCreationSettings->SourceSkeletalMesh : nullptr) - 1);
+                                })
+                                .MaxSliderValue_Lambda([this]()
                                 {
                                     return FMath::Max(0, GetSkeletalMeshLODCount(PendingCreationSettings != nullptr ? PendingCreationSettings->SourceSkeletalMesh : nullptr) - 1);
                                 })
@@ -941,6 +1007,15 @@ bool UWetClothingAssetFactory::ConfigureProperties()
                                     return PendingCreationSettings != nullptr ? PendingCreationSettings->LastGeneratedLODIndex : 0;
                                 })
                                 .OnValueChanged_Lambda([this](int32 NewValue)
+                                {
+                                    if (PendingCreationSettings == nullptr)
+                                    {
+                                        return;
+                                    }
+                                    PendingCreationSettings->LastGeneratedLODIndex = NewValue;
+                                    ClampLODRangeForMesh(PendingCreationSettings->SourceSkeletalMesh, PendingCreationSettings->FirstGeneratedLODIndex, PendingCreationSettings->LastGeneratedLODIndex);
+                                })
+                                .OnValueCommitted_Lambda([this](int32 NewValue, ETextCommit::Type)
                                 {
                                     if (PendingCreationSettings == nullptr)
                                     {

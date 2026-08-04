@@ -14,5 +14,6 @@ public:
         int32 OutputResolution,
         TSet<int32>& OutProblemMaterialSlots,
         FString& OutError,
-        FDWCDataUVValidationFailure* OutFailure = nullptr);
+        FDWCDataUVValidationFailure* OutFailure = nullptr,
+        TArray<FDWCDataUVValidationExclusion>* OutDegenerateExclusions = nullptr);
 };

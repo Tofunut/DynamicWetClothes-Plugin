@@ -12,7 +12,8 @@ bool FDWCDataUVMetadataBuilder::BuildLOD(
     const int32 LODIndex,
     const int32 DataUVChannelIndex,
     FDWCDataUVLODMetadata& OutMetadata,
-    FString* OutErrorMessage)
+    FString* OutErrorMessage,
+    const TSet<int32>* GeneratedMaterialSlotIndices)
 {
     OutMetadata = FDWCDataUVLODMetadata();
     if (Mesh == nullptr)
@@ -77,7 +78,14 @@ bool FDWCDataUVMetadataBuilder::BuildLOD(
         IslandsByMaterialSlot.SetNum(Mesh->GetMaterials().Num());
         for (int32 MaterialSlotIndex = 0; MaterialSlotIndex < Mesh->GetMaterials().Num(); ++MaterialSlotIndex)
         {
-            if (!Asset.IsMaterialSlotWettable(MaterialSlotIndex))
+            if (GeneratedMaterialSlotIndices != nullptr)
+            {
+                if (!GeneratedMaterialSlotIndices->Contains(MaterialSlotIndex))
+                {
+                    continue;
+                }
+            }
+            else if (!Asset.IsMaterialSlotWettable(MaterialSlotIndex))
             {
                 continue;
             }

@@ -756,11 +756,11 @@ TSharedRef<ITableRow> FWCAEditorWidgets::GenerateMaterialSlotRow(
                           .Font(FAppStyle::GetFontStyle(TEXT("NormalFontBold")))]];
 
     RowContent->AddSlot()
-        .AutoWidth()
+        .FillWidth(1.0f)
         .VAlign(VAlign_Center)
         .Padding(2.0f, 0.0f, 10.0f, 0.0f)
             [SNew(SBox)
-                 .WidthOverride(FWCAEditorWidgets::MaterialSlotNameColumnWidth)
+                 .MinDesiredWidth(FWCAEditorWidgets::MaterialSlotNameColumnWidth)
                  .VAlign(VAlign_Center)
                      [SNew(SVerticalBox)
 
@@ -848,57 +848,71 @@ TSharedRef<ITableRow> FWCAEditorWidgets::GenerateMaterialSlotRow(
                  .WidthOverride(FWCAEditorWidgets::MaterialSlotDataUVColumnWidth)
                  .HAlign(HAlign_Center)
                  .VAlign(VAlign_Center)
-                     [SNew(SHorizontalBox)
+                     [SNew(SButton)
+                          .ButtonStyle(FAppStyle::Get(), TEXT("NoBorder"))
+                          .ContentPadding(FMargin(2.0f, 1.0f))
+                          .IsEnabled_Lambda([ShouldShowInfo = Args.ShouldShowMaterialSlotStatusInfo, MaterialSlotIndex]()
+                          {
+                              return ShouldShowInfo && ShouldShowInfo(MaterialSlotIndex);
+                          })
+                          .ToolTipText_Lambda([GetTooltip = Args.GetMaterialSlotStatusTooltip, MaterialSlotIndex]()
+                          {
+                              return GetTooltip ? GetTooltip(MaterialSlotIndex) : FText::GetEmpty();
+                          })
+                          .OnClicked_Lambda([OnClicked = Args.OnMaterialSlotStatusInfoClicked, MaterialSlotIndex]()
+                          {
+                              return OnClicked
+                                  ? OnClicked(MaterialSlotIndex)
+                                  : FReply::Handled();
+                          })
+                              [SNew(SHorizontalBox)
 
-                      + SHorizontalBox::Slot()
-                            .AutoWidth()
-                            .VAlign(VAlign_Center)
-                                [SNew(STextBlock)
-                                     .Text_Lambda([GetStatusText = Args.GetMaterialSlotStatusText, MaterialSlotIndex, bIsAllSlotsRow]()
-                                     {
-                                         return bIsAllSlotsRow
-                                                    ? FText::FromString(TEXT("-"))
-                                                    : GetStatusText ? GetStatusText(MaterialSlotIndex) : FText::GetEmpty();
-                                     })
-                                     .ToolTipText_Lambda([GetTooltip = Args.GetMaterialSlotStatusTooltip, MaterialSlotIndex, bIsAllSlotsRow]()
-                                     {
-                                         return !bIsAllSlotsRow && GetTooltip ? GetTooltip(MaterialSlotIndex) : FText::GetEmpty();
-                                     })
-                                     .Font(FAppStyle::GetFontStyle(TEXT("SmallFont")))
-                                     .ColorAndOpacity_Lambda([GetStatusColor = Args.GetMaterialSlotStatusColor, MaterialSlotIndex, bIsAllSlotsRow]()
-                                     {
-                                         return !bIsAllSlotsRow && GetStatusColor
-                                             ? GetStatusColor(MaterialSlotIndex)
-                                             : FSlateColor(FStyleColors::Foreground);
-                                     })]
+                               + SHorizontalBox::Slot()
+                                     .AutoWidth()
+                                     .VAlign(VAlign_Center)
+                                         [SNew(SBox)
+                                              .WidthOverride(18.0f)
+                                              .HAlign(HAlign_Center)
+                                              .VAlign(VAlign_Center)
+                                                  [SNew(SImage)
+                                                       .DesiredSizeOverride(FVector2D(14.0f, 14.0f))
+                                                       .Visibility_Lambda([ShouldShowInfo = Args.ShouldShowMaterialSlotStatusInfo, MaterialSlotIndex]()
+                                                       {
+                                                           return ShouldShowInfo && ShouldShowInfo(MaterialSlotIndex)
+                                                               ? EVisibility::Visible
+                                                               : EVisibility::Hidden;
+                                                       })
+                                                       .Image_Lambda([GetBrush = Args.GetMaterialSlotStatusInfoBrush, MaterialSlotIndex]()
+                                                       {
+                                                           return GetBrush
+                                                               ? GetBrush(MaterialSlotIndex)
+                                                               : FAppStyle::GetBrush(TEXT("Icons.InfoWithColor"));
+                                                       })
+                                                       .ColorAndOpacity_Lambda([GetColor = Args.GetMaterialSlotStatusInfoColor, MaterialSlotIndex]()
+                                                       {
+                                                           return GetColor
+                                                               ? GetColor(MaterialSlotIndex)
+                                                               : FSlateColor(FLinearColor::White);
+                                                       })]]
 
-                      + SHorizontalBox::Slot()
-                            .AutoWidth()
-                            .VAlign(VAlign_Center)
-                            .Padding(4.0f, 0.0f, 0.0f, 0.0f)
-                                [SNew(SButton)
-                                     .ButtonStyle(FAppStyle::Get(), TEXT("NoBorder"))
-                                     .ContentPadding(FMargin(1.0f))
-                                     .Visibility_Lambda([ShouldShowInfo = Args.ShouldShowMaterialSlotStatusInfo, MaterialSlotIndex, bIsAllSlotsRow]()
-                                     {
-                                         return !bIsAllSlotsRow && ShouldShowInfo && ShouldShowInfo(MaterialSlotIndex)
-                                                    ? EVisibility::Visible
-                                                    : EVisibility::Collapsed;
-                                     })
-                                     .ToolTipText_Lambda([GetTooltip = Args.GetMaterialSlotStatusTooltip, MaterialSlotIndex]()
-                                     {
-                                         return GetTooltip ? GetTooltip(MaterialSlotIndex) : FText::GetEmpty();
-                                     })
-                                     .OnClicked_Lambda([OnClicked = Args.OnMaterialSlotStatusInfoClicked, MaterialSlotIndex]()
-                                     {
-                                         return OnClicked
-                                                    ? OnClicked(MaterialSlotIndex)
-                                                    : FReply::Handled();
-                                     })
-                                         [SNew(SImage)
-                                              .DesiredSizeOverride(FVector2D(14.0f, 14.0f))
-                                              .Image(FAppStyle::GetBrush(TEXT("ClassIcon.PointLightComponent")))
-                                              .ColorAndOpacity(FSlateColor(FStyleColors::AccentYellow))]]]];
+                               + SHorizontalBox::Slot()
+                                     .AutoWidth()
+                                     .VAlign(VAlign_Center)
+                                     .Padding(5.0f, 0.0f, 0.0f, 0.0f)
+                                         [SNew(STextBlock)
+                                              .Text_Lambda([GetStatusText = Args.GetMaterialSlotStatusText, MaterialSlotIndex]()
+                                              {
+                                                  return GetStatusText
+                                                      ? GetStatusText(MaterialSlotIndex)
+                                                      : FText::GetEmpty();
+                                              })
+                                              .Font(FAppStyle::GetFontStyle(TEXT("SmallFont")))
+                                              .ColorAndOpacity_Lambda([GetStatusColor = Args.GetMaterialSlotStatusColor, MaterialSlotIndex]()
+                                              {
+                                                  return GetStatusColor
+                                                      ? GetStatusColor(MaterialSlotIndex)
+                                                      : FSlateColor(FStyleColors::Foreground);
+                                              })]]]];
 
     if (Args.bShowWettableToggle)
     {

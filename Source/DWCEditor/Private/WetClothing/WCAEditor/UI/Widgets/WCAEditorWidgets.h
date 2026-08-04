@@ -37,6 +37,8 @@ struct FWCAMaterialSlotRowArgs
     TFunction<FSlateColor(int32)> GetMaterialSlotStatusColor;
     TFunction<FText(int32)> GetMaterialSlotStatusTooltip;
     TFunction<bool(int32)> ShouldShowMaterialSlotStatusInfo;
+    TFunction<const FSlateBrush*(int32)> GetMaterialSlotStatusInfoBrush;
+    TFunction<FSlateColor(int32)> GetMaterialSlotStatusInfoColor;
     TFunction<FReply(int32)> OnMaterialSlotStatusInfoClicked;
     TFunction<FText(int32)> GetMaterialSlotWarningText;
     TFunction<FSlateColor(int32)> GetMaterialSlotRowBackgroundColor;
@@ -74,7 +76,7 @@ class FWCAEditorWidgets
     static constexpr float MaterialSlotSlotColumnWidth = 42.0f;
     static constexpr float MaterialSlotNameColumnWidth = 150.0f;
     static constexpr float MaterialSlotThumbnailColumnWidth = 112.0f;
-    static constexpr float MaterialSlotDataUVColumnWidth = 76.0f;
+    static constexpr float MaterialSlotDataUVColumnWidth = 112.0f;
     static constexpr float MaterialSlotWettableColumnWidth = 76.0f;
 
     static TSharedRef<SWidget> BuildSectionHeader(const TAttribute<FText>& Title, const TAttribute<FText>& Detail = TAttribute<FText>());

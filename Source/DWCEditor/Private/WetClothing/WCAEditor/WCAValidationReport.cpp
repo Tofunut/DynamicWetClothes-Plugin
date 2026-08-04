@@ -1,6 +1,8 @@
 #include "WetClothing/WCAEditor/WCAValidationReport.h"
 
 #include "DataAssets/WetClothingAsset.h"
+#include "Engine/SkeletalMesh.h"
+#include "Rendering/SkeletalMeshRenderData.h"
 #include "DataAssets/WetClothingTransparencyData.h"
 #include "WetClothing/DerivedAssets/Materials/WCAMaterialGenerator.h"
 #include "WetClothing/DerivedAssets/Textures/Transparency/DWCTransparencyEditedMapBaker.h"
@@ -103,6 +105,190 @@ namespace
                 ? NSLOCTEXT("WCAValidationReport", "SaveRequiredAction", "Save the asset to persist the current data.")
                 : RequiredAction,
             Status == EDWCBakeStatus::Failed);
+    }
+
+
+    struct FDataUVLayoutDiagnosis
+    {
+        FString Detail;
+        FText RequiredAction;
+    };
+
+    FDataUVLayoutDiagnosis DiagnoseDataUVLayout(
+        const UWetClothingAsset& Asset,
+        const EDWCBakeStatus Status,
+        const bool bRunDeepValidation)
+    {
+        FDataUVLayoutDiagnosis Result;
+        Result.Detail = FString::Printf(TEXT("Prepared Mesh UV Layout: %s."), *BakeStatusToString(Status));
+        Result.RequiredAction = NSLOCTEXT(
+            "WCAValidationReport",
+            "DWCDataUVGenericLockedAction",
+            "Review the reason below. Restore the sealed layout inputs when possible; create a new WCA only when the prepared mesh or UV layout must change.");
+
+        const USkeletalMesh* RuntimeMesh = Asset.GetRuntimeSkeletalMesh();
+        if (RuntimeMesh == nullptr)
+        {
+            Result.Detail += TEXT("\nReason: Prepared mesh is missing.");
+            Result.RequiredAction = NSLOCTEXT(
+                "WCAValidationReport",
+                "DWCDataUVMissingPreparedMeshAction",
+                "Restore the prepared mesh reference, or create a new WCA from the intended source mesh.");
+            return Result;
+        }
+
+        const TArray<FDWCDataUVLODMetadata>& StoredMetadata = Asset.GetDataUVMetadata();
+        if (StoredMetadata.IsEmpty())
+        {
+            Result.Detail += TEXT("\nReason: No stored DWC UV metadata was found.");
+            Result.RequiredAction = NSLOCTEXT(
+                "WCAValidationReport",
+                "DWCDataUVMissingMetadataAction",
+                "Initialize the prepared mesh UV layout for this asset.");
+            return Result;
+        }
+
+        const FSkeletalMeshRenderData* RenderData = RuntimeMesh->GetResourceForRendering();
+        const int32 LODCount = RenderData != nullptr ? RenderData->LODRenderData.Num() : 0;
+        const FDWCWetClothingAssetSetupSettings& Setup = Asset.GetSetupSettings();
+        const int32 FirstLODIndex = LODCount > 0
+            ? FMath::Clamp(Setup.FirstGeneratedLODIndex, 0, LODCount - 1)
+            : FMath::Max(0, Setup.FirstGeneratedLODIndex);
+        const int32 LastLODIndex = LODCount > 0
+            ? FMath::Clamp(Setup.LastGeneratedLODIndex, FirstLODIndex, LODCount - 1)
+            : FMath::Max(FirstLODIndex, Setup.LastGeneratedLODIndex);
+
+        for (int32 LODIndex = FirstLODIndex; LODIndex <= LastLODIndex; ++LODIndex)
+        {
+            const FDWCDataUVLODMetadata* Metadata = Asset.FindDataUVMetadataForLOD(LODIndex);
+            if (Metadata == nullptr)
+            {
+                Result.Detail += FString::Printf(
+                    TEXT("\nReason: Stored DWC UV metadata is missing for LOD%d.\nMapped LOD Range: LOD%d-LOD%d."),
+                    LODIndex,
+                    FirstLODIndex,
+                    LastLODIndex);
+                Result.RequiredAction = NSLOCTEXT(
+                    "WCAValidationReport",
+                    "DWCDataUVMissingLODMetadataAction",
+                    "Restore the mapped LOD range used by the sealed layout, or create a new WCA for a different LOD range.");
+                return Result;
+            }
+            if (!Metadata->bIsValid)
+            {
+                Result.Detail += FString::Printf(
+                    TEXT("\nReason: Stored DWC UV metadata is marked invalid.\nLOD: %d."),
+                    LODIndex);
+                return Result;
+            }
+            if (Metadata->UVChannelIndex != Asset.GetDWCDataUVChannelIndex())
+            {
+                Result.Detail += FString::Printf(
+                    TEXT("\nReason: DWC UV channel mismatch.\nLOD: %d.\nStored Channel: UV%d.\nCurrent Channel: UV%d."),
+                    LODIndex,
+                    Metadata->UVChannelIndex,
+                    Asset.GetDWCDataUVChannelIndex());
+                Result.RequiredAction = NSLOCTEXT(
+                    "WCAValidationReport",
+                    "DWCDataUVChannelMismatchAction",
+                    "Restore the sealed DWC UV channel setting, or create a new WCA to use a different channel.");
+                return Result;
+            }
+            if (Metadata->GeneratorVersion != DWCGeneratedDataVersion::DataUV)
+            {
+                Result.Detail += FString::Printf(
+                    TEXT("\nReason: DWC UV generator version mismatch.\nLOD: %d.\nStored Version: %d.\nCurrent Version: %d."),
+                    LODIndex,
+                    Metadata->GeneratorVersion,
+                    DWCGeneratedDataVersion::DataUV);
+                Result.RequiredAction = NSLOCTEXT(
+                    "WCAValidationReport",
+                    "DWCDataUVGeneratorVersionAction",
+                    "The stored layout was created by another generator version. Create a new WCA only when regeneration with the current version is required.");
+                return Result;
+            }
+
+            if (RenderData != nullptr && RenderData->LODRenderData.IsValidIndex(LODIndex))
+            {
+                const int32 CurrentVertexCount = RenderData->LODRenderData[LODIndex].GetNumVertices();
+                if (Metadata->RenderVertexCount != CurrentVertexCount)
+                {
+                    Result.Detail += FString::Printf(
+                        TEXT("\nReason: Prepared mesh render vertex count changed.\nLOD: %d.\nStored Vertices: %d.\nCurrent Vertices: %d."),
+                        LODIndex,
+                        Metadata->RenderVertexCount,
+                        CurrentVertexCount);
+                    Result.RequiredAction = NSLOCTEXT(
+                        "WCAValidationReport",
+                        "DWCDataUVVertexCountMismatchAction",
+                        "Restore the prepared mesh used by this WCA, or create a new WCA for the changed mesh.");
+                    return Result;
+                }
+            }
+
+            if (!bRunDeepValidation)
+            {
+                continue;
+            }
+
+            const FString CurrentSourceSignature = UWetClothingAsset::BuildMeshContentSignature(
+                RuntimeMesh,
+                LODIndex,
+                Asset.GetOriginalUVChannelIndex());
+            const FString CurrentOutputSignature = UWetClothingAsset::BuildMeshContentSignature(
+                RuntimeMesh,
+                LODIndex,
+                Asset.GetDWCDataUVChannelIndex());
+            if (CurrentSourceSignature.IsEmpty())
+            {
+                Result.Detail += FString::Printf(
+                    TEXT("\nReason: The current source UV signature could not be read.\nLOD: %d.\nSource Channel: UV%d."),
+                    LODIndex,
+                    Asset.GetOriginalUVChannelIndex());
+                return Result;
+            }
+            if (Metadata->MeshInputSignature != CurrentSourceSignature)
+            {
+                Result.Detail += FString::Printf(
+                    TEXT("\nReason: Source UV signature mismatch.\nLOD: %d.\nSource Channel: UV%d.\nStored Signature: %s.\nCurrent Signature: %s."),
+                    LODIndex,
+                    Asset.GetOriginalUVChannelIndex(),
+                    *Metadata->MeshInputSignature,
+                    *CurrentSourceSignature);
+                Result.RequiredAction = NSLOCTEXT(
+                    "WCAValidationReport",
+                    "DWCDataUVSourceSignatureMismatchAction",
+                    "Restore the original prepared-mesh UV layout, or create a new WCA if that layout intentionally changed.");
+                return Result;
+            }
+            if (CurrentOutputSignature.IsEmpty())
+            {
+                Result.Detail += FString::Printf(
+                    TEXT("\nReason: The current DWC UV output signature could not be read.\nLOD: %d.\nDWC UV Channel: UV%d."),
+                    LODIndex,
+                    Asset.GetDWCDataUVChannelIndex());
+                return Result;
+            }
+            if (Metadata->DataUVOutputSignature != CurrentOutputSignature)
+            {
+                Result.Detail += FString::Printf(
+                    TEXT("\nReason: DWC UV output signature mismatch.\nLOD: %d.\nDWC UV Channel: UV%d.\nStored Signature: %s.\nCurrent Signature: %s."),
+                    LODIndex,
+                    Asset.GetDWCDataUVChannelIndex(),
+                    *Metadata->DataUVOutputSignature,
+                    *CurrentOutputSignature);
+                Result.RequiredAction = NSLOCTEXT(
+                    "WCAValidationReport",
+                    "DWCDataUVOutputSignatureMismatchAction",
+                    "Restore the sealed DWC UV values on the prepared mesh, or create a new WCA if the UV output intentionally changed.");
+                return Result;
+            }
+        }
+
+        Result.Detail += bRunDeepValidation
+            ? TEXT("\nReason: The stored layout does not match the current mapped LOD range or sealed metadata.")
+            : TEXT("\nReason: Fast validation found a stored-layout mismatch. Use Refresh in Validation Results for signature-level details.");
+        return Result;
     }
 
     FString BuildRuntimeDetail(
@@ -730,19 +916,26 @@ FWCAValidationReport BuildWCAValidationReport(
     };
 
     const bool bDataUVLayoutLocked = Asset.HasLockedDataUVLayout();
-    AddBakeStatusIssueIfRequired(
-        Report,
-        TEXT("DWCDataUV"),
-        NSLOCTEXT("WCAValidationReport", "PreparedMeshUVLayoutTitle", "Prepared Mesh UV Layout"),
-        State.GeneratedDataUV,
-        EWCAValidationSection::DataUV,
-        bDataUVLayoutLocked ? EWCAValidationFixKind::Manual : EWCAValidationFixKind::InitializeDataUV,
-        bDataUVLayoutLocked
-            ? NSLOCTEXT("WCAValidationReport", "DWCDataUVLockedAction", "The prepared mesh UV layout is sealed and cannot be rebuilt. Create a new WCA if the prepared mesh or UV layout changed.")
-            : NSLOCTEXT("WCAValidationReport", "DWCDataUVInitializeAction", "Initialize the prepared mesh UV layout for this asset."),
-        FString::Printf(TEXT("Prepared Mesh UV Layout: %s.%s"),
-            *BakeStatusToString(State.GeneratedDataUV),
-            bDataUVLayoutLocked ? TEXT(" The stored packed layout is immutable") : TEXT("")));
+    if (IsActionRequiredStatus(State.GeneratedDataUV))
+    {
+        const FDataUVLayoutDiagnosis Diagnosis = DiagnoseDataUVLayout(
+            Asset,
+            State.GeneratedDataUV,
+            Mode == EWCAValidationMode::Deep);
+        AddIssue(
+            Report,
+            TEXT("DWCDataUV"),
+            SeverityForStatus(State.GeneratedDataUV),
+            EWCAValidationSection::DataUV,
+            bDataUVLayoutLocked ? EWCAValidationFixKind::Manual : EWCAValidationFixKind::InitializeDataUV,
+            NSLOCTEXT("WCAValidationReport", "PreparedMeshUVLayoutTitle", "Prepared Mesh UV Layout"),
+            FText::FromString(BakeStatusToString(State.GeneratedDataUV)),
+            FText::FromString(Diagnosis.Detail),
+            bDataUVLayoutLocked
+                ? Diagnosis.RequiredAction
+                : NSLOCTEXT("WCAValidationReport", "DWCDataUVInitializeAction", "Initialize the prepared mesh UV layout for this asset."),
+            State.GeneratedDataUV == EDWCBakeStatus::Failed);
+    }
 
     AddBakeStatusIssueIfRequired(
         Report,

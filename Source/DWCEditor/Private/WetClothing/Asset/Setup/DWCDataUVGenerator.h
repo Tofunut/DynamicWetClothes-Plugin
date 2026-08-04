@@ -9,12 +9,13 @@ class USkeletalMesh;
 struct FDWCDataUVGenerationResult
 {
     bool bSucceeded = false;
+    bool bTargetSlotNotPresent = false;
     int32 UVChannelIndex = INDEX_NONE;
     int32 MaterialSlotIndex = INDEX_NONE;
-    /** Number of logical islands found in the Original UV before self-overlap splitting. */
+    /** Editor-facing Original UV island count retained for diagnostics. */
     int32 OriginalUVIslandCount = 0;
 
-    /** Number of non-overlapping DWC UV Channel charts packed into the generated channel. */
+    /** Number of topology-connected physical Source UV shells packed as indivisible DWC UV charts. */
     int32 DataUVChartCount = 0;
 
     int32 SplitOriginalUVIslandCount = 0;
@@ -22,6 +23,13 @@ struct FDWCDataUVGenerationResult
     int32 Degenerate3DTriangleCount = 0;
     int32 DegenerateSourceUVTriangleCount = 0;
     int32 InvalidSourceUVTriangleCount = 0;
+    int32 PackedDegenerateTriangleCount = 0;
+    int32 ExcludedVisibleTriangleCount = 0;
+    double ExcludedVisible3DSurfaceArea = 0.0;
+    double ExcludedVisible3DSurfaceRatio = 0.0;
+    double LargestConnectedExcluded3DSurfaceArea = 0.0;
+    double LargestConnectedExcluded3DSurfaceRatio = 0.0;
+    EDWCDataUVResultSeverity ResultSeverity = EDWCDataUVResultSeverity::Ready;
     TArray<FDWCDataUVSlotWarning> SlotWarnings;
     TSet<int32> FailedMaterialSlotIndices;
     FDWCDataUVValidationFailure ValidationFailure;
@@ -45,7 +53,9 @@ struct FDWCDataUVGenerationResult
             {
                 WarningCount += SlotWarning.DegenerateSourceUVTriangleCount +
                     SlotWarning.InvalidSourceUVTriangleCount +
+                    SlotWarning.PackedDegenerateTriangleCount +
                     SlotWarning.SplitOriginalUVIslandCount +
+                    (SlotWarning.SelfOverlapPairCount > 0 ? 1 : 0) +
                     SlotWarning.BudgetFallbackIslandCount;
             }
         }

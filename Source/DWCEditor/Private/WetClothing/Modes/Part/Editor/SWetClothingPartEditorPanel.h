@@ -131,6 +131,11 @@ class SWetClothingPartEditorPanel : public SCompoundWidget
     FText                                          GetMaterialSlotStatusText(int32 MaterialSlotIndex) const;
     FSlateColor                                    GetMaterialSlotStatusColor(int32 MaterialSlotIndex) const;
     FText                                          GetMaterialSlotStatusTooltip(int32 MaterialSlotIndex) const;
+    bool                                           ShouldShowMaterialSlotStatusInfo(int32 MaterialSlotIndex) const;
+    const FSlateBrush*                             GetMaterialSlotStatusInfoBrush(int32 MaterialSlotIndex) const;
+    FSlateColor                                    GetMaterialSlotStatusInfoColor(int32 MaterialSlotIndex) const;
+    FReply                                         HandleMaterialSlotStatusInfoClicked(int32 MaterialSlotIndex);
+    FSlateColor                                    GetMaterialSlotRowBackgroundColor(int32 MaterialSlotIndex) const;
     FSlateColor                                    GetMaterialSlotRowAccentColor(int32 MaterialSlotIndex) const;
     bool                                           IsMaterialSlotIncludedInDataUVLayout(int32 MaterialSlotIndex) const;
     bool                                           DoesMaterialSlotHaveDataUVWarnings(int32 MaterialSlotIndex) const;
@@ -176,7 +181,9 @@ class SWetClothingPartEditorPanel : public SCompoundWidget
     FText                                          GetUVIslandAssignmentButtonTooltip() const;
     FText                                          GetUVStatusText() const;
     EVisibility                                    GetUVStatusOverlayVisibility() const;
+    EVisibility                                    GetUVEditorContentVisibility() const;
     EVisibility                                    GetUVIslandStatusOverlayVisibility() const;
+    FText                                          GetCommonPartEditingEmptyStateText() const;
     FText                                          GetWetPartSectionText() const;
     FText                                          GetSelectedAssignWetPartText() const;
     FSlateColor                                    GetSelectedAssignWetPartColor() const;

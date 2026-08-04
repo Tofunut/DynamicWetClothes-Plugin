@@ -24,6 +24,23 @@ struct FDWCDataUVChart
     double RawArea = 0.0;
 };
 
+enum class EDWCDataUVChartBuildFailureReason : uint8
+{
+    None,
+    AnalysisBudgetExceeded
+};
+
+/** Structured details for a Source UV overlap-analysis failure. */
+struct FDWCDataUVChartBuildFailure
+{
+    bool bIsValid = false;
+    EDWCDataUVChartBuildFailureReason FailureReason = EDWCDataUVChartBuildFailureReason::None;
+    int32 MaterialSlotIndex = INDEX_NONE;
+    int32 SourceTriangleCount = 0;
+    int64 TestedCandidatePairCount = 0;
+    FString Reason;
+};
+
 /** Structured details for a final packed DWC UV validation failure. */
 struct FDWCDataUVValidationFailure
 {
@@ -34,5 +51,16 @@ struct FDWCDataUVValidationFailure
     int32 ChartIndex = INDEX_NONE;
     double PackedArea = 0.0;
     FString Reason;
+    FVector2D PackedUVs[3] = { FVector2D::ZeroVector, FVector2D::ZeroVector, FVector2D::ZeroVector };
+};
+
+/** Non-fatal packed triangle excluded because its final packed UV area is below tolerance. */
+struct FDWCDataUVValidationExclusion
+{
+    int32 MaterialSlotIndex = INDEX_NONE;
+    int32 MeshTriangleID = INDEX_NONE;
+    int32 GeneratorTriangleIndex = INDEX_NONE;
+    int32 ChartIndex = INDEX_NONE;
+    double PackedArea = 0.0;
     FVector2D PackedUVs[3] = { FVector2D::ZeroVector, FVector2D::ZeroVector, FVector2D::ZeroVector };
 };

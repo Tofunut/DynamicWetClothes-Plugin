@@ -103,6 +103,10 @@ struct DWC_API FWCADerivedInlineData
     UPROPERTY(VisibleAnywhere, Category = "Wet Clothing|DWC UV Channel")
     TArray<int32> FailedDataUVMaterialSlotIndices;
 
+    /** Per-slot, per-LOD outcome from the most recent explicit DWC UV build. */
+    UPROPERTY(VisibleAnywhere, Category = "Wet Clothing|DWC UV Channel")
+    TArray<FDWCDataUVSlotLODResult> LastDataUVSlotLODResults;
+
     /** Most recent explicit DWC UV Channel generation failure shown by Part Edit. */
     UPROPERTY(VisibleAnywhere, Category = "Wet Clothing|DWC UV Channel")
     FString LastDataUVGenerationFailure;
@@ -216,6 +220,9 @@ class DWC_API UWetClothingAsset : public UDataAsset
 
     /** Commits a channel-only relocation after the prepared mesh UV values have been copied verbatim. */
     bool CommitDataUVChannelRelocation(int32 InDWCDataUVChannelIndex, FString* OutErrorMessage = nullptr);
+
+    /** Removes stored per-LOD DWC UV/runtime records outside the supplied retained LOD set. */
+    int32 PruneDataUVLODData(const TSet<int32>& RetainedLODIndices);
     const TArray<FDWCDataUVLODMetadata>& GetDataUVMetadata() const { return Derived.Inline.DataUVMetadata; }
     void MarkGeneratedDataUVOutOfDate();
     void MarkSimulationBakeOutOfDate();

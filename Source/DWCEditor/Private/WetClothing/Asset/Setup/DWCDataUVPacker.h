@@ -10,10 +10,11 @@ public:
     static bool Pack(
         const TArray<FDWCDataUVTriangle>& Triangles,
         TArray<FDWCDataUVChart>& Charts,
-        int32 Resolution,
-        int32 PaddingPixels,
+        double ChartPaddingUV,
+        double BorderPaddingUV,
         TMap<int32, FVector2f>& OutPackedUVByVertexInstance,
-        int32& OutFailedMaterialSlotIndex);
+        int32& OutFailedMaterialSlotIndex,
+        int32* OutFailedChartCount = nullptr);
 
 private:
     static void BuildRawChartUVs(

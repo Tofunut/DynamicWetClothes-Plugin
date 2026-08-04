@@ -19,10 +19,145 @@
 
 namespace DWCDataUVGeneratorInternal
 {
-    static constexpr int32 InternalPackingResolution = 4096;
-    static constexpr int32 InternalPaddingPixels = 32; // 2 output texels at the fixed 256x256 Wet Part Data resolution.
-    static constexpr int32 FixedWetPartDataResolution = 256;
+    // Data UV padding is authored in texels at the minimum/reference data-texture resolution,
+    // then converted once to normalized UV space for the resolution-independent packer.
+    static constexpr int32 DataUVReferenceResolution = 256;
+    static constexpr int32 ChartPaddingTexels = 2;
+    static constexpr int32 BorderPaddingTexels = 2;
+    static constexpr double ChartPaddingUV =
+        static_cast<double>(ChartPaddingTexels) / static_cast<double>(DataUVReferenceResolution);
+    static constexpr double BorderPaddingUV =
+        static_cast<double>(BorderPaddingTexels) / static_cast<double>(DataUVReferenceResolution);
     static constexpr double TransferDegenerateTriangleAreaTolerance = 1.0e-10;
+    static constexpr double VisibleExclusionNoteRatioThreshold = 0.0001; // 0.01%
+    static constexpr double VisibleExclusionFailureRatioThreshold = 0.005; // 0.5%
+    static constexpr double ConnectedVisibleExclusionFailureRatioThreshold = 0.0025; // 0.25%
+
+    struct FExcludedVisibleTriangle
+    {
+        int32 MaterialSlotIndex = INDEX_NONE;
+        int32 GeneratorTriangleIndex = INDEX_NONE;
+        int32 MeshTriangleID = INDEX_NONE;
+        FVertexID Vertices[3];
+        double SurfaceArea = 0.0;
+        bool bPackedDegenerate = false;
+    };
+
+    struct FMeshEdgeKey
+    {
+        int32 A = INDEX_NONE;
+        int32 B = INDEX_NONE;
+
+        friend bool operator==(const FMeshEdgeKey& Left, const FMeshEdgeKey& Right)
+        {
+            return Left.A == Right.A && Left.B == Right.B;
+        }
+
+        friend uint32 GetTypeHash(const FMeshEdgeKey& Key)
+        {
+            return HashCombine(::GetTypeHash(Key.A), ::GetTypeHash(Key.B));
+        }
+    };
+
+    static FMeshEdgeKey MakeMeshEdgeKey(const FVertexID A, const FVertexID B)
+    {
+        const int32 ValueA = A.GetValue();
+        const int32 ValueB = B.GetValue();
+        return ValueA <= ValueB
+            ? FMeshEdgeKey{ValueA, ValueB}
+            : FMeshEdgeKey{ValueB, ValueA};
+    }
+
+    static double ComputeTriangleSurfaceArea3D(const FDWCDataUVTriangle& Triangle)
+    {
+        return 0.5 * FDWCUVGeometry::ComputeTriangleDoubleArea3D(
+            Triangle.Positions[0], Triangle.Positions[1], Triangle.Positions[2]);
+    }
+
+    static double ComputeLargestConnectedExcludedArea(
+        const TArray<FExcludedVisibleTriangle>& ExcludedTriangles,
+        const int32 MaterialSlotIndex)
+    {
+        TArray<int32> LocalIndices;
+        for (int32 Index = 0; Index < ExcludedTriangles.Num(); ++Index)
+        {
+            if (ExcludedTriangles[Index].MaterialSlotIndex == MaterialSlotIndex)
+            {
+                LocalIndices.Add(Index);
+            }
+        }
+        if (LocalIndices.IsEmpty())
+        {
+            return 0.0;
+        }
+
+        TArray<int32> Parent;
+        Parent.SetNumUninitialized(LocalIndices.Num());
+        for (int32 LocalIndex = 0; LocalIndex < Parent.Num(); ++LocalIndex)
+        {
+            Parent[LocalIndex] = LocalIndex;
+        }
+
+        auto FindRoot = [&Parent](int32 Index)
+        {
+            int32 Root = Index;
+            while (Parent[Root] != Root)
+            {
+                Root = Parent[Root];
+            }
+            while (Parent[Index] != Index)
+            {
+                const int32 Next = Parent[Index];
+                Parent[Index] = Root;
+                Index = Next;
+            }
+            return Root;
+        };
+
+        auto Union = [&Parent, &FindRoot](const int32 A, const int32 B)
+        {
+            const int32 RootA = FindRoot(A);
+            const int32 RootB = FindRoot(B);
+            if (RootA != RootB)
+            {
+                Parent[RootB] = RootA;
+            }
+        };
+
+        TMap<FMeshEdgeKey, int32> FirstTriangleByEdge;
+        for (int32 LocalIndex = 0; LocalIndex < LocalIndices.Num(); ++LocalIndex)
+        {
+            const FExcludedVisibleTriangle& Triangle = ExcludedTriangles[LocalIndices[LocalIndex]];
+            for (int32 EdgeIndex = 0; EdgeIndex < 3; ++EdgeIndex)
+            {
+                const FMeshEdgeKey Edge = MakeMeshEdgeKey(
+                    Triangle.Vertices[EdgeIndex],
+                    Triangle.Vertices[(EdgeIndex + 1) % 3]);
+                if (const int32* ExistingLocalIndex = FirstTriangleByEdge.Find(Edge))
+                {
+                    Union(LocalIndex, *ExistingLocalIndex);
+                }
+                else
+                {
+                    FirstTriangleByEdge.Add(Edge, LocalIndex);
+                }
+            }
+        }
+
+        TMap<int32, double> AreaByRoot;
+        for (int32 LocalIndex = 0; LocalIndex < LocalIndices.Num(); ++LocalIndex)
+        {
+            AreaByRoot.FindOrAdd(FindRoot(LocalIndex)) +=
+                ExcludedTriangles[LocalIndices[LocalIndex]].SurfaceArea;
+        }
+
+        double LargestArea = 0.0;
+        for (const TPair<int32, double>& Pair : AreaByRoot)
+        {
+            LargestArea = FMath::Max(LargestArea, Pair.Value);
+        }
+        return LargestArea;
+    }
 
     static void SetFailure(FDWCDataUVGenerationResult& Result, const FString& Message)
     {
@@ -45,16 +180,6 @@ namespace DWCDataUVGeneratorInternal
         FDWCDataUVSlotWarning& SlotWarning = SlotWarnings.AddDefaulted_GetRef();
         SlotWarning.MaterialSlotIndex = MaterialSlotIndex;
         return SlotWarning;
-    }
-
-    static int32 GetBudgetFallbackIslandCount(const TArray<FDWCDataUVSlotWarning>& SlotWarnings)
-    {
-        int32 Count = 0;
-        for (const FDWCDataUVSlotWarning& SlotWarning : SlotWarnings)
-        {
-            Count += SlotWarning.BudgetFallbackIslandCount;
-        }
-        return Count;
     }
 
     template <typename ElementIDType>
@@ -623,8 +748,14 @@ FDWCDataUVGenerationResult FDWCDataUVGenerator::GenerateForSkeletalMesh(
 
     TArray<FDWCDataUVTriangle> Triangles;
     TMap<int32, TArray<int32>> SlotToTriangleIndices;
+    TMap<int32, int32> MatchingTriangleCountBySlot;
+    TMap<int32, int32> VisibleTriangleCountBySlot;
+    TMap<int32, double> TotalValid3DSurfaceAreaBySlot;
+    TMap<int32, int32> Degenerate3DTriangleCountBySlot;
     TMap<int32, int32> DegenerateUVTriangleCountBySlot;
     TMap<int32, int32> InvalidUVTriangleCountBySlot;
+    TArray<FExcludedVisibleTriangle> ExcludedVisibleTriangles;
+    TSet<int32> ExcludedTriangleIndices;
     TSet<int32> ExcludedVertexInstanceIDs;
 
     for (const FTriangleID TriangleID : MeshDescription->Triangles().GetElementIDs())
@@ -647,6 +778,8 @@ FDWCDataUVGenerationResult FDWCDataUVGenerator::GenerateForSkeletalMesh(
             continue;
         }
 
+        ++MatchingTriangleCountBySlot.FindOrAdd(MaterialSlotIndex);
+
         const auto VertexInstances = MeshDescription->GetTriangleVertexInstances(TriangleID);
         if (VertexInstances.Num() < 3)
         {
@@ -666,6 +799,22 @@ FDWCDataUVGenerationResult FDWCDataUVGenerator::GenerateForSkeletalMesh(
             Triangle.SourceUVs[CornerIndex] = FVector2D(SourceUV.X, SourceUV.Y);
         }
 
+        const int32 TriangleArrayIndex = Triangles.Add(Triangle);
+        const double TriangleSurfaceArea = ComputeTriangleSurfaceArea3D(Triangle);
+        if (TriangleSurfaceArea <= 0.5e-10)
+        {
+            ++Result.Degenerate3DTriangleCount;
+            ++Degenerate3DTriangleCountBySlot.FindOrAdd(MaterialSlotIndex);
+            ExcludedTriangleIndices.Add(TriangleArrayIndex);
+            for (const FVertexInstanceID VertexInstanceID : Triangle.VertexInstances)
+            {
+                ExcludedVertexInstanceIDs.Add(VertexInstanceID.GetValue());
+            }
+            continue;
+        }
+        TotalValid3DSurfaceAreaBySlot.FindOrAdd(MaterialSlotIndex) += TriangleSurfaceArea;
+        ++VisibleTriangleCountBySlot.FindOrAdd(MaterialSlotIndex);
+
         const bool bSourceUVIsFinite =
             FDWCUVGeometry::IsFiniteReasonableUV(Triangle.SourceUVs[0]) &&
             FDWCUVGeometry::IsFiniteReasonableUV(Triangle.SourceUVs[1]) &&
@@ -674,6 +823,16 @@ FDWCDataUVGenerationResult FDWCDataUVGenerator::GenerateForSkeletalMesh(
         {
             ++Result.InvalidSourceUVTriangleCount;
             ++InvalidUVTriangleCountBySlot.FindOrAdd(MaterialSlotIndex);
+            FExcludedVisibleTriangle& ExcludedTriangle = ExcludedVisibleTriangles.AddDefaulted_GetRef();
+            ExcludedTriangle.MaterialSlotIndex = MaterialSlotIndex;
+            ExcludedTriangle.GeneratorTriangleIndex = TriangleArrayIndex;
+            ExcludedTriangle.MeshTriangleID = TriangleID.GetValue();
+            ExcludedTriangle.SurfaceArea = TriangleSurfaceArea;
+            ExcludedTriangleIndices.Add(TriangleArrayIndex);
+            for (int32 CornerIndex = 0; CornerIndex < 3; ++CornerIndex)
+            {
+                ExcludedTriangle.Vertices[CornerIndex] = Triangle.Vertices[CornerIndex];
+            }
             for (const FVertexInstanceID VertexInstanceID : Triangle.VertexInstances)
             {
                 ExcludedVertexInstanceIDs.Add(VertexInstanceID.GetValue());
@@ -681,22 +840,23 @@ FDWCDataUVGenerationResult FDWCDataUVGenerator::GenerateForSkeletalMesh(
             continue;
         }
 
-        // Degenerate geometry and UV triangles are filtered before connectivity/overlap analysis.
-        // Point/line triangles would otherwise create false conflicts and cannot be rasterized.
-        if (FDWCUVGeometry::ComputeTriangleDoubleArea3D(Triangle.Positions[0], Triangle.Positions[1], Triangle.Positions[2]) <= 1.0e-10)
-        {
-            ++Result.Degenerate3DTriangleCount;
-            for (const FVertexInstanceID VertexInstanceID : Triangle.VertexInstances)
-            {
-                ExcludedVertexInstanceIDs.Add(VertexInstanceID.GetValue());
-            }
-            continue;
-        }
-
-        if (FDWCUVGeometry::ComputeTriangleArea2D(Triangle.SourceUVs[0], Triangle.SourceUVs[1], Triangle.SourceUVs[2]) <= 1.0e-12)
+        // Degenerate UV triangles are filtered before connectivity/overlap analysis.
+        // Point/line UV triangles would otherwise create false conflicts and cannot be rasterized.
+        if (FDWCUVGeometry::ComputeTriangleArea2D(
+                Triangle.SourceUVs[0], Triangle.SourceUVs[1], Triangle.SourceUVs[2]) <= 1.0e-12)
         {
             ++Result.DegenerateSourceUVTriangleCount;
             ++DegenerateUVTriangleCountBySlot.FindOrAdd(MaterialSlotIndex);
+            FExcludedVisibleTriangle& ExcludedTriangle = ExcludedVisibleTriangles.AddDefaulted_GetRef();
+            ExcludedTriangle.MaterialSlotIndex = MaterialSlotIndex;
+            ExcludedTriangle.GeneratorTriangleIndex = TriangleArrayIndex;
+            ExcludedTriangle.MeshTriangleID = TriangleID.GetValue();
+            ExcludedTriangle.SurfaceArea = TriangleSurfaceArea;
+            ExcludedTriangleIndices.Add(TriangleArrayIndex);
+            for (int32 CornerIndex = 0; CornerIndex < 3; ++CornerIndex)
+            {
+                ExcludedTriangle.Vertices[CornerIndex] = Triangle.Vertices[CornerIndex];
+            }
             for (const FVertexInstanceID VertexInstanceID : Triangle.VertexInstances)
             {
                 ExcludedVertexInstanceIDs.Add(VertexInstanceID.GetValue());
@@ -704,10 +864,16 @@ FDWCDataUVGenerationResult FDWCDataUVGenerator::GenerateForSkeletalMesh(
             continue;
         }
 
-        const int32 TriangleArrayIndex = Triangles.Add(Triangle);
         SlotToTriangleIndices.FindOrAdd(MaterialSlotIndex).Add(TriangleArrayIndex);
     }
 
+    for (const TPair<int32, int32>& Pair : Degenerate3DTriangleCountBySlot)
+    {
+        if (Pair.Value > 0)
+        {
+            FindOrAddSlotWarning(Result.SlotWarnings, Pair.Key).Degenerate3DTriangleCount += Pair.Value;
+        }
+    }
     for (const TPair<int32, int32>& Pair : DegenerateUVTriangleCountBySlot)
     {
         if (Pair.Value > 0)
@@ -723,20 +889,47 @@ FDWCDataUVGenerationResult FDWCDataUVGenerator::GenerateForSkeletalMesh(
         }
     }
 
-    if (Triangles.Num() == 0)
+    if (SlotToTriangleIndices.IsEmpty())
     {
+        if (TargetMaterialSlotIndices == nullptr && TargetMaterialSlotIndex != INDEX_NONE)
+        {
+            const int32 MatchingTriangleCount = MatchingTriangleCountBySlot.FindRef(TargetMaterialSlotIndex);
+            const int32 VisibleTriangleCount = VisibleTriangleCountBySlot.FindRef(TargetMaterialSlotIndex);
+            Result.MaterialSlotIndex = TargetMaterialSlotIndex;
+            Result.UVChannelIndex = NewUVChannelIndex;
+
+            if (MatchingTriangleCount == 0)
+            {
+                Result.bSucceeded = true;
+                Result.bTargetSlotNotPresent = true;
+                Result.Message = FString::Printf(
+                    TEXT("This material slot is not used by LOD%d."),
+                    LODIndex);
+                return Result;
+            }
+
+            if (VisibleTriangleCount == 0)
+            {
+                Result.bSucceeded = true;
+                Result.bTargetSlotNotPresent = true;
+                Result.Message = FString::Printf(
+                    TEXT("All triangles in this material slot have zero 3D surface area at LOD%d."),
+                    LODIndex);
+                return Result;
+            }
+
+            Result.FailedMaterialSlotIndices.Add(TargetMaterialSlotIndex);
+            SetFailure(Result, TEXT("Visible triangles exist, but all source UV triangles are invalid or degenerate."));
+            return Result;
+        }
+
         if (TargetMaterialSlotIndices != nullptr)
         {
             for (const int32 MaterialSlotIndex : *TargetMaterialSlotIndices)
             {
                 Result.FailedMaterialSlotIndices.Add(MaterialSlotIndex);
             }
-            SetFailure(Result, TEXT("The selected Wettable material slots do not contain triangles that can be unwrapped."));
-        }
-        else if (TargetMaterialSlotIndex != INDEX_NONE)
-        {
-            Result.FailedMaterialSlotIndices.Add(TargetMaterialSlotIndex);
-            SetFailure(Result, FString::Printf(TEXT("Material Slot %d does not contain triangles that can be unwrapped."), TargetMaterialSlotIndex));
+            SetFailure(Result, TEXT("The selected Wettable material slots do not contain valid source UV triangles."));
         }
         else
         {
@@ -773,14 +966,34 @@ FDWCDataUVGenerationResult FDWCDataUVGenerator::GenerateForSkeletalMesh(
     Result.OriginalUVIslandCount = OriginalUVIslands.Num();
 
     TArray<FDWCDataUVChart> DataUVCharts;
-    FDWCDataUVChartBuilder::BuildNonOverlappingCharts(
+    FDWCDataUVChartBuildFailure ChartBuildFailure;
+    const bool bChartsBuilt = FDWCDataUVChartBuilder::BuildNonOverlappingCharts(
         Triangles,
         OriginalUVIslands,
         DataUVCharts,
         Result.SplitOriginalUVIslandCount,
         Result.SelfOverlapPairCount,
-        Result.SlotWarnings);
+        Result.SlotWarnings,
+        &ChartBuildFailure);
     const double ChartBuildEndTime = FPlatformTime::Seconds();
+
+    if (!bChartsBuilt)
+    {
+        if (ChartBuildFailure.bIsValid)
+        {
+            Result.FailedMaterialSlotIndices.Add(ChartBuildFailure.MaterialSlotIndex);
+            SetFailure(Result, FString::Printf(
+                TEXT("Material Slot %d contains a physical Source UV shell whose internal self-overlap analysis exceeds the supported limit after %lld exact triangle-pair tests within a shell containing %d triangle(s)."),
+                ChartBuildFailure.MaterialSlotIndex,
+                static_cast<long long>(ChartBuildFailure.TestedCandidatePairCount),
+                ChartBuildFailure.SourceTriangleCount));
+        }
+        else
+        {
+            SetFailure(Result, TEXT("Source UV overlap analysis failed before non-overlapping DWC UV Channel charts could be generated."));
+        }
+        return Result;
+    }
 
     if (DataUVCharts.Num() == 0)
     {
@@ -815,35 +1028,41 @@ FDWCDataUVGenerationResult FDWCDataUVGenerator::GenerateForSkeletalMesh(
     TArray<FDWCDataUVChart> ValidatedCharts = DataUVCharts;
     TMap<int32, FVector2f> PackedUVBySyntheticCorner;
     int32 PackingFailedMaterialSlotIndex = INDEX_NONE;
+    int32 PackingFailedChartCount = 0;
     if (!FDWCDataUVPacker::Pack(
             PackingTriangles,
             ValidatedCharts,
-            InternalPackingResolution,
-            InternalPaddingPixels,
+            ChartPaddingUV,
+            BorderPaddingUV,
             PackedUVBySyntheticCorner,
-            PackingFailedMaterialSlotIndex))
+            PackingFailedMaterialSlotIndex,
+            &PackingFailedChartCount))
     {
         if (PackingFailedMaterialSlotIndex != INDEX_NONE)
         {
             Result.FailedMaterialSlotIndices.Add(PackingFailedMaterialSlotIndex);
         }
         SetFailure(Result, FString::Printf(
-            TEXT("Material Slot %d cannot be packed while preserving the required DWC UV Channel gutter."),
-            PackingFailedMaterialSlotIndex));
+            TEXT("Material Slot %d generated %d DWC UV packing chart(s), which cannot be packed into the 0-1 UV space while preserving %d texels of padding around each chart."),
+            PackingFailedMaterialSlotIndex,
+            PackingFailedChartCount,
+            ChartPaddingTexels));
         return Result;
     }
 
     TSet<int32> ProblemMaterialSlots;
     FString PackedValidationError;
     FDWCDataUVValidationFailure ValidationFailure;
+    TArray<FDWCDataUVValidationExclusion> PackedDegenerateExclusions;
     if (!FDWCDataUVValidator::Validate(
             PackingTriangles,
             ValidatedCharts,
             PackedUVBySyntheticCorner,
-            FixedWetPartDataResolution,
+            DataUVReferenceResolution,
             ProblemMaterialSlots,
             PackedValidationError,
-            &ValidationFailure))
+            &ValidationFailure,
+            &PackedDegenerateExclusions))
     {
         for (const int32 MaterialSlotIndex : ProblemMaterialSlots)
         {
@@ -855,9 +1074,211 @@ FDWCDataUVGenerationResult FDWCDataUVGenerator::GenerateForSkeletalMesh(
             *PackedValidationError));
         return Result;
     }
+
+    TSet<int32> PackedDegenerateTriangleIndices;
+    for (const FDWCDataUVValidationExclusion& Exclusion : PackedDegenerateExclusions)
+    {
+        if (!Triangles.IsValidIndex(Exclusion.GeneratorTriangleIndex) ||
+            PackedDegenerateTriangleIndices.Contains(Exclusion.GeneratorTriangleIndex))
+        {
+            continue;
+        }
+
+        PackedDegenerateTriangleIndices.Add(Exclusion.GeneratorTriangleIndex);
+        ExcludedTriangleIndices.Add(Exclusion.GeneratorTriangleIndex);
+        const FDWCDataUVTriangle& Triangle = Triangles[Exclusion.GeneratorTriangleIndex];
+        ++Result.PackedDegenerateTriangleCount;
+        FDWCDataUVSlotWarning& SlotDiagnostic = FindOrAddSlotWarning(
+            Result.SlotWarnings,
+            Triangle.MaterialSlotIndex);
+        ++SlotDiagnostic.PackedDegenerateTriangleCount;
+
+        FExcludedVisibleTriangle& ExcludedTriangle = ExcludedVisibleTriangles.AddDefaulted_GetRef();
+        ExcludedTriangle.MaterialSlotIndex = Triangle.MaterialSlotIndex;
+        ExcludedTriangle.GeneratorTriangleIndex = Exclusion.GeneratorTriangleIndex;
+        ExcludedTriangle.MeshTriangleID = Triangle.TriangleID.GetValue();
+        ExcludedTriangle.SurfaceArea = ComputeTriangleSurfaceArea3D(Triangle);
+        ExcludedTriangle.bPackedDegenerate = true;
+        for (int32 CornerIndex = 0; CornerIndex < 3; ++CornerIndex)
+        {
+            ExcludedTriangle.Vertices[CornerIndex] = Triangle.Vertices[CornerIndex];
+            ExcludedVertexInstanceIDs.Add(Triangle.VertexInstances[CornerIndex].GetValue());
+        }
+    }
+
+    TMap<int32, int32> ExcludedVisibleTriangleCountBySlot;
+    TMap<int32, double> ExcludedVisibleAreaBySlot;
+    for (const FExcludedVisibleTriangle& ExcludedTriangle : ExcludedVisibleTriangles)
+    {
+        ++ExcludedVisibleTriangleCountBySlot.FindOrAdd(ExcludedTriangle.MaterialSlotIndex);
+        ExcludedVisibleAreaBySlot.FindOrAdd(ExcludedTriangle.MaterialSlotIndex) += ExcludedTriangle.SurfaceArea;
+    }
+
+    TSet<int32> DiagnosticSlotIndices;
+    for (const FDWCDataUVSlotWarning& SlotDiagnostic : Result.SlotWarnings)
+    {
+        DiagnosticSlotIndices.Add(SlotDiagnostic.MaterialSlotIndex);
+    }
+    for (const TPair<int32, double>& Pair : TotalValid3DSurfaceAreaBySlot)
+    {
+        DiagnosticSlotIndices.Add(Pair.Key);
+    }
+
+    TArray<FString> ExclusionFailureMessages;
+    for (const int32 MaterialSlotIndex : DiagnosticSlotIndices)
+    {
+        FDWCDataUVSlotWarning& SlotDiagnostic = FindOrAddSlotWarning(Result.SlotWarnings, MaterialSlotIndex);
+        SlotDiagnostic.TotalValid3DSurfaceArea = TotalValid3DSurfaceAreaBySlot.FindRef(MaterialSlotIndex);
+        SlotDiagnostic.ExcludedVisibleTriangleCount = ExcludedVisibleTriangleCountBySlot.FindRef(MaterialSlotIndex);
+        SlotDiagnostic.ExcludedVisible3DSurfaceArea = ExcludedVisibleAreaBySlot.FindRef(MaterialSlotIndex);
+        SlotDiagnostic.ExcludedVisible3DSurfaceRatio = SlotDiagnostic.TotalValid3DSurfaceArea > SMALL_NUMBER
+            ? SlotDiagnostic.ExcludedVisible3DSurfaceArea / SlotDiagnostic.TotalValid3DSurfaceArea
+            : 0.0;
+        SlotDiagnostic.LargestConnectedExcluded3DSurfaceArea = ComputeLargestConnectedExcludedArea(
+            ExcludedVisibleTriangles,
+            MaterialSlotIndex);
+        SlotDiagnostic.LargestConnectedExcluded3DSurfaceRatio = SlotDiagnostic.TotalValid3DSurfaceArea > SMALL_NUMBER
+            ? SlotDiagnostic.LargestConnectedExcluded3DSurfaceArea / SlotDiagnostic.TotalValid3DSurfaceArea
+            : 0.0;
+
+        EDWCDataUVResultSeverity Severity = EDWCDataUVResultSeverity::Ready;
+        if (SlotDiagnostic.Degenerate3DTriangleCount > 0 ||
+            SlotDiagnostic.SplitOriginalUVIslandCount > 0 ||
+            SlotDiagnostic.SelfOverlapPairCount > 0 ||
+            SlotDiagnostic.BudgetFallbackIslandCount > 0)
+        {
+            Severity = EDWCDataUVResultSeverity::ReadyWithNotes;
+        }
+
+        if (SlotDiagnostic.ExcludedVisibleTriangleCount > 0)
+        {
+            const bool bPackedDegenerateWasExcluded = SlotDiagnostic.PackedDegenerateTriangleCount > 0;
+            Severity = bPackedDegenerateWasExcluded ||
+                       SlotDiagnostic.ExcludedVisible3DSurfaceRatio > VisibleExclusionNoteRatioThreshold
+                ? EDWCDataUVResultSeverity::ReadyWithWarnings
+                : DWCDataUVResultSeverity::Max(Severity, EDWCDataUVResultSeverity::ReadyWithNotes);
+        }
+
+        if (SlotDiagnostic.InvalidSourceUVTriangleCount > 0)
+        {
+            Severity = EDWCDataUVResultSeverity::Failed;
+            Result.FailedMaterialSlotIndices.Add(MaterialSlotIndex);
+            ExclusionFailureMessages.Add(FString::Printf(
+                TEXT("Material Slot %d contains %d source triangle(s) with non-finite UV coordinates. NaN or Inf UV data cannot be used safely."),
+                MaterialSlotIndex,
+                SlotDiagnostic.InvalidSourceUVTriangleCount));
+        }
+        else
+        {
+            const bool bTotalExcludedSurfaceLimitExceeded =
+                SlotDiagnostic.ExcludedVisible3DSurfaceRatio > VisibleExclusionFailureRatioThreshold;
+            const bool bConnectedExcludedRegionLimitExceeded =
+                SlotDiagnostic.LargestConnectedExcluded3DSurfaceRatio > ConnectedVisibleExclusionFailureRatioThreshold;
+
+            if (bTotalExcludedSurfaceLimitExceeded || bConnectedExcludedRegionLimitExceeded)
+            {
+                Severity = EDWCDataUVResultSeverity::Failed;
+                Result.FailedMaterialSlotIndices.Add(MaterialSlotIndex);
+
+                if (bTotalExcludedSurfaceLimitExceeded && bConnectedExcludedRegionLimitExceeded)
+                {
+                    ExclusionFailureMessages.Add(FString::Printf(
+                        TEXT("Material Slot %d excluded %.4f%% of its visible 3D surface, exceeding the %.2f%% total limit. Its largest connected excluded region is %.4f%%, also exceeding the %.2f%% connected-region limit."),
+                        MaterialSlotIndex,
+                        SlotDiagnostic.ExcludedVisible3DSurfaceRatio * 100.0,
+                        VisibleExclusionFailureRatioThreshold * 100.0,
+                        SlotDiagnostic.LargestConnectedExcluded3DSurfaceRatio * 100.0,
+                        ConnectedVisibleExclusionFailureRatioThreshold * 100.0));
+                }
+                else if (bTotalExcludedSurfaceLimitExceeded)
+                {
+                    ExclusionFailureMessages.Add(FString::Printf(
+                        TEXT("Material Slot %d excluded %.4f%% of its visible 3D surface, exceeding the %.2f%% total limit. Its largest connected excluded region is %.4f%% (within the %.2f%% connected-region limit)."),
+                        MaterialSlotIndex,
+                        SlotDiagnostic.ExcludedVisible3DSurfaceRatio * 100.0,
+                        VisibleExclusionFailureRatioThreshold * 100.0,
+                        SlotDiagnostic.LargestConnectedExcluded3DSurfaceRatio * 100.0,
+                        ConnectedVisibleExclusionFailureRatioThreshold * 100.0));
+                }
+                else
+                {
+                    ExclusionFailureMessages.Add(FString::Printf(
+                        TEXT("Material Slot %d's largest connected excluded region is %.4f%%, exceeding the %.2f%% connected-region limit. Total excluded visible surface is %.4f%% (within the %.2f%% total limit)."),
+                        MaterialSlotIndex,
+                        SlotDiagnostic.LargestConnectedExcluded3DSurfaceRatio * 100.0,
+                        ConnectedVisibleExclusionFailureRatioThreshold * 100.0,
+                        SlotDiagnostic.ExcludedVisible3DSurfaceRatio * 100.0,
+                        VisibleExclusionFailureRatioThreshold * 100.0));
+                }
+            }
+        }
+        SlotDiagnostic.ResultSeverity = Severity;
+        Result.ResultSeverity = DWCDataUVResultSeverity::Max(Result.ResultSeverity, Severity);
+    }
+
+    if (!ExclusionFailureMessages.IsEmpty())
+    {
+        SetFailure(Result, FString::Join(ExclusionFailureMessages, TEXT("\n")));
+        return Result;
+    }
+
+    if (!PackedDegenerateTriangleIndices.IsEmpty())
+    {
+        for (FDWCDataUVChart& Chart : ValidatedCharts)
+        {
+            Chart.TriangleIndices.RemoveAll(
+                [&PackedDegenerateTriangleIndices](const int32 TriangleIndex)
+                {
+                    return PackedDegenerateTriangleIndices.Contains(TriangleIndex);
+                });
+        }
+        ValidatedCharts.RemoveAll(
+            [](const FDWCDataUVChart& Chart)
+            {
+                return Chart.TriangleIndices.IsEmpty();
+            });
+    }
+
+    Result.ExcludedVisibleTriangleCount = ExcludedVisibleTriangles.Num();
+    for (const FDWCDataUVSlotWarning& SlotDiagnostic : Result.SlotWarnings)
+    {
+        Result.ExcludedVisible3DSurfaceArea += SlotDiagnostic.ExcludedVisible3DSurfaceArea;
+        Result.ExcludedVisible3DSurfaceRatio = FMath::Max(
+            Result.ExcludedVisible3DSurfaceRatio,
+            SlotDiagnostic.ExcludedVisible3DSurfaceRatio);
+        Result.LargestConnectedExcluded3DSurfaceArea = FMath::Max(
+            Result.LargestConnectedExcluded3DSurfaceArea,
+            SlotDiagnostic.LargestConnectedExcluded3DSurfaceArea);
+        Result.LargestConnectedExcluded3DSurfaceRatio = FMath::Max(
+            Result.LargestConnectedExcluded3DSurfaceRatio,
+            SlotDiagnostic.LargestConnectedExcluded3DSurfaceRatio);
+    }
     const double FinalPackAndValidateEndTime = FPlatformTime::Seconds();
 
     DataUVCharts = MoveTemp(ValidatedCharts);
+
+    // Excluded triangles are not DWC simulation/rasterization inputs, but may still share
+    // MeshDescription VertexInstances with neighboring valid triangles. Add one topology-only
+    // chart per material slot so the seam splitter gives all excluded triangles independent
+    // corners that can safely be cleared without touching valid DWC UVs.
+    TArray<FDWCDataUVChart> SeamCharts = DataUVCharts;
+    if (!ExcludedTriangleIndices.IsEmpty())
+    {
+        TMap<int32, TArray<int32>> ExcludedTrianglesByMaterial;
+        for (const int32 TriangleIndex : ExcludedTriangleIndices)
+        {
+            if (Triangles.IsValidIndex(TriangleIndex))
+            {
+                ExcludedTrianglesByMaterial.FindOrAdd(Triangles[TriangleIndex].MaterialSlotIndex).Add(TriangleIndex);
+            }
+        }
+        for (TPair<int32, TArray<int32>>& Pair : ExcludedTrianglesByMaterial)
+        {
+            FDWCDataUVChart& ExcludedChart = SeamCharts.AddDefaulted_GetRef();
+            ExcludedChart.MaterialSlotIndex = Pair.Key;
+            ExcludedChart.TriangleIndices = MoveTemp(Pair.Value);
+        }
+    }
 
     // Only a fully validated chart layout may modify the Prepared Mesh. Begin the
     // transaction immediately before creating real render-corner seams.
@@ -865,7 +1286,7 @@ FDWCDataUVGenerationResult FDWCDataUVGenerator::GenerateForSkeletalMesh(
     const FDWCDataUVSeamSplitResult SeamSplitResult = FDWCDataUVSeamSplitter::SplitChartBoundaries(
         *MeshDescription,
         Triangles,
-        DataUVCharts);
+        SeamCharts);
     if (!SeamSplitResult.bSucceeded)
     {
         SetFailure(Result, FString::Printf(
@@ -880,6 +1301,10 @@ FDWCDataUVGenerationResult FDWCDataUVGenerator::GenerateForSkeletalMesh(
     TMap<int32, FVector2f> PackedUVByVertexInstance;
     for (int32 TriangleIndex = 0; TriangleIndex < Triangles.Num(); ++TriangleIndex)
     {
+        if (ExcludedTriangleIndices.Contains(TriangleIndex))
+        {
+            continue;
+        }
         for (int32 CornerIndex = 0; CornerIndex < 3; ++CornerIndex)
         {
             const int32 SyntheticCornerIndex = TriangleIndex * 3 + CornerIndex;
@@ -939,6 +1364,24 @@ FDWCDataUVGenerationResult FDWCDataUVGenerator::GenerateForSkeletalMesh(
         if (IsValidElementID(VertexInstanceID))
         {
             WritableVertexInstanceUVs.Set(VertexInstanceID, NewUVChannelIndex, Pair.Value);
+        }
+    }
+
+    // The topology-only excluded charts now own separate VertexInstances. Clear them
+    // unconditionally so later GPU/runtime builders cannot interpret any excluded triangle
+    // as a valid DWC UV triangle.
+    for (const int32 TriangleIndex : ExcludedTriangleIndices)
+    {
+        if (!Triangles.IsValidIndex(TriangleIndex))
+        {
+            continue;
+        }
+        for (const FVertexInstanceID VertexInstanceID : Triangles[TriangleIndex].VertexInstances)
+        {
+            if (IsValidElementID(VertexInstanceID))
+            {
+                WritableVertexInstanceUVs.Set(VertexInstanceID, NewUVChannelIndex, FVector2f::ZeroVector);
+            }
         }
     }
 
@@ -1002,12 +1445,11 @@ FDWCDataUVGenerationResult FDWCDataUVGenerator::GenerateForSkeletalMesh(
     if (Result.HasWarnings())
     {
         Result.Message += FString::Printf(
-            TEXT(" Warnings: excluded %d degenerate source-UV triangle(s); excluded %d invalid source-UV triangle(s); split %d self-overlapping Original-UV island(s) across %d overlap pair(s); used triangle fallback for %d Original-UV island(s) whose overlap analysis exceeded the safety budget."),
+            TEXT(" Warnings: excluded %d degenerate source-UV triangle(s); excluded %d invalid source-UV triangle(s); separated %d overlapping Source-UV triangle pair(s), splitting %d physical Source UV shell(s)."),
             Result.DegenerateSourceUVTriangleCount,
             Result.InvalidSourceUVTriangleCount,
-            Result.SplitOriginalUVIslandCount,
             Result.SelfOverlapPairCount,
-            GetBudgetFallbackIslandCount(Result.SlotWarnings));
+            Result.SplitOriginalUVIslandCount);
     }
 
     Result.TriangleReadMilliseconds = (TriangleReadEndTime - GenerationStartTime) * 1000.0;

@@ -12,6 +12,7 @@ public class DWCEditor : ModuleRules
 				"ApplicationCore",
 				"AdvancedPreviewScene",
 				"AppFramework",
+				"ApplicationCore",
 				"AssetDefinition",
 				"AssetRegistry",
 				"AssetTools",

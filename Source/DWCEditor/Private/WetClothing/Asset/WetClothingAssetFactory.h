@@ -34,7 +34,7 @@ public:
 #endif
 
     UPROPERTY(EditAnywhere, Category = "Simulation Data", meta = (DisplayName = "CPU Vertex Simulation Data"))
-    bool bBuildCPUVertexSimulationData = true;
+    bool bBuildCPUVertexSimulationData = false;
 
     UPROPERTY(EditAnywhere, Category = "Simulation Data", meta = (DisplayName = "GPU Wetness Map Simulation Data"))
     bool bBuildGPUWetnessMapSimulationData = true;
@@ -87,7 +87,7 @@ public:
     int32 LastGeneratedLODIndex = MAX_int32;
 
     UPROPERTY(EditAnywhere, Category = "Simulation Data", meta = (DisplayName = "CPU Vertex Simulation Data"))
-    bool bBuildCPUVertexSimulationData = true;
+    bool bBuildCPUVertexSimulationData = false;
 
     UPROPERTY(EditAnywhere, Category = "Simulation Data", meta = (DisplayName = "GPU Wetness Map Simulation Data"))
     bool bBuildGPUWetnessMapSimulationData = true;

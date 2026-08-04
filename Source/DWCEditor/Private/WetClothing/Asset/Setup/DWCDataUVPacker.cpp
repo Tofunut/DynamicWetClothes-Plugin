@@ -10,6 +10,7 @@ namespace DWCDataUVPackerPrivate
         FVector2D DesiredSize = FVector2D::ZeroVector;
         FVector2D PackedMin = FVector2D::ZeroVector;
         FVector2D PackedSize = FVector2D::ZeroVector;
+        bool bRotated90 = false;
     };
 
     struct FFreeRect
@@ -21,12 +22,34 @@ namespace DWCDataUVPackerPrivate
         double Top() const { return Min.Y + Size.Y; }
     };
 
+    struct FShelf
+    {
+        double MinY = 0.0;
+        double Height = 0.0;
+        double NextX = 0.0;
+    };
+
     static FVector2D GetSafeRawSize(const FDWCDataUVChart& Chart)
     {
         FVector2D RawSize = Chart.RawBounds.GetSize();
         RawSize.X = FMath::Max(RawSize.X, 1.0e-4);
         RawSize.Y = FMath::Max(RawSize.Y, 1.0e-4);
         return RawSize;
+    }
+
+    static FVector2D GetContentSize(
+        const FPackingRecord& Record,
+        const double Scale,
+        const bool bRotated90)
+    {
+        FVector2D ContentSize(
+            FMath::Max(Record.DesiredSize.X * Scale, 1.0e-7),
+            FMath::Max(Record.DesiredSize.Y * Scale, 1.0e-7));
+        if (bRotated90)
+        {
+            Swap(ContentSize.X, ContentSize.Y);
+        }
+        return ContentSize;
     }
 
     static void PruneContainedFreeRects(TArray<FFreeRect>& FreeRects)
@@ -109,11 +132,11 @@ namespace DWCDataUVPackerPrivate
         PruneContainedFreeRects(FreeRects);
     }
 
-    static bool TryPackRecords(
+    static bool TryPackRecordsMaxRects(
         TArray<FPackingRecord>& Records,
         const FVector2D& AtlasMin,
         const FVector2D& AtlasSize,
-        const double IslandPaddingUV,
+        const double ChartPaddingUV,
         const double Scale)
     {
         TArray<FFreeRect> FreeRects;
@@ -121,12 +144,10 @@ namespace DWCDataUVPackerPrivate
 
         for (FPackingRecord& Record : Records)
         {
-            const FVector2D ContentSize(
-                FMath::Max(Record.DesiredSize.X * Scale, 1.0e-7),
-                FMath::Max(Record.DesiredSize.Y * Scale, 1.0e-7));
-            const FVector2D PaddedSize = ContentSize + FVector2D(IslandPaddingUV * 2.0, IslandPaddingUV * 2.0);
-
             int32 BestRectIndex = INDEX_NONE;
+            bool bBestRotated90 = false;
+            FVector2D BestContentSize = FVector2D::ZeroVector;
+            FVector2D BestPaddedSize = FVector2D::ZeroVector;
             double BestShortSide = TNumericLimits<double>::Max();
             double BestLongSide = TNumericLimits<double>::Max();
             double BestAreaWaste = TNumericLimits<double>::Max();
@@ -134,28 +155,45 @@ namespace DWCDataUVPackerPrivate
             for (int32 RectIndex = 0; RectIndex < FreeRects.Num(); ++RectIndex)
             {
                 const FFreeRect& FreeRect = FreeRects[RectIndex];
-                if (PaddedSize.X > FreeRect.Size.X + 1.0e-9 ||
-                    PaddedSize.Y > FreeRect.Size.Y + 1.0e-9)
+                for (int32 RotationIndex = 0; RotationIndex < 2; ++RotationIndex)
                 {
-                    continue;
-                }
+                    const bool bRotated90 = RotationIndex == 1;
+                    if (bRotated90 &&
+                        FMath::IsNearlyEqual(Record.DesiredSize.X, Record.DesiredSize.Y, 1.0e-12))
+                    {
+                        continue;
+                    }
 
-                const double LeftoverX = FreeRect.Size.X - PaddedSize.X;
-                const double LeftoverY = FreeRect.Size.Y - PaddedSize.Y;
-                const double ShortSide = FMath::Min(LeftoverX, LeftoverY);
-                const double LongSide = FMath::Max(LeftoverX, LeftoverY);
-                const double AreaWaste = FreeRect.Size.X * FreeRect.Size.Y - PaddedSize.X * PaddedSize.Y;
+                    const FVector2D ContentSize = GetContentSize(Record, Scale, bRotated90);
+                    const FVector2D PaddedSize = ContentSize +
+                        FVector2D(ChartPaddingUV * 2.0, ChartPaddingUV * 2.0);
+                    if (PaddedSize.X > FreeRect.Size.X + 1.0e-9 ||
+                        PaddedSize.Y > FreeRect.Size.Y + 1.0e-9)
+                    {
+                        continue;
+                    }
 
-                if (ShortSide < BestShortSide ||
-                    (FMath::IsNearlyEqual(ShortSide, BestShortSide) && LongSide < BestLongSide) ||
-                    (FMath::IsNearlyEqual(ShortSide, BestShortSide) &&
-                     FMath::IsNearlyEqual(LongSide, BestLongSide) &&
-                     AreaWaste < BestAreaWaste))
-                {
-                    BestRectIndex = RectIndex;
-                    BestShortSide = ShortSide;
-                    BestLongSide = LongSide;
-                    BestAreaWaste = AreaWaste;
+                    const double LeftoverX = FreeRect.Size.X - PaddedSize.X;
+                    const double LeftoverY = FreeRect.Size.Y - PaddedSize.Y;
+                    const double ShortSide = FMath::Min(LeftoverX, LeftoverY);
+                    const double LongSide = FMath::Max(LeftoverX, LeftoverY);
+                    const double AreaWaste = FreeRect.Size.X * FreeRect.Size.Y -
+                        PaddedSize.X * PaddedSize.Y;
+
+                    if (ShortSide < BestShortSide ||
+                        (FMath::IsNearlyEqual(ShortSide, BestShortSide) && LongSide < BestLongSide) ||
+                        (FMath::IsNearlyEqual(ShortSide, BestShortSide) &&
+                         FMath::IsNearlyEqual(LongSide, BestLongSide) &&
+                         AreaWaste < BestAreaWaste))
+                    {
+                        BestRectIndex = RectIndex;
+                        bBestRotated90 = bRotated90;
+                        BestContentSize = ContentSize;
+                        BestPaddedSize = PaddedSize;
+                        BestShortSide = ShortSide;
+                        BestLongSide = LongSide;
+                        BestAreaWaste = AreaWaste;
+                    }
                 }
             }
 
@@ -166,64 +204,139 @@ namespace DWCDataUVPackerPrivate
 
             const FFreeRect PlacementRect = {
                 FreeRects[BestRectIndex].Min,
-                PaddedSize
+                BestPaddedSize
             };
-            Record.PackedMin = PlacementRect.Min + FVector2D(IslandPaddingUV, IslandPaddingUV);
-            Record.PackedSize = ContentSize;
+            Record.PackedMin = PlacementRect.Min + FVector2D(ChartPaddingUV, ChartPaddingUV);
+            Record.PackedSize = BestContentSize;
+            Record.bRotated90 = bBestRotated90;
             SplitFreeRects(FreeRects, PlacementRect);
         }
 
         return true;
     }
 
-    static bool PackRecordsInGrid(
+    static bool TryPackRecordsInShelves(
         TArray<FPackingRecord>& Records,
         const FVector2D& AtlasMin,
         const FVector2D& AtlasSize,
-        const double IslandPaddingUV)
+        const double ChartPaddingUV,
+        const double Scale)
     {
         if (Records.IsEmpty())
         {
             return true;
         }
 
-        Records.Sort(
-            [](const FPackingRecord& A, const FPackingRecord& B)
+        const double AtlasRight = AtlasMin.X + AtlasSize.X;
+        const double AtlasTop = AtlasMin.Y + AtlasSize.Y;
+        TArray<FShelf> Shelves;
+
+        for (FPackingRecord& Record : Records)
+        {
+            int32 BestShelfIndex = INDEX_NONE;
+            bool bBestRotated90 = false;
+            FVector2D BestContentSize = FVector2D::ZeroVector;
+            FVector2D BestPaddedSize = FVector2D::ZeroVector;
+            double BestHorizontalWaste = TNumericLimits<double>::Max();
+            double BestVerticalWaste = TNumericLimits<double>::Max();
+
+            for (int32 ShelfIndex = 0; ShelfIndex < Shelves.Num(); ++ShelfIndex)
             {
-                const double AreaA = A.DesiredSize.X * A.DesiredSize.Y;
-                const double AreaB = B.DesiredSize.X * B.DesiredSize.Y;
-                return !FMath::IsNearlyEqual(AreaA, AreaB) ? AreaA > AreaB : A.ChartIndex < B.ChartIndex;
-            });
+                const FShelf& Shelf = Shelves[ShelfIndex];
+                for (int32 RotationIndex = 0; RotationIndex < 2; ++RotationIndex)
+                {
+                    const bool bRotated90 = RotationIndex == 1;
+                    if (bRotated90 &&
+                        FMath::IsNearlyEqual(Record.DesiredSize.X, Record.DesiredSize.Y, 1.0e-12))
+                    {
+                        continue;
+                    }
 
-        const int32 ColumnCount = FMath::CeilToInt(FMath::Sqrt(static_cast<double>(Records.Num())));
-        const int32 RowCount = FMath::DivideAndRoundUp(Records.Num(), ColumnCount);
-        const FVector2D CellSize(
-            AtlasSize.X / static_cast<double>(ColumnCount),
-            AtlasSize.Y / static_cast<double>(RowCount));
-        const double MaxCellPadding = FMath::Max(FMath::Min(CellSize.X, CellSize.Y) * 0.25, 0.0);
-        if (IslandPaddingUV > MaxCellPadding + 1.0e-9)
-        {
-            return false;
-        }
-        const double CellPadding = IslandPaddingUV;
-        const FVector2D ContentCellSize(
-            FMath::Max(CellSize.X - CellPadding * 2.0, 1.0e-7),
-            FMath::Max(CellSize.Y - CellPadding * 2.0, 1.0e-7));
+                    const FVector2D ContentSize = GetContentSize(Record, Scale, bRotated90);
+                    const FVector2D PaddedSize = ContentSize +
+                        FVector2D(ChartPaddingUV * 2.0, ChartPaddingUV * 2.0);
+                    if (PaddedSize.Y > Shelf.Height + 1.0e-9 ||
+                        Shelf.NextX + PaddedSize.X > AtlasRight + 1.0e-9)
+                    {
+                        continue;
+                    }
 
-        for (int32 RecordIndex = 0; RecordIndex < Records.Num(); ++RecordIndex)
-        {
-            FPackingRecord& Record = Records[RecordIndex];
-            const int32 ColumnIndex = RecordIndex % ColumnCount;
-            const int32 RowIndex = RecordIndex / ColumnCount;
-            const FVector2D CellMin = AtlasMin + FVector2D(
-                static_cast<double>(ColumnIndex) * CellSize.X,
-                static_cast<double>(RowIndex) * CellSize.Y);
-            const double UniformScale = FMath::Min(
-                ContentCellSize.X / FMath::Max(Record.DesiredSize.X, 1.0e-7),
-                ContentCellSize.Y / FMath::Max(Record.DesiredSize.Y, 1.0e-7));
-            Record.PackedSize = Record.DesiredSize * UniformScale;
-            Record.PackedMin = CellMin + FVector2D(CellPadding, CellPadding) +
-                (ContentCellSize - Record.PackedSize) * 0.5;
+                    const double HorizontalWaste = AtlasRight - (Shelf.NextX + PaddedSize.X);
+                    const double VerticalWaste = Shelf.Height - PaddedSize.Y;
+                    if (HorizontalWaste < BestHorizontalWaste ||
+                        (FMath::IsNearlyEqual(HorizontalWaste, BestHorizontalWaste) &&
+                         VerticalWaste < BestVerticalWaste))
+                    {
+                        BestShelfIndex = ShelfIndex;
+                        bBestRotated90 = bRotated90;
+                        BestContentSize = ContentSize;
+                        BestPaddedSize = PaddedSize;
+                        BestHorizontalWaste = HorizontalWaste;
+                        BestVerticalWaste = VerticalWaste;
+                    }
+                }
+            }
+
+            if (BestShelfIndex == INDEX_NONE)
+            {
+                const double NewShelfY = Shelves.IsEmpty()
+                    ? AtlasMin.Y
+                    : Shelves.Last().MinY + Shelves.Last().Height;
+                bool bFoundNewShelfOrientation = false;
+                double BestNewShelfHeight = TNumericLimits<double>::Max();
+                double BestNewShelfWidth = TNumericLimits<double>::Max();
+
+                for (int32 RotationIndex = 0; RotationIndex < 2; ++RotationIndex)
+                {
+                    const bool bRotated90 = RotationIndex == 1;
+                    if (bRotated90 &&
+                        FMath::IsNearlyEqual(Record.DesiredSize.X, Record.DesiredSize.Y, 1.0e-12))
+                    {
+                        continue;
+                    }
+
+                    const FVector2D ContentSize = GetContentSize(Record, Scale, bRotated90);
+                    const FVector2D PaddedSize = ContentSize +
+                        FVector2D(ChartPaddingUV * 2.0, ChartPaddingUV * 2.0);
+                    if (PaddedSize.X > AtlasSize.X + 1.0e-9 ||
+                        NewShelfY + PaddedSize.Y > AtlasTop + 1.0e-9)
+                    {
+                        continue;
+                    }
+
+                    if (!bFoundNewShelfOrientation ||
+                        PaddedSize.Y < BestNewShelfHeight ||
+                        (FMath::IsNearlyEqual(PaddedSize.Y, BestNewShelfHeight) &&
+                         PaddedSize.X < BestNewShelfWidth))
+                    {
+                        bFoundNewShelfOrientation = true;
+                        bBestRotated90 = bRotated90;
+                        BestContentSize = ContentSize;
+                        BestPaddedSize = PaddedSize;
+                        BestNewShelfHeight = PaddedSize.Y;
+                        BestNewShelfWidth = PaddedSize.X;
+                    }
+                }
+
+                if (!bFoundNewShelfOrientation)
+                {
+                    return false;
+                }
+
+                FShelf& NewShelf = Shelves.AddDefaulted_GetRef();
+                NewShelf.MinY = NewShelfY;
+                NewShelf.Height = BestPaddedSize.Y;
+                NewShelf.NextX = AtlasMin.X;
+                BestShelfIndex = Shelves.Num() - 1;
+            }
+
+            FShelf& Shelf = Shelves[BestShelfIndex];
+            Record.PackedMin = FVector2D(
+                Shelf.NextX + ChartPaddingUV,
+                Shelf.MinY + ChartPaddingUV);
+            Record.PackedSize = BestContentSize;
+            Record.bRotated90 = bBestRotated90;
+            Shelf.NextX += BestPaddedSize.X;
         }
 
         return true;
@@ -233,7 +346,8 @@ namespace DWCDataUVPackerPrivate
         TArray<FPackingRecord>& Records,
         const FVector2D& AtlasMin,
         const FVector2D& AtlasSize,
-        const double IslandPaddingUV)
+        const double ChartPaddingUV,
+        const bool bUseShelfPacker)
     {
         if (Records.IsEmpty())
         {
@@ -243,17 +357,44 @@ namespace DWCDataUVPackerPrivate
         Records.Sort(
             [](const FPackingRecord& A, const FPackingRecord& B)
             {
+                const double MaxDimensionA = FMath::Max(A.DesiredSize.X, A.DesiredSize.Y);
+                const double MaxDimensionB = FMath::Max(B.DesiredSize.X, B.DesiredSize.Y);
+                if (!FMath::IsNearlyEqual(MaxDimensionA, MaxDimensionB))
+                {
+                    return MaxDimensionA > MaxDimensionB;
+                }
+
                 const double AreaA = A.DesiredSize.X * A.DesiredSize.Y;
                 const double AreaB = B.DesiredSize.X * B.DesiredSize.Y;
                 if (!FMath::IsNearlyEqual(AreaA, AreaB))
                 {
                     return AreaA > AreaB;
                 }
-                return FMath::Max(A.DesiredSize.X, A.DesiredSize.Y) > FMath::Max(B.DesiredSize.X, B.DesiredSize.Y);
+                return A.ChartIndex < B.ChartIndex;
             });
 
+        const auto TryPackAtScale =
+            [bUseShelfPacker, &AtlasMin, &AtlasSize, ChartPaddingUV](
+                TArray<FPackingRecord>& CandidateRecords,
+                const double Scale)
+            {
+                return bUseShelfPacker
+                    ? TryPackRecordsInShelves(
+                        CandidateRecords,
+                        AtlasMin,
+                        AtlasSize,
+                        ChartPaddingUV,
+                        Scale)
+                    : TryPackRecordsMaxRects(
+                        CandidateRecords,
+                        AtlasMin,
+                        AtlasSize,
+                        ChartPaddingUV,
+                        Scale);
+            };
+
         TArray<FPackingRecord> CandidateRecords = Records;
-        if (!TryPackRecords(CandidateRecords, AtlasMin, AtlasSize, IslandPaddingUV, 1.0))
+        if (!TryPackAtScale(CandidateRecords, 1.0))
         {
             double Low = 0.0;
             double High = 1.0;
@@ -264,7 +405,7 @@ namespace DWCDataUVPackerPrivate
             {
                 const double Mid = (Low + High) * 0.5;
                 CandidateRecords = Records;
-                if (TryPackRecords(CandidateRecords, AtlasMin, AtlasSize, IslandPaddingUV, Mid))
+                if (TryPackAtScale(CandidateRecords, Mid))
                 {
                     Low = Mid;
                     BestRecords = MoveTemp(CandidateRecords);
@@ -331,13 +472,18 @@ void FDWCDataUVPacker::BuildRawChartUVs(
 bool FDWCDataUVPacker::Pack(
     const TArray<FDWCDataUVTriangle>& Triangles,
     TArray<FDWCDataUVChart>& Charts,
-    const int32 Resolution,
-    const int32 PaddingPixels,
+    const double ChartPaddingUV,
+    const double BorderPaddingUV,
     TMap<int32, FVector2f>& OutPackedUVByVertexInstance,
-    int32& OutFailedMaterialSlotIndex)
+    int32& OutFailedMaterialSlotIndex,
+    int32* OutFailedChartCount)
 {
     OutPackedUVByVertexInstance.Reset();
     OutFailedMaterialSlotIndex = INDEX_NONE;
+    if (OutFailedChartCount != nullptr)
+    {
+        *OutFailedChartCount = 0;
+    }
     if (Charts.IsEmpty())
     {
         return true;
@@ -368,27 +514,39 @@ bool FDWCDataUVPacker::Pack(
             TotalArea += FMath::Max(Charts[ChartIndex].RawArea, 0.0);
         }
 
-        const double RequestedPaddingUV = Resolution > 0
-            ? static_cast<double>(FMath::Max(PaddingPixels, 0)) / static_cast<double>(Resolution)
-            : 0.0;
-        const double MaxReasonablePaddingUV = SlotChartIndices.Num() > 0
-            ? 0.45 / (FMath::Sqrt(static_cast<double>(SlotChartIndices.Num())) + 1.0)
-            : 0.0;
-        if (RequestedPaddingUV > MaxReasonablePaddingUV + 1.0e-9)
+        const double SafeChartPaddingUV = FMath::Max(ChartPaddingUV, 0.0);
+        const double SafeBorderPaddingUV = FMath::Max(BorderPaddingUV, 0.0);
+        if (SafeBorderPaddingUV >= 0.5)
         {
             OutFailedMaterialSlotIndex = MaterialSlotIndex;
+            if (OutFailedChartCount != nullptr)
+            {
+                *OutFailedChartCount = SlotChartIndices.Num();
+            }
             OutPackedUVByVertexInstance.Reset();
             return false;
         }
-        const double PaddingUV = FMath::Max(RequestedPaddingUV, 0.0);
-        const double BorderPaddingUV = PaddingUV;
-        const double IslandPaddingUV = PaddingUV;
 
-        const FVector2D AtlasMin(BorderPaddingUV, BorderPaddingUV);
+        const FVector2D AtlasMin(SafeBorderPaddingUV, SafeBorderPaddingUV);
         const FVector2D AtlasSize(
-            FMath::Max(1.0 - BorderPaddingUV * 2.0, 1.0e-6),
-            FMath::Max(1.0 - BorderPaddingUV * 2.0, 1.0e-6));
+            FMath::Max(1.0 - SafeBorderPaddingUV * 2.0, 1.0e-6),
+            FMath::Max(1.0 - SafeBorderPaddingUV * 2.0, 1.0e-6));
         const double UsableAtlasArea = AtlasSize.X * AtlasSize.Y;
+
+        // This is only a necessary lower bound: even at an infinitesimal chart
+        // content scale, every chart still owns padding on all four sides.
+        const double MinimumPaddingArea = static_cast<double>(SlotChartIndices.Num()) *
+            FMath::Square(SafeChartPaddingUV * 2.0);
+        if (MinimumPaddingArea > UsableAtlasArea + 1.0e-9)
+        {
+            OutFailedMaterialSlotIndex = MaterialSlotIndex;
+            if (OutFailedChartCount != nullptr)
+            {
+                *OutFailedChartCount = SlotChartIndices.Num();
+            }
+            OutPackedUVByVertexInstance.Reset();
+            return false;
+        }
 
         TArray<DWCDataUVPackerPrivate::FPackingRecord> Records;
         Records.Reserve(SlotChartIndices.Num());
@@ -415,31 +573,26 @@ bool FDWCDataUVPacker::Pack(
                 FMath::Sqrt(TargetArea / AspectRatio));
         }
 
+        // MaxRects gives better utilization for ordinary chart counts. A bounded
+        // shelf packer avoids the former fixed square-grid failure mode for large
+        // chart sets while keeping runtime predictable. Both paths allow 90-degree
+        // chart rotation and search for the largest common scale that fits.
         constexpr int32 MaxRectsChartLimit = 256;
-        bool bPacked = true;
-        if (Records.Num() >= MaxRectsChartLimit)
-        {
-            // MaxRects performs free-rectangle pruning for every record and every scale
-            // retry. A pathological overlap split can create thousands of charts; use a
-            // deterministic bounded path before that work becomes superlinear.
-            bPacked = DWCDataUVPackerPrivate::PackRecordsInGrid(
-                Records,
-                AtlasMin,
-                AtlasSize,
-                IslandPaddingUV);
-        }
-        else
-        {
-            bPacked = DWCDataUVPackerPrivate::PackRecordsWithMaximumScale(
-                Records,
-                AtlasMin,
-                AtlasSize,
-                IslandPaddingUV);
-        }
+        const bool bUseShelfPacker = Records.Num() > MaxRectsChartLimit;
+        const bool bPacked = DWCDataUVPackerPrivate::PackRecordsWithMaximumScale(
+            Records,
+            AtlasMin,
+            AtlasSize,
+            SafeChartPaddingUV,
+            bUseShelfPacker);
 
         if (!bPacked)
         {
             OutFailedMaterialSlotIndex = MaterialSlotIndex;
+            if (OutFailedChartCount != nullptr)
+            {
+                *OutFailedChartCount = SlotChartIndices.Num();
+            }
             OutPackedUVByVertexInstance.Reset();
             return false;
         }
@@ -453,23 +606,29 @@ bool FDWCDataUVPacker::Pack(
 
             FDWCDataUVChart& Chart = Charts[Record.ChartIndex];
             const FVector2D RawSize = DWCDataUVPackerPrivate::GetSafeRawSize(Chart);
-            const double UniformScale = FMath::Min(
-                Record.PackedSize.X / RawSize.X,
-                Record.PackedSize.Y / RawSize.Y);
-            const FVector2D PackedSize = RawSize * UniformScale;
-            const FVector2D PackedMin = Record.PackedMin + (Record.PackedSize - PackedSize) * 0.5;
+            const double UniformScale = Record.bRotated90
+                ? FMath::Min(
+                    Record.PackedSize.X / RawSize.Y,
+                    Record.PackedSize.Y / RawSize.X)
+                : FMath::Min(
+                    Record.PackedSize.X / RawSize.X,
+                    Record.PackedSize.Y / RawSize.Y);
 
             for (const TPair<int32, FVector2D>& Pair : Chart.RawUVByVertexInstance)
             {
-                FVector2D PackedUV = PackedMin + (Pair.Value - Chart.RawBounds.Min) * UniformScale;
+                const FVector2D RawLocal = Pair.Value - Chart.RawBounds.Min;
+                const FVector2D OrientedLocal = Record.bRotated90
+                    ? FVector2D(RawSize.Y - RawLocal.Y, RawLocal.X)
+                    : RawLocal;
+                FVector2D PackedUV = Record.PackedMin + OrientedLocal * UniformScale;
                 PackedUV.X = FMath::Clamp(
                     PackedUV.X,
-                    BorderPaddingUV,
-                    1.0 - BorderPaddingUV);
+                    SafeBorderPaddingUV,
+                    1.0 - SafeBorderPaddingUV);
                 PackedUV.Y = FMath::Clamp(
                     PackedUV.Y,
-                    BorderPaddingUV,
-                    1.0 - BorderPaddingUV);
+                    SafeBorderPaddingUV,
+                    1.0 - SafeBorderPaddingUV);
                 OutPackedUVByVertexInstance.Add(Pair.Key, FVector2f(PackedUV));
             }
         }

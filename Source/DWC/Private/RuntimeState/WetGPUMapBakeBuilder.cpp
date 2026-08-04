@@ -1406,6 +1406,8 @@ bool ResolveWettableMaterialSlots(
         SetGPUMapBakeError(OutErrorMessage, TEXT("No DWC Prepared Skeletal Mesh is available."));
         return false;
     }
+    const FDWCDataUVLODMetadata* CanonicalDataUVMetadata =
+        Asset.FindDataUVMetadataForLOD(UWetClothingAsset::RuntimeSimulationLODIndex);
     for (const FWetClothingAuthoredMaterialSlot& SlotState : Asset.Authored.PartData.EditableWetPartData.MaterialSlots)
     {
         if (!SlotState.bIsWettableSlot)
@@ -1418,6 +1420,14 @@ bool ResolveWettableMaterialSlots(
                 OutErrorMessage,
                 FString::Printf(TEXT("Wettable material slot index %d is invalid for the DWC Prepared Skeletal Mesh."), SlotState.MaterialSlotIndex));
             return false;
+        }
+        if (CanonicalDataUVMetadata != nullptr &&
+            !CanonicalDataUVMetadata->GeneratedMaterialSlotIndices.IsEmpty() &&
+            !CanonicalDataUVMetadata->GeneratedMaterialSlotIndices.Contains(SlotState.MaterialSlotIndex))
+        {
+            // DWC UV layouts are material-slot independent. A slot whose UV build failed is
+            // omitted from GPU runtime payloads without blocking successfully committed slots.
+            continue;
         }
         OutMaterialSlots.AddUnique(SlotState.MaterialSlotIndex);
     }

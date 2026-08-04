@@ -15,6 +15,7 @@
 #include "Serialization/MemoryWriter.h"
 #include "DataAssets/WetnessProfile.h"
 #include "Utility/DWCError.h"
+#include "Utility/DWCLog.h"
 #include "Utility/DWCDataUVBufferView.h"
 
 namespace
@@ -1825,12 +1826,28 @@ void UWetClothingAsset::Serialize(FArchive& Ar)
     bool bHasSerializedRuntimeBulkData = RuntimeBulkData.GetBulkDataSize() > 0;
     // Version 4 already appended this custom BulkData block. Older layouts are not
     // supported semantically, but their serialized bytes still must be consumed.
-    if (Ar.IsSaving() || Metadata.AssetDataVersion >= FirstAssetVersionWithSerializedRuntimeBulkData)
+    const bool bLoadSerializedRuntimeBulkData =
+        Ar.IsLoadingFromCookedPackage() ||
+        Metadata.AssetDataVersion >= FirstAssetVersionWithSerializedRuntimeBulkData;
+    if (Ar.IsSaving() || bLoadSerializedRuntimeBulkData)
     {
         Ar << bHasSerializedRuntimeBulkData;
         if (bHasSerializedRuntimeBulkData)
         {
+            if (Ar.IsSaving())
+            {
+                RuntimeBulkData.SetBulkDataFlags(
+                    BULKDATA_Force_NOT_InlinePayload |
+                    BULKDATA_LazyLoadable);
+                RuntimeBulkData.ClearBulkDataFlags(BULKDATA_ForceInlinePayload);
+            }
+
             RuntimeBulkData.Serialize(Ar, this, INDEX_NONE, false, EFileRegionType::None);
+
+            if (Ar.IsLoadingFromCookedPackage())
+            {
+                Metadata.AssetDataVersion = CurrentAssetDataVersion;
+            }
         }
     }
 
@@ -2280,7 +2297,10 @@ void UWetClothingAsset::StoreRuntimeDataToBulkData()
     }
 
     RuntimeBulkData.RemoveBulkData();
-    RuntimeBulkData.SetBulkDataFlags(BULKDATA_PayloadAtEndOfFile | BULKDATA_LazyLoadable);
+    RuntimeBulkData.SetBulkDataFlags(
+        BULKDATA_Force_NOT_InlinePayload |
+        BULKDATA_LazyLoadable);
+    RuntimeBulkData.ClearBulkDataFlags(BULKDATA_ForceInlinePayload);
     RuntimeBulkData.Lock(LOCK_READ_WRITE);
     void* BulkBytes = RuntimeBulkData.Realloc(Bytes.Num());
     FMemory::Memcpy(BulkBytes, Bytes.GetData(), Bytes.Num());
@@ -3713,6 +3733,8 @@ void UWetClothingAsset::MarkRuntimeBakeOutputsDirty(const int32 OutputMask)
 }
 
 
+#endif // WITH_EDITOR
+
 FString UWetClothingAsset::BuildMeshContentSignature(
     const USkeletalMesh* SkeletalMesh,
     const int32 LODIndex,
@@ -3730,6 +3752,7 @@ FString UWetClothingAsset::BuildMeshContentSignature(
         UVChannelIndex);
 }
 
+#if WITH_EDITOR
 void UWetClothingAsset::ClearMeshContentSignatureCache()
 {
     FWetGPUMapBakeBuilder::ClearSignatureCache();

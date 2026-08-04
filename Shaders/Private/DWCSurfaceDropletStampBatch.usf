@@ -1,0 +1,146 @@
+#include "/Engine/Public/Platform.ush"
+#include "/DWCGPU/DWCSurfaceStampCommon.ush"
+
+// Two float4s per stamp:
+//   [0] = (StampUV.xy, StampCenterPixels.xy)
+//   [1] = (StampHalfSizePixels.xy, StampAmount, bDroplet2)
+StructuredBuffer<float4> Stamps;
+// (TileIndex, StampOffset, StampCount, TargetMask) for active tiles only.
+StructuredBuffer<uint4> ActiveTileRecords;
+StructuredBuffer<uint> TileStampIndices;
+StructuredBuffer<uint4> TexelLookup;
+RWTexture2D<float> TargetSurface1;
+RWTexture2D<float> TargetSurface2;
+
+int2 TextureSize;
+int2 TileGridSize;
+uint StampCount;
+uint TriangleCount;
+uint ActiveTileCount;
+uint DispatchGridWidth;
+
+static const uint DWC_STAMP_TILE_SIZE = 8u;
+static const uint DWC_STAMP_GROUP_THREAD_COUNT = 64u;
+
+groupshared float4 GStampCenterAndUV[DWC_STAMP_GROUP_THREAD_COUNT];
+groupshared float4 GStampSizeAmountAndTarget[DWC_STAMP_GROUP_THREAD_COUNT];
+groupshared uint GStampIsland[DWC_STAMP_GROUP_THREAD_COUNT];
+
+[numthreads(8, 8, 1)]
+void MainCS(uint3 GroupID : SV_GroupID, uint3 GroupThreadID : SV_GroupThreadID)
+{
+    const uint ActiveTileRecordIndex = GroupID.y * DispatchGridWidth + GroupID.x;
+    if (ActiveTileRecordIndex >= ActiveTileCount || any(TileGridSize <= 0))
+    {
+        return;
+    }
+
+    const uint4 ActiveTileRecord = ActiveTileRecords[ActiveTileRecordIndex];
+    const uint TileIndex = ActiveTileRecord.x;
+    if (TileIndex >= (uint)(TileGridSize.x * TileGridSize.y))
+    {
+        return;
+    }
+
+    const uint TileX = TileIndex % (uint)TileGridSize.x;
+    const uint TileY = TileIndex / (uint)TileGridSize.x;
+    const int2 Pixel = int2(
+        TileX * DWC_STAMP_TILE_SIZE + GroupThreadID.x,
+        TileY * DWC_STAMP_TILE_SIZE + GroupThreadID.y);
+    const bool bPixelValid = all(Pixel >= 0) && all(Pixel < TextureSize);
+    const uint TargetMask = ActiveTileRecord.w;
+    float Wetness1 = bPixelValid && (TargetMask & 1u) != 0u
+        ? saturate(TargetSurface1[Pixel])
+        : 0.0;
+    float Wetness2 = bPixelValid && (TargetMask & 2u) != 0u
+        ? saturate(TargetSurface2[Pixel])
+        : 0.0;
+
+    const uint ThreadIndex = GroupThreadID.y * DWC_STAMP_TILE_SIZE + GroupThreadID.x;
+    for (uint ChunkStart = 0u; ChunkStart < ActiveTileRecord.z; ChunkStart += DWC_STAMP_GROUP_THREAD_COUNT)
+    {
+        const uint ChunkStampCount = min(
+            DWC_STAMP_GROUP_THREAD_COUNT,
+            ActiveTileRecord.z - ChunkStart);
+        if (ThreadIndex < ChunkStampCount)
+        {
+            const uint StampIndex = TileStampIndices[ActiveTileRecord.y + ChunkStart + ThreadIndex];
+            if (StampIndex < StampCount)
+            {
+                const float4 StampCenterAndUV = Stamps[StampIndex * 2u];
+                GStampCenterAndUV[ThreadIndex] = StampCenterAndUV;
+                GStampSizeAmountAndTarget[ThreadIndex] = Stamps[StampIndex * 2u + 1u];
+
+                uint4 StampLookup;
+                GStampIsland[ThreadIndex] =
+                    DWC_ResolveStampLookup(StampCenterAndUV.xy, TextureSize, TexelLookup, StampLookup) &&
+                    StampLookup.x < TriangleCount
+                        ? StampLookup.w
+                        : 0u;
+            }
+            else
+            {
+                GStampIsland[ThreadIndex] = 0u;
+            }
+        }
+        GroupMemoryBarrierWithGroupSync();
+
+        if (bPixelValid)
+        {
+            const uint4 PixelLookup = TexelLookup[Pixel.y * TextureSize.x + Pixel.x];
+            if (DWC_IsValidLookup(PixelLookup))
+            {
+                for (uint ChunkOffset = 0u; ChunkOffset < ChunkStampCount; ++ChunkOffset)
+                {
+                    if (GStampIsland[ChunkOffset] == 0u ||
+                        GStampIsland[ChunkOffset] != PixelLookup.w)
+                    {
+                        continue;
+                    }
+
+                    const float4 StampCenterAndUV = GStampCenterAndUV[ChunkOffset];
+                    const float4 StampSizeAmountAndTarget = GStampSizeAmountAndTarget[ChunkOffset];
+                    const float2 StampCenterPixels = StampCenterAndUV.zw;
+                    const float2 StampHalfSizePixels = max(
+                        StampSizeAmountAndTarget.xy,
+                        float2(0.5, 0.5));
+                    const int2 StampMinPixel = int2(floor(StampCenterPixels - StampHalfSizePixels - 1.0));
+                    const int2 StampMaxPixel = int2(ceil(StampCenterPixels + StampHalfSizePixels + 1.0));
+                    if (any(Pixel < StampMinPixel) || any(Pixel > StampMaxPixel))
+                    {
+                        continue;
+                    }
+
+                    const float2 Delta = (float2(Pixel) + 0.5) - StampCenterPixels;
+                    const float Brush = DWC_StampBrush(Delta / StampHalfSizePixels);
+                    if (Brush <= 0.0)
+                    {
+                        continue;
+                    }
+
+                    const float AddedWetness =
+                        smoothstep(0.0, 0.12, saturate(Brush)) *
+                        max(StampSizeAmountAndTarget.z, 0.0);
+                    if (StampSizeAmountAndTarget.w > 0.5)
+                    {
+                        Wetness2 = saturate(Wetness2 + AddedWetness);
+                    }
+                    else
+                    {
+                        Wetness1 = saturate(Wetness1 + AddedWetness);
+                    }
+                }
+            }
+        }
+        GroupMemoryBarrierWithGroupSync();
+    }
+
+    if (bPixelValid && (TargetMask & 1u) != 0u)
+    {
+        TargetSurface1[Pixel] = Wetness1;
+    }
+    if (bPixelValid && (TargetMask & 2u) != 0u)
+    {
+        TargetSurface2[Pixel] = Wetness2;
+    }
+}

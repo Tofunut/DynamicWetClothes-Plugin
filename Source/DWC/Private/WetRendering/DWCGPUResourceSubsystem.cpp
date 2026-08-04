@@ -50,7 +50,9 @@ namespace
         Texture->Filter = TF_Nearest;
         Texture->AddressX = TA_Clamp;
         Texture->AddressY = TA_Clamp;
+#if WITH_EDITORONLY_DATA
         Texture->MipGenSettings = TMGS_NoMipmaps;
+#endif
         Texture->NeverStream = true;
 
         FTexture2DMipMap& Mip = Texture->GetPlatformData()->Mips[0];
@@ -621,7 +623,9 @@ namespace
         Texture->Filter = TF_Nearest;
         Texture->AddressX = TA_Clamp;
         Texture->AddressY = TA_Clamp;
+#if WITH_EDITORONLY_DATA
         Texture->MipGenSettings = TMGS_NoMipmaps;
+#endif
         Texture->NeverStream = true;
 
         FTexture2DMipMap& Mip = Texture->GetPlatformData()->Mips[0];
@@ -1297,7 +1301,9 @@ UTexture2DArray* UDWCGPUResourceSubsystem::BuildTextureArray(
     Array->Filter = TF_Bilinear;
     Array->AddressX = TA_Wrap;
     Array->AddressY = TA_Wrap;
+#if WITH_EDITORONLY_DATA
     Array->MipGenSettings = TMGS_NoMipmaps;
+#endif
     Array->CompressionSettings = bNormalArray ? TC_VectorDisplacementmap : TC_Masks;
     Array->NeverStream = true;
     Array->UpdateResource();
@@ -2095,18 +2101,6 @@ void UDWCGPUResourceSubsystem::ApplyResourcesToMaterials(
             Resources->ProfileRemapLUT != nullptr &&
             Resources->FindWetPartDataTexture(MaterialSlotIndex) != nullptr &&
             GlobalRenderProfileLUT != nullptr;
-        UE_LOG(
-            LogDWC,
-            Display,
-            TEXT("DWC material render profile binding for asset '%s' slot %d MID '%s': useRuntimeLUT=%d wetPartData=%s remapLUT=%s globalLUT=%s fallbackProfile='%s'."),
-            *GetPathNameSafe(Asset),
-            MaterialSlotIndex,
-            *GetNameSafe(MID),
-            bUseRenderProfileLUT ? 1 : 0,
-            *GetPathNameSafe(Resources != nullptr ? Resources->FindWetPartDataTexture(MaterialSlotIndex) : nullptr),
-            *GetPathNameSafe(Resources != nullptr ? Resources->ProfileRemapLUT.Get() : nullptr),
-            *GetPathNameSafe(GlobalRenderProfileLUT.Get()),
-            FallbackProfile != nullptr ? *ResolveProfileKey(*FallbackProfile) : TEXT("None"));
         MID->SetScalarParameterValue(
             DWCWetMaterialParameters::UseRenderProfileLUT(),
             bUseRenderProfileLUT ? 1.0f : 0.0f);

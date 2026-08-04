@@ -182,6 +182,10 @@ class DWC_API UWetClothingAsset : public UDataAsset
 
     virtual void Serialize(FArchive& Ar) override;
     virtual void PostLoad() override;
+    static FString BuildMeshContentSignature(
+        const USkeletalMesh* SkeletalMesh,
+        int32 LODIndex,
+        int32 UVChannelIndex = INDEX_NONE);
 
 #if WITH_EDITOR
     virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
@@ -243,7 +247,6 @@ class DWC_API UWetClothingAsset : public UDataAsset
     /** Invalidates selected derived outputs after editor-authored data changes without marking stale payloads as save-pending. */
     void MarkRuntimeBakeOutputsDirty(int32 OutputMask);
 
-    static FString BuildMeshContentSignature(const USkeletalMesh* SkeletalMesh, int32 LODIndex, int32 UVChannelIndex = INDEX_NONE);
     static void ClearMeshContentSignatureCache();
 #endif
     void ClearPrecomputedSimulationData();

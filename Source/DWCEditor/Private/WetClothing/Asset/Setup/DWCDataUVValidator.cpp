@@ -23,10 +23,15 @@ bool FDWCDataUVValidator::Validate(
     const TMap<int32, FVector2f>& PackedUVByVertexInstance,
     const int32 /*OutputResolution*/,
     TSet<int32>& OutProblemMaterialSlots,
-    FString& OutError)
+    FString& OutError,
+    FDWCDataUVValidationFailure* OutFailure)
 {
     OutProblemMaterialSlots.Reset();
     OutError.Reset();
+    if (OutFailure != nullptr)
+    {
+        *OutFailure = FDWCDataUVValidationFailure();
+    }
 
     TMap<int32, TSet<int32>> TriangleIndicesByMaterial;
     TMap<int32, int32> ChartIndexByTriangle;
@@ -128,6 +133,19 @@ bool FDWCDataUVValidator::Validate(
                     PackedTriangle.UVs[1].Y,
                     PackedTriangle.UVs[2].X,
                     PackedTriangle.UVs[2].Y);
+                if (OutFailure != nullptr && !OutFailure->bIsValid)
+                {
+                    OutFailure->bIsValid = true;
+                    OutFailure->MaterialSlotIndex = MaterialPair.Key;
+                    OutFailure->MeshTriangleID = PackedTriangle.MeshTriangleID;
+                    OutFailure->GeneratorTriangleIndex = PackedTriangle.SourceTriangleIndex;
+                    OutFailure->ChartIndex = PackedTriangle.ChartIndex;
+                    OutFailure->PackedArea = PackedArea;
+                    OutFailure->Reason = Reason;
+                    OutFailure->PackedUVs[0] = PackedTriangle.UVs[0];
+                    OutFailure->PackedUVs[1] = PackedTriangle.UVs[1];
+                    OutFailure->PackedUVs[2] = PackedTriangle.UVs[2];
+                }
                 continue;
             }
 

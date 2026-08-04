@@ -42,7 +42,6 @@ class SWetClothingPartEditorPanel : public SCompoundWidget
     using FTextureItemPtr = TSharedPtr<FWCATextureItem>;
     using FUVIslandItemPtr = TSharedPtr<FWetClothingAssetUVIsland>;
     using FUVSelectionToolItemPtr = TSharedPtr<FWCAUVSelectionToolItem>;
-    using FUVDisplayModeItemPtr = TSharedPtr<EWCAUVDisplayMode>;
     using FAutoPartitionColorModeItemPtr = TSharedPtr<EWetPartAutoPartitionColorMode>;
     using FWetPartEntryPtr = TSharedPtr<FWetClothingWetPartEntry>;
 
@@ -96,8 +95,6 @@ class SWetClothingPartEditorPanel : public SCompoundWidget
     TSharedRef<SWidget>       BuildTextureComboContent(FTextureItemPtr Item, float ThumbnailSize, bool bCompactLayout);
     FReply                    HandleApplyMaterialSetupClicked();
     bool                      IsApplyMaterialSetupEnabled() const;
-    TSharedRef<SWidget>       GenerateUVDisplayModeComboItem(FUVDisplayModeItemPtr Item);
-    void                      HandleUVDisplayModeSelectionChanged(FUVDisplayModeItemPtr Item, ESelectInfo::Type SelectInfo);
     TSharedRef<ITableRow>     GenerateUVIslandRow(FUVIslandItemPtr Item, const TSharedRef<STableViewBase>& OwnerTable);
     void                      HandleUVIslandSelectionChanged(FUVIslandItemPtr Item, ESelectInfo::Type SelectInfo);
     void                      HandleUVIslandSelectionChangedFromUVView(const TArray<int32>& UVIslandIDs, EWCAUVSelectionOp SelectionOp);
@@ -135,7 +132,6 @@ class SWetClothingPartEditorPanel : public SCompoundWidget
     FText                                          GetMaterialSlotStatusText(int32 MaterialSlotIndex) const;
     FSlateColor                                    GetMaterialSlotStatusColor(int32 MaterialSlotIndex) const;
     FText                                          GetMaterialSlotStatusTooltip(int32 MaterialSlotIndex) const;
-    FSlateColor                                    GetMaterialSlotRowBackgroundColor(int32 MaterialSlotIndex) const;
     FSlateColor                                    GetMaterialSlotRowAccentColor(int32 MaterialSlotIndex) const;
     bool                                           IsMaterialSlotIncludedInDataUVLayout(int32 MaterialSlotIndex) const;
     bool                                           DoesMaterialSlotHaveDataUVWarnings(int32 MaterialSlotIndex) const;
@@ -167,7 +163,6 @@ class SWetClothingPartEditorPanel : public SCompoundWidget
     FText                                          GetRenderProfileBakeStatusText() const;
     FText                                          GetRenderProfileBakeSettingsText() const;
     FText                                          GetOriginalUVChannelText() const;
-    FText                                          GetSelectedUVDisplayModeText() const;
     float                                          GetUVViewBackgroundTextureOpacity() const;
     float                                          GetUVViewIslandLineOpacity() const;
     float                                          GetUVViewIslandLineThicknessScale() const;
@@ -177,11 +172,13 @@ class SWetClothingPartEditorPanel : public SCompoundWidget
     FText                                          GetUVIslandCountText() const;
     FText                                          GetSelectedUVIslandText() const;
     EVisibility                                    GetSelectedUVIslandTextVisibility() const;
+    FText                                          GetUVIslandAssignmentSummaryText() const;
+    FText                                          GetUVIslandAssignmentButtonText() const;
+    FText                                          GetUVIslandAssignmentButtonTooltip() const;
     FText                                          GetUVStatusText() const;
     EVisibility                                    GetUVStatusOverlayVisibility() const;
     EVisibility                                    GetUVIslandStatusOverlayVisibility() const;
     FText                                          GetWetPartSectionText() const;
-    FText                                          GetAssignUVIslandToWetPartText() const;
     FText                                          GetSelectedAssignWetPartText() const;
     FSlateColor                                    GetSelectedAssignWetPartColor() const;
     FText                                          GetSelectedWetPartText() const;
@@ -265,9 +262,6 @@ class SWetClothingPartEditorPanel : public SCompoundWidget
     TSharedPtr<class SBox>                             SelectedTextureComboContentBox;
     TSharedPtr<class SBox>                             TextureSelectionContainer;
     bool                                               bShowMaterialTextureInUVView = true;
-    TArray<FUVDisplayModeItemPtr>                      UVDisplayModeItems;
-    FUVDisplayModeItemPtr                              SelectedUVDisplayModeItem;
-    TSharedPtr<class SComboBox<FUVDisplayModeItemPtr>> UVDisplayModeComboBox;
     TArray<FUVIslandItemPtr>                           UVIslandItems;
     TSharedPtr<class SListView<FUVIslandItemPtr>>      UVIslandListView;
     int32                                              SelectedUVIslandID = INDEX_NONE;
@@ -275,7 +269,6 @@ class SWetClothingPartEditorPanel : public SCompoundWidget
     bool                                               bSyncingUVIslandListSelection = false;
     TSharedPtr<SWCAUVView>                UVView;
     EWCAUVSelectionTool                   CurrentUVSelectionTool = EWCAUVSelectionTool::BoxSelect;
-    EWCAUVDisplayMode                     CurrentUVDisplayMode = EWCAUVDisplayMode::Normal;
     float                                              UVViewBackgroundTextureOpacity = 0.70f;
     float                                              UVViewIslandLineOpacity = 1.0f;
     float                                              UVViewIslandLineThicknessScale = 1.0f;

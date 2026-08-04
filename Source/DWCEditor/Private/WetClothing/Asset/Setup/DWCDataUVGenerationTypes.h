@@ -23,3 +23,16 @@ struct FDWCDataUVChart
     FBox2D RawBounds = FBox2D(ForceInit);
     double RawArea = 0.0;
 };
+
+/** Structured details for a final packed DWC UV validation failure. */
+struct FDWCDataUVValidationFailure
+{
+    bool bIsValid = false;
+    int32 MaterialSlotIndex = INDEX_NONE;
+    int32 MeshTriangleID = INDEX_NONE;
+    int32 GeneratorTriangleIndex = INDEX_NONE;
+    int32 ChartIndex = INDEX_NONE;
+    double PackedArea = 0.0;
+    FString Reason;
+    FVector2D PackedUVs[3] = { FVector2D::ZeroVector, FVector2D::ZeroVector, FVector2D::ZeroVector };
+};

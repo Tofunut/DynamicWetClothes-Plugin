@@ -22,17 +22,11 @@ class SWetWrinkleUVPanel : public SCompoundWidget
     float GetIslandLineThicknessScale() const { return IslandLineThicknessScale; }
 
   private:
-    using FDisplayModeItemPtr = TSharedPtr<EWCAUVDisplayMode>;
-
-    FText GetSelectedDisplayModeText() const;
-    void HandleDisplayModeChanged(FDisplayModeItemPtr Item);
     void HandleIslandLineOpacityChanged(float NewValue);
     void HandleIslandLineThicknessScaleChanged(float NewValue);
     void ApplyViewSettings();
 
     TSharedPtr<SWCAUVView> UVView;
-    TArray<FDisplayModeItemPtr> DisplayModeItems;
-    FDisplayModeItemPtr SelectedDisplayModeItem;
     EWCAUVDisplayMode DisplayMode = EWCAUVDisplayMode::Normal;
     float IslandLineOpacity = 1.0f;
     float IslandLineThicknessScale = 1.0f;

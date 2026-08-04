@@ -2474,8 +2474,8 @@ bool UWetClothingAsset::InitializeNewAsset(
 
         FWetClothingWetPartEntry& DefaultPart = Slot.WetPartEntries.AddDefaulted_GetRef();
         DefaultPart.WetPartID = 0;
-        DefaultPart.DisplayName = TEXT("Part Default");
-        DefaultPart.Color = FLinearColor::White;
+        DefaultPart.DisplayName = TEXT("Unassigned");
+        DefaultPart.Color = FLinearColor(0.32f, 0.32f, 0.32f, 1.0f);
         DefaultPart.bViewEnabled = true;
         DefaultPart.ProfileIndex = 0;
     }
@@ -2518,20 +2518,29 @@ bool UWetClothingAsset::ApplySetupSettings(
         PreviousSettings.FirstGeneratedLODIndex != NewSettings.FirstGeneratedLODIndex ||
         PreviousSettings.LastGeneratedLODIndex != NewSettings.LastGeneratedLODIndex;
 
-    // A sealed WCA may select only LODs whose UV layout/topology was created during the initial commit.
-    // Expanding into an ungenerated LOD would require rebuilding island information, which is forbidden.
+    // A sealed WCA may activate only LODs whose DWC UV metadata was created during the initial commit.
+    // Original UV topology is canonical LOD0 data and is intentionally stored only once, so it must not
+    // be required separately for every mapped LOD. Data outside the active range remains retained.
     if (HasLockedDataUVLayout() && bLODRangeChanged)
     {
+        if (FindOriginalUVTopologyForLOD(RuntimeSimulationLODIndex) == nullptr)
+        {
+            DWC::Error::SetMessage(
+                OutChangeSummary,
+                TEXT("The sealed LOD0 Original UV topology is missing. Create a new WCA to rebuild the DWC UV layout."));
+            return false;
+        }
+
         for (int32 LODIndex = NewSettings.FirstGeneratedLODIndex;
              LODIndex <= NewSettings.LastGeneratedLODIndex;
              ++LODIndex)
         {
-            if (FindDataUVMetadataForLOD(LODIndex) == nullptr || FindOriginalUVTopologyForLOD(LODIndex) == nullptr)
+            if (FindDataUVMetadataForLOD(LODIndex) == nullptr)
             {
                 DWC::Error::SetMessage(
                     OutChangeSummary,
                     FString::Printf(
-                        TEXT("LOD%d has no sealed DWC UV Channel/island payload. Create a new WCA to generate a different LOD mapping range."),
+                        TEXT("LOD%d has no retained DWC UV data. The active LOD mapping range can only use LODs generated for this WCA."),
                         LODIndex));
                 return false;
             }
@@ -2621,7 +2630,7 @@ bool UWetClothingAsset::ApplySetupSettings(
     if (bLODRangeChanged)
     {
         Changes.Add(FString::Printf(
-            TEXT("LOD mapping range changed: LOD%d-LOD%d -> LOD%d-LOD%d. Runtime mapping rebuild is required."),
+            TEXT("Active LOD mapping range changed: LOD%d-LOD%d -> LOD%d-LOD%d. Retained DWC UV data is unchanged; runtime mapping rebuild is required."),
             PreviousSettings.FirstGeneratedLODIndex,
             PreviousSettings.LastGeneratedLODIndex,
             Metadata.SetupSettings.FirstGeneratedLODIndex,
@@ -3601,7 +3610,7 @@ bool UWetClothingAsset::CanPrepareRuntimeDataForEditorSave(FString* OutSkipReaso
             });
         if (!bHasMappedDataUV)
         {
-            DWC::Error::SetMessage(OutSkipReason, TEXT("DWC UV Channel has not been generated for every mapped LOD yet."));
+            DWC::Error::SetMessage(OutSkipReason, TEXT("The prepared mesh UV layout has not been generated for every mapped LOD yet."));
             return false;
         }
     }

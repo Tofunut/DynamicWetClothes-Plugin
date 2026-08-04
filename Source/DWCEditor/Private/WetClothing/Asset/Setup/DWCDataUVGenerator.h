@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "DWCDataUVGenerationTypes.h"
 #include "DataAssets/WetClothingAssetSetupData.h"
 
 class USkeletalMesh;
@@ -23,6 +24,7 @@ struct FDWCDataUVGenerationResult
     int32 InvalidSourceUVTriangleCount = 0;
     TArray<FDWCDataUVSlotWarning> SlotWarnings;
     TSet<int32> FailedMaterialSlotIndices;
+    FDWCDataUVValidationFailure ValidationFailure;
 
     /** VertexInstances duplicated to make non-overlapping DWC UV Channel chart boundaries real seams. */
     int32 ChartBoundarySplitVertexInstanceCount = 0;

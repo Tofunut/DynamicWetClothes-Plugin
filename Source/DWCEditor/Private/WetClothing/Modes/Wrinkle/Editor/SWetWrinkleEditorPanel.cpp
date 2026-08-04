@@ -1911,7 +1911,7 @@ FReply SWetWrinkleEditorPanel::ExecuteBakeAllWrinkleNormalMaps()
             continue;
         }
 
-        if (Patch.MaterialSlotIndex != INDEX_NONE && DWCEditorPreviewSlotUtils::IsCpuPreviewReady(Asset, Patch.MaterialSlotIndex))
+        if (Patch.MaterialSlotIndex != INDEX_NONE && DWCEditorPreviewSlotUtils::IsWrinkleAuthoringReady(Asset, Patch.MaterialSlotIndex))
         {
             UniqueMaterialSlots.Add(Patch.MaterialSlotIndex);
         }
@@ -1920,7 +1920,7 @@ FReply SWetWrinkleEditorPanel::ExecuteBakeAllWrinkleNormalMaps()
     for (const FWetProceduralRidgeStroke& Stroke : Asset->Authored.WrinkleData.EditableProceduralRidgeStrokes)
     {
         if ((!Stroke.bEnabled && !Asset->Authored.WrinkleData.BakeSettings.bIncludeDisabledPatches) ||
-            Stroke.MaterialSlotIndex == INDEX_NONE || !DWCEditorPreviewSlotUtils::IsCpuPreviewReady(Asset, Stroke.MaterialSlotIndex) || Stroke.Points.Num() < 2)
+            Stroke.MaterialSlotIndex == INDEX_NONE || !DWCEditorPreviewSlotUtils::IsWrinkleAuthoringReady(Asset, Stroke.MaterialSlotIndex) || Stroke.Points.Num() < 2)
         {
             continue;
         }
@@ -2335,7 +2335,7 @@ void SWetWrinkleEditorPanel::RefreshMaterialSlotOptions()
         const int32 MaterialCount = TargetMesh->GetMaterials().Num();
         for (int32 MaterialSlotIndex = 0; MaterialSlotIndex < MaterialCount; ++MaterialSlotIndex)
         {
-            if (!DWCEditorPreviewSlotUtils::IsCpuPreviewReady(Asset, MaterialSlotIndex))
+            if (!DWCEditorPreviewSlotUtils::IsWrinkleAuthoringReady(Asset, MaterialSlotIndex))
             {
                 continue;
             }
@@ -2419,7 +2419,7 @@ bool SWetWrinkleEditorPanel::EnsureWrinkleUVChannelForMaterialSlot(int32 Materia
         return false;
     }
 
-    if (!DWCEditorPreviewSlotUtils::IsCpuPreviewReady(Asset, MaterialSlotIndex))
+    if (!DWCEditorPreviewSlotUtils::IsWrinkleAuthoringReady(Asset, MaterialSlotIndex))
     {
         BrushSettings.UVChannelIndex = INDEX_NONE;
         InvalidateWrinkleUVViewCache();
@@ -2427,7 +2427,7 @@ bool SWetWrinkleEditorPanel::EnsureWrinkleUVChannelForMaterialSlot(int32 Materia
         {
             FMessageDialog::Open(
                 EAppMsgType::Ok,
-                LOCTEXT("WrinkleUVSlotNotDwcReady", "This material slot is not ready for DWC preview. Mark it Wettable and generate its CPU material in WetPart mode before editing wrinkles."));
+                LOCTEXT("WrinkleUVSlotNotDwcReady", "This material slot is not ready for wrinkle authoring. Mark it Wettable and generate DWC UV Channel for the slot before editing wrinkles."));
         }
         return false;
     }
@@ -3485,19 +3485,81 @@ FText SWetWrinkleEditorPanel::GetMaterialSlotCountText() const
 
 TSharedRef<ITableRow> SWetWrinkleEditorPanel::GenerateMaterialSlotRow(FMaterialSlotItemPtr Item, const TSharedRef<STableViewBase>& OwnerTable)
 {
-    FWCAMaterialSlotRowArgs Args;
-    Args.WetClothingAsset = WetClothingAsset.Get();
-    Args.GeneratedDataUV = WetClothingAsset.IsValid() ? WetClothingAsset->GetRuntimeSkeletalMesh() : nullptr;
-    Args.ThumbnailPool = MaterialThumbnailPool;
-    Args.ThumbnailSink = &MaterialSlotThumbnails;
-    Args.AllSlotsTitle = LOCTEXT("AllDwcReadyMaterialSlotsRow", "All DWC-Ready Slots");
-    Args.bShowWettableToggle = false;
-    Args.BuildTrailingWidget = [this](const int32 MaterialSlotIndex)
-    {
-        return BuildCustomWrinkleMapToggle(MaterialSlotIndex);
-    };
+    const int32 MaterialSlotIndex = Item.IsValid() ? Item->SlotIndex : INDEX_NONE;
+    const bool bIsAllSlotsRow = Item.IsValid() && MaterialSlotIndex == INDEX_NONE;
+    UMaterialInterface* MaterialObject = !bIsAllSlotsRow && Item.IsValid() ? Item->Material.Get() : nullptr;
+    const FText SlotTitle = bIsAllSlotsRow
+                                ? LOCTEXT("AllDwcReadyMaterialSlotsRow", "All DWC-Ready Slots")
+                                : Item.IsValid()
+                                ? FText::Format(
+                                      LOCTEXT("WrinkleMaterialSlotTitle", "[{0}] {1}"),
+                                      FText::AsNumber(MaterialSlotIndex),
+                                      FText::FromName(Item->SlotName))
+                                : LOCTEXT("InvalidWrinkleMaterialSlotTitle", "Invalid Material Slot");
 
-    return FWCAEditorWidgets::GenerateMaterialSlotRow(Item, OwnerTable, Args);
+    TSharedRef<SWidget> ThumbnailWidget =
+        SNew(SBorder)
+        .BorderImage(FAppStyle::Get().GetBrush(TEXT("WhiteBrush")))
+        .BorderBackgroundColor(FLinearColor(0.06f, 0.06f, 0.06f, 1.0f));
+
+    if (bIsAllSlotsRow && WetClothingAsset.IsValid() && WetClothingAsset->GetRuntimeSkeletalMesh() != nullptr && MaterialThumbnailPool.IsValid())
+    {
+        TSharedPtr<FAssetThumbnail> MeshThumbnail = MakeShared<FAssetThumbnail>(
+            WetClothingAsset->GetRuntimeSkeletalMesh(),
+            48,
+            48,
+            MaterialThumbnailPool);
+        MaterialSlotThumbnails.Add(MeshThumbnail);
+
+        FAssetThumbnailConfig ThumbnailConfig;
+        ThumbnailConfig.bAllowFadeIn = false;
+        ThumbnailWidget = MeshThumbnail->MakeThumbnailWidget(ThumbnailConfig);
+    }
+    else if (MaterialObject != nullptr && MaterialThumbnailPool.IsValid())
+    {
+        TSharedPtr<FAssetThumbnail> Thumbnail = MakeShared<FAssetThumbnail>(
+            MaterialObject,
+            48,
+            48,
+            MaterialThumbnailPool);
+        MaterialSlotThumbnails.Add(Thumbnail);
+
+        FAssetThumbnailConfig ThumbnailConfig;
+        ThumbnailConfig.bAllowFadeIn = false;
+        ThumbnailWidget = Thumbnail->MakeThumbnailWidget(ThumbnailConfig);
+    }
+
+    TSharedRef<SHorizontalBox> RowContent = SNew(SHorizontalBox);
+
+    RowContent->AddSlot()
+        .AutoWidth()
+        .VAlign(VAlign_Center)
+        .Padding(0.0f, 0.0f, 8.0f, 0.0f)
+            [SNew(SBox)
+                 .WidthOverride(52.0f)
+                 .HeightOverride(52.0f)
+                     [ThumbnailWidget]];
+
+    RowContent->AddSlot()
+        .FillWidth(1.0f)
+        .VAlign(VAlign_Center)
+        .Padding(2.0f, 0.0f, 10.0f, 0.0f)
+            [SNew(STextBlock)
+                 .Text(SlotTitle)
+                 .Font(FAppStyle::GetFontStyle(TEXT("NormalFontBold")))
+                 .OverflowPolicy(ETextOverflowPolicy::Ellipsis)];
+
+    if (!bIsAllSlotsRow)
+    {
+        RowContent->AddSlot()
+            .AutoWidth()
+            .VAlign(VAlign_Center)
+                [BuildCustomWrinkleMapToggle(MaterialSlotIndex)];
+    }
+
+    return SNew(STableRow<FMaterialSlotItemPtr>, OwnerTable)
+        .Padding(4.0f)
+            [RowContent];
 }
 
 void SWetWrinkleEditorPanel::HandleMaterialSlotSelectionChanged(FMaterialSlotItemPtr Item, ESelectInfo::Type SelectInfo)

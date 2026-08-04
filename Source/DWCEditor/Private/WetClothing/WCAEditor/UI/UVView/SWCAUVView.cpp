@@ -316,6 +316,7 @@ void SWCAUVView::Clear()
     IslandColors.Reset();
     HiddenUVIslandIDs.Reset();
     CircleMarkers.Reset();
+    CachedWireEdgesByIsland.Reset();
     CachedOutlineEdgesByIsland.Reset();
     CachedContentUVBounds = FBox2D(ForceInit);
     SetBackgroundTexture(nullptr);
@@ -486,24 +487,29 @@ int32 SWCAUVView::OnPaint(
         }
         else
         {
-            for (const FWetClothingAssetUVTriangle& Triangle : Island.UVTriangles)
+            // Draw each canonical UV edge exactly once. Drawing a closed line
+            // strip for every triangle submitted shared interior edges twice,
+            // which made assigned part lines appear pale/white and thicker.
+            const TArray<FCachedOutlineEdge>* WireEdges = CachedWireEdgesByIsland.Find(Island.UVIslandID);
+            if (WireEdges != nullptr)
             {
-                const TArray<FVector2D> TrianglePoints = {
-                    UVToLocal(Triangle.UVs[0], AllottedGeometry, UVBounds, ZoomAmount, ClampedViewOffset),
-                    UVToLocal(Triangle.UVs[1], AllottedGeometry, UVBounds, ZoomAmount, ClampedViewOffset),
-                    UVToLocal(Triangle.UVs[2], AllottedGeometry, UVBounds, ZoomAmount, ClampedViewOffset),
-                    UVToLocal(Triangle.UVs[0], AllottedGeometry, UVBounds, ZoomAmount, ClampedViewOffset)
-                };
+                for (const FCachedOutlineEdge& Edge : *WireEdges)
+                {
+                    const TArray<FVector2D> EdgeLine = {
+                        UVToLocal(Edge.Start, AllottedGeometry, UVBounds, ZoomAmount, ClampedViewOffset),
+                        UVToLocal(Edge.End, AllottedGeometry, UVBounds, ZoomAmount, ClampedViewOffset)
+                    };
 
-                FSlateDrawElement::MakeLines(
-                    OutDrawElements,
-                    DrawLayer,
-                    AllottedGeometry.ToPaintGeometry(),
-                    TrianglePoints,
-                    ESlateDrawEffect::None,
-                    LineColor,
-                    true,
-                    Thickness);
+                    FSlateDrawElement::MakeLines(
+                        OutDrawElements,
+                        DrawLayer,
+                        AllottedGeometry.ToPaintGeometry(),
+                        EdgeLine,
+                        ESlateDrawEffect::None,
+                        LineColor,
+                        true,
+                        Thickness);
+                }
             }
         }
     }
@@ -881,6 +887,7 @@ FReply SWCAUVView::OnMouseWheel(const FGeometry& MyGeometry, const FPointerEvent
 void SWCAUVView::RebuildGeometryCache()
 {
     CachedContentUVBounds = FBox2D(ForceInit);
+    CachedWireEdgesByIsland.Reset();
     CachedOutlineEdgesByIsland.Reset();
 
     for (const FWetClothingAssetUVIsland& Island : Islands)
@@ -906,14 +913,21 @@ void SWCAUVView::RebuildGeometryCache()
             }
         }
 
-        TArray<FCachedOutlineEdge>& CachedEdges = CachedOutlineEdgesByIsland.FindOrAdd(Island.UVIslandID);
+        TArray<FCachedOutlineEdge>& CachedWireEdges = CachedWireEdgesByIsland.FindOrAdd(Island.UVIslandID);
+        TArray<FCachedOutlineEdge>& CachedOutlineEdges = CachedOutlineEdgesByIsland.FindOrAdd(Island.UVIslandID);
+        CachedWireEdges.Reserve(OutlineMap.Num());
+
         for (const TPair<FDWCCanonicalUVEdge, FUVOutlineEdgeDrawData>& Pair : OutlineMap)
         {
+            FCachedOutlineEdge& WireEdge = CachedWireEdges.AddDefaulted_GetRef();
+            WireEdge.Start = Pair.Value.Points.Key;
+            WireEdge.End = Pair.Value.Points.Value;
+
             if (Pair.Value.ForwardCount != Pair.Value.ReverseCount)
             {
-                FCachedOutlineEdge& Edge = CachedEdges.AddDefaulted_GetRef();
-                Edge.Start = Pair.Value.Points.Key;
-                Edge.End = Pair.Value.Points.Value;
+                FCachedOutlineEdge& OutlineEdge = CachedOutlineEdges.AddDefaulted_GetRef();
+                OutlineEdge.Start = Pair.Value.Points.Key;
+                OutlineEdge.End = Pair.Value.Points.Value;
             }
         }
     }

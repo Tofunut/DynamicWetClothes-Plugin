@@ -28,17 +28,25 @@
 
 namespace
 {
+    FLinearColor GetUnassignedPartColor()
+    {
+        return FLinearColor(0.32f, 0.32f, 0.32f, 1.0f);
+    }
+
     FText GetWetPartDisplayName(const FWetClothingWetPartEntry& Entry)
     {
+        if (Entry.WetPartID == 0)
+        {
+            return NSLOCTEXT("WetClothingEditorCommonWidgets", "UnassignedWetPartName", "Unassigned");
+        }
+
         const FString TrimmedName = Entry.DisplayName.TrimStartAndEnd();
         if (!TrimmedName.IsEmpty())
         {
             return FText::FromString(TrimmedName);
         }
 
-        return Entry.WetPartID == 0
-                   ? NSLOCTEXT("WetClothingEditorCommonWidgets", "DefaultWetPartName", "Part Default")
-                   : FText::Format(NSLOCTEXT("WetClothingEditorCommonWidgets", "NumberedWetPartName", "Part {0}"), FText::AsNumber(Entry.WetPartID));
+        return FText::Format(NSLOCTEXT("WetClothingEditorCommonWidgets", "NumberedWetPartName", "Part {0}"), FText::AsNumber(Entry.WetPartID));
     }
 
     FText GetWettableSlotMissingProfileWarningText(const UWetClothingAsset* WetClothingAsset, int32 MaterialSlotIndex)
@@ -75,9 +83,9 @@ namespace
         }
 
         return MissingProfilePartCount == 1
-                   ? NSLOCTEXT("WetClothingEditorCommonWidgets", "WettableSlotOneMissingProfileWarning", "Warning: 1 part has no Wetness Profile.")
+                   ? NSLOCTEXT("WetClothingEditorCommonWidgets", "WettableSlotOneMissingProfileWarning", "1 part has no Wetness Profile.")
                    : FText::Format(
-                         NSLOCTEXT("WetClothingEditorCommonWidgets", "WettableSlotManyMissingProfilesWarning", "Warning: {0} parts have no Wetness Profile."),
+                         NSLOCTEXT("WetClothingEditorCommonWidgets", "WettableSlotManyMissingProfilesWarning", "{0} parts have no Wetness Profile."),
                          FText::AsNumber(MissingProfilePartCount));
     }
 
@@ -106,20 +114,6 @@ TSharedRef<SWidget> FWCAEditorWidgets::BuildSectionHeader(const TAttribute<FText
 
     return Header;
 }
-
-FText FWCAEditorWidgets::GetUVDisplayModeLabel(EWCAUVDisplayMode DisplayMode)
-{
-    return DisplayMode == EWCAUVDisplayMode::OutlineOnly
-               ? NSLOCTEXT("WetClothingEditorCommonWidgets", "UVDisplayModeOutline", "Outline")
-               : NSLOCTEXT("WetClothingEditorCommonWidgets", "UVDisplayModeNormal", "Normal");
-}
-
-TSharedRef<SWidget> FWCAEditorWidgets::GenerateUVDisplayModeComboItem(TSharedPtr<EWCAUVDisplayMode> Item)
-{
-    return SNew(STextBlock)
-        .Text(GetUVDisplayModeLabel(Item.IsValid() ? *Item : EWCAUVDisplayMode::Normal));
-}
-
 
 TSharedRef<SWidget> FWCAEditorWidgets::BuildTextureComboContent(
     TSharedPtr<FWCATextureItem> Item,
@@ -225,23 +219,38 @@ TSharedRef<SWidget> FWCAEditorWidgets::BuildUVViewTextureAndViewRow(
 {
     return SNew(SHorizontalBox)
         + SHorizontalBox::Slot()
-              .FillWidth(1.0f)
-                  [SNew(SBorder)
-                       .Padding(6.0f)
-                       .BorderImage(FAppStyle::Get().GetBrush(TEXT("ToolPanel.GroupBorder")))
-                           [TextureSelector]]
+        .AutoWidth()
+        .VAlign(VAlign_Center)
+        .Padding(0.0f, 0.0f, 8.0f, 0.0f)
+        [
+            SNew(STextBlock)
+            .Text(NSLOCTEXT("WetClothingEditorCommonWidgets", "UVViewTextureLabel", "Background"))
+            .Font(FAppStyle::GetFontStyle(TEXT("SmallFont")))
+            .ColorAndOpacity(FSlateColor::UseSubduedForeground())
+        ]
+
         + SHorizontalBox::Slot()
-              .AutoWidth()
-              .VAlign(VAlign_Center)
-              .Padding(10.0f, 0.0f, 0.0f, 0.0f)
-                  [ViewOptionsButton];
+        .FillWidth(1.0f)
+        .VAlign(VAlign_Center)
+        [
+            SNew(SBox)
+            .MinDesiredHeight(32.0f)
+            .VAlign(VAlign_Center)
+            [
+                TextureSelector
+            ]
+        ]
+
+        + SHorizontalBox::Slot()
+        .AutoWidth()
+        .VAlign(VAlign_Center)
+        .Padding(4.0f, 0.0f, 0.0f, 0.0f)
+        [
+            ViewOptionsButton
+        ];
 }
 
 TSharedRef<SWidget> FWCAEditorWidgets::BuildUVViewOptionsButton(
-    TArray<TSharedPtr<EWCAUVDisplayMode>>* DisplayModeItems,
-    TSharedPtr<EWCAUVDisplayMode> SelectedDisplayModeItem,
-    TAttribute<FText> SelectedDisplayModeText,
-    TFunction<void(TSharedPtr<EWCAUVDisplayMode>)> OnDisplayModeChanged,
     TAttribute<float> BackgroundTextureOpacity,
     TFunction<void(float)> OnBackgroundTextureOpacityChanged,
     TAttribute<float> UVIslandLineOpacity,
@@ -278,39 +287,6 @@ TSharedRef<SWidget> FWCAEditorWidgets::BuildUVViewOptionsButton(
     };
 
     TSharedRef<SVerticalBox> OptionsPanel = SNew(SVerticalBox);
-
-    OptionsPanel->AddSlot()
-        .AutoHeight()
-        .Padding(0.0f, 0.0f, 0.0f, 6.0f)
-        [
-            SNew(STextBlock)
-            .Text(NSLOCTEXT("WetClothingEditorCommonWidgets", "UVViewModeLabel", "Mode"))
-            .Font(LabelFont)
-        ];
-
-    OptionsPanel->AddSlot()
-        .AutoHeight()
-        .Padding(0.0f, 0.0f, 0.0f, 12.0f)
-        [
-            SNew(SComboBox<TSharedPtr<EWCAUVDisplayMode>>)
-            .OptionsSource(DisplayModeItems)
-            .InitiallySelectedItem(SelectedDisplayModeItem)
-            .OnGenerateWidget_Lambda([](TSharedPtr<EWCAUVDisplayMode> Item)
-            {
-                return FWCAEditorWidgets::GenerateUVDisplayModeComboItem(Item);
-            })
-            .OnSelectionChanged_Lambda([OnDisplayModeChanged](TSharedPtr<EWCAUVDisplayMode> Item, ESelectInfo::Type)
-            {
-                if (Item.IsValid() && OnDisplayModeChanged)
-                {
-                    OnDisplayModeChanged(Item);
-                }
-            })
-            [
-                SNew(STextBlock)
-                .Text(SelectedDisplayModeText)
-            ]
-        ];
 
     if (bShowBackgroundTextureControls)
     {
@@ -368,7 +344,7 @@ TSharedRef<SWidget> FWCAEditorWidgets::BuildUVViewOptionsButton(
             .VAlign(VAlign_Center)
             [
                 SNew(STextBlock)
-                .Text(NSLOCTEXT("WetClothingEditorCommonWidgets", "UVViewIslandLineOpacityLabel", "UV Island Line Opacity"))
+                .Text(NSLOCTEXT("WetClothingEditorCommonWidgets", "UVViewIslandLineOpacityLabel", "UV Line Opacity"))
                 .Font(LabelFont)
             ]
 
@@ -410,7 +386,7 @@ TSharedRef<SWidget> FWCAEditorWidgets::BuildUVViewOptionsButton(
             .VAlign(VAlign_Center)
             [
                 SNew(STextBlock)
-                .Text(NSLOCTEXT("WetClothingEditorCommonWidgets", "UVViewLineWeightLabel", "Line Weight"))
+                .Text(NSLOCTEXT("WetClothingEditorCommonWidgets", "UVViewLineWeightLabel", "UV Line Thickness"))
                 .Font(LabelFont)
             ]
 
@@ -729,19 +705,7 @@ TSharedRef<ITableRow> FWCAEditorWidgets::GenerateMaterialSlotRow(
              + SVerticalBox::Slot()
                    .AutoHeight()
                    .Padding(0.0f, 3.0f, 0.0f, 0.0f)
-                       [SNew(STextBlock)
-                            .Text_Lambda([GetWarningText = Args.GetMaterialSlotWarningText, WetClothingAsset = Args.WetClothingAsset, MaterialSlotIndex, bIsAllSlotsRow]()
-                            {
-                                if (bIsAllSlotsRow)
-                                {
-                                    return FText::GetEmpty();
-                                }
-                                return GetWarningText
-                                    ? GetWarningText(MaterialSlotIndex)
-                                    : GetWettableSlotMissingProfileWarningText(WetClothingAsset, MaterialSlotIndex);
-                            })
-                            .Font(FAppStyle::GetFontStyle(TEXT("SmallFont")))
-                            .ColorAndOpacity(FSlateColor(FLinearColor(1.0f, 0.78f, 0.18f, 1.0f)))
+                       [SNew(SHorizontalBox)
                             .Visibility_Lambda([GetWarningText = Args.GetMaterialSlotWarningText, WetClothingAsset = Args.WetClothingAsset, MaterialSlotIndex, bIsAllSlotsRow]()
                             {
                                 if (bIsAllSlotsRow)
@@ -755,7 +719,32 @@ TSharedRef<ITableRow> FWCAEditorWidgets::GenerateMaterialSlotRow(
                                     ? EVisibility::Collapsed
                                     : EVisibility::Visible;
                             })
-                            .OverflowPolicy(ETextOverflowPolicy::Ellipsis)]];
+
+                        + SHorizontalBox::Slot()
+                              .AutoWidth()
+                              .VAlign(VAlign_Center)
+                              .Padding(0.0f, 0.0f, 4.0f, 0.0f)
+                                  [SNew(SImage)
+                                       .DesiredSizeOverride(FVector2D(13.0f, 13.0f))
+                                       .Image(FAppStyle::GetBrush(TEXT("Icons.WarningWithColor")))]
+
+                        + SHorizontalBox::Slot()
+                              .FillWidth(1.0f)
+                              .VAlign(VAlign_Center)
+                                  [SNew(STextBlock)
+                                       .Text_Lambda([GetWarningText = Args.GetMaterialSlotWarningText, WetClothingAsset = Args.WetClothingAsset, MaterialSlotIndex, bIsAllSlotsRow]()
+                                       {
+                                           if (bIsAllSlotsRow)
+                                           {
+                                               return FText::GetEmpty();
+                                           }
+                                           return GetWarningText
+                                               ? GetWarningText(MaterialSlotIndex)
+                                               : GetWettableSlotMissingProfileWarningText(WetClothingAsset, MaterialSlotIndex);
+                                       })
+                                       .Font(FAppStyle::GetFontStyle(TEXT("SmallFont")))
+                                       .ColorAndOpacity(FSlateColor(FLinearColor(1.0f, 0.78f, 0.18f, 1.0f)))
+                                       .OverflowPolicy(ETextOverflowPolicy::Ellipsis)]]];
 
     RowContent->AddSlot()
         .AutoWidth()
@@ -963,7 +952,7 @@ TSharedRef<ITableRow> FWCAEditorWidgets::GeneratePartMapRow(
     TSharedPtr<FWetClothingWetPartEntry> Item,
     const TSharedRef<STableViewBase>& OwnerTable)
 {
-    const FLinearColor Color = Item.IsValid() ? (Item->WetPartID == 0 ? FLinearColor::White : Item->Color) : FLinearColor::White;
+    const FLinearColor Color = Item.IsValid() ? (Item->WetPartID == 0 ? GetUnassignedPartColor() : Item->Color) : GetUnassignedPartColor();
     const FText DisplayName = Item.IsValid() ? GetWetPartDisplayName(*Item) : NSLOCTEXT("WetClothingEditorCommonWidgets", "InvalidWetPartName", "Invalid Part");
     const FText IDText = Item.IsValid()
                              ? FText::Format(NSLOCTEXT("WetClothingEditorCommonWidgets", "WetPartRowIDLabel", "ID {0}"), FText::AsNumber(Item->WetPartID))
@@ -989,6 +978,10 @@ TSharedRef<ITableRow> FWCAEditorWidgets::GeneratePartMapRow(
                    .VAlign(VAlign_Center)
                        [SNew(STextBlock)
                             .Text(DisplayName)
+                            .Font(FAppStyle::GetFontStyle(TEXT("NormalFontBold")))
+                            .ColorAndOpacity(Item.IsValid() && Item->WetPartID == 0
+                                ? FSlateColor::UseSubduedForeground()
+                                : FSlateColor::UseForeground())
                             .OverflowPolicy(ETextOverflowPolicy::Ellipsis)]
 
              + SHorizontalBox::Slot()
@@ -996,6 +989,7 @@ TSharedRef<ITableRow> FWCAEditorWidgets::GeneratePartMapRow(
                    .VAlign(VAlign_Center)
                        [SNew(STextBlock)
                             .Text(IDText)
+                            .Visibility(Item.IsValid() && Item->WetPartID == 0 ? EVisibility::Collapsed : EVisibility::Visible)
                             .ColorAndOpacity(FSlateColor(FLinearColor(0.72f, 0.72f, 0.72f, 1.0f)))]];
 }
 

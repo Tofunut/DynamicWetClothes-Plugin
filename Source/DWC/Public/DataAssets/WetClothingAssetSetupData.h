@@ -119,10 +119,10 @@ struct DWC_API FDWCWetClothingAssetSetupSettings
     UPROPERTY()
     bool bAllowOverwritePreferredDWCDataUVChannel = false;
 
-    UPROPERTY(EditAnywhere, Category = "Mesh|LOD Mapping Range", meta = (DisplayName = "First Mapped LOD", ClampMin = "0"))
+    UPROPERTY(EditAnywhere, Category = "Mesh|Active LOD Mapping Range", meta = (DisplayName = "First Mapped LOD", ClampMin = "0"))
     int32 FirstGeneratedLODIndex = 0;
 
-    UPROPERTY(EditAnywhere, Category = "Mesh|LOD Mapping Range", meta = (DisplayName = "Last Mapped LOD", ClampMin = "0"))
+    UPROPERTY(EditAnywhere, Category = "Mesh|Active LOD Mapping Range", meta = (DisplayName = "Last Mapped LOD", ClampMin = "0"))
     int32 LastGeneratedLODIndex = MAX_int32;
 
     /** Render LOD used by CPU/GPU simulation runtime data. */

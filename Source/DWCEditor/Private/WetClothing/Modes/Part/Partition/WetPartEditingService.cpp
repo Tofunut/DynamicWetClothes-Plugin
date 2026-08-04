@@ -165,7 +165,7 @@ FLinearColor FWetPartEditingService::GetDefaultWetPartColor(int32 WetPartID)
 {
     if (WetPartID == 0)
     {
-        return FLinearColor::White;
+        return FLinearColor(0.32f, 0.32f, 0.32f, 1.0f);
     }
 
     static const FLinearColor Palette[] = {
@@ -193,11 +193,16 @@ FLinearColor FWetPartEditingService::GetDefaultWetPartColor(int32 WetPartID)
 
 FString FWetPartEditingService::GetDefaultWetPartName(int32 WetPartID)
 {
-    return WetPartID == 0 ? TEXT("Part Default") : FString::Printf(TEXT("Part %d"), WetPartID);
+    return WetPartID == 0 ? TEXT("Unassigned") : FString::Printf(TEXT("Part %d"), WetPartID);
 }
 
 FString FWetPartEditingService::GetWetPartDisplayName(const FWetClothingWetPartEntry& Entry)
 {
+    if (Entry.WetPartID == 0)
+    {
+        return TEXT("Unassigned");
+    }
+
     const FString TrimmedName = Entry.DisplayName.TrimStartAndEnd();
     if (!TrimmedName.IsEmpty())
     {

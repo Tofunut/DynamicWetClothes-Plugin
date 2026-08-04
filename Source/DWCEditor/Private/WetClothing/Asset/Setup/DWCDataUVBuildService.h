@@ -1,15 +1,28 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "DWCDataUVGenerationTypes.h"
 #include "DataAssets/WetClothingAssetSetupData.h"
 
 class UWetClothingAsset;
 class USkeletalMesh;
 
+struct FDWCDataUVLODWarning
+{
+    int32 LODIndex = INDEX_NONE;
+    FString Summary;
+    FString TechnicalDetails;
+};
+
 struct FDWCDataUVBuildResult
 {
     bool bSucceeded = false;
     USkeletalMesh* PreparedMesh = nullptr;
+    int32 DataUVChannelIndex = INDEX_NONE;
+    int32 WettableMaterialSlotCount = 0;
+    TArray<int32> TargetLODIndices;
+    TArray<int32> GeneratedLODIndices;
+    TArray<FDWCDataUVLODWarning> LODWarnings;
     int32 OriginalUVIslandCount = 0;
     bool bGeneratedWithWarnings = false;
     int32 ExcludedTriangleCount = 0;
@@ -20,7 +33,10 @@ struct FDWCDataUVBuildResult
     int32 BudgetFallbackIslandCount = 0;
     TArray<FDWCDataUVSlotWarning> SlotWarnings;
     TSet<int32> FailedMaterialSlotIndices;
+    int32 FailureLODIndex = INDEX_NONE;
+    FDWCDataUVValidationFailure ValidationFailure;
     int32 ChartBoundarySplitVertexInstanceCount = 0;
+    FString TimingSummary;
     FString Message;
 };
 

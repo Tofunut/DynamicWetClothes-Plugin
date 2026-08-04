@@ -2,6 +2,7 @@
 
 #include "AssetThumbnail.h"
 #include "AssetRegistry/AssetData.h"
+#include "Core/DWCEditorStyle.h"
 #include "DataAssets/WetClothingAsset.h"
 #include "DetailsViewArgs.h"
 #include "Engine/SkeletalMesh.h"
@@ -22,6 +23,7 @@
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SComboBox.h"
 #include "Widgets/Input/SSpinBox.h"
+#include "Widgets/Images/SImage.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/SBoxPanel.h"
@@ -36,6 +38,7 @@ namespace
     constexpr uint32 SourceMeshThumbnailSize = 112;
     constexpr int32 RecommendedDWCDataUVSelection = INDEX_NONE;
     constexpr int32 MaxDWCDataUVChannelIndex = 3;
+    const FLinearColor InfoIconTint(0.32f, 0.65f, 1.0f, 1.0f);
 
     int32 GetSkeletalMeshUVChannelCount(const USkeletalMesh* Mesh, const int32 LODIndex)
     {
@@ -74,11 +77,11 @@ namespace
         const int32 LODCount = GetSkeletalMeshLODCount(Mesh);
         if (LODCount <= 0)
         {
-            return LOCTEXT("LODRangeInfoNoMesh", "Select a source mesh to inspect available LODs.");
+            return FText::GetEmpty();
         }
 
         return FText::Format(
-            LOCTEXT("LODRangeInfo", "Available LODs: LOD0 - LOD{0}. DWC UV Channel and Original UV topology will be generated for LOD{1} - LOD{2}."),
+            LOCTEXT("LODRangeInfo", "Available LODs: LOD0 - LOD{0}. DWC UV data will be generated for LOD{1} - LOD{2}; canonical Original UV topology is stored for LOD0."),
             FText::AsNumber(LODCount - 1),
             FText::AsNumber(FirstLODIndex),
             FText::AsNumber(LastLODIndex));
@@ -131,7 +134,7 @@ namespace
     {
         if (Mesh == nullptr)
         {
-            return LOCTEXT("SourceMeshUVInfoNoMesh", "Select a source mesh to inspect its LOD0 UV channels.");
+            return FText::GetEmpty();
         }
 
         const FSkeletalMeshRenderData* RenderData = Mesh->GetResourceForRendering();
@@ -222,11 +225,16 @@ namespace
         const bool bUseRecommendedDWCDataUVChannel,
         const int32 PreferredDWCDataUVChannelIndex)
     {
+        if (Mesh == nullptr)
+        {
+            return FText::GetEmpty();
+        }
+
         const int32 SourceUVChannelCount = GetSkeletalMeshUVChannelCount(Mesh, 0);
         if (SourceUVChannelCount <= 0)
         {
             return FText::Format(
-                LOCTEXT("PreferredDWCDataUVInfoNoMesh", "DWC UV Channel will be generated into UV{0}."),
+                LOCTEXT("PreferredDWCDataUVInfoNoUVs", "DWC UV Channel will be generated into UV{0}."),
                 FText::AsNumber(PreferredDWCDataUVChannelIndex));
         }
 
@@ -260,6 +268,136 @@ namespace
             FText::FromString(BuildUVChannelList(0, SourceUVChannelCount - 1)));
     }
 
+    int32 ResolvePreferredDWCDataUVChannelIndex(
+        const USkeletalMesh* Mesh,
+        const int32 OriginalUVChannelIndex,
+        const bool bUseRecommendedDWCDataUVChannel,
+        const int32 PreferredDWCDataUVChannelIndex)
+    {
+        return bUseRecommendedDWCDataUVChannel
+            ? GetDefaultDWCDataUVChannelIndex(Mesh, OriginalUVChannelIndex)
+            : PreferredDWCDataUVChannelIndex;
+    }
+
+    bool IsPreferredDWCDataUVInfoWarning(
+        const USkeletalMesh* Mesh,
+        const int32 OriginalUVChannelIndex,
+        const bool bUseRecommendedDWCDataUVChannel,
+        const int32 PreferredDWCDataUVChannelIndex)
+    {
+        const int32 EffectiveUVChannelIndex = ResolvePreferredDWCDataUVChannelIndex(
+            Mesh,
+            OriginalUVChannelIndex,
+            bUseRecommendedDWCDataUVChannel,
+            PreferredDWCDataUVChannelIndex);
+        return IsExistingSourceUVChannel(Mesh, EffectiveUVChannelIndex) &&
+               EffectiveUVChannelIndex != OriginalUVChannelIndex;
+    }
+
+    FSlateColor GetPreferredDWCDataUVInfoColor(
+        const USkeletalMesh* Mesh,
+        const int32 OriginalUVChannelIndex,
+        const bool bUseRecommendedDWCDataUVChannel,
+        const int32 PreferredDWCDataUVChannelIndex)
+    {
+        if (Mesh == nullptr)
+        {
+            return FSlateColor(InfoIconTint);
+        }
+
+        if (!IsDWCDataUVSelectionValid(
+            Mesh,
+            OriginalUVChannelIndex,
+            bUseRecommendedDWCDataUVChannel,
+            PreferredDWCDataUVChannelIndex))
+        {
+            return FStyleColors::Error;
+        }
+
+        return IsPreferredDWCDataUVInfoWarning(
+            Mesh,
+            OriginalUVChannelIndex,
+            bUseRecommendedDWCDataUVChannel,
+            PreferredDWCDataUVChannelIndex)
+            ? FStyleColors::Warning
+            : FSlateColor(InfoIconTint);
+    }
+
+    const FSlateBrush* GetPreferredDWCDataUVInfoIconBrush(
+        const USkeletalMesh* Mesh,
+        const int32 OriginalUVChannelIndex,
+        const bool bUseRecommendedDWCDataUVChannel,
+        const int32 PreferredDWCDataUVChannelIndex)
+    {
+        if (Mesh == nullptr)
+        {
+            return FAppStyle::GetBrush(TEXT("Icons.InfoWithColor"));
+        }
+
+        if (!IsDWCDataUVSelectionValid(
+            Mesh,
+            OriginalUVChannelIndex,
+            bUseRecommendedDWCDataUVChannel,
+            PreferredDWCDataUVChannelIndex))
+        {
+            return FDWCEditorStyle::GetBrush(TEXT("DWCEditor.Status.Error"));
+        }
+
+        return IsPreferredDWCDataUVInfoWarning(
+            Mesh,
+            OriginalUVChannelIndex,
+            bUseRecommendedDWCDataUVChannel,
+            PreferredDWCDataUVChannelIndex)
+            ? FAppStyle::GetBrush(TEXT("Icons.WarningWithColor"))
+            : FAppStyle::GetBrush(TEXT("Icons.InfoWithColor"));
+    }
+
+    TSharedRef<SWidget> BuildCreationInfoTextRow(const TAttribute<FText>& Text)
+    {
+        return SNew(SHorizontalBox)
+            .Visibility_Lambda([Text]()
+            {
+                return Text.Get().IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible;
+            })
+            + SHorizontalBox::Slot()
+            .AutoWidth()
+            .VAlign(VAlign_Top)
+            .Padding(0.0f, 1.0f, 6.0f, 0.0f)
+            [
+                SNew(SBox)
+                .WidthOverride(16.0f)
+                .HeightOverride(16.0f)
+                [
+                    SNew(SImage)
+                    .Image(FAppStyle::GetBrush(TEXT("Icons.InfoWithColor")))
+                    .ColorAndOpacity(InfoIconTint)
+                ]
+            ]
+            + SHorizontalBox::Slot()
+            .FillWidth(1.0f)
+            .VAlign(VAlign_Center)
+            [
+                SNew(STextBlock)
+                .AutoWrapText(true)
+                .Font(FAppStyle::GetFontStyle(TEXT("SmallFont")))
+                .ColorAndOpacity(InfoIconTint)
+                .Text(Text)
+            ];
+    }
+
+    TSharedRef<SWidget> BuildCreationHelperTextRow(const TAttribute<FText>& Text)
+    {
+        return SNew(STextBlock)
+            .Visibility_Lambda([Text]()
+            {
+                return Text.Get().IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible;
+            })
+            .AutoWrapText(true)
+            .Font(FAppStyle::GetFontStyle(TEXT("SmallFont")))
+            .ColorAndOpacity(FSlateColor::UseSubduedForeground())
+            .Text(Text);
+    }
+
     void RefreshSourceMeshThumbnail(
         const TSharedPtr<FAssetThumbnail>& SourceMeshThumbnail,
         const TSharedPtr<FAssetThumbnailPool>& SourceMeshThumbnailPool,
@@ -271,7 +409,9 @@ namespace
         }
 
         SourceMeshThumbnail->SetAsset(SourceMesh);
-        SourceMeshThumbnail->SetRealTime(SourceMesh != nullptr);
+        // This dialog only needs a static preview. Real-time thumbnails depend on continuous
+        // editor ticking and can remain black while the modal loop is active.
+        SourceMeshThumbnail->SetRealTime(false);
         SourceMeshThumbnail->RefreshThumbnail();
 
         if (SourceMeshThumbnailPool.IsValid())
@@ -390,6 +530,29 @@ bool UWetClothingAssetFactory::ConfigureProperties()
                        PendingCreationSettings->PreferredDWCDataUVChannelIndex);
         };
 
+    auto HasSourceMesh =
+        [this]()
+        {
+            return PendingCreationSettings != nullptr &&
+                   PendingCreationSettings->SourceSkeletalMesh != nullptr;
+        };
+
+    auto GetSourceMeshRequiredTooltip =
+        [HasSourceMesh]()
+        {
+            return HasSourceMesh()
+                ? FText::GetEmpty()
+                : LOCTEXT("SelectSourceMeshFirstTooltip", "Select a source mesh first.");
+        };
+
+    auto GetSourceMeshRequiredInfoText =
+        [this]()
+        {
+            return PendingCreationSettings == nullptr || PendingCreationSettings->SourceSkeletalMesh == nullptr
+                ? LOCTEXT("CreateSelectSourceMeshStatus", "Select a source mesh to inspect UV channels and available LODs.")
+                : FText::GetEmpty();
+        };
+
     bool bAccepted = false;
     TSharedRef<SWindow> Dialog =
         SNew(SWindow)
@@ -436,6 +599,12 @@ bool UWetClothingAssetFactory::ConfigureProperties()
                     .AutoHeight()
                     .Padding(0.0f, 6.0f, 0.0f, 0.0f)
                     [
+                        BuildCreationInfoTextRow(TAttribute<FText>::Create(TAttribute<FText>::FGetter::CreateLambda(GetSourceMeshRequiredInfoText)))
+                    ]
+                    + SVerticalBox::Slot()
+                    .AutoHeight()
+                    .Padding(0.0f, 6.0f, 0.0f, 0.0f)
+                    [
                         SNew(SHorizontalBox)
                         + SHorizontalBox::Slot()
                         .AutoWidth()
@@ -475,16 +644,12 @@ bool UWetClothingAssetFactory::ConfigureProperties()
                             .AutoHeight()
                             .Padding(0.0f, 6.0f, 0.0f, 0.0f)
                             [
-                                SNew(STextBlock)
-                                .AutoWrapText(true)
-                                .Font(FAppStyle::GetFontStyle(TEXT("SmallFont")))
-                                .ColorAndOpacity(FStyleColors::Primary)
-                                .Text_Lambda([this]()
+                                BuildCreationHelperTextRow(TAttribute<FText>::Create(TAttribute<FText>::FGetter::CreateLambda([this]()
                                 {
                                     return PendingCreationSettings != nullptr
                                         ? BuildSourceMeshUVInfoText(PendingCreationSettings->SourceSkeletalMesh)
                                         : BuildSourceMeshUVInfoText(nullptr);
-                                })
+                                })))
                             ]
                         ]
                     ]
@@ -510,11 +675,7 @@ bool UWetClothingAssetFactory::ConfigureProperties()
                     .AutoHeight()
                     .Padding(0.0f, 8.0f, 0.0f, 0.0f)
                     [
-                        SNew(STextBlock)
-                        .AutoWrapText(true)
-                        .Font(FAppStyle::GetFontStyle(TEXT("SmallFont")))
-                        .ColorAndOpacity(FStyleColors::AccentGreen)
-                        .Text(BuildCreateDWCDataUVTargetText())
+                        BuildCreationHelperTextRow(BuildCreateDWCDataUVTargetText())
                     ]
                     + SVerticalBox::Slot()
                     .AutoHeight()
@@ -536,6 +697,8 @@ bool UWetClothingAssetFactory::ConfigureProperties()
                             .WidthOverride(180.0f)
                             [
                                 SNew(SComboBox<TSharedPtr<int32>>)
+                                .IsEnabled_Lambda(HasSourceMesh)
+                                .ToolTipText_Lambda(GetSourceMeshRequiredTooltip)
                                 .OptionsSource(&DWCDataUVChannelOptions)
                                 .InitiallySelectedItem(DWCDataUVChannelOptions[0])
                                 .OnGenerateWidget_Lambda([this](TSharedPtr<int32> Item)
@@ -589,30 +752,92 @@ bool UWetClothingAssetFactory::ConfigureProperties()
                     .AutoHeight()
                     .Padding(0.0f, 4.0f, 0.0f, 0.0f)
                     [
-                        SNew(STextBlock)
-                        .AutoWrapText(true)
-                        .Font(FAppStyle::GetFontStyle(TEXT("SmallFont")))
-                        .ColorAndOpacity_Lambda([this, &bUseRecommendedDWCDataUVChannel]()
+                        SNew(SHorizontalBox)
+                        .Visibility_Lambda([this, &bUseRecommendedDWCDataUVChannel]()
                         {
-                            return PendingCreationSettings != nullptr &&
-                                   !IsDWCDataUVSelectionValid(
-                                       PendingCreationSettings->SourceSkeletalMesh,
-                                       PendingCreationSettings->OriginalUVChannelIndex,
-                                       bUseRecommendedDWCDataUVChannel,
-                                       PendingCreationSettings->PreferredDWCDataUVChannelIndex)
-                                       ? FStyleColors::Error
-                                       : FStyleColors::Primary;
-                        })
-                        .Text_Lambda([this, &bUseRecommendedDWCDataUVChannel]()
-                        {
-                            return PendingCreationSettings != nullptr
+                            const FText InfoText = PendingCreationSettings != nullptr
                                 ? BuildPreferredDWCDataUVInfoText(
                                     PendingCreationSettings->SourceSkeletalMesh,
                                     PendingCreationSettings->OriginalUVChannelIndex,
                                     bUseRecommendedDWCDataUVChannel,
                                     PendingCreationSettings->PreferredDWCDataUVChannelIndex)
                                 : BuildPreferredDWCDataUVInfoText(nullptr, 0, true, 1);
+                            return InfoText.IsEmpty()
+                                ? EVisibility::Collapsed
+                                : EVisibility::Visible;
                         })
+                        + SHorizontalBox::Slot()
+                        .AutoWidth()
+                        .VAlign(VAlign_Top)
+                        .Padding(0.0f, 1.0f, 6.0f, 0.0f)
+                        [
+                            SNew(SBox)
+                            .WidthOverride(16.0f)
+                            .HeightOverride(16.0f)
+                            [
+                                SNew(SImage)
+                                .Image_Lambda([this, &bUseRecommendedDWCDataUVChannel]()
+                                {
+                                    return PendingCreationSettings != nullptr
+                                        ? GetPreferredDWCDataUVInfoIconBrush(
+                                            PendingCreationSettings->SourceSkeletalMesh,
+                                            PendingCreationSettings->OriginalUVChannelIndex,
+                                            bUseRecommendedDWCDataUVChannel,
+                                            PendingCreationSettings->PreferredDWCDataUVChannelIndex)
+                                        : GetPreferredDWCDataUVInfoIconBrush(nullptr, 0, true, 1);
+                                })
+                                .ColorAndOpacity_Lambda([this, &bUseRecommendedDWCDataUVChannel]()
+                                {
+                                    if (PendingCreationSettings == nullptr ||
+                                        PendingCreationSettings->SourceSkeletalMesh == nullptr)
+                                    {
+                                        return InfoIconTint;
+                                    }
+
+                                    const int32 EffectiveUVChannelIndex = ResolvePreferredDWCDataUVChannelIndex(
+                                        PendingCreationSettings->SourceSkeletalMesh,
+                                        PendingCreationSettings->OriginalUVChannelIndex,
+                                        bUseRecommendedDWCDataUVChannel,
+                                        PendingCreationSettings->PreferredDWCDataUVChannelIndex);
+                                    return IsDWCDataUVSelectionValid(
+                                               PendingCreationSettings->SourceSkeletalMesh,
+                                               PendingCreationSettings->OriginalUVChannelIndex,
+                                               bUseRecommendedDWCDataUVChannel,
+                                               PendingCreationSettings->PreferredDWCDataUVChannelIndex) &&
+                                           !IsExistingSourceUVChannel(PendingCreationSettings->SourceSkeletalMesh, EffectiveUVChannelIndex)
+                                               ? InfoIconTint
+                                               : FLinearColor::White;
+                                })
+                            ]
+                        ]
+                        + SHorizontalBox::Slot()
+                        .FillWidth(1.0f)
+                        .VAlign(VAlign_Center)
+                        [
+                            SNew(STextBlock)
+                            .AutoWrapText(true)
+                            .Font(FAppStyle::GetFontStyle(TEXT("SmallFont")))
+                            .ColorAndOpacity_Lambda([this, &bUseRecommendedDWCDataUVChannel]()
+                            {
+                                return PendingCreationSettings != nullptr
+                                    ? GetPreferredDWCDataUVInfoColor(
+                                        PendingCreationSettings->SourceSkeletalMesh,
+                                        PendingCreationSettings->OriginalUVChannelIndex,
+                                        bUseRecommendedDWCDataUVChannel,
+                                        PendingCreationSettings->PreferredDWCDataUVChannelIndex)
+                                    : GetPreferredDWCDataUVInfoColor(nullptr, 0, true, 1);
+                            })
+                            .Text_Lambda([this, &bUseRecommendedDWCDataUVChannel]()
+                            {
+                                return PendingCreationSettings != nullptr
+                                    ? BuildPreferredDWCDataUVInfoText(
+                                        PendingCreationSettings->SourceSkeletalMesh,
+                                        PendingCreationSettings->OriginalUVChannelIndex,
+                                        bUseRecommendedDWCDataUVChannel,
+                                        PendingCreationSettings->PreferredDWCDataUVChannelIndex)
+                                    : BuildPreferredDWCDataUVInfoText(nullptr, 0, true, 1);
+                            })
+                        ]
                     ]
                 ]
             ]
@@ -634,7 +859,7 @@ bool UWetClothingAssetFactory::ConfigureProperties()
                         .VAlign(VAlign_Center)
                         [
                             SNew(STextBlock)
-                            .Text(LOCTEXT("LODRangeLabel", "LOD Mapping Range"))
+                            .Text(LOCTEXT("LODRangeLabel", "Active LOD Mapping Range"))
                             .Font(FAppStyle::GetFontStyle(TEXT("NormalFontBold")))
                         ]
                     ]
@@ -658,6 +883,8 @@ bool UWetClothingAssetFactory::ConfigureProperties()
                             .WidthOverride(120.0f)
                             [
                                 SNew(SSpinBox<int32>)
+                                .IsEnabled_Lambda(HasSourceMesh)
+                                .ToolTipText_Lambda(GetSourceMeshRequiredTooltip)
                                 .MinValue(0)
                                 .MaxValue_Lambda([this]()
                                 {
@@ -699,6 +926,8 @@ bool UWetClothingAssetFactory::ConfigureProperties()
                             .WidthOverride(120.0f)
                             [
                                 SNew(SSpinBox<int32>)
+                                .IsEnabled_Lambda(HasSourceMesh)
+                                .ToolTipText_Lambda(GetSourceMeshRequiredTooltip)
                                 .MinValue_Lambda([this]()
                                 {
                                     return PendingCreationSettings != nullptr ? PendingCreationSettings->FirstGeneratedLODIndex : 0;
@@ -727,11 +956,7 @@ bool UWetClothingAssetFactory::ConfigureProperties()
                     .AutoHeight()
                     .Padding(0.0f, 6.0f, 0.0f, 0.0f)
                     [
-                        SNew(STextBlock)
-                        .AutoWrapText(true)
-                        .Font(FAppStyle::GetFontStyle(TEXT("SmallFont")))
-                        .ColorAndOpacity(FStyleColors::Primary)
-                        .Text_Lambda([this]()
+                        BuildCreationHelperTextRow(TAttribute<FText>::Create(TAttribute<FText>::FGetter::CreateLambda([this]()
                         {
                             if (PendingCreationSettings == nullptr)
                             {
@@ -742,7 +967,7 @@ bool UWetClothingAssetFactory::ConfigureProperties()
                                 PendingCreationSettings->SourceSkeletalMesh,
                                 PendingCreationSettings->FirstGeneratedLODIndex,
                                 PendingCreationSettings->LastGeneratedLODIndex);
-                        })
+                        })))
                     ]
                 ]
             ]
@@ -814,7 +1039,27 @@ bool UWetClothingAssetFactory::ConfigureProperties()
             ]
         ]);
 
-    FSlateApplication::Get().AddModalWindow(Dialog, FSlateApplication::Get().GetActiveTopLevelWindow());
+    FSlateApplication& SlateApplication = FSlateApplication::Get();
+    FDelegateHandle ThumbnailModalTickHandle;
+    if (SourceMeshThumbnailPool.IsValid())
+    {
+        ThumbnailModalTickHandle = SlateApplication.GetOnModalLoopTickEvent().AddLambda(
+            [WeakThumbnailPool = TWeakPtr<FAssetThumbnailPool>(SourceMeshThumbnailPool)](const float DeltaTime)
+            {
+                if (const TSharedPtr<FAssetThumbnailPool> ThumbnailPool = WeakThumbnailPool.Pin();
+                    ThumbnailPool.IsValid() && ThumbnailPool->IsTickable())
+                {
+                    ThumbnailPool->Tick(DeltaTime);
+                }
+            });
+    }
+
+    SlateApplication.AddModalWindow(Dialog, SlateApplication.GetActiveTopLevelWindow());
+
+    if (ThumbnailModalTickHandle.IsValid())
+    {
+        SlateApplication.GetOnModalLoopTickEvent().Remove(ThumbnailModalTickHandle);
+    }
     if (!bAccepted)
     {
         PendingCreationSettings = nullptr;

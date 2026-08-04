@@ -13,5 +13,6 @@ public:
         const TMap<int32, FVector2f>& PackedUVByVertexInstance,
         int32 OutputResolution,
         TSet<int32>& OutProblemMaterialSlots,
-        FString& OutError);
+        FString& OutError,
+        FDWCDataUVValidationFailure* OutFailure = nullptr);
 };

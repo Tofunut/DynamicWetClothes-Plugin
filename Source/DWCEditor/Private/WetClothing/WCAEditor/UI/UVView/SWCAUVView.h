@@ -154,6 +154,9 @@ class SWCAUVView : public SLeafWidget
     };
 
     TArray<FWetClothingAssetUVIsland>      Islands;
+    // A canonical, per-island edge list prevents triangle-shared edges from
+    // being submitted more than once and becoming brighter than boundaries.
+    TMap<int32, TArray<FCachedOutlineEdge>> CachedWireEdgesByIsland;
     TMap<int32, TArray<FCachedOutlineEdge>> CachedOutlineEdgesByIsland;
     FBox2D                                 CachedContentUVBounds = FBox2D(ForceInit);
     TSet<int32>                            SelectedUVIslandIDs;

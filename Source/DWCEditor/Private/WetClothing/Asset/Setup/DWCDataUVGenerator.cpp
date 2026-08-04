@@ -835,18 +835,21 @@ FDWCDataUVGenerationResult FDWCDataUVGenerator::GenerateForSkeletalMesh(
 
     TSet<int32> ProblemMaterialSlots;
     FString PackedValidationError;
+    FDWCDataUVValidationFailure ValidationFailure;
     if (!FDWCDataUVValidator::Validate(
             PackingTriangles,
             ValidatedCharts,
             PackedUVBySyntheticCorner,
             FixedWetPartDataResolution,
             ProblemMaterialSlots,
-            PackedValidationError))
+            PackedValidationError,
+            &ValidationFailure))
     {
         for (const int32 MaterialSlotIndex : ProblemMaterialSlots)
         {
             Result.FailedMaterialSlotIndices.Add(MaterialSlotIndex);
         }
+        Result.ValidationFailure = MoveTemp(ValidationFailure);
         SetFailure(Result, FString::Printf(
             TEXT("DWC UV Channel generation failed final non-overlap validation: %s"),
             *PackedValidationError));

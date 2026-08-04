@@ -467,16 +467,16 @@ namespace
             {
                 Section = EWCAValidationSection::DataUV;
                 FixKind = bDataUVLayoutLocked ? EWCAValidationFixKind::Manual : EWCAValidationFixKind::InitializeDataUV;
-                Title = NSLOCTEXT("WCAValidationReport", "DWCDataUVTitle", "DWC UV Channel");
+                Title = NSLOCTEXT("WCAValidationReport", "PreparedMeshUVLayoutTitle", "Prepared Mesh UV Layout");
                 RequiredAction = bDataUVLayoutLocked
                     ? NSLOCTEXT(
                         "WCAValidationReport",
                         "DWCDataUVLockedAction",
-                        "The sealed UV layout cannot be rebuilt. Create a new WCA if its mesh topology changed.")
+                        "The prepared mesh UV layout is sealed and cannot be rebuilt. Create a new WCA if the mesh topology changed.")
                     : NSLOCTEXT(
                         "WCAValidationReport",
                         "DWCDataUVInitializeAction",
-                        "Initialize DWC UV Channel for this asset.");
+                        "Initialize the prepared mesh UV layout for this asset.");
                 if (HasIssueForSectionAndContext(Report, Section, FText::GetEmpty()))
                 {
                     continue;
@@ -636,7 +636,7 @@ bool FWCAValidationReport::HasAutoResolvableIssues() const
 FString FWCAValidationReport::BuildSummary() const
 {
     TArray<FString> Sections;
-    AppendIssueSection(Sections, TEXT("DWC UV Channel"), *this, EWCAValidationSection::DataUV, false);
+    AppendIssueSection(Sections, TEXT("Prepared Mesh UV Layout"), *this, EWCAValidationSection::DataUV, false);
     AppendIssueSection(Sections, TEXT("Runtime Data"), *this, EWCAValidationSection::RuntimeData, false);
     AppendIssueSection(Sections, TEXT("Generated Materials"), *this, EWCAValidationSection::GeneratedMaterials, false);
     AppendIssueSection(Sections, TEXT("GPU Runtime Data"), *this, EWCAValidationSection::GPUSimulationMaps, false);
@@ -650,7 +650,7 @@ FString FWCAValidationReport::BuildSummary() const
 FString FWCAValidationReport::BuildManualIssueSummary() const
 {
     TArray<FString> Sections;
-    AppendIssueSection(Sections, TEXT("DWC UV Channel"), *this, EWCAValidationSection::DataUV, true);
+    AppendIssueSection(Sections, TEXT("Prepared Mesh UV Layout"), *this, EWCAValidationSection::DataUV, true);
     AppendIssueSection(Sections, TEXT("Runtime Data"), *this, EWCAValidationSection::RuntimeData, true);
     AppendIssueSection(Sections, TEXT("Generated Materials"), *this, EWCAValidationSection::GeneratedMaterials, true);
     AppendIssueSection(Sections, TEXT("GPU Runtime Data"), *this, EWCAValidationSection::GPUSimulationMaps, true);
@@ -736,14 +736,14 @@ FWCAValidationReport BuildWCAValidationReport(
     AddBakeStatusIssueIfRequired(
         Report,
         TEXT("DWCDataUV"),
-        NSLOCTEXT("WCAValidationReport", "DWCDataUVTitle", "DWC UV Channel"),
+        NSLOCTEXT("WCAValidationReport", "PreparedMeshUVLayoutTitle", "Prepared Mesh UV Layout"),
         State.GeneratedDataUV,
         EWCAValidationSection::DataUV,
         bDataUVLayoutLocked ? EWCAValidationFixKind::Manual : EWCAValidationFixKind::InitializeDataUV,
         bDataUVLayoutLocked
-            ? NSLOCTEXT("WCAValidationReport", "DWCDataUVLockedAction", "The sealed UV layout cannot be rebuilt. Create a new WCA if the prepared mesh or UV layout changed.")
-            : NSLOCTEXT("WCAValidationReport", "DWCDataUVInitializeAction", "Initialize DWC UV Channel for this asset."),
-        FString::Printf(TEXT("DWC UV Channel: %s.%s"),
+            ? NSLOCTEXT("WCAValidationReport", "DWCDataUVLockedAction", "The prepared mesh UV layout is sealed and cannot be rebuilt. Create a new WCA if the prepared mesh or UV layout changed.")
+            : NSLOCTEXT("WCAValidationReport", "DWCDataUVInitializeAction", "Initialize the prepared mesh UV layout for this asset."),
+        FString::Printf(TEXT("Prepared Mesh UV Layout: %s.%s"),
             *BakeStatusToString(State.GeneratedDataUV),
             bDataUVLayoutLocked ? TEXT(" The stored packed layout is immutable") : TEXT("")));
 
@@ -756,7 +756,7 @@ FWCAValidationReport BuildWCAValidationReport(
         bDataUVLayoutLocked ? EWCAValidationFixKind::Manual : EWCAValidationFixKind::InitializeDataUV,
         bDataUVLayoutLocked
             ? NSLOCTEXT("WCAValidationReport", "OriginalUVTopologyLockedAction", "Original UV island topology is locked. Create a new WCA to generate different topology.")
-            : NSLOCTEXT("WCAValidationReport", "OriginalUVTopologyInitializeAction", "Initialize DWC UV Channel and Original UV topology."),
+            : NSLOCTEXT("WCAValidationReport", "OriginalUVTopologyInitializeAction", "Initialize the prepared mesh UV layout and Original UV topology."),
         FString::Printf(TEXT("Original UV Topology: %s.%s"),
             *BakeStatusToString(State.OriginalUVTopology),
             bDataUVLayoutLocked ? TEXT(" The stored island identities are immutable") : TEXT("")));
@@ -786,7 +786,7 @@ FWCAValidationReport BuildWCAValidationReport(
                     bSavePending,
                     bCanBuildCPURuntimeData,
                     NSLOCTEXT("WCAValidationReport", "CPURuntimeDataAction", "Use Build for Runtime > Build CPU Runtime Data, or save the asset, to rebuild and persist it."),
-                    NSLOCTEXT("WCAValidationReport", "CPURuntimeDataPrerequisiteAction", "Resolve the runtime-data prerequisite, then use Build for Runtime > Build CPU Runtime Data.")),
+                    NSLOCTEXT("WCAValidationReport", "CPURuntimeDataPrerequisiteAction", "Resolve the prepared mesh UV layout issue, then use Build for Runtime > Build CPU Runtime Data.")),
                 State.CPURuntimeData == EDWCBakeStatus::Failed);
         }
     }
@@ -816,7 +816,7 @@ FWCAValidationReport BuildWCAValidationReport(
                     bSavePending,
                     bCanBuildGPURuntimeData,
                     NSLOCTEXT("WCAValidationReport", "GPURuntimeDataAction", "Use Build for Runtime > Build GPU Runtime Data, or save the asset, to rebuild and persist it."),
-                    NSLOCTEXT("WCAValidationReport", "GPURuntimeDataPrerequisiteAction", "Resolve the runtime-data prerequisite, then use Build for Runtime > Build GPU Runtime Data.")),
+                    NSLOCTEXT("WCAValidationReport", "GPURuntimeDataPrerequisiteAction", "Resolve the prepared mesh UV layout issue, then use Build for Runtime > Build GPU Runtime Data.")),
                 State.GPURuntimeData == EDWCBakeStatus::Failed);
         }
     }
@@ -830,7 +830,7 @@ FWCAValidationReport BuildWCAValidationReport(
         bCanBuildGPURuntimeData ? EWCAValidationFixKind::BakeGPUMaps : EWCAValidationFixKind::Manual,
         bCanBuildGPURuntimeData
             ? NSLOCTEXT("WCAValidationReport", "BuildGPUDataAction", "Use Build for Runtime > Build GPU Runtime Data.")
-            : NSLOCTEXT("WCAValidationReport", "BuildGPUDataPrerequisiteAction", "Resolve the GPU runtime-data prerequisite, then use Build for Runtime > Build GPU Runtime Data."),
+            : NSLOCTEXT("WCAValidationReport", "BuildGPUDataPrerequisiteAction", "Resolve the prepared mesh UV layout issue, then use Build for Runtime > Build GPU Runtime Data."),
         BuildMapDetail(TEXT("GPU Runtime Data"), State.GPUMaps, Asset.IsBakeOutputSavePending(DWCBakeOutput::GPUMaps)),
         Asset.IsBakeOutputSavePending(DWCBakeOutput::GPUMaps));
 

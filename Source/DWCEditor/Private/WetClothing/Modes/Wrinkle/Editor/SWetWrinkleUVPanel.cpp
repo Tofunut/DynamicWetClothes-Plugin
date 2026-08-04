@@ -12,9 +12,6 @@
 void SWetWrinkleUVPanel::Construct(const FArguments& InArgs)
 {
     OnViewSettingsChanged = InArgs._OnViewSettingsChanged;
-    DisplayModeItems.Add(MakeShared<EWCAUVDisplayMode>(EWCAUVDisplayMode::Normal));
-    DisplayModeItems.Add(MakeShared<EWCAUVDisplayMode>(EWCAUVDisplayMode::OutlineOnly));
-    SelectedDisplayModeItem = DisplayModeItems[0];
 
     ChildSlot
         [SNew(SBorder)
@@ -41,16 +38,6 @@ void SWetWrinkleUVPanel::Construct(const FArguments& InArgs)
                             [SNew(SBox)
                                  .HAlign(HAlign_Right)
                                      [FWCAEditorWidgets::BuildUVViewOptionsButton(
-                                         &DisplayModeItems,
-                                         SelectedDisplayModeItem,
-                                         TAttribute<FText>::Create(
-                                             TAttribute<FText>::FGetter::CreateSP(
-                                                 this,
-                                                 &SWetWrinkleUVPanel::GetSelectedDisplayModeText)),
-                                         [this](FDisplayModeItemPtr Item)
-                                         {
-                                             HandleDisplayModeChanged(Item);
-                                         },
                                          TAttribute<float>(),
                                          TFunction<void(float)>(),
                                          TAttribute<float>::CreateLambda([this]()
@@ -78,24 +65,6 @@ void SWetWrinkleUVPanel::Construct(const FArguments& InArgs)
     ApplyViewSettings();
 }
 
-FText SWetWrinkleUVPanel::GetSelectedDisplayModeText() const
-{
-    return FWCAEditorWidgets::GetUVDisplayModeLabel(DisplayMode);
-}
-
-void SWetWrinkleUVPanel::HandleDisplayModeChanged(FDisplayModeItemPtr Item)
-{
-    if (!Item.IsValid())
-    {
-        return;
-    }
-
-    SelectedDisplayModeItem = Item;
-    DisplayMode = *Item;
-    ApplyViewSettings();
-    OnViewSettingsChanged.ExecuteIfBound();
-}
-
 void SWetWrinkleUVPanel::HandleIslandLineOpacityChanged(const float NewValue)
 {
     IslandLineOpacity = FMath::Clamp(NewValue, 0.0f, 1.0f);
@@ -114,7 +83,7 @@ void SWetWrinkleUVPanel::ApplyViewSettings()
 {
     if (UVView.IsValid())
     {
-        UVView->SetDisplayMode(DisplayMode);
+        UVView->SetDisplayMode(EWCAUVDisplayMode::Normal);
         UVView->SetUVIslandLineOpacity(IslandLineOpacity);
         UVView->SetUVIslandLineThicknessScale(IslandLineThicknessScale);
     }

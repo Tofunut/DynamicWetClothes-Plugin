@@ -9,6 +9,7 @@
 #include "Misc/PackageName.h"
 #include "Modules/ModuleManager.h"
 #include "ObjectTools.h"
+#include "Rendering/SkeletalMeshRenderData.h"
 #include "UObject/UObjectIterator.h"
 
 namespace DWCPreparedMeshResolverPrivate
@@ -89,6 +90,20 @@ FDWCPreparedMeshResolveResult FDWCPreparedMeshResolver::Resolve(
     if (SourceMesh == nullptr)
     {
         return Failure(TEXT("The Wet Clothing Asset has no Source Skeletal Mesh."));
+    }
+
+    UPackage* SourcePackage = SourceMesh->GetOutermost();
+    const bool bIsPreviewOnlyMesh = SourceMesh->HasAnyFlags(RF_Transient) || SourcePackage == GetTransientPackage() ||
+        SourcePackage == nullptr || !FPackageName::IsValidLongPackageName(SourcePackage->GetName());
+    if (bIsPreviewOnlyMesh)
+    {
+        return Failure(TEXT("The Source Skeletal Mesh is preview-only or unsaved. Assign a saved Skeletal Mesh asset before creating a WCA."));
+    }
+
+    const FSkeletalMeshRenderData* SourceRenderData = SourceMesh->GetResourceForRendering();
+    if (SourceRenderData == nullptr || SourceRenderData->LODRenderData.Num() == 0)
+    {
+        return Failure(TEXT("The Source Skeletal Mesh has no render LOD data. Wait for the mesh to finish loading, then assign the saved asset again."));
     }
 
     if (!bForceNewAsset && Asset.GetDWCSkeletalMesh() != nullptr && Asset.GetDWCSkeletalMesh() != SourceMesh)

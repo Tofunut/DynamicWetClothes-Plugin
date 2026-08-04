@@ -296,6 +296,15 @@ FDWCDataUVBuildResult FDWCDataUVBuildService::Generate(
     double SeamSplitMilliseconds = 0.0;
     double PackAndValidateMilliseconds = 0.0;
     bool bGeneratedWithWarnings = false;
+    TArray<FString> NonCanonicalLODWarnings;
+    auto AddNonCanonicalLODWarning = [&NonCanonicalLODWarnings, &bGeneratedWithWarnings](const int32 LODIndex, const FString& Warning)
+    {
+        bGeneratedWithWarnings = true;
+        NonCanonicalLODWarnings.Add(FString::Printf(
+            TEXT("LOD%d DWC UV Channel warning: %s"),
+            LODIndex,
+            *Warning));
+    };
 
     int32 DataUVChannelIndex = Asset.GetDWCDataUVChannelIndex();
     if (DataUVChannelIndex == INDEX_NONE ||
@@ -375,12 +384,26 @@ FDWCDataUVBuildResult FDWCDataUVBuildService::Generate(
         CurrentRenderData = PreparedMesh->GetResourceForRendering();
         if (CurrentRenderData == nullptr || !CurrentRenderData->LODRenderData.IsValidIndex(LODIndex))
         {
+            if (LODIndex != CanonicalDataUVLODIndex)
+            {
+                AddNonCanonicalLODWarning(
+                    LODIndex,
+                    TEXT("render data is unavailable. Temporarily skipped this non-LOD0 DWC UV Channel payload; LOD0 remains generated."));
+                continue;
+            }
             SetFailure(Result, FString::Printf(TEXT("The DWC Prepared Skeletal Mesh has no LOD%d render data."), LODIndex));
             return Result;
         }
 
         if (CurrentRenderData->LODRenderData[LODIndex].GetNumVertices() <= 0)
         {
+            if (LODIndex != CanonicalDataUVLODIndex)
+            {
+                AddNonCanonicalLODWarning(
+                    LODIndex,
+                    TEXT("render data has no vertices. Temporarily skipped this non-LOD0 DWC UV Channel payload; LOD0 remains generated."));
+                continue;
+            }
             SetFailure(Result, FString::Printf(TEXT("The DWC Prepared Skeletal Mesh LOD%d has no vertices."), LODIndex));
             return Result;
         }
@@ -400,21 +423,22 @@ FDWCDataUVBuildResult FDWCDataUVBuildService::Generate(
                 &WettableMaterialSlotIndices);
             if (!UVResult.bSucceeded)
             {
-                Result.FailedMaterialSlotIndices = UVResult.FailedMaterialSlotIndices;
-                SetFailure(Result, FString::Printf(
-                    TEXT("LOD%d DWC UV Channel generation failed: %s"),
+                AddNonCanonicalLODWarning(
                     LODIndex,
-                    *UVResult.Message));
-                return Result;
+                    FString::Printf(
+                        TEXT("generation did not pass validation, so this non-LOD0 payload was temporarily skipped instead of failing the whole build. Original failure: %s"),
+                        *UVResult.Message));
+                continue;
             }
             if (UVResult.UVChannelIndex != DataUVChannelIndex)
             {
-                SetFailure(Result, FString::Printf(
-                    TEXT("LOD%d generated DWC UV Channel %d, but this asset requires UV%d for every generated LOD."),
+                AddNonCanonicalLODWarning(
                     LODIndex,
-                    UVResult.UVChannelIndex,
-                    DataUVChannelIndex));
-                return Result;
+                    FString::Printf(
+                        TEXT("generated DWC UV Channel %d, but this asset requires UV%d. Temporarily skipped this non-LOD0 payload; LOD0 remains generated."),
+                        UVResult.UVChannelIndex,
+                        DataUVChannelIndex));
+                continue;
             }
 
             UWetClothingAsset::ClearMeshContentSignatureCache();
@@ -430,6 +454,16 @@ FDWCDataUVBuildResult FDWCDataUVBuildService::Generate(
                 Metadata,
                 &MetadataError))
         {
+            if (LODIndex != CanonicalDataUVLODIndex)
+            {
+                DataUVMetadata.RemoveAt(DataUVMetadata.Num() - 1);
+                AddNonCanonicalLODWarning(
+                    LODIndex,
+                    FString::Printf(
+                        TEXT("metadata could not be built. Temporarily skipped this non-LOD0 payload; LOD0 remains generated. Original failure: %s"),
+                        *MetadataError));
+                continue;
+            }
             SetFailure(Result, FString::Printf(
                 TEXT("LOD%d generated invalid DWC UV Channel metadata: %s"),
                 LODIndex,
@@ -551,6 +585,12 @@ FDWCDataUVBuildResult FDWCDataUVBuildService::Generate(
             Result.SplitOriginalUVIslandCount,
             Result.SelfOverlapPairCount,
             Result.BudgetFallbackIslandCount);
+
+        for (const FString& NonCanonicalLODWarning : NonCanonicalLODWarnings)
+        {
+            Result.Message += TEXT("\n\n") + NonCanonicalLODWarning;
+            UE_LOG(LogDWC, Warning, TEXT("%s"), *NonCanonicalLODWarning);
+        }
 
         for (const FDWCDataUVSlotWarning& SlotWarning : Result.SlotWarnings)
         {

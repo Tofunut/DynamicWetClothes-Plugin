@@ -7,6 +7,7 @@ namespace DWCDataUVValidatorPrivate
     struct FPackedTriangleRecord
     {
         int32 SourceTriangleIndex = INDEX_NONE;
+        int32 MeshTriangleID = INDEX_NONE;
         int32 MaterialSlotIndex = INDEX_NONE;
         int32 ChartIndex = INDEX_NONE;
         FVector2D UVs[3] = { FVector2D::ZeroVector, FVector2D::ZeroVector, FVector2D::ZeroVector };
@@ -66,6 +67,7 @@ bool FDWCDataUVValidator::Validate(
             const FDWCDataUVTriangle& Triangle = Triangles[TriangleIndex];
             FPackedTriangleRecord PackedTriangle;
             PackedTriangle.SourceTriangleIndex = TriangleIndex;
+            PackedTriangle.MeshTriangleID = Triangle.TriangleID.GetValue();
             PackedTriangle.MaterialSlotIndex = MaterialPair.Key;
             PackedTriangle.ChartIndex = ChartIndexByTriangle.FindRef(TriangleIndex);
             PackedTriangle.Bounds = FBox2D(ForceInit);
@@ -102,13 +104,30 @@ bool FDWCDataUVValidator::Validate(
                                      UV.Y >= -RangeTolerance && UV.Y <= 1.0 + RangeTolerance;
             }
 
-            if (!bValidCoordinates ||
-                FDWCUVGeometry::ComputeTriangleArea2D(PackedTriangle.UVs[0], PackedTriangle.UVs[1], PackedTriangle.UVs[2]) <= 1.0e-12)
+            const double PackedArea = FDWCUVGeometry::ComputeTriangleArea2D(
+                PackedTriangle.UVs[0],
+                PackedTriangle.UVs[1],
+                PackedTriangle.UVs[2]);
+            if (!bValidCoordinates || PackedArea <= 1.0e-12)
             {
                 OutProblemMaterialSlots.Add(MaterialPair.Key);
+                const TCHAR* Reason = bValidCoordinates
+                    ? TEXT("packed triangle area is below tolerance")
+                    : TEXT("packed UV coordinate is non-finite or outside 0-1 range");
                 OutError = FString::Printf(
-                    TEXT("Generated DWC UV contains an invalid or degenerate packed triangle in material slot %d."),
-                    MaterialPair.Key);
+                    TEXT("Generated DWC UV contains an invalid or degenerate packed triangle in material slot %d: mesh triangle id %d, generator triangle index %d, chart %d, packed area %.12g, reason: %s, packed UVs ((%.9g, %.9g), (%.9g, %.9g), (%.9g, %.9g))."),
+                    MaterialPair.Key,
+                    PackedTriangle.MeshTriangleID,
+                    PackedTriangle.SourceTriangleIndex,
+                    PackedTriangle.ChartIndex,
+                    PackedArea,
+                    Reason,
+                    PackedTriangle.UVs[0].X,
+                    PackedTriangle.UVs[0].Y,
+                    PackedTriangle.UVs[1].X,
+                    PackedTriangle.UVs[1].Y,
+                    PackedTriangle.UVs[2].X,
+                    PackedTriangle.UVs[2].Y);
                 continue;
             }
 

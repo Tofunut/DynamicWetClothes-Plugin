@@ -67,6 +67,10 @@ class FWCAEditorWidgets
   public:
     static constexpr float MaterialSlotListHeaderTopPadding = 14.0f;
     static constexpr float MaterialSlotListSeparatorBottomPadding = 10.0f;
+    static constexpr float MaterialSlotSlotColumnWidth = 42.0f;
+    static constexpr float MaterialSlotThumbnailColumnWidth = 112.0f;
+    static constexpr float MaterialSlotDataUVColumnWidth = 104.0f;
+    static constexpr float MaterialSlotWettableColumnWidth = 76.0f;
 
     static TSharedRef<SWidget> BuildSectionHeader(const TAttribute<FText>& Title, const TAttribute<FText>& Detail = TAttribute<FText>());
     static TSharedRef<SWidget> BuildPreviewSection(

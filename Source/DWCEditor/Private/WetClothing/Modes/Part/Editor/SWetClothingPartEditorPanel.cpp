@@ -396,7 +396,7 @@ void SWetClothingPartEditorPanel::Construct(const FArguments& InArgs)
 
          // Column 1: Target Mesh / UV Channel / Material Slots / Wet Part Map.
          + SSplitter::Slot()
-               .Value(0.25f)
+               .Value(0.30f)
                    [SNew(SBorder)
                         .Padding(10.0f)
                             [SNew(SVerticalBox)
@@ -462,7 +462,7 @@ void SWetClothingPartEditorPanel::Construct(const FArguments& InArgs)
                                                                              .AutoWidth()
                                                                              .Padding(0.0f, 0.0f, 8.0f, 0.0f)
                                                                                  [SNew(SBox)
-                                                                                      .WidthOverride(42.0f)
+                                                                                      .WidthOverride(FWCAEditorWidgets::MaterialSlotSlotColumnWidth)
                                                                                       .HAlign(HAlign_Center)
                                                                                       .VAlign(VAlign_Center)
                                                                                           [SNew(STextBlock)
@@ -481,7 +481,7 @@ void SWetClothingPartEditorPanel::Construct(const FArguments& InArgs)
                                                                              .AutoWidth()
                                                                              .Padding(0.0f, 0.0f, 10.0f, 0.0f)
                                                                                  [SNew(SBox)
-                                                                                      .WidthOverride(112.0f)
+                                                                                      .WidthOverride(FWCAEditorWidgets::MaterialSlotThumbnailColumnWidth)
                                                                                       .HAlign(HAlign_Left)
                                                                                       .VAlign(VAlign_Center)
                                                                                           [SNew(STextBlock)
@@ -501,7 +501,7 @@ void SWetClothingPartEditorPanel::Construct(const FArguments& InArgs)
                                                                        + SHorizontalBox::Slot()
                                                                              .AutoWidth()
                                                                                  [SNew(SBox)
-                                                                                      .WidthOverride(104.0f)
+                                                                                      .WidthOverride(FWCAEditorWidgets::MaterialSlotDataUVColumnWidth)
                                                                                       .HAlign(HAlign_Center)
                                                                                       .VAlign(VAlign_Center)
                                                                                           [SNew(STextBlock)
@@ -511,7 +511,7 @@ void SWetClothingPartEditorPanel::Construct(const FArguments& InArgs)
                                                                        + SHorizontalBox::Slot()
                                                                              .AutoWidth()
                                                                                  [SNew(SBox)
-                                                                                      .WidthOverride(76.0f)
+                                                                                      .WidthOverride(FWCAEditorWidgets::MaterialSlotWettableColumnWidth)
                                                                                       .HAlign(HAlign_Center)
                                                                                       .VAlign(VAlign_Center)
                                                                                           [SNew(STextBlock)
@@ -626,7 +626,7 @@ void SWetClothingPartEditorPanel::Construct(const FArguments& InArgs)
 
          // Column 2: UV View, with UV Islands directly underneath.
          + SSplitter::Slot()
-               .Value(0.375f)
+               .Value(0.35f)
                    [SNew(SBorder)
                         .Padding(8.0f)
                             [SNew(SSplitter)
@@ -871,7 +871,7 @@ void SWetClothingPartEditorPanel::Construct(const FArguments& InArgs)
 
          // Column 3: Preview.
          + SSplitter::Slot()
-               .Value(0.375f)
+               .Value(0.35f)
                    [FWCAEditorWidgets::BuildPreviewSection(
                        SNew(SOverlay)
 
@@ -2402,6 +2402,10 @@ FReply SWetClothingPartEditorPanel::HandleDataUVOperationClicked()
     PersistDataUVFailureState();
     Asset->MarkPackageDirty();
     RefreshFromAsset();
+    if (BuildResult.bGeneratedWithWarnings && !BuildResult.Message.IsEmpty())
+    {
+        FMessageDialog::Open(EAppMsgType::Ok, FText::FromString(BuildResult.Message));
+    }
     return FReply::Handled();
 }
 

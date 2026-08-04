@@ -4,6 +4,7 @@
 #include "Framework/Commands/UIAction.h"
 #include "WetClothing/WCAEditor/WCAEditorMode.h"
 #include "WetClothing/WCAEditor/WCAEditorTypes.h"
+#include "WetClothing/WCAEditor/UI/UVView/SWCAUVView.h"
 #include "Widgets/Input/SComboBox.h"
 #include "Widgets/Input/SEditableTextBox.h"
 
@@ -28,6 +29,7 @@ struct FWCAMaterialSlotRowArgs
     TSharedPtr<FAssetThumbnailPool> ThumbnailPool;
     TArray<TSharedPtr<FAssetThumbnail>>* ThumbnailSink = nullptr;
     FText AllSlotsTitle;
+    FText AllSlotsTooltip;
     bool bShowWettableToggle = true;
     FOnWettableMaterialSlotClicked OnWettableSlotClicked;
     TFunction<bool(int32)> IsWettableToggleEnabled;
@@ -41,6 +43,8 @@ struct FWCAMaterialSlotRowArgs
     TFunction<FSlateColor(int32)> GetMaterialSlotRowAccentColor;
     TFunction<TSharedRef<SWidget>(int32)> BuildThumbnailWidget;
     TFunction<TSharedRef<SWidget>(int32)> BuildLeadingWidget;
+    TFunction<bool(int32)> IsMaterialSlotEnabled;
+    TFunction<FText(int32)> GetMaterialSlotTooltipText;
     TFunction<TSharedRef<SWidget>(int32)> BuildTrailingWidget;
 };
 
@@ -113,6 +117,22 @@ class FWCAEditorWidgets
         TAttribute<float> UVIslandLineThicknessScale,
         TFunction<void(float)> OnUVIslandLineThicknessScaleChanged,
         bool bShowBackgroundTextureControls = true);
+
+    static TSharedRef<SWidget> BuildUVViewOptionsButton(
+        TArray<TSharedPtr<EWCAUVDisplayMode>>* DisplayModeItems,
+        TSharedPtr<EWCAUVDisplayMode> SelectedDisplayModeItem,
+        TAttribute<FText> SelectedDisplayModeText,
+        TFunction<void(TSharedPtr<EWCAUVDisplayMode>)> OnDisplayModeChanged,
+        TAttribute<float> BackgroundTextureOpacity,
+        TFunction<void(float)> OnBackgroundTextureOpacityChanged,
+        TAttribute<float> UVIslandLineOpacity,
+        TFunction<void(float)> OnUVIslandLineOpacityChanged,
+        TAttribute<float> UVIslandLineThicknessScale,
+        TFunction<void(float)> OnUVIslandLineThicknessScaleChanged,
+        bool bShowBackgroundTextureControls = true);
+
+    static TSharedRef<SWidget> GenerateUVDisplayModeComboItem(TSharedPtr<EWCAUVDisplayMode> Item);
+    static FText GetUVDisplayModeLabel(EWCAUVDisplayMode DisplayMode);
 
     static TSharedRef<ITableRow> GenerateMaterialSlotRow(
         TSharedPtr<FWCAMaterialSlotItem> Item,

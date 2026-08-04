@@ -4,19 +4,21 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "Engine/World.h"
 #include "InputCoreTypes.h"
-#include "SceneView.h"
 #include "SEditorViewport.h"
+#include "WetClothing/Foundation/Input/DWCEditorInteractiveToolsHost.h"
 #include "WetClothing/Modes/DWCPreviewViewportToolbarUtils.h"
 #include "WetWrinkleViewport.h"
 
 FWetWrinkleViewportClient::FWetWrinkleViewportClient(
     FAdvancedPreviewScene* InPreviewScene,
-    const TSharedRef<SWetWrinkleViewport>& InViewportWidget)
+    const TSharedRef<SWetWrinkleViewport>& InViewportWidget,
+    FDWCEditorInteractiveToolsHost* InInputToolsHost)
     : FEditorViewportClient(
-          nullptr,
+          InInputToolsHost != nullptr ? InInputToolsHost->GetModeTools() : nullptr,
           InPreviewScene,
           StaticCastSharedRef<SEditorViewport>(InViewportWidget)),
       PreviewScene(InPreviewScene),
+      InputToolsHost(InInputToolsHost),
       ViewportWidget(InViewportWidget)
 {
     SetViewMode(VMI_Lit);
@@ -62,121 +64,12 @@ void FWetWrinkleViewportClient::Tick(float DeltaSeconds)
 
 bool FWetWrinkleViewportClient::InputKey(const FInputKeyEventArgs& EventArgs)
 {
-    if (EventArgs.Key == EKeys::Escape && EventArgs.Event == IE_Pressed && bIsPainting)
+    if (EventArgs.Key == EKeys::Escape && EventArgs.Event == IE_Pressed &&
+        InputToolsHost != nullptr && InputToolsHost->CancelActiveInteraction())
     {
-        if (const TSharedPtr<SWetWrinkleViewport> PinnedViewport = ViewportWidget.Pin())
-        {
-            PinnedViewport->CancelPaintStrokeFromClient();
-        }
-        bIsPainting = false;
         return true;
     }
-
-    const bool bIsLeftMouseButton = EventArgs.Key == EKeys::LeftMouseButton;
-    const bool bIsCameraModifierDown =
-        Viewport != nullptr &&
-        (Viewport->KeyState(EKeys::LeftAlt) || Viewport->KeyState(EKeys::RightAlt));
-
-    if (bIsLeftMouseButton && EventArgs.Event == IE_Released && bIsPainting)
-    {
-        if (const TSharedPtr<SWetWrinkleViewport> PinnedViewport = ViewportWidget.Pin())
-        {
-            PinnedViewport->EndPaintStrokeFromClient();
-        }
-
-        bIsPainting = false;
-        return true;
-    }
-
-    if (bIsLeftMouseButton && EventArgs.Event == IE_Pressed && !bIsCameraModifierDown)
-    {
-        FWetWrinkleSurfaceHit SurfaceHit;
-        if (TraceSurfaceUnderCursor(SurfaceHit))
-        {
-            if (const TSharedPtr<SWetWrinkleViewport> PinnedViewport = ViewportWidget.Pin())
-            {
-                PinnedViewport->HandleSurfaceHitFromClient(SurfaceHit);
-                PinnedViewport->BeginPaintStrokeFromClient(SurfaceHit);
-                bHasCurrentSurfaceHit = true;
-                bIsPainting = true;
-                return true;
-            }
-        }
-    }
-
     return FEditorViewportClient::InputKey(EventArgs);
-}
-
-void FWetWrinkleViewportClient::MouseMove(FViewport* InViewport, int32 X, int32 Y)
-{
-    FEditorViewportClient::MouseMove(InViewport, X, Y);
-    UpdateSurfaceHitUnderCursor();
-}
-
-void FWetWrinkleViewportClient::CapturedMouseMove(FViewport* InViewport, int32 X, int32 Y)
-{
-    if (bIsPainting)
-    {
-        FWetWrinkleSurfaceHit SurfaceHit;
-        if (TraceSurfaceUnderCursor(SurfaceHit))
-        {
-            if (const TSharedPtr<SWetWrinkleViewport> PinnedViewport = ViewportWidget.Pin())
-            {
-                PinnedViewport->HandleSurfaceHitFromClient(SurfaceHit);
-                PinnedViewport->RequestPaintStampFromClient(SurfaceHit);
-                bHasCurrentSurfaceHit = true;
-            }
-        }
-        else
-        {
-            ClearSurfaceHit();
-        }
-        return;
-    }
-
-    FEditorViewportClient::CapturedMouseMove(InViewport, X, Y);
-    UpdateSurfaceHitUnderCursor();
-}
-
-void FWetWrinkleViewportClient::ProcessClick(FSceneView& View, HHitProxy* HitProxy, FKey Key, EInputEvent Event, uint32 HitX, uint32 HitY)
-{
-    FEditorViewportClient::ProcessClick(View, HitProxy, Key, Event, HitX, HitY);
-
-    if (Key == EKeys::LeftMouseButton && Event == IE_Released && bIsPainting)
-    {
-        if (const TSharedPtr<SWetWrinkleViewport> PinnedViewport = ViewportWidget.Pin())
-        {
-            PinnedViewport->EndPaintStrokeFromClient();
-        }
-
-        bIsPainting = false;
-        return;
-    }
-
-    if (Key == EKeys::LeftMouseButton && (Event == IE_Pressed || Event == IE_Released))
-    {
-        FVector RayOrigin = FVector::ZeroVector;
-        FVector RayDirection = FVector::ForwardVector;
-        View.DeprojectFVector2D(FVector2D(HitX, HitY), RayOrigin, RayDirection);
-
-        if (const TSharedPtr<SWetWrinkleViewport> PinnedViewport = ViewportWidget.Pin())
-        {
-            FWetWrinkleSurfaceHit SurfaceHit;
-            if (PinnedViewport->TraceSurface(RayOrigin, RayDirection, SurfaceHit))
-            {
-                PinnedViewport->HandleSurfaceHitFromClient(SurfaceHit);
-                if (Event == IE_Pressed && !bIsPainting)
-                {
-                    PinnedViewport->BeginPaintStrokeFromClient(SurfaceHit);
-                    bIsPainting = true;
-                }
-                bHasCurrentSurfaceHit = true;
-                return;
-            }
-        }
-    }
-
-    ClearSurfaceHit();
 }
 
 void FWetWrinkleViewportClient::Draw(const FSceneView* View, FPrimitiveDrawInterface* PDI)
@@ -239,50 +132,3 @@ void FWetWrinkleViewportClient::SetPreviewMeshComponent(const USkeletalMeshCompo
     PreviewMeshComponent = InPreviewMeshComponent;
 }
 
-void FWetWrinkleViewportClient::UpdateSurfaceHitUnderCursor()
-{
-    FWetWrinkleSurfaceHit SurfaceHit;
-    if (TraceSurfaceUnderCursor(SurfaceHit))
-    {
-        if (const TSharedPtr<SWetWrinkleViewport> PinnedViewport = ViewportWidget.Pin())
-        {
-            PinnedViewport->HandleSurfaceHitFromClient(SurfaceHit);
-            bHasCurrentSurfaceHit = true;
-            return;
-        }
-    }
-
-    ClearSurfaceHit();
-}
-
-bool FWetWrinkleViewportClient::TraceSurfaceUnderCursor(FWetWrinkleSurfaceHit& OutSurfaceHit)
-{
-    if (Viewport == nullptr || PreviewMeshComponent.Get() == nullptr)
-    {
-        return false;
-    }
-
-    const FViewportCursorLocation Cursor = GetCursorWorldLocationFromMousePos();
-
-    if (const TSharedPtr<SWetWrinkleViewport> PinnedViewport = ViewportWidget.Pin())
-    {
-        return PinnedViewport->TraceSurface(Cursor.GetOrigin(), Cursor.GetDirection(), OutSurfaceHit);
-    }
-
-    return false;
-}
-
-void FWetWrinkleViewportClient::ClearSurfaceHit()
-{
-    if (!bHasCurrentSurfaceHit)
-    {
-        return;
-    }
-
-    bHasCurrentSurfaceHit = false;
-
-    if (const TSharedPtr<SWetWrinkleViewport> PinnedViewport = ViewportWidget.Pin())
-    {
-        PinnedViewport->HandleSurfaceHitFromClient(FWetWrinkleSurfaceHit());
-    }
-}

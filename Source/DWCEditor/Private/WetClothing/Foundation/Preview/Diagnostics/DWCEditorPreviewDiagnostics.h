@@ -1,0 +1,48 @@
+#pragma once
+
+#include "CoreMinimal.h"
+
+class FDWCEditorPreviewSession;
+class UTexture2D;
+
+DECLARE_LOG_CATEGORY_EXTERN(LogDWCEditorPreview, Log, All);
+
+struct FDWCEditorPreviewMemoryBucket
+{
+    FString Name;
+    uint64 UsedBytes = 0;
+    uint64 BudgetBytes = 0;
+    int32 EntryCount = 0;
+    uint64 HitCount = 0;
+    uint64 MissCount = 0;
+    uint64 EvictionCount = 0;
+    int32 ActiveLeaseCount = 0;
+    int32 RetiredEntryCount = 0;
+};
+
+struct FDWCEditorPreviewOperationCounter
+{
+    FString Name;
+    uint64 Count = 0;
+    uint64 Bytes = 0;
+};
+
+using FDWCEditorPreviewMemoryCollector =
+    TFunction<void(TArray<FDWCEditorPreviewMemoryBucket>&)>;
+using FDWCEditorPreviewOperationCollector =
+    TFunction<void(TArray<FDWCEditorPreviewOperationCounter>&)>;
+using FDWCEditorPreviewDiagnosticResetter = TFunction<void()>;
+
+/** On-demand diagnostics for active editor preview sessions. */
+class FDWCEditorPreviewDiagnostics final
+{
+  public:
+    static void RegisterSession(FDWCEditorPreviewSession* Session);
+    static void UnregisterSession(FDWCEditorPreviewSession* Session);
+    static void DumpAllSessions();
+    static void ResetAllCounters();
+
+    /** CPU source plus estimated resident resource bytes; intended for diagnostics only. */
+    static uint64 EstimateTextureBytes(const UTexture2D* Texture);
+    static FString FormatBytes(uint64 Bytes);
+};

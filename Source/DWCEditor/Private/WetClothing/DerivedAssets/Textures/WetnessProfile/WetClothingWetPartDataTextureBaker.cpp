@@ -125,13 +125,21 @@ namespace
         });
     }
 
-    FString MakeSlotSignature(const FString& GlobalSignature, const int32 MaterialSlotIndex)
+}
+
+FString FWetClothingWetPartDataTextureBaker::MakeSlotBuildSignature(
+    const FString& GlobalSignature,
+    const int32 MaterialSlotIndex)
+{
+    if (GlobalSignature.IsEmpty() || MaterialSlotIndex == INDEX_NONE)
     {
-        return FMD5::HashAnsiString(*FString::Printf(
-            TEXT("DWC.WetPartDataTexture.Slot.v7|Global=%s|Slot=%d"),
-            *GlobalSignature,
-            MaterialSlotIndex));
+        return FString();
     }
+
+    return FMD5::HashAnsiString(*FString::Printf(
+        TEXT("DWC.WetPartDataTexture.Slot.v7|Global=%s|Slot=%d"),
+        *GlobalSignature,
+        MaterialSlotIndex));
 }
 
 bool FWetClothingWetPartDataTextureBaker::ResolveProfileParameters(
@@ -650,7 +658,7 @@ bool FWetClothingWetPartDataTextureBaker::Bake(
         FWetClothingBakedWetPartDataSlotTexture& BakedSlot = BakedSlotTextures.AddDefaulted_GetRef();
         BakedSlot.MaterialSlotIndex = MaterialSlotIndex;
         BakedSlot.WetPartDataTexture = WetPartDataTexture;
-        BakedSlot.BuildSignature = MakeSlotSignature(MakeBuildSignature(WetClothingAsset), MaterialSlotIndex);
+        BakedSlot.BuildSignature = MakeSlotBuildSignature(MakeBuildSignature(WetClothingAsset), MaterialSlotIndex);
         BakedSlot.BakeGuid = FGuid::NewGuid();
 
         FWetClothingWetPartDataSlotBakeResult& SlotResult = OutResult.SlotResults.AddDefaulted_GetRef();

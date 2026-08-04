@@ -9,6 +9,7 @@
 #include "PropertyEditorModule.h"
 #include "WetClothing/DerivedAssets/Materials/WCAMaterialGenerator.h"
 #include "WetClothing/DerivedAssets/Textures/WetnessProfile/WetClothingSurfaceTextureNormalizer.h"
+#include "WetClothing/Foundation/Preview/Diagnostics/DWCEditorPreviewDiagnostics.h"
 #include "WetnessProfile/Editor/WetnessProfileDetailsCustomization.h"
 #include "UObject/UnrealType.h"
 
@@ -41,6 +42,18 @@ class FDWCEditorModule : public IModuleInterface
             FConsoleCommandWithArgsDelegate::CreateRaw(this, &FDWCEditorModule::ExtractSkeletalMeshMaterialSlot),
             ECVF_Default);
 
+        DumpEditorPreviewStatsCommand = IConsoleManager::Get().RegisterConsoleCommand(
+            TEXT("DWC.EditorPreview.DumpStats"),
+            TEXT("Dumps memory and cache statistics for active DWC editor preview sessions."),
+            FConsoleCommandDelegate::CreateStatic(&FDWCEditorPreviewDiagnostics::DumpAllSessions),
+            ECVF_Default);
+
+        ResetEditorPreviewStatsCommand = IConsoleManager::Get().RegisterConsoleCommand(
+            TEXT("DWC.EditorPreview.ResetStats"),
+            TEXT("Resets counters for active DWC editor preview sessions without clearing their caches."),
+            FConsoleCommandDelegate::CreateStatic(&FDWCEditorPreviewDiagnostics::ResetAllCounters),
+            ECVF_Default);
+
         FDWCSkeletalMeshMaterialSlotExtractor::RegisterContentBrowserMenu(this);
         ObjectPropertyChangedHandle = FCoreUObjectDelegates::OnObjectPropertyChanged.AddRaw(
             this,
@@ -56,6 +69,18 @@ class FDWCEditorModule : public IModuleInterface
         }
 
         FDWCSkeletalMeshMaterialSlotExtractor::UnregisterContentBrowserMenu(this);
+
+        if (ResetEditorPreviewStatsCommand != nullptr)
+        {
+            IConsoleManager::Get().UnregisterConsoleObject(ResetEditorPreviewStatsCommand);
+            ResetEditorPreviewStatsCommand = nullptr;
+        }
+
+        if (DumpEditorPreviewStatsCommand != nullptr)
+        {
+            IConsoleManager::Get().UnregisterConsoleObject(DumpEditorPreviewStatsCommand);
+            DumpEditorPreviewStatsCommand = nullptr;
+        }
 
         if (ExtractSkeletalMeshMaterialSlotCommand != nullptr)
         {
@@ -144,7 +169,6 @@ class FDWCEditorModule : public IModuleInterface
             return;
         }
 
-        UE_LOG(LogTemp, Display, TEXT("MF_DWC_EvaluateSurfaceAppearance satisfies the DWC runtime material-function contract."));
     }
 
     void ExtractSkeletalMeshMaterialSlot(const TArray<FString>& Args)
@@ -180,6 +204,8 @@ class FDWCEditorModule : public IModuleInterface
 
     IConsoleObject* ValidateSurfaceAppearanceFunctionsCommand = nullptr;
     IConsoleObject* ExtractSkeletalMeshMaterialSlotCommand = nullptr;
+    IConsoleObject* DumpEditorPreviewStatsCommand = nullptr;
+    IConsoleObject* ResetEditorPreviewStatsCommand = nullptr;
     FDelegateHandle ObjectPropertyChangedHandle;
 
 };

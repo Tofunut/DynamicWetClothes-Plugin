@@ -415,11 +415,6 @@ void UDWCStatsSubsystem::CollectStats(FDWCStatsSnapshot& OutSnapshot)
             const UWetClothingAsset* WetClothingAsset = Receiver->WetClothingAsset.Get();
             if (WetClothingAsset != nullptr && Receiver->RenderStage.IsValid())
             {
-                const int32 PreferredWrinkleUVChannel =
-                    WetClothingAsset->Authored.WrinkleData.WrinkleUVChannelIndex != INDEX_NONE
-                        ? WetClothingAsset->Authored.WrinkleData.WrinkleUVChannelIndex
-                        : 0;
-
                 for (int32 MaterialSlotIndex = 0; MaterialSlotIndex < Receiver->RenderStage->WetMaterialInstances.Num(); ++MaterialSlotIndex)
                 {
                     if (Receiver->RenderStage->WetMaterialInstances[MaterialSlotIndex] == nullptr ||
@@ -429,14 +424,9 @@ void UDWCStatsSubsystem::CollectStats(FDWCStatsSnapshot& OutSnapshot)
                     }
 
                     const FWetWrinkleResolvedNormalMap WrinkleMap =
-                        WetClothingAsset->Authored.WrinkleData.ResolveRuntimeWrinkleNormalMap(
-                            MaterialSlotIndex,
-                            PreferredWrinkleUVChannel,
-                            UWetClothingAsset::RuntimeSimulationLODIndex);
+                        WetClothingAsset->Authored.WrinkleData.ResolveRuntimeWrinkleNormalMap(MaterialSlotIndex);
                     if (WrinkleMap.IsValid() &&
-                        WrinkleMap.Texture != nullptr &&
-                        WrinkleMap.UVChannelIndex == PreferredWrinkleUVChannel &&
-                        WrinkleMap.LODIndex == UWetClothingAsset::RuntimeSimulationLODIndex)
+                        WrinkleMap.Texture != nullptr)
                     {
                         ++OutSnapshot.WrinkleMaterialBindingCount;
                         AddUniqueResidentTexture(
@@ -446,26 +436,10 @@ void UDWCStatsSubsystem::CollectStats(FDWCStatsSnapshot& OutSnapshot)
                             OutSnapshot.WrinkleTextureGPUBytes);
                     }
 
-                    const FWetClothingTransparencyLayerData* TransparencyLayer =
-                        WetClothingAsset->Authored.TransparencyData.TransparencyLayers.FindByPredicate(
-                            [MaterialSlotIndex](const FWetClothingTransparencyLayerData& Candidate)
-                            {
-                                return Candidate.TargetSurface.OuterMaterialSlotIndex == MaterialSlotIndex;
-                            });
-                    if (TransparencyLayer == nullptr)
-                    {
-                        continue;
-                    }
-
                     const FWetClothingBakedTransparencyMap* TransparencyMap =
-                        WetClothingAsset->Authored.TransparencyData.FindRuntimeBakedTransparencyMap(
-                            MaterialSlotIndex,
-                            TransparencyLayer->TargetSurface.OuterUVChannel,
-                            UWetClothingAsset::RuntimeSimulationLODIndex);
+                        WetClothingAsset->Authored.TransparencyData.FindRuntimeBakedTransparencyMap(MaterialSlotIndex);
                     if (TransparencyMap == nullptr ||
-                        TransparencyMap->TransparencyMap == nullptr ||
-                        TransparencyMap->UVChannelIndex < 0 ||
-                        TransparencyMap->UVChannelIndex > 3)
+                        TransparencyMap->TransparencyMap == nullptr)
                     {
                         continue;
                     }

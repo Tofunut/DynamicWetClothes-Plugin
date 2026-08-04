@@ -302,17 +302,6 @@ bool FWetRuntimeDataBuilder::InitializeWetPartVertexDataFromPrecomputedData(
             PrecomputedWettableVertexCount,
             *GetNameSafe(Receiver.OwnerForLogs));
     }
-    else
-    {
-        UE_LOG(
-            LogTemp,
-            Log,
-            TEXT("DynamicWetClothesComponent: Initialized %d wettable vertices from %d precomputed wettable vertices on %s."),
-            RuntimeWettableVertexCount,
-            PrecomputedWettableVertexCount,
-            *GetNameSafe(Receiver.OwnerForLogs));
-    }
-
     return true;
 }
 

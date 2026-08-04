@@ -1,8 +1,5 @@
 #include "WetClothing/Modes/Transparency/RevealBake/DWCRevealBakeSurfaceCache.h"
 
-#include "WetClothing/Modes/Transparency/RevealBake/DWCRevealBakeLog.h"
-#include "WetClothing/Modes/Transparency/RevealBake/DWCRevealBakeUtilities.h"
-
 uint32 GetTypeHash(const FDWCRevealBakeSurfaceCacheKey& Key)
 {
     uint32 Hash = ::GetTypeHash(Key.LayerIndex);
@@ -21,17 +18,9 @@ const FDWCRevealBakeSurface* FDWCRevealBakeSurfaceCache::FindOrBuild(
     const FDWCRevealBakeSurfaceCacheKey Key{ LayerIndex, LODIndex, UVChannelIndex };
     if (const FDWCRevealBakeSurface* CachedSurface = Surfaces.Find(Key))
     {
-        UE_LOG(
-            LogDWCRevealBake,
-            Log,
-            TEXT("DWC Reveal Bake: Surface cache hit. Layer='%s', LOD=%d, UV=%d."),
-            *Layer.LayerId.ToString(),
-            LODIndex,
-            UVChannelIndex);
         return CachedSurface;
     }
 
-    const double BuildStartTime = FPlatformTime::Seconds();
     FDWCRevealBakeSurface BuiltSurface;
     if (!FDWCRevealBakeSurfaceBuilder::BuildReferencePoseSurface(
             Layer,
@@ -42,16 +31,6 @@ const FDWCRevealBakeSurface* FDWCRevealBakeSurfaceCache::FindOrBuild(
     {
         return nullptr;
     }
-
-    UE_LOG(
-        LogDWCRevealBake,
-        Log,
-        TEXT("DWC Reveal Bake: Surface build. Layer='%s', LOD=%d, UV=%d, Triangles=%d, Time=%.2f ms."),
-        *Layer.LayerId.ToString(),
-        LODIndex,
-        UVChannelIndex,
-        BuiltSurface.Triangles.Num(),
-        FDWCRevealBakeUtilities::GetElapsedMilliseconds(BuildStartTime));
 
     return &Surfaces.Add(Key, MoveTemp(BuiltSurface));
 }

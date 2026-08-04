@@ -41,15 +41,6 @@ enum class EDWCTransparencyRevealColorBrushMode : uint8
     Smooth UMETA(DisplayName = "Smooth")
 };
 
-UENUM()
-enum class EDWCTransparencyBakedMapMatch : uint8
-{
-    None,
-    ExactSlotUVLOD,
-    SlotUVFallback,
-    SlotFallback
-};
-
 USTRUCT(BlueprintType)
 struct DWC_API FDWCTransparencyBrushSample
 {
@@ -86,9 +77,6 @@ struct DWC_API FDWCTransparencyBrushStroke
     int32 MaterialSlotIndex = INDEX_NONE;
 
     UPROPERTY(EditAnywhere, Category = "Transparency Brush")
-    int32 UVChannelIndex = 0;
-
-    UPROPERTY(EditAnywhere, Category = "Transparency Brush")
     EDWCTransparencyUVAddressMode UVAddressMode = EDWCTransparencyUVAddressMode::Clamp;
 
     UPROPERTY(EditAnywhere, Category = "Transparency Brush")
@@ -121,9 +109,6 @@ struct DWC_API FDWCTransparencyRevealColorStroke
 
     UPROPERTY(EditAnywhere, Category = "Transparency Reveal Color Paint")
     int32 MaterialSlotIndex = INDEX_NONE;
-
-    UPROPERTY(EditAnywhere, Category = "Transparency Reveal Color Paint")
-    int32 UVChannelIndex = 0;
 
     UPROPERTY(EditAnywhere, Category = "Transparency Reveal Color Paint")
     EDWCTransparencyUVAddressMode UVAddressMode = EDWCTransparencyUVAddressMode::Clamp;
@@ -177,9 +162,6 @@ struct DWC_API FWetClothingTransparencyTargetSurface
 
     UPROPERTY(VisibleAnywhere, Category = "Transparency Outer Slot")
     FName OuterMaterialSlotName;
-
-    UPROPERTY(EditAnywhere, Category = "Transparency Outer Slot", meta = (ClampMin = "0"))
-    int32 OuterUVChannel = 0;
 
     UPROPERTY(EditAnywhere, Category = "Transparency Outer Slot")
     EDWCTransparencyUVAddressMode UVAddressMode = EDWCTransparencyUVAddressMode::Clamp;
@@ -241,9 +223,6 @@ struct DWC_API FWetClothingTransparencyAutoBakeMetadata
     FString BuildSignature;
 
     UPROPERTY(VisibleAnywhere, Category = "Transparency Auto Bake")
-    int32 LODIndex = 0;
-
-    UPROPERTY(VisibleAnywhere, Category = "Transparency Auto Bake")
     int32 Resolution = 1024;
 
     UPROPERTY(VisibleAnywhere, Category = "Transparency Auto Bake")
@@ -263,12 +242,6 @@ struct DWC_API FWetClothingBakedTransparencyMap
 
     UPROPERTY(VisibleAnywhere, Category = "Baked Transparency")
     int32 MaterialSlotIndex = INDEX_NONE;
-
-    UPROPERTY(VisibleAnywhere, Category = "Baked Transparency")
-    int32 UVChannelIndex = 0;
-
-    UPROPERTY(VisibleAnywhere, Category = "Baked Transparency")
-    int32 LODIndex = 0;
 
     UPROPERTY(VisibleAnywhere, Category = "Baked Transparency")
     TObjectPtr<UTexture2D> TransparencyMap = nullptr;
@@ -422,25 +395,15 @@ struct DWC_API FWetClothingTransparencyData
     UPROPERTY(EditAnywhere, Category = "Multi-Mesh Source")
     TSoftClassPtr<AActor> SourceBlueprintClass;
 
-    FWetClothingTransparencyLayerData* FindTransparencyLayer(int32 MaterialSlotIndex, int32 UVChannelIndex);
-    const FWetClothingTransparencyLayerData* FindTransparencyLayer(int32 MaterialSlotIndex, int32 UVChannelIndex) const;
+    FWetClothingTransparencyLayerData* FindTransparencyLayer(int32 MaterialSlotIndex);
+    const FWetClothingTransparencyLayerData* FindTransparencyLayer(int32 MaterialSlotIndex) const;
 
-    const FWetClothingBakedTransparencyMap* FindBakedTransparencyMap(
-        int32 MaterialSlotIndex,
-        int32 PreferredUVChannelIndex = INDEX_NONE,
-        int32 PreferredLODIndex = INDEX_NONE,
-        EDWCTransparencyBakedMapMatch* OutMatch = nullptr) const;
+    const FWetClothingBakedTransparencyMap* FindBakedTransparencyMap(int32 MaterialSlotIndex) const;
 
-    /** Runtime lookup never falls back across UV channels or LODs and rejects stale baked output. */
-    const FWetClothingBakedTransparencyMap* FindRuntimeBakedTransparencyMap(
-        int32 MaterialSlotIndex,
-        int32 DWCDataUVChannelIndex,
-        int32 LODIndex) const;
+    /** Runtime lookup rejects stale baked output for the requested material slot. */
+    const FWetClothingBakedTransparencyMap* FindRuntimeBakedTransparencyMap(int32 MaterialSlotIndex) const;
 
-    UTexture2D* ResolveBakedTransparencyMap(
-        int32 MaterialSlotIndex,
-        int32 PreferredUVChannelIndex = INDEX_NONE,
-        int32 PreferredLODIndex = INDEX_NONE) const;
+    UTexture2D* ResolveBakedTransparencyMap(int32 MaterialSlotIndex) const;
 };
 
 class DWC_API FWetClothingTransparencyDataHelpers
@@ -450,5 +413,5 @@ class DWC_API FWetClothingTransparencyDataHelpers
         const USkeletalMesh* TargetMesh,
         const FWetClothingTransparencyLayerData& Layer,
         TArray<FString>& OutErrors,
-        int32 LODIndex = 0);
+        int32 DWCDataUVChannelIndex);
 };

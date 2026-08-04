@@ -151,12 +151,10 @@ namespace
     void CollectWrinkleMaterialSlots(const UWetClothingAsset& Asset, TSet<int32>& OutMaterialSlots)
     {
         const FWetClothingWrinkleData& WrinkleData = Asset.Authored.WrinkleData;
-        const int32 UVChannelIndex = Asset.GetDWCDataUVChannelIndex();
         for (const FWetWrinklePatchPlacement& Patch : WrinkleData.EditablePatches)
         {
             if ((!Patch.bEnabled && !WrinkleData.BakeSettings.bIncludeDisabledPatches) ||
                 Patch.MaterialSlotIndex == INDEX_NONE ||
-                Patch.UVChannelIndex != UVChannelIndex ||
                 !Asset.IsMaterialSlotWettable(Patch.MaterialSlotIndex))
             {
                 continue;
@@ -167,7 +165,6 @@ namespace
         {
             if ((!Stroke.bEnabled && !WrinkleData.BakeSettings.bIncludeDisabledPatches) ||
                 Stroke.MaterialSlotIndex == INDEX_NONE ||
-                Stroke.UVChannelIndex != UVChannelIndex ||
                 !Asset.IsMaterialSlotWettable(Stroke.MaterialSlotIndex))
             {
                 continue;
@@ -872,7 +869,7 @@ FWCAValidationReport BuildWCAValidationReport(
         CollectWrinkleMaterialSlots(Asset, WrinkleMaterialSlots);
         for (const int32 MaterialSlotIndex : WrinkleMaterialSlots)
         {
-            if (!Asset.Authored.WrinkleData.IsUsingCustomWrinkleNormalMap(MaterialSlotIndex, Asset.GetDWCDataUVChannelIndex(), UWetClothingAsset::RuntimeSimulationLODIndex) &&
+            if (!Asset.Authored.WrinkleData.IsUsingCustomWrinkleNormalMap(MaterialSlotIndex) &&
                 !FWetWrinkleNormalMapBaker::IsMaterialSlotBakeCurrent(&Asset, MaterialSlotIndex))
             {
                 AddIssue(

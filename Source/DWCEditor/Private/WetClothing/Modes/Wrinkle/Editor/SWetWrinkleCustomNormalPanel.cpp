@@ -2,10 +2,10 @@
 
 #include "AssetRegistry/AssetData.h"
 #include "DataAssets/WetClothingAsset.h"
+#include "WetClothing/Foundation/Authoring/DWCEditorAuthoringDocument.h"
 #include "Editor.h"
 #include "Engine/Texture2D.h"
 #include "PropertyCustomizationHelpers.h"
-#include "ScopedTransaction.h"
 #include "Styling/AppStyle.h"
 #include "Subsystems/AssetEditorSubsystem.h"
 #include "Widgets/Images/SImage.h"
@@ -29,14 +29,7 @@ namespace
             return nullptr;
         }
 
-        const int32 UVChannelIndex = Asset->Authored.WrinkleData.WrinkleUVChannelIndex;
-        return Asset->Authored.WrinkleData.RuntimeNormalSources.FindByPredicate(
-            [MaterialSlotIndex, UVChannelIndex](const FWetWrinkleRuntimeNormalSource& Candidate)
-            {
-                return Candidate.MaterialSlotIndex == MaterialSlotIndex &&
-                       Candidate.UVChannelIndex == UVChannelIndex &&
-                       Candidate.LODIndex == UWetClothingAsset::RuntimeSimulationLODIndex;
-            });
+        return Asset->Authored.WrinkleData.FindRuntimeNormalSource(MaterialSlotIndex);
     }
 
     FWetWrinkleRuntimeNormalSource& FindOrAddExactRuntimeSource(
@@ -50,8 +43,6 @@ namespace
 
         FWetWrinkleRuntimeNormalSource& Added = Asset.Authored.WrinkleData.RuntimeNormalSources.AddDefaulted_GetRef();
         Added.MaterialSlotIndex = MaterialSlotIndex;
-        Added.UVChannelIndex = Asset.Authored.WrinkleData.WrinkleUVChannelIndex;
-        Added.LODIndex = UWetClothingAsset::RuntimeSimulationLODIndex;
         return Added;
     }
 
@@ -69,6 +60,7 @@ namespace
 void SWetWrinkleCustomNormalPanel::Construct(const FArguments& InArgs)
 {
     WetClothingAsset = InArgs._WetClothingAsset;
+    AuthoringDocument = InArgs._AuthoringDocument;
     MaterialSlotIndex = InArgs._MaterialSlotIndex;
     OnSettingsChanged = InArgs._OnSettingsChanged;
 
@@ -206,12 +198,31 @@ void SWetWrinkleCustomNormalPanel::HandleTextureChanged(const FAssetData& AssetD
         return;
     }
 
-    const FScopedTransaction Transaction(LOCTEXT("SetCustomNormalTransaction", "Set Custom Wrinkle Normal Map"));
-    Asset->Modify();
-    FWetWrinkleRuntimeNormalSource& Source = FindOrAddExactRuntimeSource(*Asset, SlotIndex);
-    Source.Source = EDWCWrinkleNormalSource::CustomTexture;
-    Source.CustomWrinkleNormalMap = Cast<UTexture2D>(AssetData.GetAsset());
-    Asset->MarkPackageDirty();
+    UTexture2D* NewTexture = Cast<UTexture2D>(AssetData.GetAsset());
+    FDWCEditorAuthoringChange Change;
+    Change.Domain = EDWCEditorAuthoringDomain::Wrinkle;
+    Change.Impact = EDWCEditorAuthoringImpact::AssetDirty |
+        EDWCEditorAuthoringImpact::Preview |
+        EDWCEditorAuthoringImpact::RuntimeBinding |
+        EDWCEditorAuthoringImpact::Details;
+    Change.MaterialSlotIndex = SlotIndex;
+    if (!AuthoringDocument.IsValid() ||
+        !AuthoringDocument->Edit(
+            LOCTEXT("SetCustomNormalTransaction", "Set Custom Wrinkle Normal Map"),
+            Change,
+            [SlotIndex, NewTexture](UWetClothingAsset& MutableAsset)
+            {
+                FWetWrinkleRuntimeNormalSource& Source =
+                    FindOrAddExactRuntimeSource(MutableAsset, SlotIndex);
+                if (Source.Source == EDWCWrinkleNormalSource::CustomTexture &&
+                    Source.CustomWrinkleNormalMap == NewTexture) return false;
+                Source.Source = EDWCWrinkleNormalSource::CustomTexture;
+                Source.CustomWrinkleNormalMap = NewTexture;
+                return true;
+            }).bChanged)
+    {
+        return;
+    }
     Refresh();
     OnSettingsChanged.ExecuteIfBound();
 }
@@ -261,7 +272,7 @@ FText SWetWrinkleCustomNormalPanel::GetTextureInfoText() const
                ? FText::Format(LOCTEXT("TextureInfo", "{0} x {1} | UV {2}"),
                      FText::AsNumber(Texture->GetSizeX()),
                      FText::AsNumber(Texture->GetSizeY()),
-                     FText::AsNumber(WetClothingAsset.IsValid() ? WetClothingAsset->Authored.WrinkleData.WrinkleUVChannelIndex : 0))
+                     FText::AsNumber(WetClothingAsset.IsValid() ? WetClothingAsset->GetDWCDataUVChannelIndex() : 0))
                : FText::GetEmpty();
 }
 

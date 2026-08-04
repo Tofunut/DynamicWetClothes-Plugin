@@ -3,6 +3,8 @@
 #include "CoreMinimal.h"
 #include "WetClothing/Modes/Transparency/RevealBake/DWCRevealBakeSurface.h"
 
+class FDWCEditorCancellationToken;
+
 struct FDWCRevealBakeTexelSample
 {
     FIntPoint Pixel = FIntPoint::ZeroValue;
@@ -91,7 +93,8 @@ class FDWCRevealBakeRayProjector
         const TArray<FDWCRevealBakeTexelSample>&      Samples,
         const FDWCRevealBakeRayProjectionSettings&    Settings,
         TFunctionRef<void(const FDWCRevealBakeRayHit&)> ConsumeHit,
-        FString*                                OutErrorMessage = nullptr);
+        FString*                                OutErrorMessage = nullptr,
+        const FDWCEditorCancellationToken*      CancellationToken = nullptr);
 
   private:
     static constexpr double RayIntersectionEpsilon = 1.0e-8;

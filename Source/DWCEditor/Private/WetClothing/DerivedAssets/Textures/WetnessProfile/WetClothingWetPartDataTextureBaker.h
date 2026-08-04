@@ -48,6 +48,7 @@ class FWetClothingWetPartDataTextureBaker
 {
 public:
     static FString MakeBuildSignature(const UWetClothingAsset* WetClothingAsset);
+    static FString MakeSlotBuildSignature(const FString& GlobalSignature, int32 MaterialSlotIndex);
 
     static bool Bake(
         UWetClothingAsset* WetClothingAsset,

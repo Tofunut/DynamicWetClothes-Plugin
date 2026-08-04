@@ -71,7 +71,6 @@ bool UDWCBakeComponent::ResolveLayer(const FDWCBakeLayer& Layer, FDWCBakeResolve
     OutResolvedLayer.bCanBeWetOuterLayer = Layer.bCanBeWetOuterLayer;
     OutResolvedLayer.bBlocksReveal = Layer.bBlocksReveal;
     OutResolvedLayer.MaxRevealDistance = Layer.MaxRevealDistance;
-    OutResolvedLayer.OuterUVChannel = Layer.OuterUVChannel;
     OutResolvedLayer.SourceUVChannel = Layer.SourceUVChannel;
 
     const int32 MaterialCount = SkeletalMeshComponent->GetNumMaterials();
@@ -138,7 +137,7 @@ FString UDWCBakeComponent::MakeBuildSignature(const TArray<FDWCBakeResolvedLayer
     for (const FDWCBakeResolvedLayer& Layer : ResolvedLayers)
     {
         Signature += FString::Printf(
-            TEXT("|%s:%d:%s:%s:%d:%d:%d:%d:%d:%g"),
+            TEXT("|%s:%d:%s:%s:%d:%d:%d:%d:%g"),
             *Layer.LayerId.ToString(),
             Layer.LayerOrder,
             *Layer.ComponentPath,
@@ -146,7 +145,6 @@ FString UDWCBakeComponent::MakeBuildSignature(const TArray<FDWCBakeResolvedLayer
             Layer.bCanBeRevealSource ? 1 : 0,
             Layer.bCanBeWetOuterLayer ? 1 : 0,
             Layer.bBlocksReveal ? 1 : 0,
-            Layer.OuterUVChannel,
             Layer.SourceUVChannel,
             Layer.MaxRevealDistance);
 

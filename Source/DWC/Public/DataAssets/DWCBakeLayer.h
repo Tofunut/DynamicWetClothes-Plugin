@@ -60,9 +60,6 @@ struct FDWCBakeLayer
     float MaxRevealDistance = 5.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "UV", meta = (ClampMin = "0"))
-    int32 OuterUVChannel = 0;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "UV", meta = (ClampMin = "0"))
     int32 SourceUVChannel = 0;
 };
 
@@ -103,9 +100,6 @@ struct FDWCBakeResolvedLayer
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DWC|Bake")
     float MaxRevealDistance = 5.0f;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DWC|Bake")
-    int32 OuterUVChannel = 0;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DWC|Bake")
     int32 SourceUVChannel = 0;

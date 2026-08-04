@@ -8,16 +8,18 @@
 #include "WetClothing/DerivedAssets/Materials/WCAMaterialGenerator.h"
 #include "WetClothing/DerivedAssets/Textures/Transparency/DWCTransparencyEditedMapBaker.h"
 #include "WetClothing/DerivedAssets/Textures/WetnessProfile/WetClothingRenderProfileBakeService.h"
-#include "WetClothing/Modes/DWCEditorPreviewSlotUtils.h"
+#include "WetClothing/Foundation/Preview/Slots/DWCEditorPreviewSlotState.h"
+#include "WetClothing/Foundation/Preview/Diagnostics/DWCEditorPreviewDiagnostics.h"
+#include "WetClothing/Foundation/Bake/DWCEditorBakeCoordinator.h"
 #include "WetClothing/Modes/Transparency/AutoMap/DWCTransparencyAutoMapGenerator.h"
 #include "WetClothing/WCAEditor/WCAGeneratedDataInvalidator.h"
 #include "WetClothing/WCAEditor/WCAValidationReport.h"
 #include "WetClothing/Asset/Setup/DWCDataUVBuildService.h"
-#include "WetClothing/WCAEditor/UI/WCAReportDialogs.h"
 #include "WetClothing/WCAEditor/UI/SWCAEditorPanel.h"
 #include "DetailsViewArgs.h"
 #include "Engine/SkeletalMesh.h"
 #include "Framework/Application/SlateApplication.h"
+#include "Framework/MultiBox/MultiBoxBuilder.h"
 #include "IDetailsView.h"
 #include "Modules/ModuleManager.h"
 #include "Misc/MessageDialog.h"
@@ -2650,6 +2652,8 @@ namespace
         TArray<FString> BakedLayerSummaries;
         TArray<FString> WarningMessages;
         int32 BakedLayerCount = 0;
+        const FDWCEditorPreviewSlotCollection PreviewSlotStates =
+            FDWCEditorPreviewSlotResolver::Resolve(&Asset);
 
         Asset.Modify();
         for (FWetClothingTransparencyLayerData& Layer :
@@ -2661,11 +2665,15 @@ namespace
             }
 
             const int32 MaterialSlotIndex = Layer.TargetSurface.OuterMaterialSlotIndex;
-            if (!DWCEditorPreviewSlotUtils::IsCpuPreviewReady(&Asset, MaterialSlotIndex))
+            if (!PreviewSlotStates.IsReady(MaterialSlotIndex))
             {
+                const FDWCEditorPreviewSlotState* State = PreviewSlotStates.Find(MaterialSlotIndex);
                 OutFailure = FString::Printf(
-                    TEXT("Transparency Textures: slot %d is not DWC-ready. Generate Materials before transparency textures can be baked."),
-                    MaterialSlotIndex);
+                    TEXT("Transparency Maps: slot %d is not ready. %s"),
+                    MaterialSlotIndex,
+                    State != nullptr
+                        ? *FDWCEditorPreviewSlotResolver::GetIssueText(State->Issue).ToString()
+                        : TEXT("The slot is unavailable for preview."));
                 Asset.SetTransparencyBakeStatus(EDWCBakeStatus::Failed, OutFailure);
                 return false;
             }
@@ -2688,15 +2696,6 @@ namespace
                 return false;
             }
 
-            Layer.AutoBakeMetadata.AutoBakeGuid = FGuid::NewGuid();
-            Layer.AutoBakeMetadata.BuildSignature = AutoResult.BuildSignature;
-            Layer.AutoBakeMetadata.LODIndex = AutoResult.LODIndex;
-            Layer.AutoBakeMetadata.Resolution = AutoResult.Resolution.X;
-            Layer.AutoBakeMetadata.PaddingPixels = Asset.Authored.TransparencyData.TransparencyPaddingPixels;
-            Layer.AutoBakeMetadata.ValidHitCount = AutoResult.ValidHitCount;
-            Layer.AutoBakeMetadata.NoHitCount = AutoResult.NoHitCount;
-            Layer.MarkFinalBakeStale();
-
             FDWCTransparencyEditedMapBakeResult BakeResult;
             FString BakeError;
             if (!FDWCTransparencyEditedMapBaker::Bake(Asset, Layer, AutoResult, BakeResult, BakeError))
@@ -2709,13 +2708,20 @@ namespace
                 return false;
             }
 
+            Layer.AutoBakeMetadata.AutoBakeGuid = FGuid::NewGuid();
+            Layer.AutoBakeMetadata.BuildSignature = AutoResult.BuildSignature;
+            Layer.AutoBakeMetadata.Resolution = AutoResult.Resolution.X;
+            Layer.AutoBakeMetadata.PaddingPixels = Asset.Authored.TransparencyData.TransparencyPaddingPixels;
+            Layer.AutoBakeMetadata.ValidHitCount = AutoResult.ValidHitCount;
+            Layer.AutoBakeMetadata.NoHitCount = AutoResult.NoHitCount;
+
             ++BakedLayerCount;
             BakedLayerSummaries.Add(FString::Printf(
                 TEXT("%s (Slot %d, UV%d, LOD%d) -> %s"),
                 *Layer.TargetSurface.OuterMaterialSlotName.ToString(),
                 MaterialSlotIndex,
-                Layer.TargetSurface.OuterUVChannel,
-                AutoResult.LODIndex,
+                Asset.GetDWCDataUVChannelIndex(),
+                0,
                 *GetPathNameSafe(BakeResult.TransparencyMap)));
 
             for (const FString& Warning : GenerateWarnings)
@@ -3034,7 +3040,6 @@ void FWCAEditor::Initialize(const EToolkitMode::Type Mode, const TSharedPtr<IToo
 {
     check(InWetClothingAsset != nullptr);
 
-    const double InitializeStartTime = FPlatformTime::Seconds();
     WetClothingAsset = InWetClothingAsset;
     InWetClothingAsset->ReleaseLoadedRuntimeBulkPayloadForEditor();
 
@@ -3070,12 +3075,6 @@ void FWCAEditor::Initialize(const EToolkitMode::Type Mode, const TSharedPtr<IToo
     AddToolbarExtender(ToolbarExtender);
 
     RegenerateMenusAndToolbars();
-    UE_LOG(
-        LogTemp,
-        Display,
-        TEXT("WCAEditor Initialize: '%s' completed in %.2f ms."),
-        *GetNameSafe(InWetClothingAsset),
-        (FPlatformTime::Seconds() - InitializeStartTime) * 1000.0);
 }
 
 void FWCAEditor::RegisterTabSpawners(const TSharedRef<FTabManager>& InTabManager)
@@ -3297,6 +3296,13 @@ void FWCAEditor::FillAssetToolbar(FToolBarBuilder& ToolbarBuilder)
         LOCTEXT("BuildForRuntimeToolbarTooltip", "Build runtime data and generate the assets required by this Wet Clothing Asset. Up-to-date actions are disabled."),
         FSlateIcon(FDWCEditorStyle::GetStyleSetName(), TEXT("DWCEditor.BuildForRuntime"), TEXT("DWCEditor.BuildForRuntime.Small")),
         false);
+    ToolbarBuilder.AddComboButton(
+        FUIAction(),
+        FOnGetContent::CreateSP(this, &FWCAEditor::BuildPreviewDiagnosticsMenu),
+        LOCTEXT("PreviewDiagnosticsToolbarLabel", "Preview Diagnostics"),
+        LOCTEXT("PreviewDiagnosticsToolbarTooltip", "Write DWC editor preview CPU/GPU residency and upload-queue diagnostics to the Output Log."),
+        FSlateIcon(FAppStyle::GetAppStyleSetName(), TEXT("Icons.Info")),
+        false);
     FText ValidationLabel = LOCTEXT("ValidationToolbarLabel", "Validation");
     FText ValidationTooltip = LOCTEXT("ValidationToolbarTooltip", "Validation passed. Click to view the latest validation results.");
     FName ValidationIconStyleSet = FAppStyle::GetAppStyleSetName();
@@ -3489,9 +3495,10 @@ void FWCAEditor::InitializeGeneratedDataUV(
         // Generate() already invalidated transient derived data. Refresh the editor as well so
         // panels do not keep local copies of pre-initialization UV view data after a failed initial build.
         RefreshAssetStateAndEditor();
-        WCAReportDialogs::OpenDWCDataUVBuildFailureDialog(
-            Result,
-            Result.PreparedMesh != nullptr ? Result.PreparedMesh : Asset->GetRuntimeSkeletalMesh());
+        FMessageDialog::Open(
+            EAppMsgCategory::Error,
+            EAppMsgType::Ok,
+            FText::FromString(Result.Message));
         return;
     }
 
@@ -3502,9 +3509,10 @@ void FWCAEditor::InitializeGeneratedDataUV(
     RefreshAssetStateAndEditor();
     if (Result.bGeneratedWithWarnings)
     {
-        WCAReportDialogs::OpenDWCDataUVBuildResultDialog(
-            Result,
-            Result.PreparedMesh != nullptr ? Result.PreparedMesh : Asset->GetRuntimeSkeletalMesh());
+        FMessageDialog::Open(
+            EAppMsgCategory::Warning,
+            EAppMsgType::Ok,
+            FText::FromString(Result.Message));
     }
     else
     {
@@ -3798,6 +3806,34 @@ TSharedRef<SWidget> FWCAEditor::BuildRuntimeBuildMenu()
     return FWCAEditorWidgets::BuildRuntimeBuildMenu(Args);
 }
 
+TSharedRef<SWidget> FWCAEditor::BuildPreviewDiagnosticsMenu()
+{
+    FMenuBuilder MenuBuilder(true, nullptr);
+    MenuBuilder.BeginSection(TEXT("PreviewDiagnostics"), LOCTEXT("PreviewDiagnosticsMenuSection", "PREVIEW DIAGNOSTICS"));
+    MenuBuilder.AddMenuEntry(
+        LOCTEXT("DumpPreviewDiagnosticsMenuItem", "Dump GPU Residency"),
+        LOCTEXT("DumpPreviewDiagnosticsMenuItemTooltip", "Write active preview sessions, GPU Resident/Retiring texture bytes, and render upload queue state to the Output Log."),
+        FSlateIcon(FAppStyle::GetAppStyleSetName(), TEXT("Icons.Info")),
+        FUIAction(FExecuteAction::CreateSP(this, &FWCAEditor::HandleDumpPreviewDiagnostics)));
+    MenuBuilder.AddMenuEntry(
+        LOCTEXT("ResetPreviewDiagnosticsMenuItem", "Reset Preview Counters"),
+        LOCTEXT("ResetPreviewDiagnosticsMenuItemTooltip", "Reset preview cache, texture workspace, and render upload queue counters. Current residency becomes the new high-water baseline."),
+        FSlateIcon(FAppStyle::GetAppStyleSetName(), TEXT("Icons.Refresh")),
+        FUIAction(FExecuteAction::CreateSP(this, &FWCAEditor::HandleResetPreviewDiagnostics)));
+    MenuBuilder.EndSection();
+    return MenuBuilder.MakeWidget();
+}
+
+void FWCAEditor::HandleDumpPreviewDiagnostics()
+{
+    FDWCEditorPreviewDiagnostics::DumpAllSessions();
+}
+
+void FWCAEditor::HandleResetPreviewDiagnostics()
+{
+    FDWCEditorPreviewDiagnostics::ResetAllCounters();
+}
+
 FReply FWCAEditor::HandleBuildCPURuntimeDataClicked()
 {
     UWetClothingAsset* Asset = WetClothingAsset.Get();
@@ -4049,42 +4085,31 @@ FReply FWCAEditor::HandleBakeWrinkleNormalMapClicked()
         return FReply::Handled();
     }
 
-    FScopedSlowTask SlowTask(
-        2.0f,
-        LOCTEXT("BakeWrinkleMapsProgress", "Baking wrinkle textures..."));
-    SlowTask.MakeDialog(false);
-    SlowTask.EnterProgressFrame(
-        1.0f,
-        LOCTEXT("BakeWrinkleMapsBuildProgress", "Generating wrinkle normal and mask maps..."));
-
-    FString Summary;
-    bool bHadWarnings = false;
-    if (!EditorPanel->BakeAllWrinkleMaps(Summary, &bHadWarnings))
+    TWeakPtr<FWCAEditor> WeakEditor = SharedThis(this);
+    FString RequestError;
+    if (!EditorPanel->RequestBakeAllWrinkleMaps(
+            [WeakEditor](const FDWCEditorBakeBatchResult& Result)
+            {
+                const TSharedPtr<FWCAEditor> Editor = WeakEditor.Pin();
+                if (!Editor.IsValid())
+                {
+                    return;
+                }
+                Editor->RefreshAssetStateAndEditor();
+                FMessageDialog::Open(
+                    Result.bSucceeded
+                        ? EAppMsgCategory::Success
+                        : EAppMsgCategory::Warning,
+                    EAppMsgType::Ok,
+                    FText::FromString(Result.Summary));
+            },
+            &RequestError))
     {
-        RefreshAssetStateAndEditor();
-        FMessageDialog::Open(EAppMsgCategory::Warning, EAppMsgType::Ok, FText::FromString(Summary));
-        return FReply::Handled();
-    }
-
-    SlowTask.EnterProgressFrame(
-        1.0f,
-        LOCTEXT("BakeWrinkleMapsSaveProgress", "Saving wrinkle textures..."));
-    UWetClothingAsset* Asset = WetClothingAsset.Get();
-    if (Asset == nullptr || !DWCEditorUtils::SaveAsset(Asset))
-    {
-        RefreshAssetStateAndEditor();
         FMessageDialog::Open(
             EAppMsgCategory::Warning,
             EAppMsgType::Ok,
-            LOCTEXT("BakeWrinkleMapsSaveFailed", "Wrinkle maps were generated, but the Wet Clothing Asset or generated textures could not be saved."));
-        return FReply::Handled();
+            FText::FromString(RequestError));
     }
-
-    RefreshAssetStateAndEditor();
-    FMessageDialog::Open(
-        bHadWarnings ? EAppMsgCategory::Warning : EAppMsgCategory::Success,
-        EAppMsgType::Ok,
-        FText::FromString(Summary));
     return FReply::Handled();
 }
 
@@ -4095,54 +4120,30 @@ FReply FWCAEditor::HandleBakeTransparencyMapsClicked()
         return FReply::Handled();
     }
 
-    UWetClothingAsset* Asset = WetClothingAsset.Get();
-    if (Asset == nullptr)
+    if (!EditorPanel.IsValid())
     {
         return FReply::Handled();
     }
-
-    FScopedSlowTask SlowTask(
-        2.0f,
-        FText::FromString(FString::Printf(TEXT("Baking transparency textures for %s..."), *GetNameSafe(Asset))));
-    SlowTask.MakeDialog(false);
-    SlowTask.EnterProgressFrame(
-        1.0f,
-        LOCTEXT("BakeTransparencyMapsBuildProgress", "Generating and baking packed transparency textures..."));
-
-    FString Summary;
-    FString Failure;
-    bool bHadWarnings = false;
-    if (!ResolveTransparencyMapsForAsset(*Asset, Summary, Failure, &bHadWarnings))
+    TWeakPtr<FWCAEditor> WeakEditor = SharedThis(this);
+    FString RequestError;
+    if (!EditorPanel->RequestBakeAllTransparencyMaps(
+            [WeakEditor](const FDWCEditorBakeBatchResult& Result)
+            {
+                const TSharedPtr<FWCAEditor> Editor = WeakEditor.Pin();
+                if (!Editor.IsValid())
+                {
+                    return;
+                }
+                Editor->RefreshAssetStateAndEditor();
+                FMessageDialog::Open(
+                    Result.bSucceeded ? EAppMsgCategory::Success : EAppMsgCategory::Warning,
+                    EAppMsgType::Ok,
+                    FText::FromString(Result.Summary));
+            },
+            &RequestError))
     {
-        const FString FailureMessage = Failure.IsEmpty()
-            ? FString(TEXT("Transparency texture bake failed."))
-            : Failure;
-        RefreshAssetStateAndEditor();
-        FMessageDialog::Open(
-            EAppMsgCategory::Warning,
-            EAppMsgType::Ok,
-            FText::FromString(FailureMessage));
-        return FReply::Handled();
+        FMessageDialog::Open(EAppMsgCategory::Warning, EAppMsgType::Ok, FText::FromString(RequestError));
     }
-
-    SlowTask.EnterProgressFrame(
-        1.0f,
-        LOCTEXT("BakeTransparencyMapsSaveProgress", "Saving transparency textures..."));
-    if (!DWCEditorUtils::SaveAsset(Asset))
-    {
-        RefreshAssetStateAndEditor();
-        FMessageDialog::Open(
-            EAppMsgCategory::Warning,
-            EAppMsgType::Ok,
-            LOCTEXT("BakeTransparencyMapsSaveFailed", "Transparency maps were generated, but the Wet Clothing Asset or generated textures could not be saved."));
-        return FReply::Handled();
-    }
-
-    RefreshAssetStateAndEditor();
-    FMessageDialog::Open(
-        bHadWarnings ? EAppMsgCategory::Warning : EAppMsgCategory::Success,
-        EAppMsgType::Ok,
-        FText::FromString(Summary));
     return FReply::Handled();
 }
 

@@ -6,28 +6,28 @@
 struct FWetProceduralRidgeRasterResult
 {
     bool bAffectedPixels = false;
+    bool bCanceled = false;
     FIntRect DirtyRect = FIntRect(0, 0, 0, 0);
 };
+
+struct FDWCEditorNormalRasterSurface;
+class FDWCEditorCancellationToken;
 
 class FWetProceduralRidgeRasterizer
 {
   public:
+    static constexpr int32 ScratchTileSize = 128;
+
     static FIntRect ComputeBounds(
         const FWetProceduralRidgeStroke& Stroke,
         FIntPoint TextureSize,
         int32 FirstPointIndex = 0);
 
-    static FWetProceduralRidgeRasterResult Rasterize(
+    static FWetProceduralRidgeRasterResult RasterizeToSurface(
         const FWetProceduralRidgeStroke& Stroke,
-        FIntPoint TextureSize,
-        TArray<FColor>& InOutPixels,
+        FDWCEditorNormalRasterSurface& Surface,
         const FIntRect* ClipRect = nullptr,
-        bool bBlendWithExisting = true);
+        const FDWCEditorCancellationToken* CancellationToken = nullptr);
 
-    static FWetProceduralRidgeRasterResult RasterizeToNormalCoverageBuffers(
-        const FWetProceduralRidgeStroke& Stroke,
-        FIntPoint TextureSize,
-        TArray<FVector3f>& InOutNormalBuffer,
-        TArray<float>& InOutCoverageBuffer,
-        const FIntRect* ClipRect = nullptr);
+    static uint64 GetTransientScratchBytesUpperBound();
 };

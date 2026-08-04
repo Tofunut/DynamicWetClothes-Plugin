@@ -132,7 +132,8 @@ struct DWC_API FWCADerivedData
     UPROPERTY(VisibleAnywhere, Category = "Wet Clothing|Derived")
     FWCADerivedInlineData Inline;
 
-    UPROPERTY(VisibleAnywhere, Category = "Wet Clothing|Derived")
+    // Rebuildable runtime payloads must not be copied into every editor undo snapshot.
+    UPROPERTY(VisibleAnywhere, NonTransactional, Category = "Wet Clothing|Derived")
     FWCADerivedBulkData Bulk;
 };
 
@@ -174,7 +175,8 @@ class DWC_API UWetClothingAsset : public UDataAsset
     GENERATED_BODY()
 
   public:
-    static constexpr int32 CurrentAssetDataVersion = 11;
+    /** Version 13 keys authored wrinkle/transparency data by material slot only. */
+    static constexpr int32 CurrentAssetDataVersion = 13;
     static constexpr int32 FirstAssetVersionWithSerializedRuntimeBulkData = 4;
     static constexpr int32 CurrentPrecomputedSimulationDataVersion = 11;
     static constexpr int32 CurrentRuntimeBulkDataVersion = 7;
@@ -237,6 +239,7 @@ class DWC_API UWetClothingAsset : public UDataAsset
     bool CanPrepareRuntimeDataForEditorSave(FString* OutSkipReason = nullptr) const;
     bool PrepareRuntimeDataForEditorSave(FString* OutErrorMessage = nullptr);
     void ReleaseLoadedRuntimeBulkPayloadForEditor();
+    uint64 GetResidentRuntimeBulkPayloadBytesForEditor() const;
     void ClearRuntimeDataEditorSavePreparation();
     /** Saves a targeted CPU/GPU runtime segment without rebuilding the other segment during PreSave. */
     void SkipNextRuntimeDataPreSaveRebuild();
@@ -333,7 +336,6 @@ class DWC_API UWetClothingAsset : public UDataAsset
     void RefreshBakeStateFast();
     void RefreshBakeStateDeep();
     void RefreshBakeStateInternal(bool bRunDeepValidation);
-    void LogOriginalUVTopologyMemoryStats() const;
 
     bool bRuntimeDataRebuildInProgress = false;
     bool bSkipNextPreSaveRuntimeDataRebuild = false;

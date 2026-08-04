@@ -1,5 +1,7 @@
 #include "WetClothing/Modes/Transparency/RevealBake/DWCRevealBakeProjection.h"
 
+#include "WetClothing/Foundation/Jobs/DWCEditorCancellationToken.h"
+
 #include "Algo/Sort.h"
 
 FVector FDWCRevealBakeTexelSampler::InterpolateVector(const FVector& Barycentric, const FVector Values[3])
@@ -429,7 +431,8 @@ bool FDWCRevealBakeRayProjector::ProjectSamplesToSources(
     const TArray<FDWCRevealBakeTexelSample>&   Samples,
     const FDWCRevealBakeRayProjectionSettings& Settings,
     TFunctionRef<void(const FDWCRevealBakeRayHit&)> ConsumeHit,
-    FString*                             OutErrorMessage)
+    FString*                             OutErrorMessage,
+    const FDWCEditorCancellationToken*   CancellationToken)
 {
     if (Samples.Num() == 0)
     {
@@ -457,8 +460,16 @@ bool FDWCRevealBakeRayProjector::ProjectSamplesToSources(
         return false;
     }
 
+    int32 SampleIndex = 0;
     for (const FDWCRevealBakeTexelSample& Sample : Samples)
     {
+        if ((SampleIndex++ & 255) == 0 &&
+            CancellationToken != nullptr &&
+            CancellationToken->IsCanceled())
+        {
+            SetError(OutErrorMessage, TEXT("Transparency ray projection was canceled."));
+            return false;
+        }
         const FVector RayDirection = -Sample.Normal.GetSafeNormal();
         const FVector RayOrigin = Sample.Position + RayDirection * Settings.RayStartOffset;
 

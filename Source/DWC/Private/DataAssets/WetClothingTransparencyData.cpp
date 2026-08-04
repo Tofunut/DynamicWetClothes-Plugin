@@ -40,148 +40,65 @@ void FWetClothingTransparencyLayerData::MarkFinalBakeStale()
     }
 }
 
-FWetClothingTransparencyLayerData* FWetClothingTransparencyData::FindTransparencyLayer(
-    int32 MaterialSlotIndex,
-    int32 UVChannelIndex)
+FWetClothingTransparencyLayerData* FWetClothingTransparencyData::FindTransparencyLayer(int32 MaterialSlotIndex)
 {
     return TransparencyLayers.FindByPredicate(
-        [MaterialSlotIndex, UVChannelIndex](const FWetClothingTransparencyLayerData& Candidate)
+        [MaterialSlotIndex](const FWetClothingTransparencyLayerData& Candidate)
         {
-            return Candidate.TargetSurface.OuterMaterialSlotIndex == MaterialSlotIndex &&
-                   Candidate.TargetSurface.OuterUVChannel == UVChannelIndex;
+            return Candidate.TargetSurface.OuterMaterialSlotIndex == MaterialSlotIndex;
         });
 }
 
-const FWetClothingTransparencyLayerData* FWetClothingTransparencyData::FindTransparencyLayer(
-    int32 MaterialSlotIndex,
-    int32 UVChannelIndex) const
+const FWetClothingTransparencyLayerData* FWetClothingTransparencyData::FindTransparencyLayer(int32 MaterialSlotIndex) const
 {
     return TransparencyLayers.FindByPredicate(
-        [MaterialSlotIndex, UVChannelIndex](const FWetClothingTransparencyLayerData& Candidate)
+        [MaterialSlotIndex](const FWetClothingTransparencyLayerData& Candidate)
         {
-            return Candidate.TargetSurface.OuterMaterialSlotIndex == MaterialSlotIndex &&
-                   Candidate.TargetSurface.OuterUVChannel == UVChannelIndex;
+            return Candidate.TargetSurface.OuterMaterialSlotIndex == MaterialSlotIndex;
         });
 }
 
 const FWetClothingBakedTransparencyMap* FWetClothingTransparencyData::FindBakedTransparencyMap(
-    int32 MaterialSlotIndex,
-    int32 PreferredUVChannelIndex,
-    int32 PreferredLODIndex,
-    EDWCTransparencyBakedMapMatch* OutMatch) const
+    int32 MaterialSlotIndex) const
 {
-    if (OutMatch != nullptr)
-    {
-        *OutMatch = EDWCTransparencyBakedMapMatch::None;
-    }
-
-    const auto FindMatch = [this](const TFunctionRef<bool(const FWetClothingBakedTransparencyMap&)>& Predicate)
-        -> const FWetClothingBakedTransparencyMap*
-    {
-        for (const FWetClothingTransparencyLayerData& Layer : TransparencyLayers)
-        {
-            if (const FWetClothingBakedTransparencyMap* Match = Layer.BakedMaps.FindByPredicate(
-                    [&Predicate](const FWetClothingBakedTransparencyMap& Candidate)
-                    {
-                        return IsUsableBakedMap(Candidate) && Predicate(Candidate);
-                    }))
-            {
-                return Match;
-            }
-        }
-
-        return nullptr;
-    };
-
-    if (PreferredUVChannelIndex != INDEX_NONE && PreferredLODIndex != INDEX_NONE)
-    {
-        if (const FWetClothingBakedTransparencyMap* Match = FindMatch(
-                [MaterialSlotIndex, PreferredUVChannelIndex, PreferredLODIndex](const FWetClothingBakedTransparencyMap& Candidate)
-                {
-                    return Candidate.MaterialSlotIndex == MaterialSlotIndex &&
-                           Candidate.UVChannelIndex == PreferredUVChannelIndex &&
-                           Candidate.LODIndex == PreferredLODIndex;
-                }))
-        {
-            if (OutMatch != nullptr)
-            {
-                *OutMatch = EDWCTransparencyBakedMapMatch::ExactSlotUVLOD;
-            }
-            return Match;
-        }
-    }
-
-    if (PreferredUVChannelIndex != INDEX_NONE)
-    {
-        if (const FWetClothingBakedTransparencyMap* Match = FindMatch(
-                [MaterialSlotIndex, PreferredUVChannelIndex](const FWetClothingBakedTransparencyMap& Candidate)
-                {
-                    return Candidate.MaterialSlotIndex == MaterialSlotIndex &&
-                           Candidate.UVChannelIndex == PreferredUVChannelIndex;
-                }))
-        {
-            if (OutMatch != nullptr)
-            {
-                *OutMatch = EDWCTransparencyBakedMapMatch::SlotUVFallback;
-            }
-            return Match;
-        }
-    }
-
-    if (const FWetClothingBakedTransparencyMap* Match = FindMatch(
-            [MaterialSlotIndex](const FWetClothingBakedTransparencyMap& Candidate)
-            {
-                return Candidate.MaterialSlotIndex == MaterialSlotIndex;
-            }))
-    {
-        if (OutMatch != nullptr)
-        {
-            *OutMatch = EDWCTransparencyBakedMapMatch::SlotFallback;
-        }
-        return Match;
-    }
-
-    return nullptr;
-}
-
-const FWetClothingBakedTransparencyMap* FWetClothingTransparencyData::FindRuntimeBakedTransparencyMap(
-    const int32 MaterialSlotIndex,
-    const int32 DWCDataUVChannelIndex,
-    const int32 LODIndex) const
-{
-    if (MaterialSlotIndex == INDEX_NONE ||
-        DWCDataUVChannelIndex < 0 ||
-        DWCDataUVChannelIndex > 7 ||
-        LODIndex < 0)
-    {
-        return nullptr;
-    }
-
-    const FWetClothingTransparencyLayerData* Layer =
-        FindTransparencyLayer(MaterialSlotIndex, DWCDataUVChannelIndex);
+    const FWetClothingTransparencyLayerData* Layer = FindTransparencyLayer(MaterialSlotIndex);
     if (Layer == nullptr)
     {
         return nullptr;
     }
 
     return Layer->BakedMaps.FindByPredicate(
-        [MaterialSlotIndex, DWCDataUVChannelIndex, LODIndex](
-            const FWetClothingBakedTransparencyMap& Candidate)
+        [MaterialSlotIndex](const FWetClothingBakedTransparencyMap& Candidate)
+        {
+            return Candidate.MaterialSlotIndex == MaterialSlotIndex && IsUsableBakedMap(Candidate);
+        });
+}
+
+const FWetClothingBakedTransparencyMap* FWetClothingTransparencyData::FindRuntimeBakedTransparencyMap(
+    const int32 MaterialSlotIndex) const
+{
+    if (MaterialSlotIndex == INDEX_NONE)
+    {
+        return nullptr;
+    }
+
+    const FWetClothingTransparencyLayerData* Layer = FindTransparencyLayer(MaterialSlotIndex);
+    if (Layer == nullptr)
+    {
+        return nullptr;
+    }
+
+    return Layer->BakedMaps.FindByPredicate(
+        [MaterialSlotIndex](const FWetClothingBakedTransparencyMap& Candidate)
         {
             return Candidate.MaterialSlotIndex == MaterialSlotIndex &&
-                   Candidate.UVChannelIndex == DWCDataUVChannelIndex &&
-                   Candidate.LODIndex == LODIndex &&
                    Candidate.IsRuntimeUsable();
         });
 }
 
-UTexture2D* FWetClothingTransparencyData::ResolveBakedTransparencyMap(
-    int32 MaterialSlotIndex,
-    int32 PreferredUVChannelIndex,
-    int32 PreferredLODIndex) const
+UTexture2D* FWetClothingTransparencyData::ResolveBakedTransparencyMap(int32 MaterialSlotIndex) const
 {
-    const FWetClothingBakedTransparencyMap* Match =
-        FindBakedTransparencyMap(MaterialSlotIndex, PreferredUVChannelIndex, PreferredLODIndex);
+    const FWetClothingBakedTransparencyMap* Match = FindBakedTransparencyMap(MaterialSlotIndex);
     return Match != nullptr ? Match->TransparencyMap.Get() : nullptr;
 }
 
@@ -189,8 +106,9 @@ bool FWetClothingTransparencyDataHelpers::ValidateTransparencyLayer(
     const USkeletalMesh* TargetMesh,
     const FWetClothingTransparencyLayerData& Layer,
     TArray<FString>& OutErrors,
-    int32 LODIndex)
+    int32 DWCDataUVChannelIndex)
 {
+    constexpr int32 LODIndex = 0;
     OutErrors.Reset();
     const FWetClothingTransparencyTargetSurface& TargetSurface = Layer.TargetSurface;
     const FWetClothingTransparencyRaySettings& RaySettings = Layer.RaySettings;
@@ -222,11 +140,11 @@ bool FWetClothingTransparencyDataHelpers::ValidateTransparencyLayer(
     else
     {
         NumTexCoords = RenderData->LODRenderData[LODIndex].StaticVertexBuffers.StaticMeshVertexBuffer.GetNumTexCoords();
-        if (TargetSurface.OuterUVChannel < 0 || TargetSurface.OuterUVChannel >= NumTexCoords)
+        if (DWCDataUVChannelIndex < 0 || DWCDataUVChannelIndex >= NumTexCoords)
         {
             OutErrors.Add(FString::Printf(
-                TEXT("Outer UV Channel %d is invalid for LOD %d, which has %d UV channel(s)."),
-                TargetSurface.OuterUVChannel,
+                TEXT("DWC Data UV Channel %d is invalid for LOD %d, which has %d UV channel(s)."),
+                DWCDataUVChannelIndex,
                 LODIndex,
                 NumTexCoords));
         }

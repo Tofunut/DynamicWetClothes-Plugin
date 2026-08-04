@@ -126,17 +126,7 @@ namespace
                 DWCSurfaceTextureSharedAsset::Resolution);
             return nullptr;
         }
-        if (LoadedTexture != nullptr)
-        {
-            UE_LOG(
-                LogDWC,
-                Display,
-                TEXT("DWC loaded authored %s texture directly for editor Texture2DArray preview: profile='%s', texture='%s'."),
-                TextureRole,
-                *ProfileIdentity,
-                *LoadedTexture->GetPathName());
-        }
-        else
+        if (LoadedTexture == nullptr)
         {
             UE_LOG(
                 LogDWC,
@@ -1130,22 +1120,6 @@ int32 UDWCGPUResourceSubsystem::FindOrAddRuntimeProfile(
             FMath::Clamp(Surface.DropletFlowColorBlend, 0.0f, 1.0f),
             FMath::Clamp(Surface.DropletFlowNormalStrength, 0.0f, 3.0f),
             0.0f);
-        UE_LOG(
-            LogDWC,
-            Display,
-            TEXT("DWC runtime Surface Water render profile packed: runtimeIndex=%d profile='%s' surfaceEnabled=%d normalStrength=%.6g roughnessBlend=%.6g targetRoughness=%.6g totalStrength=%.6g specular=%.6g droplet1Slices=(%d,%d) droplet2Slices=(%d,%d)."),
-            RuntimeIndex,
-            *Key,
-            Surface.bEnabled ? 1 : 0,
-            Surface.SurfaceWaterNormalStrength,
-            Surface.SurfaceWaterRoughnessBlend,
-            Surface.SurfaceWaterTargetRoughness,
-            Surface.SurfaceWaterTotalStrength,
-            Surface.SurfaceWaterSpecular,
-            DropletNormalSlice,
-            DropletMaskSlice,
-            DropletFlowNormalSlice,
-            DropletFlowMaskSlice);
         Record->bSurfaceResourcesResolved = true;
         DirtyRuntimeProfileIndices.Add(RuntimeIndex);
         bTextureArraysDirty |= bTextureArraysChanged;
@@ -1582,15 +1556,6 @@ const FDWCAssetRenderProfileResources* UDWCGPUResourceSubsystem::AcquireAssetRes
     {
         return Existing;
     }
-    if (Existing != nullptr && !bExistingProfileSignatureValid)
-    {
-        UE_LOG(
-            LogDWC,
-            Display,
-            TEXT("DWC Render Profile resources for '%s' are being refreshed because resolved Wetness Profile parameters changed."),
-            *GetNameSafe(Asset));
-    }
-
     if (Usage == EDWCRenderResourceUsage::FullGPU)
     {
         bool bNeutralRegistryChanged = false;
@@ -1982,19 +1947,6 @@ void UDWCGPUResourceSubsystem::ApplyFallbackRenderProfileParameters(
             : 0;
 
         const FString ProfileKey = ResolveProfileKey(Profile);
-        UE_LOG(
-            LogDWC,
-            Display,
-            TEXT("DWC fallback Surface Water render profile prepared for asset '%s' slot %d profile '%s' (used only when runtime LUT is unavailable): surfaceEnabled=%d droplet1Slices=(%d,%d) droplet2Slices=(%d,%d)."),
-            *GetPathNameSafe(WetClothingAsset),
-            MaterialSlotIndex,
-            *ProfileKey,
-            Surface.bEnabled ? 1 : 0,
-            Slices.DropletNormal,
-            Slices.DropletMask,
-            Slices.DropletFlowNormal,
-            Slices.DropletFlowMask);
-
         if (Surface.bEnabled && Surface.SurfaceWaterNormalStrength <= UE_KINDA_SMALL_NUMBER && bDropletRequested)
         {
             UE_LOG(

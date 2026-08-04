@@ -278,13 +278,6 @@ bool UDynamicWetClothesComponent::InitializeWetRuntime()
         }
     }
 
-    UE_LOG(
-        LogTemp,
-        Log,
-        TEXT("DynamicWetClothesComponent: Initialized %d wet mesh receiver(s) on %s."),
-        Receivers.Num(),
-        *GetNameSafe(GetOwner()));
-
     const bool bInitialized = Receivers.Num() > 0;
     if (bInitialized && HasBegunPlay())
     {

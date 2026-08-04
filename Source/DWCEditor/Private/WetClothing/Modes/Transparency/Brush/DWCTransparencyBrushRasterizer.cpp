@@ -37,7 +37,9 @@ namespace
             return true;
         }
         return AutoResult.OuterIslandIDBuffer.IsValidIndex(PixelIndex) &&
-            AutoResult.OuterIslandIDBuffer[PixelIndex] == UVIslandID;
+            FDWCTransparencyAutoBakeResult::MatchesOuterIslandID(
+                AutoResult.OuterIslandIDBuffer[PixelIndex],
+                UVIslandID);
     }
 
     int32 ResolveSampleIslandID(
@@ -72,7 +74,8 @@ namespace
             X = FMath::Clamp(X, 0, Width - 1);
             Y = FMath::Clamp(Y, 0, Height - 1);
         }
-        return AutoResult.OuterIslandIDBuffer[Y * Width + X];
+        return FDWCTransparencyAutoBakeResult::DecodeOuterIslandID(
+            AutoResult.OuterIslandIDBuffer[Y * Width + X]);
     }
 
     void ApplySample(
@@ -208,9 +211,10 @@ namespace
 
 void FDWCTransparencyBrushRasterizer::RebuildFromStrokes(
     const FDWCTransparencyAutoBakeResult& AutoResult,
-    const FWetClothingTransparencyLayerData& Layer,
+    const TArray<FDWCTransparencyBrushStroke>& Strokes,
+    const int32 BaselineStrokeCount,
     const int32 MaterialSlotIndex,
-    const int32 UVChannelIndex,
+    const int32 /*UVChannelIndex*/,
     TArray<uint8>& OutManualPremultipliedBuffer,
     TArray<uint8>& OutManualWeightBuffer)
 {
@@ -221,17 +225,16 @@ void FDWCTransparencyBrushRasterizer::RebuildFromStrokes(
     }
 
     const int32 FirstStrokeIndex = FMath::Clamp(
-        AutoResult.BaselineStrokeCount,
+        BaselineStrokeCount,
         0,
-        Layer.EditableStrokes.Num());
+        Strokes.Num());
 
     bool bHasRelevantStrokeSamples = false;
-    for (int32 StrokeIndex = FirstStrokeIndex; StrokeIndex < Layer.EditableStrokes.Num(); ++StrokeIndex)
+    for (int32 StrokeIndex = FirstStrokeIndex; StrokeIndex < Strokes.Num(); ++StrokeIndex)
     {
-        const FDWCTransparencyBrushStroke& Stroke = Layer.EditableStrokes[StrokeIndex];
+        const FDWCTransparencyBrushStroke& Stroke = Strokes[StrokeIndex];
         if (Stroke.bEnabled &&
             Stroke.MaterialSlotIndex == MaterialSlotIndex &&
-            Stroke.UVChannelIndex == UVChannelIndex &&
             !Stroke.Samples.IsEmpty())
         {
             bHasRelevantStrokeSamples = true;
@@ -246,12 +249,10 @@ void FDWCTransparencyBrushRasterizer::RebuildFromStrokes(
 
     OutManualPremultipliedBuffer.Init(0, PixelCount);
     OutManualWeightBuffer.Init(0, PixelCount);
-    for (int32 StrokeIndex = FirstStrokeIndex; StrokeIndex < Layer.EditableStrokes.Num(); ++StrokeIndex)
+    for (int32 StrokeIndex = FirstStrokeIndex; StrokeIndex < Strokes.Num(); ++StrokeIndex)
     {
-        const FDWCTransparencyBrushStroke& Stroke = Layer.EditableStrokes[StrokeIndex];
-        if (!Stroke.bEnabled ||
-            Stroke.MaterialSlotIndex != MaterialSlotIndex ||
-            Stroke.UVChannelIndex != UVChannelIndex)
+        const FDWCTransparencyBrushStroke& Stroke = Strokes[StrokeIndex];
+        if (!Stroke.bEnabled || Stroke.MaterialSlotIndex != MaterialSlotIndex)
         {
             continue;
         }

@@ -190,19 +190,11 @@ namespace
         return true;
     }
 
-    bool HasUsableBakedWrinkleMapForGroup(
+    bool HasUsableBakedWrinkleMapForSlot(
         const UWetClothingAsset& Asset,
-        const int32 MaterialSlotIndex,
-        const int32 UVChannelIndex,
-        const int32 LODIndex)
+        const int32 MaterialSlotIndex)
     {
-        const FWetWrinkleBakedMapSet* BakedMap = Asset.Authored.WrinkleData.BakedWrinkleMaps.FindByPredicate(
-            [MaterialSlotIndex, UVChannelIndex, LODIndex](const FWetWrinkleBakedMapSet& Candidate)
-            {
-                return Candidate.MaterialSlotIndex == MaterialSlotIndex &&
-                       Candidate.UVChannelIndex == UVChannelIndex &&
-                       Candidate.LODIndex == LODIndex;
-            });
+        const FWetWrinkleBakedMapSet* BakedMap = Asset.Authored.WrinkleData.FindBakedWrinkleMap(MaterialSlotIndex);
 
         return BakedMap != nullptr &&
                BakedMap->BakedWrinkleNormalMap != nullptr &&
@@ -213,11 +205,9 @@ namespace
                !BakedMap->BuildSignature.IsEmpty();
     }
 
-    bool DoesWrinkleBakeGroupHaveContent(
+    bool DoesWrinkleBakeSlotHaveContent(
         const UWetClothingAsset& Asset,
-        const int32 MaterialSlotIndex,
-        const int32 UVChannelIndex,
-        const int32 LODIndex)
+        const int32 MaterialSlotIndex)
     {
         const FWetClothingWrinkleData& WrinkleData = Asset.Authored.WrinkleData;
         const bool bIncludeDisabled = WrinkleData.BakeSettings.bIncludeDisabledPatches;
@@ -226,7 +216,6 @@ namespace
         {
             if ((!Patch.bEnabled && !bIncludeDisabled) ||
                 Patch.MaterialSlotIndex != MaterialSlotIndex ||
-                Patch.UVChannelIndex != UVChannelIndex ||
                 Patch.WrinkleNormalTexture == nullptr)
             {
                 continue;
@@ -238,8 +227,6 @@ namespace
         {
             if ((!Stroke.bEnabled && !bIncludeDisabled) ||
                 Stroke.MaterialSlotIndex != MaterialSlotIndex ||
-                Stroke.UVChannelIndex != UVChannelIndex ||
-                Stroke.LODIndex != LODIndex ||
                 Stroke.Points.Num() < 2 ||
                 Stroke.WidthUV <= 0.0f ||
                 Stroke.Strength <= 0.0f)
@@ -255,25 +242,14 @@ namespace
     bool AreRequiredWrinkleBakeAssetReferencesValid(const UWetClothingAsset& Asset)
     {
         const FWetClothingWrinkleData& WrinkleData = Asset.Authored.WrinkleData;
-        const int32 UVChannelIndex = Asset.GetDWCDataUVChannelIndex();
-        TArray<int32> LODIndices = WrinkleData.BakeSettings.TargetLODIndices;
-        if (LODIndices.IsEmpty())
-        {
-            LODIndices.Add(UWetClothingAsset::RuntimeSimulationLODIndex);
-        }
-
         TSet<int32> MaterialSlotIndices;
         for (const FWetWrinklePatchPlacement& Patch : WrinkleData.EditablePatches)
         {
             if ((!Patch.bEnabled && !WrinkleData.BakeSettings.bIncludeDisabledPatches) ||
                 Patch.MaterialSlotIndex == INDEX_NONE ||
-                Patch.UVChannelIndex != UVChannelIndex ||
                 Patch.WrinkleNormalTexture == nullptr ||
                 !Asset.IsMaterialSlotWettable(Patch.MaterialSlotIndex) ||
-                WrinkleData.IsUsingCustomWrinkleNormalMap(
-                    Patch.MaterialSlotIndex,
-                    UVChannelIndex,
-                    UWetClothingAsset::RuntimeSimulationLODIndex))
+                WrinkleData.IsUsingCustomWrinkleNormalMap(Patch.MaterialSlotIndex))
             {
                 continue;
             }
@@ -284,15 +260,11 @@ namespace
         {
             if ((!Stroke.bEnabled && !WrinkleData.BakeSettings.bIncludeDisabledPatches) ||
                 Stroke.MaterialSlotIndex == INDEX_NONE ||
-                Stroke.UVChannelIndex != UVChannelIndex ||
                 Stroke.Points.Num() < 2 ||
                 Stroke.WidthUV <= 0.0f ||
                 Stroke.Strength <= 0.0f ||
                 !Asset.IsMaterialSlotWettable(Stroke.MaterialSlotIndex) ||
-                WrinkleData.IsUsingCustomWrinkleNormalMap(
-                    Stroke.MaterialSlotIndex,
-                    UVChannelIndex,
-                    UWetClothingAsset::RuntimeSimulationLODIndex))
+                WrinkleData.IsUsingCustomWrinkleNormalMap(Stroke.MaterialSlotIndex))
             {
                 continue;
             }
@@ -302,19 +274,15 @@ namespace
         bool bFoundRequiredBake = false;
         for (const int32 MaterialSlotIndex : MaterialSlotIndices)
         {
-            for (const int32 RequestedLODIndex : LODIndices)
+            if (!DoesWrinkleBakeSlotHaveContent(Asset, MaterialSlotIndex))
             {
-                const int32 LODIndex = FMath::Max(0, RequestedLODIndex);
-                if (!DoesWrinkleBakeGroupHaveContent(Asset, MaterialSlotIndex, UVChannelIndex, LODIndex))
-                {
-                    continue;
-                }
+                continue;
+            }
 
-                bFoundRequiredBake = true;
-                if (!HasUsableBakedWrinkleMapForGroup(Asset, MaterialSlotIndex, UVChannelIndex, LODIndex))
-                {
-                    return false;
-                }
+            bFoundRequiredBake = true;
+            if (!HasUsableBakedWrinkleMapForSlot(Asset, MaterialSlotIndex))
+            {
+                return false;
             }
         }
 
@@ -324,8 +292,6 @@ namespace
     bool AreRequiredTransparencyBakeAssetReferencesValid(const UWetClothingAsset& Asset)
     {
         bool bFoundRequiredLayer = false;
-        const int32 LODIndex = UWetClothingAsset::RuntimeSimulationLODIndex;
-
         for (const FWetClothingTransparencyLayerData& Layer : Asset.Authored.TransparencyData.TransparencyLayers)
         {
             const int32 MaterialSlotIndex = Layer.TargetSurface.OuterMaterialSlotIndex;
@@ -337,13 +303,8 @@ namespace
             }
 
             bFoundRequiredLayer = true;
-            const FWetClothingBakedTransparencyMap* BakedMap = Layer.BakedMaps.FindByPredicate(
-                [MaterialSlotIndex, &Layer, LODIndex](const FWetClothingBakedTransparencyMap& Candidate)
-                {
-                    return Candidate.MaterialSlotIndex == MaterialSlotIndex &&
-                           Candidate.UVChannelIndex == Layer.TargetSurface.OuterUVChannel &&
-                           Candidate.LODIndex == LODIndex;
-                });
+            const FWetClothingBakedTransparencyMap* BakedMap =
+                Asset.Authored.TransparencyData.FindRuntimeBakedTransparencyMap(MaterialSlotIndex);
             if (BakedMap == nullptr || !BakedMap->IsRuntimeUsable())
             {
                 return false;
@@ -1861,10 +1822,7 @@ void UWetClothingAsset::Serialize(FArchive& Ar)
 
 void UWetClothingAsset::PostLoad()
 {
-    const double PostLoadStartTime = FPlatformTime::Seconds();
     Super::PostLoad();
-
-
 
     FWetClothingEditableWetPartData& EditableWetPartData = Authored.PartData.EditableWetPartData;
     EditableWetPartData.EnsureDefaultProfile();
@@ -1888,6 +1846,7 @@ void UWetClothingAsset::PostLoad()
         Metadata.DWCSkeletalMesh = nullptr;
         Metadata.DWCDataUVChannelIndex = INDEX_NONE;
     }
+
     bRuntimeBulkDataLoaded = RuntimeBulkData.GetBulkDataSize() == 0;
     bRuntimeBulkDataLoadFailed = false;
     bRuntimeBulkDataDirty = false;
@@ -1959,14 +1918,6 @@ void UWetClothingAsset::PostLoad()
     EditorSaveSavedOutputMaskSnapshot = 0;
     bRuntimeDataEditorSaveAttemptActive = false;
 #endif
-    UE_LOG(
-        LogDWC,
-        Display,
-        TEXT("WetClothingAsset PostLoad: '%s' completed in %.2f ms (runtime bulk loaded=%s, bulk size=%.2f MB)."),
-        *GetNameSafe(this),
-        (FPlatformTime::Seconds() - PostLoadStartTime) * 1000.0,
-        bRuntimeBulkDataLoaded ? TEXT("true") : TEXT("false"),
-        static_cast<double>(RuntimeBulkData.GetBulkDataSize()) / (1024.0 * 1024.0));
 }
 
 #if WITH_EDITOR
@@ -2155,6 +2106,63 @@ bool UWetClothingAsset::LoadRuntimeBulkData(const bool bForceProgressDialog) con
 }
 
 #if WITH_EDITOR
+uint64 UWetClothingAsset::GetResidentRuntimeBulkPayloadBytesForEditor() const
+{
+    uint64 Bytes = 0;
+
+    const FWetClothingPrecomputedSimulationData& CPUData = Derived.Bulk.NeighborRuntimeData;
+    Bytes += CPUData.Vertices.GetAllocatedSize();
+    Bytes += CPUData.NeighborGraph.GetAllocatedSize();
+    for (const FWetClothingPrecomputedVertexNeighbors& VertexNeighbors : CPUData.NeighborGraph)
+    {
+        Bytes += VertexNeighbors.Neighbors.GetAllocatedSize();
+    }
+
+    const FWetClothingPrecomputedBoneOptimizationCache& BoneCache = CPUData.BoneOptimizationCache;
+    Bytes += BoneCache.BoneNames.GetAllocatedSize();
+    Bytes += BoneCache.BoneStartOffsets.GetAllocatedSize();
+    Bytes += BoneCache.FlatVertexIndices.GetAllocatedSize();
+    Bytes += BoneCache.ResolvedIncludeRules.GetAllocatedSize();
+    for (const FWetClothingPrecomputedResolvedBoneIncludeRule& Rule : BoneCache.ResolvedIncludeRules)
+    {
+        Bytes += Rule.IncludedBoneIndices.GetAllocatedSize();
+    }
+
+    Bytes += Derived.Bulk.GPURuntimeData.GetAllocatedSize();
+    for (const FDWCGPULODBakeData& GPUData : Derived.Bulk.GPURuntimeData)
+    {
+        Bytes += GPUData.Profiles.GetAllocatedSize();
+        Bytes += GPUData.Triangles.GetAllocatedSize();
+        Bytes += GPUData.VertexIncidentTriangles.GetAllocatedSize();
+        for (const FDWCGPUVertexIncidentTriangles& IncidentTriangles : GPUData.VertexIncidentTriangles)
+        {
+            Bytes += IncidentTriangles.TriangleIDs.GetAllocatedSize();
+        }
+
+        Bytes += GPUData.MaterialSlots.GetAllocatedSize();
+        for (const FDWCGPUMaterialSlotBakeData& MaterialSlot : GPUData.MaterialSlots)
+        {
+            Bytes += MaterialSlot.TexelTriangleIDs.GetAllocatedSize();
+            Bytes += MaterialSlot.PackedTexelBarycentricXY.GetAllocatedSize();
+            Bytes += MaterialSlot.RestTexelAreas.GetAllocatedSize();
+            Bytes += MaterialSlot.ValidMask.GetAllocatedSize();
+            Bytes += MaterialSlot.SurfaceTexelTriangleIDs.GetAllocatedSize();
+            Bytes += MaterialSlot.SurfacePackedTexelBarycentricXY.GetAllocatedSize();
+            Bytes += MaterialSlot.SurfaceRestTexelAreas.GetAllocatedSize();
+            Bytes += MaterialSlot.SurfaceValidMask.GetAllocatedSize();
+            Bytes += MaterialSlot.SeamDestinations.GetAllocatedSize();
+            Bytes += MaterialSlot.SeamIncoming.GetAllocatedSize();
+        }
+    }
+
+    Bytes += Derived.Bulk.LODVertexColorRuntimeData.GetAllocatedSize();
+    for (const FWCALODVertexColorRuntimeData& LODData : Derived.Bulk.LODVertexColorRuntimeData)
+    {
+        Bytes += LODData.TargetToSourceVertex.GetAllocatedSize();
+    }
+    return Bytes;
+}
+
 void UWetClothingAsset::ReleaseLoadedRuntimeBulkPayloadForEditor()
 {
     if (bRuntimeBulkDataDirty || RuntimeBulkData.GetBulkDataSize() <= 0)
@@ -3774,36 +3782,6 @@ const FDWCEditorUVTopologyData* UWetClothingAsset::FindOriginalUVTopologyForLOD(
         {
             return Data.LODIndex == LODIndex;
         });
-}
-
-void UWetClothingAsset::LogOriginalUVTopologyMemoryStats() const
-{
-    int32 IslandCount = 0;
-    int64 TriangleIndexCount = 0;
-    int64 EstimatedBytes = Derived.Inline.OriginalUVTopologies.GetAllocatedSize();
-
-    for (const FDWCEditorUVTopologyData& Topology : Derived.Inline.OriginalUVTopologies)
-    {
-        IslandCount += Topology.Islands.Num();
-        EstimatedBytes += Topology.BuildSignature.GetAllocatedSize();
-        EstimatedBytes += Topology.Islands.GetAllocatedSize();
-        for (const FDWCOriginalUVIslandTopology& Island : Topology.Islands)
-        {
-            TriangleIndexCount += Island.TriangleIndices.Num();
-            EstimatedBytes += Island.TriangleIndices.GetAllocatedSize();
-        }
-    }
-
-
-    UE_LOG(
-        LogDWC,
-        Display,
-        TEXT("WetClothingAsset topology memory: '%s' LODs=%d, islands=%d, triangle indices=%lld, estimated allocations=%.2f MB."),
-        *GetNameSafe(this),
-        Derived.Inline.OriginalUVTopologies.Num(),
-        IslandCount,
-        TriangleIndexCount,
-        static_cast<double>(EstimatedBytes) / (1024.0 * 1024.0));
 }
 
 void UWetClothingAsset::SetValidationSummary(const FDWCTriangleValidationSummary& InSummary)

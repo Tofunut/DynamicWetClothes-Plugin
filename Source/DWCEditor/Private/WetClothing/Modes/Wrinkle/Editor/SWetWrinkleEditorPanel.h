@@ -3,11 +3,9 @@
 #include "CoreMinimal.h"
 #include "DataAssets/WetClothingWrinkleData.h"
 #include "EditorUndoClient.h"
-#include "ScopedTransaction.h"
 #include "Styling/SlateTypes.h"
 #include "Types/WidgetActiveTimerDelegate.h"
 #include "Widgets/SCompoundWidget.h"
-#include "WetClothing/DerivedAssets/Textures/Wrinkle/WetWrinkleNormalMapBaker.h"
 #include "WetClothing/Modes/Wrinkle/Editor/SWetWrinkleElementListPanel.h"
 #include "WetClothing/Modes/Wrinkle/Editor/SWetWrinklePalettePanel.h"
 #include "WetClothing/Modes/Wrinkle/Editor/SWetWrinkleUVPanel.h"
@@ -16,9 +14,20 @@
 #include "WetClothing/Foundation/MeshAnalysis/WetClothingAssetMeshAnalyzer.h"
 #include "WetClothing/WCAEditor/UI/UVView/SWCAUVView.h"
 #include "WetClothing/Modes/Wrinkle/Viewport/WetWrinkleHitData.h"
+#include "WetClothing/Foundation/Preview/Slots/DWCEditorPreviewSlotState.h"
+#include "WetClothing/Foundation/Authoring/DWCEditorAuthoringTypes.h"
 
 class FAssetThumbnail;
 class FAssetThumbnailPool;
+class FDWCEditorAuthoringDocument;
+class FDWCEditorBakeCoordinator;
+class FDWCEditorSessionStore;
+class FDWCEditorSpatialQueryService;
+class FDWCEditorRenderUploadQueue;
+class FDWCEditorTextureWorkspace;
+class FDWCEditorWorkerJobScheduler;
+class FWetWrinkleAuthoringController;
+using FDWCEditorWorkerJobSchedulerPtr = TSharedPtr<FDWCEditorWorkerJobScheduler, ESPMode::ThreadSafe>;
 class IDetailsView;
 class ITableRow;
 class SInlineEditableTextBlock;
@@ -30,6 +39,7 @@ class USkeletalMesh;
 class UWetClothingAsset;
 class UTexture;
 class UTexture2D;
+enum class EDWCEditorPreviewSuspendReason : uint8;
 struct FAssetData;
 struct FWetWrinklePatchPlacement;
 struct FWetProceduralRidgeStroke;
@@ -46,6 +56,13 @@ class SWetWrinkleEditorPanel : public SCompoundWidget, public FEditorUndoClient
   public:
     SLATE_BEGIN_ARGS(SWetWrinkleEditorPanel) {}
     SLATE_ARGUMENT(UWetClothingAsset*, WetClothingAsset)
+    SLATE_ARGUMENT(TSharedPtr<FDWCEditorAuthoringDocument>, AuthoringDocument)
+    SLATE_ARGUMENT(TSharedPtr<FDWCEditorSessionStore>, SessionStore)
+    SLATE_ARGUMENT(FDWCEditorWorkerJobSchedulerPtr, WorkerJobScheduler)
+    SLATE_ARGUMENT(TSharedPtr<FDWCEditorBakeCoordinator>, BakeCoordinator)
+    SLATE_ARGUMENT(TSharedPtr<FDWCEditorSpatialQueryService>, SpatialQueryService)
+    SLATE_ARGUMENT(TSharedPtr<FDWCEditorTextureWorkspace>, TextureWorkspace)
+    SLATE_ARGUMENT(TSharedPtr<FDWCEditorRenderUploadQueue>, RenderUploadQueue)
     SLATE_ARGUMENT(TSharedPtr<IDetailsView>, DetailsView)
     SLATE_END_ARGS()
 
@@ -55,12 +72,18 @@ class SWetWrinkleEditorPanel : public SCompoundWidget, public FEditorUndoClient
     virtual void PostRedo(bool bSuccess) override;
     void RefreshFromAsset();
     void RefreshFromAssetLightweight();
+    void SuspendPreview(EDWCEditorPreviewSuspendReason Reason);
+    void ResumePreviewIfNeeded();
     FReply BakeSelectedWrinkleNormalMap();
-    FReply ExecuteBakeWrinkleNormalMap();
-    FReply ExecuteBakeAllWrinkleNormalMaps();
 
   private:
     void RefreshFromAssetInternal(bool bForcePreviewMaterialRebuild, bool bRebuildAccumulatedPreview);
+    void DispatchWrinkleBrushState(EDWCEditorSessionEffect Effects);
+    void DispatchWrinkleSelectionState();
+    void HandleSessionStateChanged(
+        const FDWCEditorSessionState& State,
+        EDWCEditorSessionEffect Effects,
+        uint64 Revision);
     using FStrokeListItemPtr = FWetWrinkleElementListItemPtr;
     using FMaterialSlotItemPtr = TSharedPtr<FWCAMaterialSlotItem>;
     using FWrinkleTexturePaletteItemPtr = FWetWrinkleTexturePaletteItemPtr;
@@ -80,10 +103,6 @@ class SWetWrinkleEditorPanel : public SCompoundWidget, public FEditorUndoClient
     FReply BakeWrinkleNormalMapsForSlots(const TArray<int32>& MaterialSlotIndices);
     FReply HandleFocusClicked();
     void HandleSurfaceHitChanged(const FWetWrinkleSurfaceHit& SurfaceHit);
-    void HandlePaintStrokeStarted(const FWetWrinkleSurfaceHit& SurfaceHit);
-    void HandlePaintStampRequested(const FWetWrinkleSurfaceHit& SurfaceHit);
-    void HandlePaintStrokeEnded();
-    void HandlePaintStrokeCanceled();
     TSharedRef<SWidget> BuildPatchBrushSection();
     TSharedRef<SWidget> BuildPatchListSection();
     FWetWrinkleBrushSettings MakeViewportBrushSettings() const;
@@ -100,7 +119,6 @@ class SWetWrinkleEditorPanel : public SCompoundWidget, public FEditorUndoClient
     void RefreshBrushPresetOptions();
     void RefreshWrinkleTexturePalette(bool bForceAssetScan = false);
     void RefreshWrinkleTexturePaletteView();
-    void RefreshWrinkleTexturePaletteState();
     void RefreshWrinkleTexturePaletteItemState(const FWrinkleTexturePaletteItemPtr& Item);
     FWrinkleTexturePaletteItemPtr UpsertWrinkleTexturePaletteItem(const FAssetData& AssetData);
     bool RemoveWrinkleTexturePaletteItem(const FSoftObjectPath& TexturePath);
@@ -135,7 +153,6 @@ class SWetWrinkleEditorPanel : public SCompoundWidget, public FEditorUndoClient
     int32 GetWrinkleUVViewChannelIndex() const;
     FText GetDWCDataUVChannelText() const;
     FReply HandleAutoGenerateClicked();
-    FText GetHitInfoText() const;
     FText GetPatchListSummaryText() const;
     FText GetBrushSectionHeadingText() const;
     FText GetBrushSizeLabelText() const;
@@ -169,7 +186,6 @@ class SWetWrinkleEditorPanel : public SCompoundWidget, public FEditorUndoClient
     FReply HandleWrinkleTexturePaletteContextMenu(const FPointerEvent& MouseEvent, FWrinkleTexturePaletteItemPtr Item);
     FReply HandleRefreshWrinkleTexturePaletteClicked();
     FSlateColor GetWrinkleTexturePaletteTileColor(FWrinkleTexturePaletteItemPtr Item) const;
-    EVisibility GetWrinkleTexturePaletteTileVisibility(FWrinkleTexturePaletteItemPtr Item) const;
     FText GetWrinkleTexturePaletteTooltipText(FWrinkleTexturePaletteItemPtr Item) const;
     void RefreshWrinkleNormalThumbnail();
     const FSlateBrush* GetWrinkleNormalThumbnailBrush() const;
@@ -204,6 +220,8 @@ class SWetWrinkleEditorPanel : public SCompoundWidget, public FEditorUndoClient
     void HandleFalloffChanged(float NewValue);
     void HandleRotationChanged(float NewValue);
     void HandlePreviewWetnessChanged(float NewValue);
+    ECheckBoxState GetShowBakedTransparencyState() const;
+    void HandleShowBakedTransparencyChanged(ECheckBoxState NewState);
     void HandleRidgeStartTaperChanged(float NewValue);
     void HandleRidgeEndTaperChanged(float NewValue);
     void HandleRidgePointSpacingChanged(float NewValue);
@@ -285,16 +303,29 @@ class SWetWrinkleEditorPanel : public SCompoundWidget, public FEditorUndoClient
         FWetWrinkleSurfaceHit& OutSmoothedHit) const;
     UTexture* ResolveSourceTextureForStamp(int32 MaterialSlotIndex) const;
     bool IsCurrentWrinkleNormalUsable(FString* OutReason = nullptr) const;
-    FText GetMaterialSlotDisplayText(int32 MaterialSlotIndex) const;
     FMaterialSlotItemPtr FindMaterialSlotItem(int32 MaterialSlotIndex) const;
+    const FDWCEditorPreviewSlotState* FindPreviewSlotState(int32 MaterialSlotIndex) const;
     FString MakeDefaultPatchName() const;
+    bool EditWrinkleData(
+        const FText& TransactionText,
+        EDWCEditorAuthoringImpact Impact,
+        int32 MaterialSlotIndex,
+        const FGuid& ElementGuid,
+        TFunctionRef<bool(FWetClothingWrinkleData&)> Mutation);
     void MarkAssetEdited();
-    void MarkWrinkleAuthoringEdited();
 
   private:
     TWeakObjectPtr<UWetClothingAsset> WetClothingAsset;
+    TSharedPtr<FDWCEditorAuthoringDocument> AuthoringDocument;
+    TSharedPtr<FDWCEditorSessionStore> SessionStore;
+    FDWCEditorWorkerJobSchedulerPtr WorkerJobScheduler;
+    TSharedPtr<FDWCEditorBakeCoordinator> BakeCoordinator;
+    TSharedPtr<FDWCEditorSpatialQueryService> SpatialQueryService;
+    TSharedPtr<FDWCEditorTextureWorkspace> TextureWorkspace;
+    TSharedPtr<FDWCEditorRenderUploadQueue> RenderUploadQueue;
     TSharedPtr<IDetailsView> DetailsView;
     TSharedPtr<SWetWrinkleViewport> PreviewViewport;
+    TSharedPtr<FWetWrinkleAuthoringController> AuthoringController;
     TUniquePtr<FWetWrinklePreviewController> PreviewController;
     TSharedPtr<SWetWrinkleCustomNormalPanel> CustomNormalPanel;
     TSharedPtr<SWidgetSwitcher> RightPanelSwitcher;
@@ -315,6 +346,7 @@ class SWetWrinkleEditorPanel : public SCompoundWidget, public FEditorUndoClient
     TSharedPtr<class SComboButton> BrushSizeComboButton;
     TSharedPtr<SWetWrinkleElementListPanel> ElementListPanel;
     TArray<FMaterialSlotItemPtr> MaterialSlotItems;
+    FDWCEditorPreviewSlotCollection PreviewSlotStates;
     TArray<TSharedPtr<FWetWrinkleBrushPresetOption>> BrushPresetOptions;
     TSharedPtr<SWetWrinklePalettePanel> WrinklePalettePanel;
     TSharedPtr<FAssetThumbnailPool> MaterialThumbnailPool;
@@ -324,6 +356,7 @@ class SWetWrinkleEditorPanel : public SCompoundWidget, public FEditorUndoClient
     FWetWrinkleBrushSettings BrushSettings;
     float SizeCm = 8.0f;
     float SizeUV = 0.0677f;
+    bool bShowBakedTransparency = true;
     FWetWrinkleSurfaceHit CurrentHit;
     FGuid SelectedStrokeGuid;
     EWetWrinkleElementType SelectedElementType = EWetWrinkleElementType::Patch;
@@ -335,15 +368,16 @@ class SWetWrinkleEditorPanel : public SCompoundWidget, public FEditorUndoClient
     TArray<FWetWrinkleSurfaceHit> CapturedProceduralRidgeHits;
     TArray<FWetWrinkleSurfaceHit> SmoothedProceduralRidgeHits;
     FWetWrinkleSurfaceHit LiveProceduralRidgeHit;
-    TUniquePtr<FScopedTransaction> ActiveRidgeEditTransaction;
-    TUniquePtr<FScopedTransaction> ActiveRidgePropertyTransaction;
-    TUniquePtr<FWetWrinkleNormalMapBakeSession> WrinkleBakeSession;
+    bool bRidgePointEditActive = false;
+    bool bRidgePropertyEditActive = false;
     int32 SelectedProceduralRidgePointIndex = INDEX_NONE;
     int32 EditingProceduralRidgePointIndex = INDEX_NONE;
     int32 EditingProceduralRidgeUVIslandID = INDEX_NONE;
     TOptional<FWetProceduralRidgeStroke> TransientEditedProceduralRidgeStroke;
     bool bEditingProceduralRidgePoint = false;
     bool bSynchronizingMaterialSlotSelection = false;
+    bool bApplyingSessionState = false;
+    bool bPreviewSuspended = false;
     FGuid PendingStartConnectionStrokeGuid;
     int32 PendingStartConnectionSegmentIndex = INDEX_NONE;
     float PendingStartConnectionSegmentT = 0.0f;

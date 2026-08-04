@@ -5,6 +5,7 @@
 class UTexture;
 class UTexture2D;
 class UWetClothingAsset;
+class FDWCEditorCancellationToken;
 
 struct FWetWrinkleNormalMapBakeSettings
 {
@@ -20,6 +21,43 @@ struct FWetWrinkleNormalMapBakeResult
     int32 BakedProceduralStrokeCount = 0;
     TArray<UTexture2D*> BakedNormalMaps;
     TArray<UTexture2D*> BakedMasks;
+};
+
+/** Immutable, UObject-free input captured on the game thread for a wrinkle bake. */
+class FWetWrinkleNormalMapBakeSnapshot
+{
+  public:
+    struct FImpl;
+
+    FWetWrinkleNormalMapBakeSnapshot();
+    ~FWetWrinkleNormalMapBakeSnapshot();
+    FWetWrinkleNormalMapBakeSnapshot(FWetWrinkleNormalMapBakeSnapshot&&);
+    FWetWrinkleNormalMapBakeSnapshot& operator=(FWetWrinkleNormalMapBakeSnapshot&&);
+
+    FWetWrinkleNormalMapBakeSnapshot(const FWetWrinkleNormalMapBakeSnapshot&) = delete;
+    FWetWrinkleNormalMapBakeSnapshot& operator=(const FWetWrinkleNormalMapBakeSnapshot&) = delete;
+
+    bool IsValid() const;
+    int32 GetMaterialSlotIndex() const;
+    uint64 GetEstimatedBytes() const;
+
+  private:
+    TUniquePtr<FImpl> Impl;
+
+    friend class FWetWrinkleNormalMapBaker;
+};
+
+/** Pure CPU result. It contains no UObject references and is safe to move back to the game thread. */
+struct FWetWrinkleNormalMapComputedResult
+{
+    bool bSucceeded = false;
+    bool bCanceled = false;
+    FString Error;
+    TArray<FColor> NormalPixels;
+    TArray<uint8> MaskPixels;
+    int32 BakedStampCount = 0;
+    int32 BakedProceduralStrokeCount = 0;
+    uint64 ResultBytes = 0;
 };
 
 class FWetWrinkleNormalMapBakeSession
@@ -45,6 +83,25 @@ class FWetWrinkleNormalMapBakeSession
 class FWetWrinkleNormalMapBaker
 {
   public:
+    static bool BuildMaterialSlotSnapshot(
+        UWetClothingAsset* WetClothingAsset,
+        int32 MaterialSlotIndex,
+        const FWetWrinkleNormalMapBakeSettings& Settings,
+        FWetWrinkleNormalMapBakeSession& Session,
+        FWetWrinkleNormalMapBakeSnapshot& OutSnapshot,
+        FString& OutErrorMessage);
+
+    static FWetWrinkleNormalMapComputedResult ComputeSnapshot(
+        const FWetWrinkleNormalMapBakeSnapshot& Snapshot,
+        const FDWCEditorCancellationToken* CancellationToken = nullptr);
+
+    static bool CommitComputedResult(
+        UWetClothingAsset* WetClothingAsset,
+        const FWetWrinkleNormalMapBakeSnapshot& Snapshot,
+        FWetWrinkleNormalMapComputedResult&& ComputedResult,
+        FWetWrinkleNormalMapBakeResult& OutResult,
+        FString& OutErrorMessage);
+
     static bool BakeMaterialSlot(
         UWetClothingAsset*                       WetClothingAsset,
         int32                                    MaterialSlotIndex,
@@ -67,12 +124,12 @@ class FWetWrinkleNormalMapBaker
   private:
     struct FBakeGroup;
 
-    static bool BakeGroup(
+    static bool BuildGroupSnapshot(
         UWetClothingAsset&                       WetClothingAsset,
         const FBakeGroup&                        Group,
         const FWetWrinkleNormalMapBakeSettings& Settings,
         FWetWrinkleNormalMapBakeSession&        Session,
-        FWetWrinkleNormalMapBakeResult&         InOutResult,
+        FWetWrinkleNormalMapBakeSnapshot&       OutSnapshot,
         FString&                                OutErrorMessage);
 
     static FString MakeBuildSignature(
@@ -97,4 +154,5 @@ class FWetWrinkleNormalMapBaker
         int32                 Height,
         const TArray<uint8>&  Pixels,
         FString&              OutErrorMessage);
+
 };

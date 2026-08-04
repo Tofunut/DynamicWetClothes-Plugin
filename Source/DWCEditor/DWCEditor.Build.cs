@@ -20,6 +20,7 @@ public class DWCEditor : ModuleRules
 				"DWC",
 				"Engine",
 				"InputCore",
+				"InteractiveToolsFramework",
 				"MaterialEditor",
 				"MessageLog",
 				"MeshDescription",
@@ -33,6 +34,7 @@ public class DWCEditor : ModuleRules
 				"SlateCore",
 				"StaticMeshDescription",
 				"ToolMenus",
+				"EditorInteractiveToolsFramework",
 				"UnrealEd"
 			});
 	}

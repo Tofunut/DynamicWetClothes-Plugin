@@ -1,14 +1,9 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "WetClothing/Foundation/Authoring/State/DWCEditorSessionState.h"
 #include "Widgets/SCompoundWidget.h"
 #include "Widgets/Views/SListView.h"
-
-enum class EWetWrinkleElementType : uint8
-{
-    Patch,
-    ProceduralRidgeStroke
-};
 
 struct FWetWrinkleElementListItem
 {

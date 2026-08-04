@@ -1,7 +1,15 @@
 #include "SWCAEditorPanel.h"
 
 #include "DataAssets/WetClothingAsset.h"
+#include "Editor.h"
 #include "IDetailsView.h"
+#include "WetClothing/Foundation/Authoring/DWCEditorAuthoringDocument.h"
+#include "WetClothing/Foundation/Cache/DWCEditorCacheStore.h"
+#include "WetClothing/Foundation/Spatial/DWCEditorSpatialQueryService.h"
+#include "WetClothing/Foundation/TextureWorkspace/DWCEditorRenderUploadQueue.h"
+#include "WetClothing/Foundation/TextureWorkspace/DWCEditorTextureWorkspace.h"
+#include "WetClothing/Foundation/Authoring/State/DWCEditorSessionStore.h"
+#include "WetClothing/Foundation/Jobs/DWCEditorWorkerJobScheduler.h"
 #include "WetClothing/Modes/Part/Editor/SWetClothingPartEditorPanel.h"
 #include "WetClothing/DerivedAssets/Textures/WetnessProfile/WetClothingRenderProfileBakeService.h"
 #include "WetClothing/Modes/Transparency/Editor/SWetClothingTransparencyBakePanel.h"
@@ -9,6 +17,7 @@
 #include "WetClothing/DerivedAssets/Materials/WCAMaterialGenerator.h"
 #include "WetClothing/WCAEditor/WCAGeneratedDataInvalidator.h"
 #include "WetClothing/DerivedAssets/Textures/Wrinkle/WetWrinkleBakeService.h"
+#include "WetClothing/Foundation/Bake/DWCEditorBakeCoordinator.h"
 #include "WetClothing/Modes/Wrinkle/Editor/SWetWrinkleEditorPanel.h"
 #include "WetClothing/WCAEditor/WCAValidationReport.h"
 #include "WetClothing/WCAEditor/UI/Widgets/WCAEditorWidgets.h"
@@ -20,6 +29,37 @@
 
 namespace
 {
+    FDWCEditorAuthoringIndex BuildAuthoringIndex(const UWetClothingAsset* Asset)
+    {
+        FDWCEditorAuthoringIndex Index;
+        if (Asset == nullptr)
+        {
+            return Index;
+        }
+
+        for (const FWetWrinklePatchPlacement& Patch : Asset->Authored.WrinkleData.EditablePatches)
+        {
+            Index.WrinkleMaterialSlots.Add(Patch.MaterialSlotIndex);
+            if (Patch.PatchGuid.IsValid())
+            {
+                Index.WrinkleElementGuids.Add(Patch.PatchGuid);
+            }
+        }
+        for (const FWetProceduralRidgeStroke& Stroke : Asset->Authored.WrinkleData.EditableProceduralRidgeStrokes)
+        {
+            Index.WrinkleMaterialSlots.Add(Stroke.MaterialSlotIndex);
+            if (Stroke.StrokeGuid.IsValid())
+            {
+                Index.WrinkleElementGuids.Add(Stroke.StrokeGuid);
+            }
+        }
+        for (const FWetClothingTransparencyLayerData& Layer : Asset->Authored.TransparencyData.TransparencyLayers)
+        {
+            Index.TransparencyLayerGuids.Add(Layer.LayerGuid);
+        }
+        return Index;
+    }
+
     void RaiseIssueSeverity(FWCAEditorIssueStatus& Status, const EWCAEditorStatusSeverity Severity)
     {
         if (static_cast<uint8>(Severity) > static_cast<uint8>(Status.Severity))
@@ -119,6 +159,33 @@ FString FWCAEditorIssueStatus::BuildSummary() const
 
 SWCAEditorPanel::~SWCAEditorPanel()
 {
+    if (PreBeginPIEHandle.IsValid())
+    {
+        FEditorDelegates::PreBeginPIE.Remove(PreBeginPIEHandle);
+        PreBeginPIEHandle.Reset();
+    }
+    if (EndPIEHandle.IsValid())
+    {
+        FEditorDelegates::EndPIE.Remove(EndPIEHandle);
+        EndPIEHandle.Reset();
+    }
+    SuspendAllPreviewModes(EDWCEditorPreviewSuspendReason::EditorClosing);
+    BakeCoordinator.Reset();
+    if (WorkerJobScheduler.IsValid())
+    {
+        WorkerJobScheduler->Shutdown();
+        WorkerJobScheduler.Reset();
+    }
+    if (RenderUploadQueue.IsValid())
+    {
+        RenderUploadQueue->Shutdown();
+    }
+    TextureWorkspace.Reset();
+    RenderUploadQueue.Reset();
+    if (AuthoringDocument.IsValid())
+    {
+        AuthoringDocument->OnChanged().RemoveAll(this);
+    }
     if (const UWetClothingAsset* Asset = WetClothingAsset.Get())
     {
         FWCAGeneratedDataInvalidator::InvalidateAsset(*Asset);
@@ -128,6 +195,28 @@ SWCAEditorPanel::~SWCAEditorPanel()
 void SWCAEditorPanel::Construct(const FArguments& InArgs)
 {
     WetClothingAsset = InArgs._WetClothingAsset;
+    AuthoringDocument = MakeShared<FDWCEditorAuthoringDocument>(WetClothingAsset.Get());
+    CacheStore = MakeShared<FDWCEditorCacheStore>();
+    SpatialQueryService = MakeShared<FDWCEditorSpatialQueryService>(CacheStore.ToSharedRef());
+    RenderUploadQueue = MakeShared<FDWCEditorRenderUploadQueue>();
+    TextureWorkspace = MakeShared<FDWCEditorTextureWorkspace>(RenderUploadQueue.ToSharedRef());
+    SessionStore = MakeShared<FDWCEditorSessionStore>();
+    WorkerJobScheduler = MakeShared<FDWCEditorWorkerJobScheduler, ESPMode::ThreadSafe>();
+    TWeakPtr<FDWCEditorSessionStore> WeakSessionStore = SessionStore;
+    WorkerJobScheduler->SetDomainRevisionProvider(
+        [WeakSessionStore](const EDWCEditorAuthoringDomain Domain)
+        {
+            const TSharedPtr<FDWCEditorSessionStore> Store = WeakSessionStore.Pin();
+            return Store.IsValid() ? GetDWCEditorDomainRevision(Store->GetState(), Domain) : MAX_uint64;
+        });
+    BakeCoordinator = MakeShared<FDWCEditorBakeCoordinator>(
+        WetClothingAsset.Get(),
+        WorkerJobScheduler.ToSharedRef());
+    AuthoringDocument->OnChanged().AddSP(this, &SWCAEditorPanel::HandleAuthoringDocumentChanged);
+    FDWCReconcileAuthoringAction InitialReconcile;
+    InitialReconcile.AuthoringRevision = AuthoringDocument->GetRevision();
+    InitialReconcile.Index = BuildAuthoringIndex(WetClothingAsset.Get());
+    SessionStore->Dispatch(InitialReconcile);
     DetailsView = InArgs._DetailsView;
     OnStatusChanged = InArgs._OnStatusChanged;
 
@@ -143,6 +232,29 @@ void SWCAEditorPanel::Construct(const FArguments& InArgs)
     RegisterActiveTimer(
         0.5,
         FWidgetActiveTimerDelegate::CreateSP(this, &SWCAEditorPanel::HandleStatusRefreshTimer));
+    RegisterActiveTimer(
+        0.0,
+        FWidgetActiveTimerDelegate::CreateSP(this, &SWCAEditorPanel::HandleTextureUploadTimer));
+
+    PreBeginPIEHandle = FEditorDelegates::PreBeginPIE.AddSP(
+        this,
+        &SWCAEditorPanel::HandlePreBeginPIE);
+    EndPIEHandle = FEditorDelegates::EndPIE.AddSP(
+        this,
+        &SWCAEditorPanel::HandleEndPIE);
+}
+
+EActiveTimerReturnType SWCAEditorPanel::HandleTextureUploadTimer(double, float)
+{
+    if (RenderUploadQueue.IsValid())
+    {
+        RenderUploadQueue->Flush();
+    }
+    if (TextureWorkspace.IsValid())
+    {
+        TextureWorkspace->ProcessRetiredGPUResources();
+    }
+    return EActiveTimerReturnType::Continue;
 }
 
 TSharedRef<SWidget> SWCAEditorPanel::EnsureModeWidget(const EWCAEditorMode Mode)
@@ -163,6 +275,13 @@ TSharedRef<SWidget> SWCAEditorPanel::EnsureModeWidget(const EWCAEditorMode Mode)
         {
             SAssignNew(WrinkleEditorPanel, SWetWrinkleEditorPanel)
                 .WetClothingAsset(WetClothingAsset.Get())
+                .AuthoringDocument(AuthoringDocument)
+                .SessionStore(SessionStore)
+                .WorkerJobScheduler(WorkerJobScheduler)
+                .BakeCoordinator(BakeCoordinator)
+                .SpatialQueryService(SpatialQueryService)
+                .TextureWorkspace(TextureWorkspace)
+                .RenderUploadQueue(RenderUploadQueue)
                 .DetailsView(DetailsView);
         }
         return WrinkleEditorPanel.ToSharedRef();
@@ -172,6 +291,13 @@ TSharedRef<SWidget> SWCAEditorPanel::EnsureModeWidget(const EWCAEditorMode Mode)
         {
             SAssignNew(TransparencyBakePanel, SWetClothingTransparencyBakePanel)
                 .WetClothingAsset(WetClothingAsset.Get())
+                .AuthoringDocument(AuthoringDocument)
+                .SessionStore(SessionStore)
+                .WorkerJobScheduler(WorkerJobScheduler)
+                .BakeCoordinator(BakeCoordinator)
+                .SpatialQueryService(SpatialQueryService)
+                .TextureWorkspace(TextureWorkspace)
+                .RenderUploadQueue(RenderUploadQueue)
                 .DetailsView(DetailsView);
         }
         return TransparencyBakePanel.ToSharedRef();
@@ -187,6 +313,9 @@ void SWCAEditorPanel::RefreshFromAsset(const bool bRebuildActiveModePreview)
     bPendingFullModeRefresh = false;
     UpdateCachedStatus();
 
+    const EWCAEditorMode ActiveMode = SessionStore.IsValid()
+        ? SessionStore->GetState().ActiveMode
+        : EWCAEditorMode::PartEdit;
     switch (ActiveMode)
     {
     case EWCAEditorMode::PartEdit:
@@ -353,6 +482,55 @@ bool SWCAEditorPanel::BakeAllWrinkleMaps(FString& OutSummary, bool* OutHadWarnin
     return FWetWrinkleBakeService::BakeAllWrinkleMaps(WetClothingAsset.Get(), OutSummary, OutHadWarnings);
 }
 
+bool SWCAEditorPanel::RequestBakeAllWrinkleMaps(
+    TFunction<void(const FDWCEditorBakeBatchResult&)> Completion,
+    FString* OutError)
+{
+    UWetClothingAsset* Asset = WetClothingAsset.Get();
+    if (Asset == nullptr || !BakeCoordinator.IsValid())
+    {
+        if (OutError != nullptr) *OutError = TEXT("The asynchronous bake service is unavailable.");
+        return false;
+    }
+    TArray<int32> MaterialSlots;
+    FWetWrinkleBakeService::CollectBakeMaterialSlots(*Asset, MaterialSlots);
+    return BakeCoordinator->RequestWrinkleBake(
+        MoveTemp(MaterialSlots),
+        true,
+        MoveTemp(Completion),
+        OutError);
+}
+
+bool SWCAEditorPanel::RequestBakeAllTransparencyMaps(
+    TFunction<void(const FDWCEditorBakeBatchResult&)> Completion,
+    FString* OutError)
+{
+    UWetClothingAsset* Asset = WetClothingAsset.Get();
+    if (Asset == nullptr || !BakeCoordinator.IsValid())
+    {
+        if (OutError != nullptr) *OutError = TEXT("The asynchronous bake service is unavailable.");
+        return false;
+    }
+
+    TArray<FGuid> LayerGuids;
+    for (const FWetClothingTransparencyLayerData& Layer :
+         Asset->Authored.TransparencyData.TransparencyLayers)
+    {
+        const int32 MaterialSlotIndex = Layer.TargetSurface.OuterMaterialSlotIndex;
+        if (Layer.SourceType == EDWCTransparencySourceType::SameMeshMaterialSlots &&
+            MaterialSlotIndex != INDEX_NONE &&
+            Asset->IsMaterialSlotWettable(MaterialSlotIndex))
+        {
+            LayerGuids.Add(Layer.LayerGuid);
+        }
+    }
+    return BakeCoordinator->RequestTransparencyBake(
+        MoveTemp(LayerGuids),
+        true,
+        MoveTemp(Completion),
+        OutError);
+}
+
 FReply SWCAEditorPanel::BakeSelectedWrinkleNormalMap()
 {
     EnsureModeWidget(EWCAEditorMode::WrinkleEdit);
@@ -376,7 +554,14 @@ bool SWCAEditorPanel::SaveBakedVisualAssets() const
 
 void SWCAEditorPanel::SetEditorMode(const EWCAEditorMode NewMode)
 {
-    ActiveMode = NewMode;
+    if (bHasActiveEditorMode && ActiveEditorMode != NewMode)
+    {
+        SuspendPreviewMode(ActiveEditorMode, EDWCEditorPreviewSuspendReason::ModeSwitch);
+    }
+    if (SessionStore.IsValid())
+    {
+        SessionStore->Dispatch(FDWCActivateEditorModeAction{NewMode});
+    }
     const bool bHadModeWidget =
         (NewMode == EWCAEditorMode::PartEdit && PartEditorPanel.IsValid()) ||
         (NewMode == EWCAEditorMode::WrinkleEdit && WrinkleEditorPanel.IsValid()) ||
@@ -387,6 +572,10 @@ void SWCAEditorPanel::SetEditorMode(const EWCAEditorMode NewMode)
         ModeContentBox->SetContent(EnsureModeWidget(NewMode));
     }
 
+    ActiveEditorMode = NewMode;
+    bHasActiveEditorMode = true;
+    ResumePreviewModeIfNeeded(NewMode);
+
     if (bHadModeWidget)
     {
         RefreshFromAsset(false);
@@ -396,6 +585,84 @@ void SWCAEditorPanel::SetEditorMode(const EWCAEditorMode NewMode)
         bRefreshPending = false;
         UpdateCachedStatus();
     }
+}
+
+void SWCAEditorPanel::HandleAuthoringDocumentChanged(const FDWCEditorAuthoringChange& Change)
+{
+    if (!SessionStore.IsValid())
+    {
+        return;
+    }
+
+    FDWCReconcileAuthoringAction Action;
+    Action.AuthoringRevision = Change.Revision;
+    Action.Domain = Change.Domain;
+    Action.Index = BuildAuthoringIndex(WetClothingAsset.Get());
+    Action.Impact = Change.Impact;
+    SessionStore->Dispatch(Action);
+}
+
+void SWCAEditorPanel::SuspendPreviewMode(
+    const EWCAEditorMode Mode,
+    const EDWCEditorPreviewSuspendReason Reason)
+{
+    switch (Mode)
+    {
+    case EWCAEditorMode::WrinkleEdit:
+        if (WrinkleEditorPanel.IsValid())
+        {
+            WrinkleEditorPanel->SuspendPreview(Reason);
+        }
+        break;
+    case EWCAEditorMode::TransparencyBake:
+        if (TransparencyBakePanel.IsValid())
+        {
+            TransparencyBakePanel->SuspendPreview(Reason);
+        }
+        break;
+    case EWCAEditorMode::PartEdit:
+    default:
+        break;
+    }
+}
+
+void SWCAEditorPanel::ResumePreviewModeIfNeeded(const EWCAEditorMode Mode)
+{
+    switch (Mode)
+    {
+    case EWCAEditorMode::WrinkleEdit:
+        if (WrinkleEditorPanel.IsValid())
+        {
+            WrinkleEditorPanel->ResumePreviewIfNeeded();
+        }
+        break;
+    case EWCAEditorMode::TransparencyBake:
+        if (TransparencyBakePanel.IsValid())
+        {
+            TransparencyBakePanel->ResumePreviewIfNeeded();
+        }
+        break;
+    case EWCAEditorMode::PartEdit:
+    default:
+        break;
+    }
+}
+
+void SWCAEditorPanel::SuspendAllPreviewModes(const EDWCEditorPreviewSuspendReason Reason)
+{
+    SuspendPreviewMode(EWCAEditorMode::WrinkleEdit, Reason);
+    SuspendPreviewMode(EWCAEditorMode::TransparencyBake, Reason);
+}
+
+void SWCAEditorPanel::HandlePreBeginPIE(const bool)
+{
+    SuspendAllPreviewModes(EDWCEditorPreviewSuspendReason::BeginPIE);
+}
+
+void SWCAEditorPanel::HandleEndPIE(const bool)
+{
+    // Do not rebuild preview textures on PIE exit. The active editor mode
+    // resumes lazily through its mode button or the next editing action.
 }
 
 #undef LOCTEXT_NAMESPACE

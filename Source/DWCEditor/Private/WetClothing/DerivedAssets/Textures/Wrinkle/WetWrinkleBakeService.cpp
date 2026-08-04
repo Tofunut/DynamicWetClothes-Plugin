@@ -19,10 +19,7 @@ namespace
                 continue;
             }
 
-            if (WrinkleData.IsUsingCustomWrinkleNormalMap(
-                    Patch.MaterialSlotIndex,
-                    WrinkleData.WrinkleUVChannelIndex,
-                    UWetClothingAsset::RuntimeSimulationLODIndex))
+            if (WrinkleData.IsUsingCustomWrinkleNormalMap(Patch.MaterialSlotIndex))
             {
                 continue;
             }
@@ -40,10 +37,7 @@ namespace
                 continue;
             }
 
-            if (WrinkleData.IsUsingCustomWrinkleNormalMap(
-                    Stroke.MaterialSlotIndex,
-                    WrinkleData.WrinkleUVChannelIndex,
-                    UWetClothingAsset::RuntimeSimulationLODIndex))
+            if (WrinkleData.IsUsingCustomWrinkleNormalMap(Stroke.MaterialSlotIndex))
             {
                 continue;
             }
@@ -58,6 +52,16 @@ namespace
             &Asset,
             MaterialSlotIndex);
     }
+}
+
+void FWetWrinkleBakeService::CollectBakeMaterialSlots(
+    const UWetClothingAsset& WetClothingAsset,
+    TArray<int32>& OutMaterialSlots)
+{
+    TSet<int32> MaterialSlots;
+    CollectAuthoredWrinkleMaterialSlots(WetClothingAsset, MaterialSlots);
+    OutMaterialSlots = MaterialSlots.Array();
+    OutMaterialSlots.Sort();
 }
 
 void FWetWrinkleBakeService::RefreshBakeStatusFromCurrentOutputs(

@@ -19,9 +19,49 @@ namespace
         TextureAddress AddressX = TA_Clamp;
         TextureAddress AddressY = TA_Clamp;
         FWetClothingTextureReadback Data;
+        uint64 LastUsedSerial = 0;
     };
 
     TMap<FObjectKey, FReadbackCacheEntry> GTextureReadbackCache;
+    uint64 GTextureReadbackUseSerial = 0;
+    constexpr uint64 TextureReadbackCacheBudgetBytes = 256ull * 1024ull * 1024ull;
+
+    uint64 GetReadbackCacheBytes()
+    {
+        uint64 TotalBytes = 0;
+        for (const TPair<FObjectKey, FReadbackCacheEntry>& Pair : GTextureReadbackCache)
+        {
+            if (Pair.Value.Data.RawData.IsValid())
+            {
+                TotalBytes += Pair.Value.Data.RawData->GetAllocatedSize();
+            }
+        }
+        return TotalBytes;
+    }
+
+    void TrimReadbackCache(const FObjectKey& ProtectedKey)
+    {
+        uint64 UsedBytes = GetReadbackCacheBytes();
+        while (UsedBytes > TextureReadbackCacheBudgetBytes)
+        {
+            const FObjectKey* OldestKey = nullptr;
+            uint64 OldestSerial = MAX_uint64;
+            for (const TPair<FObjectKey, FReadbackCacheEntry>& Pair : GTextureReadbackCache)
+            {
+                if (Pair.Key != ProtectedKey && Pair.Value.LastUsedSerial < OldestSerial)
+                {
+                    OldestSerial = Pair.Value.LastUsedSerial;
+                    OldestKey = &Pair.Key;
+                }
+            }
+            if (OldestKey == nullptr)
+            {
+                break;
+            }
+            GTextureReadbackCache.Remove(*OldestKey);
+            UsedBytes = GetReadbackCacheBytes();
+        }
+    }
 }
 
 bool FWetClothingTextureReadback::IsValid() const
@@ -77,7 +117,7 @@ bool FWetClothingTextureReadbackUtils::TryReadTextureSourceData(
     if (Texture != nullptr)
     {
         const FObjectKey Key(Texture);
-        if (const FReadbackCacheEntry* Cached = GTextureReadbackCache.Find(Key))
+        if (FReadbackCacheEntry* Cached = GTextureReadbackCache.Find(Key))
         {
             if (Cached->Width == Texture->Source.GetSizeX() &&
                 Cached->Height == Texture->Source.GetSizeY() &&
@@ -88,6 +128,7 @@ bool FWetClothingTextureReadbackUtils::TryReadTextureSourceData(
                 Cached->AddressY == Texture->AddressY)
             {
                 OutTextureData = Cached->Data;
+                Cached->LastUsedSerial = ++GTextureReadbackUseSerial;
                 OutErrorMessage.Reset();
                 return true;
             }
@@ -144,6 +185,8 @@ bool FWetClothingTextureReadbackUtils::TryReadTextureSourceData(
     CacheEntry.AddressX = OutTextureData.AddressX;
     CacheEntry.AddressY = OutTextureData.AddressY;
     CacheEntry.Data = OutTextureData;
+    CacheEntry.LastUsedSerial = ++GTextureReadbackUseSerial;
+    TrimReadbackCache(FObjectKey(Texture));
 
     OutErrorMessage.Reset();
     return true;
@@ -156,6 +199,7 @@ bool FWetClothingTextureReadbackUtils::TryReadTextureSourceData(
 void FWetClothingTextureReadbackUtils::ClearCache()
 {
     GTextureReadbackCache.Reset();
+    GTextureReadbackUseSerial = 0;
 }
 
 void FWetClothingTextureReadbackUtils::InvalidateTexture(UTexture2D* Texture)

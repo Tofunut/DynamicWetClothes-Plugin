@@ -1,25 +1,10 @@
 #include "WetClothing/Modes/Wrinkle/Stroke/WetProceduralRidgeRasterizer.h"
 
+#include "WetClothing/Foundation/Jobs/DWCEditorCancellationToken.h"
+#include "WetClothing/Foundation/Raster/DWCEditorNormalRasterCore.h"
+
 namespace
 {
-    FColor EncodeNormalTS(const FVector& Normal)
-    {
-        const FVector N = Normal.GetSafeNormal(UE_SMALL_NUMBER, FVector(0.0, 0.0, 1.0));
-        return FColor(
-            static_cast<uint8>(FMath::Clamp((N.X * 0.5 + 0.5) * 255.0, 0.0, 255.0)),
-            static_cast<uint8>(FMath::Clamp((N.Y * 0.5 + 0.5) * 255.0, 0.0, 255.0)),
-            static_cast<uint8>(FMath::Clamp((N.Z * 0.5 + 0.5) * 255.0, 0.0, 255.0)),
-            255);
-    }
-
-    FVector DecodeNormalTS(const FColor& Color)
-    {
-        return FVector(
-            static_cast<double>(Color.R) / 127.5 - 1.0,
-            static_cast<double>(Color.G) / 127.5 - 1.0,
-            static_cast<double>(Color.B) / 127.5 - 1.0).GetSafeNormal(UE_SMALL_NUMBER, FVector(0.0, 0.0, 1.0));
-    }
-
     FIntRect ClampRect(const FIntRect& Rect, const FIntPoint TextureSize)
     {
         return FIntRect(
@@ -225,7 +210,8 @@ namespace
         const FWetProceduralRidgeStroke& Stroke,
         const FIntPoint TextureSize,
         const FIntRect& Bounds,
-        TFunctionRef<void(int32, int32, const FVector&, double)> ApplyPixel)
+        TFunctionRef<void(int32, int32, const FVector&, double)> ApplyPixel,
+        const FDWCEditorCancellationToken* CancellationToken)
     {
         FWetProceduralRidgeRasterResult Result;
         if (Bounds.IsEmpty())
@@ -272,141 +258,104 @@ namespace
             }
         }
 
-        const int32 BoundsWidth = Bounds.Width();
-        const int32 BoundsHeight = Bounds.Height();
-        TArray<int32> BestSegmentIndices;
-        TArray<float> BestDistanceMetrics;
-        BestSegmentIndices.Init(INDEX_NONE, BoundsWidth * BoundsHeight);
-        BestDistanceMetrics.Init(MAX_flt, BoundsWidth * BoundsHeight);
-
-        // Segment bounds are used only to collect the best polyline candidate. A pixel is
-        // evaluated once below, so adjacent segment caps cannot build a bead at each point.
-        for (int32 SegmentIndex = 0; SegmentIndex + 1 < Stroke.Points.Num(); ++SegmentIndex)
+        FIntRect DirtyRect;
+        bool bHasDirtyRect = false;
+        // Keep candidate scratch bounded. Large strokes are evaluated tile by
+        // tile, so a full-resolution stroke does not allocate full-resolution
+        // int/float helper arrays on the game or worker thread.
+        for (int32 TileMinY = Bounds.Min.Y; TileMinY < Bounds.Max.Y; TileMinY += FWetProceduralRidgeRasterizer::ScratchTileSize)
         {
-            const FVector2D A = Stroke.Points[SegmentIndex].PositionUV;
-            const FVector2D B = Stroke.Points[SegmentIndex + 1].PositionUV;
-            const FVector2D AB = B - A;
-            const double SegmentLengthSquared = AB.SizeSquared();
-            if (SegmentLengthSquared <= UE_SMALL_NUMBER)
+            for (int32 TileMinX = Bounds.Min.X; TileMinX < Bounds.Max.X; TileMinX += FWetProceduralRidgeRasterizer::ScratchTileSize)
             {
-                continue;
-            }
-
-            const FVector2D SegmentDir = SegmentDirections[SegmentIndex];
-            const FIntPoint PixelA(FMath::RoundToInt(A.X * TextureSize.X), FMath::RoundToInt(A.Y * TextureSize.Y));
-            const FIntPoint PixelB(FMath::RoundToInt(B.X * TextureSize.X), FMath::RoundToInt(B.Y * TextureSize.Y));
-            FIntRect SegmentBounds(
-                FMath::Min(PixelA.X, PixelB.X) - RasterPaddingPixels,
-                FMath::Min(PixelA.Y, PixelB.Y) - RasterPaddingPixels,
-                FMath::Max(PixelA.X, PixelB.X) + RasterPaddingPixels + 1,
-                FMath::Max(PixelA.Y, PixelB.Y) + RasterPaddingPixels + 1);
-            SegmentBounds.Min.X = FMath::Max(SegmentBounds.Min.X, Bounds.Min.X);
-            SegmentBounds.Min.Y = FMath::Max(SegmentBounds.Min.Y, Bounds.Min.Y);
-            SegmentBounds.Max.X = FMath::Min(SegmentBounds.Max.X, Bounds.Max.X);
-            SegmentBounds.Max.Y = FMath::Min(SegmentBounds.Max.Y, Bounds.Max.Y);
-
-            for (int32 Y = SegmentBounds.Min.Y; Y < SegmentBounds.Max.Y; ++Y)
-            {
-                for (int32 X = SegmentBounds.Min.X; X < SegmentBounds.Max.X; ++X)
+                if (CancellationToken != nullptr && CancellationToken->IsCanceled())
                 {
-                    const FVector2D UV(
-                        (static_cast<double>(X) + 0.5) / TextureSize.X,
-                        (static_cast<double>(Y) + 0.5) / TextureSize.Y);
-                    const double SegmentT = FMath::Clamp(
-                        FVector2D::DotProduct(UV - A, AB) / SegmentLengthSquared,
-                        0.0,
-                        1.0);
-                    const double StrokeT = FMath::Clamp(
-                        (CumulativeLengths[SegmentIndex] + SegmentT * SegmentLengths[SegmentIndex]) / TotalLength,
-                        0.0,
-                        1.0);
-                    const FVector2D Closest = A + AB * SegmentT;
-                    const FVector2D Delta = UV - Closest;
-                    const double HalfWidth = ResolveHalfWidth(Stroke, StrokeT);
-                    FVector2D StrokeDirection = FMath::Lerp(
-                        PointTangents[SegmentIndex],
-                        PointTangents[SegmentIndex + 1],
-                        SegmentT).GetSafeNormal();
-                    if (StrokeDirection.IsNearlyZero())
-                    {
-                        StrokeDirection = SegmentDir;
-                    }
-                    const FVector2D Perp(-StrokeDirection.Y, StrokeDirection.X);
-                    const double CenterlineOffset = ResolveCenterlineOffset(Stroke, StrokeT, HalfWidth);
-                    const FVector2D AdjustedDelta = Delta - Perp * CenterlineOffset;
-                    const double DistanceMetric = AdjustedDelta.SizeSquared() / FMath::Square(HalfWidth);
-                    if (DistanceMetric > 1.0)
+                    Result.bCanceled = true;
+                    return Result;
+                }
+                const FIntRect TileBounds(
+                    TileMinX,
+                    TileMinY,
+                    FMath::Min(TileMinX + FWetProceduralRidgeRasterizer::ScratchTileSize, Bounds.Max.X),
+                    FMath::Min(TileMinY + FWetProceduralRidgeRasterizer::ScratchTileSize, Bounds.Max.Y));
+                const int32 TileWidth = TileBounds.Width();
+                TArray<int32, TInlineAllocator<FWetProceduralRidgeRasterizer::ScratchTileSize * FWetProceduralRidgeRasterizer::ScratchTileSize>> BestSegmentIndices;
+                TArray<float, TInlineAllocator<FWetProceduralRidgeRasterizer::ScratchTileSize * FWetProceduralRidgeRasterizer::ScratchTileSize>> BestDistanceMetrics;
+                BestSegmentIndices.Init(INDEX_NONE, TileBounds.Width() * TileBounds.Height());
+                BestDistanceMetrics.Init(MAX_flt, TileBounds.Width() * TileBounds.Height());
+
+                for (int32 SegmentIndex = 0; SegmentIndex + 1 < Stroke.Points.Num(); ++SegmentIndex)
+                {
+                    const FVector2D A = Stroke.Points[SegmentIndex].PositionUV;
+                    const FVector2D B = Stroke.Points[SegmentIndex + 1].PositionUV;
+                    const FVector2D AB = B - A;
+                    const double SegmentLengthSquared = AB.SizeSquared();
+                    if (SegmentLengthSquared <= UE_SMALL_NUMBER)
                     {
                         continue;
                     }
-
-                    const int32 LocalIndex = (Y - Bounds.Min.Y) * BoundsWidth + (X - Bounds.Min.X);
-                    if (DistanceMetric < BestDistanceMetrics[LocalIndex])
+                    const FVector2D SegmentDir = SegmentDirections[SegmentIndex];
+                    const FIntPoint PixelA(FMath::RoundToInt(A.X * TextureSize.X), FMath::RoundToInt(A.Y * TextureSize.Y));
+                    const FIntPoint PixelB(FMath::RoundToInt(B.X * TextureSize.X), FMath::RoundToInt(B.Y * TextureSize.Y));
+                    FIntRect SegmentBounds(
+                        FMath::Min(PixelA.X, PixelB.X) - RasterPaddingPixels,
+                        FMath::Min(PixelA.Y, PixelB.Y) - RasterPaddingPixels,
+                        FMath::Max(PixelA.X, PixelB.X) + RasterPaddingPixels + 1,
+                        FMath::Max(PixelA.Y, PixelB.Y) + RasterPaddingPixels + 1);
+                    SegmentBounds.Min.X = FMath::Max(SegmentBounds.Min.X, TileBounds.Min.X);
+                    SegmentBounds.Min.Y = FMath::Max(SegmentBounds.Min.Y, TileBounds.Min.Y);
+                    SegmentBounds.Max.X = FMath::Min(SegmentBounds.Max.X, TileBounds.Max.X);
+                    SegmentBounds.Max.Y = FMath::Min(SegmentBounds.Max.Y, TileBounds.Max.Y);
+                    for (int32 Y = SegmentBounds.Min.Y; Y < SegmentBounds.Max.Y; ++Y)
                     {
-                        BestDistanceMetrics[LocalIndex] = static_cast<float>(DistanceMetric);
-                        BestSegmentIndices[LocalIndex] = SegmentIndex;
+                        for (int32 X = SegmentBounds.Min.X; X < SegmentBounds.Max.X; ++X)
+                        {
+                            const FVector2D UV((static_cast<double>(X) + 0.5) / TextureSize.X, (static_cast<double>(Y) + 0.5) / TextureSize.Y);
+                            const double SegmentT = FMath::Clamp(FVector2D::DotProduct(UV - A, AB) / SegmentLengthSquared, 0.0, 1.0);
+                            const double StrokeT = FMath::Clamp((CumulativeLengths[SegmentIndex] + SegmentT * SegmentLengths[SegmentIndex]) / TotalLength, 0.0, 1.0);
+                            FVector2D StrokeDirection = FMath::Lerp(PointTangents[SegmentIndex], PointTangents[SegmentIndex + 1], SegmentT).GetSafeNormal();
+                            if (StrokeDirection.IsNearlyZero()) StrokeDirection = SegmentDir;
+                            const double HalfWidth = ResolveHalfWidth(Stroke, StrokeT);
+                            const FVector2D Perp(-StrokeDirection.Y, StrokeDirection.X);
+                            const FVector2D AdjustedDelta = UV - (A + AB * SegmentT) - Perp * ResolveCenterlineOffset(Stroke, StrokeT, HalfWidth);
+                            const double DistanceMetric = AdjustedDelta.SizeSquared() / FMath::Square(HalfWidth);
+                            const int32 LocalIndex = (Y - TileBounds.Min.Y) * TileWidth + (X - TileBounds.Min.X);
+                            if (DistanceMetric <= 1.0 && DistanceMetric < BestDistanceMetrics[LocalIndex])
+                            {
+                                BestDistanceMetrics[LocalIndex] = static_cast<float>(DistanceMetric);
+                                BestSegmentIndices[LocalIndex] = SegmentIndex;
+                            }
+                        }
                     }
                 }
-            }
-        }
 
-        FIntRect DirtyRect;
-        bool bHasDirtyRect = false;
-        for (int32 Y = Bounds.Min.Y; Y < Bounds.Max.Y; ++Y)
-        {
-            for (int32 X = Bounds.Min.X; X < Bounds.Max.X; ++X)
-            {
-                const int32 LocalIndex = (Y - Bounds.Min.Y) * BoundsWidth + (X - Bounds.Min.X);
-                const int32 SegmentIndex = BestSegmentIndices[LocalIndex];
-                if (SegmentIndex == INDEX_NONE)
+                for (int32 Y = TileBounds.Min.Y; Y < TileBounds.Max.Y; ++Y)
                 {
-                    continue;
-                }
+                    for (int32 X = TileBounds.Min.X; X < TileBounds.Max.X; ++X)
+                    {
+                        const int32 LocalIndex = (Y - TileBounds.Min.Y) * TileWidth + (X - TileBounds.Min.X);
+                        const int32 SegmentIndex = BestSegmentIndices[LocalIndex];
+                        if (SegmentIndex == INDEX_NONE) continue;
 
-                const FVector2D A = Stroke.Points[SegmentIndex].PositionUV;
-                const FVector2D B = Stroke.Points[SegmentIndex + 1].PositionUV;
-                const FVector2D AB = B - A;
-                const double SegmentLengthSquared = AB.SizeSquared();
-                const FVector2D UV(
-                    (static_cast<double>(X) + 0.5) / TextureSize.X,
-                    (static_cast<double>(Y) + 0.5) / TextureSize.Y);
-                const double SegmentT = FMath::Clamp(
-                    FVector2D::DotProduct(UV - A, AB) / SegmentLengthSquared,
-                    0.0,
-                    1.0);
-                const double StrokeT = FMath::Clamp(
-                    (CumulativeLengths[SegmentIndex] + SegmentT * SegmentLengths[SegmentIndex]) / TotalLength,
-                    0.0,
-                    1.0);
-                FVector2D StrokeDirection = FMath::Lerp(
-                    PointTangents[SegmentIndex],
-                    PointTangents[SegmentIndex + 1],
-                    SegmentT).GetSafeNormal();
-                if (StrokeDirection.IsNearlyZero())
-                {
-                    StrokeDirection = SegmentDirections[SegmentIndex];
-                }
-                const FVector2D Perp(-StrokeDirection.Y, StrokeDirection.X);
-                const double HalfWidth = ResolveHalfWidth(Stroke, StrokeT);
-                const FVector2D Delta = UV - (A + AB * SegmentT);
-                const FVector2D AdjustedDelta =
-                    Delta - Perp * ResolveCenterlineOffset(Stroke, StrokeT, HalfWidth);
-                const double Distance01 = FMath::Clamp(
-                    FMath::Sqrt(static_cast<double>(BestDistanceMetrics[LocalIndex])),
-                    0.0,
-                    1.0);
-                const double Coverage = ComputeCrossSectionCoverage(Stroke, Distance01, StrokeT);
-                if (Coverage <= UE_SMALL_NUMBER)
-                {
-                    continue;
-                }
+                        const FVector2D A = Stroke.Points[SegmentIndex].PositionUV;
+                        const FVector2D B = Stroke.Points[SegmentIndex + 1].PositionUV;
+                        const FVector2D AB = B - A;
+                        const double SegmentT = FMath::Clamp(FVector2D::DotProduct(
+                            FVector2D((static_cast<double>(X) + 0.5) / TextureSize.X, (static_cast<double>(Y) + 0.5) / TextureSize.Y) - A, AB) / AB.SizeSquared(), 0.0, 1.0);
+                        const double StrokeT = FMath::Clamp((CumulativeLengths[SegmentIndex] + SegmentT * SegmentLengths[SegmentIndex]) / TotalLength, 0.0, 1.0);
+                        FVector2D StrokeDirection = FMath::Lerp(PointTangents[SegmentIndex], PointTangents[SegmentIndex + 1], SegmentT).GetSafeNormal();
+                        if (StrokeDirection.IsNearlyZero()) StrokeDirection = SegmentDirections[SegmentIndex];
+                        const FVector2D Perp(-StrokeDirection.Y, StrokeDirection.X);
+                        const double HalfWidth = ResolveHalfWidth(Stroke, StrokeT);
+                        const FVector2D UV((static_cast<double>(X) + 0.5) / TextureSize.X, (static_cast<double>(Y) + 0.5) / TextureSize.Y);
+                        const FVector2D AdjustedDelta = UV - (A + AB * SegmentT) - Perp * ResolveCenterlineOffset(Stroke, StrokeT, HalfWidth);
+                        const double Distance01 = FMath::Clamp(FMath::Sqrt(static_cast<double>(BestDistanceMetrics[LocalIndex])), 0.0, 1.0);
+                        const double Coverage = ComputeCrossSectionCoverage(Stroke, Distance01, StrokeT);
+                        if (Coverage <= UE_SMALL_NUMBER) continue;
 
-                ApplyPixel(
-                    X,
-                    Y,
-                    ComputeRidgeNormal(Stroke, StrokeDirection, AdjustedDelta, Distance01, StrokeT),
-                    Coverage);
-                IncludePoint(DirtyRect, bHasDirtyRect, FIntPoint(X, Y));
+                        ApplyPixel(X, Y, ComputeRidgeNormal(Stroke, StrokeDirection, AdjustedDelta, Distance01, StrokeT), Coverage);
+                        IncludePoint(DirtyRect, bHasDirtyRect, FIntPoint(X, Y));
+                    }
+                }
             }
         }
 
@@ -415,83 +364,46 @@ namespace
         return Result;
     }
 
-    FVector BlendRidgeNormal(const FVector& BaseNormal, const FVector& RidgeNormal, const double Coverage)
-    {
-        return FVector(
-                   BaseNormal.X + RidgeNormal.X * Coverage,
-                   BaseNormal.Y + RidgeNormal.Y * Coverage,
-                   BaseNormal.Z * RidgeNormal.Z)
-            .GetSafeNormal(UE_SMALL_NUMBER, FVector(0.0, 0.0, 1.0));
-    }
 }
 
-FWetProceduralRidgeRasterResult FWetProceduralRidgeRasterizer::Rasterize(
+uint64 FWetProceduralRidgeRasterizer::GetTransientScratchBytesUpperBound()
+{
+    return static_cast<uint64>(ScratchTileSize) * ScratchTileSize * (sizeof(int32) + sizeof(float));
+}
+
+FWetProceduralRidgeRasterResult FWetProceduralRidgeRasterizer::RasterizeToSurface(
     const FWetProceduralRidgeStroke& Stroke,
-    const FIntPoint TextureSize,
-    TArray<FColor>& InOutPixels,
+    FDWCEditorNormalRasterSurface& Surface,
     const FIntRect* ClipRect,
-    const bool bBlendWithExisting)
+    const FDWCEditorCancellationToken* CancellationToken)
 {
     FWetProceduralRidgeRasterResult Result;
-    const int32 PixelCount = TextureSize.X * TextureSize.Y;
-    if (!Stroke.bEnabled || Stroke.Points.Num() < 2 || PixelCount <= 0 || InOutPixels.Num() != PixelCount)
+    if (!Surface.IsValid() || !Stroke.bEnabled || Stroke.Points.Num() < 2)
     {
         return Result;
     }
 
-    const FIntRect Bounds = ResolveRasterBounds(Stroke, TextureSize, ClipRect);
-    if (Bounds.IsEmpty())
-    {
-        return Result;
-    }
-
+    const FIntRect Bounds = ResolveRasterBounds(Stroke, Surface.Size, ClipRect);
     return RasterizeStrokePixels(
         Stroke,
-        TextureSize,
+        Surface.Size,
         Bounds,
-        [&InOutPixels, TextureSize, bBlendWithExisting](
-            const int32 X,
-            const int32 Y,
-            const FVector& RidgeNormal,
-            const double Coverage)
+        [&Surface](const int32 X, const int32 Y, const FVector& RidgeNormal, const double Coverage)
         {
-            const int32 PixelIndex = Y * TextureSize.X + X;
-            const FVector BaseNormal = bBlendWithExisting
-                ? DecodeNormalTS(InOutPixels[PixelIndex])
-                : FVector(0.0, 0.0, 1.0);
-            InOutPixels[PixelIndex] = EncodeNormalTS(BlendRidgeNormal(BaseNormal, RidgeNormal, Coverage));
-        });
-}
-
-FWetProceduralRidgeRasterResult FWetProceduralRidgeRasterizer::RasterizeToNormalCoverageBuffers(
-    const FWetProceduralRidgeStroke& Stroke,
-    const FIntPoint TextureSize,
-    TArray<FVector3f>& InOutNormalBuffer,
-    TArray<float>& InOutCoverageBuffer,
-    const FIntRect* ClipRect)
-{
-    FWetProceduralRidgeRasterResult Result;
-    const int32 PixelCount = TextureSize.X * TextureSize.Y;
-    if (!Stroke.bEnabled || Stroke.Points.Num() < 2 || PixelCount <= 0 ||
-        InOutNormalBuffer.Num() != PixelCount || InOutCoverageBuffer.Num() != PixelCount)
-    {
-        return Result;
-    }
-
-    const FIntRect Bounds = ResolveRasterBounds(Stroke, TextureSize, ClipRect);
-    return RasterizeStrokePixels(
-        Stroke,
-        TextureSize,
-        Bounds,
-        [&InOutNormalBuffer, &InOutCoverageBuffer, TextureSize](
-            const int32 X,
-            const int32 Y,
-            const FVector& RidgeNormal,
-            const double Coverage)
-        {
-            const int32 Index = Y * TextureSize.X + X;
-            InOutNormalBuffer[Index] = FVector3f(
-                BlendRidgeNormal(FVector(InOutNormalBuffer[Index]), RidgeNormal, Coverage));
-            InOutCoverageBuffer[Index] = FMath::Max(InOutCoverageBuffer[Index], static_cast<float>(Coverage));
-        });
+            const int32 Index = Y * Surface.Size.X + X;
+            const FVector3f Detail = FVector3f(
+                RidgeNormal.X * Coverage,
+                RidgeNormal.Y * Coverage,
+                RidgeNormal.Z);
+            Surface.SetNormal(Index, FDWCEditorNormalRasterCore::BlendAngleCorrected(
+                Surface.GetNormal(Index),
+                Detail.GetSafeNormal(UE_SMALL_NUMBER, FVector3f(0.0f, 0.0f, 1.0f))));
+            if (Surface.HasCoverage())
+            {
+                Surface.Coverage[Index] = FMath::Max(
+                    Surface.Coverage[Index],
+                    static_cast<float>(Coverage));
+            }
+        },
+        CancellationToken);
 }

@@ -641,14 +641,6 @@ UMaterialInterface* LoadOrCreateBaseMaterial()
             TEXT("DWC: Created '%s' in memory but could not save it. The viewport remains usable for this editor session."),
             *ObjectPath);
     }
-    else
-    {
-        UE_LOG(
-            LogTemp,
-            Display,
-            TEXT("DWC: Created persistent Wetness Profile preview material '%s'."),
-            *ObjectPath);
-    }
 
     PreviewMaterialCreationState = EPreviewMaterialCreationState::Succeeded;
     return Material;

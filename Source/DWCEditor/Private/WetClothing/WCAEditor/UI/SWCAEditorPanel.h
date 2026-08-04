@@ -5,11 +5,22 @@
 #include "Widgets/SCompoundWidget.h"
 
 class IDetailsView;
+class FDWCEditorAuthoringDocument;
+class FDWCEditorBakeCoordinator;
+class FDWCEditorCacheStore;
+class FDWCEditorRenderUploadQueue;
+class FDWCEditorSessionStore;
+class FDWCEditorSpatialQueryService;
+class FDWCEditorTextureWorkspace;
+class FDWCEditorWorkerJobScheduler;
 class SBox;
 class SWetClothingPartEditorPanel;
 class SWetClothingTransparencyBakePanel;
 class SWetWrinkleEditorPanel;
 class UWetClothingAsset;
+struct FDWCEditorAuthoringChange;
+struct FDWCEditorBakeBatchResult;
+enum class EDWCEditorPreviewSuspendReason : uint8;
 
 enum class EWCAEditorStatusSeverity : uint8
 {
@@ -67,6 +78,12 @@ public:
     bool BakePendingVisualAssets(FString& OutSummary, bool* OutHadWarnings = nullptr);
     FReply BakeSelectedWrinkleNormalMap();
     bool BakeAllWrinkleMaps(FString& OutSummary, bool* OutHadWarnings = nullptr);
+    bool RequestBakeAllWrinkleMaps(
+        TFunction<void(const FDWCEditorBakeBatchResult&)> Completion,
+        FString* OutError = nullptr);
+    bool RequestBakeAllTransparencyMaps(
+        TFunction<void(const FDWCEditorBakeBatchResult&)> Completion,
+        FString* OutError = nullptr);
     bool SaveBakedVisualAssets() const;
     bool SaveTransparencySetupAssets() const;
     void SetEditorMode(EWCAEditorMode NewMode);
@@ -75,20 +92,38 @@ private:
     TSharedRef<SWidget> EnsureModeWidget(EWCAEditorMode Mode);
     EActiveTimerReturnType HandleDeferredRefresh(double CurrentTime, float DeltaTime);
     EActiveTimerReturnType HandleStatusRefreshTimer(double CurrentTime, float DeltaTime);
+    EActiveTimerReturnType HandleTextureUploadTimer(double CurrentTime, float DeltaTime);
     void UpdateCachedStatus(bool bRefreshAssetState = true);
+    void HandleAuthoringDocumentChanged(const FDWCEditorAuthoringChange& Change);
+    void SuspendPreviewMode(EWCAEditorMode Mode, EDWCEditorPreviewSuspendReason Reason);
+    void ResumePreviewModeIfNeeded(EWCAEditorMode Mode);
+    void SuspendAllPreviewModes(EDWCEditorPreviewSuspendReason Reason);
+    void HandlePreBeginPIE(bool bIsSimulating);
+    void HandleEndPIE(bool bIsSimulating);
 
 private:
     TWeakObjectPtr<UWetClothingAsset> WetClothingAsset;
+    TSharedPtr<FDWCEditorAuthoringDocument> AuthoringDocument;
+    TSharedPtr<FDWCEditorCacheStore> CacheStore;
+    TSharedPtr<FDWCEditorSpatialQueryService> SpatialQueryService;
+    TSharedPtr<FDWCEditorRenderUploadQueue> RenderUploadQueue;
+    TSharedPtr<FDWCEditorTextureWorkspace> TextureWorkspace;
+    TSharedPtr<FDWCEditorSessionStore> SessionStore;
+    TSharedPtr<FDWCEditorWorkerJobScheduler, ESPMode::ThreadSafe> WorkerJobScheduler;
+    TSharedPtr<FDWCEditorBakeCoordinator> BakeCoordinator;
     TSharedPtr<IDetailsView> DetailsView;
     FSimpleDelegate OnStatusChanged;
     TSharedPtr<SBox> ModeContentBox;
     TSharedPtr<SWetClothingPartEditorPanel> PartEditorPanel;
     TSharedPtr<SWetWrinkleEditorPanel> WrinkleEditorPanel;
     TSharedPtr<SWetClothingTransparencyBakePanel> TransparencyBakePanel;
-    EWCAEditorMode ActiveMode = EWCAEditorMode::PartEdit;
     bool bRefreshPending = false;
     bool bPendingFullModeRefresh = false;
     bool bSuppressStatusChangedNotification = false;
+    bool bHasActiveEditorMode = false;
+    EWCAEditorMode ActiveEditorMode = EWCAEditorMode::PartEdit;
     int32 CachedIssueCount = 0;
     EWCAEditorStatusSeverity CachedStatusSeverity = EWCAEditorStatusSeverity::Info;
+    FDelegateHandle PreBeginPIEHandle;
+    FDelegateHandle EndPIEHandle;
 };

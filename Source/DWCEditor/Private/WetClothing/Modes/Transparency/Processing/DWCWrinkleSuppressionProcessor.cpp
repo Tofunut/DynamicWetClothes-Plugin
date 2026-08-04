@@ -46,9 +46,7 @@ namespace
 
 FDWCWrinkleSuppressionSource FDWCWrinkleSuppressionProcessor::FindExactSource(
     const UWetClothingAsset* WetClothingAsset,
-    const int32 MaterialSlotIndex,
-    const int32 UVChannelIndex,
-    const int32 LODIndex)
+    const int32 MaterialSlotIndex)
 {
     FDWCWrinkleSuppressionSource Result;
     if (WetClothingAsset == nullptr)
@@ -57,11 +55,9 @@ FDWCWrinkleSuppressionSource FDWCWrinkleSuppressionProcessor::FindExactSource(
     }
 
     Result.BakedMap = WetClothingAsset->Authored.WrinkleData.BakedWrinkleMaps.FindByPredicate(
-        [MaterialSlotIndex, UVChannelIndex, LODIndex](const FWetWrinkleBakedMapSet& Candidate)
+        [MaterialSlotIndex](const FWetWrinkleBakedMapSet& Candidate)
         {
             return Candidate.MaterialSlotIndex == MaterialSlotIndex &&
-                   Candidate.UVChannelIndex == UVChannelIndex &&
-                   Candidate.LODIndex == LODIndex &&
                    Candidate.BakedWrinkleMask != nullptr;
         });
     Result.MaskTexture = Result.BakedMap != nullptr
@@ -103,7 +99,7 @@ bool FDWCWrinkleSuppressionProcessor::BuildResampledCoverageBuffer(
     OutErrorMessage.Reset();
     if (!Source.IsValid())
     {
-        OutErrorMessage = TEXT("No exact baked wrinkle mask matches the transparency slot, UV channel, and LOD.");
+        OutErrorMessage = TEXT("No baked wrinkle mask matches the transparency material slot.");
         return false;
     }
     if (OutputSize.X <= 0 || OutputSize.Y <= 0)

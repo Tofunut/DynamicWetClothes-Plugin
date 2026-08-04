@@ -449,6 +449,71 @@ TSharedRef<SWidget> FWCAEditorWidgets::BuildUVViewOptionsButton(
         ];
 }
 
+TSharedRef<SWidget> FWCAEditorWidgets::BuildUVViewOptionsButton(
+    TArray<TSharedPtr<EWCAUVDisplayMode>>* DisplayModeItems,
+    TSharedPtr<EWCAUVDisplayMode> SelectedDisplayModeItem,
+    TAttribute<FText> SelectedDisplayModeText,
+    TFunction<void(TSharedPtr<EWCAUVDisplayMode>)> OnDisplayModeChanged,
+    TAttribute<float> BackgroundTextureOpacity,
+    TFunction<void(float)> OnBackgroundTextureOpacityChanged,
+    TAttribute<float> UVIslandLineOpacity,
+    TFunction<void(float)> OnUVIslandLineOpacityChanged,
+    TAttribute<float> UVIslandLineThicknessScale,
+    TFunction<void(float)> OnUVIslandLineThicknessScaleChanged,
+    const bool bShowBackgroundTextureControls)
+{
+    TSharedRef<SWidget> ViewOptionsButton = BuildUVViewOptionsButton(
+        BackgroundTextureOpacity,
+        MoveTemp(OnBackgroundTextureOpacityChanged),
+        UVIslandLineOpacity,
+        MoveTemp(OnUVIslandLineOpacityChanged),
+        UVIslandLineThicknessScale,
+        MoveTemp(OnUVIslandLineThicknessScaleChanged),
+        bShowBackgroundTextureControls);
+
+    TSharedRef<SWidget> DisplayModeCombo = SNew(SComboBox<TSharedPtr<EWCAUVDisplayMode>>)
+        .OptionsSource(DisplayModeItems)
+        .InitiallySelectedItem(SelectedDisplayModeItem)
+        .OnGenerateWidget_Lambda([](TSharedPtr<EWCAUVDisplayMode> Item)
+        {
+            return GenerateUVDisplayModeComboItem(Item);
+        })
+        .OnSelectionChanged_Lambda([OnDisplayModeChanged](TSharedPtr<EWCAUVDisplayMode> Item, ESelectInfo::Type)
+        {
+            if (OnDisplayModeChanged)
+            {
+                OnDisplayModeChanged(Item);
+            }
+        })
+        .ContentPadding(FMargin(6.0f, 3.0f))
+        [SNew(STextBlock)
+             .Text(SelectedDisplayModeText)];
+
+    return SNew(SHorizontalBox)
+        + SHorizontalBox::Slot()
+              .AutoWidth()
+              .VAlign(VAlign_Center)
+                  [DisplayModeCombo]
+        + SHorizontalBox::Slot()
+              .AutoWidth()
+              .VAlign(VAlign_Center)
+              .Padding(4.0f, 0.0f, 0.0f, 0.0f)
+                  [ViewOptionsButton];
+}
+
+TSharedRef<SWidget> FWCAEditorWidgets::GenerateUVDisplayModeComboItem(TSharedPtr<EWCAUVDisplayMode> Item)
+{
+    return SNew(STextBlock)
+        .Text(Item.IsValid() ? GetUVDisplayModeLabel(*Item) : FText::GetEmpty());
+}
+
+FText FWCAEditorWidgets::GetUVDisplayModeLabel(EWCAUVDisplayMode DisplayMode)
+{
+    return DisplayMode == EWCAUVDisplayMode::OutlineOnly
+        ? NSLOCTEXT("WetClothingEditorCommonWidgets", "UVDisplayModeOutlineOnly", "Outline Only")
+        : NSLOCTEXT("WetClothingEditorCommonWidgets", "UVDisplayModeNormal", "Normal");
+}
+
 TSharedRef<SWidget> FWCAEditorWidgets::BuildPreviewSection(
     const TSharedRef<SWidget>& PreviewContent,
     const FOnWetClothingPreviewFocusClicked& OnFocusClicked,
@@ -582,6 +647,13 @@ TSharedRef<ITableRow> FWCAEditorWidgets::GenerateMaterialSlotRow(
 {
     const int32 MaterialSlotIndex = Item.IsValid() ? Item->SlotIndex : INDEX_NONE;
     const bool  bIsAllSlotsRow = Item.IsValid() && MaterialSlotIndex == INDEX_NONE;
+    const bool bIsRowEnabled = bIsAllSlotsRow || !Args.IsMaterialSlotEnabled ||
+        Args.IsMaterialSlotEnabled(MaterialSlotIndex);
+    const FText RowTooltip = bIsAllSlotsRow
+        ? Args.AllSlotsTooltip
+        : Args.GetMaterialSlotTooltipText
+            ? Args.GetMaterialSlotTooltipText(MaterialSlotIndex)
+            : FText::GetEmpty();
     UMaterialInterface* MaterialObject = !bIsAllSlotsRow && Item.IsValid() ? Item->Material.Get() : nullptr;
     const FText SlotIDText = bIsAllSlotsRow
                                  ? NSLOCTEXT("WetClothingEditorCommonWidgets", "AllMaterialSlotsSlotID", "All")
@@ -927,6 +999,8 @@ TSharedRef<ITableRow> FWCAEditorWidgets::GenerateMaterialSlotRow(
         ];
 
     return SNew(STableRow<TSharedPtr<FWCAMaterialSlotItem>>, OwnerTable)
+        .IsEnabled(bIsRowEnabled)
+        .ToolTipText(RowTooltip)
         .Padding(0.0f)
         [
             SNew(SBorder)

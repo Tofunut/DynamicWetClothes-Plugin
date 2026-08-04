@@ -22,9 +22,7 @@ class FDWCWrinkleSuppressionProcessor
   public:
     static FDWCWrinkleSuppressionSource FindExactSource(
         const UWetClothingAsset* WetClothingAsset,
-        int32 MaterialSlotIndex,
-        int32 UVChannelIndex,
-        int32 LODIndex);
+        int32 MaterialSlotIndex);
 
     static bool BuildProcessedBuffer(
         const FDWCWrinkleSuppressionSource& Source,

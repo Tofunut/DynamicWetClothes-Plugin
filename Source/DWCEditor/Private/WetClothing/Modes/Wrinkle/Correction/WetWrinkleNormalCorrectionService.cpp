@@ -90,7 +90,6 @@ bool FWetWrinkleNormalCorrectionService::CreateOrUpdateCorrectedTexture(
     Texture->AddressY = TA_Clamp;
     Texture->bFlipGreenChannel = false;
     Texture->PostEditChange();
-    Texture->UpdateResource();
     Texture->MarkPackageDirty();
 
     OutTexture = Texture;

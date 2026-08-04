@@ -61,8 +61,6 @@ bool DWCEditorUtils::SaveAsset(UObject* Asset, const bool bPrepareRuntimeData)
         return false;
     }
 
-    const double SaveStartTime = FPlatformTime::Seconds();
-
     UWetClothingAsset* WetClothingAsset = Cast<UWetClothingAsset>(Asset);
     if (WetClothingAsset != nullptr)
     {
@@ -105,8 +103,6 @@ bool DWCEditorUtils::SaveAsset(UObject* Asset, const bool bPrepareRuntimeData)
             WetClothingAsset->SkipNextRuntimeDataPreSaveRebuild();
         }
     }
-    const double RuntimePreparationEndTime = FPlatformTime::Seconds();
-
     TUniquePtr<FScopedSlowTask> SaveSlowTask;
     if (WetClothingAsset != nullptr)
     {
@@ -187,8 +183,6 @@ bool DWCEditorUtils::SaveAsset(UObject* Asset, const bool bPrepareRuntimeData)
 #endif
 
     }
-    const double PackageCollectionEndTime = FPlatformTime::Seconds();
-
     if (SaveSlowTask.IsValid())
     {
         SaveSlowTask->EnterProgressFrame(
@@ -197,11 +191,14 @@ bool DWCEditorUtils::SaveAsset(UObject* Asset, const bool bPrepareRuntimeData)
     }
 
     const bool bSaved = FEditorFileUtils::PromptForCheckoutAndSave(PackagesToSave, false, false) == FEditorFileUtils::PR_Success;
-    const double PackageSaveEndTime = FPlatformTime::Seconds();
     if (WetClothingAsset != nullptr)
     {
         WetClothingAsset->CompleteRuntimeDataEditorSaveAttempt(bSaved);
         WetClothingAsset->RefreshBakeState(false);
+        if (bSaved)
+        {
+            WetClothingAsset->ReleaseLoadedRuntimeBulkPayloadForEditor();
+        }
     }
     if (bSaved)
     {
@@ -214,19 +211,5 @@ bool DWCEditorUtils::SaveAsset(UObject* Asset, const bool bPrepareRuntimeData)
         GDWCEditorAssetSaved.Broadcast(Asset);
     }
     GDWCEditorAssetSaveAttemptFinished.Broadcast(Asset, bSaved);
-    const double SaveEndTime = FPlatformTime::Seconds();
-    UE_LOG(
-        LogTemp,
-        Display,
-        TEXT("DWC editor save for '%s' %s in %.1f ms across %d package(s) "
-             "(runtime preparation %.1f, package collection %.1f, package save %.1f, completion callbacks %.1f)."),
-        *GetNameSafe(Asset),
-        bSaved ? TEXT("completed") : TEXT("failed"),
-        (SaveEndTime - SaveStartTime) * 1000.0,
-        PackagesToSave.Num(),
-        (RuntimePreparationEndTime - SaveStartTime) * 1000.0,
-        (PackageCollectionEndTime - RuntimePreparationEndTime) * 1000.0,
-        (PackageSaveEndTime - PackageCollectionEndTime) * 1000.0,
-        (SaveEndTime - PackageSaveEndTime) * 1000.0);
     return bSaved;
 }

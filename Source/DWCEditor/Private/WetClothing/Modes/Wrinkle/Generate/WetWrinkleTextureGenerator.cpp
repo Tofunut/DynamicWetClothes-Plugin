@@ -315,7 +315,7 @@ bool FWetWrinkleTextureGenerator::GeneratePreviewMaterialSlotTexture(
 
     if (WetClothingAsset->GetRuntimeSkeletalMesh() == nullptr)
     {
-        OutErrorMessage = TEXT("Generate the DWC UV Channel before generating wrinkle textures.");
+        OutErrorMessage = TEXT("Generate the DWC Data UV before generating wrinkle textures.");
         return false;
     }
 
@@ -327,7 +327,7 @@ bool FWetWrinkleTextureGenerator::GeneratePreviewMaterialSlotTexture(
 
     if (!WetClothingAsset->GetRuntimeSkeletalMesh()->GetMaterials().IsValidIndex(MaterialSlotIndex))
     {
-        OutErrorMessage = TEXT("Selected material slot is not valid for the DWC UV Channel.");
+        OutErrorMessage = TEXT("Selected material slot is not valid for the DWC Data UV.");
         return false;
     }
 
@@ -349,7 +349,7 @@ bool FWetWrinkleTextureGenerator::GeneratePreviewMaterialSlotTexture(
     const int32 LODIndex = FMath::Max(0, Settings.LODIndex);
     if (!WetClothingAsset->HasValidDataUVForLOD(LODIndex))
     {
-        OutErrorMessage = TEXT("Generate the DWC UV Channel before generating wrinkle textures.");
+        OutErrorMessage = TEXT("Generate the DWC Data UV before generating wrinkle textures.");
         return false;
     }
 
@@ -368,7 +368,7 @@ bool FWetWrinkleTextureGenerator::GeneratePreviewMaterialSlotTexture(
         return false;
     }
 
-    const int32 MaxResolution = FMath::Clamp(Settings.Resolution, 16, 8192);
+    const int32 MaxResolution = FMath::Clamp(Settings.Resolution, 16, 4096);
     const int32 Width = MaxResolution;
     const int32 Height = MaxResolution;
 

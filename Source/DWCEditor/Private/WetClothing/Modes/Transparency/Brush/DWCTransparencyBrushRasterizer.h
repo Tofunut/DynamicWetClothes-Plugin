@@ -10,7 +10,8 @@ class FDWCTransparencyBrushRasterizer
   public:
     static void RebuildFromStrokes(
         const FDWCTransparencyAutoBakeResult& AutoResult,
-        const FWetClothingTransparencyLayerData& Layer,
+        const TArray<FDWCTransparencyBrushStroke>& Strokes,
+        int32 BaselineStrokeCount,
         int32 MaterialSlotIndex,
         int32 UVChannelIndex,
         TArray<uint8>& OutManualPremultipliedBuffer,

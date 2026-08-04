@@ -127,7 +127,6 @@ class SWetClothingPartEditorPanel : public SCompoundWidget
     const FSlateBrush*        GetUVSelectionToolBrush(FUVSelectionToolItemPtr Item) const;
     FSlateColor               GetUVSelectionToolIconColor(FUVSelectionToolItemPtr Item) const;
 
-    FText                                          GetMaterialSlotCountText() const;
     FText                                          GetSelectedMaterialSlotText() const;
     FText                                          GetMaterialSlotStatusText(int32 MaterialSlotIndex) const;
     FSlateColor                                    GetMaterialSlotStatusColor(int32 MaterialSlotIndex) const;

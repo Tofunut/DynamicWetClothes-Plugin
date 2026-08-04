@@ -7,8 +7,11 @@
 #include "Engine/SkeletalMesh.h"
 #include "DataAssets/WetClothingAsset.h"
 #include "Misc/Crc.h"
+#include "Rendering/SkeletalMeshLODRenderData.h"
+#include "Rendering/SkeletalMeshRenderData.h"
 #include "UObject/ObjectKey.h"
 #include "WetClothing/Foundation/MeshAnalysis/WetClothingAssetMeshAnalyzer.h"
+#include "WetClothing/Foundation/UV/DWCUVGeometry.h"
 
 namespace
 {
@@ -241,15 +244,36 @@ bool FWCAUVIslandViewCache::BuildMaterialSlotPreviewTriangles(
     int32                                MaterialSlotIndex,
     TArray<FWetClothingAssetUVTriangle>& OutTriangles)
 {
+    return BuildMaterialSlotPreviewTriangles(
+        SkeletalMesh,
+        0,
+        0,
+        MaterialSlotIndex,
+        OutTriangles);
+}
+
+bool FWCAUVIslandViewCache::BuildMaterialSlotPreviewTriangles(
+    const USkeletalMesh*                 SkeletalMesh,
+    const int32                          LODIndex,
+    const int32                          UVChannelIndex,
+    const int32                          MaterialSlotIndex,
+    TArray<FWetClothingAssetUVTriangle>& OutTriangles)
+{
     OutTriangles.Reset();
 
-    if (SkeletalMesh == nullptr || FWetClothingAssetMeshAnalyzer::GetNumUVChannels(SkeletalMesh, 0) <= 0)
+    if (SkeletalMesh == nullptr || FWetClothingAssetMeshAnalyzer::GetNumUVChannels(SkeletalMesh, LODIndex) <= 0)
     {
         return false;
     }
 
     TArray<TSharedPtr<FWetClothingAssetUVIsland>> BuiltIslands;
-    if (!GetMaterialSlotUVIslands(SkeletalMesh, 0, 0, MaterialSlotIndex, BuiltIslands, nullptr))
+    if (!GetMaterialSlotUVIslands(
+            SkeletalMesh,
+            LODIndex,
+            UVChannelIndex,
+            MaterialSlotIndex,
+            BuiltIslands,
+            nullptr))
     {
         return false;
     }
@@ -263,6 +287,113 @@ bool FWCAUVIslandViewCache::BuildMaterialSlotPreviewTriangles(
     }
 
     return OutTriangles.Num() > 0;
+}
+
+bool FWCAUVIslandViewCache::BuildMaterialSlotGeometryPreviewTriangles(
+    const USkeletalMesh*                 SkeletalMesh,
+    const int32                          LODIndex,
+    const int32                          PreferredUVChannelIndex,
+    const int32                          MaterialSlotIndex,
+    TArray<FWetClothingAssetUVTriangle>& OutTriangles)
+{
+    OutTriangles.Reset();
+
+    if (SkeletalMesh == nullptr || !SkeletalMesh->GetMaterials().IsValidIndex(MaterialSlotIndex))
+    {
+        return false;
+    }
+
+    const FSkeletalMeshRenderData* RenderData = SkeletalMesh->GetResourceForRendering();
+    if (RenderData == nullptr || !RenderData->LODRenderData.IsValidIndex(LODIndex))
+    {
+        return false;
+    }
+
+    const FSkeletalMeshLODRenderData& LODData = RenderData->LODRenderData[LODIndex];
+    const int32 VertexCount = static_cast<int32>(LODData.GetNumVertices());
+    if (VertexCount <= 0)
+    {
+        return false;
+    }
+
+    TArray<uint32> IndexBuffer;
+    LODData.MultiSizeIndexContainer.GetIndexBuffer(IndexBuffer);
+    if (IndexBuffer.IsEmpty())
+    {
+        return false;
+    }
+
+    const int32 NumUVChannels = static_cast<int32>(LODData.GetNumTexCoords());
+    const int32 PreviewUVChannelIndex = NumUVChannels > 0
+        ? FMath::Clamp(PreferredUVChannelIndex, 0, NumUVChannels - 1)
+        : INDEX_NONE;
+
+    for (const FSkelMeshRenderSection& Section : LODData.RenderSections)
+    {
+        if (!Section.IsValid() || Section.MaterialIndex != MaterialSlotIndex)
+        {
+            continue;
+        }
+
+        const int32 FirstIndex = static_cast<int32>(Section.BaseIndex);
+        const int32 LastIndex = FMath::Min(
+            FirstIndex + static_cast<int32>(Section.NumTriangles * 3),
+            IndexBuffer.Num());
+
+        for (int32 TriangleIndex = FirstIndex; TriangleIndex + 2 < LastIndex; TriangleIndex += 3)
+        {
+            const uint32 Indices[3] =
+            {
+                IndexBuffer[TriangleIndex],
+                IndexBuffer[TriangleIndex + 1],
+                IndexBuffer[TriangleIndex + 2]
+            };
+            if (Indices[0] >= static_cast<uint32>(VertexCount) ||
+                Indices[1] >= static_cast<uint32>(VertexCount) ||
+                Indices[2] >= static_cast<uint32>(VertexCount))
+            {
+                continue;
+            }
+
+            FWetClothingAssetUVTriangle Triangle;
+            Triangle.TriangleID = TriangleIndex / 3;
+            Triangle.MaterialSlotIndex = MaterialSlotIndex;
+            Triangle.UVIslandID = INDEX_NONE;
+
+            for (int32 CornerIndex = 0; CornerIndex < 3; ++CornerIndex)
+            {
+                const uint32 VertexIndex = Indices[CornerIndex];
+                Triangle.LocalPositions[CornerIndex] = FVector(
+                    LODData.StaticVertexBuffers.PositionVertexBuffer.VertexPosition(VertexIndex));
+
+                FVector2D PreviewUV = FVector2D::ZeroVector;
+                if (PreviewUVChannelIndex != INDEX_NONE)
+                {
+                    PreviewUV = FVector2D(
+                        LODData.StaticVertexBuffers.StaticMeshVertexBuffer.GetVertexUV(
+                            VertexIndex,
+                            PreviewUVChannelIndex));
+                    if (!FDWCUVGeometry::IsFiniteReasonableUV(PreviewUV))
+                    {
+                        PreviewUV = FVector2D::ZeroVector;
+                    }
+                }
+                Triangle.UVs[CornerIndex] = PreviewUV;
+            }
+
+            if (FDWCUVGeometry::ComputeTriangleDoubleArea3D(
+                    Triangle.LocalPositions[0],
+                    Triangle.LocalPositions[1],
+                    Triangle.LocalPositions[2]) <= 1.0e-10)
+            {
+                continue;
+            }
+
+            OutTriangles.Add(MoveTemp(Triangle));
+        }
+    }
+
+    return !OutTriangles.IsEmpty();
 }
 
 bool FWCAUVIslandViewCache::BuildMaterialSlotPreviewTriangles(

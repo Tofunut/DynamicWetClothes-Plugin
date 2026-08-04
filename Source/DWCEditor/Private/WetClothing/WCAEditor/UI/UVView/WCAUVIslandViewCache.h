@@ -36,6 +36,24 @@ public:
         TArray<FWetClothingAssetUVTriangle>& OutTriangles);
 
     static bool BuildMaterialSlotPreviewTriangles(
+        const USkeletalMesh* SkeletalMesh,
+        int32 LODIndex,
+        int32 UVChannelIndex,
+        int32 MaterialSlotIndex,
+        TArray<FWetClothingAssetUVTriangle>& OutTriangles);
+
+    /**
+     * Geometry-only fallback for the compact material-slot thumbnail.
+     * Keeps a slot visible even when its UVs are missing or degenerate.
+     */
+    static bool BuildMaterialSlotGeometryPreviewTriangles(
+        const USkeletalMesh* SkeletalMesh,
+        int32 LODIndex,
+        int32 PreferredUVChannelIndex,
+        int32 MaterialSlotIndex,
+        TArray<FWetClothingAssetUVTriangle>& OutTriangles);
+
+    static bool BuildMaterialSlotPreviewTriangles(
         const UWetClothingAsset* WetClothingAsset,
         int32 MaterialSlotIndex,
         TArray<FWetClothingAssetUVTriangle>& OutTriangles);

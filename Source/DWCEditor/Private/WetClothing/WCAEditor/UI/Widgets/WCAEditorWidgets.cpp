@@ -595,12 +595,12 @@ TSharedRef<ITableRow> FWCAEditorWidgets::GenerateMaterialSlotRow(
                                 : Item.IsValid()
                                 ? FText::FromName(Item->SlotName)
                                 : NSLOCTEXT("WetClothingEditorCommonWidgets", "InvalidMaterialSlotTitle", "Invalid Material Slot");
-    TSharedRef<SWidget> ThumbnailWidget =
+    const TSharedRef<SWidget> EmptyMaterialThumbnailWidget =
         SNew(SBorder)
         .BorderImage(FAppStyle::Get().GetBrush(TEXT("WhiteBrush")))
         .BorderBackgroundColor(FLinearColor(0.06f, 0.06f, 0.06f, 1.0f));
+    TSharedRef<SWidget> ThumbnailWidget = EmptyMaterialThumbnailWidget;
     TSharedPtr<SWidget> MaterialThumbnailWidget;
-    bool bShowPairedThumbnails = false;
 
     if (MaterialObject != nullptr && Args.ThumbnailPool.IsValid())
     {
@@ -618,41 +618,35 @@ TSharedRef<ITableRow> FWCAEditorWidgets::GenerateMaterialSlotRow(
     if (!bIsAllSlotsRow && Args.BuildThumbnailWidget)
     {
         const TSharedRef<SWidget> SlotPreviewWidget = Args.BuildThumbnailWidget(MaterialSlotIndex);
-        if (MaterialThumbnailWidget.IsValid())
-        {
-            bShowPairedThumbnails = true;
-            ThumbnailWidget =
-                SNew(SHorizontalBox)
+        ThumbnailWidget =
+            SNew(SHorizontalBox)
 
-                + SHorizontalBox::Slot()
-                .AutoWidth()
-                .VAlign(VAlign_Center)
-                .Padding(0.0f, 0.0f, 12.0f, 0.0f)
+            + SHorizontalBox::Slot()
+            .AutoWidth()
+            .VAlign(VAlign_Center)
+            .Padding(0.0f, 0.0f, 12.0f, 0.0f)
+            [
+                SNew(SBox)
+                .WidthOverride(48.0f)
+                .HeightOverride(48.0f)
                 [
-                    SNew(SBox)
-                    .WidthOverride(48.0f)
-                    .HeightOverride(48.0f)
-                    [
-                        MaterialThumbnailWidget.ToSharedRef()
-                    ]
+                    MaterialThumbnailWidget.IsValid()
+                        ? MaterialThumbnailWidget.ToSharedRef()
+                        : EmptyMaterialThumbnailWidget
                 ]
+            ]
 
-                + SHorizontalBox::Slot()
-                .AutoWidth()
-                .VAlign(VAlign_Center)
+            + SHorizontalBox::Slot()
+            .AutoWidth()
+            .VAlign(VAlign_Center)
+            [
+                SNew(SBox)
+                .WidthOverride(48.0f)
+                .HeightOverride(48.0f)
                 [
-                    SNew(SBox)
-                    .WidthOverride(48.0f)
-                    .HeightOverride(48.0f)
-                    [
-                        SlotPreviewWidget
-                    ]
-                ];
-        }
-        else
-        {
-            ThumbnailWidget = SlotPreviewWidget;
-        }
+                    SlotPreviewWidget
+                ]
+            ];
     }
     else if (MaterialThumbnailWidget.IsValid())
     {
@@ -690,22 +684,25 @@ TSharedRef<ITableRow> FWCAEditorWidgets::GenerateMaterialSlotRow(
                           .Font(FAppStyle::GetFontStyle(TEXT("NormalFontBold")))]];
 
     RowContent->AddSlot()
-        .FillWidth(1.0f)
+        .AutoWidth()
         .VAlign(VAlign_Center)
         .Padding(2.0f, 0.0f, 10.0f, 0.0f)
-            [SNew(SVerticalBox)
+            [SNew(SBox)
+                 .WidthOverride(FWCAEditorWidgets::MaterialSlotNameColumnWidth)
+                 .VAlign(VAlign_Center)
+                     [SNew(SVerticalBox)
 
-             + SVerticalBox::Slot()
-                   .AutoHeight()
-                       [SNew(STextBlock)
-                            .Text(SlotTitle)
-                            .Font(FAppStyle::GetFontStyle(TEXT("NormalFontBold")))
-                            .OverflowPolicy(ETextOverflowPolicy::Ellipsis)]
+                      + SVerticalBox::Slot()
+                            .AutoHeight()
+                                [SNew(STextBlock)
+                                     .Text(SlotTitle)
+                                     .Font(FAppStyle::GetFontStyle(TEXT("NormalFontBold")))
+                                     .OverflowPolicy(ETextOverflowPolicy::Ellipsis)]
 
-             + SVerticalBox::Slot()
-                   .AutoHeight()
-                   .Padding(0.0f, 3.0f, 0.0f, 0.0f)
-                       [SNew(SHorizontalBox)
+                      + SVerticalBox::Slot()
+                            .AutoHeight()
+                            .Padding(0.0f, 3.0f, 0.0f, 0.0f)
+                                [SNew(SHorizontalBox)
                             .Visibility_Lambda([GetWarningText = Args.GetMaterialSlotWarningText, WetClothingAsset = Args.WetClothingAsset, MaterialSlotIndex, bIsAllSlotsRow]()
                             {
                                 if (bIsAllSlotsRow)
@@ -744,7 +741,7 @@ TSharedRef<ITableRow> FWCAEditorWidgets::GenerateMaterialSlotRow(
                                        })
                                        .Font(FAppStyle::GetFontStyle(TEXT("SmallFont")))
                                        .ColorAndOpacity(FSlateColor(FLinearColor(1.0f, 0.78f, 0.18f, 1.0f)))
-                                       .OverflowPolicy(ETextOverflowPolicy::Ellipsis)]]];
+                                       .OverflowPolicy(ETextOverflowPolicy::Ellipsis)]]]];
 
     RowContent->AddSlot()
         .AutoWidth()

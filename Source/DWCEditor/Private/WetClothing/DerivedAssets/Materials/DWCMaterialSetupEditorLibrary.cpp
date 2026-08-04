@@ -3,6 +3,8 @@
 #include "DataAssets/WetClothingAsset.h"
 #include "WetClothing/DerivedAssets/Materials/WCAMaterialGenerator.h"
 #include "WetClothing/DerivedAssets/Textures/WetnessProfile/WetClothingRenderProfileBakeService.h"
+#include "Materials/Material.h"
+#include "Materials/MaterialInstanceConstant.h"
 
 bool UDWCMaterialSetupEditorLibrary::RepairGeneratedWetMaterials(
     UWetClothingAsset* WetClothingAsset,
@@ -52,10 +54,9 @@ bool UDWCMaterialSetupEditorLibrary::RepairGeneratedWetMaterials(
         MaterialOverride.GeneratedMaterialInstance = Result.GeneratedMaterialInstance;
         ++RepairedCount;
         Messages.Add(FString::Printf(
-            TEXT("Slot %d repaired: shared=%s CPU=%s GPU=%s (%s)"),
+            TEXT("Slot %d repaired: shared=%s runtime=%s (%s)"),
             MaterialOverride.MaterialSlotIndex,
             *GetNameSafe(Result.GeneratedMaterial),
-            *GetNameSafe(Result.GeneratedMaterialInstance),
             *GetNameSafe(Result.GeneratedMaterialInstance),
             *Result.Message));
     }

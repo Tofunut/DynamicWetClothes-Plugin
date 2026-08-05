@@ -77,6 +77,18 @@
 
 namespace SWetClothingPartEditorPanelLocal
 {
+    bool IsSameMaterialFamily(UMaterialInterface* A, UMaterialInterface* B)
+    {
+        if (A == nullptr || B == nullptr)
+        {
+            return A == B;
+        }
+
+        UMaterial* ABase = A->GetMaterial();
+        UMaterial* BBase = B->GetMaterial();
+        return A == B || (ABase != nullptr && ABase == BBase);
+    }
+
     constexpr float                          AutoPartitionMaxTolerancePercent = 40.0f;
     constexpr float                          AutoPartitionDefaultTolerancePercent = 20.0f;
     constexpr float                          MaterialSlotListScrollbarThickness = 12.0f;
@@ -2949,13 +2961,15 @@ FReply SWetClothingPartEditorPanel::HandleApplyMaterialSetupClicked()
     {
         if (WetClothingAssetPtr != nullptr)
         {
-            if (const USkeletalMesh* GeneratedDataUV = WetClothingAssetPtr->GetRuntimeSkeletalMesh())
+            if (USkeletalMesh* GeneratedDataUV = WetClothingAssetPtr->GetRuntimeSkeletalMesh())
             {
                 const TArray<FSkeletalMaterial>& Materials = GeneratedDataUV->GetMaterials();
                 TArray<int32>                    AssignedSlotIndices;
                 for (int32 MaterialIndex = 0; MaterialIndex < Materials.Num(); ++MaterialIndex)
                 {
-                    if (Materials[MaterialIndex].MaterialInterface == SourceMaterial)
+                    if (SWetClothingPartEditorPanelLocal::IsSameMaterialFamily(
+                            Materials[MaterialIndex].MaterialInterface,
+                            SourceMaterial))
                     {
                         AssignedSlotIndices.Add(MaterialIndex);
                     }
@@ -2964,6 +2978,7 @@ FReply SWetClothingPartEditorPanel::HandleApplyMaterialSetupClicked()
                 if (AssignedSlotIndices.Num() > 0)
                 {
                     WetClothingAssetPtr->Modify();
+                    GeneratedDataUV->Modify();
                     for (const int32 MaterialIndex : AssignedSlotIndices)
                     {
                         FWetClothingGeneratedWetMaterialOverride* ExistingOverride = WetClothingAssetPtr->Derived.Inline.GeneratedWetMaterialOverrides.FindByPredicate(
@@ -2981,8 +2996,11 @@ FReply SWetClothingPartEditorPanel::HandleApplyMaterialSetupClicked()
                         ExistingOverride->SourceMaterial = SourceMaterial;
                         ExistingOverride->GeneratedMaterial = MaterialSet.GeneratedMaterial;
                         ExistingOverride->GeneratedMaterialInstance = MaterialSet.GeneratedMaterialInstance;
+                        GeneratedDataUV->GetMaterials()[MaterialIndex].MaterialInterface =
+                            MaterialSet.GeneratedMaterialInstance;
                         FWCAEditorWidgets::MarkMaterialSlotWettable(WetClothingAssetPtr, MaterialIndex);
                     }
+                    GeneratedDataUV->MarkPackageDirty();
                     WetClothingAssetPtr->MarkPackageDirty();
                     RefreshMaterialSlotItems();
 

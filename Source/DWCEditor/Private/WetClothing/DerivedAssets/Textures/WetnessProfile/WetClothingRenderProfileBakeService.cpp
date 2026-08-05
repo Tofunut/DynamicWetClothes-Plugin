@@ -16,6 +16,18 @@
 
 namespace
 {
+    bool IsSameMaterialFamily(UMaterialInterface* A, UMaterialInterface* B)
+    {
+        if (A == nullptr || B == nullptr)
+        {
+            return A == B;
+        }
+
+        UMaterial* ABase = A->GetMaterial();
+        UMaterial* BBase = B->GetMaterial();
+        return A == B || (ABase != nullptr && ABase == BBase);
+    }
+
     struct FExpectedWetPartRenderProfile
     {
         int32 MaterialSlotIndex = INDEX_NONE;
@@ -407,6 +419,18 @@ bool FWetClothingRenderProfileBakeService::BakeRenderProfileDataAndUpdateMateria
         Override->SourceMaterial = SourceMaterial;
         Override->GeneratedMaterial = MaterialSet.GeneratedMaterial;
         Override->GeneratedMaterialInstance = MaterialSet.GeneratedMaterialInstance;
+
+        if (USkeletalMesh* RuntimeMesh = WetClothingAsset->GetRuntimeSkeletalMesh())
+        {
+            if (RuntimeMesh->GetMaterials().IsValidIndex(MaterialSlotIndex) &&
+                IsSameMaterialFamily(RuntimeMesh->GetMaterials()[MaterialSlotIndex].MaterialInterface, SourceMaterial))
+            {
+                RuntimeMesh->Modify();
+                RuntimeMesh->GetMaterials()[MaterialSlotIndex].MaterialInterface =
+                    MaterialSet.GeneratedMaterialInstance;
+                RuntimeMesh->MarkPackageDirty();
+            }
+        }
 
         UpdatedMaterials.Add(FString::Printf(
             TEXT("Slot %d -> %s / %s / %s"),

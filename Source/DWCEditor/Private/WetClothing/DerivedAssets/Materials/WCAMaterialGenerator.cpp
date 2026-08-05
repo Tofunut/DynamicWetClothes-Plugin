@@ -352,7 +352,6 @@ namespace
         const TArray<FString> InputNames =
             UMaterialEditingLibrary::GetMaterialExpressionInputNames(Expression);
 
-        // ??€ì«???¿ë’— ??¥ì”ª æ¹²ê³•????…ì °???????Žë’— ?ëªƒë±¶
         if (InputName.IsEmpty())
         {
             return InputNames.IsEmpty();
@@ -1964,26 +1963,25 @@ return LitBaseColor;
             return nullptr;
         }
 
-        if (ExistingObject != nullptr)
+        if (Instance != nullptr)
         {
-            if (!RetireExistingGeneratedAssetForReplacement(ExistingObject, ObjectPath, OutErrorMessage))
+            Instance->Modify();
+            bOutReusedExisting = true;
+        }
+        else
+        {
+            UPackage* InstancePackage = CreatePackage(*PackageName);
+            Instance = NewObject<UMaterialInstanceConstant>(
+                InstancePackage,
+                *AssetName,
+                RF_Public | RF_Standalone | RF_Transactional);
+            if (Instance == nullptr)
             {
+                OutErrorMessage = FString::Printf(TEXT("Could not create generated material instance '%s'."), *ObjectPath);
                 return nullptr;
             }
-            Instance = nullptr;
+            FAssetRegistryModule::AssetCreated(Instance);
         }
-
-        UPackage* InstancePackage = CreatePackage(*PackageName);
-        Instance = NewObject<UMaterialInstanceConstant>(
-            InstancePackage,
-            *AssetName,
-            RF_Public | RF_Standalone | RF_Transactional);
-        if (Instance == nullptr)
-        {
-            OutErrorMessage = FString::Printf(TEXT("Could not create generated material instance '%s'."), *ObjectPath);
-            return nullptr;
-        }
-        FAssetRegistryModule::AssetCreated(Instance);
 
         if (const UMaterialInstance* SourceInstance = Cast<UMaterialInstance>(SourceMaterial))
         {
@@ -2180,7 +2178,7 @@ FWetClothingUnifiedMaterialSetupResult FWCAMaterialGenerator::CreateOrUpdateUnif
         GeneratedMaterial,
         GeneratedDwcUnifiedInstanceSuffix,
         UnifiedOptions,
-        false,
+        true,
         InstanceError,
         bReusedInstance);
 

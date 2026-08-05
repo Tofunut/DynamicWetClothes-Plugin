@@ -62,6 +62,18 @@
 
 namespace
 {
+    bool IsSameMaterialFamily(UMaterialInterface* A, UMaterialInterface* B)
+    {
+        if (A == nullptr || B == nullptr)
+        {
+            return A == B;
+        }
+
+        UMaterial* ABase = A->GetMaterial();
+        UMaterial* BBase = B->GetMaterial();
+        return A == B || (ABase != nullptr && ABase == BBase);
+    }
+
     constexpr int32 MaxDWCDataUVChannelIndex = 3;
     constexpr int32 WCAReportDialogFontSize = 10;
     const FLinearColor InfoIconTint(0.32f, 0.65f, 1.0f, 1.0f);
@@ -2597,10 +2609,24 @@ namespace
                 MaterialSlotIndex,
                 SourceMaterial);
 
+            UMaterialInterface* CurrentMaterial = RuntimeMesh->GetMaterials()[MaterialSlotIndex].MaterialInterface;
+            const bool bCanApplyGeneratedMaterial = CurrentMaterial == nullptr ||
+                CurrentMaterial == SourceMaterial ||
+                CurrentMaterial == ExistingOverride->GeneratedMaterial ||
+                CurrentMaterial == ExistingOverride->GeneratedMaterialInstance ||
+                IsSameMaterialFamily(CurrentMaterial, SourceMaterial);
+            if (bCanApplyGeneratedMaterial)
+            {
+                RuntimeMesh->GetMaterials()[MaterialSlotIndex].MaterialInterface = MaterialSet.GeneratedMaterialInstance;
+                RuntimeMesh->MarkPackageDirty();
+            }
+
             UpdatedMaterials.Add(FString::Printf(
-                TEXT("Slot %d -> %s"),
+                TEXT("Slot %d -> shared %s, runtime %s%s"),
                 MaterialSlotIndex,
-                *GetNameSafe(MaterialSet.GeneratedMaterial)));
+                *GetNameSafe(MaterialSet.GeneratedMaterial),
+                *GetNameSafe(MaterialSet.GeneratedMaterialInstance),
+                bCanApplyGeneratedMaterial ? TEXT(" (applied to DWC mesh)") : TEXT(" (override only; mesh slot has custom material)")));
         }
 
         if (!UpdatedMaterials.IsEmpty())
@@ -4701,7 +4727,8 @@ FReply FWCAEditor::GenerateWetMaterials()
             CurrentMaterial == SourceMaterial ||
             (ExistingOverride != nullptr &&
                 (CurrentMaterial == ExistingOverride->GeneratedMaterial ||
-                 CurrentMaterial == ExistingOverride->GeneratedMaterialInstance));
+                 CurrentMaterial == ExistingOverride->GeneratedMaterialInstance)) ||
+            IsSameMaterialFamily(CurrentMaterial, SourceMaterial);
         if (bCanApplyGeneratedMaterial)
         {
             RuntimeMesh->GetMaterials()[MaterialSlotIndex].MaterialInterface = MaterialSet.GeneratedMaterialInstance;

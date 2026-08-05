@@ -29,6 +29,7 @@
 #include "Modules/ModuleManager.h"
 #include "Profiling/DWCStatsSubsystem.h"
 #include "TimerManager.h"
+#include "Materials/Material.h"
 #include "Utility/DWCLog.h"
 #include "Utility/DWCProfiling.h"
 
@@ -57,6 +58,16 @@ namespace
         const UMaterialInterface* WetMaterial)
     {
         if (CurrentMaterial == nullptr || CurrentMaterial == WetMaterial)
+        {
+            return true;
+        }
+
+        const UMaterialInterface* SourceMaterial = MaterialOverride.SourceMaterial.Get();
+        const UMaterial* CurrentBaseMaterial = CurrentMaterial->GetMaterial();
+        const UMaterial* SourceBaseMaterial = SourceMaterial != nullptr ? SourceMaterial->GetMaterial() : nullptr;
+        if (CurrentBaseMaterial != nullptr &&
+            SourceBaseMaterial != nullptr &&
+            CurrentBaseMaterial == SourceBaseMaterial)
         {
             return true;
         }

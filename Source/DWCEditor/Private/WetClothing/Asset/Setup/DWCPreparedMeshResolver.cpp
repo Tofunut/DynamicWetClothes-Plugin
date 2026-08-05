@@ -9,6 +9,8 @@
 #include "Misc/PackageName.h"
 #include "Modules/ModuleManager.h"
 #include "ObjectTools.h"
+#include "Materials/Material.h"
+#include "Materials/MaterialInterface.h"
 #include "Rendering/SkeletalMeshRenderData.h"
 #include "UObject/UObjectIterator.h"
 
@@ -51,6 +53,18 @@ namespace DWCPreparedMeshResolverPrivate
         return ObjectTools::DeleteObjects(ObjectsToDelete, false) > 0;
     }
 
+    bool IsSameMaterialFamily(UMaterialInterface* A, UMaterialInterface* B)
+    {
+        if (A == nullptr || B == nullptr)
+        {
+            return A == B;
+        }
+
+        UMaterial* ABase = A->GetMaterial();
+        UMaterial* BBase = B->GetMaterial();
+        return A == B || (ABase != nullptr && ABase == BBase);
+    }
+
     void ApplyExistingGeneratedMaterials(UWetClothingAsset& Asset, USkeletalMesh& Mesh)
     {
         for (const FWetClothingGeneratedWetMaterialOverride& MaterialOverride :
@@ -68,7 +82,8 @@ namespace DWCPreparedMeshResolverPrivate
             const bool bIsExpectedSource = CurrentMaterial == nullptr ||
                 CurrentMaterial == MaterialOverride.SourceMaterial ||
                 CurrentMaterial == MaterialOverride.GeneratedMaterial ||
-                CurrentMaterial == MaterialOverride.GeneratedMaterialInstance;
+                CurrentMaterial == MaterialOverride.GeneratedMaterialInstance ||
+                IsSameMaterialFamily(CurrentMaterial, MaterialOverride.SourceMaterial.Get());
             if (!bIsExpectedSource)
             {
                 continue;

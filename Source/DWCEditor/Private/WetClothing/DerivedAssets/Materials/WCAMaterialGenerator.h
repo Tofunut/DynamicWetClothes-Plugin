@@ -22,7 +22,7 @@ struct FWetClothingUnifiedMaterialSetupResult
 class FWCAMaterialGenerator
 {
   public:
-    static constexpr int32 GeneratedMaterialGeneratorVersion = 2;
+    static constexpr int32 GeneratedMaterialGeneratorVersion = 3;
 
     struct FOptions
     {

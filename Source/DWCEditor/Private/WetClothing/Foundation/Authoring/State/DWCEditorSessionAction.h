@@ -55,9 +55,14 @@ struct FDWCSetTransparencyPreviewAction
     EDWCTransparencyVisualizationMode VisualizationMode =
         EDWCTransparencyVisualizationMode::Final;
     float WetnessPreviewPercent = 100.0f;
-    float TransparencyPreviewStrength = 0.4f;
-    float WrinkleSuppressionStrength = 0.6f;
+    FDWCTransparencyPreviewSettings Settings;
     bool bShowSavedWrinkle = true;
+};
+
+struct FDWCInitializeTransparencyPreviewSettingsAction
+{
+    FDWCTransparencyPreviewSettings Settings;
+    bool bForce = false;
 };
 
 struct FDWCSetTransparencyPaintAction

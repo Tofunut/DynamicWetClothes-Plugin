@@ -173,50 +173,57 @@ bool FWetTransparencyPreviewGraphExtension::ExtendGraph(
         Material, DWCTransparencyPreviewMaterialParameters::TransparencyStrength(), 1.0f, 3100);
     UMaterialExpressionScalarParameter* ShowInnerColor = CreateScalarParameter(
         Material, DWCTransparencyPreviewMaterialParameters::ShowInnerColor(), 0.0f, 3200);
-    UMaterialExpressionTextureObjectParameter* WrinkleSuppressionMap = CreateColorTextureParameter(
-        Material, DWCTransparencyPreviewMaterialParameters::WrinkleSuppressionMap(), 3300);
-    UMaterialExpressionScalarParameter* UseWrinkleSuppressionMap = CreateScalarParameter(
-        Material, DWCTransparencyPreviewMaterialParameters::UseWrinkleSuppressionMap(), 0.0f, 3400);
+    UMaterialExpressionTextureObjectParameter* WrinkleCoverageMap = CreateMaskTextureParameter(
+        Material, DWCTransparencyPreviewMaterialParameters::WrinkleCoverageMap(), 3300);
+    UMaterialExpressionScalarParameter* UseWrinkleCoverageMap = CreateScalarParameter(
+        Material, DWCTransparencyPreviewMaterialParameters::UseWrinkleCoverageMap(), 0.0f, 3400);
     UMaterialExpressionScalarParameter* WrinkleSuppressionStrength = CreateScalarParameter(
         Material, DWCTransparencyPreviewMaterialParameters::WrinkleSuppressionStrength(), 0.0f, 3500);
+    UMaterialExpressionScalarParameter* WrinkleMaskThreshold = CreateScalarParameter(
+        Material, DWCTransparencyPreviewMaterialParameters::WrinkleMaskThreshold(), 0.15f, 3600);
+    UMaterialExpressionScalarParameter* WrinkleMaskSoftness = CreateScalarParameter(
+        Material, DWCTransparencyPreviewMaterialParameters::WrinkleMaskSoftness(), 0.05f, 3700);
+    UMaterialExpressionScalarParameter* VisualizationMode = CreateScalarParameter(
+        Material, DWCTransparencyPreviewMaterialParameters::VisualizationMode(), 0.0f, 3800);
     UMaterialExpressionVectorParameter* HoverState0 = CreateVectorParameter(
         Material,
         DWCTransparencyPreviewMaterialParameters::HoverState0(),
         FLinearColor(0.0f, 0.0f, 0.025f, 0.5f),
-        3600);
+        3900);
     UMaterialExpressionVectorParameter* HoverState1 = CreateVectorParameter(
         Material,
         DWCTransparencyPreviewMaterialParameters::HoverState1(),
         FLinearColor::Black,
-        3700);
+        4000);
     UMaterialExpressionVectorParameter* HoverColor = CreateVectorParameter(
         Material,
         DWCTransparencyPreviewMaterialParameters::HoverColor(),
         FLinearColor::Black,
-        3800);
+        4100);
     UMaterialExpressionScalarParameter* HoverTarget = CreateScalarParameter(
-        Material, DWCTransparencyPreviewMaterialParameters::HoverTarget(), 0.0f, 3900);
+        Material, DWCTransparencyPreviewMaterialParameters::HoverTarget(), 0.0f, 4200);
     UMaterialExpressionScalarParameter* HoverWrap = CreateScalarParameter(
-        Material, DWCTransparencyPreviewMaterialParameters::HoverWrap(), 0.0f, 4000);
+        Material, DWCTransparencyPreviewMaterialParameters::HoverWrap(), 0.0f, 4300);
     UMaterialExpressionVectorParameter* HoverTexelSize = CreateVectorParameter(
         Material,
         DWCTransparencyPreviewMaterialParameters::HoverTexelSize(),
         FLinearColor::Black,
-        4100);
+        4400);
     UMaterialExpressionScalarParameter* HoverVisualizationMode = CreateScalarParameter(
-        Material, DWCTransparencyPreviewMaterialParameters::HoverVisualizationMode(), 0.0f, 4150);
+        Material, DWCTransparencyPreviewMaterialParameters::HoverVisualizationMode(), 0.0f, 4450);
     UMaterialExpressionTextureObjectParameter* HoverBaselineMap = CreateColorTextureParameter(
-        Material, DWCTransparencyPreviewMaterialParameters::HoverBaselineMap(), 4200);
+        Material, DWCTransparencyPreviewMaterialParameters::HoverBaselineMap(), 4500);
     UMaterialExpressionScalarParameter* UseHoverBaselineMap = CreateScalarParameter(
-        Material, DWCTransparencyPreviewMaterialParameters::UseHoverBaselineMap(), 0.0f, 4300);
+        Material, DWCTransparencyPreviewMaterialParameters::UseHoverBaselineMap(), 0.0f, 4600);
     UMaterialExpressionTextureObjectParameter* HoverEdgeFeatherMap = CreateMaskTextureParameter(
-        Material, DWCTransparencyPreviewMaterialParameters::HoverEdgeFeatherMap(), 4400);
+        Material, DWCTransparencyPreviewMaterialParameters::HoverEdgeFeatherMap(), 4700);
     UMaterialExpressionScalarParameter* UseHoverEdgeFeatherMap = CreateScalarParameter(
-        Material, DWCTransparencyPreviewMaterialParameters::UseHoverEdgeFeatherMap(), 0.0f, 4500);
+        Material, DWCTransparencyPreviewMaterialParameters::UseHoverEdgeFeatherMap(), 0.0f, 4800);
     UMaterialExpressionScalarParameter* PreviewWetness = FindPreviewWetnessParameter(Material);
     if (Blend == nullptr || TransparencyMap == nullptr || UseTransparencyMap == nullptr ||
-        TransparencyStrength == nullptr || ShowInnerColor == nullptr || WrinkleSuppressionMap == nullptr ||
-        UseWrinkleSuppressionMap == nullptr || WrinkleSuppressionStrength == nullptr ||
+        TransparencyStrength == nullptr || ShowInnerColor == nullptr || WrinkleCoverageMap == nullptr ||
+        UseWrinkleCoverageMap == nullptr || WrinkleSuppressionStrength == nullptr ||
+        WrinkleMaskThreshold == nullptr || WrinkleMaskSoftness == nullptr || VisualizationMode == nullptr ||
         HoverState0 == nullptr || HoverState1 == nullptr || HoverColor == nullptr ||
         HoverTarget == nullptr || HoverWrap == nullptr || HoverTexelSize == nullptr ||
         HoverVisualizationMode == nullptr ||
@@ -236,9 +243,12 @@ bool FWetTransparencyPreviewGraphExtension::ExtendGraph(
         TEXT("PreviewWetness"),
         TEXT("TransparencyStrength"),
         TEXT("ShowInnerColor"),
-        TEXT("WrinkleSuppressionMapTex"),
-        TEXT("UseWrinkleSuppressionMap"),
+        TEXT("WrinkleCoverageMapTex"),
+        TEXT("UseWrinkleCoverageMap"),
         TEXT("WrinkleSuppressionStrength"),
+        TEXT("WrinkleMaskThreshold"),
+        TEXT("WrinkleMaskSoftness"),
+        TEXT("VisualizationMode"),
         TEXT("HoverState0"),
         TEXT("HoverState1"),
         TEXT("HoverFalloff"),
@@ -381,12 +391,48 @@ if (HoverState1.x > 0.0 && HoverTarget > 0.5)
     }
 }
 
-float Suppression = Texture2DSampleLevel(WrinkleSuppressionMapTex, WrinkleSuppressionMapTexSampler, SelectedUV, 0).r;
-float SuppressionWeight = saturate(Suppression * max(WrinkleSuppressionStrength, 0.0)) * saturate(UseWrinkleSuppressionMap);
-float MapBlendWeight = saturate(TransparencySample.a) * max(TransparencyStrength, 0.0);
+float Coverage = Texture2DSampleLevel(
+    WrinkleCoverageMapTex,
+    WrinkleCoverageMapTexSampler,
+    SelectedUV,
+    0).r * saturate(UseWrinkleCoverageMap);
+float SafeThreshold = saturate(WrinkleMaskThreshold);
+float SafeSoftness = saturate(WrinkleMaskSoftness);
+float TransitionEnd = min(SafeThreshold + SafeSoftness, 1.0);
+float ThresholdGate = SafeSoftness <= 0.00001 || TransitionEnd <= SafeThreshold + 0.00001
+    ? step(SafeThreshold, Coverage)
+    : smoothstep(SafeThreshold, TransitionEnd, Coverage);
+float Suppression = saturate(Coverage * ThresholdGate);
+float SuppressionWeight = saturate(Suppression * max(WrinkleSuppressionStrength, 0.0));
+float FinalAlpha = saturate(
+    saturate(TransparencySample.a) * max(TransparencyStrength, 0.0) * (1.0 - SuppressionWeight));
+int SelectedVisualizationMode = (int)floor(VisualizationMode + 0.5);
+
+float3 DisplayColor = TransparencySample.rgb;
+float MapBlendWeight = FinalAlpha;
+if (SelectedVisualizationMode == 1)
+{
+    MapBlendWeight = 1.0;
+}
+else if (SelectedVisualizationMode == 2)
+{
+    DisplayColor = float3(FinalAlpha, FinalAlpha, FinalAlpha);
+    MapBlendWeight = FinalAlpha;
+}
+else if (SelectedVisualizationMode == 3)
+{
+    DisplayColor = float3(Suppression, Suppression, Suppression);
+    MapBlendWeight = 1.0;
+}
+else if (SelectedVisualizationMode >= 4)
+{
+    MapBlendWeight = saturate(TransparencySample.a);
+}
+
 float InnerColorBlendWeight = saturate(ShowInnerColor);
-float BlendWeight = max(MapBlendWeight, InnerColorBlendWeight) * saturate(UseTransparencyMap) * saturate(PreviewWetness) * (1.0 - SuppressionWeight);
-return lerp(BaseColor, TransparencySample.rgb, BlendWeight);
+float BlendWeight = max(MapBlendWeight, InnerColorBlendWeight) *
+    saturate(UseTransparencyMap) * saturate(PreviewWetness);
+return lerp(BaseColor, DisplayColor, BlendWeight);
 )");
     Blend->OutputType = CMOT_Float3;
     Blend->Description = TEXT("DWC Transparency Live Preview BaseColor Blend");
@@ -401,9 +447,12 @@ return lerp(BaseColor, TransparencySample.rgb, BlendWeight);
     bConnected &= Connect({ PreviewWetness, FString() }, Blend, TEXT("PreviewWetness"), OutErrorMessage);
     bConnected &= Connect({ TransparencyStrength, FString() }, Blend, TEXT("TransparencyStrength"), OutErrorMessage);
     bConnected &= Connect({ ShowInnerColor, FString() }, Blend, TEXT("ShowInnerColor"), OutErrorMessage);
-    bConnected &= Connect({ WrinkleSuppressionMap, FString() }, Blend, TEXT("WrinkleSuppressionMapTex"), OutErrorMessage);
-    bConnected &= Connect({ UseWrinkleSuppressionMap, FString() }, Blend, TEXT("UseWrinkleSuppressionMap"), OutErrorMessage);
+    bConnected &= Connect({ WrinkleCoverageMap, FString() }, Blend, TEXT("WrinkleCoverageMapTex"), OutErrorMessage);
+    bConnected &= Connect({ UseWrinkleCoverageMap, FString() }, Blend, TEXT("UseWrinkleCoverageMap"), OutErrorMessage);
     bConnected &= Connect({ WrinkleSuppressionStrength, FString() }, Blend, TEXT("WrinkleSuppressionStrength"), OutErrorMessage);
+    bConnected &= Connect({ WrinkleMaskThreshold, FString() }, Blend, TEXT("WrinkleMaskThreshold"), OutErrorMessage);
+    bConnected &= Connect({ WrinkleMaskSoftness, FString() }, Blend, TEXT("WrinkleMaskSoftness"), OutErrorMessage);
+    bConnected &= Connect({ VisualizationMode, FString() }, Blend, TEXT("VisualizationMode"), OutErrorMessage);
     bConnected &= Connect({ HoverState0, FString() }, Blend, TEXT("HoverState0"), OutErrorMessage);
     bConnected &= Connect({ HoverState1, FString() }, Blend, TEXT("HoverState1"), OutErrorMessage);
     bConnected &= Connect({ HoverState0, TEXT("A") }, Blend, TEXT("HoverFalloff"), OutErrorMessage);
@@ -436,9 +485,12 @@ void FWetTransparencyPreviewGraphExtension::InitializeMID(
     PreviewMID.SetScalarParameterValue(DWCTransparencyPreviewMaterialParameters::UseTransparencyMap(), 0.0f);
     PreviewMID.SetScalarParameterValue(DWCTransparencyPreviewMaterialParameters::TransparencyStrength(), 1.0f);
     PreviewMID.SetScalarParameterValue(DWCTransparencyPreviewMaterialParameters::ShowInnerColor(), 0.0f);
-    PreviewMID.SetTextureParameterValue(DWCTransparencyPreviewMaterialParameters::WrinkleSuppressionMap(), nullptr);
-    PreviewMID.SetScalarParameterValue(DWCTransparencyPreviewMaterialParameters::UseWrinkleSuppressionMap(), 0.0f);
+    PreviewMID.SetTextureParameterValue(DWCTransparencyPreviewMaterialParameters::WrinkleCoverageMap(), nullptr);
+    PreviewMID.SetScalarParameterValue(DWCTransparencyPreviewMaterialParameters::UseWrinkleCoverageMap(), 0.0f);
     PreviewMID.SetScalarParameterValue(DWCTransparencyPreviewMaterialParameters::WrinkleSuppressionStrength(), 0.0f);
+    PreviewMID.SetScalarParameterValue(DWCTransparencyPreviewMaterialParameters::WrinkleMaskThreshold(), 0.15f);
+    PreviewMID.SetScalarParameterValue(DWCTransparencyPreviewMaterialParameters::WrinkleMaskSoftness(), 0.05f);
+    PreviewMID.SetScalarParameterValue(DWCTransparencyPreviewMaterialParameters::VisualizationMode(), 0.0f);
     PreviewMID.SetVectorParameterValue(
         DWCTransparencyPreviewMaterialParameters::HoverState0(),
         FLinearColor(0.0f, 0.0f, 0.025f, 0.5f));

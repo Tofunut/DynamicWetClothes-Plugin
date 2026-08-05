@@ -28,21 +28,39 @@ namespace DWCTransparencyPreviewMaterialParameters
         return Name;
     }
 
-    inline const FName& WrinkleSuppressionMap()
+    inline const FName& WrinkleCoverageMap()
     {
-        static const FName Name(TEXT("DWC_TransparencyPreviewSuppressionMap"));
+        static const FName Name(TEXT("DWC_TransparencyPreviewWrinkleCoverageMap"));
         return Name;
     }
 
-    inline const FName& UseWrinkleSuppressionMap()
+    inline const FName& UseWrinkleCoverageMap()
     {
-        static const FName Name(TEXT("DWC_UseTransparencyPreviewSuppression"));
+        static const FName Name(TEXT("DWC_UseTransparencyPreviewWrinkleCoverage"));
         return Name;
     }
 
     inline const FName& WrinkleSuppressionStrength()
     {
         static const FName Name(TEXT("DWC_TransparencyPreviewWrinkleSuppressionStrength"));
+        return Name;
+    }
+
+    inline const FName& WrinkleMaskThreshold()
+    {
+        static const FName Name(TEXT("DWC_TransparencyPreviewWrinkleThreshold"));
+        return Name;
+    }
+
+    inline const FName& WrinkleMaskSoftness()
+    {
+        static const FName Name(TEXT("DWC_TransparencyPreviewWrinkleSoftness"));
+        return Name;
+    }
+
+    inline const FName& VisualizationMode()
+    {
+        static const FName Name(TEXT("DWC_TransparencyPreviewVisualizationMode"));
         return Name;
     }
 

@@ -608,6 +608,17 @@ private:
     FString StatusMessage;
     bool bHasCandidateColor = false;
 };
+
+FDWCTransparencyPreviewSettings MakeTransparencyPreviewSettings(
+    const FWetClothingTransparencyData& Data)
+{
+    FDWCTransparencyPreviewSettings Settings;
+    Settings.TransparencyStrength = Data.TransparencyPreviewStrength;
+    Settings.WrinkleSuppressionStrength = Data.WrinkleSuppressionStrength;
+    Settings.WrinkleMaskThreshold = Data.WrinkleSuppressionCoverageThreshold;
+    Settings.WrinkleMaskSoftness = Data.WrinkleSuppressionMaskSoftness;
+    return Settings;
+}
 }
 
 void SWetClothingTransparencyBakePanel::Construct(const FArguments& InArgs)
@@ -645,13 +656,15 @@ void SWetClothingTransparencyBakePanel::Construct(const FArguments& InArgs)
             TextureWorkspace.ToSharedRef(),
             WorkerJobScheduler.IsValid() ? WorkerJobScheduler->GetSessionEpoch() : FGuid());
     }
-    SessionStore->OnChanged().AddSP(this, &SWetClothingTransparencyBakePanel::HandleSessionStateChanged);
     DetailsView = InArgs._DetailsView;
+    FDWCInitializeTransparencyPreviewSettingsAction InitializePreviewSettings;
     if (const UWetClothingAsset* Asset = WetClothingAsset.Get())
     {
-        TransparencyPreviewStrength = Asset->Authored.TransparencyData.TransparencyPreviewStrength;
-        WrinkleSuppressionStrength = FMath::Clamp(Asset->Authored.TransparencyData.WrinkleSuppressionStrength, 0.0f, 5.0f);
+        InitializePreviewSettings.Settings =
+            MakeTransparencyPreviewSettings(Asset->Authored.TransparencyData);
     }
+    SessionStore->Dispatch(InitializePreviewSettings);
+    SessionStore->OnChanged().AddSP(this, &SWetClothingTransparencyBakePanel::HandleSessionStateChanged);
     ThumbnailPool = MakeShared<FAssetThumbnailPool>(32);
     VisualizationModeItems.Add(MakeShared<EDWCTransparencyVisualizationMode>(EDWCTransparencyVisualizationMode::Final));
     VisualizationModeItems.Add(MakeShared<EDWCTransparencyVisualizationMode>(EDWCTransparencyVisualizationMode::InnerColor));
@@ -695,9 +708,41 @@ void SWetClothingTransparencyBakePanel::DispatchTransparencyPreviewState()
         : EWetClothingTransparencyPreviewMode::TargetMeshOnly;
     Action.VisualizationMode = SelectedVisualizationMode;
     Action.WetnessPreviewPercent = WetnessPreviewPercent;
-    Action.TransparencyPreviewStrength = TransparencyPreviewStrength;
-    Action.WrinkleSuppressionStrength = WrinkleSuppressionStrength;
+    Action.Settings = GetTransparencyPreviewSettings();
     Action.bShowSavedWrinkle = bShowSavedWrinkle;
+    SessionStore->Dispatch(Action);
+}
+
+FDWCTransparencyPreviewSettings SWetClothingTransparencyBakePanel::GetTransparencyPreviewSettings() const
+{
+    if (SessionStore.IsValid())
+    {
+        return SessionStore->GetState().Transparency.PreviewSettings;
+    }
+
+    FDWCTransparencyPreviewSettings Settings;
+    if (const UWetClothingAsset* Asset = WetClothingAsset.Get())
+    {
+        Settings = MakeTransparencyPreviewSettings(Asset->Authored.TransparencyData);
+    }
+    return Settings;
+}
+
+void SWetClothingTransparencyBakePanel::DispatchTransparencyPreviewSettings(
+    FDWCTransparencyPreviewSettings Settings)
+{
+    if (!SessionStore.IsValid() || bApplyingSessionState)
+    {
+        return;
+    }
+
+    FDWCSetTransparencyPreviewAction Action;
+    const FDWCEditorTransparencySessionState& Current = SessionStore->GetState().Transparency;
+    Action.PreviewMode = Current.PreviewMode;
+    Action.VisualizationMode = Current.VisualizationMode;
+    Action.WetnessPreviewPercent = Current.WetnessPreviewPercent;
+    Action.Settings = MoveTemp(Settings);
+    Action.bShowSavedWrinkle = Current.bShowSavedWrinkle;
     SessionStore->Dispatch(Action);
 }
 
@@ -810,8 +855,6 @@ void SWetClothingTransparencyBakePanel::HandleSessionStateChanged(
     StageByLayer = TransparencyState.StageByLayer;
     SelectedVisualizationMode = TransparencyState.VisualizationMode;
     WetnessPreviewPercent = TransparencyState.WetnessPreviewPercent;
-    TransparencyPreviewStrength = TransparencyState.TransparencyPreviewStrength;
-    WrinkleSuppressionStrength = TransparencyState.WrinkleSuppressionStrength;
     bShowSavedWrinkle = TransparencyState.bShowSavedWrinkle;
 
     const FDWCTransparencyPaintSettings& Paint = TransparencyState.Paint;
@@ -1108,6 +1151,17 @@ void SWetClothingTransparencyBakePanel::RefreshFromAsset()
     // a stage or source-type change, or after an operation that changed its
     // generated-output data.
     bPreviewSlotStateRefreshRequested = true;
+    if (SessionStore.IsValid())
+    {
+        if (const UWetClothingAsset* Asset = WetClothingAsset.Get())
+        {
+            FDWCInitializeTransparencyPreviewSettingsAction SyncPreviewSettings;
+            SyncPreviewSettings.Settings =
+                MakeTransparencyPreviewSettings(Asset->Authored.TransparencyData);
+            SyncPreviewSettings.bForce = true;
+            SessionStore->Dispatch(SyncPreviewSettings);
+        }
+    }
     RepairInvalidLayerIdentities();
 
     EDWCTransparencyPanelRefreshFlags Flags = EDWCTransparencyPanelRefreshFlags::Model;
@@ -2186,29 +2240,24 @@ void SWetClothingTransparencyBakePanel::HandleWetnessPreviewChanged(float InValu
 
 TOptional<float> SWetClothingTransparencyBakePanel::GetTransparencyPreviewStrength() const
 {
-    return TransparencyPreviewStrength;
+    return GetTransparencyPreviewSettings().TransparencyStrength;
+}
+
+void SWetClothingTransparencyBakePanel::HandleTransparencyPreviewStrengthChanged(const float InValue)
+{
+    FDWCTransparencyPreviewSettings Settings = GetTransparencyPreviewSettings();
+    Settings.TransparencyStrength = FMath::Max(0.0f, InValue);
+    DispatchTransparencyPreviewSettings(MoveTemp(Settings));
 }
 
 void SWetClothingTransparencyBakePanel::HandleTransparencyPreviewStrengthCommitted(
     const float InValue,
     ETextCommit::Type)
 {
-    const float NewStrength = FMath::Max(0.0f, InValue);
-    if (FMath::IsNearlyEqual(TransparencyPreviewStrength, NewStrength))
-    {
-        return;
-    }
-    TransparencyPreviewStrength = NewStrength;
-    EditFinalBakeSettings(
+    HandleTransparencyPreviewStrengthChanged(InValue);
+    CommitTransparencyPreviewSettings(
         LOCTEXT("SetTransparencyPreviewStrength", "Set Transparency Preview Strength"),
-        [NewStrength](FWetClothingTransparencyData& Data)
-        {
-            if (FMath::IsNearlyEqual(Data.TransparencyPreviewStrength, NewStrength)) return false;
-            Data.TransparencyPreviewStrength = NewStrength;
-            return true;
-        },
-        EDWCTransparencyFinalPreviewRefresh::None);
-    DispatchTransparencyPreviewState();
+        GetTransparencyPreviewSettings());
 }
 
 ECheckBoxState SWetClothingTransparencyBakePanel::GetShowSavedWrinkleState() const
@@ -2226,29 +2275,68 @@ void SWetClothingTransparencyBakePanel::HandleShowSavedWrinkleChanged(
 
 TOptional<float> SWetClothingTransparencyBakePanel::GetWrinkleSuppressionStrength() const
 {
-    return WrinkleSuppressionStrength;
+    return GetTransparencyPreviewSettings().WrinkleSuppressionStrength;
+}
+
+void SWetClothingTransparencyBakePanel::HandleWrinkleSuppressionStrengthChanged(const float InValue)
+{
+    FDWCTransparencyPreviewSettings Settings = GetTransparencyPreviewSettings();
+    Settings.WrinkleSuppressionStrength = FMath::Clamp(InValue, 0.0f, 5.0f);
+    DispatchTransparencyPreviewSettings(MoveTemp(Settings));
 }
 
 void SWetClothingTransparencyBakePanel::HandleWrinkleSuppressionStrengthCommitted(
     const float InValue,
     ETextCommit::Type)
 {
-    const float NewStrength = FMath::Clamp(InValue, 0.0f, 5.0f);
-    if (FMath::IsNearlyEqual(WrinkleSuppressionStrength, NewStrength))
-    {
-        return;
-    }
-    WrinkleSuppressionStrength = NewStrength;
-    EditFinalBakeSettings(
+    HandleWrinkleSuppressionStrengthChanged(InValue);
+    CommitTransparencyPreviewSettings(
         LOCTEXT("SetWrinkleSuppressionStrength", "Set Wrinkle Suppression Strength"),
-        [NewStrength](FWetClothingTransparencyData& Data)
-        {
-            if (FMath::IsNearlyEqual(Data.WrinkleSuppressionStrength, NewStrength)) return false;
-            Data.WrinkleSuppressionStrength = NewStrength;
-            return true;
-        },
-        EDWCTransparencyFinalPreviewRefresh::WrinkleSuppression);
-    DispatchTransparencyPreviewState();
+        GetTransparencyPreviewSettings());
+}
+
+TOptional<float> SWetClothingTransparencyBakePanel::GetWrinkleMaskThreshold() const
+{
+    return GetTransparencyPreviewSettings().WrinkleMaskThreshold;
+}
+
+void SWetClothingTransparencyBakePanel::HandleWrinkleMaskThresholdChanged(const float InValue)
+{
+    FDWCTransparencyPreviewSettings Settings = GetTransparencyPreviewSettings();
+    Settings.WrinkleMaskThreshold = FMath::Clamp(InValue, 0.0f, 1.0f);
+    DispatchTransparencyPreviewSettings(MoveTemp(Settings));
+}
+
+void SWetClothingTransparencyBakePanel::HandleWrinkleMaskThresholdCommitted(
+    const float InValue,
+    ETextCommit::Type)
+{
+    HandleWrinkleMaskThresholdChanged(InValue);
+    CommitTransparencyPreviewSettings(
+        LOCTEXT("SetWrinkleSuppressionThreshold", "Set Wrinkle Coverage Threshold"),
+        GetTransparencyPreviewSettings());
+}
+
+TOptional<float> SWetClothingTransparencyBakePanel::GetWrinkleMaskSoftness() const
+{
+    return GetTransparencyPreviewSettings().WrinkleMaskSoftness;
+}
+
+void SWetClothingTransparencyBakePanel::HandleWrinkleMaskSoftnessChanged(const float InValue)
+{
+    FDWCTransparencyPreviewSettings Settings = GetTransparencyPreviewSettings();
+    Settings.WrinkleMaskSoftness = FMath::Clamp(InValue, 0.0f, 1.0f);
+    DispatchTransparencyPreviewSettings(MoveTemp(Settings));
+}
+
+void SWetClothingTransparencyBakePanel::HandleWrinkleMaskSoftnessCommitted(
+    const float InValue,
+    ETextCommit::Type)
+{
+    HandleWrinkleMaskSoftnessChanged(InValue);
+    CommitTransparencyPreviewSettings(
+        LOCTEXT("SetWrinkleSuppressionSoftness", "Set Wrinkle Mask Softness"),
+        GetTransparencyPreviewSettings());
 }
 
 ECheckBoxState SWetClothingTransparencyBakePanel::IsBrushModeChecked(const EDWCTransparencyBrushMode Mode) const
@@ -2415,6 +2503,7 @@ FReply SWetClothingTransparencyBakePanel::HandleUndoLastStrokeClicked()
         return FReply::Handled();
     }
     const FGuid StrokeGuid = Layer->EditableStrokes.Last().StrokeGuid;
+    const TArray<FDWCTransparencyBrushStroke> InvalidatedStrokes = {Layer->EditableStrokes.Last()};
     if (!EditSelectedLayerFinal(
             LOCTEXT("RemoveLastTransparencyStroke", "Remove Last Transparency Stroke"),
             StrokeGuid,
@@ -2424,6 +2513,10 @@ FReply SWetClothingTransparencyBakePanel::HandleUndoLastStrokeClicked()
                 MutableLayer.EditableStrokes.Pop();
                 return true;
             })) return FReply::Handled();
+    if (PreviewViewport.IsValid())
+    {
+        PreviewViewport->ReplayAlphaStrokeHistory(InvalidatedStrokes);
+    }
     return FReply::Handled();
 }
 
@@ -2437,6 +2530,10 @@ FReply SWetClothingTransparencyBakePanel::HandleClearStrokesClicked()
     {
         return FReply::Handled();
     }
+    TArray<FDWCTransparencyBrushStroke> InvalidatedStrokes;
+    InvalidatedStrokes.Append(
+        Layer->EditableStrokes.GetData() + BaselineStrokeCount,
+        Layer->EditableStrokes.Num() - BaselineStrokeCount);
     if (!EditSelectedLayerFinal(
             LOCTEXT("ClearTransparencyStrokes", "Clear Transparency Strokes"),
             FGuid(),
@@ -2448,6 +2545,10 @@ FReply SWetClothingTransparencyBakePanel::HandleClearStrokesClicked()
                     MutableLayer.EditableStrokes.Num() - BaselineStrokeCount);
                 return true;
             })) return FReply::Handled();
+    if (PreviewViewport.IsValid())
+    {
+        PreviewViewport->ReplayAlphaStrokeHistory(InvalidatedStrokes);
+    }
     return FReply::Handled();
 }
 
@@ -2460,6 +2561,16 @@ FReply SWetClothingTransparencyBakePanel::HandleDeleteStrokeClicked(const FGuid 
     {
         return FReply::Handled();
     }
+    const FDWCTransparencyBrushStroke* Stroke = Layer->EditableStrokes.FindByPredicate(
+        [StrokeGuid](const FDWCTransparencyBrushStroke& Candidate)
+        {
+            return Candidate.StrokeGuid == StrokeGuid;
+        });
+    if (Stroke == nullptr)
+    {
+        return FReply::Handled();
+    }
+    const TArray<FDWCTransparencyBrushStroke> InvalidatedStrokes = {*Stroke};
     if (!EditSelectedLayerFinal(
             LOCTEXT("DeleteTransparencyStroke", "Delete Transparency Stroke"),
             StrokeGuid,
@@ -2471,6 +2582,10 @@ FReply SWetClothingTransparencyBakePanel::HandleDeleteStrokeClicked(const FGuid 
                         return Stroke.StrokeGuid == StrokeGuid;
                     }) > 0;
             })) return FReply::Handled();
+    if (PreviewViewport.IsValid())
+    {
+        PreviewViewport->ReplayAlphaStrokeHistory(InvalidatedStrokes);
+    }
     return FReply::Handled();
 }
 
@@ -2488,6 +2603,7 @@ void SWetClothingTransparencyBakePanel::HandleStrokeEnabledChanged(
     if (FDWCTransparencyBrushStroke* Stroke = Layer->EditableStrokes.FindByPredicate(
             [StrokeGuid](const FDWCTransparencyBrushStroke& Candidate) { return Candidate.StrokeGuid == StrokeGuid; }))
     {
+        const TArray<FDWCTransparencyBrushStroke> InvalidatedStrokes = {*Stroke};
         const bool bEnabled = NewState == ECheckBoxState::Checked;
         if (!EditSelectedLayerFinal(
                 LOCTEXT("ToggleTransparencyStroke", "Toggle Transparency Stroke"),
@@ -2503,6 +2619,10 @@ void SWetClothingTransparencyBakePanel::HandleStrokeEnabledChanged(
                     MutableStroke->bEnabled = bEnabled;
                     return true;
                 })) return;
+        if (PreviewViewport.IsValid())
+        {
+            PreviewViewport->ReplayAlphaStrokeHistory(InvalidatedStrokes);
+        }
     }
 }
 
@@ -2745,7 +2865,7 @@ bool SWetClothingTransparencyBakePanel::EditSelectedLayerFinal(
     Change.Domain = EDWCEditorAuthoringDomain::Transparency;
     Change.Impact = EDWCEditorAuthoringImpact::AssetDirty |
         EDWCEditorAuthoringImpact::ElementList |
-        EDWCEditorAuthoringImpact::Preview |
+        EDWCEditorAuthoringImpact::PreviewIncremental |
         EDWCEditorAuthoringImpact::TransparencyFinalBake;
     Change.MaterialSlotIndex = Layer->TargetSurface.OuterMaterialSlotIndex;
     Change.LayerGuid = LayerGuid;
@@ -2821,6 +2941,43 @@ void SWetClothingTransparencyBakePanel::EditFinalBakeSettings(
             PreviewViewport->RefreshOuterEdgeFeatherPreview();
         }
     }
+}
+
+void SWetClothingTransparencyBakePanel::CommitTransparencyPreviewSettings(
+    const FText& Text,
+    const FDWCTransparencyPreviewSettings& Settings)
+{
+    if (!AuthoringDocument.IsValid())
+    {
+        return;
+    }
+
+    FDWCEditorAuthoringChange Change;
+    Change.Domain = EDWCEditorAuthoringDomain::Transparency;
+    Change.Impact = EDWCEditorAuthoringImpact::AssetDirty |
+        EDWCEditorAuthoringImpact::TransparencyFinalBake;
+    AuthoringDocument->Edit(
+        Text,
+        Change,
+        [&Settings](UWetClothingAsset& Asset)
+        {
+            FWetClothingTransparencyData& Data = Asset.Authored.TransparencyData;
+            const bool bChanged =
+                !FMath::IsNearlyEqual(Data.TransparencyPreviewStrength, Settings.TransparencyStrength) ||
+                !FMath::IsNearlyEqual(Data.WrinkleSuppressionStrength, Settings.WrinkleSuppressionStrength) ||
+                !FMath::IsNearlyEqual(Data.WrinkleSuppressionCoverageThreshold, Settings.WrinkleMaskThreshold) ||
+                !FMath::IsNearlyEqual(Data.WrinkleSuppressionMaskSoftness, Settings.WrinkleMaskSoftness);
+            if (!bChanged)
+            {
+                return false;
+            }
+
+            Data.TransparencyPreviewStrength = Settings.TransparencyStrength;
+            Data.WrinkleSuppressionStrength = Settings.WrinkleSuppressionStrength;
+            Data.WrinkleSuppressionCoverageThreshold = Settings.WrinkleMaskThreshold;
+            Data.WrinkleSuppressionMaskSoftness = Settings.WrinkleMaskSoftness;
+            return true;
+        });
 }
 
 TSharedRef<ITableRow> SWetClothingTransparencyBakePanel::GenerateLayerRow(FLayerItemPtr Item, const TSharedRef<STableViewBase>& Owner)
@@ -3899,7 +4056,15 @@ FReply SWetClothingTransparencyBakePanel::HandleClearRevealColorPaintClicked()
         return FReply::Handled();
     }
     const int32 SlotIndex = Layer->TargetSurface.OuterMaterialSlotIndex;
-    EditRevealColorStrokeHistory(
+    TArray<FDWCTransparencyRevealColorStroke> InvalidatedStrokes;
+    for (const FDWCTransparencyRevealColorStroke& Stroke : Layer->RevealColorPaintStrokes)
+    {
+        if (Stroke.MaterialSlotIndex == SlotIndex)
+        {
+            InvalidatedStrokes.Add(Stroke);
+        }
+    }
+    if (EditRevealColorStrokeHistory(
         LOCTEXT("ClearRevealColorPaint", "Clear Reveal Color Paint"),
         FGuid(),
         [SlotIndex](FWetClothingTransparencyLayerData& MutableLayer)
@@ -3909,7 +4074,10 @@ FReply SWetClothingTransparencyBakePanel::HandleClearRevealColorPaintClicked()
                 {
                     return Stroke.MaterialSlotIndex == SlotIndex;
                 }) > 0;
-        });
+        }) && PreviewViewport.IsValid())
+    {
+        PreviewViewport->ReplayRevealColorStrokeHistory(InvalidatedStrokes);
+    }
     return FReply::Handled();
 }
 
@@ -3928,8 +4096,8 @@ bool SWetClothingTransparencyBakePanel::EditRevealColorStrokeHistory(
     Change.Domain = EDWCEditorAuthoringDomain::Transparency;
     Change.Impact = EDWCEditorAuthoringImpact::AssetDirty |
         EDWCEditorAuthoringImpact::ElementList |
-        EDWCEditorAuthoringImpact::Preview |
-        EDWCEditorAuthoringImpact::TransparencyAutoBake;
+        EDWCEditorAuthoringImpact::PreviewIncremental |
+        EDWCEditorAuthoringImpact::TransparencyFinalBake;
     Change.MaterialSlotIndex = Layer->TargetSurface.OuterMaterialSlotIndex;
     Change.LayerGuid = LayerGuid;
     Change.ElementGuid = StrokeGuid;
@@ -3950,8 +4118,6 @@ bool SWetClothingTransparencyBakePanel::EditRevealColorStrokeHistory(
     {
         return false;
     }
-    EnsureManualRevealWorkingMap(true);
-    RefreshViewportContext();
     RefreshRevealColorStrokeList();
     return true;
 }
@@ -3984,7 +4150,20 @@ FReply SWetClothingTransparencyBakePanel::HandleUndoLastRevealColorStrokeClicked
 FReply SWetClothingTransparencyBakePanel::HandleDeleteRevealColorStrokeClicked(const FGuid StrokeGuid)
 {
     if (AuthoringController.IsValid()) AuthoringController->CancelActiveInteraction(true);
-    EditRevealColorStrokeHistory(
+    const FWetClothingTransparencyLayerData* Layer = GetSelectedLayer();
+    const FDWCTransparencyRevealColorStroke* Stroke = Layer != nullptr
+        ? Layer->RevealColorPaintStrokes.FindByPredicate(
+            [StrokeGuid](const FDWCTransparencyRevealColorStroke& Candidate)
+            {
+                return Candidate.StrokeGuid == StrokeGuid;
+            })
+        : nullptr;
+    if (Stroke == nullptr)
+    {
+        return FReply::Handled();
+    }
+    const TArray<FDWCTransparencyRevealColorStroke> InvalidatedStrokes = {*Stroke};
+    if (EditRevealColorStrokeHistory(
         LOCTEXT("DeleteRevealColorStroke", "Delete Reveal Color Stroke"),
         StrokeGuid,
         [StrokeGuid](FWetClothingTransparencyLayerData& MutableLayer)
@@ -3994,7 +4173,10 @@ FReply SWetClothingTransparencyBakePanel::HandleDeleteRevealColorStrokeClicked(c
                 {
                     return Stroke.StrokeGuid == StrokeGuid;
                 }) > 0;
-        });
+        }) && PreviewViewport.IsValid())
+    {
+        PreviewViewport->ReplayRevealColorStrokeHistory(InvalidatedStrokes);
+    }
     return FReply::Handled();
 }
 
@@ -4003,8 +4185,21 @@ void SWetClothingTransparencyBakePanel::HandleRevealColorStrokeEnabledChanged(
     const FGuid StrokeGuid)
 {
     if (AuthoringController.IsValid()) AuthoringController->CancelActiveInteraction(true);
+    const FWetClothingTransparencyLayerData* Layer = GetSelectedLayer();
+    const FDWCTransparencyRevealColorStroke* ExistingStroke = Layer != nullptr
+        ? Layer->RevealColorPaintStrokes.FindByPredicate(
+            [StrokeGuid](const FDWCTransparencyRevealColorStroke& Candidate)
+            {
+                return Candidate.StrokeGuid == StrokeGuid;
+            })
+        : nullptr;
+    if (ExistingStroke == nullptr)
+    {
+        return;
+    }
+    const TArray<FDWCTransparencyRevealColorStroke> InvalidatedStrokes = {*ExistingStroke};
     const bool bEnabled = NewState == ECheckBoxState::Checked;
-    EditRevealColorStrokeHistory(
+    if (EditRevealColorStrokeHistory(
         LOCTEXT("ToggleRevealColorStroke", "Toggle Reveal Color Stroke"),
         StrokeGuid,
         [StrokeGuid, bEnabled](FWetClothingTransparencyLayerData& MutableLayer)
@@ -4021,7 +4216,10 @@ void SWetClothingTransparencyBakePanel::HandleRevealColorStrokeEnabledChanged(
             }
             Stroke->bEnabled = bEnabled;
             return true;
-        });
+        }) && PreviewViewport.IsValid())
+    {
+        PreviewViewport->ReplayRevealColorStrokeHistory(InvalidatedStrokes);
+    }
 }
 
 TSharedRef<ITableRow> SWetClothingTransparencyBakePanel::GenerateRevealColorStrokeRow(
@@ -4443,7 +4641,7 @@ TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildPreviewSettingsSecti
       + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,3)[SNew(STextBlock).Text(LOCTEXT("PreviewWetnessLabel", "Preview Wetness"))]
       + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,6)[SNew(SSlider).MinValue(0).MaxValue(100).Value(this, &SWetClothingTransparencyBakePanel::GetWetnessPreviewPercent).OnValueChanged(this, &SWetClothingTransparencyBakePanel::HandleWetnessPreviewChanged)]
       + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,6)[BuildLabeledControl(LOCTEXT("TransparencyPreviewStrengthLabel", "Transparency Strength"),
-          SNew(SNumericEntryBox<float>).IsEnabled(bCanRecomputeFinalSettings).MinValue(0.0f).MaxValue(8.0f).Value(this, &SWetClothingTransparencyBakePanel::GetTransparencyPreviewStrength).OnValueCommitted(this, &SWetClothingTransparencyBakePanel::HandleTransparencyPreviewStrengthCommitted))]
+          SNew(SNumericEntryBox<float>).IsEnabled(bCanRecomputeFinalSettings).MinValue(0.0f).MaxValue(8.0f).Value(this, &SWetClothingTransparencyBakePanel::GetTransparencyPreviewStrength).OnValueChanged(this, &SWetClothingTransparencyBakePanel::HandleTransparencyPreviewStrengthChanged).OnValueCommitted(this, &SWetClothingTransparencyBakePanel::HandleTransparencyPreviewStrengthCommitted))]
       + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,6)
         [SNew(SCheckBox)
             .IsChecked(this, &SWetClothingTransparencyBakePanel::GetShowSavedWrinkleState)
@@ -4451,19 +4649,21 @@ TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildPreviewSettingsSecti
             .ToolTipText(LOCTEXT("ShowSavedWrinkleTooltip", "Show the wrinkle normal texture currently selected for runtime. Live Wrinkle Editor hover and stroke data are not included."))
             [SNew(STextBlock).Text(LOCTEXT("ShowSavedWrinkle", "Show Saved Wrinkle"))]]
       + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,6)[BuildLabeledControl(LOCTEXT("WrinkleSuppressionStrengthLabel", "Wrinkle Suppression Strength"),
-          SNew(SNumericEntryBox<float>).IsEnabled(bCanRecomputeFinalSettings).MinValue(0.0f).MaxValue(5.0f).Value(this, &SWetClothingTransparencyBakePanel::GetWrinkleSuppressionStrength).OnValueCommitted(this, &SWetClothingTransparencyBakePanel::HandleWrinkleSuppressionStrengthCommitted))]
+          SNew(SNumericEntryBox<float>).IsEnabled(bCanRecomputeFinalSettings).MinValue(0.0f).MaxValue(5.0f).Value(this, &SWetClothingTransparencyBakePanel::GetWrinkleSuppressionStrength).OnValueChanged(this, &SWetClothingTransparencyBakePanel::HandleWrinkleSuppressionStrengthChanged).OnValueCommitted(this, &SWetClothingTransparencyBakePanel::HandleWrinkleSuppressionStrengthCommitted))]
       + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,6)[BuildLabeledControl(LOCTEXT("WrinkleSuppressionThresholdLabel", "Wrinkle Mask Threshold"),
           SNew(SNumericEntryBox<float>)
               .IsEnabled(bCanRecomputeFinalSettings)
               .MinValue(0.0f).MaxValue(1.0f)
-              .Value_Lambda([this]() -> TOptional<float> { const UWetClothingAsset* A = WetClothingAsset.Get(); return A != nullptr ? TOptional<float>(A->Authored.TransparencyData.WrinkleSuppressionCoverageThreshold) : TOptional<float>(); })
-              .OnValueCommitted_Lambda([this](float V, ETextCommit::Type){ EditFinalBakeSettings(LOCTEXT("SetWrinkleSuppressionThreshold", "Set Wrinkle Coverage Threshold"), [V](auto& D){ const float NewValue = FMath::Clamp(V, 0.0f, 1.0f); if (FMath::IsNearlyEqual(D.WrinkleSuppressionCoverageThreshold, NewValue)) return false; D.WrinkleSuppressionCoverageThreshold = NewValue; return true; }, EDWCTransparencyFinalPreviewRefresh::WrinkleSuppression); }))]
+              .Value(this, &SWetClothingTransparencyBakePanel::GetWrinkleMaskThreshold)
+              .OnValueChanged(this, &SWetClothingTransparencyBakePanel::HandleWrinkleMaskThresholdChanged)
+              .OnValueCommitted(this, &SWetClothingTransparencyBakePanel::HandleWrinkleMaskThresholdCommitted))]
       + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,6)[BuildLabeledControl(LOCTEXT("WrinkleSuppressionSoftnessLabel", "Wrinkle Mask Softness"),
           SNew(SNumericEntryBox<float>)
               .IsEnabled(bCanRecomputeFinalSettings)
               .MinValue(0.0f).MaxValue(1.0f)
-              .Value_Lambda([this]() -> TOptional<float> { const UWetClothingAsset* A = WetClothingAsset.Get(); return A != nullptr ? TOptional<float>(A->Authored.TransparencyData.WrinkleSuppressionMaskSoftness) : TOptional<float>(); })
-              .OnValueCommitted_Lambda([this](float V, ETextCommit::Type){ EditFinalBakeSettings(LOCTEXT("SetWrinkleSuppressionSoftness", "Set Wrinkle Mask Softness"), [V](auto& D){ const float NewValue = FMath::Clamp(V, 0.0f, 1.0f); if (FMath::IsNearlyEqual(D.WrinkleSuppressionMaskSoftness, NewValue)) return false; D.WrinkleSuppressionMaskSoftness = NewValue; return true; }, EDWCTransparencyFinalPreviewRefresh::WrinkleSuppression); }))]
+              .Value(this, &SWetClothingTransparencyBakePanel::GetWrinkleMaskSoftness)
+              .OnValueChanged(this, &SWetClothingTransparencyBakePanel::HandleWrinkleMaskSoftnessChanged)
+              .OnValueCommitted(this, &SWetClothingTransparencyBakePanel::HandleWrinkleMaskSoftnessCommitted))]
       + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,6)[BuildLabeledControl(LOCTEXT("TransparencyVisualizationLabel", "Visualization"),
           SNew(SComboBox<TSharedPtr<EDWCTransparencyVisualizationMode>>)
               .OptionsSource(&VisualizationModeItems)
@@ -4596,9 +4796,8 @@ void SWetClothingTransparencyBakePanel::RefreshViewportContext()
     }
 
     PreviewViewport->SetWetnessPreviewPercent(WetnessPreviewPercent);
-    PreviewViewport->SetTransparencyPreviewStrength(TransparencyPreviewStrength);
+    PreviewViewport->ApplyTransparencyPreviewSettings(GetTransparencyPreviewSettings());
     PreviewViewport->SetShowSavedWrinkle(bShowSavedWrinkle);
-    PreviewViewport->SetWrinkleSuppressionStrength(WrinkleSuppressionStrength);
     PreviewViewport->SetVisualizationMode(PreviewContext.VisualizationMode);
     if (PreviewContext.PaintTarget == EDWCTransparencyPaintTarget::RevealColor)
     {

@@ -103,12 +103,14 @@ bool FDWCTransparencyRevealColorTileParityTest::RunTest(const FString& Parameter
 
     FDWCTransparencyBrushSample& Center = Stroke.Samples.AddDefaulted_GetRef();
     Center.PositionUV = FVector2D(0.49, 0.51);
-    Center.UVIslandID = 5;
+    // Deliberately differs from the raster island ID to guard the live-paint
+    // path used by meshes whose spatial and texture island numbering diverge.
+    Center.UVIslandID = 525;
     Center.RadiusUV = 0.14f;
     Center.Strength = 0.8f;
     FDWCTransparencyBrushSample& Wrapped = Stroke.Samples.AddDefaulted_GetRef();
     Wrapped.PositionUV = FVector2D(0.99, 0.03);
-    Wrapped.UVIslandID = 5;
+    Wrapped.UVIslandID = 425;
     Wrapped.RadiusUV = 0.08f;
     Wrapped.Strength = 0.55f;
 
@@ -120,7 +122,7 @@ bool FDWCTransparencyRevealColorTileParityTest::RunTest(const FString& Parameter
     SmoothStroke.Falloff = 0.35f;
     FDWCTransparencyBrushSample& SmoothSample = SmoothStroke.Samples.AddDefaulted_GetRef();
     SmoothSample.PositionUV = FVector2D(0.25, 0.5);
-    SmoothSample.UVIslandID = 5;
+    SmoothSample.UVIslandID = 525;
     SmoothSample.RadiusUV = 0.06f;
     SmoothSample.Strength = 0.7f;
 

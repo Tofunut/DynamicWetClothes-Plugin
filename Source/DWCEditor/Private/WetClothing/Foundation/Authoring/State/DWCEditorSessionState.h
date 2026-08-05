@@ -143,6 +143,19 @@ struct FDWCEditorWrinkleSessionState
     int32 SelectedRidgePointIndex = INDEX_NONE;
 };
 
+/**
+ * Transient editor values used to preview the authored transparency result.
+ * The WCA stores committed defaults; this snapshot owns the values currently
+ * being edited so an authoring notification cannot restore stale asset data.
+ */
+struct FDWCTransparencyPreviewSettings
+{
+    float TransparencyStrength = 0.4f;
+    float WrinkleSuppressionStrength = 0.6f;
+    float WrinkleMaskThreshold = 0.15f;
+    float WrinkleMaskSoftness = 0.05f;
+};
+
 struct FDWCEditorTransparencySessionState
 {
     FDWCEditorTransparencySessionState()
@@ -160,8 +173,8 @@ struct FDWCEditorTransparencySessionState
     EDWCTransparencyVisualizationMode VisualizationMode =
         EDWCTransparencyVisualizationMode::Final;
     float WetnessPreviewPercent = 100.0f;
-    float TransparencyPreviewStrength = 0.4f;
-    float WrinkleSuppressionStrength = 0.6f;
+    FDWCTransparencyPreviewSettings PreviewSettings;
+    bool bPreviewSettingsInitialized = false;
     bool bShowSavedWrinkle = true;
     FDWCTransparencyPaintSettings Paint;
     FDWCTransparencyPaintSettings RevealPaint;

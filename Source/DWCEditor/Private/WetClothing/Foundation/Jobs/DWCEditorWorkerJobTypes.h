@@ -12,6 +12,8 @@ enum class EDWCEditorWorkerJobKind : uint8
     TransparencyVisualization,
     TransparencyAlphaIncremental,
     TransparencyRevealColorIncremental,
+    TransparencyAlphaDirtyReplay,
+    TransparencyRevealColorDirtyReplay,
     WrinkleBake,
     TransparencyAutoBake,
     TransparencyFinalBake

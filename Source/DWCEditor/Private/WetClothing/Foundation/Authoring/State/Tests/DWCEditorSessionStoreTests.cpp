@@ -32,6 +32,59 @@ bool FDWCEditorSessionReducerContractTest::RunTest(const FString& Parameters)
     TestEqual(TEXT("Preview wetness is normalized"), State.Wrinkle.Brush.PreviewWetness, 1.0f);
     TestEqual(TEXT("Display size is normalized"), State.Wrinkle.BrushSizeCm, 100.0f);
 
+    FDWCInitializeTransparencyPreviewSettingsAction InitializeTransparency;
+    InitializeTransparency.Settings.TransparencyStrength = 0.8f;
+    InitializeTransparency.Settings.WrinkleSuppressionStrength = 1.2f;
+    InitializeTransparency.Settings.WrinkleMaskThreshold = 0.2f;
+    InitializeTransparency.Settings.WrinkleMaskSoftness = 0.04f;
+    const EDWCEditorSessionEffect InitializeEffects =
+        FDWCEditorSessionReducer::Reduce(State, InitializeTransparency);
+    TestTrue(
+        TEXT("Transparency preview settings initialize the live controls"),
+        EnumHasAnyFlags(InitializeEffects, EDWCEditorSessionEffect::UpdatePreviewParameters));
+    TestTrue(
+        TEXT("Transparency preview settings remember that asset defaults were imported"),
+        State.Transparency.bPreviewSettingsInitialized);
+
+    FDWCInitializeTransparencyPreviewSettingsAction IgnoreRepeatedInitialize;
+    IgnoreRepeatedInitialize.Settings.TransparencyStrength = 4.0f;
+    TestEqual(
+        TEXT("Repeated asset initialization does not overwrite the live session"),
+        FDWCEditorSessionReducer::Reduce(State, IgnoreRepeatedInitialize),
+        EDWCEditorSessionEffect::None);
+    TestEqual(
+        TEXT("The initialized live transparency strength is preserved"),
+        State.Transparency.PreviewSettings.TransparencyStrength,
+        0.8f);
+
+    FDWCSetTransparencyPreviewAction PreviewAction;
+    PreviewAction.Settings = State.Transparency.PreviewSettings;
+    PreviewAction.Settings.TransparencyStrength = -1.0f;
+    PreviewAction.Settings.WrinkleSuppressionStrength = 9.0f;
+    PreviewAction.Settings.WrinkleMaskThreshold = 2.0f;
+    PreviewAction.Settings.WrinkleMaskSoftness = -1.0f;
+    const EDWCEditorSessionEffect PreviewEffects =
+        FDWCEditorSessionReducer::Reduce(State, PreviewAction);
+    TestTrue(
+        TEXT("Live transparency settings update preview parameters"),
+        EnumHasAnyFlags(PreviewEffects, EDWCEditorSessionEffect::UpdatePreviewParameters));
+    TestEqual(
+        TEXT("Transparency strength is normalized"),
+        State.Transparency.PreviewSettings.TransparencyStrength,
+        0.0f);
+    TestEqual(
+        TEXT("Suppression strength is normalized"),
+        State.Transparency.PreviewSettings.WrinkleSuppressionStrength,
+        5.0f);
+    TestEqual(
+        TEXT("Wrinkle threshold is normalized"),
+        State.Transparency.PreviewSettings.WrinkleMaskThreshold,
+        1.0f);
+    TestEqual(
+        TEXT("Wrinkle softness is normalized"),
+        State.Transparency.PreviewSettings.WrinkleMaskSoftness,
+        0.0f);
+
     const FGuid LayerGuid = FGuid::NewGuid();
     FDWCEditorSessionReducer::Reduce(State, FDWCSelectTransparencyLayerAction{LayerGuid});
     FDWCReconcileAuthoringAction Reconcile;
@@ -55,6 +108,10 @@ bool FDWCEditorSessionReducerContractTest::RunTest(const FString& Parameters)
     TestTrue(
         TEXT("Authoring details impact becomes a details effect"),
         EnumHasAnyFlags(ReconcileEffects, EDWCEditorSessionEffect::RefreshDetails));
+    TestEqual(
+        TEXT("Authoring reconciliation does not restore stale transparency preview settings"),
+        State.Transparency.PreviewSettings.WrinkleSuppressionStrength,
+        5.0f);
 
     const FGuid WrinkleElementGuid = FGuid::NewGuid();
     FDWCEditorSessionReducer::Reduce(

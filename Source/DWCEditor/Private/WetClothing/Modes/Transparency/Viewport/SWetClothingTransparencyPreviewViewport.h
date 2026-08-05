@@ -40,6 +40,7 @@ struct FDWCTransparencyAutoBakeResult;
 struct FDWCTransparencyAlphaComposeTileSnapshot;
 struct FDWCTransparencyRevealColorComposeTileSnapshot;
 struct FDWCTransparencyPixelComposeContext;
+enum class EDWCTransparencyDirtyReplayTarget : uint8;
 using FDWCTransparencySurfaceHit = FDWCEditorSurfaceHit;
 
 class SWetClothingTransparencyPreviewViewport
@@ -72,9 +73,8 @@ class SWetClothingTransparencyPreviewViewport
     void SetPreviewMode(EWetClothingTransparencyPreviewMode NewMode);
     EWetClothingTransparencyPreviewMode GetPreviewMode() const { return PreviewMode; }
     void SetWetnessPreviewPercent(float InPercent);
-    void SetTransparencyPreviewStrength(float InStrength);
+    void ApplyTransparencyPreviewSettings(const FDWCTransparencyPreviewSettings& InSettings);
     void SetShowSavedWrinkle(bool bInShowSavedWrinkle);
-    void SetWrinkleSuppressionStrength(float InStrength);
     void RefreshWrinkleSuppressionPreview();
     void RefreshOuterEdgeFeatherPreview();
     void SetPaintSettings(const FDWCTransparencyPaintSettings& InSettings);
@@ -90,6 +90,9 @@ class SWetClothingTransparencyPreviewViewport
     void CancelAuthoringLiveStroke();
     void RebuildManualOverridesFromStrokes();
     void RefreshManualPreviewFromStrokes();
+    void ReplayAlphaStrokeHistory(const TArray<FDWCTransparencyBrushStroke>& InvalidatedStrokes);
+    void ReplayRevealColorStrokeHistory(
+        const TArray<FDWCTransparencyRevealColorStroke>& InvalidatedStrokes);
     bool TraceSurface(const FVector& RayOrigin, const FVector& RayDirection, FDWCTransparencySurfaceHit& OutHit) const;
     bool CanPaint() const;
     bool CanShowBrushCursor() const;
@@ -138,14 +141,12 @@ class SWetClothingTransparencyPreviewViewport
     bool RebuildTransparencyPreviewTexture();
     void RetryPreviewTextureRebuildIfNeeded();
     UTexture2D* GetTransparencyPreviewTexture() const;
-    UTexture2D* GetWrinkleSuppressionPreviewTexture() const;
-    bool RebuildWrinkleSuppressionBuffer();
-    bool UpdateWrinkleSuppressionPreviewTexture();
-    bool CanUseDynamicFinalPreviewComposition() const;
+    UTexture2D* GetWrinkleCoverageTexture() const;
+    bool CanUseMaterialDrivenPreviewPresentation() const;
     bool UsesFinalAlphaPreview() const;
-    bool UsesWrinkleSuppressionPreview() const;
     void RefreshDeferredFinalPreviewBuffers();
-    void InvalidateWrinkleSuppressionSourceCache();
+    void SchedulePreviewSettingsApply();
+    EActiveTimerReturnType HandlePreviewSettingsApply(double CurrentTime, float DeltaTime);
     bool RebuildOuterEdgeFeatherBuffer();
     bool IsAuthoringInteractionActive() const;
     void RebuildHitTriangles();
@@ -175,6 +176,8 @@ class SWetClothingTransparencyPreviewViewport
     bool BuildAlphaComposeTileSnapshots(
         const TArray<FIntPoint>& TileCoordinates,
         TArray<FDWCTransparencyAlphaComposeTileSnapshot>& OutTiles) const;
+    void ScheduleDirtyTileReplay(EDWCTransparencyDirtyReplayTarget Target);
+    void CancelDirtyTileReplay(EDWCTransparencyDirtyReplayTarget Target, bool bRequireFullRebuild);
     void FinalizeAuthoringPreviewUpdate();
     void InvalidatePreviewContent(bool bRequireFullRebuild = false);
     FWetClothingTransparencyLayerData* GetSelectedLayer();
@@ -217,16 +220,10 @@ class SWetClothingTransparencyPreviewViewport
     TUniquePtr<FDWCEditorPreviewSession> PreviewSession;
     TUniquePtr<FDWCEditorPreviewOrchestrator> PreviewOrchestrator;
     FDWCEditorTextureLease TransparencyPreviewHandle;
-    FDWCEditorTextureLease WrinkleSuppressionPreviewHandle;
     FDWCEditorTextureLease HoverBaselinePreviewHandle;
     FDWCEditorTextureLease HoverIslandMaskPreviewHandle;
     TObjectPtr<UProceduralMeshComponent> BrushCursorComponent = nullptr;
     TSharedPtr<const FDWCTransparencyAutoBakeResult> AutoBakePreviewResult;
-    TArray<uint8> WrinkleSuppressionBuffer;
-    TObjectPtr<UTexture2D> CachedWrinkleSuppressionMaskTexture = nullptr;
-    FGuid CachedWrinkleSuppressionBakeGuid;
-    FIntPoint CachedWrinkleSuppressionResolution = FIntPoint::ZeroValue;
-    TArray<uint16> CachedWrinkleSuppressionCoverageBuffer;
     TArray<uint8> OuterEdgeFeatherBuffer;
     FDWCTransparencyAlphaTileStore ManualAlphaTileStore;
     FDWCTransparencyRevealColorTileStore RevealColorTileStore;
@@ -247,6 +244,12 @@ class SWetClothingTransparencyPreviewViewport
     uint64 NextRevealColorCommandSequence = 1;
     uint64 RevealColorIncrementalEpoch = 1;
     FDWCEditorPreviewRecoveryController RevealColorPreviewRecovery;
+    TArray<FIntRect> PendingAlphaReplayRegions;
+    TArray<FIntRect> PendingRevealColorReplayRegions;
+    FDWCEditorWorkerJobTicket PendingAlphaReplayTicket;
+    FDWCEditorWorkerJobTicket PendingRevealColorReplayTicket;
+    uint64 AlphaReplayEpoch = 1;
+    uint64 RevealColorReplayEpoch = 1;
     FDWCEditorSpatialLease SpatialLease;
     FDWCEditorSpatialHandle SpatialHandle;
     FDWCTransparencyPaintSettings PaintSettings;
@@ -258,7 +261,9 @@ class SWetClothingTransparencyPreviewViewport
     float WetnessPreviewPercent = 100.0f;
     float TransparencyPreviewStrength = 0.4f;
     float WrinkleSuppressionStrength = 0.6f;
-    bool bWrinkleSuppressionPreviewDirty = false;
+    float WrinkleMaskThreshold = 0.15f;
+    float WrinkleMaskSoftness = 0.05f;
+    bool bPreviewSettingsApplyScheduled = false;
     bool bOuterEdgeFeatherPreviewDirty = false;
     bool bTransparencyPaintingEnabled = false;
     bool bRevealColorPaintingEnabled = false;
@@ -275,7 +280,6 @@ class SWetClothingTransparencyPreviewViewport
     uint64 HoverParameterUpdateCount = 0;
     uint64 HoverBaselineBuildCount = 0;
     uint64 HoverIslandMaskBuildCount = 0;
-    uint64 WrinkleSuppressionRebuildCount = 0;
     uint64 OuterEdgeFeatherRebuildCount = 0;
     uint64 InteractivePaintAuthoritativeReplayCount = 0;
     uint64 AlphaIncrementalCommitCount = 0;

@@ -15,7 +15,6 @@ struct FDWCTransparencyAlphaComposeTileSnapshot
     FIntPoint TileCoordinate = FIntPoint::ZeroValue;
     FIntRect Rect;
     TArray<FColor> RevealColor;
-    TArray<uint8> WrinkleSuppression;
     TArray<uint8> OuterEdgeFeather;
 };
 
@@ -28,8 +27,6 @@ struct FDWCTransparencyAlphaIncrementalJobInput
     TArray<FDWCTransparencyAlphaTilePayload> SnapshotTiles;
     TArray<FDWCTransparencyAlphaComposeTileSnapshot> ComposeTiles;
     EDWCTransparencyVisualizationMode VisualizationMode = EDWCTransparencyVisualizationMode::Final;
-    float TransparencyPreviewStrength = 0.4f;
-    float WrinkleSuppressionStrength = 0.6f;
     uint64 ExpectedAlphaRevision = 0;
     FDWCEditorPreviewRegionTarget PreviewTarget;
 };

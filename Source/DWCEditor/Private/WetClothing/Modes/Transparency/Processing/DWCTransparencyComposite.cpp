@@ -86,7 +86,8 @@ FColor FDWCTransparencyComposite::ComposeVisualizationPixel(
     const bool bUseDynamicFinalComposition =
         Context.VisualizationMode == EDWCTransparencyVisualizationMode::Final &&
         !Result.bIsFinalBakedBaseline;
-    const uint8 Alpha = Result.bIsFinalBakedBaseline || bUseDynamicFinalComposition
+    const uint8 Alpha = Result.bIsFinalBakedBaseline || bUseDynamicFinalComposition ||
+        Context.bDeferPresentationToMaterial
         ? static_cast<uint8>(FMath::RoundToInt(EditedAlpha * 255.0f))
         : ResolveFinalAlpha8(
             EditedAlpha,
@@ -120,16 +121,22 @@ FColor FDWCTransparencyComposite::ComposeVisualizationPixel(
         Pixel.A = 255;
         break;
     case EDWCTransparencyVisualizationMode::AutoAlpha:
-        Pixel = FColor(FeatheredAlpha, FeatheredAlpha, FeatheredAlpha, FeatheredAlpha);
+        if (!Context.bDeferPresentationToMaterial)
+        {
+            Pixel = FColor(FeatheredAlpha, FeatheredAlpha, FeatheredAlpha, FeatheredAlpha);
+        }
         break;
     case EDWCTransparencyVisualizationMode::WrinkleSeparation:
     {
-        const uint8 Separation = WrinkleSuppressionOverride.IsSet()
-            ? WrinkleSuppressionOverride.GetValue()
-            : Context.WrinkleSuppressionBuffer.IsValidIndex(PixelIndex)
-            ? Context.WrinkleSuppressionBuffer[PixelIndex]
-            : 0;
-        Pixel = FColor(Separation, Separation, Separation, 255);
+        if (!Context.bDeferPresentationToMaterial)
+        {
+            const uint8 Separation = WrinkleSuppressionOverride.IsSet()
+                ? WrinkleSuppressionOverride.GetValue()
+                : Context.WrinkleSuppressionBuffer.IsValidIndex(PixelIndex)
+                ? Context.WrinkleSuppressionBuffer[PixelIndex]
+                : 0;
+            Pixel = FColor(Separation, Separation, Separation, 255);
+        }
         break;
     }
     case EDWCTransparencyVisualizationMode::ValidHit:

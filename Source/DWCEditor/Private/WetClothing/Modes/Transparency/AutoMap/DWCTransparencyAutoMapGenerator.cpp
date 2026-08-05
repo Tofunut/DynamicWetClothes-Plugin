@@ -365,42 +365,36 @@ namespace
                 UVIslandID);
     }
 
-    int32 ResolveTransparencySampleIslandID(
-        const FDWCTransparencyAutoBakeResult& Result,
-        const FVector2D& PositionUV,
-        const int32 UVIslandID,
-        const int32 Width,
-        const int32 Height,
-        const bool bWrap)
-    {
-        if (Result.OuterIslandIDBuffer.Num() != Width * Height || Width <= 0 || Height <= 0)
-        {
-            return UVIslandID;
-        }
+}
 
-        int32 X = FMath::FloorToInt(PositionUV.X * Width);
-        int32 Y = FMath::FloorToInt(PositionUV.Y * Height);
-        if (bWrap)
-        {
-            X = (X % Width + Width) % Width;
-            Y = (Y % Height + Height) % Height;
-        }
-        else if (X < 0 || X >= Width || Y < 0 || Y >= Height)
-        {
-            return INDEX_NONE;
-        }
-        else
-        {
-            X = FMath::Clamp(X, 0, Width - 1);
-            Y = FMath::Clamp(Y, 0, Height - 1);
-        }
-        const int32 RasterIslandID = FDWCTransparencyAutoBakeResult::DecodeOuterIslandID(
-            Result.OuterIslandIDBuffer[Y * Width + X]);
-        // Keep saved stroke replay and live preview on the same texture-space
-        // island identity. The spatial hit ID is only a fallback when the
-        // exact center pixel has no raster coverage.
-        return RasterIslandID != INDEX_NONE ? RasterIslandID : UVIslandID;
+int32 FDWCTransparencyAutoBakeResult::ResolveOuterIslandIDAtUV(
+    const FVector2D& PositionUV,
+    const int32 FallbackUVIslandID,
+    const bool bWrap) const
+{
+    const int32 Width = Resolution.X;
+    const int32 Height = Resolution.Y;
+    if (Width <= 0 || Height <= 0 || OuterIslandIDBuffer.Num() != Width * Height)
+    {
+        return FallbackUVIslandID;
     }
+
+    int32 X = FMath::FloorToInt(PositionUV.X * Width);
+    int32 Y = FMath::FloorToInt(PositionUV.Y * Height);
+    if (bWrap)
+    {
+        X = (X % Width + Width) % Width;
+        Y = (Y % Height + Height) % Height;
+    }
+    else if (X < 0 || X >= Width || Y < 0 || Y >= Height)
+    {
+        return INDEX_NONE;
+    }
+
+    const int32 RasterIslandID = DecodeOuterIslandID(OuterIslandIDBuffer[Y * Width + X]);
+    // Spatial hit IDs are local to the query cache and can differ from the
+    // raster workspace. Only use the hit ID when the sampled texel is uncovered.
+    return RasterIslandID != INDEX_NONE ? RasterIslandID : FallbackUVIslandID;
 }
 
 bool FDWCTransparencyAutoMapGenerator::BuildTargetSurfaceBuffers(
@@ -561,12 +555,9 @@ void FDWCTransparencyAutoMapGenerator::ApplyRevealColorPaintStrokes(
             const int32 MaxX = FMath::CeilToInt(Center.X + RadiusX + 1.0f);
             const int32 MinY = FMath::FloorToInt(Center.Y - RadiusY - 1.0f);
             const int32 MaxY = FMath::CeilToInt(Center.Y + RadiusY + 1.0f);
-            const int32 ClipUVIslandID = ResolveTransparencySampleIslandID(
-                AutoResult,
+            const int32 ClipUVIslandID = AutoResult.ResolveOuterIslandIDAtUV(
                 Sample.PositionUV,
                 Sample.UVIslandID,
-                Width,
-                Height,
                 bWrap);
             const float InnerRadius = 1.0f - FMath::Clamp(Stroke.Falloff, 0.0f, 1.0f);
             const bool bSmooth = Stroke.BrushMode == EDWCTransparencyRevealColorBrushMode::Smooth;

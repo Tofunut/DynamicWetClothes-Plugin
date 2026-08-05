@@ -44,6 +44,12 @@ struct FDWCTransparencyAutoBakeResult
             (CanEncodeOuterIslandID(IslandID) && EncodedIslandID == static_cast<uint16>(IslandID));
     }
 
+    /** Resolves the texture-space island used consistently by hover, live paint, and stroke replay. */
+    int32 ResolveOuterIslandIDAtUV(
+        const FVector2D& PositionUV,
+        int32 FallbackUVIslandID,
+        bool bWrap) const;
+
     FGuid LayerGuid;
     int32 MaterialSlotIndex = INDEX_NONE;
     int32 UVChannelIndex = 0;

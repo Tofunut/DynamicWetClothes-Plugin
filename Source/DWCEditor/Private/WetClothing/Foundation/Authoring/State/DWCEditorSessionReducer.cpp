@@ -69,6 +69,25 @@ namespace
         Paint.TargetAlpha = FMath::Clamp(Paint.TargetAlpha, 0.0f, 1.0f);
     }
 
+    void NormalizeTransparencyPreviewSettings(FDWCTransparencyPreviewSettings& Settings)
+    {
+        Settings.TransparencyStrength = FMath::Max(0.0f, Settings.TransparencyStrength);
+        Settings.WrinkleSuppressionStrength =
+            FMath::Clamp(Settings.WrinkleSuppressionStrength, 0.0f, 5.0f);
+        Settings.WrinkleMaskThreshold = FMath::Clamp(Settings.WrinkleMaskThreshold, 0.0f, 1.0f);
+        Settings.WrinkleMaskSoftness = FMath::Clamp(Settings.WrinkleMaskSoftness, 0.0f, 1.0f);
+    }
+
+    bool AreTransparencyPreviewSettingsEquivalent(
+        const FDWCTransparencyPreviewSettings& A,
+        const FDWCTransparencyPreviewSettings& B)
+    {
+        return FMath::IsNearlyEqual(A.TransparencyStrength, B.TransparencyStrength) &&
+            FMath::IsNearlyEqual(A.WrinkleSuppressionStrength, B.WrinkleSuppressionStrength) &&
+            FMath::IsNearlyEqual(A.WrinkleMaskThreshold, B.WrinkleMaskThreshold) &&
+            FMath::IsNearlyEqual(A.WrinkleMaskSoftness, B.WrinkleMaskSoftness);
+    }
+
     EDWCEditorSessionEffect EffectsForAuthoringImpact(const EDWCEditorAuthoringImpact Impact)
     {
         EDWCEditorSessionEffect Effects = EDWCEditorSessionEffect::RefreshStatus;
@@ -240,17 +259,38 @@ EDWCEditorSessionEffect FDWCEditorSessionReducer::Reduce(
 
 EDWCEditorSessionEffect FDWCEditorSessionReducer::Reduce(
     FDWCEditorSessionState& State,
+    const FDWCInitializeTransparencyPreviewSettingsAction& Action)
+{
+    FDWCEditorTransparencySessionState& Transparency = State.Transparency;
+    if (Transparency.bPreviewSettingsInitialized && !Action.bForce)
+    {
+        return EDWCEditorSessionEffect::None;
+    }
+
+    FDWCTransparencyPreviewSettings Settings = Action.Settings;
+    NormalizeTransparencyPreviewSettings(Settings);
+    const bool bChanged = !Transparency.bPreviewSettingsInitialized ||
+        !AreTransparencyPreviewSettingsEquivalent(Transparency.PreviewSettings, Settings);
+    Transparency.PreviewSettings = Settings;
+    Transparency.bPreviewSettingsInitialized = true;
+    return bChanged
+        ? EDWCEditorSessionEffect::SyncControls |
+            EDWCEditorSessionEffect::UpdatePreviewParameters
+        : EDWCEditorSessionEffect::None;
+}
+
+EDWCEditorSessionEffect FDWCEditorSessionReducer::Reduce(
+    FDWCEditorSessionState& State,
     const FDWCSetTransparencyPreviewAction& Action)
 {
     FDWCEditorTransparencySessionState& Preview = State.Transparency;
     const float Wetness = FMath::Clamp(Action.WetnessPreviewPercent, 0.0f, 100.0f);
-    const float Strength = FMath::Max(0.0f, Action.TransparencyPreviewStrength);
-    const float Suppression = FMath::Clamp(Action.WrinkleSuppressionStrength, 0.0f, 5.0f);
+    FDWCTransparencyPreviewSettings Settings = Action.Settings;
+    NormalizeTransparencyPreviewSettings(Settings);
     const bool bChanged = Preview.PreviewMode != Action.PreviewMode ||
         Preview.VisualizationMode != Action.VisualizationMode ||
         !FMath::IsNearlyEqual(Preview.WetnessPreviewPercent, Wetness) ||
-        !FMath::IsNearlyEqual(Preview.TransparencyPreviewStrength, Strength) ||
-        !FMath::IsNearlyEqual(Preview.WrinkleSuppressionStrength, Suppression) ||
+        !AreTransparencyPreviewSettingsEquivalent(Preview.PreviewSettings, Settings) ||
         Preview.bShowSavedWrinkle != Action.bShowSavedWrinkle;
     if (!bChanged)
     {
@@ -259,8 +299,8 @@ EDWCEditorSessionEffect FDWCEditorSessionReducer::Reduce(
     Preview.PreviewMode = Action.PreviewMode;
     Preview.VisualizationMode = Action.VisualizationMode;
     Preview.WetnessPreviewPercent = Wetness;
-    Preview.TransparencyPreviewStrength = Strength;
-    Preview.WrinkleSuppressionStrength = Suppression;
+    Preview.PreviewSettings = Settings;
+    Preview.bPreviewSettingsInitialized = true;
     Preview.bShowSavedWrinkle = Action.bShowSavedWrinkle;
     return EDWCEditorSessionEffect::SyncControls |
         EDWCEditorSessionEffect::UpdatePreviewParameters;

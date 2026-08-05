@@ -16,7 +16,6 @@ struct FDWCTransparencyVisualizationJobInput
     TSharedPtr<const FDWCTransparencyAutoBakeResult> AutoResult;
     FDWCTransparencyRevealColorTileStore RevealColorTileStore;
     FDWCTransparencyAlphaTileStore ManualAlphaTileStore;
-    TArray<uint8> WrinkleSuppressionBuffer;
     TArray<uint8> OuterEdgeFeatherBuffer;
     bool bRebuildManualOverridesFromStrokes = false;
     bool bRebuildRevealColorFromStrokes = false;
@@ -29,8 +28,6 @@ struct FDWCTransparencyVisualizationJobInput
     int32 MaterialSlotIndex = INDEX_NONE;
     int32 UVChannelIndex = INDEX_NONE;
     EDWCTransparencyVisualizationMode VisualizationMode = EDWCTransparencyVisualizationMode::Final;
-    float TransparencyPreviewStrength = 0.4f;
-    float WrinkleSuppressionStrength = 0.6f;
 };
 
 struct FDWCTransparencyVisualizationJobResult final : FDWCEditorWorkerJobResult

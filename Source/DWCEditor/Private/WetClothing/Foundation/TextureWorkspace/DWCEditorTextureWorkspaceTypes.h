@@ -15,7 +15,6 @@ enum class EDWCEditorTexturePurpose : uint8
     WrinkleAccumulated,
     WrinkleProcedural,
     TransparencyVisualization,
-    TransparencyWrinkleSuppression,
     TransparencyHoverBaseline,
     TransparencyHoverIslandMask
 };

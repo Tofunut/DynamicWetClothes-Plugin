@@ -89,11 +89,9 @@ FDWCTransparencyVisualizationWorker::Build(
     Context.AutoResult = &Result;
     Context.RevealColorTileStore = &Input.RevealColorTileStore;
     Context.ManualAlphaTileStore = &Input.ManualAlphaTileStore;
-    Context.WrinkleSuppressionBuffer = MakeArrayView(Input.WrinkleSuppressionBuffer);
     Context.OuterEdgeFeatherBuffer = MakeArrayView(Input.OuterEdgeFeatherBuffer);
     Context.VisualizationMode = Input.VisualizationMode;
-    Context.TransparencyStrength = Input.TransparencyPreviewStrength;
-    Context.WrinkleSuppressionStrength = Input.WrinkleSuppressionStrength;
+    Context.bDeferPresentationToMaterial = true;
     Context.MaximumHitDistance = Input.VisualizationMode == EDWCTransparencyVisualizationMode::HitDistance
         ? FDWCTransparencyComposite::ComputeMaximumHitDistance(Result)
         : KINDA_SMALL_NUMBER;

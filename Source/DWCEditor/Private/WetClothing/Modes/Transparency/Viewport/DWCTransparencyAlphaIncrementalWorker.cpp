@@ -17,7 +17,6 @@ FDWCEditorWorkerMemoryEstimate FDWCTransparencyAlphaIncrementalWorker::EstimateM
     for (const FDWCTransparencyAlphaComposeTileSnapshot& Tile : ComposeTiles)
     {
         Estimate.SnapshotBytes += Tile.RevealColor.GetAllocatedSize();
-        Estimate.SnapshotBytes += Tile.WrinkleSuppression.GetAllocatedSize();
         Estimate.SnapshotBytes += Tile.OuterEdgeFeather.GetAllocatedSize();
     }
     const uint64 FullTilePixels =
@@ -77,8 +76,7 @@ FDWCTransparencyAlphaIncrementalWorker::Build(
     Context.AutoResult = Input.AutoResult.Get();
     Context.ManualAlphaTileStore = &ComposedStore;
     Context.VisualizationMode = Input.VisualizationMode;
-    Context.TransparencyStrength = Input.TransparencyPreviewStrength;
-    Context.WrinkleSuppressionStrength = Input.WrinkleSuppressionStrength;
+    Context.bDeferPresentationToMaterial = true;
     Context.MaximumHitDistance = Input.VisualizationMode == EDWCTransparencyVisualizationMode::HitDistance
         ? FDWCTransparencyComposite::ComputeMaximumHitDistance(*Input.AutoResult)
         : KINDA_SMALL_NUMBER;
@@ -97,7 +95,6 @@ FDWCTransparencyAlphaIncrementalWorker::Build(
         const int32 PixelCount = Tile.Rect.Width() * Tile.Rect.Height();
         if (Tile.Rect.IsEmpty() ||
             (!Tile.RevealColor.IsEmpty() && Tile.RevealColor.Num() != PixelCount) ||
-            (!Tile.WrinkleSuppression.IsEmpty() && Tile.WrinkleSuppression.Num() != PixelCount) ||
             (!Tile.OuterEdgeFeather.IsEmpty() && Tile.OuterEdgeFeather.Num() != PixelCount))
         {
             Output->bSucceeded = false;
@@ -123,9 +120,7 @@ FDWCTransparencyAlphaIncrementalWorker::Build(
                     Tile.RevealColor.IsValidIndex(LocalIndex)
                         ? TOptional<FColor>(Tile.RevealColor[LocalIndex])
                         : TOptional<FColor>(),
-                    Tile.WrinkleSuppression.IsValidIndex(LocalIndex)
-                        ? TOptional<uint8>(Tile.WrinkleSuppression[LocalIndex])
-                        : TOptional<uint8>(),
+                    TOptional<uint8>(),
                     Tile.OuterEdgeFeather.IsValidIndex(LocalIndex)
                         ? TOptional<uint8>(Tile.OuterEdgeFeather[LocalIndex])
                         : TOptional<uint8>());

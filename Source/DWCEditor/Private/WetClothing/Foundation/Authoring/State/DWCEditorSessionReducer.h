@@ -12,6 +12,7 @@ class FDWCEditorSessionReducer
     static EDWCEditorSessionEffect Reduce(FDWCEditorSessionState& State, const FDWCSetWrinkleCrossPreviewAction& Action);
     static EDWCEditorSessionEffect Reduce(FDWCEditorSessionState& State, const FDWCSelectTransparencyLayerAction& Action);
     static EDWCEditorSessionEffect Reduce(FDWCEditorSessionState& State, const FDWCSetTransparencyStageAction& Action);
+    static EDWCEditorSessionEffect Reduce(FDWCEditorSessionState& State, const FDWCInitializeTransparencyPreviewSettingsAction& Action);
     static EDWCEditorSessionEffect Reduce(FDWCEditorSessionState& State, const FDWCSetTransparencyPreviewAction& Action);
     static EDWCEditorSessionEffect Reduce(FDWCEditorSessionState& State, const FDWCSetTransparencyPaintAction& Action);
     static EDWCEditorSessionEffect Reduce(FDWCEditorSessionState& State, const FDWCSetTransparencyEditContextAction& Action);

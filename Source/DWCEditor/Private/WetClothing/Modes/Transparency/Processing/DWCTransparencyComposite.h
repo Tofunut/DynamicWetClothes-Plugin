@@ -28,6 +28,9 @@ struct FDWCTransparencyPixelComposeContext
     float TransparencyStrength = 0.4f;
     float WrinkleSuppressionStrength = 0.6f;
     float MaximumHitDistance = KINDA_SMALL_NUMBER;
+    // Preview textures retain authored alpha and defer strength, suppression,
+    // and suppression visualization to the transient preview material.
+    bool bDeferPresentationToMaterial = false;
 
     bool IsValid() const;
 };

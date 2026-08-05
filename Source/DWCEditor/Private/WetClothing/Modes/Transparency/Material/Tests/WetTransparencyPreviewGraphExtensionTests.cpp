@@ -201,6 +201,16 @@ bool FDWCTransparencyPreviewMaterialHoverGraphTest::RunTest(const FString&)
         HasTextureParameter(*Material, DWCTransparencyPreviewMaterialParameters::HoverEdgeFeatherMap()));
     TestTrue(TEXT("Hover edge feather use is exposed as a scalar parameter"),
         HasScalarParameter(*Material, DWCTransparencyPreviewMaterialParameters::UseHoverEdgeFeatherMap()));
+    TestTrue(TEXT("Wrinkle coverage is exposed as a texture parameter"),
+        HasTextureParameter(*Material, DWCTransparencyPreviewMaterialParameters::WrinkleCoverageMap()));
+    TestTrue(TEXT("Wrinkle coverage use is exposed as a scalar parameter"),
+        HasScalarParameter(*Material, DWCTransparencyPreviewMaterialParameters::UseWrinkleCoverageMap()));
+    TestTrue(TEXT("Wrinkle threshold is exposed as a scalar parameter"),
+        HasScalarParameter(*Material, DWCTransparencyPreviewMaterialParameters::WrinkleMaskThreshold()));
+    TestTrue(TEXT("Wrinkle softness is exposed as a scalar parameter"),
+        HasScalarParameter(*Material, DWCTransparencyPreviewMaterialParameters::WrinkleMaskSoftness()));
+    TestTrue(TEXT("Transparency visualization mode is exposed as a scalar parameter"),
+        HasScalarParameter(*Material, DWCTransparencyPreviewMaterialParameters::VisualizationMode()));
 
     const UMaterialExpressionCustom* HoverBlend = nullptr;
     for (UMaterialExpression* Expression : Material->GetExpressions())
@@ -225,14 +235,20 @@ bool FDWCTransparencyPreviewMaterialHoverGraphTest::RunTest(const FString&)
             HoverBlend->Code.Contains(TEXT("HoverIslandEligibility")));
         TestTrue(TEXT("Auto-alpha hover updates its grayscale visualization"),
             HoverBlend->Code.Contains(TEXT("TransparencySample.rgb = TransparencySample.aaa")));
+        TestTrue(TEXT("Wrinkle coverage is sampled directly by the preview material"),
+            HoverBlend->Code.Contains(TEXT("WrinkleCoverageMapTex")));
+        TestTrue(TEXT("Wrinkle threshold and softness are evaluated by the preview material"),
+            HoverBlend->Code.Contains(TEXT("smoothstep(SafeThreshold, TransitionEnd, Coverage)")));
+        TestTrue(TEXT("Wrinkle suppression is applied to final alpha in the preview material"),
+            HoverBlend->Code.Contains(TEXT("(1.0 - SuppressionWeight)")));
     }
 
     TestEqual(TEXT("The material hover target enum has a stable disabled value"),
         static_cast<uint8>(EDWCTransparencyMaterialHoverTarget::None), static_cast<uint8>(0));
     TestEqual(TEXT("The material hover operation enum has a stable smooth value"),
         static_cast<uint8>(EDWCTransparencyMaterialHoverOperation::Smooth), static_cast<uint8>(3));
-    TestTrue(TEXT("The feature schema invalidates pre-hover cached graphs"),
-        FWetTransparencyPreviewGraphExtension::GraphSchemaVersion >= 4);
+    TestTrue(TEXT("The feature schema invalidates pre-material-suppression cached graphs"),
+        FWetTransparencyPreviewGraphExtension::GraphSchemaVersion >= 5);
     return true;
 }
 

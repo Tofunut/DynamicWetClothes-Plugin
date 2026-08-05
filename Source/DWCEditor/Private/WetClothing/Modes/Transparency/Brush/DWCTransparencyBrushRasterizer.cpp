@@ -43,42 +43,6 @@ namespace
                 UVIslandID);
     }
 
-    int32 ResolveSampleIslandID(
-        const FDWCTransparencyAutoBakeResult& AutoResult,
-        const FDWCTransparencyBrushSample& Sample,
-        const int32 Width,
-        const int32 Height,
-        const bool bWrap)
-    {
-        if (Sample.UVIslandID != INDEX_NONE)
-        {
-            return Sample.UVIslandID;
-        }
-        if (AutoResult.OuterIslandIDBuffer.Num() != Width * Height)
-        {
-            return INDEX_NONE;
-        }
-
-        int32 X = FMath::FloorToInt(Sample.PositionUV.X * Width);
-        int32 Y = FMath::FloorToInt(Sample.PositionUV.Y * Height);
-        if (bWrap)
-        {
-            X = WrapIndex(X, Width);
-            Y = WrapIndex(Y, Height);
-        }
-        else if (X < 0 || X >= Width || Y < 0 || Y >= Height)
-        {
-            return INDEX_NONE;
-        }
-        else
-        {
-            X = FMath::Clamp(X, 0, Width - 1);
-            Y = FMath::Clamp(Y, 0, Height - 1);
-        }
-        return FDWCTransparencyAutoBakeResult::DecodeOuterIslandID(
-            AutoResult.OuterIslandIDBuffer[Y * Width + X]);
-    }
-
     void ApplySample(
         const FDWCTransparencyAutoBakeResult& AutoResult,
         const FDWCTransparencyBrushStroke& Stroke,
@@ -101,11 +65,9 @@ namespace
         const int32 MaxX = FMath::CeilToInt(CenterPixels.X + RadiusPixelsX + 1.0f);
         const int32 MinY = FMath::FloorToInt(CenterPixels.Y - RadiusPixelsY - 1.0f);
         const int32 MaxY = FMath::CeilToInt(CenterPixels.Y + RadiusPixelsY + 1.0f);
-        const int32 ClipUVIslandID = ResolveSampleIslandID(
-            AutoResult,
-            Sample,
-            Width,
-            Height,
+        const int32 ClipUVIslandID = AutoResult.ResolveOuterIslandIDAtUV(
+            Sample.PositionUV,
+            Sample.UVIslandID,
             bWrap);
         TArray<uint8> SmoothPremultipliedSnapshot;
         TArray<uint8> SmoothWeightSnapshot;
@@ -290,7 +252,10 @@ bool FDWCTransparencyBrushRasterizer::RasterizeSamplesToTiles(
         const int32 MaxX = FMath::CeilToInt(Center.X + RadiusX + 1.0f);
         const int32 MinY = FMath::FloorToInt(Center.Y - RadiusY - 1.0f);
         const int32 MaxY = FMath::CeilToInt(Center.Y + RadiusY + 1.0f);
-        const int32 IslandID = ResolveSampleIslandID(AutoResult, Sample, Width, Height, bWrap);
+        const int32 IslandID = AutoResult.ResolveOuterIslandIDAtUV(
+            Sample.PositionUV,
+            Sample.UVIslandID,
+            bWrap);
         const float InnerRadius = 1.0f - FMath::Clamp(Stroke.Falloff, 0.0f, 1.0f);
 
         for (int32 RawY = MinY; RawY <= MaxY; ++RawY)
@@ -447,7 +412,10 @@ bool FDWCTransparencyBrushRasterizer::RasterizeRevealColorSamplesToTiles(
         const int32 MaxX = FMath::CeilToInt(Center.X + RadiusX + 1.0f);
         const int32 MinY = FMath::FloorToInt(Center.Y - RadiusY - 1.0f);
         const int32 MaxY = FMath::CeilToInt(Center.Y + RadiusY + 1.0f);
-        const int32 IslandID = ResolveSampleIslandID(AutoResult, Sample, Width, Height, bWrap);
+        const int32 IslandID = AutoResult.ResolveOuterIslandIDAtUV(
+            Sample.PositionUV,
+            Sample.UVIslandID,
+            bWrap);
         const float InnerRadius = 1.0f - FMath::Clamp(Stroke.Falloff, 0.0f, 1.0f);
 
         for (int32 RawY = MinY; RawY <= MaxY; ++RawY)

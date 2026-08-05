@@ -152,11 +152,19 @@ class SWetClothingTransparencyBakePanel : public SCompoundWidget
     float GetWetnessPreviewPercent() const;
     void HandleWetnessPreviewChanged(float InValue);
     TOptional<float> GetTransparencyPreviewStrength() const;
+    void HandleTransparencyPreviewStrengthChanged(float InValue);
     void HandleTransparencyPreviewStrengthCommitted(float InValue, ETextCommit::Type CommitType);
     ECheckBoxState GetShowSavedWrinkleState() const;
     void HandleShowSavedWrinkleChanged(ECheckBoxState NewState);
     TOptional<float> GetWrinkleSuppressionStrength() const;
+    void HandleWrinkleSuppressionStrengthChanged(float InValue);
     void HandleWrinkleSuppressionStrengthCommitted(float InValue, ETextCommit::Type CommitType);
+    TOptional<float> GetWrinkleMaskThreshold() const;
+    void HandleWrinkleMaskThresholdChanged(float InValue);
+    void HandleWrinkleMaskThresholdCommitted(float InValue, ETextCommit::Type CommitType);
+    TOptional<float> GetWrinkleMaskSoftness() const;
+    void HandleWrinkleMaskSoftnessChanged(float InValue);
+    void HandleWrinkleMaskSoftnessCommitted(float InValue, ETextCommit::Type CommitType);
     ECheckBoxState IsBrushModeChecked(EDWCTransparencyBrushMode Mode) const;
     void HandleBrushModeChanged(ECheckBoxState NewState, EDWCTransparencyBrushMode Mode);
     float GetBrushSizeCm() const;
@@ -212,6 +220,11 @@ class SWetClothingTransparencyBakePanel : public SCompoundWidget
         const FText& TransactionText,
         TFunctionRef<bool(FWetClothingTransparencyData&)> Edit,
         EDWCTransparencyFinalPreviewRefresh PreviewRefresh);
+    void CommitTransparencyPreviewSettings(
+        const FText& TransactionText,
+        const FDWCTransparencyPreviewSettings& Settings);
+    FDWCTransparencyPreviewSettings GetTransparencyPreviewSettings() const;
+    void DispatchTransparencyPreviewSettings(FDWCTransparencyPreviewSettings Settings);
 
     TSharedRef<ITableRow> GenerateLayerRow(FLayerItemPtr Item, const TSharedRef<STableViewBase>& OwnerTable);
     TSharedRef<ITableRow> GenerateInnerSourceRow(TSharedPtr<int32> Item, const TSharedRef<STableViewBase>& OwnerTable);
@@ -344,8 +357,6 @@ class SWetClothingTransparencyBakePanel : public SCompoundWidget
     bool bPreviewSlotStateRefreshRequested = true;
     EDWCTransparencyVisualizationMode SelectedVisualizationMode = static_cast<EDWCTransparencyVisualizationMode>(0);
     float WetnessPreviewPercent = 100.0f;
-    float TransparencyPreviewStrength = 0.4f;
-    float WrinkleSuppressionStrength = 0.6f;
     bool bShowSavedWrinkle = true;
     EDWCTransparencyBrushMode BrushMode = EDWCTransparencyBrushMode::Apply;
     float BrushRadiusUV = 0.0677f;

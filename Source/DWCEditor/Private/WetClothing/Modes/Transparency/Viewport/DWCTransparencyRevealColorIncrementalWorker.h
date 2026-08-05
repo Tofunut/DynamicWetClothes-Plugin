@@ -17,7 +17,6 @@ struct FDWCTransparencyRevealColorComposeTileSnapshot
     FIntRect Rect;
     TArray<uint8> ManualPremultiplied;
     TArray<uint8> ManualWeight;
-    TArray<uint8> WrinkleSuppression;
     TArray<uint8> OuterEdgeFeather;
 };
 
@@ -31,8 +30,6 @@ struct FDWCTransparencyRevealColorIncrementalJobInput
     TArray<FDWCTransparencyRevealColorTilePayload> SnapshotTiles;
     TArray<FDWCTransparencyRevealColorComposeTileSnapshot> ComposeTiles;
     EDWCTransparencyVisualizationMode VisualizationMode = EDWCTransparencyVisualizationMode::Final;
-    float TransparencyPreviewStrength = 0.4f;
-    float WrinkleSuppressionStrength = 0.6f;
     uint64 ExpectedRevealRevision = 0;
     FDWCEditorPreviewRegionTarget PreviewTarget;
 };

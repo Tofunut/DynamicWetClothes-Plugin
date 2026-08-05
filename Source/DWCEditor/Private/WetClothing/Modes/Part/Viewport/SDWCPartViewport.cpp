@@ -106,10 +106,25 @@ namespace
     {
         if (MeshComponent == nullptr)
         {
-            return 0.02f;
+            return 0.05f;
         }
 
-        return FMath::Clamp(static_cast<float>(MeshComponent->Bounds.SphereRadius) * 0.0012f, 0.02f, 0.12f);
+        return FMath::Clamp(static_cast<float>(MeshComponent->Bounds.SphereRadius) * 0.0020f, 0.04f, 0.25f);
+    }
+
+    void ConfigureStaticPartPreviewPose(USkeletalMeshComponent* MeshComponent)
+    {
+        if (MeshComponent == nullptr)
+        {
+            return;
+        }
+
+        // Part/UV editing uses reference-pose triangle positions for picking and overlays.
+        // Keep the rendered mesh in the same pose instead of rebuilding overlays every frame.
+        MeshComponent->SetForcedLOD(PartViewportForceRenderLOD0);
+        MeshComponent->SetEnableAnimation(false);
+        MeshComponent->SetDisablePostProcessBlueprint(true);
+        MeshComponent->SetForceRefPose(true);
     }
 
     float CalculateSelectionOverlayHalfThickness(const USkeletalMeshComponent* MeshComponent)
@@ -534,7 +549,7 @@ void SDWCPartViewport::Construct(const FArguments& InArgs)
     PreviewMeshComponent = NewObject<USkeletalMeshComponent>(GetTransientPackage(), NAME_None, RF_Transient);
     PreviewMeshComponent->SetMobility(EComponentMobility::Movable);
     PreviewMeshComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-    PreviewMeshComponent->SetForcedLOD(PartViewportForceRenderLOD0);
+    ConfigureStaticPartPreviewPose(PreviewMeshComponent);
     PreviewScene->AddComponent(PreviewMeshComponent, FTransform::Identity);
 
     WetPartOverlayComponent = NewObject<UProceduralMeshComponent>(GetTransientPackage(), NAME_None, RF_Transient);
@@ -543,6 +558,7 @@ void SDWCPartViewport::Construct(const FArguments& InArgs)
     WetPartOverlayComponent->SetCastShadow(false);
     WetPartOverlayComponent->bUseAsyncCooking = false;
     WetPartOverlayComponent->SetMaterial(0, ResolveWetPartOverlayMaterial());
+    WetPartOverlayComponent->SetVisibility(false, true);
     PreviewScene->AddComponent(WetPartOverlayComponent, FTransform::Identity);
 
     SelectionOverlayComponent = NewObject<UProceduralMeshComponent>(GetTransientPackage(), NAME_None, RF_Transient);
@@ -551,6 +567,7 @@ void SDWCPartViewport::Construct(const FArguments& InArgs)
     SelectionOverlayComponent->SetCastShadow(false);
     SelectionOverlayComponent->bUseAsyncCooking = false;
     SelectionOverlayComponent->SetMaterial(0, ResolveWetPartOverlayMaterial());
+    SelectionOverlayComponent->SetVisibility(false, true);
     PreviewScene->AddComponent(SelectionOverlayComponent, FTransform::Identity);
 
     RefreshPreviewMesh();
@@ -615,6 +632,7 @@ void SDWCPartViewport::RefreshPreviewMesh()
 
     if (PreviewMeshComponent->GetSkeletalMeshAsset() == TargetMesh && TargetMesh != nullptr)
     {
+        ConfigureStaticPartPreviewPose(PreviewMeshComponent);
         if (bSurfaceWaterTilingPreview)
         {
             RefreshSurfaceWaterPreviewMaterial();
@@ -626,15 +644,17 @@ void SDWCPartViewport::RefreshPreviewMesh()
     }
 
     PreviewMeshComponent->SetSkeletalMeshAsset(TargetMesh);
-    PreviewMeshComponent->SetForcedLOD(PartViewportForceRenderLOD0);
+    ConfigureStaticPartPreviewPose(PreviewMeshComponent);
     PreviewMeshComponent->ShowAllMaterialSections(0);
     if (WetPartOverlayComponent != nullptr)
     {
+        WetPartOverlayComponent->SetVisibility(false, true);
         WetPartOverlayComponent->ClearAllMeshSections();
         WetPartOverlayComponent->SetMaterial(0, ResolveWetPartOverlayMaterial());
     }
     if (SelectionOverlayComponent != nullptr)
     {
+        SelectionOverlayComponent->SetVisibility(false, true);
         SelectionOverlayComponent->ClearAllMeshSections();
         SelectionOverlayComponent->SetMaterial(0, ResolveWetPartOverlayMaterial());
     }
@@ -749,7 +769,9 @@ void SDWCPartViewport::ClearHighlightedIsland()
     CurrentHighlightedUVIslandIDs.Reset();
     if (SelectionOverlayComponent != nullptr)
     {
+        SelectionOverlayComponent->SetVisibility(false, true);
         SelectionOverlayComponent->ClearAllMeshSections();
+        SelectionOverlayComponent->MarkRenderStateDirty();
     }
     RequestViewportRedraw();
 }
@@ -774,7 +796,9 @@ void SDWCPartViewport::ClearWetPartIslandColors()
 
     if (WetPartOverlayComponent != nullptr)
     {
+        WetPartOverlayComponent->SetVisibility(false, true);
         WetPartOverlayComponent->ClearAllMeshSections();
+        WetPartOverlayComponent->MarkRenderStateDirty();
     }
     RequestViewportRedraw();
 }
@@ -916,6 +940,7 @@ void SDWCPartViewport::RefreshWetPartOverlayMesh()
         return;
     }
 
+    WetPartOverlayComponent->SetVisibility(false, true);
     WetPartOverlayComponent->ClearAllMeshSections();
     WetPartOverlayComponent->SetMaterial(0, ResolveWetPartOverlayMaterial());
 
@@ -941,7 +966,7 @@ void SDWCPartViewport::RefreshWetPartOverlayMesh()
     {
         const int32* WetPartID = CurrentWetPartIslandAssignments.Find(Island.UVIslandID);
         const FLinearColor* IslandColor = CurrentWetPartIslandColors.Find(Island.UVIslandID);
-        if (WetPartID == nullptr || IslandColor == nullptr)
+        if (WetPartID == nullptr || *WetPartID <= 0 || IslandColor == nullptr)
         {
             continue;
         }
@@ -989,6 +1014,7 @@ void SDWCPartViewport::RefreshWetPartOverlayMesh()
             Tangents,
             false,
             false);
+        WetPartOverlayComponent->SetVisibility(true, true);
     }
 
     WetPartOverlayComponent->MarkRenderStateDirty();
@@ -1002,6 +1028,7 @@ void SDWCPartViewport::RefreshSelectionOverlayMesh()
         return;
     }
 
+    SelectionOverlayComponent->SetVisibility(false, true);
     SelectionOverlayComponent->ClearAllMeshSections();
     SelectionOverlayComponent->SetMaterial(0, ResolveWetPartOverlayMaterial());
 
@@ -1062,6 +1089,12 @@ void SDWCPartViewport::RefreshSelectionOverlayMesh()
 
     for (const TPair<FQuantizedLocalEdge, FEdgeAccumulatorWithNormal>& Pair : EdgeMap)
     {
+        // Internal triangle edges occur twice. Keep only the selected islands' boundary.
+        if (Pair.Value.Count != 1)
+        {
+            continue;
+        }
+
         FWetClothingAssetSelectionEdge SelectionEdge;
         SelectionEdge.LocalStart = Pair.Value.Start;
         SelectionEdge.LocalEnd = Pair.Value.End;
@@ -1094,6 +1127,7 @@ void SDWCPartViewport::RefreshSelectionOverlayMesh()
             Tangents,
             false,
             false);
+        SelectionOverlayComponent->SetVisibility(true, true);
     }
 
     SelectionOverlayComponent->MarkRenderStateDirty();

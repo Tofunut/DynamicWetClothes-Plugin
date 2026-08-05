@@ -16,6 +16,7 @@
 #include "Runtime/Engine/Public/Rendering/SkeletalMeshLODRenderData.h"
 #include "Runtime/Engine/Public/Rendering/SkeletalMeshRenderData.h"
 #include "DataAssets/WetClothingAsset.h"
+#include "DataAssets/WetClothingGPUData.h"
 #include "DataAssets/WetnessProfile.h"
 
 
@@ -302,6 +303,160 @@ bool FWetRuntimeDataBuilder::InitializeWetPartVertexDataFromPrecomputedData(
             PrecomputedWettableVertexCount,
             *GetNameSafe(Receiver.OwnerForLogs));
     }
+    return true;
+}
+
+
+bool FWetRuntimeDataBuilder::InitializeWetPartVertexDataFromGPUData(
+    FWetRuntimeDataBuildArgs& Receiver,
+    const int32 VertexCount)
+{
+    constexpr int32 RuntimeLODIndex = UWetClothingAsset::RuntimeSimulationLODIndex;
+    if (Receiver.MutableRuntimeData == nullptr ||
+        Receiver.WetClothingAsset == nullptr ||
+        Receiver.TargetSkeletalMesh == nullptr ||
+        VertexCount <= 0)
+    {
+        return false;
+    }
+
+    const USkeletalMesh* SkeletalMesh = Receiver.TargetSkeletalMesh->GetSkeletalMeshAsset();
+    if (SkeletalMesh == nullptr ||
+        !Receiver.WetClothingAsset->IsGPURuntimeDataValidForMesh(SkeletalMesh, RuntimeLODIndex))
+    {
+        return false;
+    }
+
+    const FDWCGPULODBakeData& GPUData =
+        Receiver.WetClothingAsset->GetGPUWetMapRuntimeData(RuntimeLODIndex);
+    if (GPUData.Triangles.IsEmpty())
+    {
+        return false;
+    }
+
+    FWetClothingRuntimeData& RuntimeData = *Receiver.MutableRuntimeData;
+    RuntimeData.VertexWetPartIDs.Init(INDEX_NONE, VertexCount);
+    RuntimeData.VertexWettableFlags.Init(false, VertexCount);
+    RuntimeData.VertexAbsorbedWetnessFlags.Init(false, VertexCount);
+    RuntimeData.VertexWetnessProfileIndices.Init(
+        FWetClothingRuntimeData::InvalidWetnessProfileIndex,
+        VertexCount);
+    RuntimeData.WetnessProfileTable.Reset();
+    RuntimeData.ResetNeighborGraph();
+    RuntimeData.ResetBoneOptimizationCache();
+
+    const FWetClothingEditableWetPartData& WetPartData =
+        Receiver.WetClothingAsset->Authored.PartData.EditableWetPartData;
+    RuntimeData.WetnessProfileTable.SetNum(WetPartData.Profiles.Num());
+    for (int32 ProfileIndex = 0; ProfileIndex < WetPartData.Profiles.Num(); ++ProfileIndex)
+    {
+        RuntimeData.WetnessProfileTable[ProfileIndex] =
+            ResolveRuntimeWetnessProfileParameters(
+                *Receiver.WetClothingAsset,
+                ProfileIndex,
+                Receiver.OwnerForLogs);
+    }
+    if (RuntimeData.WetnessProfileTable.IsEmpty())
+    {
+        RuntimeData.WetnessProfileTable.Add(FWetnessProfileParameters());
+    }
+    if (RuntimeData.WetnessProfileTable.Num() >=
+        static_cast<int32>(FWetClothingRuntimeData::InvalidWetnessProfileIndex))
+    {
+        UE_LOG(
+            LogTemp,
+            Error,
+            TEXT("DynamicWetClothesComponent: Too many authored wetness profiles for GPU vertex mapping on %s."),
+            *GetNameSafe(Receiver.OwnerForLogs));
+        return false;
+    }
+
+    // Match the CPU precompute policy for vertices shared by multiple sections:
+    // the lowest material-slot index owns the deterministic vertex binding.
+    TArray<int32> AssignedMaterialSlots;
+    AssignedMaterialSlots.Init(INDEX_NONE, VertexCount);
+    int32 AssignedWettableVertexCount = 0;
+
+    for (const FDWCGPUBakedTriangle& Triangle : GPUData.Triangles)
+    {
+        if (!Triangle.IsValid())
+        {
+            continue;
+        }
+
+        const FWetClothingAuthoredMaterialSlot* Slot =
+            WetPartData.FindMaterialSlot(Triangle.MaterialSlotIndex);
+        if (Slot == nullptr || !Slot->bIsWettableSlot)
+        {
+            continue;
+        }
+
+        const FWetClothingWetPartEntry* Part = Slot->WetPartEntries.FindByPredicate(
+            [&Triangle](const FWetClothingWetPartEntry& Candidate)
+            {
+                return Candidate.WetPartID != 0 &&
+                       Candidate.AssignedUVIslandIDs.Contains(Triangle.UVIslandID);
+            });
+        if (Part == nullptr)
+        {
+            continue;
+        }
+
+        const int32 EffectiveProfileIndex = WetPartData.Profiles.IsValidIndex(Part->ProfileIndex)
+            ? Part->ProfileIndex
+            : 0;
+        if (!RuntimeData.WetnessProfileTable.IsValidIndex(EffectiveProfileIndex))
+        {
+            continue;
+        }
+
+        const FWetnessProfileParameters& Profile =
+            RuntimeData.WetnessProfileTable[EffectiveProfileIndex];
+        const int32 TriangleVertices[3] =
+        {
+            Triangle.VertexIndices.X,
+            Triangle.VertexIndices.Y,
+            Triangle.VertexIndices.Z
+        };
+
+        for (const int32 VertexIndex : TriangleVertices)
+        {
+            if (!RuntimeData.VertexWetPartIDs.IsValidIndex(VertexIndex))
+            {
+                continue;
+            }
+
+            const int32 ExistingSlot = AssignedMaterialSlots[VertexIndex];
+            if (ExistingSlot != INDEX_NONE && ExistingSlot <= Triangle.MaterialSlotIndex)
+            {
+                continue;
+            }
+
+            if (!RuntimeData.VertexWettableFlags[VertexIndex])
+            {
+                ++AssignedWettableVertexCount;
+            }
+            AssignedMaterialSlots[VertexIndex] = Triangle.MaterialSlotIndex;
+            RuntimeData.VertexWetPartIDs[VertexIndex] = Part->WetPartID;
+            RuntimeData.VertexWettableFlags[VertexIndex] = true;
+            RuntimeData.VertexAbsorbedWetnessFlags[VertexIndex] =
+                Profile.SupportsAbsorbedWetness();
+            RuntimeData.VertexWetnessProfileIndices[VertexIndex] =
+                static_cast<uint16>(EffectiveProfileIndex);
+        }
+    }
+
+    if (AssignedWettableVertexCount <= 0)
+    {
+        UE_LOG(
+            LogTemp,
+            Error,
+            TEXT("DynamicWetClothesComponent: GPU runtime data initialized no wettable vertex bindings for WCA '%s' on %s."),
+            *GetNameSafe(Receiver.WetClothingAsset),
+            *GetNameSafe(Receiver.OwnerForLogs));
+        return false;
+    }
+
     return true;
 }
 

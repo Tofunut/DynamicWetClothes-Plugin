@@ -20,7 +20,7 @@ void FWetClothingWetPartOverlayMeshBuilder::BuildMeshData(
     {
         const int32*        WetPartID = UVIslandToWetPartID.Find(Island.UVIslandID);
         const FLinearColor* IslandColor = IslandColors.Find(Island.UVIslandID);
-        if (WetPartID == nullptr || IslandColor == nullptr)
+        if (WetPartID == nullptr || *WetPartID <= 0 || IslandColor == nullptr)
         {
             continue;
         }

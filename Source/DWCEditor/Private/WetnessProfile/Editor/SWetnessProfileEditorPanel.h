@@ -7,6 +7,7 @@
 
 class IDetailsView;
 class USkeletalMesh;
+struct FSlateBrush;
 class UWetnessProfile;
 struct FAssetData;
 
@@ -30,6 +31,7 @@ private:
     TSharedRef<SWidget> BuildPreviewControlsSection();
     TSharedRef<SWidget> BuildPreviewModeSection();
     TSharedRef<SWidget> BuildPreviewWaterSection();
+    TSharedRef<SWidget> BuildPreviewSimulationSection();
     TSharedRef<SWidget> BuildPreviewDetailSizeSection();
 
     FString GetCurrentPreviewMeshObjectPath() const;
@@ -54,6 +56,33 @@ private:
     FText GetPreviewModeText() const;
     FText GetPreviewModeText(SWetnessProfileViewport::EPreviewMode InMode) const;
 
+    TSharedRef<SWidget> GeneratePreviewBehaviorWidget(TSharedPtr<SWetnessProfileViewport::EPreviewBehavior> InBehavior) const;
+    void HandlePreviewBehaviorChanged(TSharedPtr<SWetnessProfileViewport::EPreviewBehavior> InBehavior, ESelectInfo::Type SelectInfo);
+    FText GetPreviewBehaviorText() const;
+    FText GetPreviewBehaviorText(SWetnessProfileViewport::EPreviewBehavior InBehavior) const;
+    EVisibility GetManualControlsVisibility() const;
+    EVisibility GetSimulationControlsVisibility() const;
+    FReply HandlePlayPauseClicked();
+    FReply HandleRestartSimulationClicked();
+    const FSlateBrush* GetPlayPauseBrush() const;
+    FText GetPlayPauseToolTip() const;
+    FText GetSimulationTimeText() const;
+    ECheckBoxState GetAbsorbedLayerCheckState() const;
+    void HandleAbsorbedLayerCheckStateChanged(ECheckBoxState NewState);
+    ECheckBoxState GetSurfaceLayerCheckState() const;
+    void HandleSurfaceLayerCheckStateChanged(ECheckBoxState NewState);
+    ECheckBoxState GetDroplet1CheckState() const;
+    void HandleDroplet1CheckStateChanged(ECheckBoxState NewState);
+    ECheckBoxState GetDroplet2CheckState() const;
+    void HandleDroplet2CheckStateChanged(ECheckBoxState NewState);
+    EVisibility GetDroplet1ControlsVisibility() const;
+    EVisibility GetDroplet2ControlsVisibility() const;
+    TSharedRef<SWidget> GeneratePreviewSpeedWidget(TSharedPtr<float> InSpeed) const;
+    void HandlePreviewSpeedChanged(TSharedPtr<float> InSpeed, ESelectInfo::Type SelectInfo);
+    FText GetPreviewSpeedText() const;
+    ECheckBoxState GetLoopCheckState() const;
+    void HandleLoopCheckStateChanged(ECheckBoxState NewState);
+
     void LoadPersistedPreviewSettings();
     void PersistPreviewDetailSizes();
     void ApplyPreviewSettingsToViewport();
@@ -65,7 +94,15 @@ private:
     TSharedPtr<SWetnessProfileViewport> PreviewViewport;
     TArray<TSharedPtr<SWetnessProfileViewport::EPreviewMode>> PreviewModeItems;
     TSharedPtr<SWetnessProfileViewport::EPreviewMode> SelectedPreviewModeItem;
+    TArray<TSharedPtr<SWetnessProfileViewport::EPreviewBehavior>> PreviewBehaviorItems;
+    TSharedPtr<SWetnessProfileViewport::EPreviewBehavior> SelectedPreviewBehaviorItem;
+    TArray<TSharedPtr<float>> PreviewSpeedItems;
+    TSharedPtr<float> SelectedPreviewSpeedItem;
 
+    bool bPreviewAbsorbedLayerEnabled = true;
+    bool bPreviewSurfaceLayerEnabled = true;
+    bool bPreviewDroplet1Enabled = true;
+    bool bPreviewDroplet2Enabled = false;
     float PreviewDroplet1DetailSize = 1.0f;
     float PreviewDroplet2DetailSize = 1.0f;
 };

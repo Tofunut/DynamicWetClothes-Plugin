@@ -17,7 +17,7 @@ public:
 
     bool CaptureEditableLOD(int32 LODIndex, FString* OutErrorMessage = nullptr);
     void Commit();
-    void Rollback();
+    void Rollback(bool bDeferMeshCommit = false);
 
 private:
     struct FLODBackup

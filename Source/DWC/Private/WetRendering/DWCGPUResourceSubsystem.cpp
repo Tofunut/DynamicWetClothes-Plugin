@@ -339,10 +339,15 @@ namespace
         {
             return;
         }
+        const FSurfaceWaterProfileParameters& Surface = SourceProfile->GetParameters().SurfaceWater;
         LocalProfile.NormalizedDropletNormal = SourceProfile->GetPreparedDropletNormalTexture();
         LocalProfile.NormalizedDropletMask = SourceProfile->GetPreparedDropletMaskTexture();
-        LocalProfile.NormalizedDropletFlowNormal = SourceProfile->GetPreparedDroplet2NormalTexture();
-        LocalProfile.NormalizedDropletFlowMask = SourceProfile->GetPreparedDroplet2MaskTexture();
+        LocalProfile.NormalizedDropletFlowNormal = Surface.DropletFlowNormalTexture != nullptr
+            ? SourceProfile->GetPreparedDroplet2NormalTexture()
+            : nullptr;
+        LocalProfile.NormalizedDropletFlowMask = Surface.DropletFlowMaskTexture != nullptr
+            ? SourceProfile->GetPreparedDroplet2MaskTexture()
+            : nullptr;
 #endif
     }
 #endif
@@ -1034,41 +1039,29 @@ int32 UDWCGPUResourceSubsystem::FindOrAddRuntimeProfile(
                 TEXT("DropletMask"),
                 false)
             : nullptr;
-        const bool bHasDedicatedFlowNormal =
-            LocalProfile.NormalizedDropletFlowNormal != nullptr ||
+        // Droplet2 is independent. A missing authored Droplet2 texture must use
+        // neutral slice 0 rather than silently borrowing Droplet1.
+        const bool bHasAuthoredFlowNormal =
             Surface.DropletFlowNormalTexture != nullptr ||
             LocalProfile.SourceDropletFlowNormal.IsValid();
-        const bool bHasDedicatedFlowMask =
-            LocalProfile.NormalizedDropletFlowMask != nullptr ||
+        const bool bHasAuthoredFlowMask =
             Surface.DropletFlowMaskTexture != nullptr ||
             LocalProfile.SourceDropletFlowMask.IsValid();
-        UTexture2D* ResolvedDropletFlowNormal = bFlowRequested
+        UTexture2D* ResolvedDropletFlowNormal = bFlowRequested && bHasAuthoredFlowNormal
             ? ResolveDirectSurfaceTexture(
                 LocalProfile,
-                bHasDedicatedFlowNormal
-                    ? LocalProfile.NormalizedDropletFlowNormal.Get()
-                    : LocalProfile.NormalizedDropletNormal.Get(),
-                bHasDedicatedFlowNormal
-                    ? Surface.DropletFlowNormalTexture.Get()
-                    : Surface.DropletNormalTexture.Get(),
-                bHasDedicatedFlowNormal
-                    ? LocalProfile.SourceDropletFlowNormal
-                    : LocalProfile.SourceDropletNormal,
+                LocalProfile.NormalizedDropletFlowNormal,
+                Surface.DropletFlowNormalTexture,
+                LocalProfile.SourceDropletFlowNormal,
                 TEXT("DropletFlowNormal"),
                 true)
             : nullptr;
-        UTexture2D* ResolvedDropletFlowMask = bFlowRequested
+        UTexture2D* ResolvedDropletFlowMask = bFlowRequested && bHasAuthoredFlowMask
             ? ResolveDirectSurfaceTexture(
                 LocalProfile,
-                bHasDedicatedFlowMask
-                    ? LocalProfile.NormalizedDropletFlowMask.Get()
-                    : LocalProfile.NormalizedDropletMask.Get(),
-                bHasDedicatedFlowMask
-                    ? Surface.DropletFlowMaskTexture.Get()
-                    : Surface.DropletMaskTexture.Get(),
-                bHasDedicatedFlowMask
-                    ? LocalProfile.SourceDropletFlowMask
-                    : LocalProfile.SourceDropletMask,
+                LocalProfile.NormalizedDropletFlowMask,
+                Surface.DropletFlowMaskTexture,
+                LocalProfile.SourceDropletFlowMask,
                 TEXT("DropletFlowMask"),
                 false)
             : nullptr;
@@ -1832,41 +1825,29 @@ void UDWCGPUResourceSubsystem::ApplyFallbackRenderProfileParameters(
                 TEXT("DropletMask"),
                 false)
             : nullptr;
-        const bool bHasDedicatedFlowNormal =
-            Profile.NormalizedDropletFlowNormal != nullptr ||
+        // Droplet2 is independent. A missing authored Droplet2 texture must use
+        // neutral slice 0 rather than silently borrowing Droplet1.
+        const bool bHasAuthoredFlowNormal =
             Surface.DropletFlowNormalTexture != nullptr ||
             Profile.SourceDropletFlowNormal.IsValid();
-        const bool bHasDedicatedFlowMask =
-            Profile.NormalizedDropletFlowMask != nullptr ||
+        const bool bHasAuthoredFlowMask =
             Surface.DropletFlowMaskTexture != nullptr ||
             Profile.SourceDropletFlowMask.IsValid();
-        UTexture2D* ResolvedDropletFlowNormal = bFlowRequested
+        UTexture2D* ResolvedDropletFlowNormal = bFlowRequested && bHasAuthoredFlowNormal
             ? ResolveDirectSurfaceTexture(
                 Profile,
-                bHasDedicatedFlowNormal
-                    ? Profile.NormalizedDropletFlowNormal.Get()
-                    : Profile.NormalizedDropletNormal.Get(),
-                bHasDedicatedFlowNormal
-                    ? Surface.DropletFlowNormalTexture.Get()
-                    : Surface.DropletNormalTexture.Get(),
-                bHasDedicatedFlowNormal
-                    ? Profile.SourceDropletFlowNormal
-                    : Profile.SourceDropletNormal,
+                Profile.NormalizedDropletFlowNormal,
+                Surface.DropletFlowNormalTexture,
+                Profile.SourceDropletFlowNormal,
                 TEXT("DropletFlowNormal"),
                 true)
             : nullptr;
-        UTexture2D* ResolvedDropletFlowMask = bFlowRequested
+        UTexture2D* ResolvedDropletFlowMask = bFlowRequested && bHasAuthoredFlowMask
             ? ResolveDirectSurfaceTexture(
                 Profile,
-                bHasDedicatedFlowMask
-                    ? Profile.NormalizedDropletFlowMask.Get()
-                    : Profile.NormalizedDropletMask.Get(),
-                bHasDedicatedFlowMask
-                    ? Surface.DropletFlowMaskTexture.Get()
-                    : Surface.DropletMaskTexture.Get(),
-                bHasDedicatedFlowMask
-                    ? Profile.SourceDropletFlowMask
-                    : Profile.SourceDropletMask,
+                Profile.NormalizedDropletFlowMask,
+                Surface.DropletFlowMaskTexture,
+                Profile.SourceDropletFlowMask,
                 TEXT("DropletFlowMask"),
                 false)
             : nullptr;

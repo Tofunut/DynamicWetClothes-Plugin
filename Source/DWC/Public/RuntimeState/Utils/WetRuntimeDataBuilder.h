@@ -43,6 +43,11 @@ class DWC_API FWetRuntimeDataBuilder
     static bool InitializeWetPartVertexDataFromPrecomputedData(
         FWetRuntimeDataBuildArgs& Args,
         int32 VertexCount);
+    /** Builds the common per-vertex Part/Profile lookup from GPU runtime triangles.
+     *  This path intentionally does not require CPU neighbor/precomputed data. */
+    static bool InitializeWetPartVertexDataFromGPUData(
+        FWetRuntimeDataBuildArgs& Args,
+        int32 VertexCount);
     static bool InitializeNeighborGraphFromPrecomputedData(FWetRuntimeDataBuildArgs& Args);
     static void EnsureWetnessBufferSize(FWetRuntimeDataBuildArgs& Args, int32 VertexCount);
     static void EnsureWetnessBufferSize(FWetInputStageArgs& Args, int32 VertexCount);

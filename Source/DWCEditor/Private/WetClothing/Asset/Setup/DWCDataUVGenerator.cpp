@@ -192,7 +192,8 @@ namespace DWCDataUVGeneratorInternal
         const USkeletalMesh* SkeletalMesh,
         const FMeshDescription& MeshDescription,
         FSkeletalMeshAttributes& Attributes,
-        FTriangleID TriangleID)
+        FTriangleID TriangleID,
+        const TMap<FName, int32>* MaterialSlotIndexByNameOverride)
     {
         const FPolygonID PolygonID = MeshDescription.GetTrianglePolygon(TriangleID);
         if (!IsValidElementID(PolygonID))
@@ -203,14 +204,25 @@ namespace DWCDataUVGeneratorInternal
         const FPolygonGroupID PolygonGroupID = MeshDescription.GetPolygonPolygonGroup(PolygonID);
         int32 FallbackIndex = PolygonGroupID.GetValue();
 
+        const auto MaterialSlotNames = Attributes.GetPolygonGroupMaterialSlotNames();
+        const FName PolygonGroupMaterialName = IsValidElementID(PolygonGroupID) ? MaterialSlotNames[PolygonGroupID] : NAME_None;
+        if (MaterialSlotIndexByNameOverride != nullptr)
+        {
+            if (const int32* ResolvedIndex = MaterialSlotIndexByNameOverride->Find(PolygonGroupMaterialName))
+            {
+                return *ResolvedIndex;
+            }
+            return SkeletalMesh != nullptr && SkeletalMesh->GetMaterials().IsValidIndex(FallbackIndex)
+                ? FallbackIndex
+                : INDEX_NONE;
+        }
+
         if (SkeletalMesh == nullptr || !IsValidElementID(PolygonGroupID))
         {
             return FallbackIndex;
         }
 
         const TArray<FSkeletalMaterial>& Materials = SkeletalMesh->GetMaterials();
-        const auto MaterialSlotNames = Attributes.GetPolygonGroupMaterialSlotNames();
-        const FName PolygonGroupMaterialName = IsValidElementID(PolygonGroupID) ? MaterialSlotNames[PolygonGroupID] : NAME_None;
 
         if (!PolygonGroupMaterialName.IsNone())
         {
@@ -679,7 +691,12 @@ FDWCDataUVGenerationResult FDWCDataUVGenerator::GenerateForSkeletalMesh(
     int32 PreferredUVChannelIndex,
     bool bAllowOverwriteExistingChannel,
     int32 TargetMaterialSlotIndex,
-    const TSet<int32>* TargetMaterialSlotIndices)
+    const TSet<int32>* TargetMaterialSlotIndices,
+    const bool bDeferMeshCommit,
+    FMeshDescription* MeshDescriptionOverride,
+    const bool bAnalysisOnly,
+    const bool bClearNonTargetVertexInstances,
+    const TMap<FName, int32>* MaterialSlotIndexByNameOverride)
 {
     using namespace DWCDataUVGeneratorInternal;
 
@@ -692,7 +709,9 @@ FDWCDataUVGenerationResult FDWCDataUVGenerator::GenerateForSkeletalMesh(
         return Result;
     }
 
-    FMeshDescription* MeshDescription = SkeletalMesh->GetMeshDescription(LODIndex);
+    FMeshDescription* MeshDescription = MeshDescriptionOverride != nullptr
+        ? MeshDescriptionOverride
+        : SkeletalMesh->GetMeshDescription(LODIndex);
     if (MeshDescription == nullptr)
     {
         SetFailure(Result, FString::Printf(TEXT("The target skeletal mesh does not expose editable mesh description data for LOD %d."), LODIndex));
@@ -760,7 +779,12 @@ FDWCDataUVGenerationResult FDWCDataUVGenerator::GenerateForSkeletalMesh(
 
     for (const FTriangleID TriangleID : MeshDescription->Triangles().GetElementIDs())
     {
-        const int32 MaterialSlotIndex = ResolveMaterialSlotIndex(SkeletalMesh, *MeshDescription, Attributes, TriangleID);
+        const int32 MaterialSlotIndex = ResolveMaterialSlotIndex(
+            SkeletalMesh,
+            *MeshDescription,
+            Attributes,
+            TriangleID,
+            MaterialSlotIndexByNameOverride);
         if (MaterialSlotIndex == INDEX_NONE)
         {
             continue;
@@ -1280,6 +1304,35 @@ FDWCDataUVGenerationResult FDWCDataUVGenerator::GenerateForSkeletalMesh(
         }
     }
 
+    if (bAnalysisOnly)
+    {
+        const int32 FinalDataUVChartCount = DataUVCharts.Num();
+        TSharedPtr<FDWCDataUVGenerationPlan, ESPMode::ThreadSafe> Plan =
+            MakeShared<FDWCDataUVGenerationPlan, ESPMode::ThreadSafe>();
+        Plan->UVChannelIndex = NewUVChannelIndex;
+        Plan->Triangles = MoveTemp(Triangles);
+        Plan->SeamCharts = MoveTemp(SeamCharts);
+        Plan->PackedUVBySyntheticCorner = MoveTemp(PackedUVBySyntheticCorner);
+        Plan->ExcludedTriangleIndices = MoveTemp(ExcludedTriangleIndices);
+        Plan->ExcludedVertexInstanceIDs = MoveTemp(ExcludedVertexInstanceIDs);
+        Result.GenerationPlan = Plan;
+        Result.bSucceeded = true;
+        Result.UVChannelIndex = NewUVChannelIndex;
+        Result.MaterialSlotIndex = TargetMaterialSlotIndex;
+        Result.DataUVChartCount = FinalDataUVChartCount;
+        Result.TriangleReadMilliseconds = (TriangleReadEndTime - GenerationStartTime) * 1000.0;
+        Result.OriginalIslandBuildMilliseconds = (OriginalIslandBuildEndTime - TriangleReadEndTime) * 1000.0;
+        Result.ChartBuildMilliseconds = (ChartBuildEndTime - OriginalIslandBuildEndTime) * 1000.0;
+        Result.PackAndValidateMilliseconds = (FinalPackAndValidateEndTime - ChartBuildEndTime) * 1000.0;
+        Result.SeamSplitMilliseconds = 0.0;
+        Result.Message = FString::Printf(
+            TEXT("Validated Material Slot %d for LOD%d in candidate DWC UV Channel %d."),
+            TargetMaterialSlotIndex,
+            LODIndex,
+            NewUVChannelIndex);
+        return Result;
+    }
+
     // Only a fully validated chart layout may modify the Prepared Mesh. Begin the
     // transaction immediately before creating real render-corner seams.
     SkeletalMesh->Modify();
@@ -1350,7 +1403,7 @@ FDWCDataUVGenerationResult FDWCDataUVGenerator::GenerateForSkeletalMesh(
     // Batch generation owns the whole DWC channel. Clear every non-target corner so an
     // overwritten preferred channel cannot leave unrelated source UV values looking like
     // valid DWC data on Non-wettable slots.
-    if (TargetMaterialSlotIndices != nullptr)
+    if (TargetMaterialSlotIndices != nullptr && bClearNonTargetVertexInstances)
     {
         for (const FVertexInstanceID VertexInstanceID : MeshDescription->VertexInstances().GetElementIDs())
         {
@@ -1401,9 +1454,12 @@ FDWCDataUVGenerationResult FDWCDataUVGenerator::GenerateForSkeletalMesh(
         }
     }
 
-    SkeletalMesh->CommitMeshDescription(LODIndex);
-    SkeletalMesh->PostEditChange();
-    SkeletalMesh->MarkPackageDirty();
+    if (!bDeferMeshCommit)
+    {
+        SkeletalMesh->CommitMeshDescription(LODIndex);
+        SkeletalMesh->PostEditChange();
+        SkeletalMesh->MarkPackageDirty();
+    }
 
     Result.bSucceeded = true;
     Result.UVChannelIndex = NewUVChannelIndex;
@@ -1465,6 +1521,147 @@ FDWCDataUVGenerationResult FDWCDataUVGenerator::GenerateForSkeletalMesh(
         Result.PackAndValidateMilliseconds,
         Result.SeamSplitMilliseconds);
 
+    return Result;
+}
+
+FDWCDataUVPlanApplyResult FDWCDataUVGenerator::ApplyGenerationPlan(
+    USkeletalMesh* SkeletalMesh,
+    const int32 LODIndex,
+    const FDWCDataUVGenerationPlan& Plan,
+    const bool bClearDestinationChannel,
+    const bool bDeferMeshCommit)
+{
+    using namespace DWCDataUVGeneratorInternal;
+
+    FDWCDataUVPlanApplyResult Result;
+    if (SkeletalMesh == nullptr)
+    {
+        Result.Message = TEXT("No skeletal mesh is assigned.");
+        return Result;
+    }
+    FMeshDescription* MeshDescription = SkeletalMesh->GetMeshDescription(LODIndex);
+    if (MeshDescription == nullptr)
+    {
+        Result.Message = FString::Printf(TEXT("LOD%d has no editable MeshDescription."), LODIndex);
+        return Result;
+    }
+    if (Plan.UVChannelIndex < 0 || Plan.UVChannelIndex >= 8)
+    {
+        Result.Message = TEXT("The analyzed DWC UV plan contains an invalid destination channel.");
+        return Result;
+    }
+
+    const double StartTime = FPlatformTime::Seconds();
+    SkeletalMesh->Modify();
+    TArray<FDWCDataUVTriangle> Triangles = Plan.Triangles;
+    const FDWCDataUVSeamSplitResult SeamSplitResult = FDWCDataUVSeamSplitter::SplitChartBoundaries(
+        *MeshDescription,
+        Triangles,
+        Plan.SeamCharts);
+    if (!SeamSplitResult.bSucceeded)
+    {
+        Result.Message = FString::Printf(
+            TEXT("DWC UV Channel chart-boundary seam generation failed: %s"),
+            *SeamSplitResult.Message);
+        return Result;
+    }
+
+    FSkeletalMeshAttributes Attributes(*MeshDescription);
+    Attributes.Register(true);
+    auto WritableVertexInstanceUVs = Attributes.GetVertexInstanceUVs();
+    if (WritableVertexInstanceUVs.GetNumChannels() <= Plan.UVChannelIndex)
+    {
+        WritableVertexInstanceUVs.SetNumChannels(Plan.UVChannelIndex + 1);
+    }
+    if (bClearDestinationChannel)
+    {
+        for (const FVertexInstanceID VertexInstanceID : MeshDescription->VertexInstances().GetElementIDs())
+        {
+            WritableVertexInstanceUVs.Set(VertexInstanceID, Plan.UVChannelIndex, FVector2f::ZeroVector);
+        }
+    }
+
+    TMap<int32, FVector2f> PackedUVByVertexInstance;
+    for (int32 TriangleIndex = 0; TriangleIndex < Triangles.Num(); ++TriangleIndex)
+    {
+        if (Plan.ExcludedTriangleIndices.Contains(TriangleIndex))
+        {
+            continue;
+        }
+        for (int32 CornerIndex = 0; CornerIndex < 3; ++CornerIndex)
+        {
+            const FVector2f* PackedUV = Plan.PackedUVBySyntheticCorner.Find(TriangleIndex * 3 + CornerIndex);
+            if (PackedUV == nullptr)
+            {
+                Result.Message = FString::Printf(
+                    TEXT("The analyzed DWC UV plan omitted triangle %d corner %d."),
+                    TriangleIndex,
+                    CornerIndex);
+                return Result;
+            }
+            const int32 VertexInstanceIndex = Triangles[TriangleIndex].VertexInstances[CornerIndex].GetValue();
+            if (const FVector2f* ExistingUV = PackedUVByVertexInstance.Find(VertexInstanceIndex))
+            {
+                if (!FMath::IsNearlyEqual(ExistingUV->X, PackedUV->X, 1.0e-6f) ||
+                    !FMath::IsNearlyEqual(ExistingUV->Y, PackedUV->Y, 1.0e-6f))
+                {
+                    Result.Message = TEXT("The analyzed DWC UV plan produced conflicting final VertexInstance coordinates.");
+                    return Result;
+                }
+            }
+            else
+            {
+                PackedUVByVertexInstance.Add(VertexInstanceIndex, *PackedUV);
+            }
+        }
+    }
+
+    for (const TPair<int32, FVector2f>& Pair : PackedUVByVertexInstance)
+    {
+        const FVertexInstanceID VertexInstanceID(Pair.Key);
+        if (IsValidElementID(VertexInstanceID))
+        {
+            WritableVertexInstanceUVs.Set(VertexInstanceID, Plan.UVChannelIndex, Pair.Value);
+        }
+    }
+    for (const int32 TriangleIndex : Plan.ExcludedTriangleIndices)
+    {
+        if (!Triangles.IsValidIndex(TriangleIndex))
+        {
+            continue;
+        }
+        for (const FVertexInstanceID VertexInstanceID : Triangles[TriangleIndex].VertexInstances)
+        {
+            if (IsValidElementID(VertexInstanceID))
+            {
+                WritableVertexInstanceUVs.Set(VertexInstanceID, Plan.UVChannelIndex, FVector2f::ZeroVector);
+            }
+        }
+    }
+    for (const int32 ExcludedVertexInstanceValue : Plan.ExcludedVertexInstanceIDs)
+    {
+        if (PackedUVByVertexInstance.Contains(ExcludedVertexInstanceValue))
+        {
+            continue;
+        }
+        const FVertexInstanceID VertexInstanceID(ExcludedVertexInstanceValue);
+        if (IsValidElementID(VertexInstanceID))
+        {
+            WritableVertexInstanceUVs.Set(VertexInstanceID, Plan.UVChannelIndex, FVector2f::ZeroVector);
+        }
+    }
+
+    if (!bDeferMeshCommit)
+    {
+        SkeletalMesh->CommitMeshDescription(LODIndex);
+        SkeletalMesh->PostEditChange();
+        SkeletalMesh->MarkPackageDirty();
+    }
+
+    Result.bSucceeded = true;
+    Result.ChartBoundarySplitVertexInstanceCount = SeamSplitResult.SplitVertexInstanceCount;
+    Result.SeamSplitMilliseconds = (FPlatformTime::Seconds() - StartTime) * 1000.0;
+    Result.Message = SeamSplitResult.Message;
     return Result;
 }
 

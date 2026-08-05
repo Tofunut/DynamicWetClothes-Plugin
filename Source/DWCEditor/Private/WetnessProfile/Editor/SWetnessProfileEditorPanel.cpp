@@ -11,11 +11,14 @@
 #include "Styling/CoreStyle.h"
 #include "UObject/MetaData.h"
 #include "UObject/Package.h"
+#include "UObject/UnrealType.h"
 #include "WetnessProfile/Editor/WetnessProfileEditorPolicy.h"
 #include "WetnessProfile/Viewport/SWetnessProfileViewport.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SComboBox.h"
+#include "Widgets/Input/SCheckBox.h"
 #include "Widgets/Input/SSlider.h"
+#include "Widgets/Images/SImage.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SSeparator.h"
@@ -73,6 +76,17 @@ namespace
         Options.MaximumFractionalDigits = 2;
         return FText::AsNumber(Value, &Options);
     }
+
+#if WITH_EDITORONLY_DATA
+    void NotifyPreviewDisplayFilterChanged(UWetnessProfile& Profile, const FName PropertyName)
+    {
+        if (FProperty* Property = FindFProperty<FProperty>(UWetnessProfile::StaticClass(), PropertyName))
+        {
+            FPropertyChangedEvent Event(Property, EPropertyChangeType::ValueSet);
+            Profile.PostEditChangeProperty(Event);
+        }
+    }
+#endif
 }
 
 void SWetnessProfileEditorPanel::Construct(const FArguments& InArgs)
@@ -90,6 +104,18 @@ void SWetnessProfileEditorPanel::Construct(const FArguments& InArgs)
         MakeShared<SWetnessProfileViewport::EPreviewMode>(SWetnessProfileViewport::EPreviewMode::DropletStampTest),
     };
     SelectedPreviewModeItem = PreviewModeItems[0];
+    PreviewBehaviorItems = {
+        MakeShared<SWetnessProfileViewport::EPreviewBehavior>(SWetnessProfileViewport::EPreviewBehavior::Manual),
+        MakeShared<SWetnessProfileViewport::EPreviewBehavior>(SWetnessProfileViewport::EPreviewBehavior::Simulation),
+    };
+    SelectedPreviewBehaviorItem = PreviewBehaviorItems[0];
+    PreviewSpeedItems = {
+        MakeShared<float>(0.25f),
+        MakeShared<float>(0.5f),
+        MakeShared<float>(1.0f),
+        MakeShared<float>(2.0f),
+    };
+    SelectedPreviewSpeedItem = PreviewSpeedItems[2];
 
     const FSlateFontInfo PanelHeadingFont = FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), 16);
 
@@ -138,8 +164,12 @@ void SWetnessProfileEditorPanel::Construct(const FArguments& InArgs)
 
 void SWetnessProfileEditorPanel::RefreshFromProfile()
 {
+    LoadPersistedPreviewSettings();
     if (PreviewViewport.IsValid())
     {
+        PreviewViewport->SetPreviewDropletVisibility(
+            bPreviewDroplet1Enabled,
+            bPreviewDroplet2Enabled);
         PreviewViewport->RefreshFromProfile();
     }
 }
@@ -247,7 +277,15 @@ TSharedRef<SWidget> SWetnessProfileEditorPanel::BuildPreviewControlsSection()
 
              + SVerticalBox::Slot()
                    .AutoHeight()
-                       [BuildPreviewWaterSection()]
+                       [SNew(SBox)
+                            .Visibility(this, &SWetnessProfileEditorPanel::GetManualControlsVisibility)
+                            [BuildPreviewWaterSection()]]
+
+             + SVerticalBox::Slot()
+                   .AutoHeight()
+                       [SNew(SBox)
+                            .Visibility(this, &SWetnessProfileEditorPanel::GetSimulationControlsVisibility)
+                            [BuildPreviewSimulationSection()]]
 
              + SVerticalBox::Slot()
                    .AutoHeight()
@@ -303,23 +341,175 @@ TSharedRef<SWidget> SWetnessProfileEditorPanel::BuildPreviewWaterSection()
 
 TSharedRef<SWidget> SWetnessProfileEditorPanel::BuildPreviewModeSection()
 {
-    return SNew(SHorizontalBox)
-        + SHorizontalBox::Slot()
-              .AutoWidth()
-              .VAlign(VAlign_Center)
-                  [SNew(SBox)
-                       .WidthOverride(112.0f)
-                           [SNew(STextBlock).Text(LOCTEXT("PreviewModeLabel", "Preview Mode"))]]
-        + SHorizontalBox::Slot()
-              .FillWidth(1.0f)
-              .VAlign(VAlign_Center)
-                  [SNew(SComboBox<TSharedPtr<SWetnessProfileViewport::EPreviewMode>>)
-                       .OptionsSource(&PreviewModeItems)
-                       .InitiallySelectedItem(SelectedPreviewModeItem)
-                       .OnGenerateWidget(this, &SWetnessProfileEditorPanel::GeneratePreviewModeWidget)
-                       .OnSelectionChanged(this, &SWetnessProfileEditorPanel::HandlePreviewModeChanged)
-                       [SNew(STextBlock)
-                            .Text(this, &SWetnessProfileEditorPanel::GetPreviewModeText)]];
+    const auto BuildLabel = [](const FText& Text)
+    {
+        return SNew(SBox)
+            .WidthOverride(112.0f)
+            [SNew(STextBlock).Text(Text)];
+    };
+
+    return SNew(SVerticalBox)
+        + SVerticalBox::Slot()
+              .AutoHeight()
+                  [SNew(SHorizontalBox)
+                   + SHorizontalBox::Slot()
+                         .AutoWidth()
+                         .VAlign(VAlign_Center)
+                             [BuildLabel(LOCTEXT("PreviewModeLabel", "Preview Mode"))]
+                   + SHorizontalBox::Slot()
+                         .FillWidth(1.0f)
+                         .VAlign(VAlign_Center)
+                             [SNew(SComboBox<TSharedPtr<SWetnessProfileViewport::EPreviewMode>>)
+                                  .OptionsSource(&PreviewModeItems)
+                                  .InitiallySelectedItem(SelectedPreviewModeItem)
+                                  .OnGenerateWidget(this, &SWetnessProfileEditorPanel::GeneratePreviewModeWidget)
+                                  .OnSelectionChanged(this, &SWetnessProfileEditorPanel::HandlePreviewModeChanged)
+                                  [SNew(STextBlock).Text(this, &SWetnessProfileEditorPanel::GetPreviewModeText)]]]
+        + SVerticalBox::Slot()
+              .AutoHeight()
+              .Padding(0.0f, 6.0f, 0.0f, 0.0f)
+                  [SNew(SHorizontalBox)
+                   + SHorizontalBox::Slot()
+                         .AutoWidth()
+                         .VAlign(VAlign_Center)
+                             [BuildLabel(LOCTEXT("PreviewBehaviorLabel", "Preview Behavior"))]
+                   + SHorizontalBox::Slot()
+                         .FillWidth(1.0f)
+                         .VAlign(VAlign_Center)
+                             [SNew(SComboBox<TSharedPtr<SWetnessProfileViewport::EPreviewBehavior>>)
+                                  .OptionsSource(&PreviewBehaviorItems)
+                                  .InitiallySelectedItem(SelectedPreviewBehaviorItem)
+                                  .OnGenerateWidget(this, &SWetnessProfileEditorPanel::GeneratePreviewBehaviorWidget)
+                                  .OnSelectionChanged(this, &SWetnessProfileEditorPanel::HandlePreviewBehaviorChanged)
+                                  [SNew(STextBlock).Text(this, &SWetnessProfileEditorPanel::GetPreviewBehaviorText)]]];
+}
+
+TSharedRef<SWidget> SWetnessProfileEditorPanel::BuildPreviewSimulationSection()
+{
+    const auto BuildFilterCheckBox = [](const FText& Label, const TAttribute<ECheckBoxState>& State, const FOnCheckStateChanged& OnChanged)
+    {
+        return SNew(SCheckBox)
+            .IsChecked(State)
+            .OnCheckStateChanged(OnChanged)
+            [SNew(STextBlock).Text(Label)];
+    };
+
+    return SNew(SVerticalBox)
+        + SVerticalBox::Slot()
+              .AutoHeight()
+              .Padding(0.0f, 0.0f, 0.0f, 5.0f)
+                  [SNew(SHorizontalBox)
+                   + SHorizontalBox::Slot()
+                         .AutoWidth()
+                         .VAlign(VAlign_Center)
+                         .Padding(0.0f, 0.0f, 10.0f, 0.0f)
+                             [SNew(STextBlock)
+                                  .Text(LOCTEXT("SimulationLayersHeading", "Simulation Layers"))
+                                  .Font(FAppStyle::GetFontStyle(TEXT("PropertyWindow.BoldFont")))]
+                   + SHorizontalBox::Slot()
+                         .AutoWidth()
+                         .Padding(0.0f, 0.0f, 12.0f, 0.0f)
+                             [BuildFilterCheckBox(
+                                 LOCTEXT("PreviewAbsorbedLayer", "Absorbed Water"),
+                                 TAttribute<ECheckBoxState>::CreateSP(this, &SWetnessProfileEditorPanel::GetAbsorbedLayerCheckState),
+                                 FOnCheckStateChanged::CreateSP(this, &SWetnessProfileEditorPanel::HandleAbsorbedLayerCheckStateChanged))]
+                   + SHorizontalBox::Slot()
+                         .AutoWidth()
+                             [BuildFilterCheckBox(
+                                 LOCTEXT("PreviewSurfaceLayer", "Surface Water"),
+                                 TAttribute<ECheckBoxState>::CreateSP(this, &SWetnessProfileEditorPanel::GetSurfaceLayerCheckState),
+                                 FOnCheckStateChanged::CreateSP(this, &SWetnessProfileEditorPanel::HandleSurfaceLayerCheckStateChanged))]]
+        + SVerticalBox::Slot()
+              .AutoHeight()
+              .Padding(0.0f, 0.0f, 0.0f, 8.0f)
+                  [SNew(SHorizontalBox)
+                   + SHorizontalBox::Slot()
+                         .AutoWidth()
+                         .VAlign(VAlign_Center)
+                         .Padding(0.0f, 0.0f, 10.0f, 0.0f)
+                             [SNew(STextBlock)
+                                  .Text(LOCTEXT("SurfaceTypesHeading", "Surface Types"))
+                                  .Font(FAppStyle::GetFontStyle(TEXT("PropertyWindow.BoldFont")))]
+                   + SHorizontalBox::Slot()
+                         .AutoWidth()
+                         .Padding(0.0f, 0.0f, 12.0f, 0.0f)
+                             [BuildFilterCheckBox(
+                                 LOCTEXT("PreviewDroplet1", "Droplet 1"),
+                                 TAttribute<ECheckBoxState>::CreateSP(this, &SWetnessProfileEditorPanel::GetDroplet1CheckState),
+                                 FOnCheckStateChanged::CreateSP(this, &SWetnessProfileEditorPanel::HandleDroplet1CheckStateChanged))]
+                   + SHorizontalBox::Slot()
+                         .AutoWidth()
+                             [BuildFilterCheckBox(
+                                 LOCTEXT("PreviewDroplet2", "Droplet 2"),
+                                 TAttribute<ECheckBoxState>::CreateSP(this, &SWetnessProfileEditorPanel::GetDroplet2CheckState),
+                                 FOnCheckStateChanged::CreateSP(this, &SWetnessProfileEditorPanel::HandleDroplet2CheckStateChanged))]]
+        + SVerticalBox::Slot()
+              .AutoHeight()
+                  [SNew(SHorizontalBox)
+                   + SHorizontalBox::Slot()
+                         .AutoWidth()
+                         .Padding(0.0f, 0.0f, 4.0f, 0.0f)
+                             [SNew(SBox)
+                                  .WidthOverride(28.0f)
+                                  .HeightOverride(26.0f)
+                                  [SNew(SButton)
+                                       .ButtonStyle(FAppStyle::Get(), TEXT("SimpleButton"))
+                                       .ToolTipText(this, &SWetnessProfileEditorPanel::GetPlayPauseToolTip)
+                                       .OnClicked(this, &SWetnessProfileEditorPanel::HandlePlayPauseClicked)
+                                       .ContentPadding(4.0f)
+                                       [SNew(SImage)
+                                            .Image(this, &SWetnessProfileEditorPanel::GetPlayPauseBrush)]]]
+                   + SHorizontalBox::Slot()
+                         .AutoWidth()
+                         .Padding(0.0f, 0.0f, 12.0f, 0.0f)
+                             [SNew(SBox)
+                                  .WidthOverride(28.0f)
+                                  .HeightOverride(26.0f)
+                                  [SNew(SButton)
+                                       .ButtonStyle(FAppStyle::Get(), TEXT("SimpleButton"))
+                                       .ToolTipText(LOCTEXT("RestartSimulationTooltip", "Restart Simulation"))
+                                       .OnClicked(this, &SWetnessProfileEditorPanel::HandleRestartSimulationClicked)
+                                       .ContentPadding(4.0f)
+                                       [SNew(SImage)
+                                            .Image(FAppStyle::GetBrush(TEXT("Icons.Refresh")))]]]
+                   + SHorizontalBox::Slot()
+                         .AutoWidth()
+                         .VAlign(VAlign_Center)
+                         .Padding(0.0f, 0.0f, 6.0f, 0.0f)
+                             [SNew(STextBlock).Text(LOCTEXT("SimulationScenarioLabel", "Single Splash"))]
+                   + SHorizontalBox::Slot()
+                         .FillWidth(1.0f)
+                   + SHorizontalBox::Slot()
+                         .AutoWidth()
+                         .VAlign(VAlign_Center)
+                         .Padding(0.0f, 0.0f, 6.0f, 0.0f)
+                             [SNew(STextBlock).Text(LOCTEXT("PreviewSpeedLabel", "Speed"))]
+                   + SHorizontalBox::Slot()
+                         .AutoWidth()
+                         .VAlign(VAlign_Center)
+                             [SNew(SBox)
+                                  .WidthOverride(72.0f)
+                                  [SNew(SComboBox<TSharedPtr<float>>)
+                                       .OptionsSource(&PreviewSpeedItems)
+                                       .InitiallySelectedItem(SelectedPreviewSpeedItem)
+                                       .OnGenerateWidget(this, &SWetnessProfileEditorPanel::GeneratePreviewSpeedWidget)
+                                       .OnSelectionChanged(this, &SWetnessProfileEditorPanel::HandlePreviewSpeedChanged)
+                                       [SNew(STextBlock).Text(this, &SWetnessProfileEditorPanel::GetPreviewSpeedText)]]]]
+        + SVerticalBox::Slot()
+              .AutoHeight()
+              .Padding(0.0f, 6.0f, 0.0f, 0.0f)
+                  [SNew(SHorizontalBox)
+                   + SHorizontalBox::Slot()
+                         .FillWidth(1.0f)
+                         .VAlign(VAlign_Center)
+                             [SNew(STextBlock).Text(this, &SWetnessProfileEditorPanel::GetSimulationTimeText)]
+                   + SHorizontalBox::Slot()
+                         .AutoWidth()
+                         .VAlign(VAlign_Center)
+                             [SNew(SCheckBox)
+                                  .IsChecked(this, &SWetnessProfileEditorPanel::GetLoopCheckState)
+                                  .OnCheckStateChanged(this, &SWetnessProfileEditorPanel::HandleLoopCheckStateChanged)
+                                  [SNew(STextBlock).Text(LOCTEXT("SimulationLoopLabel", "Loop"))]]];
 }
 
 TSharedRef<SWidget> SWetnessProfileEditorPanel::BuildPreviewDetailSizeSection()
@@ -371,20 +561,24 @@ TSharedRef<SWidget> SWetnessProfileEditorPanel::BuildPreviewDetailSizeSection()
 
         + SVerticalBox::Slot()
               .AutoHeight()
-                  [BuildDetailSlider(
-                      LOCTEXT("PreviewDroplet1DetailSizeLabel", "Droplet1 Detail Size"),
-                      TAttribute<float>::Create(TAttribute<float>::FGetter::CreateSP(this, &SWetnessProfileEditorPanel::GetPreviewDroplet1DetailSize)),
-                      FOnFloatValueChanged::CreateSP(this, &SWetnessProfileEditorPanel::HandlePreviewDroplet1DetailSizeChanged),
-                      TAttribute<FText>::Create(TAttribute<FText>::FGetter::CreateSP(this, &SWetnessProfileEditorPanel::GetPreviewDroplet1DetailSizeText)))]
+                  [SNew(SBox)
+                       .Visibility(this, &SWetnessProfileEditorPanel::GetDroplet1ControlsVisibility)
+                           [BuildDetailSlider(
+                               LOCTEXT("PreviewDroplet1DetailSizeLabel", "Droplet1 Detail Size"),
+                               TAttribute<float>::Create(TAttribute<float>::FGetter::CreateSP(this, &SWetnessProfileEditorPanel::GetPreviewDroplet1DetailSize)),
+                               FOnFloatValueChanged::CreateSP(this, &SWetnessProfileEditorPanel::HandlePreviewDroplet1DetailSizeChanged),
+                               TAttribute<FText>::Create(TAttribute<FText>::FGetter::CreateSP(this, &SWetnessProfileEditorPanel::GetPreviewDroplet1DetailSizeText)))]]
 
         + SVerticalBox::Slot()
               .AutoHeight()
               .Padding(0.0f, 6.0f, 0.0f, 0.0f)
-                  [BuildDetailSlider(
-                      LOCTEXT("PreviewDroplet2DetailSizeLabel", "Droplet2 Detail Size"),
-                      TAttribute<float>::Create(TAttribute<float>::FGetter::CreateSP(this, &SWetnessProfileEditorPanel::GetPreviewDroplet2DetailSize)),
-                      FOnFloatValueChanged::CreateSP(this, &SWetnessProfileEditorPanel::HandlePreviewDroplet2DetailSizeChanged),
-                      TAttribute<FText>::Create(TAttribute<FText>::FGetter::CreateSP(this, &SWetnessProfileEditorPanel::GetPreviewDroplet2DetailSizeText)))];
+                  [SNew(SBox)
+                       .Visibility(this, &SWetnessProfileEditorPanel::GetDroplet2ControlsVisibility)
+                           [BuildDetailSlider(
+                               LOCTEXT("PreviewDroplet2DetailSizeLabel", "Droplet2 Detail Size"),
+                               TAttribute<float>::Create(TAttribute<float>::FGetter::CreateSP(this, &SWetnessProfileEditorPanel::GetPreviewDroplet2DetailSize)),
+                               FOnFloatValueChanged::CreateSP(this, &SWetnessProfileEditorPanel::HandlePreviewDroplet2DetailSizeChanged),
+                               TAttribute<FText>::Create(TAttribute<FText>::FGetter::CreateSP(this, &SWetnessProfileEditorPanel::GetPreviewDroplet2DetailSizeText)))]];
 }
 
 TSharedRef<SWidget> SWetnessProfileEditorPanel::GeneratePreviewModeWidget(
@@ -435,6 +629,240 @@ FText SWetnessProfileEditorPanel::GetPreviewModeText(const SWetnessProfileViewpo
         return LOCTEXT("PreviewModeDropletStampTest", "Droplet Stamp Test");
     default:
         return FText::GetEmpty();
+    }
+}
+
+TSharedRef<SWidget> SWetnessProfileEditorPanel::GeneratePreviewBehaviorWidget(
+    TSharedPtr<SWetnessProfileViewport::EPreviewBehavior> InBehavior) const
+{
+    return SNew(STextBlock)
+        .Text(InBehavior.IsValid() ? GetPreviewBehaviorText(*InBehavior) : FText::GetEmpty());
+}
+
+void SWetnessProfileEditorPanel::HandlePreviewBehaviorChanged(
+    TSharedPtr<SWetnessProfileViewport::EPreviewBehavior> InBehavior,
+    ESelectInfo::Type /*SelectInfo*/)
+{
+    if (!InBehavior.IsValid())
+    {
+        return;
+    }
+    SelectedPreviewBehaviorItem = InBehavior;
+    if (PreviewViewport.IsValid())
+    {
+        PreviewViewport->SetPreviewBehavior(*InBehavior);
+    }
+}
+
+FText SWetnessProfileEditorPanel::GetPreviewBehaviorText() const
+{
+    return SelectedPreviewBehaviorItem.IsValid()
+        ? GetPreviewBehaviorText(*SelectedPreviewBehaviorItem)
+        : FText::GetEmpty();
+}
+
+FText SWetnessProfileEditorPanel::GetPreviewBehaviorText(
+    const SWetnessProfileViewport::EPreviewBehavior InBehavior) const
+{
+    return InBehavior == SWetnessProfileViewport::EPreviewBehavior::Simulation
+        ? LOCTEXT("PreviewBehaviorSimulation", "Simulation")
+        : LOCTEXT("PreviewBehaviorManual", "Manual");
+}
+
+EVisibility SWetnessProfileEditorPanel::GetManualControlsVisibility() const
+{
+    return SelectedPreviewBehaviorItem.IsValid() &&
+        *SelectedPreviewBehaviorItem == SWetnessProfileViewport::EPreviewBehavior::Manual
+        ? EVisibility::Visible
+        : EVisibility::Collapsed;
+}
+
+EVisibility SWetnessProfileEditorPanel::GetSimulationControlsVisibility() const
+{
+    return SelectedPreviewBehaviorItem.IsValid() &&
+        *SelectedPreviewBehaviorItem == SWetnessProfileViewport::EPreviewBehavior::Simulation
+        ? EVisibility::Visible
+        : EVisibility::Collapsed;
+}
+
+FReply SWetnessProfileEditorPanel::HandlePlayPauseClicked()
+{
+    if (PreviewViewport.IsValid())
+    {
+        PreviewViewport->SetPreviewAnimationEnabled(!PreviewViewport->IsPreviewAnimationEnabled());
+    }
+    return FReply::Handled();
+}
+
+FReply SWetnessProfileEditorPanel::HandleRestartSimulationClicked()
+{
+    if (PreviewViewport.IsValid())
+    {
+        PreviewViewport->RestartPreviewSimulation();
+    }
+    return FReply::Handled();
+}
+
+const FSlateBrush* SWetnessProfileEditorPanel::GetPlayPauseBrush() const
+{
+    return FAppStyle::GetBrush(
+        PreviewViewport.IsValid() && PreviewViewport->IsPreviewAnimationEnabled()
+            ? TEXT("Icons.Pause")
+            : TEXT("Icons.Play"));
+}
+
+FText SWetnessProfileEditorPanel::GetPlayPauseToolTip() const
+{
+    return PreviewViewport.IsValid() && PreviewViewport->IsPreviewAnimationEnabled()
+        ? LOCTEXT("PauseSimulationTooltip", "Pause Simulation")
+        : LOCTEXT("PlaySimulationTooltip", "Play Simulation");
+}
+
+ECheckBoxState SWetnessProfileEditorPanel::GetAbsorbedLayerCheckState() const
+{
+    return bPreviewAbsorbedLayerEnabled ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+}
+
+void SWetnessProfileEditorPanel::HandleAbsorbedLayerCheckStateChanged(const ECheckBoxState NewState)
+{
+    bPreviewAbsorbedLayerEnabled = NewState == ECheckBoxState::Checked;
+    if (PreviewViewport.IsValid())
+    {
+        PreviewViewport->SetPreviewSimulationLayers(
+            bPreviewAbsorbedLayerEnabled,
+            bPreviewSurfaceLayerEnabled);
+    }
+}
+
+ECheckBoxState SWetnessProfileEditorPanel::GetSurfaceLayerCheckState() const
+{
+    return bPreviewSurfaceLayerEnabled ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+}
+
+void SWetnessProfileEditorPanel::HandleSurfaceLayerCheckStateChanged(const ECheckBoxState NewState)
+{
+    bPreviewSurfaceLayerEnabled = NewState == ECheckBoxState::Checked;
+    if (PreviewViewport.IsValid())
+    {
+        PreviewViewport->SetPreviewSimulationLayers(
+            bPreviewAbsorbedLayerEnabled,
+            bPreviewSurfaceLayerEnabled);
+    }
+}
+
+ECheckBoxState SWetnessProfileEditorPanel::GetDroplet1CheckState() const
+{
+    return bPreviewDroplet1Enabled ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+}
+
+void SWetnessProfileEditorPanel::HandleDroplet1CheckStateChanged(const ECheckBoxState NewState)
+{
+    bPreviewDroplet1Enabled = NewState == ECheckBoxState::Checked;
+#if WITH_EDITORONLY_DATA
+    if (UWetnessProfile* Profile = WetnessProfile.Get())
+    {
+        Profile->bEditorShowDroplet1 = bPreviewDroplet1Enabled;
+        NotifyPreviewDisplayFilterChanged(
+            *Profile,
+            GET_MEMBER_NAME_CHECKED(UWetnessProfile, bEditorShowDroplet1));
+    }
+#endif
+    RefreshDetailsViews();
+    if (PreviewViewport.IsValid())
+    {
+        PreviewViewport->SetPreviewDropletVisibility(
+            bPreviewDroplet1Enabled,
+            bPreviewDroplet2Enabled);
+    }
+}
+
+ECheckBoxState SWetnessProfileEditorPanel::GetDroplet2CheckState() const
+{
+    return bPreviewDroplet2Enabled ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+}
+
+void SWetnessProfileEditorPanel::HandleDroplet2CheckStateChanged(const ECheckBoxState NewState)
+{
+    bPreviewDroplet2Enabled = NewState == ECheckBoxState::Checked;
+#if WITH_EDITORONLY_DATA
+    if (UWetnessProfile* Profile = WetnessProfile.Get())
+    {
+        Profile->bEditorShowDroplet2 = bPreviewDroplet2Enabled;
+        NotifyPreviewDisplayFilterChanged(
+            *Profile,
+            GET_MEMBER_NAME_CHECKED(UWetnessProfile, bEditorShowDroplet2));
+    }
+#endif
+    RefreshDetailsViews();
+    if (PreviewViewport.IsValid())
+    {
+        PreviewViewport->SetPreviewDropletVisibility(
+            bPreviewDroplet1Enabled,
+            bPreviewDroplet2Enabled);
+    }
+}
+
+EVisibility SWetnessProfileEditorPanel::GetDroplet1ControlsVisibility() const
+{
+    return bPreviewDroplet1Enabled ? EVisibility::Visible : EVisibility::Collapsed;
+}
+
+EVisibility SWetnessProfileEditorPanel::GetDroplet2ControlsVisibility() const
+{
+    return bPreviewDroplet2Enabled ? EVisibility::Visible : EVisibility::Collapsed;
+}
+
+FText SWetnessProfileEditorPanel::GetSimulationTimeText() const
+{
+    const float Time = PreviewViewport.IsValid() ? PreviewViewport->GetPreviewAnimationTime() : 0.0f;
+    FNumberFormattingOptions Options;
+    Options.MinimumFractionalDigits = 1;
+    Options.MaximumFractionalDigits = 1;
+    return FText::Format(
+        LOCTEXT("SimulationTimeFormat", "Simulation Time  {0} s / {1} s"),
+        FText::AsNumber(Time, &Options),
+        FText::AsNumber(SWetnessProfileViewport::GetPreviewLoopDuration(), &Options));
+}
+
+TSharedRef<SWidget> SWetnessProfileEditorPanel::GeneratePreviewSpeedWidget(TSharedPtr<float> InSpeed) const
+{
+    const float Speed = InSpeed.IsValid() ? *InSpeed : 1.0f;
+    return SNew(STextBlock).Text(FText::Format(LOCTEXT("PreviewSpeedItemFormat", "{0}x"), FText::AsNumber(Speed)));
+}
+
+void SWetnessProfileEditorPanel::HandlePreviewSpeedChanged(
+    TSharedPtr<float> InSpeed,
+    ESelectInfo::Type /*SelectInfo*/)
+{
+    if (!InSpeed.IsValid())
+    {
+        return;
+    }
+    SelectedPreviewSpeedItem = InSpeed;
+    if (PreviewViewport.IsValid())
+    {
+        PreviewViewport->SetPreviewAnimationSpeed(*InSpeed);
+    }
+}
+
+FText SWetnessProfileEditorPanel::GetPreviewSpeedText() const
+{
+    const float Speed = SelectedPreviewSpeedItem.IsValid() ? *SelectedPreviewSpeedItem : 1.0f;
+    return FText::Format(LOCTEXT("PreviewSpeedValueFormat", "{0}x"), FText::AsNumber(Speed));
+}
+
+ECheckBoxState SWetnessProfileEditorPanel::GetLoopCheckState() const
+{
+    return PreviewViewport.IsValid() && PreviewViewport->IsPreviewLoopEnabled()
+        ? ECheckBoxState::Checked
+        : ECheckBoxState::Unchecked;
+}
+
+void SWetnessProfileEditorPanel::HandleLoopCheckStateChanged(const ECheckBoxState NewState)
+{
+    if (PreviewViewport.IsValid())
+    {
+        PreviewViewport->SetPreviewLoopEnabled(NewState == ECheckBoxState::Checked);
     }
 }
 
@@ -573,6 +1001,13 @@ void SWetnessProfileEditorPanel::LoadPersistedPreviewSettings()
         ReadFloatMetadata(Profile, PreviewDroplet2DetailSizeMetadataKey, 1.0f),
         0.0f,
         4.0f);
+#if WITH_EDITORONLY_DATA
+    if (Profile != nullptr)
+    {
+        bPreviewDroplet1Enabled = Profile->bEditorShowDroplet1;
+        bPreviewDroplet2Enabled = Profile->bEditorShowDroplet2;
+    }
+#endif
 }
 
 void SWetnessProfileEditorPanel::PersistPreviewDetailSizes()
@@ -597,13 +1032,25 @@ void SWetnessProfileEditorPanel::ApplyPreviewSettingsToViewport()
     }
 
     PreviewViewport->SetPreviewDropletDetailSizes(PreviewDroplet1DetailSize, PreviewDroplet2DetailSize);
+    PreviewViewport->SetPreviewSimulationLayers(
+        bPreviewAbsorbedLayerEnabled,
+        bPreviewSurfaceLayerEnabled);
+    PreviewViewport->SetPreviewDropletVisibility(
+        bPreviewDroplet1Enabled,
+        bPreviewDroplet2Enabled);
     PreviewViewport->SetPreviewSurfaceWater(1.0f);
     if (SelectedPreviewModeItem.IsValid())
     {
         PreviewViewport->SetPreviewMode(*SelectedPreviewModeItem);
     }
+    if (SelectedPreviewBehaviorItem.IsValid())
+    {
+        PreviewViewport->SetPreviewBehavior(*SelectedPreviewBehaviorItem);
+    }
     PreviewViewport->SetPreviewAnimationEnabled(true);
-    PreviewViewport->SetPreviewAnimationSpeed(1.0f);
+    PreviewViewport->SetPreviewAnimationSpeed(
+        SelectedPreviewSpeedItem.IsValid() ? *SelectedPreviewSpeedItem : 1.0f);
+    PreviewViewport->SetPreviewLoopEnabled(true);
 }
 
 #undef LOCTEXT_NAMESPACE

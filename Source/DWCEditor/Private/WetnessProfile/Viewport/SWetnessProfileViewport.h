@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "SEditorViewport.h"
 #include "UObject/GCObject.h"
+#include "GPU/DWCGPUBackend.h"
 
 class FAdvancedPreviewScene;
 class FWetnessProfileViewportClient;
@@ -33,6 +34,12 @@ class SWetnessProfileViewport : public SEditorViewport, public FGCObject
         DropletStampTest
     };
 
+    enum class EPreviewBehavior : uint8
+    {
+        Manual,
+        Simulation
+    };
+
     SLATE_BEGIN_ARGS(SWetnessProfileViewport) {}
     SLATE_ARGUMENT(UWetnessProfile*, WetnessProfile)
     SLATE_END_ARGS()
@@ -61,10 +68,23 @@ class SWetnessProfileViewport : public SEditorViewport, public FGCObject
     void SetPreviewMode(EPreviewMode InPreviewMode);
     EPreviewMode GetPreviewMode() const { return PreviewMode; }
 
+    void SetPreviewBehavior(EPreviewBehavior InBehavior);
+    EPreviewBehavior GetPreviewBehavior() const { return PreviewBehavior; }
     void SetPreviewAnimationEnabled(bool bInEnabled);
     void SetPreviewAnimationSpeed(float InSpeed);
+    void SetPreviewLoopEnabled(bool bInEnabled);
+    void SetPreviewSimulationLayers(bool bAbsorbedEnabled, bool bSurfaceEnabled);
+    void SetPreviewDropletVisibility(bool bDroplet1Enabled, bool bDroplet2Enabled);
+    void RestartPreviewSimulation();
     bool IsPreviewAnimationEnabled() const { return bPreviewAnimationEnabled; }
+    bool IsPreviewLoopEnabled() const { return bPreviewLoopEnabled; }
+    bool IsPreviewAbsorbedLayerEnabled() const { return bPreviewAbsorbedLayerEnabled; }
+    bool IsPreviewSurfaceLayerEnabled() const { return bPreviewSurfaceLayerEnabled; }
+    bool IsPreviewDroplet1Enabled() const { return bPreviewDroplet1Enabled; }
+    bool IsPreviewDroplet2Enabled() const { return bPreviewDroplet2Enabled; }
     float GetPreviewAnimationSpeed() const { return PreviewAnimationSpeed; }
+    float GetPreviewAnimationTime() const { return PreviewAnimationTime; }
+    static constexpr float GetPreviewLoopDuration() { return 8.0f; }
 
     void SetPreviewSkeletalMeshOverride(USkeletalMesh* InPreviewMesh);
     void ClearPreviewSkeletalMeshOverride();
@@ -88,6 +108,13 @@ class SWetnessProfileViewport : public SEditorViewport, public FGCObject
     void RefreshPreviewMaterialParameters();
     void RefreshGeneratedPreviewMaterialParameters();
     void RefreshGeneratedPreviewAnimationTime();
+    bool EnsureGPUPreviewSimulator();
+    void ShutdownGPUPreviewSimulator();
+    void TickGPUPreviewSimulation(float InDeltaTime);
+    void BindGPUPreviewTextures();
+    FVector2f ResolveScenarioSplashUV() const;
+    void RefreshScenarioSplashUV();
+    void ScheduleSimulationRestart();
     void UpdateRealtimeState();
     FText GetOverlayText() const;
 
@@ -113,14 +140,27 @@ class SWetnessProfileViewport : public SEditorViewport, public FGCObject
     TObjectPtr<UTexture> PreviewDefaultNormalTexture = nullptr;
     TObjectPtr<UTexture> PreviewDefaultMaskTexture = nullptr;
     TSharedPtr<STextBlock> OverlayText;
+    TUniquePtr<IDWCGPUPreviewSimulator> GPUPreviewSimulator;
 
     bool bHasPreviewMeshOverride = false;
     bool bPreviewAnimationEnabled = true;
+    bool bPreviewLoopEnabled = true;
+    bool bGPUPreviewUnavailable = false;
+    bool bPreviewAbsorbedLayerEnabled = true;
+    bool bPreviewSurfaceLayerEnabled = true;
+    bool bPreviewDroplet1Enabled = true;
+    bool bPreviewDroplet2Enabled = false;
     float PreviewAbsorbedWater = 0.5f;
     float PreviewSurfaceWater = 1.0f;
     float PreviewDroplet1DetailSize = 1.0f;
     float PreviewDroplet2DetailSize = 1.0f;
     EPreviewMode PreviewMode = EPreviewMode::Lit;
+    EPreviewBehavior PreviewBehavior = EPreviewBehavior::Manual;
     float PreviewAnimationSpeed = 1.0f;
     float PreviewAnimationTime = 0.0f;
+    float PreviewSimulationAccumulator = 0.0f;
+    float PendingSimulationRestartDelay = -1.0f;
+    uint32 LastSimulationParameterHash = 0u;
+    bool bHasSimulationParameterHash = false;
+    FVector2f PreviewScenarioSplashUV = FVector2f(0.5f, 0.5f);
 };

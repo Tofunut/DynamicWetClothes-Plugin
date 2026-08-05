@@ -5,12 +5,14 @@
 #include "Templates/UniquePtr.h"
 #include "RuntimeState/Utils/WetSurfaceContactResolver.h"
 
+class UObject;
 class UDynamicWetClothesComponent;
 class USkeletalMeshComponent;
 class UWetClothingAsset;
 class UMaterialInstanceDynamic;
 class UTextureRenderTarget2D;
 struct FWetClothingSettings;
+struct FWetnessProfileParameters;
 
 
 /** CPU-side routing request. TriangleID is intentionally resolved from UV through TexelLookup on GPU. */
@@ -78,6 +80,43 @@ public:
     virtual void Shutdown() = 0;
 };
 
+
+
+/** Lightweight editor-only simulation input that reuses the runtime GPU wetness shaders. */
+struct DWC_API FDWCGPUPreviewInitArgs
+{
+    UObject* WorldContextObject = nullptr;
+    int32 Resolution = 512;
+    float MaxWetness = 1.15f;
+    float CapillaryImmediateAbsorptionFraction = 0.65f;
+    bool bUseEightDirectionDiffusion = false;
+};
+
+/** Optional DWCGPU-backed Wetness Profile preview. No RHI types cross this interface. */
+class DWC_API IDWCGPUPreviewSimulator
+{
+public:
+    IDWCGPUPreviewSimulator() = default;
+    virtual ~IDWCGPUPreviewSimulator() = default;
+
+    virtual bool Initialize(const FDWCGPUPreviewInitArgs& Args) = 0;
+    virtual void SetProfileParameters(const FWetnessProfileParameters& Parameters) = 0;
+    virtual void SetScenarioSplashUV(FVector2f InSplashUV) = 0;
+    virtual void SetPreviewChannels(
+        bool bAbsorbedEnabled,
+        bool bSurfaceEnabled,
+        bool bDroplet1Enabled,
+        bool bDroplet2Enabled) = 0;
+    virtual void Restart() = 0;
+    virtual void Step(float DeltaSeconds, float ScenarioTimeSeconds) = 0;
+    virtual bool IsReady() const = 0;
+    virtual int32 GetResolution() const = 0;
+    virtual UTextureRenderTarget2D* GetWetnessMap() const = 0;
+    virtual UTextureRenderTarget2D* GetDroplet1Map() const = 0;
+    virtual UTextureRenderTarget2D* GetDroplet2Map() const = 0;
+    virtual void Shutdown() = 0;
+};
+
 /** Implemented by the optional DWCGPU module. */
 class DWC_API IDWCGPUModule : public IModuleInterface
 {
@@ -86,4 +125,5 @@ public:
     virtual ~IDWCGPUModule();
 
     virtual TUniquePtr<IDWCGPUBackend> CreateBackend() = 0;
+    virtual TUniquePtr<IDWCGPUPreviewSimulator> CreatePreviewSimulator() = 0;
 };

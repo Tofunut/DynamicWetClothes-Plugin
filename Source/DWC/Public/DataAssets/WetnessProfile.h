@@ -120,11 +120,11 @@ struct DWC_API FSurfaceWaterProfileParameters
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet2", meta = (ClampMin = "0.0", ClampMax = "1.0", DisplayName = "Spawn Spread Rate"))
     float DropletFlowSpawnPositionSpread = 0.35f;
 
-    /** Optional normal texture for Droplet2. Empty falls back to the Droplet1 normal. */
+    /** Optional normal texture for Droplet2. Empty uses the neutral flat-normal slice. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet2|Rendering")
     TObjectPtr<UTexture2D> DropletFlowNormalTexture = nullptr;
 
-    /** Optional mask texture for Droplet2. Empty falls back to the Droplet1 mask. */
+    /** Optional mask texture for Droplet2. Empty uses the neutral unmasked slice. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet2|Rendering")
     TObjectPtr<UTexture2D> DropletFlowMaskTexture = nullptr;
 
@@ -361,5 +361,13 @@ class DWC_API UWetnessProfile : public UDataAsset
     /** Editor preview mesh shown by default when this Wetness Profile is opened. */
     UPROPERTY(EditAnywhere, Category = "Wetness Profile|Preview")
     TObjectPtr<USkeletalMesh> PreviewSkeletalMesh = nullptr;
+
+    /** Editor-only display filter. It does not enable or disable Droplet1 at runtime. */
+    UPROPERTY(Transient)
+    bool bEditorShowDroplet1 = true;
+
+    /** Editor-only display filter. It does not enable or disable Droplet2 at runtime. */
+    UPROPERTY(Transient)
+    bool bEditorShowDroplet2 = false;
 #endif
 };

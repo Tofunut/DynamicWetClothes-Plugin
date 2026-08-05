@@ -8,6 +8,7 @@
 #include "IDetailPropertyRow.h"
 #include "IPropertyUtilities.h"
 #include "PropertyHandle.h"
+#include "UObject/UnrealType.h"
 #include "Styling/AppStyle.h"
 #include "WetnessProfile/Editor/WetnessProfileEditorPolicy.h"
 #include "Widgets/Images/SImage.h"
@@ -161,6 +162,17 @@ namespace
             Handle->SetValue(NewState == ECheckBoxState::Checked);
         }
     }
+
+#if WITH_EDITORONLY_DATA
+    void NotifyDetailsPreviewDisplayFilterChanged(UWetnessProfile& Profile, const FName PropertyName)
+    {
+        if (FProperty* Property = FindFProperty<FProperty>(UWetnessProfile::StaticClass(), PropertyName))
+        {
+            FPropertyChangedEvent Event(Property, EPropertyChangeType::ValueSet);
+            Profile.PostEditChangeProperty(Event);
+        }
+    }
+#endif
 
     void ConfigureSurfaceTypeGroupHeader(
         IDetailGroup& Group,
@@ -370,6 +382,13 @@ void FWetnessProfileDetailsCustomization::CustomizeDetails(IDetailLayoutBuilder&
     const bool bShowAbsorbed = Mode != EWetnessProfileDetailsMode::SurfaceWater;
     const bool bShowSurface = Mode != EWetnessProfileDetailsMode::AbsorbedWater;
     const bool bSingleChannel = Mode != EWetnessProfileDetailsMode::Combined;
+#if WITH_EDITORONLY_DATA
+    const bool bShowDroplet1 = !Profile.IsValid() || Profile->bEditorShowDroplet1;
+    const bool bShowDroplet2 = Profile.IsValid() && Profile->bEditorShowDroplet2;
+#else
+    constexpr bool bShowDroplet1 = true;
+    constexpr bool bShowDroplet2 = true;
+#endif
 
     if (bShowAbsorbed)
     {
@@ -472,6 +491,75 @@ void FWetnessProfileDetailsCustomization::CustomizeDetails(IDetailLayoutBuilder&
                 LOCTEXT("EnableSurfaceWaterTooltip", "Enable water that remains visible on top of the material surface."));
         }
 
+#if WITH_EDITORONLY_DATA
+        GeneralCategory.AddCustomRow(LOCTEXT("SurfaceTypeVisibilityFilter", "Droplet1 Droplet2 Show"))
+            .NameContent()
+            [
+                SNew(STextBlock)
+                .Text(LOCTEXT("SurfaceTypeVisibilityLabel", "Show"))
+                .ToolTipText(LOCTEXT(
+                    "SurfaceTypeVisibilityTooltip",
+                    "Editor-only display filters. They control which Droplet sections and preview layers are shown; runtime behavior is unchanged."))
+                .Font(IDetailLayoutBuilder::GetDetailFont())
+            ]
+            .ValueContent()
+            .MinDesiredWidth(260.0f)
+            [
+                SNew(SHorizontalBox)
+                + SHorizontalBox::Slot()
+                .AutoWidth()
+                .Padding(0.0f, 0.0f, 14.0f, 0.0f)
+                [
+                    SNew(SCheckBox)
+                    .IsChecked(bShowDroplet1 ? ECheckBoxState::Checked : ECheckBoxState::Unchecked)
+                    .OnCheckStateChanged_Lambda(
+                        [WeakProfile = Profile, WeakUtilities = PropertyUtilities](const ECheckBoxState NewState)
+                        {
+                            if (UWetnessProfile* MutableProfile = WeakProfile.Get())
+                            {
+                                MutableProfile->bEditorShowDroplet1 = NewState == ECheckBoxState::Checked;
+                                NotifyDetailsPreviewDisplayFilterChanged(
+                                    *MutableProfile,
+                                    GET_MEMBER_NAME_CHECKED(UWetnessProfile, bEditorShowDroplet1));
+                            }
+                            if (const TSharedPtr<IPropertyUtilities> Utilities = WeakUtilities.Pin())
+                            {
+                                Utilities->ForceRefresh();
+                            }
+                        })
+                    [
+                        SNew(STextBlock)
+                        .Text(LOCTEXT("ShowDroplet1", "Droplet 1"))
+                    ]
+                ]
+                + SHorizontalBox::Slot()
+                .AutoWidth()
+                [
+                    SNew(SCheckBox)
+                    .IsChecked(bShowDroplet2 ? ECheckBoxState::Checked : ECheckBoxState::Unchecked)
+                    .OnCheckStateChanged_Lambda(
+                        [WeakProfile = Profile, WeakUtilities = PropertyUtilities](const ECheckBoxState NewState)
+                        {
+                            if (UWetnessProfile* MutableProfile = WeakProfile.Get())
+                            {
+                                MutableProfile->bEditorShowDroplet2 = NewState == ECheckBoxState::Checked;
+                                NotifyDetailsPreviewDisplayFilterChanged(
+                                    *MutableProfile,
+                                    GET_MEMBER_NAME_CHECKED(UWetnessProfile, bEditorShowDroplet2));
+                            }
+                            if (const TSharedPtr<IPropertyUtilities> Utilities = WeakUtilities.Pin())
+                            {
+                                Utilities->ForceRefresh();
+                            }
+                        })
+                    [
+                        SNew(STextBlock)
+                        .Text(LOCTEXT("ShowDroplet2", "Droplet 2"))
+                    ]
+                ]
+            ];
+#endif
+
         IDetailCategoryBuilder& SimulationCategory = DetailBuilder.EditCategory(
             TEXT("DWCSurfaceSimulation"),
             bSingleChannel
@@ -489,6 +577,8 @@ void FWetnessProfileDetailsCustomization::CustomizeDetails(IDetailLayoutBuilder&
             MakeMidpointRawToPercent(20.0f, 40.0f), MakeMidpointPercentToRaw(20.0f, 40.0f), 0.0f, 100.0f,
             SurfaceSettingsEnabled);
 
+        if (bShowDroplet1)
+        {
         IDetailGroup& Droplet1Group = SimulationCategory.AddGroup(
             TEXT("DWCDroplet1"),
             LOCTEXT("Droplet1Group", "Droplet1"),
@@ -518,6 +608,10 @@ void FWetnessProfileDetailsCustomization::CustomizeDetails(IDetailLayoutBuilder&
             MakeSquaredRawToPercent(64.0f), MakeSquaredPercentToRaw(64.0f), 0.0f, 256.0f,
             SurfaceSettingsEnabled);
 
+        }
+
+        if (bShowDroplet2)
+        {
         IDetailGroup& Droplet2Group = SimulationCategory.AddGroup(
             TEXT("DWCDroplet2"),
             LOCTEXT("Droplet2Group", "Droplet2"),
@@ -554,6 +648,8 @@ void FWetnessProfileDetailsCustomization::CustomizeDetails(IDetailLayoutBuilder&
             0.0f, 1.0f, 0.0f, 1.0f, 0.01f, 100.0f, 1, LOCTEXT("PercentSuffixDroplet2Spread", "%"),
             SurfaceSettingsEnabled);
 
+        }
+
         IDetailCategoryBuilder& RenderingCategory = DetailBuilder.EditCategory(
             TEXT("DWCSurfaceRendering"),
             bSingleChannel
@@ -561,6 +657,8 @@ void FWetnessProfileDetailsCustomization::CustomizeDetails(IDetailLayoutBuilder&
                 : LOCTEXT("CombinedSurfaceRenderingCategory", "Surface Water | Rendering"),
             ECategoryPriority::Important);
         ConfigurePrimaryCategory(RenderingCategory, BaseSortOrder + 10);
+        if (bShowDroplet1)
+        {
         IDetailGroup& StaticRenderingGroup = RenderingCategory.AddGroup(
             TEXT("DWCDroplet1Rendering"),
             LOCTEXT("Droplet1RenderingGroup", "Droplet1"),
@@ -611,6 +709,10 @@ void FWetnessProfileDetailsCustomization::CustomizeDetails(IDetailLayoutBuilder&
             0.0f, 1.0f, 0.0f, 1.0f, 0.01f, 100.0f, 1, LOCTEXT("PercentSuffixWaterSpecular", "%"),
             SurfaceSettingsEnabled);
 
+        }
+
+        if (bShowDroplet2)
+        {
         IDetailGroup& FlowRenderingGroup = RenderingCategory.AddGroup(
             TEXT("DWCDroplet2Rendering"),
             LOCTEXT("Droplet2RenderingGroup", "Droplet2"),
@@ -660,6 +762,8 @@ void FWetnessProfileDetailsCustomization::CustomizeDetails(IDetailLayoutBuilder&
             0.0f, 1.0f, 0.0f, 1.0f, 0.01f, 100.0f, 1, LOCTEXT("PercentSuffixFlowSpecular", "%"),
             SurfaceSettingsEnabled);
 
+        }
+
         IDetailCategoryBuilder& DetailTexturesCategory = DetailBuilder.EditCategory(
             TEXT("DWCSurfaceDetailTextures"),
             bSingleChannel
@@ -668,6 +772,8 @@ void FWetnessProfileDetailsCustomization::CustomizeDetails(IDetailLayoutBuilder&
             ECategoryPriority::Important);
         ConfigurePrimaryCategory(DetailTexturesCategory, BaseSortOrder + 15);
 
+        if (bShowDroplet1)
+        {
         IDetailGroup& DropletTexturesGroup = DetailTexturesCategory.AddGroup(
             TEXT("DWCDroplet1Textures"),
             LOCTEXT("Droplet1TexturesGroup", "Droplet1"),
@@ -686,6 +792,10 @@ void FWetnessProfileDetailsCustomization::CustomizeDetails(IDetailLayoutBuilder&
             LOCTEXT("DropletMaskTooltip", "Optional mask used to localize visible Surface Water coverage and droplet detail. Empty means unmasked coverage."),
             SurfaceSettingsEnabled);
 
+        }
+
+        if (bShowDroplet2)
+        {
         IDetailGroup& DropletFlowTexturesGroup = DetailTexturesCategory.AddGroup(
             TEXT("DWCDroplet2Textures"),
             LOCTEXT("Droplet2TexturesGroup", "Droplet2"),
@@ -695,14 +805,15 @@ void FWetnessProfileDetailsCustomization::CustomizeDetails(IDetailLayoutBuilder&
             DropletFlowTexturesGroup,
             FindPropertyByPath(TEXT("Parameters.SurfaceWater.DropletFlowNormalTexture")),
             LOCTEXT("DropletFlowNormal", "Normal Texture"),
-            LOCTEXT("DropletFlowNormalTooltip", "Normal texture used by Droplet2. Empty falls back to the Droplet1 normal."),
+            LOCTEXT("DropletFlowNormalTooltip", "Optional normal texture used by Droplet2. Empty uses the neutral flat-normal slice and never copies Droplet1."),
             SurfaceSettingsEnabled);
         AddDefaultProperty(
             DropletFlowTexturesGroup,
             FindPropertyByPath(TEXT("Parameters.SurfaceWater.DropletFlowMaskTexture")),
             LOCTEXT("DropletFlowMask", "Mask Texture"),
-            LOCTEXT("DropletFlowMaskTooltip", "Mask texture used by Droplet2. Empty falls back to the Droplet1 mask."),
+            LOCTEXT("DropletFlowMaskTooltip", "Optional mask texture used by Droplet2. Empty uses the neutral unmasked slice and never copies Droplet1."),
             SurfaceSettingsEnabled);
+        }
 
     }
 }

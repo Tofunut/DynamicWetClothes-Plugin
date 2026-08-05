@@ -83,7 +83,7 @@ void FDWCPreparedMeshEditTransaction::Commit()
     Backups.Reset();
 }
 
-void FDWCPreparedMeshEditTransaction::Rollback()
+void FDWCPreparedMeshEditTransaction::Rollback(const bool bDeferMeshCommit)
 {
     if (bCommitted || bRolledBack || Mesh == nullptr || Backups.IsEmpty())
     {
@@ -107,10 +107,16 @@ void FDWCPreparedMeshEditTransaction::Rollback()
         }
 
         *MeshDescription = Backup.MeshDescription;
-        Mesh->CommitMeshDescription(Backup.LODIndex);
+        if (!bDeferMeshCommit)
+        {
+            Mesh->CommitMeshDescription(Backup.LODIndex);
+        }
     }
 
-    Mesh->PostEditChange();
-    Mesh->MarkPackageDirty();
+    if (!bDeferMeshCommit)
+    {
+        Mesh->PostEditChange();
+        Mesh->MarkPackageDirty();
+    }
     Backups.Reset();
 }

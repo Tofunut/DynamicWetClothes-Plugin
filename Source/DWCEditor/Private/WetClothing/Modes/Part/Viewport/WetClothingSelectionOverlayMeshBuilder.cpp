@@ -259,6 +259,12 @@ void FWetClothingSelectionOverlayMeshBuilder::BuildMeshData(
 
     for (const TPair<FSelectionOverlayQuantizedLocalEdge, FEdgeAccumulatorWithNormal>& Pair : EdgeMap)
     {
+        // Internal triangle edges occur twice. Keep only the selected islands' boundary.
+        if (Pair.Value.Count != 1)
+        {
+            continue;
+        }
+
         FWetClothingSelectionOverlayEdge SelectionEdge;
         SelectionEdge.LocalStart = Pair.Value.Start;
         SelectionEdge.LocalEnd = Pair.Value.End;

@@ -1592,7 +1592,10 @@ namespace
 
         bool bSelectorConnected = true;
         bSelectorConnected &= ConnectChecked(UseGPUBackend, FString(), WetnessSourceSwitch, TEXT("A"), FailureReasons);
-        bSelectorConnected &= ConnectChecked(WetnessMap, TEXT("A"), WetnessSourceSwitch, TEXT("A > B"), FailureReasons);
+        // GPU wetness maps use PF_R16F. Sampling Alpha from a single-channel texture
+        // resolves to 1.0, which makes the whole mesh appear fully wet even after a black clear.
+        // Read the actual stored wetness value from the R channel.
+        bSelectorConnected &= ConnectChecked(WetnessMap, TEXT("R"), WetnessSourceSwitch, TEXT("A > B"), FailureReasons);
         bSelectorConnected &= ConnectChecked(VertexColor, TEXT("A"), WetnessSourceSwitch, TEXT("A < B"), FailureReasons);
         bSelectorConnected &= ConnectChecked(VertexColor, TEXT("A"), WetnessSourceSwitch, TEXT("A == B"), FailureReasons);
         if (!bSelectorConnected)
@@ -2255,8 +2258,50 @@ FWetClothingUnifiedMaterialSetupResult FWCAMaterialGenerator::CreateTransientUni
     }
     if (IsUnifiedDwcMaterial(SourceBaseMaterial))
     {
+        // A Wetness Profile preview mesh may already use its generated DWC material.
+        // Previously this path failed and the viewport silently restored the source
+        // material, so no preview render target parameters were ever bound.
+        UMaterialInstanceConstant* ConfiguredPreviewInstance = NewObject<UMaterialInstanceConstant>(
+            GetTransientPackage(),
+            MakeUniqueObjectName(
+                GetTransientPackage(),
+                UMaterialInstanceConstant::StaticClass(),
+                TEXT("DWC_ConfiguredWetnessProfilePreviewMIC")),
+            RF_Transient);
+        if (ConfiguredPreviewInstance == nullptr)
+        {
+            Result.Message = TEXT("Could not create a transient instance for the configured DWC preview material.");
+            return Result;
+        }
+
+        ConfiguredPreviewInstance->SetParentEditorOnly(SourceMaterial);
+        ConfiguredPreviewInstance->SetScalarParameterValueEditorOnly(
+            FMaterialParameterInfo(DwcUseGpuBackendParameterName),
+            1.0f);
+
+        FString SurfaceWaterSwitchError;
+        if (!SetDwcSurfaceWaterStaticSwitchOverride(
+                ConfiguredPreviewInstance,
+                SourceMaterial,
+                true,
+                SurfaceWaterSwitchError))
+        {
+            Result.Message = FString::Printf(
+                TEXT("Could not enable Surface Water for the configured DWC preview material. %s"),
+                *SurfaceWaterSwitchError);
+            ConfiguredPreviewInstance->MarkAsGarbage();
+            return Result;
+        }
+
+        UMaterialEditingLibrary::UpdateMaterialInstance(ConfiguredPreviewInstance);
+        ConfiguredPreviewInstance->PostEditChange();
+
+        Result.bSucceeded = true;
+        Result.bAlreadyConfigured = true;
+        Result.GeneratedMaterial = SourceBaseMaterial;
+        Result.GeneratedMaterialInstance = ConfiguredPreviewInstance;
         Result.Message = FString::Printf(
-            TEXT("'%s' is already a generated DWC material. Select the original source material for preview generation."),
+            TEXT("Created a transient preview instance from configured DWC material '%s'."),
             *GetNameSafe(SourceMaterial));
         return Result;
     }

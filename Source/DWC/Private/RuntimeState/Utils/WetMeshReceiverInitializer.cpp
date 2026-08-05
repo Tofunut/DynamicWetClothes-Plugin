@@ -70,17 +70,18 @@ namespace
             return;
         }
 
-        const FString CPUDiagnostics = Asset->GetPrecomputedSimulationDataValidationSummary(SkeletalMesh);
-        const bool bCPUDataValid = Asset->IsPrecomputedSimulationDataValidForMesh(SkeletalMesh);
-
         if (Mode == EDWCSimulationMode::VertexCPU)
         {
+            const FString CPUDiagnostics =
+                Asset->GetPrecomputedSimulationDataValidationSummary(SkeletalMesh);
+            const bool bCPUDataValid =
+                Asset->IsPrecomputedSimulationDataValidForMesh(SkeletalMesh);
             if (bCPUDataValid)
             {
                 UE_LOG(
                     LogDWC,
                     Log,
-                    TEXT("DWC runtime mode '%s' active on '%s'. Using CPU runtime data from asset '%s' for mesh '%s' LOD%d (hasCPUPayload=%s). %s"),
+                    TEXT("DWC runtime mode '%s' active on '%s'. Asset='%s', mesh='%s', LOD=%d, hasCPUPayload=%s. %s"),
                     SimulationModeToLogString(Mode),
                     *GetNameSafe(Component),
                     *GetNameSafe(Asset),
@@ -94,7 +95,7 @@ namespace
                 UE_LOG(
                     LogDWC,
                     Error,
-                    TEXT("DWC runtime mode '%s' requested on '%s' but CPU runtime data is not usable. Asset='%s', mesh='%s', LOD=%d, hasCPUPayload=%s. %s"),
+                    TEXT("DWC runtime mode '%s' cannot initialize on '%s'. Asset='%s', mesh='%s', LOD=%d, hasCPUPayload=%s. %s"),
                     SimulationModeToLogString(Mode),
                     *GetNameSafe(Component),
                     *GetNameSafe(Asset),
@@ -106,30 +107,30 @@ namespace
             return;
         }
 
-        const bool bGPURuntimeDataValid = Asset->IsGPURuntimeDataValidForMesh(SkeletalMesh, LODIndex);
-        const bool bGPUMapDataValid = Asset->IsGPUWetMapDataValidForMesh(SkeletalMesh, LODIndex);
+        const bool bGPURuntimeDataValid =
+            Asset->IsGPURuntimeDataValidForMesh(SkeletalMesh, LODIndex);
+        const bool bGPUMapDataValid =
+            Asset->IsGPUWetMapDataValidForMesh(SkeletalMesh, LODIndex);
         if (bGPURuntimeDataValid && bGPUMapDataValid)
         {
             UE_LOG(
                 LogDWC,
                 Log,
-                TEXT("DWC runtime mode '%s' active on '%s'. Using GPU runtime/map data from asset '%s' for mesh '%s' LOD%d (hasGPUPayload=%s, hasGPUMapPayload=%s, CPUDataValid=%s). %s"),
+                TEXT("DWC runtime mode '%s' active on '%s'. Asset='%s', mesh='%s', LOD=%d, GPURuntimeDataValid=true, GPUMapDataValid=true, hasGPUPayload=%s, hasGPUMapPayload=%s."),
                 SimulationModeToLogString(Mode),
                 *GetNameSafe(Component),
                 *GetNameSafe(Asset),
                 *GetNameSafe(SkeletalMesh),
                 LODIndex,
                 Asset->HasGPURuntimeDataPayload() ? TEXT("true") : TEXT("false"),
-                Asset->HasGPUMapDataPayload() ? TEXT("true") : TEXT("false"),
-                bCPUDataValid ? TEXT("true") : TEXT("false"),
-                *CPUDiagnostics);
+                Asset->HasGPUMapDataPayload() ? TEXT("true") : TEXT("false"));
         }
         else
         {
             UE_LOG(
                 LogDWC,
                 Warning,
-                TEXT("DWC runtime mode '%s' requested on '%s' but GPU data is not fully usable. Asset='%s', mesh='%s', LOD=%d, GPURuntimeDataValid=%s, GPUMapDataValid=%s, hasGPUPayload=%s, hasGPUMapPayload=%s, CPUDataValid=%s. %s"),
+                TEXT("DWC runtime mode '%s' cannot fully initialize on '%s'. Asset='%s', mesh='%s', LOD=%d, GPURuntimeDataValid=%s, GPUMapDataValid=%s, hasGPUPayload=%s, hasGPUMapPayload=%s."),
                 SimulationModeToLogString(Mode),
                 *GetNameSafe(Component),
                 *GetNameSafe(Asset),
@@ -138,9 +139,7 @@ namespace
                 bGPURuntimeDataValid ? TEXT("true") : TEXT("false"),
                 bGPUMapDataValid ? TEXT("true") : TEXT("false"),
                 Asset->HasGPURuntimeDataPayload() ? TEXT("true") : TEXT("false"),
-                Asset->HasGPUMapDataPayload() ? TEXT("true") : TEXT("false"),
-                bCPUDataValid ? TEXT("true") : TEXT("false"),
-                *CPUDiagnostics);
+                Asset->HasGPUMapDataPayload() ? TEXT("true") : TEXT("false"));
         }
     }
 }
@@ -354,6 +353,7 @@ bool FWetMeshReceiverInitializer::InitializeReceiver(
     Receiver.SharedRuntimeData = RuntimeDataSubsystem->AcquireSharedRuntimeData(
         *Receiver.WetClothingAsset.Get(),
         *Receiver.MeshComponent.Get(),
+        Context.SimulationMode,
         Context.Owner);
     if (!Receiver.SharedRuntimeData.IsValid())
     {

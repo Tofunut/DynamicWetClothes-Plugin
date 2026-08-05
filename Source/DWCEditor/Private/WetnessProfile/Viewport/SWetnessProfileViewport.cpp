@@ -5,23 +5,28 @@
 #include "Components/PrimitiveComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Core/WetClothingSettings.h"
+#include "GPU/DWCGPUBackend.h"
 #include "DataAssets/WetClothingPartData.h"
 #include "DataAssets/WetnessProfile.h"
 #include "Engine/SkeletalMesh.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/Texture.h"
 #include "Engine/Texture2D.h"
+#include "Engine/TextureRenderTarget2D.h"
 #include "Engine/World.h"
 #include "Materials/Material.h"
 #include "Materials/MaterialInstanceConstant.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
+#include "Modules/ModuleManager.h"
 #include "Styling/AppStyle.h"
 #include "ToolMenus.h"
 #include "UObject/UObjectGlobals.h"
 #include "Utility/DWCLog.h"
 #include "ViewportToolbar/UnrealEdViewportToolbar.h"
 #include "WetClothing/Modes/DWCPreviewViewportToolbarUtils.h"
+#include "WetClothing/WCAEditor/UI/UVView/WCAUVPreviewTriangleReader.h"
 #include "WetClothing/DerivedAssets/Materials/WCAMaterialGenerator.h"
 #include "WetClothing/DerivedAssets/Textures/WetnessProfile/WetClothingSurfaceTextureNormalizer.h"
 #include "WetRendering/DWCGPUResourceSubsystem.h"
@@ -37,6 +42,8 @@ namespace
 {
     constexpr float PreviewSceneLift = 82.0f;
     constexpr float PreviewSphereScale = 1.35f;
+    constexpr float PreviewFixedStep = 0.1f;
+    constexpr float PreviewRestartDebounce = 0.12f;
     const FName PreviewSurfaceWaterOverrideParameter(TEXT("DWC_PreviewSurfaceWaterOverride"));
     const FName PreviewSurfaceWaterAmountParameter(TEXT("DWC_PreviewSurfaceWaterAmount"));
 
@@ -143,6 +150,34 @@ namespace
     {
         return static_cast<uint8>(FMath::RoundToInt(FMath::Clamp(Value / 4.0f, 0.0f, 1.0f) * 255.0f));
     }
+
+    uint32 BuildSimulationParameterHash(const FWetnessProfileParameters& Parameters)
+    {
+        const FResolvedAbsorbedWaterSimulationParameters Resolved =
+            Parameters.ResolveAbsorbedWaterSimulation();
+        const FSurfaceWaterProfileParameters& Surface = Parameters.SurfaceWater;
+        uint32 Hash = 0u;
+        const auto AddValue = [&Hash](const auto& Value)
+        {
+            Hash = HashCombine(Hash, GetTypeHash(Value));
+        };
+
+        AddValue(Parameters.AbsorbedWetness.bEnabled);
+        AddValue(Resolved.AbsorptionMultiplier);
+        AddValue(Resolved.SpreadRatePerSecond);
+        AddValue(Resolved.DryRatePerSecond);
+        AddValue(Resolved.GravityFlowStrength);
+        AddValue(Surface.bEnabled);
+        AddValue(Parameters.GetDropletDryRatePerSecond());
+        AddValue(Surface.DropletSpawnProbability);
+        AddValue(Surface.DropletRadiusPixels);
+        AddValue(Surface.DropletHeightPixels);
+        AddValue(Surface.DropletFlowSpawnProbability);
+        AddValue(Surface.DropletFlowRadiusPixels);
+        AddValue(Surface.DropletFlowHeightPixels);
+        AddValue(Surface.DropletFlowSpawnPositionSpread);
+        return Hash;
+    }
 }
 
 void SWetnessProfileViewport::Construct(const FArguments& InArgs)
@@ -158,6 +193,7 @@ void SWetnessProfileViewport::Construct(const FArguments& InArgs)
 
 SWetnessProfileViewport::~SWetnessProfileViewport()
 {
+    ShutdownGPUPreviewSimulator();
     if (PreviewScene.IsValid() && PreviewMeshComponent != nullptr)
     {
         PreviewScene->RemoveComponent(PreviewMeshComponent);
@@ -204,6 +240,23 @@ void SWetnessProfileViewport::AddReferencedObjects(FReferenceCollector& Collecto
 
 void SWetnessProfileViewport::RefreshFromProfile()
 {
+    if (PreviewBehavior == EPreviewBehavior::Simulation)
+    {
+        if (EnsureGPUPreviewSimulator() && WetnessProfile.IsValid())
+        {
+            const FWetnessProfileParameters Parameters =
+                GetSanitizedProfileParameters(WetnessProfile.Get());
+            const uint32 SimulationParameterHash = BuildSimulationParameterHash(Parameters);
+            GPUPreviewSimulator->SetProfileParameters(Parameters);
+            if (!bHasSimulationParameterHash ||
+                SimulationParameterHash != LastSimulationParameterHash)
+            {
+                LastSimulationParameterHash = SimulationParameterHash;
+                bHasSimulationParameterHash = true;
+                ScheduleSimulationRestart();
+            }
+        }
+    }
     if (!bHasPreviewMeshOverride)
     {
         ApplyResolvedPreviewMesh(false);
@@ -218,16 +271,9 @@ void SWetnessProfileViewport::Tick(
 {
     SEditorViewport::Tick(AllottedGeometry, InCurrentTime, InDeltaTime);
 
-    if (!bPreviewAnimationEnabled || PreviewAnimationSpeed <= KINDA_SMALL_NUMBER)
+    if (PreviewBehavior == EPreviewBehavior::Simulation)
     {
-        return;
-    }
-
-    PreviewAnimationTime += FMath::Max(InDeltaTime, 0.0f) * PreviewAnimationSpeed;
-    RefreshGeneratedPreviewAnimationTime();
-    if (ViewportClient.IsValid())
-    {
-        ViewportClient->Invalidate();
+        TickGPUPreviewSimulation(InDeltaTime);
     }
 }
 
@@ -283,6 +329,30 @@ void SWetnessProfileViewport::SetPreviewMode(const EPreviewMode InPreviewMode)
     RefreshPreviewMaterialParameters();
 }
 
+void SWetnessProfileViewport::SetPreviewBehavior(const EPreviewBehavior InBehavior)
+{
+    if (PreviewBehavior == InBehavior)
+    {
+        return;
+    }
+    PreviewBehavior = InBehavior;
+    if (PreviewBehavior == EPreviewBehavior::Simulation)
+    {
+        EnsureGPUPreviewSimulator();
+        if (WetnessProfile.IsValid())
+        {
+            const FWetnessProfileParameters Parameters =
+                GetSanitizedProfileParameters(WetnessProfile.Get());
+            LastSimulationParameterHash = BuildSimulationParameterHash(Parameters);
+            bHasSimulationParameterHash = true;
+        }
+        RestartPreviewSimulation();
+    }
+    ApplyResolvedPreviewMesh(true);
+    RefreshPreviewMaterialParameters();
+    UpdateRealtimeState();
+}
+
 void SWetnessProfileViewport::SetPreviewAnimationEnabled(const bool bInEnabled)
 {
     if (bPreviewAnimationEnabled == bInEnabled)
@@ -291,12 +361,11 @@ void SWetnessProfileViewport::SetPreviewAnimationEnabled(const bool bInEnabled)
     }
 
     bPreviewAnimationEnabled = bInEnabled;
-    if (!bPreviewAnimationEnabled)
-    {
-        PreviewAnimationTime = 0.0f;
-    }
     UpdateRealtimeState();
-    RefreshPreviewMaterialParameters();
+    if (ViewportClient.IsValid())
+    {
+        ViewportClient->Invalidate();
+    }
 }
 
 void SWetnessProfileViewport::SetPreviewAnimationSpeed(const float InSpeed)
@@ -309,7 +378,67 @@ void SWetnessProfileViewport::SetPreviewAnimationSpeed(const float InSpeed)
 
     PreviewAnimationSpeed = NewSpeed;
     UpdateRealtimeState();
+}
+
+void SWetnessProfileViewport::SetPreviewLoopEnabled(const bool bInEnabled)
+{
+    bPreviewLoopEnabled = bInEnabled;
+}
+
+void SWetnessProfileViewport::SetPreviewSimulationLayers(
+    const bool bAbsorbedEnabled,
+    const bool bSurfaceEnabled)
+{
+    if (bPreviewAbsorbedLayerEnabled == bAbsorbedEnabled &&
+        bPreviewSurfaceLayerEnabled == bSurfaceEnabled)
+    {
+        return;
+    }
+    bPreviewAbsorbedLayerEnabled = bAbsorbedEnabled;
+    bPreviewSurfaceLayerEnabled = bSurfaceEnabled;
+    RestartPreviewSimulation();
     RefreshPreviewMaterialParameters();
+}
+
+void SWetnessProfileViewport::SetPreviewDropletVisibility(
+    const bool bDroplet1Enabled,
+    const bool bDroplet2Enabled)
+{
+    if (bPreviewDroplet1Enabled == bDroplet1Enabled &&
+        bPreviewDroplet2Enabled == bDroplet2Enabled)
+    {
+        return;
+    }
+    bPreviewDroplet1Enabled = bDroplet1Enabled;
+    bPreviewDroplet2Enabled = bDroplet2Enabled;
+    RestartPreviewSimulation();
+    RefreshPreviewMaterialParameters();
+}
+
+void SWetnessProfileViewport::RestartPreviewSimulation()
+{
+    PreviewAnimationTime = 0.0f;
+    PreviewSimulationAccumulator = 0.0f;
+    PendingSimulationRestartDelay = -1.0f;
+    if (EnsureGPUPreviewSimulator())
+    {
+        if (WetnessProfile.IsValid())
+        {
+            GPUPreviewSimulator->SetProfileParameters(GetSanitizedProfileParameters(WetnessProfile.Get()));
+        }
+        GPUPreviewSimulator->SetScenarioSplashUV(PreviewScenarioSplashUV);
+        GPUPreviewSimulator->SetPreviewChannels(
+            bPreviewAbsorbedLayerEnabled,
+            bPreviewSurfaceLayerEnabled,
+            bPreviewDroplet1Enabled,
+            bPreviewDroplet2Enabled);
+        GPUPreviewSimulator->Restart();
+        BindGPUPreviewTextures();
+    }
+    if (ViewportClient.IsValid())
+    {
+        ViewportClient->Invalidate();
+    }
 }
 
 void SWetnessProfileViewport::FocusOnPreviewMesh(bool bInstant)
@@ -488,6 +617,12 @@ void SWetnessProfileViewport::ApplyResolvedPreviewMesh(bool bFocus)
         return;
     }
 
+    // Simulation uses the same currently selected model/sphere as Manual preview.
+    // The GPU solver remains a normalized 2D domain and is sampled through the model UVs.
+
+    PreviewMeshComponent->SetStaticMesh(PreviewSphereMesh);
+    PreviewMeshComponent->SetRelativeRotation(FRotator::ZeroRotator);
+    PreviewMeshComponent->SetRelativeScale3D(FVector(PreviewSphereScale));
     USkeletalMesh* ResolvedSkeletalMesh =
         bHasPreviewMeshOverride ? PreviewMeshOverride.Get() : ResolveProfilePreviewSkeletalMesh();
     if (ResolvedSkeletalMesh != nullptr)
@@ -504,6 +639,8 @@ void SWetnessProfileViewport::ApplyResolvedPreviewMesh(bool bFocus)
         PreviewMeshComponent->SetVisibility(true);
         RebuildGeneratedSpherePreviewMaterial();
     }
+
+    RefreshScenarioSplashUV();
 
     if (ViewportClient.IsValid())
     {
@@ -709,10 +846,19 @@ void SWetnessProfileViewport::RefreshPreviewMaterialParameters()
     if (PreviewMaterialInstance != nullptr)
     {
         using namespace DWCWetnessProfilePreviewMaterial;
-        PreviewMaterialInstance->SetScalarParameterValue(AbsorbedWaterParameter, PreviewAbsorbedWater);
-        PreviewMaterialInstance->SetScalarParameterValue(SurfaceWaterParameter, PreviewSurfaceWater);
-        PreviewMaterialInstance->SetScalarParameterValue(AbsorbedEnabledParameter, Absorbed.bEnabled ? 1.0f : 0.0f);
-        PreviewMaterialInstance->SetScalarParameterValue(SurfaceEnabledParameter, Surface.bEnabled ? 1.0f : 0.0f);
+        const bool bManualPreview = PreviewBehavior == EPreviewBehavior::Manual;
+        PreviewMaterialInstance->SetScalarParameterValue(
+            AbsorbedWaterParameter,
+            bManualPreview ? PreviewAbsorbedWater : 0.0f);
+        PreviewMaterialInstance->SetScalarParameterValue(
+            SurfaceWaterParameter,
+            bManualPreview ? PreviewSurfaceWater : 0.0f);
+        const bool bPreviewAbsorbedEnabled = Absorbed.bEnabled &&
+            (PreviewBehavior == EPreviewBehavior::Manual || bPreviewAbsorbedLayerEnabled);
+        const bool bPreviewSurfaceEnabled = Surface.bEnabled &&
+            (PreviewBehavior == EPreviewBehavior::Manual || bPreviewSurfaceLayerEnabled);
+        PreviewMaterialInstance->SetScalarParameterValue(AbsorbedEnabledParameter, bPreviewAbsorbedEnabled ? 1.0f : 0.0f);
+        PreviewMaterialInstance->SetScalarParameterValue(SurfaceEnabledParameter, bPreviewSurfaceEnabled ? 1.0f : 0.0f);
         PreviewMaterialInstance->SetScalarParameterValue(
             AbsorbedDarkeningStrengthParameter,
             Parameters.GetAbsorbedDarkeningStrength());
@@ -736,7 +882,7 @@ void SWetnessProfileViewport::RefreshPreviewMaterialParameters()
             FMath::Clamp(Surface.SurfaceWaterSpecular, 0.0f, 1.0f));
         PreviewMaterialInstance->SetScalarParameterValue(
             DropletsEnabledParameter,
-            Surface.bEnabled ? 1.0f : 0.0f);
+            bPreviewSurfaceEnabled && bPreviewDroplet1Enabled ? 1.0f : 0.0f);
         PreviewMaterialInstance->SetScalarParameterValue(
             DropletStampSizeParameter,
             FMath::Clamp(Surface.DropletRadiusPixels, 1.0f, 256.0f));
@@ -777,7 +923,12 @@ void SWetnessProfileViewport::RefreshGeneratedPreviewMaterialParameters()
     const FWetnessProfileParameters Parameters = GetSanitizedProfileParameters(WetnessProfile.Get());
     const FSurfaceWaterProfileParameters& Surface = Parameters.SurfaceWater;
 
-    WriteSinglePixelTexture(PreviewWetnessMapTexture, MakeScalarPreviewColor(PreviewAbsorbedWater));
+    if (PreviewBehavior == EPreviewBehavior::Manual)
+    {
+        WriteSinglePixelTexture(PreviewWetnessMapTexture, MakeScalarPreviewColor(PreviewAbsorbedWater));
+        WriteSinglePixelTexture(PreviewSurfaceDropletTexture, MakeScalarPreviewColor(PreviewSurfaceWater));
+        WriteSinglePixelTexture(PreviewSurfaceFlowDropletTexture, MakeScalarPreviewColor(PreviewSurfaceWater));
+    }
     WriteSinglePixelTexture(
         PreviewWetPartDataTexture,
         FColor(
@@ -785,8 +936,6 @@ void SWetnessProfileViewport::RefreshGeneratedPreviewMaterialParameters()
             EncodePreviewDetailSize(PreviewDroplet1DetailSize),
             EncodePreviewDetailSize(PreviewDroplet2DetailSize),
             255u));
-    WriteSinglePixelTexture(PreviewSurfaceDropletTexture, MakeScalarPreviewColor(PreviewSurfaceWater));
-    WriteSinglePixelTexture(PreviewSurfaceFlowDropletTexture, MakeScalarPreviewColor(PreviewSurfaceWater));
 
     const FLinearColor FallbackProfile0(
         Parameters.GetAbsorbedDarkeningStrength(),
@@ -816,7 +965,10 @@ void SWetnessProfileViewport::RefreshGeneratedPreviewMaterialParameters()
         FMath::Clamp(Surface.DropletFlowNormalStrength, 0.0f, 3.0f),
         0.0f);
 
-    const float SurfacePreviewAmount = Surface.bEnabled ? PreviewSurfaceWater : 0.0f;
+    const bool bManualPreview = PreviewBehavior == EPreviewBehavior::Manual;
+    const float SurfacePreviewAmount = Surface.bEnabled && bManualPreview
+        ? PreviewSurfaceWater
+        : 0.0f;
     FWetClothingLocalRenderProfile PreviewLocalProfile;
     PreviewLocalProfile.Parameters = Parameters;
     PreviewLocalProfile.StableKey = FString::Printf(
@@ -852,13 +1004,35 @@ void SWetnessProfileViewport::RefreshGeneratedPreviewMaterialParameters()
             continue;
         }
 
-        PreviewMID->SetTextureParameterValue(DWCWetMaterialParameters::WetnessMap(), PreviewWetnessMapTexture);
+        // The transient preview material is unified CPU/GPU. Force the GPU branch on
+        // the dynamic instance as well, so source MIC overrides or stale cached data
+        // can never fall back to vertex-color alpha (commonly 1.0 across the mesh).
+        PreviewMID->SetScalarParameterValue(DWCWetMaterialParameters::UseGPUBackend(), 1.0f);
         PreviewMID->SetTextureParameterValue(DWCWetMaterialParameters::WetPartDataTexture(), PreviewWetPartDataTexture);
-        PreviewMID->SetTextureParameterValue(DWCWetMaterialParameters::SurfaceDroplet1RT(), PreviewSurfaceDropletTexture);
-        PreviewMID->SetTextureParameterValue(
-            DWCWetMaterialParameters::SurfaceDroplet2RT(),
-            PreviewSurfaceFlowDropletTexture);
-        PreviewMID->SetScalarParameterValue(DWCWetMaterialParameters::SurfaceWaterTexelSize(), 1.0f);
+        if (PreviewBehavior == EPreviewBehavior::Simulation && EnsureGPUPreviewSimulator())
+        {
+            PreviewMID->SetTextureParameterValue(
+                DWCWetMaterialParameters::WetnessMap(),
+                GPUPreviewSimulator->GetWetnessMap());
+            PreviewMID->SetTextureParameterValue(
+                DWCWetMaterialParameters::SurfaceDroplet1RT(),
+                GPUPreviewSimulator->GetDroplet1Map());
+            PreviewMID->SetTextureParameterValue(
+                DWCWetMaterialParameters::SurfaceDroplet2RT(),
+                GPUPreviewSimulator->GetDroplet2Map());
+            PreviewMID->SetScalarParameterValue(
+                DWCWetMaterialParameters::SurfaceWaterTexelSize(),
+                1.0f / static_cast<float>(FMath::Max(GPUPreviewSimulator->GetResolution(), 1)));
+        }
+        else
+        {
+            PreviewMID->SetTextureParameterValue(DWCWetMaterialParameters::WetnessMap(), PreviewWetnessMapTexture);
+            PreviewMID->SetTextureParameterValue(DWCWetMaterialParameters::SurfaceDroplet1RT(), PreviewSurfaceDropletTexture);
+            PreviewMID->SetTextureParameterValue(
+                DWCWetMaterialParameters::SurfaceDroplet2RT(),
+                PreviewSurfaceFlowDropletTexture);
+            PreviewMID->SetScalarParameterValue(DWCWetMaterialParameters::SurfaceWaterTexelSize(), 1.0f);
+        }
         PreviewMID->SetScalarParameterValue(DWCWetMaterialParameters::UseRenderProfileLUT(), 0.0f);
         const bool bAppliedProfileTextures =
             ResourceSubsystem != nullptr &&
@@ -877,8 +1051,17 @@ void SWetnessProfileViewport::RefreshGeneratedPreviewMaterialParameters()
             PreviewMID->SetVectorParameterValue(DWCWetMaterialParameters::FallbackRenderProfileTexel(5), FallbackProfile5);
             PreviewMID->SetVectorParameterValue(DWCWetMaterialParameters::FallbackRenderProfileTexel(6), FallbackProfile6);
         }
-        PreviewMID->SetScalarParameterValue(PreviewSurfaceWaterOverrideParameter, 1.0f);
+        PreviewMID->SetScalarParameterValue(
+            PreviewSurfaceWaterOverrideParameter,
+            bManualPreview ? 1.0f : 0.0f);
         PreviewMID->SetScalarParameterValue(PreviewSurfaceWaterAmountParameter, SurfacePreviewAmount);
+        const bool bSurfaceLayerVisible = bManualPreview || bPreviewSurfaceLayerEnabled;
+        PreviewMID->SetScalarParameterValue(
+            DWCWetMaterialParameters::Droplet1RenderingEnabled(),
+            bSurfaceLayerVisible && bPreviewDroplet1Enabled ? 1.0f : 0.0f);
+        PreviewMID->SetScalarParameterValue(
+            DWCWetMaterialParameters::Droplet2RenderingEnabled(),
+            bSurfaceLayerVisible && bPreviewDroplet2Enabled ? 1.0f : 0.0f);
         PreviewMID->SetScalarParameterValue(
             DWCWetnessProfilePreviewMaterial::DebugModeParameter,
             static_cast<float>(PreviewMode));
@@ -895,6 +1078,250 @@ void SWetnessProfileViewport::RefreshGeneratedPreviewMaterialParameters()
 
 void SWetnessProfileViewport::RefreshGeneratedPreviewAnimationTime()
 {
+    BindGPUPreviewTextures();
+}
+
+FVector2f SWetnessProfileViewport::ResolveScenarioSplashUV() const
+{
+    const USkeletalMesh* SkeletalMesh = GetDisplayedPreviewSkeletalMesh();
+    if (SkeletalMesh == nullptr)
+    {
+        // The engine sphere has valid coverage around the center of UV0.
+        return FVector2f(0.5f, 0.5f);
+    }
+
+    TArray<int32> MaterialSlots;
+    const int32 MaterialCount = SkeletalMesh->GetMaterials().Num();
+    MaterialSlots.Reserve(MaterialCount);
+    for (int32 MaterialIndex = 0; MaterialIndex < MaterialCount; ++MaterialIndex)
+    {
+        MaterialSlots.Add(MaterialIndex);
+    }
+
+    TArray<FWCAUVPreviewSourceTriangle> Triangles;
+    FString ReadError;
+    if (!FWCAUVPreviewTriangleReader::ReadFromSkeletalMesh(
+            SkeletalMesh,
+            0,
+            0,
+            MakeArrayView(MaterialSlots),
+            Triangles,
+            &ReadError) ||
+        Triangles.IsEmpty())
+    {
+        UE_LOG(
+            LogDWC,
+            Warning,
+            TEXT("DWC Wetness Profile preview could not resolve a visible UV0 splash point for '%s': %s"),
+            *GetPathNameSafe(SkeletalMesh),
+            *ReadError);
+        return FVector2f(0.5f, 0.5f);
+    }
+
+    const FBoxSphereBounds ImportedBounds = SkeletalMesh->GetImportedBounds();
+    const FVector3f TargetPoint(
+        static_cast<float>(ImportedBounds.Origin.X + ImportedBounds.BoxExtent.X * 0.82),
+        static_cast<float>(ImportedBounds.Origin.Y),
+        static_cast<float>(ImportedBounds.Origin.Z + ImportedBounds.BoxExtent.Z * 0.15));
+
+    const FWCAUVPreviewSourceTriangle* BestTriangle = nullptr;
+    double BestScore = TNumericLimits<double>::Max();
+    for (const FWCAUVPreviewSourceTriangle& Triangle : Triangles)
+    {
+        const FVector3f Center =
+            (Triangle.LocalPositions[0] + Triangle.LocalPositions[1] + Triangle.LocalPositions[2]) / 3.0f;
+        const FVector3f Edge0 = Triangle.LocalPositions[1] - Triangle.LocalPositions[0];
+        const FVector3f Edge1 = Triangle.LocalPositions[2] - Triangle.LocalPositions[0];
+        const double AreaWeight = FMath::Max(
+            static_cast<double>(FVector3f::CrossProduct(Edge0, Edge1).Size()),
+            1.0e-4);
+        const double DistanceSquared = static_cast<double>((Center - TargetPoint).SizeSquared());
+        const double Score = DistanceSquared / FMath::Sqrt(AreaWeight);
+        if (Score < BestScore)
+        {
+            BestScore = Score;
+            BestTriangle = &Triangle;
+        }
+    }
+
+    if (BestTriangle == nullptr)
+    {
+        return FVector2f(0.5f, 0.5f);
+    }
+
+    const FVector2f UV0 = BestTriangle->UVs[0];
+    const auto UnwrapNear = [](const FVector2f UV, const FVector2f Reference)
+    {
+        return FVector2f(
+            Reference.X + (UV.X - Reference.X) - FMath::RoundToFloat(UV.X - Reference.X),
+            Reference.Y + (UV.Y - Reference.Y) - FMath::RoundToFloat(UV.Y - Reference.Y));
+    };
+    const FVector2f UV1 = UnwrapNear(BestTriangle->UVs[1], UV0);
+    const FVector2f UV2 = UnwrapNear(BestTriangle->UVs[2], UV0);
+    const FVector2f UV = (UV0 + UV1 + UV2) / 3.0f;
+    if (!FMath::IsFinite(UV.X) || !FMath::IsFinite(UV.Y))
+    {
+        return FVector2f(0.5f, 0.5f);
+    }
+
+    return FVector2f(
+        FMath::Clamp(UV.X - FMath::Floor(UV.X), 0.001f, 0.999f),
+        FMath::Clamp(UV.Y - FMath::Floor(UV.Y), 0.001f, 0.999f));
+}
+
+void SWetnessProfileViewport::RefreshScenarioSplashUV()
+{
+    PreviewScenarioSplashUV = ResolveScenarioSplashUV();
+    if (GPUPreviewSimulator && GPUPreviewSimulator->IsReady())
+    {
+        GPUPreviewSimulator->SetScenarioSplashUV(PreviewScenarioSplashUV);
+    }
+}
+
+bool SWetnessProfileViewport::EnsureGPUPreviewSimulator()
+{
+    if (GPUPreviewSimulator && GPUPreviewSimulator->IsReady())
+    {
+        return true;
+    }
+    if (bGPUPreviewUnavailable || !PreviewScene.IsValid())
+    {
+        return false;
+    }
+
+    IDWCGPUModule* GPUModule = FModuleManager::Get().LoadModulePtr<IDWCGPUModule>(TEXT("DWCGPU"));
+    if (GPUModule == nullptr)
+    {
+        bGPUPreviewUnavailable = true;
+        UE_LOG(LogDWC, Warning, TEXT("DWC Wetness Profile simulation preview could not load the optional DWCGPU module."));
+        return false;
+    }
+
+    TUniquePtr<IDWCGPUPreviewSimulator> NewSimulator = GPUModule->CreatePreviewSimulator();
+    if (!NewSimulator)
+    {
+        bGPUPreviewUnavailable = true;
+        return false;
+    }
+
+    const FWetClothingSettings Defaults;
+    FDWCGPUPreviewInitArgs Args;
+    Args.WorldContextObject = PreviewScene->GetWorld();
+    Args.Resolution = 512;
+    Args.MaxWetness = Defaults.MaxWetness;
+    Args.CapillaryImmediateAbsorptionFraction = Defaults.CapillaryImmediateAbsorptionFraction;
+    Args.bUseEightDirectionDiffusion = false;
+    if (!NewSimulator->Initialize(Args))
+    {
+        bGPUPreviewUnavailable = true;
+        return false;
+    }
+    if (WetnessProfile.IsValid())
+    {
+        NewSimulator->SetProfileParameters(GetSanitizedProfileParameters(WetnessProfile.Get()));
+    }
+    NewSimulator->SetScenarioSplashUV(PreviewScenarioSplashUV);
+    NewSimulator->SetPreviewChannels(
+        bPreviewAbsorbedLayerEnabled,
+        bPreviewSurfaceLayerEnabled,
+        bPreviewDroplet1Enabled,
+        bPreviewDroplet2Enabled);
+    GPUPreviewSimulator = MoveTemp(NewSimulator);
+    return true;
+}
+
+void SWetnessProfileViewport::ShutdownGPUPreviewSimulator()
+{
+    if (GPUPreviewSimulator)
+    {
+        GPUPreviewSimulator->Shutdown();
+        GPUPreviewSimulator.Reset();
+    }
+}
+
+void SWetnessProfileViewport::TickGPUPreviewSimulation(const float InDeltaTime)
+{
+    if (PendingSimulationRestartDelay >= 0.0f)
+    {
+        PendingSimulationRestartDelay -= FMath::Max(InDeltaTime, 0.0f);
+        if (PendingSimulationRestartDelay <= 0.0f)
+        {
+            RestartPreviewSimulation();
+        }
+    }
+
+    if (!bPreviewAnimationEnabled || PreviewAnimationSpeed <= KINDA_SMALL_NUMBER ||
+        !EnsureGPUPreviewSimulator())
+    {
+        return;
+    }
+
+    PreviewSimulationAccumulator += FMath::Max(InDeltaTime, 0.0f) * PreviewAnimationSpeed;
+    bool bStepped = false;
+    int32 SafetyCounter = 0;
+    while (PreviewSimulationAccumulator >= PreviewFixedStep && SafetyCounter++ < 8)
+    {
+        if (PreviewAnimationTime >= GetPreviewLoopDuration() - KINDA_SMALL_NUMBER)
+        {
+            if (bPreviewLoopEnabled)
+            {
+                GPUPreviewSimulator->Restart();
+                PreviewAnimationTime = 0.0f;
+                BindGPUPreviewTextures();
+            }
+            else
+            {
+                PreviewAnimationTime = GetPreviewLoopDuration();
+                bPreviewAnimationEnabled = false;
+                UpdateRealtimeState();
+                break;
+            }
+        }
+        GPUPreviewSimulator->Step(PreviewFixedStep, PreviewAnimationTime);
+        PreviewAnimationTime += PreviewFixedStep;
+        PreviewSimulationAccumulator -= PreviewFixedStep;
+        bStepped = true;
+    }
+
+    if (bStepped)
+    {
+        RefreshGeneratedPreviewAnimationTime();
+        if (ViewportClient.IsValid())
+        {
+            ViewportClient->Invalidate();
+        }
+    }
+}
+
+void SWetnessProfileViewport::BindGPUPreviewTextures()
+{
+    if (!GPUPreviewSimulator || !GPUPreviewSimulator->IsReady())
+    {
+        return;
+    }
+    const float TexelSize = 1.0f / static_cast<float>(FMath::Max(GPUPreviewSimulator->GetResolution(), 1));
+    for (UMaterialInstanceDynamic* PreviewMID : GeneratedPreviewDynamicMaterials)
+    {
+        if (PreviewMID == nullptr)
+        {
+            continue;
+        }
+        PreviewMID->SetScalarParameterValue(DWCWetMaterialParameters::UseGPUBackend(), 1.0f);
+        PreviewMID->SetScalarParameterValue(PreviewSurfaceWaterOverrideParameter, 0.0f);
+        PreviewMID->SetScalarParameterValue(PreviewSurfaceWaterAmountParameter, 0.0f);
+        PreviewMID->SetTextureParameterValue(DWCWetMaterialParameters::WetnessMap(), GPUPreviewSimulator->GetWetnessMap());
+        PreviewMID->SetTextureParameterValue(DWCWetMaterialParameters::SurfaceDroplet1RT(), GPUPreviewSimulator->GetDroplet1Map());
+        PreviewMID->SetTextureParameterValue(DWCWetMaterialParameters::SurfaceDroplet2RT(), GPUPreviewSimulator->GetDroplet2Map());
+        PreviewMID->SetScalarParameterValue(DWCWetMaterialParameters::SurfaceWaterTexelSize(), TexelSize);
+    }
+}
+
+void SWetnessProfileViewport::ScheduleSimulationRestart()
+{
+    if (PreviewBehavior == EPreviewBehavior::Simulation)
+    {
+        PendingSimulationRestartDelay = PreviewRestartDebounce;
+    }
 }
 
 void SWetnessProfileViewport::UpdateRealtimeState()
@@ -902,19 +1329,40 @@ void SWetnessProfileViewport::UpdateRealtimeState()
     if (ViewportClient.IsValid())
     {
         ViewportClient->SetRealtime(
+            PreviewBehavior == EPreviewBehavior::Simulation &&
             bPreviewAnimationEnabled && PreviewAnimationSpeed > KINDA_SMALL_NUMBER);
     }
 }
 
 FText SWetnessProfileViewport::GetOverlayText() const
 {
+    if (PreviewBehavior == EPreviewBehavior::Simulation)
+    {
+        if (bGPUPreviewUnavailable)
+        {
+            return LOCTEXT(
+                "SimulationPreviewUnavailable",
+                "GPU Simulation Preview unavailable\nThe optional DWCGPU module could not be initialized.");
+        }
+        FNumberFormattingOptions TimeOptions;
+        TimeOptions.MinimumFractionalDigits = 1;
+        TimeOptions.MaximumFractionalDigits = 1;
+        return FText::Format(
+            LOCTEXT(
+                "SimulationPreviewHint",
+                "GPU Simulation Preview  |  Single Splash\nTime {0} / {1} s  |  {2}x  |  {3}"),
+            FText::AsNumber(PreviewAnimationTime, &TimeOptions),
+            FText::AsNumber(GetPreviewLoopDuration(), &TimeOptions),
+            FText::AsNumber(PreviewAnimationSpeed),
+            bPreviewAnimationEnabled ? LOCTEXT("SimulationPlaying", "Playing") : LOCTEXT("SimulationPaused", "Paused"));
+    }
+
     const FWetnessProfileParameters Parameters = GetSanitizedProfileParameters(WetnessProfile.Get());
     const FSurfaceWaterProfileParameters& Surface = Parameters.SurfaceWater;
-
     return FText::Format(
         LOCTEXT(
             "PreviewHint",
-            "Wetness Profile Preview\nAbsorbed Wetness {0}%  |  Droplet1/Droplet2 Strength {1}%/{6}%\nDarkening {2}%  |  Absorbed Glossiness {3}%\nDroplet1/Droplet2 Normal {4}%/{8}%  |  Roughness Blend {5}%/{7}%"),
+            "Manual Preview\nAbsorbed Wetness {0}%  |  Droplet1/Droplet2 Strength {1}%/{6}%\nDarkening {2}%  |  Absorbed Glossiness {3}%\nDroplet1/Droplet2 Normal {4}%/{8}%  |  Roughness Blend {5}%/{7}%"),
         FText::AsNumber(FMath::RoundToInt(PreviewAbsorbedWater * 100.0f)),
         FText::AsNumber(FMath::RoundToInt(FMath::Clamp(Surface.SurfaceWaterTotalStrength, 0.0f, 1.0f) * 100.0f)),
         FText::AsNumber(FMath::RoundToInt(Parameters.GetAbsorbedDarkeningStrength() * 100.0f)),

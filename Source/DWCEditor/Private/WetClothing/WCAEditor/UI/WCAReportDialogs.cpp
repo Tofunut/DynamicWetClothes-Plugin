@@ -637,26 +637,10 @@ namespace
 #endif
     }
 
-    bool HasLastSlotLODResults(
-        const UWetClothingAsset& Asset,
-        const int32 MaterialSlotIndex)
-    {
-#if WITH_EDITORONLY_DATA
-        return Asset.Derived.Inline.LastDataUVSlotLODResults.ContainsByPredicate(
-            [MaterialSlotIndex](const FDWCDataUVSlotLODResult& Record)
-            {
-                return Record.MaterialSlotIndex == MaterialSlotIndex;
-            });
-#else
-        return false;
-#endif
-    }
-
     FDataUVSlotLODDisplay BuildSlotLODDisplay(
         const UWetClothingAsset& Asset,
         const int32 MaterialSlotIndex,
-        const int32 LODIndex,
-        const bool bMarkFailure)
+        const int32 LODIndex)
     {
         FDataUVSlotLODDisplay Display;
         const FDWCDataUVSlotLODResult* LastResult = FindLastSlotLODResult(
@@ -745,22 +729,13 @@ namespace
             return Display;
         }
 
-        if (bMarkFailure)
-        {
-            Display.Status = EDataUVSlotLODStatus::Failed;
-            Display.StatusText = LOCTEXT("DWCDataUVDetailsFailedLegacy", "Failed");
-            Display.IconName = TEXT("Icons.ErrorWithColor");
-            Display.IconColor = ColoredStatusIconTint();
-            Display.TextColor = ErrorColor();
-        }
-        else
-        {
-            Display.Status = EDataUVSlotLODStatus::NotGenerated;
-            Display.StatusText = LOCTEXT("DWCDataUVDetailsNotGeneratedLegacy", "Not Generated");
-            Display.IconName = TEXT("Icons.Minus");
-            Display.IconColor = FSlateColor(FStyleColors::ForegroundHover);
-            Display.TextColor = FSlateColor(FStyleColors::ForegroundHover);
-        }
+        // Do not infer a failed LOD from the slot-level failure flag. A LOD is shown as
+        // Failed only when the build service persisted that exact slot/LOD result.
+        Display.Status = EDataUVSlotLODStatus::NotGenerated;
+        Display.StatusText = LOCTEXT("DWCDataUVDetailsNotGeneratedLegacy", "Not Generated");
+        Display.IconName = TEXT("Icons.Minus");
+        Display.IconColor = FSlateColor(FStyleColors::ForegroundHover);
+        Display.TextColor = FSlateColor(FStyleColors::ForegroundHover);
         return Display;
     }
 
@@ -772,8 +747,6 @@ namespace
     {
         const TArray<int32> LODIndices = CollectMappedLODIndices(Asset, PreparedMesh);
         const bool bSlotFailed = FailedMaterialSlotIndices.Contains(MaterialSlotIndex);
-        const bool bHasPersistedLODResults = HasLastSlotLODResults(Asset, MaterialSlotIndex);
-        const int32 FirstMappedLOD = LODIndices.IsEmpty() ? INDEX_NONE : LODIndices[0];
         bool bHasReady = false;
         bool bHasNotes = false;
         bool bHasWarnings = false;
@@ -786,8 +759,7 @@ namespace
             const FDataUVSlotLODDisplay Display = BuildSlotLODDisplay(
                 Asset,
                 MaterialSlotIndex,
-                LODIndex,
-                bSlotFailed && !bHasPersistedLODResults && LODIndex == FirstMappedLOD);
+                LODIndex);
             bHasReady |= Display.Status == EDataUVSlotLODStatus::Ready ||
                 Display.Status == EDataUVSlotLODStatus::ReadyWithNotes ||
                 Display.Status == EDataUVSlotLODStatus::ReadyWithWarnings;
@@ -867,7 +839,6 @@ namespace
     {
         const TArray<int32> LODIndices = CollectMappedLODIndices(Asset, PreparedMesh);
         const bool bSlotFailed = FailedMaterialSlotIndices.Contains(MaterialSlotIndex);
-        const bool bHasPersistedLODResults = HasLastSlotLODResults(Asset, MaterialSlotIndex);
         int32 RecordedLODCount = 0;
         int32 LatestRenderVertexCount = 0;
         int32 ExcludedTriangleCount = 0;
@@ -900,15 +871,13 @@ namespace
                     Warning->LargestConnectedExcluded3DSurfaceRatio);
             }
         }
-        const int32 FirstMappedLOD = LODIndices.IsEmpty() ? INDEX_NONE : LODIndices[0];
         TSharedRef<SVerticalBox> StatusRows = SNew(SVerticalBox);
         for (const int32 LODIndex : LODIndices)
         {
             const FDataUVSlotLODDisplay Display = BuildSlotLODDisplay(
                 Asset,
                 MaterialSlotIndex,
-                LODIndex,
-                bSlotFailed && !bHasPersistedLODResults && LODIndex == FirstMappedLOD);
+                LODIndex);
             StatusRows->AddSlot()
             .AutoHeight()
             .Padding(0.0f, 3.0f)
@@ -1415,8 +1384,7 @@ namespace
                 const FDataUVSlotLODDisplay Display = BuildSlotLODDisplay(
                     Asset,
                     SlotIndex,
-                    LODIndex,
-                    FailedMaterialSlotIndices.Contains(SlotIndex));
+                    LODIndex);
                 switch (Display.Status)
                 {
                 case EDataUVSlotLODStatus::Ready: ++ReadyCount; break;

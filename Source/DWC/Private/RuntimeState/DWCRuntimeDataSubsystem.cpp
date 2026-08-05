@@ -4,6 +4,7 @@
 #include "Async/DWCSkinningTasks.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "DataAssets/WetClothingAsset.h"
+#include "DataAssets/WetClothingGPUData.h"
 #include "Engine/SkeletalMesh.h"
 #include "Rendering/SkeletalMeshLODRenderData.h"
 #include "Rendering/SkeletalMeshRenderData.h"
@@ -16,26 +17,50 @@ TSharedPtr<const FWetClothingRuntimeData, ESPMode::ThreadSafe>
 UDWCRuntimeDataSubsystem::AcquireSharedRuntimeData(
     const UWetClothingAsset& WetClothingAsset,
     USkeletalMeshComponent& TargetSkeletalMesh,
+    const EDWCSimulationMode SimulationMode,
     UObject* OwnerForLogs)
 {
     constexpr int32 RuntimeLODIndex = UWetClothingAsset::RuntimeSimulationLODIndex;
+    const bool bGPUWetnessMode = SimulationMode == EDWCSimulationMode::WetnessMapGPU;
     USkeletalMesh* SkeletalMesh = TargetSkeletalMesh.GetSkeletalMeshAsset();
     if (SkeletalMesh == nullptr ||
-        WetClothingAsset.GetDWCSkeletalMesh() != SkeletalMesh ||
-        !WetClothingAsset.IsPrecomputedSimulationDataMetadataValidForMesh(SkeletalMesh))
+        WetClothingAsset.GetDWCSkeletalMesh() != SkeletalMesh)
     {
         return nullptr;
     }
 
-    const FWetClothingPrecomputedSimulationData& PrecomputedData =
-        WetClothingAsset.GetPrecomputedSimulationData();
+    const FWetClothingPrecomputedSimulationData* CPUData = nullptr;
+    const FDWCGPULODBakeData* GPUData = nullptr;
 
     FDWCSharedRuntimeDataKey Key;
     Key.WetClothingAsset = FObjectKey(&WetClothingAsset);
     Key.SkeletalMesh = FObjectKey(SkeletalMesh);
-    Key.DataVersion = PrecomputedData.DataVersion;
-    Key.MeshSignature = PrecomputedData.MeshSignature;
-    Key.SourceDataSignature = PrecomputedData.SourceDataSignature;
+    Key.SimulationMode = SimulationMode;
+
+    if (bGPUWetnessMode)
+    {
+        if (!WetClothingAsset.IsGPURuntimeDataMetadataValidForMesh(SkeletalMesh, RuntimeLODIndex))
+        {
+            return nullptr;
+        }
+
+        GPUData = &WetClothingAsset.GetGPUWetMapRuntimeData(RuntimeLODIndex);
+        Key.DataVersion = GPUData->RuntimeDataVersion;
+        Key.MeshSignature = GPUData->MeshSignature;
+        Key.SourceDataSignature = GPUData->SourceDataSignature;
+    }
+    else
+    {
+        if (!WetClothingAsset.IsPrecomputedSimulationDataMetadataValidForMesh(SkeletalMesh))
+        {
+            return nullptr;
+        }
+
+        CPUData = &WetClothingAsset.GetPrecomputedSimulationData();
+        Key.DataVersion = CPUData->DataVersion;
+        Key.MeshSignature = CPUData->MeshSignature;
+        Key.SourceDataSignature = CPUData->SourceDataSignature;
+    }
 
     if (const TWeakPtr<const FWetClothingRuntimeData, ESPMode::ThreadSafe>* ExistingWeak =
             SharedRuntimeDataCache.Find(Key))
@@ -47,10 +72,27 @@ UDWCRuntimeDataSubsystem::AcquireSharedRuntimeData(
         SharedRuntimeDataCache.Remove(Key);
     }
 
-    // Full mesh/source signature validation is intentionally performed only on
-    // cache miss. Additional receivers using the same immutable payload reuse
-    // the validated shared object without repeating full mesh traversal.
-    if (!WetClothingAsset.IsPrecomputedSimulationDataValidForMesh(SkeletalMesh))
+    // Full validation is intentionally performed only on cache miss. GPU mode
+    // validates only GPU runtime data; CPU neighbor data must not gate it.
+    if (bGPUWetnessMode)
+    {
+        if (!WetClothingAsset.IsGPURuntimeDataValidForMesh(SkeletalMesh, RuntimeLODIndex))
+        {
+            return nullptr;
+        }
+        GPUData = &WetClothingAsset.GetGPUWetMapRuntimeData(RuntimeLODIndex);
+    }
+    else if (!WetClothingAsset.IsPrecomputedSimulationDataValidForMesh(SkeletalMesh))
+    {
+        return nullptr;
+    }
+
+    FSkeletalMeshLODRenderData* LODData = nullptr;
+    if (!FWetRuntimeDataBuilder::GetLODRenderData(
+            &TargetSkeletalMesh,
+            RuntimeLODIndex,
+            LODData) ||
+        LODData == nullptr)
     {
         return nullptr;
     }
@@ -58,10 +100,10 @@ UDWCRuntimeDataSubsystem::AcquireSharedRuntimeData(
     TSharedPtr<FWetClothingRuntimeData, ESPMode::ThreadSafe> MutableData =
         MakeShared<FWetClothingRuntimeData, ESPMode::ThreadSafe>();
     MutableData->LODIndex = RuntimeLODIndex;
-    MutableData->VertexCount = PrecomputedData.VertexCount;
-    MutableData->DataVersion = PrecomputedData.DataVersion;
-    MutableData->MeshSignature = PrecomputedData.MeshSignature;
-    MutableData->SourceDataSignature = PrecomputedData.SourceDataSignature;
+    MutableData->VertexCount = LODData->GetNumVertices();
+    MutableData->DataVersion = Key.DataVersion;
+    MutableData->MeshSignature = Key.MeshSignature;
+    MutableData->SourceDataSignature = Key.SourceDataSignature;
 
     FWetRuntimeDataBuildArgs Args;
     Args.OwnerForLogs = OwnerForLogs;
@@ -69,30 +111,45 @@ UDWCRuntimeDataSubsystem::AcquireSharedRuntimeData(
     Args.WetClothingAsset = &WetClothingAsset;
     Args.MutableRuntimeData = MutableData.Get();
     Args.RuntimeData = MutableData.Get();
-    Args.bUsePrecomputedSimulationData = true;
-    Args.bUsePrecomputedBoneOptimizationCache = true;
-    Args.bPrecomputedDataAlreadyValidated = true;
 
-    if (!FWetRuntimeDataBuilder::InitializeWetPartVertexData(Args))
+    if (bGPUWetnessMode)
     {
-        return nullptr;
+        Args.bUsePrecomputedSimulationData = false;
+        Args.bUsePrecomputedBoneOptimizationCache = false;
+        if (!FWetRuntimeDataBuilder::InitializeWetPartVertexDataFromGPUData(
+                Args,
+                MutableData->VertexCount))
+        {
+            return nullptr;
+        }
     }
-
-    // The bone cache is a broad-phase optimization. Its absence is non-fatal;
-    // contact resolution will use its existing full-vertex fallback.
-    FWetRuntimeDataBuilder::InitializeBoneOptimizationCacheFromPrecomputedData(Args);
-
-    // Neighbor data is required only by the CPU spread simulation. Build it
-    // once when available, but keep common data usable by GPU-only receivers.
-    if (!FWetRuntimeDataBuilder::InitializeNeighborGraphFromPrecomputedData(Args))
+    else
     {
-        MutableData->ResetNeighborGraph();
-        UE_LOG(
-            LogDWC,
-            Warning,
-            TEXT("DWC shared runtime data: neighbor graph is unavailable for '%s' LOD %d. GPU receivers remain usable; CPU spread requires regenerated precomputed data."),
-            *GetNameSafe(&WetClothingAsset),
-            RuntimeLODIndex);
+        check(CPUData != nullptr);
+        MutableData->VertexCount = CPUData->VertexCount;
+        Args.bUsePrecomputedSimulationData = true;
+        Args.bUsePrecomputedBoneOptimizationCache = true;
+        Args.bPrecomputedDataAlreadyValidated = true;
+
+        if (!FWetRuntimeDataBuilder::InitializeWetPartVertexData(Args))
+        {
+            return nullptr;
+        }
+
+        // The bone cache is a broad-phase optimization. Its absence is non-fatal;
+        // contact resolution will use its existing full-vertex fallback.
+        FWetRuntimeDataBuilder::InitializeBoneOptimizationCacheFromPrecomputedData(Args);
+
+        if (!FWetRuntimeDataBuilder::InitializeNeighborGraphFromPrecomputedData(Args))
+        {
+            MutableData->ResetNeighborGraph();
+            UE_LOG(
+                LogDWC,
+                Warning,
+                TEXT("DWC shared runtime data: neighbor graph is unavailable for '%s' LOD %d. CPU spread requires regenerated precomputed data."),
+                *GetNameSafe(&WetClothingAsset),
+                RuntimeLODIndex);
+        }
     }
 
     TSharedPtr<const FWetClothingRuntimeData, ESPMode::ThreadSafe> SharedData = MutableData;

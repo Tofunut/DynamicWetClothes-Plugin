@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Misc/Crc.h"
+#include "Core/DWCSimulationMode.h"
 #include "Subsystems/WorldSubsystem.h"
 #include "UObject/ObjectKey.h"
 #include "DWCRuntimeDataSubsystem.generated.h"
@@ -20,6 +21,7 @@ struct DWC_API FDWCSharedRuntimeDataKey
     int32 DataVersion = 0;
     FString MeshSignature;
     FString SourceDataSignature;
+    EDWCSimulationMode SimulationMode = EDWCSimulationMode::VertexCPU;
 
     bool operator==(const FDWCSharedRuntimeDataKey& Other) const
     {
@@ -27,7 +29,8 @@ struct DWC_API FDWCSharedRuntimeDataKey
                SkeletalMesh == Other.SkeletalMesh &&
                DataVersion == Other.DataVersion &&
                MeshSignature == Other.MeshSignature &&
-               SourceDataSignature == Other.SourceDataSignature;
+               SourceDataSignature == Other.SourceDataSignature &&
+               SimulationMode == Other.SimulationMode;
     }
 
     friend uint32 GetTypeHash(const FDWCSharedRuntimeDataKey& Key)
@@ -35,7 +38,8 @@ struct DWC_API FDWCSharedRuntimeDataKey
         uint32 Hash = HashCombine(GetTypeHash(Key.WetClothingAsset), GetTypeHash(Key.SkeletalMesh));
         Hash = HashCombine(Hash, GetTypeHash(Key.DataVersion));
         Hash = HashCombine(Hash, FCrc::StrCrc32(*Key.MeshSignature));
-        return HashCombine(Hash, FCrc::StrCrc32(*Key.SourceDataSignature));
+        Hash = HashCombine(Hash, FCrc::StrCrc32(*Key.SourceDataSignature));
+        return HashCombine(Hash, GetTypeHash(static_cast<uint8>(Key.SimulationMode)));
     }
 };
 
@@ -128,6 +132,7 @@ public:
     TSharedPtr<const FWetClothingRuntimeData, ESPMode::ThreadSafe> AcquireSharedRuntimeData(
         const UWetClothingAsset& WetClothingAsset,
         USkeletalMeshComponent& TargetSkeletalMesh,
+        EDWCSimulationMode SimulationMode,
         UObject* OwnerForLogs = nullptr);
 
     void InvalidateSharedRuntimeData(const UWetClothingAsset* WetClothingAsset);

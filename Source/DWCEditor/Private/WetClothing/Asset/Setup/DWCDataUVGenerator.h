@@ -1,10 +1,31 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "MeshDescription.h"
 #include "DWCDataUVGenerationTypes.h"
 #include "DataAssets/WetClothingAssetSetupData.h"
 
 class USkeletalMesh;
+
+
+/** Immutable output of the expensive chart analysis/packing stage. */
+struct FDWCDataUVGenerationPlan
+{
+    int32 UVChannelIndex = INDEX_NONE;
+    TArray<FDWCDataUVTriangle> Triangles;
+    TArray<FDWCDataUVChart> SeamCharts;
+    TMap<int32, FVector2f> PackedUVBySyntheticCorner;
+    TSet<int32> ExcludedTriangleIndices;
+    TSet<int32> ExcludedVertexInstanceIDs;
+};
+
+struct FDWCDataUVPlanApplyResult
+{
+    bool bSucceeded = false;
+    int32 ChartBoundarySplitVertexInstanceCount = 0;
+    double SeamSplitMilliseconds = 0.0;
+    FString Message;
+};
 
 struct FDWCDataUVGenerationResult
 {
@@ -68,6 +89,7 @@ struct FDWCDataUVGenerationResult
     }
 
     FString Message;
+    TSharedPtr<const FDWCDataUVGenerationPlan, ESPMode::ThreadSafe> GenerationPlan;
 };
 
 /** Generates and writes a DWC UV Channel into an editable Skeletal Mesh LOD. */
@@ -81,7 +103,19 @@ public:
         int32 PreferredUVChannelIndex,
         bool bAllowOverwriteExistingChannel = false,
         int32 TargetMaterialSlotIndex = INDEX_NONE,
-        const TSet<int32>* TargetMaterialSlotIndices = nullptr);
+        const TSet<int32>* TargetMaterialSlotIndices = nullptr,
+        bool bDeferMeshCommit = false,
+        FMeshDescription* MeshDescriptionOverride = nullptr,
+        bool bAnalysisOnly = false,
+        bool bClearNonTargetVertexInstances = true,
+        const TMap<FName, int32>* MaterialSlotIndexByNameOverride = nullptr);
+
+    static FDWCDataUVPlanApplyResult ApplyGenerationPlan(
+        USkeletalMesh* SkeletalMesh,
+        int32 LODIndex,
+        const FDWCDataUVGenerationPlan& Plan,
+        bool bClearDestinationChannel = false,
+        bool bDeferMeshCommit = false);
 
     static FDWCDataUVGenerationResult TransferFromSourceLOD(
         USkeletalMesh* SkeletalMesh,

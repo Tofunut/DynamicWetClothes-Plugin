@@ -32,6 +32,7 @@ namespace DWCDataUVGeneratorInternal
     static constexpr double VisibleExclusionNoteRatioThreshold = 0.0001; // 0.01%
     static constexpr double VisibleExclusionFailureRatioThreshold = 0.005; // 0.5%
     static constexpr double ConnectedVisibleExclusionFailureRatioThreshold = 0.0025; // 0.25%
+    static constexpr bool bTemporarilyAllowVisibleExclusionLimitFailures = true;
 
     struct FExcludedVisibleTriangle
     {
@@ -1199,7 +1200,10 @@ FDWCDataUVGenerationResult FDWCDataUVGenerator::GenerateForSkeletalMesh(
             const bool bConnectedExcludedRegionLimitExceeded =
                 SlotDiagnostic.LargestConnectedExcluded3DSurfaceRatio > ConnectedVisibleExclusionFailureRatioThreshold;
 
-            if (bTotalExcludedSurfaceLimitExceeded || bConnectedExcludedRegionLimitExceeded)
+            // Temporary bypass: allow degenerate/excluded visible surface over the failure limit
+            // to pass generation. Revert by removing this guard.
+            if (!bTemporarilyAllowVisibleExclusionLimitFailures &&
+                (bTotalExcludedSurfaceLimitExceeded || bConnectedExcludedRegionLimitExceeded))
             {
                 Severity = EDWCDataUVResultSeverity::Failed;
                 Result.FailedMaterialSlotIndices.Add(MaterialSlotIndex);

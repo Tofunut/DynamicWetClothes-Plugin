@@ -16,6 +16,13 @@ enum class EDWCEditorPreviewMaterialFeature : uint8
 };
 ENUM_CLASS_FLAGS(EDWCEditorPreviewMaterialFeature);
 
+enum class EDWCEditorPreviewMaterialState : uint8
+{
+    Ready,
+    Compiling,
+    Failed
+};
+
 /**
  * Adds mode-specific nodes after the common DWC surface graph has been built.
  * FeatureMask and FeatureSchemaVersion must change whenever the callback changes
@@ -46,7 +53,9 @@ struct FDWCEditorPreviewMaterialRequest
 
 struct FDWCEditorPreviewMaterialResult
 {
+    EDWCEditorPreviewMaterialState State = EDWCEditorPreviewMaterialState::Failed;
     bool bSucceeded = false;
+    bool bPending = false;
     bool bGraphCacheHit = false;
     bool bParentCacheHit = false;
     bool bMIDCacheHit = false;
@@ -63,6 +72,7 @@ struct FDWCEditorPreviewMaterialCacheStats
     int32 ParentEntryCount = 0;
     int32 SlotMIDEntryCount = 0;
     int32 FailedGraphEntryCount = 0;
+    int32 PendingGraphEntryCount = 0;
     int32 FailedParentEntryCount = 0;
     uint64 EstimatedContainerBytes = 0;
 
@@ -74,6 +84,9 @@ struct FDWCEditorPreviewMaterialCacheStats
     uint64 MIDMissCount = 0;
 
     uint64 GraphBuildCount = 0;
+    uint64 GraphCompileRequestCount = 0;
+    uint64 GraphCompileCompleteCount = 0;
+    uint64 GraphCompileFailureCount = 0;
     uint64 ParentBuildCount = 0;
     uint64 MIDBuildCount = 0;
     uint64 SourceInvalidationCount = 0;

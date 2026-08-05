@@ -12,6 +12,7 @@ enum class EDWCEditorPreviewLayerKind : uint8
     LiveWrinkleHover,
     SavedTransparency,
     LiveTransparency,
+    LiveTransparencyHover,
     Visualization
 };
 

@@ -41,6 +41,25 @@ FIntRect FDWCEditorRasterPostProcess::MapRect(
         DestinationSize);
 }
 
+FIntRect FDWCEditorRasterPostProcess::MapDestinationRectToSourceReadRect(
+    const FIntRect& DestinationRect,
+    const FIntPoint SourceSize,
+    const FIntPoint DestinationSize)
+{
+    if (DestinationRect.IsEmpty() || SourceSize.X <= 0 || SourceSize.Y <= 0 ||
+        DestinationSize.X <= 0 || DestinationSize.Y <= 0)
+    {
+        return FIntRect();
+    }
+    return ClampRect(
+        FIntRect(
+            FMath::FloorToInt(static_cast<double>(DestinationRect.Min.X) * SourceSize.X / DestinationSize.X),
+            FMath::FloorToInt(static_cast<double>(DestinationRect.Min.Y) * SourceSize.Y / DestinationSize.Y),
+            FMath::CeilToInt(static_cast<double>(DestinationRect.Max.X) * SourceSize.X / DestinationSize.X),
+            FMath::CeilToInt(static_cast<double>(DestinationRect.Max.Y) * SourceSize.Y / DestinationSize.Y)),
+        SourceSize);
+}
+
 bool FDWCEditorRasterPostProcess::DownsampleNormalSurface(
     const FDWCEditorNormalRasterSurface& Source,
     const FIntPoint DestinationSize,
@@ -217,6 +236,84 @@ bool FDWCEditorRasterPostProcess::ResampleAndEncodeNormalPixels(
                 ? FMath::Clamp(static_cast<float>(CoverageSum / WeightSum), 0.0f, 1.0f)
                 : 1.0f;
             InOutPixels[DestinationY * DestinationSize.X + DestinationX] = EncodeNormal(Normal, Alpha);
+        }
+    }
+    return true;
+}
+
+bool FDWCEditorRasterPostProcess::ResampleAndEncodeNormalRegion(
+    const FDWCEditorNormalRasterRegion& SourceRegion,
+    const FIntPoint DestinationSize,
+    const FIntRect& DestinationRect,
+    TArray<FColor>& OutPixels,
+    const bool bEncodeCoverageInAlpha)
+{
+    if (!SourceRegion.IsValid() || DestinationSize.X <= 0 || DestinationSize.Y <= 0)
+    {
+        OutPixels.Reset();
+        return false;
+    }
+    const FIntRect Rect = ClampRect(DestinationRect, DestinationSize);
+    if (Rect.IsEmpty())
+    {
+        OutPixels.Reset();
+        return false;
+    }
+    const int64 PixelCount64 = static_cast<int64>(Rect.Width()) * Rect.Height();
+    if (PixelCount64 <= 0 || PixelCount64 > MAX_int32)
+    {
+        OutPixels.Reset();
+        return false;
+    }
+    OutPixels.SetNumUninitialized(static_cast<int32>(PixelCount64));
+    const bool bCoverage = bEncodeCoverageInAlpha && SourceRegion.Surface.HasCoverage();
+
+    for (int32 DestinationY = Rect.Min.Y; DestinationY < Rect.Max.Y; ++DestinationY)
+    {
+        const double SourceMinY = static_cast<double>(DestinationY) * SourceRegion.CanvasSize.Y / DestinationSize.Y;
+        const double SourceMaxY = static_cast<double>(DestinationY + 1) * SourceRegion.CanvasSize.Y / DestinationSize.Y;
+        for (int32 DestinationX = Rect.Min.X; DestinationX < Rect.Max.X; ++DestinationX)
+        {
+            const double SourceMinX = static_cast<double>(DestinationX) * SourceRegion.CanvasSize.X / DestinationSize.X;
+            const double SourceMaxX = static_cast<double>(DestinationX + 1) * SourceRegion.CanvasSize.X / DestinationSize.X;
+            FVector3d NormalSum = FVector3d::ZeroVector;
+            double CoverageSum = 0.0;
+            double WeightSum = 0.0;
+            for (int32 SourceY = FMath::FloorToInt(SourceMinY); SourceY < FMath::CeilToInt(SourceMaxY); ++SourceY)
+            {
+                const double WeightY = FMath::Max(
+                    0.0,
+                    FMath::Min(SourceMaxY, SourceY + 1.0) - FMath::Max(SourceMinY, static_cast<double>(SourceY)));
+                const int32 Y = FMath::Clamp(SourceY, 0, SourceRegion.CanvasSize.Y - 1);
+                for (int32 SourceX = FMath::FloorToInt(SourceMinX); SourceX < FMath::CeilToInt(SourceMaxX); ++SourceX)
+                {
+                    const double WeightX = FMath::Max(
+                        0.0,
+                        FMath::Min(SourceMaxX, SourceX + 1.0) - FMath::Max(SourceMinX, static_cast<double>(SourceX)));
+                    const int32 X = FMath::Clamp(SourceX, 0, SourceRegion.CanvasSize.X - 1);
+                    if (!SourceRegion.Contains(X, Y))
+                    {
+                        OutPixels.Reset();
+                        return false;
+                    }
+                    const double Weight = WeightX * WeightY;
+                    NormalSum += FVector3d(SourceRegion.GetNormal(X, Y)) * Weight;
+                    if (bCoverage)
+                    {
+                        CoverageSum += SourceRegion.GetCoverage(X, Y) * Weight;
+                    }
+                    WeightSum += Weight;
+                }
+            }
+            const FVector3f Normal = FVector3f(NormalSum.GetSafeNormal(
+                UE_DOUBLE_SMALL_NUMBER,
+                FVector3d(0.0, 0.0, 1.0)));
+            const float Alpha = bCoverage && WeightSum > UE_DOUBLE_SMALL_NUMBER
+                ? FMath::Clamp(static_cast<float>(CoverageSum / WeightSum), 0.0f, 1.0f)
+                : 1.0f;
+            const int32 LocalIndex = (DestinationY - Rect.Min.Y) * Rect.Width() +
+                (DestinationX - Rect.Min.X);
+            OutPixels[LocalIndex] = EncodeNormal(Normal, Alpha);
         }
     }
     return true;

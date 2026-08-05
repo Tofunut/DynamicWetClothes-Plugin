@@ -16,6 +16,7 @@ class FDWCTransparencyAuthoringController;
 class FDWCEditorSessionStore;
 class FDWCEditorSpatialQueryService;
 class FDWCEditorRenderUploadQueue;
+class FDWCEditorPreviewCommitCoordinator;
 class FDWCEditorTextureWorkspace;
 class FDWCEditorWorkerJobScheduler;
 using FDWCEditorWorkerJobSchedulerPtr = TSharedPtr<FDWCEditorWorkerJobScheduler, ESPMode::ThreadSafe>;
@@ -84,6 +85,7 @@ class SWetClothingTransparencyBakePanel : public SCompoundWidget
     SLATE_ARGUMENT(TSharedPtr<FDWCEditorBakeCoordinator>, BakeCoordinator)
     SLATE_ARGUMENT(TSharedPtr<FDWCEditorSpatialQueryService>, SpatialQueryService)
     SLATE_ARGUMENT(TSharedPtr<FDWCEditorTextureWorkspace>, TextureWorkspace)
+    SLATE_ARGUMENT(TSharedPtr<FDWCEditorPreviewCommitCoordinator>, PreviewCommitCoordinator)
     SLATE_ARGUMENT(TSharedPtr<FDWCEditorRenderUploadQueue>, RenderUploadQueue)
     SLATE_ARGUMENT(TSharedPtr<IDetailsView>, DetailsView)
     SLATE_END_ARGS()
@@ -116,6 +118,8 @@ class SWetClothingTransparencyBakePanel : public SCompoundWidget
     FReply HandleContinueToGenerationClicked();
     ECheckBoxState IsStageChecked(EDWCTransparencyEditorStage Stage) const;
     ECheckBoxState IsSourceTypeCardChecked(EDWCTransparencySourceType SourceType) const;
+    bool IsSourceTypeAvailable(EDWCTransparencySourceType SourceType) const;
+    bool CanContinueToGeneration() const;
     EDWCTransparencyEditorStage GetCurrentStage() const;
     void SetCurrentStage(EDWCTransparencyEditorStage Stage);
     bool CanEnterFinalEditingStage() const;
@@ -170,6 +174,7 @@ class SWetClothingTransparencyBakePanel : public SCompoundWidget
     void HandleBrushTargetAlphaCommitted(float Value, ETextCommit::Type CommitType);
     void PushPaintSettingsToViewport();
     void RefreshTransparencyStrokeList();
+    void RefreshRevealColorStrokeList();
     FReply HandleUndoLastStrokeClicked();
     FReply HandleClearStrokesClicked();
     FReply HandleDeleteStrokeClicked(FGuid StrokeGuid);
@@ -187,6 +192,7 @@ class SWetClothingTransparencyBakePanel : public SCompoundWidget
     void UpdateInnerSourceStatus();
 
     bool RefreshOptionItems();
+    void RepairInvalidLayerIdentities();
     void RefreshLayerItems();
     void RefreshViewportContext();
     FWetClothingTransparencyLayerData* GetSelectedLayer();
@@ -231,6 +237,16 @@ class SWetClothingTransparencyBakePanel : public SCompoundWidget
     void HandleRevealPaintStrengthCommitted(float Value, ETextCommit::Type CommitType);
     void HandleRevealPaintFalloffCommitted(float Value, ETextCommit::Type CommitType);
     FReply HandleClearRevealColorPaintClicked();
+    bool EditRevealColorStrokeHistory(
+        const FText& TransactionText,
+        FGuid StrokeGuid,
+        TFunctionRef<bool(FWetClothingTransparencyLayerData&)> Edit);
+    FReply HandleUndoLastRevealColorStrokeClicked();
+    FReply HandleDeleteRevealColorStrokeClicked(FGuid StrokeGuid);
+    void HandleRevealColorStrokeEnabledChanged(ECheckBoxState NewState, FGuid StrokeGuid);
+    TSharedRef<ITableRow> GenerateRevealColorStrokeRow(
+        TSharedPtr<FGuid> Item,
+        const TSharedRef<STableViewBase>& OwnerTable);
     void PushRevealColorPaintSettingsToViewport();
     TOptional<float> GetManualInitialTransparencyAlpha() const;
     void HandleManualInitialTransparencyAlphaCommitted(float NewValue, ETextCommit::Type CommitType);
@@ -285,6 +301,7 @@ class SWetClothingTransparencyBakePanel : public SCompoundWidget
     TSharedPtr<FDWCEditorBakeCoordinator> BakeCoordinator;
     TSharedPtr<FDWCEditorSpatialQueryService> SpatialQueryService;
     TSharedPtr<FDWCEditorTextureWorkspace> TextureWorkspace;
+    TSharedPtr<FDWCEditorPreviewCommitCoordinator> PreviewCommitCoordinator;
     TSharedPtr<FDWCEditorRenderUploadQueue> RenderUploadQueue;
     TSharedPtr<IDetailsView> DetailsView;
     TSharedPtr<class SBox> ControlPanelContainer;
@@ -294,6 +311,8 @@ class SWetClothingTransparencyBakePanel : public SCompoundWidget
     TSharedPtr<class SBox> FinalEditingPreviewSettingsContainer;
     TSharedPtr<class SBox> FinalEditingGeneratedOutputsContainer;
     TSharedPtr<class SBox> TransparencyStrokeListContainer;
+    TArray<TSharedPtr<FGuid>> RevealColorStrokeItems;
+    TSharedPtr<class SListView<TSharedPtr<FGuid>>> RevealColorStrokeListView;
     TSharedPtr<class SScrollBox> ControlPanelScrollBox;
     TSharedPtr<class SComboButton> TransparencyBrushSizeComboButton;
     TSharedPtr<class SComboButton> RevealPaintSizeComboButton;
@@ -322,6 +341,7 @@ class SWetClothingTransparencyBakePanel : public SCompoundWidget
     int32 OptionItemsMaterialSlotCount = INDEX_NONE;
     int32 OptionItemsUVChannelCount = INDEX_NONE;
     uint32 OptionItemsPreviewStateSignature = 0;
+    bool bPreviewSlotStateRefreshRequested = true;
     EDWCTransparencyVisualizationMode SelectedVisualizationMode = static_cast<EDWCTransparencyVisualizationMode>(0);
     float WetnessPreviewPercent = 100.0f;
     float TransparencyPreviewStrength = 0.4f;

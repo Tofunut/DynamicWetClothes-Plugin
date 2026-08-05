@@ -29,6 +29,7 @@ class FDWCEditorPreviewOrchestrator final
 
     void SetLiveLayers(int32 MaterialSlotIndex, TArray<FDWCEditorPreviewLayer> Layers);
     void SetLiveLayer(int32 MaterialSlotIndex, FDWCEditorPreviewLayer Layer);
+    void ClearLiveLayer(int32 MaterialSlotIndex, EDWCEditorPreviewLayerKind LayerKind);
     void ClearLiveLayers(int32 MaterialSlotIndex);
     void ClearAllLiveLayers();
 

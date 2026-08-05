@@ -233,6 +233,7 @@ bool FDWCEditorPreviewSession::RefreshSlotStates()
             NewRuntime.PreviewMID = PreviousRuntime->PreviewMID;
             NewRuntime.LastMaterialUseSerial = PreviousRuntime->LastMaterialUseSerial;
             NewRuntime.bActiveInPreviewScope = PreviousRuntime->bActiveInPreviewScope;
+            NewRuntime.bMaterialBuildPending = PreviousRuntime->bMaterialBuildPending;
             NewRuntime.bMaterialBuildFailed = PreviousRuntime->bMaterialBuildFailed;
             NewRuntime.MaterialBuildError = PreviousRuntime->MaterialBuildError;
             NewRuntime.DesiredLayerParameters = PreviousRuntime->DesiredLayerParameters;
@@ -421,6 +422,33 @@ void FDWCEditorPreviewSession::PreparePreviewMaterials(
     FlushRenderResourceBindings();
 }
 
+void FDWCEditorPreviewSession::TickPendingMaterialCompilations()
+{
+    if (bSuspended || !IsInitialized())
+    {
+        return;
+    }
+
+    TRACE_CPUPROFILER_EVENT_SCOPE(FDWCEditorPreviewSession_TickPendingMaterialCompilations);
+    TArray<int32, TInlineAllocator<16>> PendingSlotIndices;
+    for (const FDWCEditorPreviewSessionSlot& Slot : RuntimeSlots)
+    {
+        if (Slot.bActiveInPreviewScope && Slot.bMaterialBuildPending)
+        {
+            PendingSlotIndices.Add(Slot.Eligibility.MaterialSlotIndex);
+        }
+    }
+    for (const int32 MaterialSlotIndex : PendingSlotIndices)
+    {
+        GetOrCreatePreviewMaterialInternal(MaterialSlotIndex, false);
+    }
+
+    if (bRenderResourcesDirty)
+    {
+        FlushRenderResourceBindings();
+    }
+}
+
 FDWCEditorPreviewSessionMaterialResult FDWCEditorPreviewSession::GetOrCreatePreviewMaterial(
     const int32 MaterialSlotIndex)
 {
@@ -476,6 +504,7 @@ FDWCEditorPreviewSessionMaterialResult FDWCEditorPreviewSession::GetOrCreatePrev
                 FlushRenderResourceBindings();
             }
         }
+        SessionResult.State = EDWCEditorPreviewMaterialState::Ready;
         SessionResult.bSucceeded = true;
         SessionResult.PreviewMID = ExistingMID;
         return SessionResult;
@@ -501,16 +530,35 @@ FDWCEditorPreviewSessionMaterialResult FDWCEditorPreviewSession::GetOrCreatePrev
     Request.ExtendGraph = SessionConfig.ExtendGraph;
 
     const FDWCEditorPreviewMaterialResult MaterialResult = MaterialCache.GetOrCreate(Request);
+    SessionResult.State = MaterialResult.State;
+    SessionResult.bPending = MaterialResult.bPending;
+    if (MaterialResult.State == EDWCEditorPreviewMaterialState::Compiling)
+    {
+        Slot->bMaterialBuildPending = true;
+        Slot->bMaterialBuildFailed = false;
+        Slot->MaterialBuildError.Reset();
+        SessionResult.Message = MaterialResult.Message;
+        return SessionResult;
+    }
     if (!MaterialResult.bSucceeded || MaterialResult.PreviewMID == nullptr)
     {
+        Slot->bMaterialBuildPending = false;
         Slot->bMaterialBuildFailed = true;
         Slot->MaterialBuildError = MaterialResult.Message;
+        UE_LOG(
+            LogDWCEditorPreview,
+            Warning,
+            TEXT("Editor preview material failed for slot %d (%s): %s"),
+            MaterialSlotIndex,
+            *GetNameSafe(SourceMaterial),
+            *MaterialResult.Message);
         SessionResult.Message = MaterialResult.Message;
         return SessionResult;
     }
 
     Slot->PreviewMID = MaterialResult.PreviewMID;
     Slot->LastMaterialUseSerial = ++MaterialUseSerial;
+    Slot->bMaterialBuildPending = false;
     Slot->bMaterialBuildFailed = false;
     Slot->MaterialBuildError.Reset();
     ApplyCommonParameters(*MaterialResult.PreviewMID);
@@ -583,6 +631,7 @@ void FDWCEditorPreviewSession::NotifySourceMaterialChanged(UMaterialInterface* S
                 RevisedSources.Add(SourceKey);
             }
             Slot.PreviewMID.Reset();
+            Slot.bMaterialBuildPending = false;
             Slot.bMaterialBuildFailed = false;
             Slot.MaterialBuildError.Reset();
             if (ResourceBindingMIDs.IsValidIndex(Slot.Eligibility.MaterialSlotIndex))
@@ -646,6 +695,7 @@ void FDWCEditorPreviewSession::FlushRenderResourceBindings()
 void FDWCEditorPreviewSession::DumpDiagnostics(const int32 SessionIndex) const
 {
     int32 BuiltMIDCount = 0;
+    int32 PendingMaterialCount = 0;
     int32 FailedMaterialCount = 0;
     uint64 SessionContainerBytes =
         static_cast<uint64>(SlotCollection.Slots.GetAllocatedSize()) +
@@ -656,6 +706,7 @@ void FDWCEditorPreviewSession::DumpDiagnostics(const int32 SessionIndex) const
     for (const FDWCEditorPreviewSessionSlot& Slot : RuntimeSlots)
     {
         BuiltMIDCount += Slot.PreviewMID.IsValid() ? 1 : 0;
+        PendingMaterialCount += Slot.bMaterialBuildPending ? 1 : 0;
         FailedMaterialCount += Slot.bMaterialBuildFailed ? 1 : 0;
         SessionContainerBytes += static_cast<uint64>(Slot.MaterialBuildError.GetAllocatedSize());
         SessionContainerBytes += Slot.DesiredLayerParameters.GetAllocatedSize();
@@ -673,7 +724,7 @@ void FDWCEditorPreviewSession::DumpDiagnostics(const int32 SessionIndex) const
     UE_LOG(
         LogDWCEditorPreview,
         Display,
-        TEXT("[%d] %s: WCA='%s', selected=%s, wetness=%.3f, ready=%d, active=%d, builtMIDs=%d, failed=%d."),
+        TEXT("[%d] %s: WCA='%s', selected=%s, wetness=%.3f, ready=%d, active=%d, builtMIDs=%d, pending=%d, failed=%d."),
         SessionIndex,
         *Label,
         *GetNameSafe(WetClothingAsset.Get()),
@@ -682,6 +733,7 @@ void FDWCEditorPreviewSession::DumpDiagnostics(const int32 SessionIndex) const
         SlotCollection.ReadyWettableSlotIndices.Num(),
         ActivePreviewMaterialSlots.Num(),
         BuiltMIDCount,
+        PendingMaterialCount,
         FailedMaterialCount);
     UE_LOG(
         LogDWCEditorPreview,
@@ -705,13 +757,21 @@ void FDWCEditorPreviewSession::DumpDiagnostics(const int32 SessionIndex) const
     UE_LOG(
         LogDWCEditorPreview,
         Display,
-        TEXT("    Material cache: graphs=%d (%d failed), parents=%d (%d failed), MIDs=%d, memory=%s."),
+        TEXT("    Material cache: graphs=%d (%d pending, %d failed), parents=%d (%d failed), MIDs=%d, memory=%s."),
         CacheStats.GraphEntryCount,
+        CacheStats.PendingGraphEntryCount,
         CacheStats.FailedGraphEntryCount,
         CacheStats.ParentEntryCount,
         CacheStats.FailedParentEntryCount,
         CacheStats.SlotMIDEntryCount,
         *FDWCEditorPreviewDiagnostics::FormatBytes(CacheStats.EstimatedContainerBytes));
+    UE_LOG(
+        LogDWCEditorPreview,
+        Display,
+        TEXT("    Material compile: requested=%llu, completed=%llu, failed=%llu."),
+        CacheStats.GraphCompileRequestCount,
+        CacheStats.GraphCompileCompleteCount,
+        CacheStats.GraphCompileFailureCount);
     UE_LOG(
         LogDWCEditorPreview,
         Display,
@@ -926,6 +986,7 @@ void FDWCEditorPreviewSession::ClearBuiltMaterials()
     for (FDWCEditorPreviewSessionSlot& Slot : RuntimeSlots)
     {
         Slot.PreviewMID.Reset();
+        Slot.bMaterialBuildPending = false;
         Slot.bMaterialBuildFailed = false;
         Slot.MaterialBuildError.Reset();
         Slot.AppliedLayerParameters = FDWCEditorPreviewParameterSet();
@@ -975,6 +1036,7 @@ void FDWCEditorPreviewSession::TrimIdlePreviewMaterials(const bool bReleaseAllId
         const int32 MaterialSlotIndex = Slot->Eligibility.MaterialSlotIndex;
         Slot->PreviewMID.Reset();
         Slot->AppliedLayerParameters = FDWCEditorPreviewParameterSet();
+        Slot->bMaterialBuildPending = false;
         Slot->bMaterialBuildFailed = false;
         Slot->MaterialBuildError.Reset();
         if (ResourceBindingMIDs.IsValidIndex(MaterialSlotIndex))

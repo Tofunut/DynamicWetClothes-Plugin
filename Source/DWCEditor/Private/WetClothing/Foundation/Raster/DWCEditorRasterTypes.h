@@ -63,6 +63,27 @@ struct FDWCEditorNormalRasterSurface
     static FVector3f UnpackNormalXY(uint32 PackedNormal);
 };
 
+/** Compact normal storage addressed in the coordinate system of a larger canvas. */
+struct FDWCEditorNormalRasterRegion
+{
+    FIntPoint CanvasSize = FIntPoint::ZeroValue;
+    FIntRect Rect;
+    FDWCEditorNormalRasterSurface Surface;
+
+    bool Initialize(FIntPoint InCanvasSize, const FIntRect& InRect, bool bWithCoverage);
+    bool InitializeFromSurface(const FDWCEditorNormalRasterSurface& Source, const FIntRect& InRect);
+    bool IsValid() const;
+    bool Contains(int32 X, int32 Y) const;
+    uint64 GetAllocatedSizeBytes() const;
+    FVector3f GetNormal(int32 X, int32 Y) const;
+    void SetNormal(int32 X, int32 Y, const FVector3f& Normal);
+    float GetCoverage(int32 X, int32 Y) const;
+    void SetCoverage(int32 X, int32 Y, float Value);
+
+  private:
+    int32 ToLocalIndex(int32 X, int32 Y) const;
+};
+
 struct FDWCEditorRasterResult
 {
     bool bSucceeded = true;

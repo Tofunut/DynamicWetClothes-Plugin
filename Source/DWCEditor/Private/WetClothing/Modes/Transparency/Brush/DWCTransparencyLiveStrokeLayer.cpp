@@ -32,9 +32,15 @@ void FDWCTransparencyLiveStrokeLayer::Reset()
     Resolution = FIntPoint::ZeroValue;
     // A finished or canceled stroke has no reuse guarantee. Release the sparse
     // index immediately so a one-off 4K stroke cannot remain resident.
-    Samples.Empty();
-    Tiles.Empty();
-    DirtyRegions.Empty();
+    // Empty() keeps allocator slack in some UE containers. A canceled 4K
+    // stroke must release its sparse index immediately, otherwise the layer
+    // looks reset while still retaining hash buckets between interactions.
+    TArray<FDWCTransparencyBrushSample> EmptySamples;
+    Samples = MoveTemp(EmptySamples);
+    TMap<FIntPoint, FTile> EmptyTiles;
+    Tiles = MoveTemp(EmptyTiles);
+    TArray<FIntRect> EmptyDirtyRegions;
+    DirtyRegions = MoveTemp(EmptyDirtyRegions);
 }
 
 void FDWCTransparencyLiveStrokeLayer::RecordSample(
@@ -87,6 +93,14 @@ void FDWCTransparencyLiveStrokeLayer::RecordSample(
 
 uint64 FDWCTransparencyLiveStrokeLayer::GetAllocatedBytes() const
 {
+    // An inactive layer has no authoring payload. Do not report the small
+    // allocator bookkeeping retained by an empty UE container as live stroke
+    // memory; callers use this value for the sparse working-set budget.
+    if (Samples.IsEmpty() && Tiles.IsEmpty() && DirtyRegions.IsEmpty())
+    {
+        return 0;
+    }
+
     uint64 Bytes = Samples.GetAllocatedSize() + Tiles.GetAllocatedSize() + DirtyRegions.GetAllocatedSize();
     for (const TPair<FIntPoint, FTile>& Pair : Tiles)
     {

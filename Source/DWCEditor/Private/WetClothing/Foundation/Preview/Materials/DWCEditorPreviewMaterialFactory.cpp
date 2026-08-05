@@ -31,36 +31,9 @@ namespace
         return true;
     }
 
-    TArray<FString> CompileTransientMaterial(UMaterial* Material)
-    {
-        if (Material == nullptr)
-        {
-            return { TEXT("Cannot compile a null editor preview material.") };
-        }
-
-        Material->SetMaterialUsage(MATUSAGE_SkeletalMesh);
-        Material->UpdateCachedExpressionData();
-        {
-            FMaterialUpdateContext UpdateContext(FMaterialUpdateContext::EOptions::SyncWithRenderingThread);
-            UpdateContext.AddMaterial(Material);
-            Material->PreEditChange(nullptr);
-            Material->PostEditChange();
-        }
-
-        if (FMaterialResource* Resource = Material->GetMaterialResource(GMaxRHIShaderPlatform))
-        {
-            if (!Resource->IsGameThreadShaderMapComplete())
-            {
-                Resource->SubmitCompileJobs_GameThread(EShaderCompileJobPriority::High);
-            }
-            Resource->FinishCompilation();
-            return Resource->GetCompileErrors();
-        }
-        return {};
-    }
 }
 
-UMaterial* FDWCEditorPreviewMaterialFactory::BuildTransientBaseMaterial(
+UMaterial* FDWCEditorPreviewMaterialFactory::BuildTransientBaseMaterialGraph(
     const FDWCEditorPreviewMaterialRequest& Request,
     FString& OutErrorMessage)
 {
@@ -166,17 +139,128 @@ UMaterial* FDWCEditorPreviewMaterialFactory::BuildTransientBaseMaterial(
         return nullptr;
     }
 
-    const TArray<FString> CompileErrors = CompileTransientMaterial(PreviewMaterial);
-    if (CompileErrors.Num() > 0)
+    // Graph edits are still performed on the game thread. PostEditChange
+    // schedules the engine shader compile; the cache polls that work later
+    // instead of blocking this call with FinishCompilation().
+    PreviewMaterial->SetMaterialUsage(MATUSAGE_SkeletalMesh);
+    PreviewMaterial->UpdateCachedExpressionData();
+    {
+        FMaterialUpdateContext UpdateContext(FMaterialUpdateContext::EOptions::SyncWithRenderingThread);
+        UpdateContext.AddMaterial(PreviewMaterial);
+        PreviewMaterial->PreEditChange(nullptr);
+        PreviewMaterial->PostEditChange();
+    }
+    return PreviewMaterial;
+}
+
+bool FDWCEditorPreviewMaterialFactory::BeginTransientBaseMaterialCompilation(
+    UMaterial* TransientBaseMaterial,
+    FString& OutErrorMessage)
+{
+    OutErrorMessage.Reset();
+    if (TransientBaseMaterial == nullptr)
+    {
+        OutErrorMessage = TEXT("Cannot compile a null editor preview material.");
+        return false;
+    }
+
+    FMaterialResource* Resource = TransientBaseMaterial->GetMaterialResource(GMaxRHIShaderPlatform);
+    if (Resource == nullptr)
+    {
+        OutErrorMessage = FString::Printf(
+            TEXT("Preview material '%s' did not create a shader resource."),
+            *GetNameSafe(TransientBaseMaterial));
+        return false;
+    }
+
+    if (!Resource->IsGameThreadShaderMapComplete())
+    {
+        Resource->SubmitCompileJobs_GameThread(EShaderCompileJobPriority::High);
+    }
+    return true;
+}
+
+EDWCEditorPreviewMaterialState FDWCEditorPreviewMaterialFactory::PollTransientBaseMaterialCompilation(
+    UMaterial* TransientBaseMaterial,
+    FString& OutErrorMessage)
+{
+    OutErrorMessage.Reset();
+    if (TransientBaseMaterial == nullptr)
+    {
+        OutErrorMessage = TEXT("The transient editor preview material no longer exists.");
+        return EDWCEditorPreviewMaterialState::Failed;
+    }
+
+    FMaterialResource* Resource = TransientBaseMaterial->GetMaterialResource(GMaxRHIShaderPlatform);
+    if (Resource == nullptr)
+    {
+        OutErrorMessage = FString::Printf(
+            TEXT("Preview material '%s' no longer has a shader resource."),
+            *GetNameSafe(TransientBaseMaterial));
+        return EDWCEditorPreviewMaterialState::Failed;
+    }
+
+    if (Resource->IsGameThreadShaderMapComplete())
+    {
+        const TArray<FString>& CompileErrors = Resource->GetCompileErrors();
+        if (CompileErrors.Num() > 0)
+        {
+            OutErrorMessage = FString::Printf(
+                TEXT("Editor preview material compilation failed for '%s':\n%s"),
+                *GetNameSafe(TransientBaseMaterial),
+                *FString::Join(CompileErrors, TEXT("\n")));
+            return EDWCEditorPreviewMaterialState::Failed;
+        }
+        return EDWCEditorPreviewMaterialState::Ready;
+    }
+
+    // IsCompilationFinished() also advances UE 5.8's deferred shader-cache
+    // lookup. The first submit made immediately after PostEditChange() can be
+    // a no-op while that lookup is pending, so submit again after polling.
+    // SubmitCompileJobs_GameThread() is idempotent for an unchanged priority.
+    Resource->IsCompilationFinished();
+    if (!Resource->IsGameThreadShaderMapComplete())
+    {
+        Resource->SubmitCompileJobs_GameThread(EShaderCompileJobPriority::High);
+    }
+
+    // Re-read after submission. A deferred DDC result can create the compile
+    // jobs during the first poll, so the pre-submit value is not authoritative.
+    if (!Resource->IsCompilationFinished())
+    {
+        return EDWCEditorPreviewMaterialState::Compiling;
+    }
+
+    const TArray<FString>& CompileErrors = Resource->GetCompileErrors();
+    if (CompileErrors.Num() > 0 || !Resource->HasValidGameThreadShaderMap())
     {
         OutErrorMessage = FString::Printf(
             TEXT("Editor preview material compilation failed for '%s':\n%s"),
-            *GetNameSafe(Request.SourceMaterial),
-            *FString::Join(CompileErrors, TEXT("\n")));
-        PreviewMaterial->MarkAsGarbage();
-        return nullptr;
+            *GetNameSafe(TransientBaseMaterial),
+            CompileErrors.Num() > 0
+                ? *FString::Join(CompileErrors, TEXT("\n"))
+                : TEXT("The shader compiler produced no valid game-thread shader map."));
+        return EDWCEditorPreviewMaterialState::Failed;
     }
-    return PreviewMaterial;
+
+    return EDWCEditorPreviewMaterialState::Ready;
+}
+
+void FDWCEditorPreviewMaterialFactory::CancelTransientBaseMaterialCompilation(
+    UMaterial* TransientBaseMaterial)
+{
+    if (TransientBaseMaterial == nullptr)
+    {
+        return;
+    }
+
+    if (FMaterialResource* Resource = TransientBaseMaterial->GetMaterialResource(GMaxRHIShaderPlatform))
+    {
+        if (!Resource->IsCompilationFinished())
+        {
+            Resource->CancelCompilation();
+        }
+    }
 }
 
 UMaterialInstanceConstant* FDWCEditorPreviewMaterialFactory::BuildTransientParent(

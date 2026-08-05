@@ -35,6 +35,8 @@
 #include "Types/WidgetActiveTimerDelegate.h"
 #include "WetClothing/Foundation/MeshAnalysis/WetClothingAssetMeshAnalyzer.h"
 #include "WetClothing/Foundation/TextureAccess/WetClothingMaterialTextureResolver.h"
+#include "WetClothing/Foundation/Preview/Commit/DWCEditorPreviewCommitCoordinator.h"
+#include "WetClothing/Foundation/Jobs/DWCEditorWorkerJobScheduler.h"
 #include "WetClothing/WCAEditor/UI/Widgets/WCAEditorWidgets.h"
 #include "WetClothing/Modes/Part/Partition/WetPartEditingService.h"
 #include "WetClothing/DerivedAssets/Textures/Wrinkle/WetWrinkleBakeService.h"
@@ -755,6 +757,7 @@ void SWetWrinkleEditorPanel::Construct(const FArguments& InArgs)
     BakeCoordinator = InArgs._BakeCoordinator;
     SpatialQueryService = InArgs._SpatialQueryService;
     TextureWorkspace = InArgs._TextureWorkspace;
+    PreviewCommitCoordinator = InArgs._PreviewCommitCoordinator;
     RenderUploadQueue = InArgs._RenderUploadQueue;
     if (!RenderUploadQueue.IsValid())
     {
@@ -763,6 +766,12 @@ void SWetWrinkleEditorPanel::Construct(const FArguments& InArgs)
     if (!TextureWorkspace.IsValid())
     {
         TextureWorkspace = MakeShared<FDWCEditorTextureWorkspace>(RenderUploadQueue.ToSharedRef());
+    }
+    if (!PreviewCommitCoordinator.IsValid())
+    {
+        PreviewCommitCoordinator = MakeShared<FDWCEditorPreviewCommitCoordinator>(
+            TextureWorkspace.ToSharedRef(),
+            WorkerJobScheduler.IsValid() ? WorkerJobScheduler->GetSessionEpoch() : FGuid());
     }
     SessionStore->OnChanged().AddSP(this, &SWetWrinkleEditorPanel::HandleSessionStateChanged);
     DetailsView = InArgs._DetailsView;
@@ -966,6 +975,7 @@ void SWetWrinkleEditorPanel::Construct(const FArguments& InArgs)
                                                      .SessionStore(SessionStore)
                                                      .SpatialQueryService(SpatialQueryService)
                                                      .TextureWorkspace(TextureWorkspace)
+                                                     .PreviewCommitCoordinator(PreviewCommitCoordinator)
                                                      .RenderUploadQueue(RenderUploadQueue)
                                                      .OnSurfaceHitChanged(FOnWetWrinkleSurfaceHitChanged::CreateSP(this, &SWetWrinkleEditorPanel::HandleSurfaceHitChanged))]
 

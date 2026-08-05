@@ -30,55 +30,65 @@ FDWCTransparencyVisualizationWorker::Build(
 
     if (Input.bRebuildManualOverridesFromStrokes)
     {
-        if (Input.ManualPremultipliedBuffer.Num() != PixelCount)
-        {
-            Input.ManualPremultipliedBuffer.Init(0, PixelCount);
-        }
-        if (Input.ManualWeightBuffer.Num() != PixelCount)
-        {
-            Input.ManualWeightBuffer.Init(0, PixelCount);
-        }
+        TArray<uint8> ManualPremultipliedBuffer;
+        TArray<uint8> ManualWeightBuffer;
         FDWCTransparencyBrushRasterizer::RebuildFromStrokes(
             Result,
             Input.EditableStrokes,
             Input.BaselineStrokeCount,
             Input.MaterialSlotIndex,
             Input.UVChannelIndex,
-            Input.ManualPremultipliedBuffer,
-            Input.ManualWeightBuffer);
-        if (Input.ManualPremultipliedBuffer.Num() != PixelCount ||
-            Input.ManualWeightBuffer.Num() != PixelCount)
+            ManualPremultipliedBuffer,
+            ManualWeightBuffer);
+        if ((!ManualPremultipliedBuffer.IsEmpty() && ManualPremultipliedBuffer.Num() != PixelCount) ||
+            (!ManualWeightBuffer.IsEmpty() && ManualWeightBuffer.Num() != PixelCount))
         {
             Output->bSucceeded = false;
             Output->Error = TEXT("The transparency manual-override rebuild produced an invalid buffer.");
             return Output;
         }
+        Input.ManualAlphaTileStore.Initialize(Result.Resolution);
+        if (ManualPremultipliedBuffer.Num() == PixelCount && ManualWeightBuffer.Num() == PixelCount)
+        {
+            Input.ManualAlphaTileStore.BuildFromDense(ManualPremultipliedBuffer, ManualWeightBuffer);
+        }
         Output->bIncludesRebuiltManualOverrides = true;
+    }
+    else if (!Input.ManualAlphaTileStore.IsValid())
+    {
+        Input.ManualAlphaTileStore.Initialize(Result.Resolution);
     }
 
     if (Input.bRebuildRevealColorFromStrokes)
     {
-        Input.RevealColorBuffer = Result.InnerColorBuffer;
+        TArray<FColor> DenseRevealColor = Result.InnerColorBuffer;
         FDWCTransparencyAutoMapGenerator::ApplyRevealColorPaintStrokes(
             Result,
             Input.RevealColorPaintStrokes,
             Input.MaterialSlotIndex,
             Input.BaseRevealColor,
-            Input.RevealColorBuffer);
-        if (Input.RevealColorBuffer.Num() != PixelCount)
+            DenseRevealColor);
+        if (DenseRevealColor.Num() != PixelCount)
         {
             Output->bSucceeded = false;
             Output->Error = TEXT("The transparency reveal-color rebuild produced an invalid buffer.");
             return Output;
         }
+        Input.RevealColorTileStore.Initialize(Result.Resolution);
+        Input.RevealColorTileStore.BuildFromDense(
+            MakeArrayView(DenseRevealColor),
+            MakeArrayView(Result.InnerColorBuffer));
         Output->bIncludesRebuiltRevealColor = true;
+    }
+    else if (!Input.RevealColorTileStore.IsValid())
+    {
+        Input.RevealColorTileStore.Initialize(Result.Resolution);
     }
 
     FDWCTransparencyPixelComposeContext Context;
     Context.AutoResult = &Result;
-    Context.RevealColorBuffer = MakeArrayView(Input.RevealColorBuffer);
-    Context.ManualPremultipliedBuffer = MakeArrayView(Input.ManualPremultipliedBuffer);
-    Context.ManualWeightBuffer = MakeArrayView(Input.ManualWeightBuffer);
+    Context.RevealColorTileStore = &Input.RevealColorTileStore;
+    Context.ManualAlphaTileStore = &Input.ManualAlphaTileStore;
     Context.WrinkleSuppressionBuffer = MakeArrayView(Input.WrinkleSuppressionBuffer);
     Context.OuterEdgeFeatherBuffer = MakeArrayView(Input.OuterEdgeFeatherBuffer);
     Context.VisualizationMode = Input.VisualizationMode;
@@ -102,17 +112,15 @@ FDWCTransparencyVisualizationWorker::Build(
     // only after composition so the worker result does not duplicate them.
     if (Output->bIncludesRebuiltManualOverrides)
     {
-        Output->RebuiltManualPremultipliedBuffer = MoveTemp(Input.ManualPremultipliedBuffer);
-        Output->RebuiltManualWeightBuffer = MoveTemp(Input.ManualWeightBuffer);
+        Output->RebuiltManualAlphaTileStore = MoveTemp(Input.ManualAlphaTileStore);
     }
     if (Output->bIncludesRebuiltRevealColor)
     {
-        Output->RebuiltRevealColorBuffer = MoveTemp(Input.RevealColorBuffer);
+        Output->RebuiltRevealColorTileStore = MoveTemp(Input.RevealColorTileStore);
     }
     Output->ResultBytes =
         static_cast<uint64>(Output->Pixels.GetAllocatedSize()) +
-        static_cast<uint64>(Output->RebuiltManualPremultipliedBuffer.GetAllocatedSize()) +
-        static_cast<uint64>(Output->RebuiltManualWeightBuffer.GetAllocatedSize()) +
-        static_cast<uint64>(Output->RebuiltRevealColorBuffer.GetAllocatedSize());
+        Output->RebuiltManualAlphaTileStore.GetAllocatedBytes() +
+        Output->RebuiltRevealColorTileStore.GetAllocatedBytes();
     return Output;
 }

@@ -7,6 +7,7 @@
 #include "Materials/MaterialExpressionScalarParameter.h"
 #include "Materials/MaterialExpressionTextureObjectParameter.h"
 #include "Materials/MaterialExpressionTextureCoordinate.h"
+#include "Materials/MaterialExpressionVectorParameter.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "WetClothing/Foundation/MaterialGraph/DWCSurfaceGraphBuilder.h"
 #include "WetClothing/Foundation/Preview/Materials/DWCEditorPreviewMaterialParameters.h"
@@ -82,6 +83,48 @@ namespace
         return Parameter;
     }
 
+    UMaterialExpressionTextureObjectParameter* CreateMaskTextureParameter(
+        UMaterial* Material,
+        const FName ParameterName,
+        const int32 NodeY)
+    {
+        UMaterialExpressionTextureObjectParameter* Parameter =
+            Cast<UMaterialExpressionTextureObjectParameter>(
+                UMaterialEditingLibrary::CreateMaterialExpression(
+                    Material,
+                    UMaterialExpressionTextureObjectParameter::StaticClass(),
+                    -650,
+                    NodeY));
+        if (Parameter != nullptr)
+        {
+            Parameter->ParameterName = ParameterName;
+            Parameter->SamplerType = SAMPLERTYPE_Masks;
+            Parameter->Texture = LoadDefaultBlackTexture();
+        }
+        return Parameter;
+    }
+
+    UMaterialExpressionVectorParameter* CreateVectorParameter(
+        UMaterial* Material,
+        const FName ParameterName,
+        const FLinearColor& DefaultValue,
+        const int32 NodeY)
+    {
+        UMaterialExpressionVectorParameter* Parameter =
+            Cast<UMaterialExpressionVectorParameter>(
+                UMaterialEditingLibrary::CreateMaterialExpression(
+                    Material,
+                    UMaterialExpressionVectorParameter::StaticClass(),
+                    -650,
+                    NodeY));
+        if (Parameter != nullptr)
+        {
+            Parameter->ParameterName = ParameterName;
+            Parameter->DefaultValue = DefaultValue;
+        }
+        return Parameter;
+    }
+
     UMaterialExpressionScalarParameter* FindPreviewWetnessParameter(UMaterial* Material)
     {
         if (Material == nullptr)
@@ -128,16 +171,57 @@ bool FWetTransparencyPreviewGraphExtension::ExtendGraph(
         Material, DWCTransparencyPreviewMaterialParameters::UseTransparencyMap(), 0.0f, 3000);
     UMaterialExpressionScalarParameter* TransparencyStrength = CreateScalarParameter(
         Material, DWCTransparencyPreviewMaterialParameters::TransparencyStrength(), 1.0f, 3100);
+    UMaterialExpressionScalarParameter* ShowInnerColor = CreateScalarParameter(
+        Material, DWCTransparencyPreviewMaterialParameters::ShowInnerColor(), 0.0f, 3200);
     UMaterialExpressionTextureObjectParameter* WrinkleSuppressionMap = CreateColorTextureParameter(
-        Material, DWCTransparencyPreviewMaterialParameters::WrinkleSuppressionMap(), 3200);
+        Material, DWCTransparencyPreviewMaterialParameters::WrinkleSuppressionMap(), 3300);
     UMaterialExpressionScalarParameter* UseWrinkleSuppressionMap = CreateScalarParameter(
-        Material, DWCTransparencyPreviewMaterialParameters::UseWrinkleSuppressionMap(), 0.0f, 3300);
+        Material, DWCTransparencyPreviewMaterialParameters::UseWrinkleSuppressionMap(), 0.0f, 3400);
     UMaterialExpressionScalarParameter* WrinkleSuppressionStrength = CreateScalarParameter(
-        Material, DWCTransparencyPreviewMaterialParameters::WrinkleSuppressionStrength(), 0.0f, 3400);
+        Material, DWCTransparencyPreviewMaterialParameters::WrinkleSuppressionStrength(), 0.0f, 3500);
+    UMaterialExpressionVectorParameter* HoverState0 = CreateVectorParameter(
+        Material,
+        DWCTransparencyPreviewMaterialParameters::HoverState0(),
+        FLinearColor(0.0f, 0.0f, 0.025f, 0.5f),
+        3600);
+    UMaterialExpressionVectorParameter* HoverState1 = CreateVectorParameter(
+        Material,
+        DWCTransparencyPreviewMaterialParameters::HoverState1(),
+        FLinearColor::Black,
+        3700);
+    UMaterialExpressionVectorParameter* HoverColor = CreateVectorParameter(
+        Material,
+        DWCTransparencyPreviewMaterialParameters::HoverColor(),
+        FLinearColor::Black,
+        3800);
+    UMaterialExpressionScalarParameter* HoverTarget = CreateScalarParameter(
+        Material, DWCTransparencyPreviewMaterialParameters::HoverTarget(), 0.0f, 3900);
+    UMaterialExpressionScalarParameter* HoverWrap = CreateScalarParameter(
+        Material, DWCTransparencyPreviewMaterialParameters::HoverWrap(), 0.0f, 4000);
+    UMaterialExpressionVectorParameter* HoverTexelSize = CreateVectorParameter(
+        Material,
+        DWCTransparencyPreviewMaterialParameters::HoverTexelSize(),
+        FLinearColor::Black,
+        4100);
+    UMaterialExpressionScalarParameter* HoverVisualizationMode = CreateScalarParameter(
+        Material, DWCTransparencyPreviewMaterialParameters::HoverVisualizationMode(), 0.0f, 4150);
+    UMaterialExpressionTextureObjectParameter* HoverBaselineMap = CreateColorTextureParameter(
+        Material, DWCTransparencyPreviewMaterialParameters::HoverBaselineMap(), 4200);
+    UMaterialExpressionScalarParameter* UseHoverBaselineMap = CreateScalarParameter(
+        Material, DWCTransparencyPreviewMaterialParameters::UseHoverBaselineMap(), 0.0f, 4300);
+    UMaterialExpressionTextureObjectParameter* HoverEdgeFeatherMap = CreateMaskTextureParameter(
+        Material, DWCTransparencyPreviewMaterialParameters::HoverEdgeFeatherMap(), 4400);
+    UMaterialExpressionScalarParameter* UseHoverEdgeFeatherMap = CreateScalarParameter(
+        Material, DWCTransparencyPreviewMaterialParameters::UseHoverEdgeFeatherMap(), 0.0f, 4500);
     UMaterialExpressionScalarParameter* PreviewWetness = FindPreviewWetnessParameter(Material);
     if (Blend == nullptr || TransparencyMap == nullptr || UseTransparencyMap == nullptr ||
-        TransparencyStrength == nullptr || WrinkleSuppressionMap == nullptr ||
+        TransparencyStrength == nullptr || ShowInnerColor == nullptr || WrinkleSuppressionMap == nullptr ||
         UseWrinkleSuppressionMap == nullptr || WrinkleSuppressionStrength == nullptr ||
+        HoverState0 == nullptr || HoverState1 == nullptr || HoverColor == nullptr ||
+        HoverTarget == nullptr || HoverWrap == nullptr || HoverTexelSize == nullptr ||
+        HoverVisualizationMode == nullptr ||
+        HoverBaselineMap == nullptr || UseHoverBaselineMap == nullptr ||
+        HoverEdgeFeatherMap == nullptr || UseHoverEdgeFeatherMap == nullptr ||
         PreviewWetness == nullptr)
     {
         OutErrorMessage = TEXT("Failed to create one or more Transparency preview expressions.");
@@ -151,9 +235,23 @@ bool FWetTransparencyPreviewGraphExtension::ExtendGraph(
         TEXT("UseTransparencyMap"),
         TEXT("PreviewWetness"),
         TEXT("TransparencyStrength"),
+        TEXT("ShowInnerColor"),
         TEXT("WrinkleSuppressionMapTex"),
         TEXT("UseWrinkleSuppressionMap"),
         TEXT("WrinkleSuppressionStrength"),
+        TEXT("HoverState0"),
+        TEXT("HoverState1"),
+        TEXT("HoverFalloff"),
+        TEXT("HoverOperation"),
+        TEXT("HoverColor"),
+        TEXT("HoverTarget"),
+        TEXT("HoverWrap"),
+        TEXT("HoverTexelSize"),
+        TEXT("HoverVisualizationMode"),
+        TEXT("HoverBaselineMapTex"),
+        TEXT("UseHoverBaselineMap"),
+        TEXT("HoverEdgeFeatherMapTex"),
+        TEXT("UseHoverEdgeFeatherMap"),
     };
     for (const FName InputName : InputNames)
     {
@@ -162,9 +260,132 @@ bool FWetTransparencyPreviewGraphExtension::ExtendGraph(
     }
     Blend->Code = TEXT(R"(
 float4 TransparencySample = Texture2DSampleLevel(TransparencyMapTex, TransparencyMapTexSampler, SelectedUV, 0);
+
+// Hover is a presentation-only layer. Disabled hover returns the committed
+// sample unchanged and does not require either optional baseline texture.
+if (HoverState1.x > 0.0 && HoverTarget > 0.5)
+{
+    float2 HoverDelta = SelectedUV - HoverState0.xy;
+    if (HoverWrap > 0.5)
+    {
+        HoverDelta -= round(HoverDelta);
+    }
+
+    float HoverRadius = max(HoverState0.z, 0.00001);
+    float HoverDistance = length(HoverDelta) / HoverRadius;
+    if (HoverDistance <= 1.0)
+    {
+        float ClampedHoverFalloff = saturate(HoverFalloff);
+        float HoverInnerRadius = 1.0 - ClampedHoverFalloff;
+        float HoverRadialWeight = ClampedHoverFalloff <= 0.00001 || HoverDistance <= HoverInnerRadius
+            ? 1.0
+            : 1.0 - smoothstep(HoverInnerRadius, 1.0, HoverDistance);
+        float HoverIslandFeather = UseHoverEdgeFeatherMap > 0.5
+            ? Texture2DSampleLevel(
+                HoverEdgeFeatherMapTex,
+                HoverEdgeFeatherMapTexSampler,
+                SelectedUV,
+                0).r
+            : 1.0;
+        float HoverIslandEligibility = step(0.5 / 255.0, HoverIslandFeather);
+        float HoverWeight = saturate(HoverRadialWeight * max(HoverState1.y, 0.0)) * HoverIslandEligibility;
+        int SelectedHoverOperation = (int)floor(HoverOperation + 0.5);
+
+        float2 SafeTexelSize = max(HoverTexelSize.xy, float2(0.000001, 0.000001));
+        float4 SmoothSample = 0.0;
+        float SmoothAlphaWeight = 0.0;
+        if (SelectedHoverOperation == 3)
+        {
+            [unroll]
+            for (int HoverY = -1; HoverY <= 1; ++HoverY)
+            {
+                [unroll]
+                for (int HoverX = -1; HoverX <= 1; ++HoverX)
+                {
+                    float2 SampleUV = SelectedUV + float2(HoverX, HoverY) * SafeTexelSize;
+                    SampleUV = HoverWrap > 0.5 ? frac(SampleUV) : saturate(SampleUV);
+                    float4 NeighborSample = Texture2DSampleLevel(
+                        TransparencyMapTex,
+                        TransparencyMapTexSampler,
+                        SampleUV,
+                        0);
+                    float NeighborEligibility = UseHoverEdgeFeatherMap > 0.5
+                        ? step(
+                            0.5 / 255.0,
+                            Texture2DSampleLevel(
+                                HoverEdgeFeatherMapTex,
+                                HoverEdgeFeatherMapTexSampler,
+                                SampleUV,
+                                0).r)
+                        : 1.0;
+                    SmoothSample.rgb += lerp(TransparencySample.rgb, NeighborSample.rgb, NeighborEligibility);
+                    SmoothSample.a += NeighborSample.a * NeighborEligibility;
+                    SmoothAlphaWeight += NeighborEligibility;
+                }
+            }
+            SmoothSample.rgb /= 9.0;
+            SmoothSample.a = SmoothAlphaWeight > 0.0
+                ? SmoothSample.a / SmoothAlphaWeight
+                : TransparencySample.a;
+        }
+
+        float4 BaselineSample = TransparencySample;
+        if (UseHoverBaselineMap > 0.5 && (SelectedHoverOperation == 1 || SelectedHoverOperation == 2))
+        {
+            BaselineSample = Texture2DSampleLevel(
+                HoverBaselineMapTex,
+                HoverBaselineMapTexSampler,
+                SelectedUV,
+                0);
+        }
+
+        if (HoverTarget < 1.5)
+        {
+            float3 HoverTargetColor = HoverColor.rgb;
+            if (SelectedHoverOperation == 1 || SelectedHoverOperation == 2)
+            {
+                HoverTargetColor = BaselineSample.rgb;
+            }
+            else if (SelectedHoverOperation == 3)
+            {
+                HoverTargetColor = SmoothSample.rgb;
+            }
+            TransparencySample.rgb = lerp(TransparencySample.rgb, HoverTargetColor, HoverWeight);
+        }
+        else
+        {
+            float HoverTargetAlpha = saturate(HoverState1.z);
+            if (SelectedHoverOperation == 1)
+            {
+                HoverTargetAlpha = 0.0;
+            }
+            else if (SelectedHoverOperation == 2)
+            {
+                HoverTargetAlpha = BaselineSample.a;
+            }
+            else if (SelectedHoverOperation == 3)
+            {
+                HoverTargetAlpha = SmoothSample.a;
+            }
+
+            if (UseHoverEdgeFeatherMap > 0.5 && SelectedHoverOperation != 3)
+            {
+                HoverTargetAlpha *= HoverIslandFeather;
+            }
+            TransparencySample.a = lerp(TransparencySample.a, HoverTargetAlpha, HoverWeight);
+            if (HoverVisualizationMode > 1.5 && HoverVisualizationMode < 2.5)
+            {
+                TransparencySample.rgb = TransparencySample.aaa;
+            }
+        }
+    }
+}
+
 float Suppression = Texture2DSampleLevel(WrinkleSuppressionMapTex, WrinkleSuppressionMapTexSampler, SelectedUV, 0).r;
 float SuppressionWeight = saturate(Suppression * max(WrinkleSuppressionStrength, 0.0)) * saturate(UseWrinkleSuppressionMap);
-float BlendWeight = saturate(TransparencySample.a) * max(TransparencyStrength, 0.0) * saturate(UseTransparencyMap) * saturate(PreviewWetness) * (1.0 - SuppressionWeight);
+float MapBlendWeight = saturate(TransparencySample.a) * max(TransparencyStrength, 0.0);
+float InnerColorBlendWeight = saturate(ShowInnerColor);
+float BlendWeight = max(MapBlendWeight, InnerColorBlendWeight) * saturate(UseTransparencyMap) * saturate(PreviewWetness) * (1.0 - SuppressionWeight);
 return lerp(BaseColor, TransparencySample.rgb, BlendWeight);
 )");
     Blend->OutputType = CMOT_Float3;
@@ -179,9 +400,23 @@ return lerp(BaseColor, TransparencySample.rgb, BlendWeight);
     bConnected &= Connect({ UseTransparencyMap, FString() }, Blend, TEXT("UseTransparencyMap"), OutErrorMessage);
     bConnected &= Connect({ PreviewWetness, FString() }, Blend, TEXT("PreviewWetness"), OutErrorMessage);
     bConnected &= Connect({ TransparencyStrength, FString() }, Blend, TEXT("TransparencyStrength"), OutErrorMessage);
+    bConnected &= Connect({ ShowInnerColor, FString() }, Blend, TEXT("ShowInnerColor"), OutErrorMessage);
     bConnected &= Connect({ WrinkleSuppressionMap, FString() }, Blend, TEXT("WrinkleSuppressionMapTex"), OutErrorMessage);
     bConnected &= Connect({ UseWrinkleSuppressionMap, FString() }, Blend, TEXT("UseWrinkleSuppressionMap"), OutErrorMessage);
     bConnected &= Connect({ WrinkleSuppressionStrength, FString() }, Blend, TEXT("WrinkleSuppressionStrength"), OutErrorMessage);
+    bConnected &= Connect({ HoverState0, FString() }, Blend, TEXT("HoverState0"), OutErrorMessage);
+    bConnected &= Connect({ HoverState1, FString() }, Blend, TEXT("HoverState1"), OutErrorMessage);
+    bConnected &= Connect({ HoverState0, TEXT("A") }, Blend, TEXT("HoverFalloff"), OutErrorMessage);
+    bConnected &= Connect({ HoverState1, TEXT("A") }, Blend, TEXT("HoverOperation"), OutErrorMessage);
+    bConnected &= Connect({ HoverColor, FString() }, Blend, TEXT("HoverColor"), OutErrorMessage);
+    bConnected &= Connect({ HoverTarget, FString() }, Blend, TEXT("HoverTarget"), OutErrorMessage);
+    bConnected &= Connect({ HoverWrap, FString() }, Blend, TEXT("HoverWrap"), OutErrorMessage);
+    bConnected &= Connect({ HoverTexelSize, FString() }, Blend, TEXT("HoverTexelSize"), OutErrorMessage);
+    bConnected &= Connect({ HoverVisualizationMode, FString() }, Blend, TEXT("HoverVisualizationMode"), OutErrorMessage);
+    bConnected &= Connect({ HoverBaselineMap, FString() }, Blend, TEXT("HoverBaselineMapTex"), OutErrorMessage);
+    bConnected &= Connect({ UseHoverBaselineMap, FString() }, Blend, TEXT("UseHoverBaselineMap"), OutErrorMessage);
+    bConnected &= Connect({ HoverEdgeFeatherMap, FString() }, Blend, TEXT("HoverEdgeFeatherMapTex"), OutErrorMessage);
+    bConnected &= Connect({ UseHoverEdgeFeatherMap, FString() }, Blend, TEXT("UseHoverEdgeFeatherMap"), OutErrorMessage);
     if (!bConnected || !UMaterialEditingLibrary::ConnectMaterialProperty(Blend, FString(), MP_BaseColor))
     {
         if (OutErrorMessage.IsEmpty())
@@ -200,7 +435,31 @@ void FWetTransparencyPreviewGraphExtension::InitializeMID(
     PreviewMID.SetTextureParameterValue(DWCTransparencyPreviewMaterialParameters::TransparencyMap(), nullptr);
     PreviewMID.SetScalarParameterValue(DWCTransparencyPreviewMaterialParameters::UseTransparencyMap(), 0.0f);
     PreviewMID.SetScalarParameterValue(DWCTransparencyPreviewMaterialParameters::TransparencyStrength(), 1.0f);
+    PreviewMID.SetScalarParameterValue(DWCTransparencyPreviewMaterialParameters::ShowInnerColor(), 0.0f);
     PreviewMID.SetTextureParameterValue(DWCTransparencyPreviewMaterialParameters::WrinkleSuppressionMap(), nullptr);
     PreviewMID.SetScalarParameterValue(DWCTransparencyPreviewMaterialParameters::UseWrinkleSuppressionMap(), 0.0f);
     PreviewMID.SetScalarParameterValue(DWCTransparencyPreviewMaterialParameters::WrinkleSuppressionStrength(), 0.0f);
+    PreviewMID.SetVectorParameterValue(
+        DWCTransparencyPreviewMaterialParameters::HoverState0(),
+        FLinearColor(0.0f, 0.0f, 0.025f, 0.5f));
+    PreviewMID.SetVectorParameterValue(
+        DWCTransparencyPreviewMaterialParameters::HoverState1(),
+        FLinearColor::Black);
+    PreviewMID.SetVectorParameterValue(
+        DWCTransparencyPreviewMaterialParameters::HoverColor(),
+        FLinearColor::Black);
+    PreviewMID.SetScalarParameterValue(
+        DWCTransparencyPreviewMaterialParameters::HoverTarget(),
+        static_cast<float>(EDWCTransparencyMaterialHoverTarget::None));
+    PreviewMID.SetScalarParameterValue(DWCTransparencyPreviewMaterialParameters::HoverWrap(), 0.0f);
+    PreviewMID.SetVectorParameterValue(
+        DWCTransparencyPreviewMaterialParameters::HoverTexelSize(),
+        FLinearColor::Black);
+    PreviewMID.SetScalarParameterValue(
+        DWCTransparencyPreviewMaterialParameters::HoverVisualizationMode(),
+        0.0f);
+    PreviewMID.SetTextureParameterValue(DWCTransparencyPreviewMaterialParameters::HoverBaselineMap(), nullptr);
+    PreviewMID.SetScalarParameterValue(DWCTransparencyPreviewMaterialParameters::UseHoverBaselineMap(), 0.0f);
+    PreviewMID.SetTextureParameterValue(DWCTransparencyPreviewMaterialParameters::HoverEdgeFeatherMap(), nullptr);
+    PreviewMID.SetScalarParameterValue(DWCTransparencyPreviewMaterialParameters::UseHoverEdgeFeatherMap(), 0.0f);
 }

@@ -67,6 +67,8 @@ class FDWCEditorPreviewSession final
 
     /** Builds the requested slot MIDs first, then applies shared render resources once. */
     void PreparePreviewMaterials(TConstArrayView<int32> MaterialSlotIndices);
+    /** Polls shader compilation and promotes completed slots without blocking. */
+    void TickPendingMaterialCompilations();
     FDWCEditorPreviewSessionMaterialResult GetOrCreatePreviewMaterial(int32 MaterialSlotIndex);
     void ForEachActiveBuiltMID(TFunctionRef<void(int32, UMaterialInstanceDynamic&)> Visitor) const;
 

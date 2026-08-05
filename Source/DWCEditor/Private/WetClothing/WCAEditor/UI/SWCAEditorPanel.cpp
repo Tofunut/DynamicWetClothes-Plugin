@@ -8,8 +8,11 @@
 #include "WetClothing/Foundation/Spatial/DWCEditorSpatialQueryService.h"
 #include "WetClothing/Foundation/TextureWorkspace/DWCEditorRenderUploadQueue.h"
 #include "WetClothing/Foundation/TextureWorkspace/DWCEditorTextureWorkspace.h"
+#include "WetClothing/Foundation/Preview/Commit/DWCEditorPreviewCommitCoordinator.h"
 #include "WetClothing/Foundation/Authoring/State/DWCEditorSessionStore.h"
+#include "WetClothing/Foundation/Async/DWCEditorResourceGovernor.h"
 #include "WetClothing/Foundation/Jobs/DWCEditorWorkerJobScheduler.h"
+#include "WetClothing/Foundation/Preview/Diagnostics/DWCEditorPreviewDiagnostics.h"
 #include "WetClothing/Modes/Part/Editor/SWetClothingPartEditorPanel.h"
 #include "WetClothing/DerivedAssets/Textures/WetnessProfile/WetClothingRenderProfileBakeService.h"
 #include "WetClothing/Modes/Transparency/Editor/SWetClothingTransparencyBakePanel.h"
@@ -170,12 +173,29 @@ SWCAEditorPanel::~SWCAEditorPanel()
         EndPIEHandle.Reset();
     }
     SuspendAllPreviewModes(EDWCEditorPreviewSuspendReason::EditorClosing);
+    if (PreviewCommitCoordinator.IsValid())
+    {
+        FDWCEditorPreviewDiagnostics::UnregisterCommitCoordinator(PreviewCommitCoordinator.Get());
+        PreviewCommitCoordinator->Shutdown();
+    }
     BakeCoordinator.Reset();
     if (WorkerJobScheduler.IsValid())
     {
+        FDWCEditorPreviewDiagnostics::UnregisterWorkerScheduler(WorkerJobScheduler.Get());
         WorkerJobScheduler->Shutdown();
         WorkerJobScheduler.Reset();
     }
+    ResourceGovernor.Reset();
+
+    // Release viewport-owned texture leases before shutting down the upload
+    // queue and workspace that service them.
+    if (ModeContentBox.IsValid())
+    {
+        ModeContentBox->SetContent(SNullWidget::NullWidget);
+    }
+    WrinkleEditorPanel.Reset();
+    TransparencyBakePanel.Reset();
+    PreviewCommitCoordinator.Reset();
     if (RenderUploadQueue.IsValid())
     {
         RenderUploadQueue->Shutdown();
@@ -201,7 +221,14 @@ void SWCAEditorPanel::Construct(const FArguments& InArgs)
     RenderUploadQueue = MakeShared<FDWCEditorRenderUploadQueue>();
     TextureWorkspace = MakeShared<FDWCEditorTextureWorkspace>(RenderUploadQueue.ToSharedRef());
     SessionStore = MakeShared<FDWCEditorSessionStore>();
-    WorkerJobScheduler = MakeShared<FDWCEditorWorkerJobScheduler, ESPMode::ThreadSafe>();
+    ResourceGovernor = MakeShared<FDWCEditorResourceGovernor>();
+    WorkerJobScheduler = MakeShared<FDWCEditorWorkerJobScheduler, ESPMode::ThreadSafe>(
+        ResourceGovernor.ToSharedRef());
+    PreviewCommitCoordinator = MakeShared<FDWCEditorPreviewCommitCoordinator>(
+        TextureWorkspace.ToSharedRef(),
+        WorkerJobScheduler->GetSessionEpoch());
+    FDWCEditorPreviewDiagnostics::RegisterCommitCoordinator(PreviewCommitCoordinator.Get());
+    FDWCEditorPreviewDiagnostics::RegisterWorkerScheduler(WorkerJobScheduler.Get());
     TWeakPtr<FDWCEditorSessionStore> WeakSessionStore = SessionStore;
     WorkerJobScheduler->SetDomainRevisionProvider(
         [WeakSessionStore](const EDWCEditorAuthoringDomain Domain)
@@ -281,6 +308,7 @@ TSharedRef<SWidget> SWCAEditorPanel::EnsureModeWidget(const EWCAEditorMode Mode)
                 .BakeCoordinator(BakeCoordinator)
                 .SpatialQueryService(SpatialQueryService)
                 .TextureWorkspace(TextureWorkspace)
+                .PreviewCommitCoordinator(PreviewCommitCoordinator)
                 .RenderUploadQueue(RenderUploadQueue)
                 .DetailsView(DetailsView);
         }
@@ -297,6 +325,7 @@ TSharedRef<SWidget> SWCAEditorPanel::EnsureModeWidget(const EWCAEditorMode Mode)
                 .BakeCoordinator(BakeCoordinator)
                 .SpatialQueryService(SpatialQueryService)
                 .TextureWorkspace(TextureWorkspace)
+                .PreviewCommitCoordinator(PreviewCommitCoordinator)
                 .RenderUploadQueue(RenderUploadQueue)
                 .DetailsView(DetailsView);
         }

@@ -9,6 +9,8 @@ class FDWCEditorAuthoringDocument;
 class FDWCEditorBakeCoordinator;
 class FDWCEditorCacheStore;
 class FDWCEditorRenderUploadQueue;
+class FDWCEditorPreviewCommitCoordinator;
+class FDWCEditorResourceGovernor;
 class FDWCEditorSessionStore;
 class FDWCEditorSpatialQueryService;
 class FDWCEditorTextureWorkspace;
@@ -108,7 +110,9 @@ private:
     TSharedPtr<FDWCEditorSpatialQueryService> SpatialQueryService;
     TSharedPtr<FDWCEditorRenderUploadQueue> RenderUploadQueue;
     TSharedPtr<FDWCEditorTextureWorkspace> TextureWorkspace;
+    TSharedPtr<FDWCEditorPreviewCommitCoordinator> PreviewCommitCoordinator;
     TSharedPtr<FDWCEditorSessionStore> SessionStore;
+    TSharedPtr<FDWCEditorResourceGovernor> ResourceGovernor;
     TSharedPtr<FDWCEditorWorkerJobScheduler, ESPMode::ThreadSafe> WorkerJobScheduler;
     TSharedPtr<FDWCEditorBakeCoordinator> BakeCoordinator;
     TSharedPtr<IDetailsView> DetailsView;

@@ -4,6 +4,55 @@
 #include "WetClothing/Foundation/Preview/Diagnostics/DWCEditorPreviewDiagnostics.h"
 #include "WetClothing/Foundation/TextureWorkspace/DWCEditorRenderUploadQueue.h"
 
+namespace
+{
+    bool IsRegionRectValid(const FIntRect& Rect, const FIntPoint& Size)
+    {
+        return !Rect.IsEmpty() && Rect.Min.X >= 0 && Rect.Min.Y >= 0 &&
+            Rect.Max.X <= Size.X && Rect.Max.Y <= Size.Y;
+    }
+
+    int64 GetRegionPixelCount(const FIntRect& Rect)
+    {
+        return static_cast<int64>(Rect.Width()) * static_cast<int64>(Rect.Height());
+    }
+
+    bool HasOverlappingRects(const TArray<FIntRect>& Rects)
+    {
+        for (int32 RectIndex = 0; RectIndex < Rects.Num(); ++RectIndex)
+        {
+            for (int32 OtherIndex = RectIndex + 1; OtherIndex < Rects.Num(); ++OtherIndex)
+            {
+                const FIntRect& A = Rects[RectIndex];
+                const FIntRect& B = Rects[OtherIndex];
+                if (FMath::Max(A.Min.X, B.Min.X) < FMath::Min(A.Max.X, B.Max.X) &&
+                    FMath::Max(A.Min.Y, B.Min.Y) < FMath::Min(A.Max.Y, B.Max.Y))
+                {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    template <typename ElementType>
+    void CopyRegionRows(
+        const TArray<ElementType>& Source,
+        const FIntRect& DestinationRect,
+        const int32 DestinationWidth,
+        TArray<ElementType>& Destination)
+    {
+        const int32 RegionWidth = DestinationRect.Width();
+        for (int32 RowIndex = 0; RowIndex < DestinationRect.Height(); ++RowIndex)
+        {
+            const ElementType* SourceRow = Source.GetData() + RowIndex * RegionWidth;
+            ElementType* DestinationRow = Destination.GetData() +
+                (DestinationRect.Min.Y + RowIndex) * DestinationWidth + DestinationRect.Min.X;
+            FMemory::Memcpy(DestinationRow, SourceRow, RegionWidth * sizeof(ElementType));
+        }
+    }
+}
+
 FDWCEditorTextureWorkspace::FDWCEditorTextureWorkspace(
     TSharedRef<FDWCEditorRenderUploadQueue> InUploadQueue,
     const uint64 InCPUBudgetBytes,
@@ -110,6 +159,42 @@ FDWCEditorTextureLease FDWCEditorTextureWorkspace::AcquireLease(const FDWCEditor
     return Lease;
 }
 
+FDWCEditorTextureLease FDWCEditorTextureWorkspace::TransferBGRA8AndAcquireLease(
+    const FDWCEditorTextureKey& Key,
+    const FDWCEditorTextureDescriptor& Descriptor,
+    TArray<FColor>&& Pixels,
+    const EDWCEditorTextureUploadPriority Priority)
+{
+    check(IsInGameThread());
+    return AcquireLease(PublishBGRA8(Key, Descriptor, MoveTemp(Pixels), Priority));
+}
+
+FDWCEditorTextureLease FDWCEditorTextureWorkspace::TransferNormalBGRA8AndAcquireLease(
+    const FDWCEditorTextureKey& Key,
+    const FDWCEditorTextureDescriptor& Descriptor,
+    TArray<FColor>&& Pixels,
+    FDWCEditorNormalRasterSurface&& WorkingSurface,
+    const EDWCEditorTextureUploadPriority Priority)
+{
+    check(IsInGameThread());
+    return AcquireLease(PublishNormalBGRA8(
+        Key,
+        Descriptor,
+        MoveTemp(Pixels),
+        MoveTemp(WorkingSurface),
+        Priority));
+}
+
+FDWCEditorTextureLease FDWCEditorTextureWorkspace::TransferG8AndAcquireLease(
+    const FDWCEditorTextureKey& Key,
+    const FDWCEditorTextureDescriptor& Descriptor,
+    TArray<uint8>&& Pixels,
+    const EDWCEditorTextureUploadPriority Priority)
+{
+    check(IsInGameThread());
+    return AcquireLease(PublishG8(Key, Descriptor, MoveTemp(Pixels), Priority));
+}
+
 FDWCEditorTextureHandle FDWCEditorTextureWorkspace::PublishBGRA8(
     const FDWCEditorTextureKey& Key,
     const FDWCEditorTextureDescriptor& Descriptor,
@@ -132,6 +217,7 @@ FDWCEditorTextureHandle FDWCEditorTextureWorkspace::PublishBGRA8(
     }
     Entry->BGRA8Pixels = MoveTemp(Pixels);
     Entry->WorkingNormalSurface = FDWCEditorNormalRasterSurface();
+    ++Entry->DataRevision;
     ++Entry->ContentRevision;
     TrimToBudget(Entry);
     bool bDeferredInitialUpload = false;
@@ -171,6 +257,7 @@ FDWCEditorTextureHandle FDWCEditorTextureWorkspace::PublishG8(
     }
     Entry->G8Pixels = MoveTemp(Pixels);
     Entry->WorkingNormalSurface = FDWCEditorNormalRasterSurface();
+    ++Entry->DataRevision;
     ++Entry->ContentRevision;
     TrimToBudget(Entry);
     bool bDeferredInitialUpload = false;
@@ -213,6 +300,7 @@ FDWCEditorTextureHandle FDWCEditorTextureWorkspace::PublishNormalBGRA8(
     }
     Entry->BGRA8Pixels = MoveTemp(Pixels);
     Entry->WorkingNormalSurface = MoveTemp(WorkingSurface);
+    ++Entry->DataRevision;
     ++Entry->ContentRevision;
     TrimToBudget(Entry);
     bool bDeferredInitialUpload = false;
@@ -244,6 +332,7 @@ void FDWCEditorTextureWorkspace::MarkDirty(
     {
         return;
     }
+    ++Entry->DataRevision;
     ++Entry->ContentRevision;
     Entry->LastUsedSerial = ++UseSerial;
     UploadQueue->Enqueue(
@@ -260,6 +349,328 @@ void FDWCEditorTextureWorkspace::MarkDirty(
     const EDWCEditorTextureUploadPriority Priority)
 {
     MarkDirty(Lease.GetHandle(), DirtyRect, bWrap, Priority);
+}
+
+void FDWCEditorTextureWorkspace::MarkPresentationDirty(
+    const FDWCEditorTextureLease& Lease,
+    const FIntRect& DirtyRect,
+    const bool bWrap,
+    const EDWCEditorTextureUploadPriority Priority)
+{
+    check(IsInGameThread());
+    const FDWCEditorTextureHandle& Entry = Lease.GetHandle();
+    bool bDeferredInitialUpload = false;
+    if (!Entry.IsValid() || Entries.FindRef(Entry->Key) != Entry ||
+        Entry->GetActiveLeaseCount() == 0 || DirtyRect.IsEmpty() ||
+        !EnsureTexture(Entry, true, &bDeferredInitialUpload))
+    {
+        return;
+    }
+    ++Entry->ContentRevision;
+    Entry->LastUsedSerial = ++UseSerial;
+    UploadQueue->Enqueue(
+        Entry,
+        bDeferredInitialUpload
+            ? FIntRect(0, 0, Entry->Descriptor.Size.X, Entry->Descriptor.Size.Y)
+            : DirtyRect,
+        bDeferredInitialUpload ? false : bWrap,
+        Priority);
+}
+
+EDWCEditorPreviewRegionCommitResult FDWCEditorTextureWorkspace::ValidateRegionTarget(
+    const FDWCEditorTextureLease& Lease,
+    const FDWCEditorPreviewRegionTarget& Target,
+    FDWCEditorTextureHandle& OutEntry) const
+{
+    OutEntry = Lease.GetHandle();
+    const FDWCEditorTextureHandle RetainedEntry = Entries.FindRef(Target.Key);
+    if (!OutEntry.IsValid() || RetainedEntry != OutEntry || OutEntry->GetActiveLeaseCount() == 0)
+    {
+        return EDWCEditorPreviewRegionCommitResult::WorkspaceEntryMissing;
+    }
+    if (!(OutEntry->GetDescriptor() == Target.Descriptor))
+    {
+        return EDWCEditorPreviewRegionCommitResult::DescriptorMismatch;
+    }
+    if (OutEntry->GetDataRevision() != Target.ExpectedDataRevision)
+    {
+        return EDWCEditorPreviewRegionCommitResult::DataRevisionMismatch;
+    }
+    if (OutEntry->GetResourceGeneration() != Target.ExpectedResourceGeneration)
+    {
+        return EDWCEditorPreviewRegionCommitResult::ResourceGenerationMismatch;
+    }
+    return EDWCEditorPreviewRegionCommitResult::Applied;
+}
+
+void FDWCEditorTextureWorkspace::QueueCommittedRegions(
+    const FDWCEditorTextureHandle& Entry,
+    const TArray<FIntRect>& DirtyRegions,
+    const EDWCEditorTextureUploadPriority Priority,
+    const bool bDeferredInitialUpload)
+{
+    if (bDeferredInitialUpload)
+    {
+        UploadQueue->Enqueue(
+            Entry,
+            FIntRect(0, 0, Entry->Descriptor.Size.X, Entry->Descriptor.Size.Y),
+            false,
+            Priority);
+        return;
+    }
+    for (const FIntRect& DirtyRegion : DirtyRegions)
+    {
+        UploadQueue->Enqueue(Entry, DirtyRegion, false, Priority);
+    }
+}
+
+FDWCEditorPreviewRegionCommitOutcome FDWCEditorTextureWorkspace::CommitBGRA8Regions(
+    const FDWCEditorTextureLease& Lease,
+    const FDWCEditorPreviewRegionTarget& Target,
+    const TArray<FDWCEditorBGRA8RegionPayload>& Regions,
+    const EDWCEditorTextureUploadPriority Priority)
+{
+    check(IsInGameThread());
+    ++RegionCommitRequestCount;
+    FDWCEditorPreviewRegionCommitOutcome Outcome;
+    FDWCEditorTextureHandle Entry;
+    Outcome.Result = ValidateRegionTarget(Lease, Target, Entry);
+    if (Outcome.Result != EDWCEditorPreviewRegionCommitResult::Applied)
+    {
+        if (Outcome.Result == EDWCEditorPreviewRegionCommitResult::WorkspaceEntryMissing) ++RegionCommitEntryMissingCount;
+        if (Outcome.Result == EDWCEditorPreviewRegionCommitResult::DataRevisionMismatch) ++RegionCommitDataRevisionMismatchCount;
+        if (Outcome.Result == EDWCEditorPreviewRegionCommitResult::ResourceGenerationMismatch) ++RegionCommitResourceGenerationMismatchCount;
+        if (Outcome.Result == EDWCEditorPreviewRegionCommitResult::DescriptorMismatch) ++RegionCommitDescriptorMismatchCount;
+        return Outcome;
+    }
+
+    TArray<FIntRect> DirtyRegions;
+    FDWCEditorPreviewRegionMemoryEstimate MemoryEstimate;
+    if (Target.Descriptor.PixelFormat != PF_B8G8R8A8 || Regions.IsEmpty() ||
+        Entry->BGRA8Pixels.Num() != Target.Descriptor.Size.X * Target.Descriptor.Size.Y ||
+        !FDWCEditorPreviewRegionMemory::TryEstimateBGRA8(Regions, MemoryEstimate))
+    {
+        Outcome.Result = EDWCEditorPreviewRegionCommitResult::InvalidPayload;
+    }
+    for (const FDWCEditorBGRA8RegionPayload& Region : Regions)
+    {
+        if (Outcome.Result != EDWCEditorPreviewRegionCommitResult::Applied ||
+            !IsRegionRectValid(Region.Rect, Target.Descriptor.Size))
+        {
+            Outcome.Result = EDWCEditorPreviewRegionCommitResult::InvalidPayload;
+            break;
+        }
+        DirtyRegions.Add(Region.Rect);
+    }
+    if (Outcome.Result == EDWCEditorPreviewRegionCommitResult::Applied && HasOverlappingRects(DirtyRegions))
+    {
+        Outcome.Result = EDWCEditorPreviewRegionCommitResult::InvalidPayload;
+    }
+    if (Outcome.Result != EDWCEditorPreviewRegionCommitResult::Applied)
+    {
+        ++RegionCommitInvalidPayloadCount;
+        return Outcome;
+    }
+
+    bool bDeferredInitialUpload = false;
+    if (!EnsureTexture(Entry, true, &bDeferredInitialUpload))
+    {
+        Outcome.Result = EDWCEditorPreviewRegionCommitResult::WorkspaceRejected;
+        ++RegionCommitWorkspaceRejectedCount;
+        return Outcome;
+    }
+    for (const FDWCEditorBGRA8RegionPayload& Region : Regions)
+    {
+        CopyRegionRows(Region.Pixels, Region.Rect, Target.Descriptor.Size.X, Entry->BGRA8Pixels);
+        Outcome.CommittedPixelCount += static_cast<uint64>(GetRegionPixelCount(Region.Rect));
+    }
+    Outcome.CommittedBytes = MemoryEstimate.ResultBytes;
+    ++Entry->DataRevision;
+    ++Entry->ContentRevision;
+    Entry->LastUsedSerial = ++UseSerial;
+    QueueCommittedRegions(Entry, DirtyRegions, Priority, bDeferredInitialUpload);
+    Outcome.Result = EDWCEditorPreviewRegionCommitResult::Applied;
+    Outcome.NewDataRevision = Entry->DataRevision;
+    Outcome.NewContentRevision = Entry->ContentRevision;
+    ++RegionCommitAppliedCount;
+    RegionCommitPixelCount += Outcome.CommittedPixelCount;
+    RegionCommitBytes += Outcome.CommittedBytes;
+    return Outcome;
+}
+
+FDWCEditorPreviewRegionCommitOutcome FDWCEditorTextureWorkspace::CommitG8Regions(
+    const FDWCEditorTextureLease& Lease,
+    const FDWCEditorPreviewRegionTarget& Target,
+    const TArray<FDWCEditorG8RegionPayload>& Regions,
+    const EDWCEditorTextureUploadPriority Priority)
+{
+    check(IsInGameThread());
+    ++RegionCommitRequestCount;
+    FDWCEditorPreviewRegionCommitOutcome Outcome;
+    FDWCEditorTextureHandle Entry;
+    Outcome.Result = ValidateRegionTarget(Lease, Target, Entry);
+    if (Outcome.Result != EDWCEditorPreviewRegionCommitResult::Applied)
+    {
+        if (Outcome.Result == EDWCEditorPreviewRegionCommitResult::WorkspaceEntryMissing) ++RegionCommitEntryMissingCount;
+        if (Outcome.Result == EDWCEditorPreviewRegionCommitResult::DataRevisionMismatch) ++RegionCommitDataRevisionMismatchCount;
+        if (Outcome.Result == EDWCEditorPreviewRegionCommitResult::ResourceGenerationMismatch) ++RegionCommitResourceGenerationMismatchCount;
+        if (Outcome.Result == EDWCEditorPreviewRegionCommitResult::DescriptorMismatch) ++RegionCommitDescriptorMismatchCount;
+        return Outcome;
+    }
+
+    TArray<FIntRect> DirtyRegions;
+    FDWCEditorPreviewRegionMemoryEstimate MemoryEstimate;
+    if (Target.Descriptor.PixelFormat != PF_G8 || Regions.IsEmpty() ||
+        Entry->G8Pixels.Num() != Target.Descriptor.Size.X * Target.Descriptor.Size.Y ||
+        !FDWCEditorPreviewRegionMemory::TryEstimateG8(Regions, MemoryEstimate))
+    {
+        Outcome.Result = EDWCEditorPreviewRegionCommitResult::InvalidPayload;
+    }
+    for (const FDWCEditorG8RegionPayload& Region : Regions)
+    {
+        if (Outcome.Result != EDWCEditorPreviewRegionCommitResult::Applied ||
+            !IsRegionRectValid(Region.Rect, Target.Descriptor.Size))
+        {
+            Outcome.Result = EDWCEditorPreviewRegionCommitResult::InvalidPayload;
+            break;
+        }
+        DirtyRegions.Add(Region.Rect);
+    }
+    if (Outcome.Result == EDWCEditorPreviewRegionCommitResult::Applied && HasOverlappingRects(DirtyRegions))
+    {
+        Outcome.Result = EDWCEditorPreviewRegionCommitResult::InvalidPayload;
+    }
+    if (Outcome.Result != EDWCEditorPreviewRegionCommitResult::Applied)
+    {
+        ++RegionCommitInvalidPayloadCount;
+        return Outcome;
+    }
+
+    bool bDeferredInitialUpload = false;
+    if (!EnsureTexture(Entry, true, &bDeferredInitialUpload))
+    {
+        Outcome.Result = EDWCEditorPreviewRegionCommitResult::WorkspaceRejected;
+        ++RegionCommitWorkspaceRejectedCount;
+        return Outcome;
+    }
+    for (const FDWCEditorG8RegionPayload& Region : Regions)
+    {
+        CopyRegionRows(Region.Pixels, Region.Rect, Target.Descriptor.Size.X, Entry->G8Pixels);
+        Outcome.CommittedPixelCount += static_cast<uint64>(GetRegionPixelCount(Region.Rect));
+    }
+    Outcome.CommittedBytes = MemoryEstimate.ResultBytes;
+    ++Entry->DataRevision;
+    ++Entry->ContentRevision;
+    Entry->LastUsedSerial = ++UseSerial;
+    QueueCommittedRegions(Entry, DirtyRegions, Priority, bDeferredInitialUpload);
+    Outcome.Result = EDWCEditorPreviewRegionCommitResult::Applied;
+    Outcome.NewDataRevision = Entry->DataRevision;
+    Outcome.NewContentRevision = Entry->ContentRevision;
+    ++RegionCommitAppliedCount;
+    RegionCommitPixelCount += Outcome.CommittedPixelCount;
+    RegionCommitBytes += Outcome.CommittedBytes;
+    return Outcome;
+}
+
+FDWCEditorPreviewRegionCommitOutcome FDWCEditorTextureWorkspace::CommitNormalRegions(
+    const FDWCEditorTextureLease& Lease,
+    const FDWCEditorPreviewRegionTarget& Target,
+    const TArray<FDWCEditorNormalRegionPayload>& Regions,
+    const EDWCEditorTextureUploadPriority Priority)
+{
+    check(IsInGameThread());
+    ++RegionCommitRequestCount;
+    FDWCEditorPreviewRegionCommitOutcome Outcome;
+    FDWCEditorTextureHandle Entry;
+    Outcome.Result = ValidateRegionTarget(Lease, Target, Entry);
+    if (Outcome.Result != EDWCEditorPreviewRegionCommitResult::Applied)
+    {
+        if (Outcome.Result == EDWCEditorPreviewRegionCommitResult::WorkspaceEntryMissing) ++RegionCommitEntryMissingCount;
+        if (Outcome.Result == EDWCEditorPreviewRegionCommitResult::DataRevisionMismatch) ++RegionCommitDataRevisionMismatchCount;
+        if (Outcome.Result == EDWCEditorPreviewRegionCommitResult::ResourceGenerationMismatch) ++RegionCommitResourceGenerationMismatchCount;
+        if (Outcome.Result == EDWCEditorPreviewRegionCommitResult::DescriptorMismatch) ++RegionCommitDescriptorMismatchCount;
+        return Outcome;
+    }
+
+    FDWCEditorNormalRasterSurface& WorkingSurface = Entry->WorkingNormalSurface;
+    TArray<FIntRect> WorkingRects;
+    TArray<FIntRect> OutputRects;
+    FDWCEditorPreviewRegionMemoryEstimate MemoryEstimate;
+    if (Target.Descriptor.PixelFormat != PF_B8G8R8A8 || Regions.IsEmpty() ||
+        !WorkingSurface.IsValid() || WorkingSurface.Size != Target.Descriptor.WorkingSize ||
+        Entry->BGRA8Pixels.Num() != Target.Descriptor.Size.X * Target.Descriptor.Size.Y ||
+        !FDWCEditorPreviewRegionMemory::TryEstimateNormal(Regions, MemoryEstimate))
+    {
+        Outcome.Result = EDWCEditorPreviewRegionCommitResult::InvalidPayload;
+    }
+    for (const FDWCEditorNormalRegionPayload& Region : Regions)
+    {
+        const bool bCoverageMatches = WorkingSurface.HasCoverage()
+            ? Region.Coverage.Num() == GetRegionPixelCount(Region.WorkingRect)
+            : Region.Coverage.IsEmpty();
+        if (Outcome.Result != EDWCEditorPreviewRegionCommitResult::Applied ||
+            !IsRegionRectValid(Region.WorkingRect, Target.Descriptor.WorkingSize) ||
+            !IsRegionRectValid(Region.OutputRect, Target.Descriptor.Size) ||
+            !bCoverageMatches)
+        {
+            Outcome.Result = EDWCEditorPreviewRegionCommitResult::InvalidPayload;
+            break;
+        }
+        WorkingRects.Add(Region.WorkingRect);
+        OutputRects.Add(Region.OutputRect);
+    }
+    if (Outcome.Result == EDWCEditorPreviewRegionCommitResult::Applied &&
+        (HasOverlappingRects(WorkingRects) || HasOverlappingRects(OutputRects)))
+    {
+        Outcome.Result = EDWCEditorPreviewRegionCommitResult::InvalidPayload;
+    }
+    if (Outcome.Result != EDWCEditorPreviewRegionCommitResult::Applied)
+    {
+        ++RegionCommitInvalidPayloadCount;
+        return Outcome;
+    }
+
+    bool bDeferredInitialUpload = false;
+    if (!EnsureTexture(Entry, true, &bDeferredInitialUpload))
+    {
+        Outcome.Result = EDWCEditorPreviewRegionCommitResult::WorkspaceRejected;
+        ++RegionCommitWorkspaceRejectedCount;
+        return Outcome;
+    }
+    for (const FDWCEditorNormalRegionPayload& Region : Regions)
+    {
+        CopyRegionRows(
+            Region.PackedNormalXY,
+            Region.WorkingRect,
+            Target.Descriptor.WorkingSize.X,
+            WorkingSurface.PackedNormalXY);
+        if (WorkingSurface.HasCoverage())
+        {
+            CopyRegionRows(
+                Region.Coverage,
+                Region.WorkingRect,
+                Target.Descriptor.WorkingSize.X,
+                WorkingSurface.Coverage);
+        }
+        CopyRegionRows(
+            Region.EncodedPixels,
+            Region.OutputRect,
+            Target.Descriptor.Size.X,
+            Entry->BGRA8Pixels);
+        Outcome.CommittedPixelCount += static_cast<uint64>(GetRegionPixelCount(Region.OutputRect));
+    }
+    Outcome.CommittedBytes = MemoryEstimate.ResultBytes;
+    ++Entry->DataRevision;
+    ++Entry->ContentRevision;
+    Entry->LastUsedSerial = ++UseSerial;
+    QueueCommittedRegions(Entry, OutputRects, Priority, bDeferredInitialUpload);
+    Outcome.Result = EDWCEditorPreviewRegionCommitResult::Applied;
+    Outcome.NewDataRevision = Entry->DataRevision;
+    Outcome.NewContentRevision = Entry->ContentRevision;
+    ++RegionCommitAppliedCount;
+    RegionCommitPixelCount += Outcome.CommittedPixelCount;
+    RegionCommitBytes += Outcome.CommittedBytes;
+    return Outcome;
 }
 
 void FDWCEditorTextureWorkspace::RecreateWithAddressMode(
@@ -903,6 +1314,43 @@ void FDWCEditorTextureWorkspace::AppendDiagnosticOperationCounters(
     HighWater.Name = TEXT("Preview GPU residency high-water");
     HighWater.Count = 1;
     HighWater.Bytes = GPUHighWaterBytes;
+
+    FDWCEditorPreviewOperationCounter& RegionRequests = OutCounters.AddDefaulted_GetRef();
+    RegionRequests.Name = TEXT("Preview region commit requests");
+    RegionRequests.Count = RegionCommitRequestCount;
+
+    FDWCEditorPreviewOperationCounter& RegionApplied = OutCounters.AddDefaulted_GetRef();
+    RegionApplied.Name = TEXT("Applied preview region commits");
+    RegionApplied.Count = RegionCommitAppliedCount;
+    RegionApplied.Bytes = RegionCommitBytes;
+
+    FDWCEditorPreviewOperationCounter& RegionPixels = OutCounters.AddDefaulted_GetRef();
+    RegionPixels.Name = TEXT("Preview region committed pixels");
+    RegionPixels.Count = RegionCommitPixelCount;
+
+    FDWCEditorPreviewOperationCounter& InvalidRegionPayloads = OutCounters.AddDefaulted_GetRef();
+    InvalidRegionPayloads.Name = TEXT("Rejected preview region invalid payloads");
+    InvalidRegionPayloads.Count = RegionCommitInvalidPayloadCount;
+
+    FDWCEditorPreviewOperationCounter& RegionDataMismatches = OutCounters.AddDefaulted_GetRef();
+    RegionDataMismatches.Name = TEXT("Rejected preview region data revisions");
+    RegionDataMismatches.Count = RegionCommitDataRevisionMismatchCount;
+
+    FDWCEditorPreviewOperationCounter& RegionResourceMismatches = OutCounters.AddDefaulted_GetRef();
+    RegionResourceMismatches.Name = TEXT("Rejected preview region resource generations");
+    RegionResourceMismatches.Count = RegionCommitResourceGenerationMismatchCount;
+
+    FDWCEditorPreviewOperationCounter& RegionDescriptorMismatches = OutCounters.AddDefaulted_GetRef();
+    RegionDescriptorMismatches.Name = TEXT("Rejected preview region descriptors");
+    RegionDescriptorMismatches.Count = RegionCommitDescriptorMismatchCount;
+
+    FDWCEditorPreviewOperationCounter& MissingRegionEntries = OutCounters.AddDefaulted_GetRef();
+    MissingRegionEntries.Name = TEXT("Rejected preview region missing entries");
+    MissingRegionEntries.Count = RegionCommitEntryMissingCount;
+
+    FDWCEditorPreviewOperationCounter& WorkspaceRejectedRegions = OutCounters.AddDefaulted_GetRef();
+    WorkspaceRejectedRegions.Name = TEXT("Rejected preview regions by workspace");
+    WorkspaceRejectedRegions.Count = RegionCommitWorkspaceRejectedCount;
 }
 
 void FDWCEditorTextureWorkspace::ResetDiagnosticCounters()
@@ -916,6 +1364,16 @@ void FDWCEditorTextureWorkspace::ResetDiagnosticCounters()
     GPUResourceReleaseCompleteCount = 0;
     GPUBudgetRejectCount = 0;
     GPUHighWaterBytes = CalculateGPUUsedBytes();
+    RegionCommitRequestCount = 0;
+    RegionCommitAppliedCount = 0;
+    RegionCommitPixelCount = 0;
+    RegionCommitBytes = 0;
+    RegionCommitInvalidPayloadCount = 0;
+    RegionCommitDataRevisionMismatchCount = 0;
+    RegionCommitResourceGenerationMismatchCount = 0;
+    RegionCommitDescriptorMismatchCount = 0;
+    RegionCommitEntryMissingCount = 0;
+    RegionCommitWorkspaceRejectedCount = 0;
 }
 
 void FDWCEditorTextureWorkspace::AddReferencedObjects(FReferenceCollector& Collector)

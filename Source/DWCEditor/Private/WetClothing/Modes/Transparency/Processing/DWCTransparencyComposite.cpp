@@ -1,6 +1,8 @@
 #include "WetClothing/Modes/Transparency/Processing/DWCTransparencyComposite.h"
 
 #include "WetClothing/Foundation/Jobs/DWCEditorCancellationToken.h"
+#include "WetClothing/Modes/Transparency/Brush/DWCTransparencyAlphaTileStore.h"
+#include "WetClothing/Modes/Transparency/Brush/DWCTransparencyRevealColorTileStore.h"
 
 namespace
 {
@@ -51,19 +53,26 @@ float FDWCTransparencyComposite::ResolveEditedAlpha(
         return 0.0f;
     }
     const float AutoAlpha = Context.AutoResult->AutoAlphaBuffer[PixelIndex] / 255.0f;
-    const float ManualPremultiplied = Context.ManualPremultipliedBuffer.IsValidIndex(PixelIndex)
-        ? Context.ManualPremultipliedBuffer[PixelIndex] / 255.0f
-        : 0.0f;
-    const float ManualWeight = Context.ManualWeightBuffer.IsValidIndex(PixelIndex)
-        ? Context.ManualWeightBuffer[PixelIndex] / 255.0f
-        : 0.0f;
+    const float ManualPremultiplied = Context.ManualAlphaTileStore != nullptr
+        ? Context.ManualAlphaTileStore->GetPremultiplied(PixelIndex) / 255.0f
+        : Context.ManualPremultipliedBuffer.IsValidIndex(PixelIndex)
+            ? Context.ManualPremultipliedBuffer[PixelIndex] / 255.0f
+            : 0.0f;
+    const float ManualWeight = Context.ManualAlphaTileStore != nullptr
+        ? Context.ManualAlphaTileStore->GetWeight(PixelIndex) / 255.0f
+        : Context.ManualWeightBuffer.IsValidIndex(PixelIndex)
+            ? Context.ManualWeightBuffer[PixelIndex] / 255.0f
+            : 0.0f;
     return FMath::Clamp(AutoAlpha * (1.0f - ManualWeight) + ManualPremultiplied, 0.0f, 1.0f);
 }
 
 FColor FDWCTransparencyComposite::ComposeVisualizationPixel(
     const FDWCTransparencyPixelComposeContext& Context,
     const int32 PixelIndex,
-    const TOptional<float> EditedAlphaOverride)
+    const TOptional<float> EditedAlphaOverride,
+    const TOptional<FColor> RevealColorOverride,
+    const TOptional<uint8> WrinkleSuppressionOverride,
+    const TOptional<uint8> OuterEdgeFeatherOverride)
 {
     if (!Context.IsValid() || !Context.AutoResult->InnerColorBuffer.IsValidIndex(PixelIndex))
     {
@@ -82,17 +91,26 @@ FColor FDWCTransparencyComposite::ComposeVisualizationPixel(
         : ResolveFinalAlpha8(
             EditedAlpha,
             Context.TransparencyStrength,
-            Context.WrinkleSuppressionBuffer.IsValidIndex(PixelIndex)
+            WrinkleSuppressionOverride.IsSet()
+                ? WrinkleSuppressionOverride.GetValue()
+                : Context.WrinkleSuppressionBuffer.IsValidIndex(PixelIndex)
                 ? Context.WrinkleSuppressionBuffer[PixelIndex]
                 : 0,
             Context.WrinkleSuppressionStrength);
     const uint8 FeatheredAlpha = !Result.bIsFinalBakedBaseline &&
-        Context.OuterEdgeFeatherBuffer.IsValidIndex(PixelIndex)
+        (OuterEdgeFeatherOverride.IsSet() || Context.OuterEdgeFeatherBuffer.IsValidIndex(PixelIndex))
         ? static_cast<uint8>(
-            (static_cast<uint32>(Alpha) * Context.OuterEdgeFeatherBuffer[PixelIndex] + 127u) / 255u)
+            (static_cast<uint32>(Alpha) *
+             (OuterEdgeFeatherOverride.IsSet()
+                 ? OuterEdgeFeatherOverride.GetValue()
+                 : Context.OuterEdgeFeatherBuffer[PixelIndex]) + 127u) / 255u)
         : Alpha;
 
-    FColor Pixel = Context.RevealColorBuffer.IsValidIndex(PixelIndex)
+    FColor Pixel = RevealColorOverride.IsSet()
+        ? RevealColorOverride.GetValue()
+        : Context.RevealColorTileStore != nullptr
+        ? Context.RevealColorTileStore->GetColor(PixelIndex, MakeArrayView(Result.InnerColorBuffer))
+        : Context.RevealColorBuffer.IsValidIndex(PixelIndex)
         ? Context.RevealColorBuffer[PixelIndex]
         : Result.InnerColorBuffer[PixelIndex];
     Pixel.A = FeatheredAlpha;
@@ -106,7 +124,9 @@ FColor FDWCTransparencyComposite::ComposeVisualizationPixel(
         break;
     case EDWCTransparencyVisualizationMode::WrinkleSeparation:
     {
-        const uint8 Separation = Context.WrinkleSuppressionBuffer.IsValidIndex(PixelIndex)
+        const uint8 Separation = WrinkleSuppressionOverride.IsSet()
+            ? WrinkleSuppressionOverride.GetValue()
+            : Context.WrinkleSuppressionBuffer.IsValidIndex(PixelIndex)
             ? Context.WrinkleSuppressionBuffer[PixelIndex]
             : 0;
         Pixel = FColor(Separation, Separation, Separation, 255);

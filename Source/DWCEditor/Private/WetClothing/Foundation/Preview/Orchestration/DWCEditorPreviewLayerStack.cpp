@@ -139,6 +139,8 @@ int32 FDWCEditorPreviewLayerStack::GetLayerOrder(const EDWCEditorPreviewLayerKin
         return 200;
     case EDWCEditorPreviewLayerKind::LiveTransparency:
         return 210;
+    case EDWCEditorPreviewLayerKind::LiveTransparencyHover:
+        return 220;
     case EDWCEditorPreviewLayerKind::Visualization:
         return 300;
     default:

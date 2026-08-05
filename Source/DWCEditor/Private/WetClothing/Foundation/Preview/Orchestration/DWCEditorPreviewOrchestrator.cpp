@@ -103,6 +103,32 @@ void FDWCEditorPreviewOrchestrator::SetLiveLayer(
     RecomposeSlot(MaterialSlotIndex);
 }
 
+void FDWCEditorPreviewOrchestrator::ClearLiveLayer(
+    const int32 MaterialSlotIndex,
+    const EDWCEditorPreviewLayerKind LayerKind)
+{
+    TArray<FDWCEditorPreviewLayer>* Layers = LiveLayersBySlot.Find(MaterialSlotIndex);
+    if (Layers == nullptr)
+    {
+        return;
+    }
+
+    const int32 RemovedCount = Layers->RemoveAll(
+        [LayerKind](const FDWCEditorPreviewLayer& Layer)
+        {
+            return Layer.Kind == LayerKind;
+        });
+    if (RemovedCount == 0)
+    {
+        return;
+    }
+    if (Layers->IsEmpty())
+    {
+        LiveLayersBySlot.Remove(MaterialSlotIndex);
+    }
+    RecomposeSlot(MaterialSlotIndex);
+}
+
 void FDWCEditorPreviewOrchestrator::ClearLiveLayers(const int32 MaterialSlotIndex)
 {
     if (LiveLayersBySlot.Remove(MaterialSlotIndex) > 0)

@@ -260,7 +260,9 @@ bool FDWCEditorBakeCoordinator::PumpWrinkleJobs(const TSharedRef<FWrinkleBatch>&
         Descriptor.Domain = EDWCEditorAuthoringDomain::Wrinkle;
         Descriptor.DomainRevision = Scheduler->GetCurrentDomainRevision(Descriptor.Domain);
         Descriptor.Priority = EDWCEditorWorkerJobPriority::UserInitiated;
+        Descriptor.RequestPolicy = EDWCEditorAsyncRequestPolicy::FIFO;
         Descriptor.EstimatedBytes = Snapshot->GetEstimatedBytes();
+        Descriptor.MemoryEstimate.SnapshotBytes = Descriptor.EstimatedBytes;
         Descriptor.DebugName = FString::Printf(TEXT("Wrinkle bake slot %d"), MaterialSlotIndex);
 
         FString SubmitError;
@@ -569,7 +571,9 @@ bool FDWCEditorBakeCoordinator::RequestTransparencyBake(
         Descriptor.Domain = EDWCEditorAuthoringDomain::Transparency;
         Descriptor.DomainRevision = Scheduler->GetCurrentDomainRevision(Descriptor.Domain);
         Descriptor.Priority = EDWCEditorWorkerJobPriority::UserInitiated;
+        Descriptor.RequestPolicy = EDWCEditorAsyncRequestPolicy::FIFO;
         Descriptor.EstimatedBytes = AutoSnapshot->GetEstimatedBytes();
+        Descriptor.MemoryEstimate.SnapshotBytes = Descriptor.EstimatedBytes;
         Descriptor.DebugName = FString::Printf(
             TEXT("Transparency projection slot %d"),
             Layer->TargetSurface.OuterMaterialSlotIndex);
@@ -744,7 +748,9 @@ bool FDWCEditorBakeCoordinator::SubmitTransparencyJob(
     Descriptor.Domain = EDWCEditorAuthoringDomain::Transparency;
     Descriptor.DomainRevision = Scheduler->GetCurrentDomainRevision(Descriptor.Domain);
     Descriptor.Priority = EDWCEditorWorkerJobPriority::UserInitiated;
+    Descriptor.RequestPolicy = EDWCEditorAsyncRequestPolicy::FIFO;
     Descriptor.EstimatedBytes = Snapshot->GetEstimatedBytes();
+    Descriptor.MemoryEstimate.SnapshotBytes = Descriptor.EstimatedBytes;
     Descriptor.DebugName = FString::Printf(
         TEXT("Transparency bake slot %d"),
         Snapshot->GetMaterialSlotIndex());

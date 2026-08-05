@@ -73,8 +73,23 @@ FDWCEditorPreviewMaterialResult FDWCEditorPreviewMaterialCache::GetOrCreate(
         const double BuildStartSeconds = FPlatformTime::Seconds();
         FGraphEntry NewEntry;
         NewEntry.SourceMaterial = Request.SourceMaterial;
-        NewEntry.Material = FDWCEditorPreviewMaterialFactory::BuildTransientBaseMaterial(
+        NewEntry.Material = FDWCEditorPreviewMaterialFactory::BuildTransientBaseMaterialGraph(
             Request, NewEntry.FailureMessage);
+        if (NewEntry.Material == nullptr)
+        {
+            NewEntry.State = EDWCEditorPreviewMaterialState::Failed;
+        }
+        else if (FDWCEditorPreviewMaterialFactory::BeginTransientBaseMaterialCompilation(
+                     NewEntry.Material,
+                     NewEntry.FailureMessage))
+        {
+            NewEntry.State = EDWCEditorPreviewMaterialState::Compiling;
+            ++LifetimeStats.GraphCompileRequestCount;
+        }
+        else
+        {
+            NewEntry.State = EDWCEditorPreviewMaterialState::Failed;
+        }
         GraphEntry = &GraphEntries.Add(GraphKey, MoveTemp(NewEntry));
         const double BuildMilliseconds = (FPlatformTime::Seconds() - BuildStartSeconds) * 1000.0;
         ++LifetimeStats.GraphBuildCount;
@@ -82,12 +97,47 @@ FDWCEditorPreviewMaterialResult FDWCEditorPreviewMaterialCache::GetOrCreate(
         LifetimeStats.MaxGraphBuildMilliseconds =
             FMath::Max(LifetimeStats.MaxGraphBuildMilliseconds, BuildMilliseconds);
     }
-    if (GraphEntry->Material == nullptr)
+    if (GraphEntry->Material == nullptr || GraphEntry->State == EDWCEditorPreviewMaterialState::Failed)
     {
+        Result.State = EDWCEditorPreviewMaterialState::Failed;
         Result.Message = GraphEntry->FailureMessage;
         return Result;
     }
     Result.TransientBaseMaterial = GraphEntry->Material;
+
+    if (GraphEntry->State == EDWCEditorPreviewMaterialState::Compiling)
+    {
+        FString CompileMessage;
+        const EDWCEditorPreviewMaterialState CompileState =
+            FDWCEditorPreviewMaterialFactory::PollTransientBaseMaterialCompilation(
+                GraphEntry->Material,
+                CompileMessage);
+        if (CompileState == EDWCEditorPreviewMaterialState::Ready)
+        {
+            GraphEntry->State = CompileState;
+            ++LifetimeStats.GraphCompileCompleteCount;
+        }
+        else if (CompileState == EDWCEditorPreviewMaterialState::Failed)
+        {
+            GraphEntry->State = CompileState;
+            GraphEntry->FailureMessage = MoveTemp(CompileMessage);
+            ++LifetimeStats.GraphCompileFailureCount;
+        }
+    }
+
+    if (GraphEntry->State == EDWCEditorPreviewMaterialState::Compiling)
+    {
+        Result.State = EDWCEditorPreviewMaterialState::Compiling;
+        Result.bPending = true;
+        Result.Message = TEXT("The editor preview material is compiling shaders.");
+        return Result;
+    }
+    if (GraphEntry->State == EDWCEditorPreviewMaterialState::Failed)
+    {
+        Result.State = EDWCEditorPreviewMaterialState::Failed;
+        Result.Message = GraphEntry->FailureMessage;
+        return Result;
+    }
 
     FParentKey ParentKey;
     ParentKey.SourceMaterial = FObjectKey(Request.SourceMaterial);
@@ -161,6 +211,7 @@ FDWCEditorPreviewMaterialResult FDWCEditorPreviewMaterialCache::GetOrCreate(
     }
 
     Result.PreviewMID = SlotEntry->MID;
+    Result.State = EDWCEditorPreviewMaterialState::Ready;
     Result.bSucceeded = Result.PreviewMID != nullptr;
     Result.Message = Result.bSucceeded
                          ? TEXT("Editor preview material hierarchy is ready.")
@@ -209,6 +260,8 @@ void FDWCEditorPreviewMaterialCache::InvalidateSource(
         {
             if (MatchesInvalidatedSource(It.Value().SourceMaterial))
             {
+                FDWCEditorPreviewMaterialFactory::CancelTransientBaseMaterialCompilation(
+                    It.Value().Material);
                 It.RemoveCurrent();
             }
         }
@@ -256,8 +309,16 @@ void FDWCEditorPreviewMaterialCache::PruneUnusedHierarchies()
 
     for (auto It = GraphEntries.CreateIterator(); It; ++It)
     {
+        if (It.Value().State == EDWCEditorPreviewMaterialState::Compiling)
+        {
+            // A pending graph is still owned by the shader compiler. Keep it
+            // alive until the next poll can promote or fail it.
+            continue;
+        }
         if (!ReferencedGraphs.Contains(FObjectKey(It.Value().Material)))
         {
+            FDWCEditorPreviewMaterialFactory::CancelTransientBaseMaterialCompilation(
+                It.Value().Material);
             It.RemoveCurrent();
             ++LifetimeStats.GraphPruneCount;
         }
@@ -269,6 +330,11 @@ void FDWCEditorPreviewMaterialCache::Reset()
     ++LifetimeStats.ResetCount;
     SlotEntries.Reset();
     ParentEntries.Reset();
+    for (TPair<FGraphKey, FGraphEntry>& Pair : GraphEntries)
+    {
+        FDWCEditorPreviewMaterialFactory::CancelTransientBaseMaterialCompilation(
+            Pair.Value.Material);
+    }
     GraphEntries.Reset();
 }
 
@@ -285,7 +351,10 @@ FDWCEditorPreviewMaterialCacheStats FDWCEditorPreviewMaterialCache::GetStats() c
     Stats.SlotMIDEntryCount = SlotEntries.Num();
     for (const TPair<FGraphKey, FGraphEntry>& Pair : GraphEntries)
     {
-        Stats.FailedGraphEntryCount += Pair.Value.Material == nullptr ? 1 : 0;
+        Stats.FailedGraphEntryCount +=
+            Pair.Value.State == EDWCEditorPreviewMaterialState::Failed ? 1 : 0;
+        Stats.PendingGraphEntryCount +=
+            Pair.Value.State == EDWCEditorPreviewMaterialState::Compiling ? 1 : 0;
     }
     for (const TPair<FParentKey, FParentEntry>& Pair : ParentEntries)
     {

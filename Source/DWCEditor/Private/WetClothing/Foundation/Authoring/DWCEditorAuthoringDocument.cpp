@@ -14,13 +14,16 @@ namespace
         UWetClothingAsset& Asset,
         const FText& TransactionText)
     {
-        const uint64 ResidentBulkBytes = Asset.GetResidentRuntimeBulkPayloadBytesForEditor();
         const double StartSeconds = FPlatformTime::Seconds();
         Asset.Modify();
         const double ModifyMilliseconds = (FPlatformTime::Seconds() - StartSeconds) * 1000.0;
 
         if (ModifyMilliseconds >= SlowModifyThresholdMilliseconds)
         {
+            // This diagnostic walks the complete CPU/GPU runtime payload. Do
+            // it only after a genuinely slow snapshot so ordinary authoring
+            // commands do not pay the diagnostic traversal cost themselves.
+            const uint64 ResidentBulkBytes = Asset.GetResidentRuntimeBulkPayloadBytesForEditor();
             UE_LOG(
                 LogDWCEditorAuthoring,
                 Warning,
@@ -35,11 +38,10 @@ namespace
             UE_LOG(
                 LogDWCEditorAuthoring,
                 VeryVerbose,
-                TEXT("WCA undo snapshot for '%s': transaction='%s', modify=%.1f ms, residentRuntimeBulk=%.1f MiB."),
+                TEXT("WCA undo snapshot for '%s': transaction='%s', modify=%.1f ms."),
                 *GetNameSafe(&Asset),
                 *TransactionText.ToString(),
-                ModifyMilliseconds,
-                static_cast<double>(ResidentBulkBytes) / (1024.0 * 1024.0));
+                ModifyMilliseconds);
         }
     }
 }

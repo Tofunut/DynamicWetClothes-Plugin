@@ -15,7 +15,9 @@ enum class EDWCEditorTexturePurpose : uint8
     WrinkleAccumulated,
     WrinkleProcedural,
     TransparencyVisualization,
-    TransparencyWrinkleSuppression
+    TransparencyWrinkleSuppression,
+    TransparencyHoverBaseline,
+    TransparencyHoverIslandMask
 };
 
 enum class EDWCEditorTextureUploadPriority : uint8
@@ -107,6 +109,7 @@ class FDWCEditorTextureWorkspaceEntry final
     const FDWCEditorTextureKey& GetKey() const { return Key; }
     const FDWCEditorTextureDescriptor& GetDescriptor() const { return Descriptor; }
     UTexture2D* GetTexture() const { return Texture.Get(); }
+    uint64 GetDataRevision() const { return DataRevision; }
     uint64 GetContentRevision() const { return ContentRevision; }
     uint64 GetResourceGeneration() const { return ResourceGeneration; }
     uint64 GetLastUsedSerial() const { return LastUsedSerial; }
@@ -162,6 +165,9 @@ class FDWCEditorTextureWorkspaceEntry final
     TArray<FColor> BGRA8Pixels;
     TArray<uint8> G8Pixels;
     FDWCEditorNormalRasterSurface WorkingNormalSurface;
+    // Persistent derived working data revision. Presentation-only changes,
+    // such as hover overlays, must not invalidate an admitted region job.
+    uint64 DataRevision = 0;
     uint64 ContentRevision = 0;
     uint64 ResourceGeneration = 0;
     uint64 LastUsedSerial = 0;

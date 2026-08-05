@@ -22,6 +22,25 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FDWCTransparencyWorkflowInputRoutingTest::RunTest(const FString& Parameters)
 {
+    TestTrue(
+        TEXT("A configured implemented structure can continue to Stage 2"),
+        DWCTransparencyWorkflow::CanContinueToGeneration(
+            true,
+            true,
+            EDWCTransparencySourceType::SameMeshMaterialSlots));
+    TestFalse(
+        TEXT("An unconfigured structure cannot continue to Stage 2"),
+        DWCTransparencyWorkflow::CanContinueToGeneration(
+            true,
+            false,
+            EDWCTransparencySourceType::SameMeshMaterialSlots));
+    TestFalse(
+        TEXT("The planned multi-mesh structure cannot continue to Stage 2"),
+        DWCTransparencyWorkflow::CanContinueToGeneration(
+            true,
+            true,
+            EDWCTransparencySourceType::OtherSkeletalMeshComponents));
+
     TestEqual(
         TEXT("Stage 1 never enables painting"),
         DWCTransparencyWorkflow::ResolvePaintTarget(

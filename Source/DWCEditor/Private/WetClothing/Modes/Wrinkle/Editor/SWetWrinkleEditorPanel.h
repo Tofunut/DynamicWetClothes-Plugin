@@ -24,6 +24,7 @@ class FDWCEditorBakeCoordinator;
 class FDWCEditorSessionStore;
 class FDWCEditorSpatialQueryService;
 class FDWCEditorRenderUploadQueue;
+class FDWCEditorPreviewCommitCoordinator;
 class FDWCEditorTextureWorkspace;
 class FDWCEditorWorkerJobScheduler;
 class FWetWrinkleAuthoringController;
@@ -62,6 +63,7 @@ class SWetWrinkleEditorPanel : public SCompoundWidget, public FEditorUndoClient
     SLATE_ARGUMENT(TSharedPtr<FDWCEditorBakeCoordinator>, BakeCoordinator)
     SLATE_ARGUMENT(TSharedPtr<FDWCEditorSpatialQueryService>, SpatialQueryService)
     SLATE_ARGUMENT(TSharedPtr<FDWCEditorTextureWorkspace>, TextureWorkspace)
+    SLATE_ARGUMENT(TSharedPtr<FDWCEditorPreviewCommitCoordinator>, PreviewCommitCoordinator)
     SLATE_ARGUMENT(TSharedPtr<FDWCEditorRenderUploadQueue>, RenderUploadQueue)
     SLATE_ARGUMENT(TSharedPtr<IDetailsView>, DetailsView)
     SLATE_END_ARGS()
@@ -322,6 +324,7 @@ class SWetWrinkleEditorPanel : public SCompoundWidget, public FEditorUndoClient
     TSharedPtr<FDWCEditorBakeCoordinator> BakeCoordinator;
     TSharedPtr<FDWCEditorSpatialQueryService> SpatialQueryService;
     TSharedPtr<FDWCEditorTextureWorkspace> TextureWorkspace;
+    TSharedPtr<FDWCEditorPreviewCommitCoordinator> PreviewCommitCoordinator;
     TSharedPtr<FDWCEditorRenderUploadQueue> RenderUploadQueue;
     TSharedPtr<IDetailsView> DetailsView;
     TSharedPtr<SWetWrinkleViewport> PreviewViewport;

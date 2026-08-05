@@ -29,5 +29,11 @@ class FWetProceduralRidgeRasterizer
         const FIntRect* ClipRect = nullptr,
         const FDWCEditorCancellationToken* CancellationToken = nullptr);
 
+    static FWetProceduralRidgeRasterResult RasterizeToRegion(
+        const FWetProceduralRidgeStroke& Stroke,
+        FDWCEditorNormalRasterRegion& Region,
+        const FIntRect* ClipRect = nullptr,
+        const FDWCEditorCancellationToken* CancellationToken = nullptr);
+
     static uint64 GetTransientScratchBytesUpperBound();
 };

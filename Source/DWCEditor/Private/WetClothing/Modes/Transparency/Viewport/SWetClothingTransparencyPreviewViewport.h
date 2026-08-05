@@ -9,15 +9,20 @@
 #include "WetClothing/Foundation/Authoring/State/DWCEditorSessionState.h"
 #include "WetClothing/Foundation/Spatial/DWCEditorSpatialQueryTypes.h"
 #include "WetClothing/Foundation/TextureWorkspace/DWCEditorTextureWorkspaceTypes.h"
+#include "WetClothing/Foundation/Preview/Commit/DWCEditorPreviewCommitTypes.h"
+#include "WetClothing/Foundation/Preview/Recovery/DWCEditorPreviewRecovery.h"
 #include "WetClothing/Foundation/Input/DWCEditorSurfaceAuthoringTool.h"
 #include "WetClothing/Foundation/Input/DWCEditorInteractiveToolsHost.h"
 #include "WetClothing/Foundation/Jobs/DWCEditorWorkerJobTypes.h"
+#include "WetClothing/Modes/Transparency/Brush/DWCTransparencyAlphaTileStore.h"
+#include "WetClothing/Modes/Transparency/Brush/DWCTransparencyRevealColorTileStore.h"
 
 class AActor;
 class FAdvancedPreviewScene;
 class FDWCTransparencyAuthoringController;
 class FDWCTransparencyLiveStrokeLayer;
 class FDWCEditorWorkerJobScheduler;
+class FDWCEditorPreviewCommitCoordinator;
 class FDWCEditorSessionStore;
 class FDWCEditorSpatialQueryService;
 class FDWCEditorRenderUploadQueue;
@@ -32,6 +37,8 @@ class UTexture2D;
 class USkeletalMeshComponent;
 class UWetClothingAsset;
 struct FDWCTransparencyAutoBakeResult;
+struct FDWCTransparencyAlphaComposeTileSnapshot;
+struct FDWCTransparencyRevealColorComposeTileSnapshot;
 struct FDWCTransparencyPixelComposeContext;
 using FDWCTransparencySurfaceHit = FDWCEditorSurfaceHit;
 
@@ -47,6 +54,7 @@ class SWetClothingTransparencyPreviewViewport
     SLATE_ARGUMENT(TSharedPtr<FDWCEditorSessionStore>, SessionStore)
     SLATE_ARGUMENT(TSharedPtr<FDWCEditorSpatialQueryService>, SpatialQueryService)
     SLATE_ARGUMENT(TSharedPtr<FDWCEditorTextureWorkspace>, TextureWorkspace)
+    SLATE_ARGUMENT(TSharedPtr<FDWCEditorPreviewCommitCoordinator>, PreviewCommitCoordinator)
     SLATE_ARGUMENT(TSharedPtr<FDWCEditorRenderUploadQueue>, RenderUploadQueue)
     SLATE_END_ARGS()
 
@@ -97,6 +105,7 @@ class SWetClothingTransparencyPreviewViewport
         EDWCTransparencyPaintTarget InPaintTarget);
     void ProcessInteractivePaintWork();
     void FlushPendingPreviewTextureUpdates();
+    void TickPreviewMaterialCompilations();
 
     virtual bool HitTestSurface(const FRay& WorldRay, double& OutHitDepth) const override;
     virtual bool CanBeginSurfaceInteraction(const FRay& WorldRay, double& OutHitDepth) override;
@@ -127,6 +136,7 @@ class SWetClothingTransparencyPreviewViewport
     void RefreshSavedWrinklePreviewParameters();
     FDWCEditorPreviewLayer BuildTransparencyPreviewLayer();
     bool RebuildTransparencyPreviewTexture();
+    void RetryPreviewTextureRebuildIfNeeded();
     UTexture2D* GetTransparencyPreviewTexture() const;
     UTexture2D* GetWrinkleSuppressionPreviewTexture() const;
     bool RebuildWrinkleSuppressionBuffer();
@@ -137,56 +147,37 @@ class SWetClothingTransparencyPreviewViewport
     void RefreshDeferredFinalPreviewBuffers();
     void InvalidateWrinkleSuppressionSourceCache();
     bool RebuildOuterEdgeFeatherBuffer();
-    bool EnsureManualOverrideBuffers();
-    bool EnsureRevealColorBuffer();
     bool IsAuthoringInteractionActive() const;
-    void ReleaseSmoothBrushScratch();
     void RebuildHitTriangles();
     void EnsureBrushCursor();
     void RefreshBrushCursor();
     void ClearBrushCursor();
-    bool RasterizeBrushSample(
-        const FDWCTransparencyBrushStroke& Stroke,
-        const FDWCTransparencyBrushSample& Sample,
-        FIntRect* OutDirtyRect = nullptr,
-        const FIntRect* ClipRect = nullptr);
-    bool RasterizeRevealColorSample(
-        const FDWCTransparencyRevealColorStroke& Stroke,
-        const FDWCTransparencyBrushSample& Sample,
-        FIntRect* OutDirtyRect = nullptr,
-        const FIntRect* ClipRect = nullptr);
-    bool ShouldDeferBrushRaster(const FDWCTransparencyBrushSample& Sample) const;
-    FIntRect ComputeCurrentHoverDirtyRect() const;
-    void RefreshHoverPreviewRegion();
-    void QueueInteractivePaintWork(
-        const FDWCTransparencyBrushStroke& Stroke,
-        const FDWCTransparencyBrushSample& Sample);
-    void QueueInteractivePaintWork(
+    void UpdateMaterialHoverLayer();
+    void ClearMaterialHoverLayer();
+    bool EnsureHoverBaselineTexture();
+    bool EnsureHoverIslandMaskTexture(int32 UVIslandID);
+    void ReleaseHoverAuxiliaryResources();
+    UTexture2D* GetHoverBaselineTexture() const;
+    UTexture2D* GetHoverIslandMaskTexture() const;
+    void QueueRevealColorIncrementalSample(
         const FDWCTransparencyRevealColorStroke& Stroke,
         const FDWCTransparencyBrushSample& Sample);
-    TArray<FIntRect> BuildInteractivePaintRegions(
-        const FDWCTransparencyBrushSample& Sample,
-        EDWCTransparencyUVAddressMode AddressMode) const;
-    uint64 GetPendingInteractivePaintRegionCount() const;
-    uint64 GetInteractivePaintWorkAllocatedBytes() const;
+    void ScheduleRevealColorIncrementalJob();
+    void CancelRevealColorIncrementalWork(bool bRequireFullRebuild);
+    bool BuildRevealColorComposeTileSnapshots(
+        const TArray<FIntPoint>& TileCoordinates,
+        TArray<FDWCTransparencyRevealColorComposeTileSnapshot>& OutTiles) const;
+    void QueueAlphaIncrementalSample(
+        const FDWCTransparencyBrushStroke& Stroke,
+        const FDWCTransparencyBrushSample& Sample);
+    void ScheduleAlphaIncrementalJob();
+    void CancelAlphaIncrementalWork(bool bRequireFullRebuild);
+    bool BuildAlphaComposeTileSnapshots(
+        const TArray<FIntPoint>& TileCoordinates,
+        TArray<FDWCTransparencyAlphaComposeTileSnapshot>& OutTiles) const;
     void FinalizeAuthoringPreviewUpdate();
-    void QueuePreviewTextureUpdate(
-        const FIntRect& DirtyRect,
-        bool bWrap,
-        bool bAllowFullRebuild = true);
-    void UploadPreviewTextureRegion(
-        const FIntRect& DirtyRect,
-        bool bRebuildPixels,
-        bool bIncludeHover = false);
-    void InvalidatePreviewContent();
+    void InvalidatePreviewContent(bool bRequireFullRebuild = false);
     FWetClothingTransparencyLayerData* GetSelectedLayer();
-    float GetStoredEditedAlpha(int32 PixelIndex) const;
-    float ApplyHoverToEditedAlpha(int32 PixelIndex, float EditedAlpha) const;
-    FColor ApplyHoverToRevealColor(int32 PixelIndex, const FColor& BaseColor) const;
-    FColor BuildVisualizationPixel(
-        int32 PixelIndex,
-        const FDWCTransparencyPixelComposeContext& Context,
-        bool bIncludeHover = false) const;
     void InvalidatePreviewViewport();
     USkeletalMeshComponent* FindFocusMeshComponent() const;
     void CollectDiagnosticMemoryStats(TArray<FDWCEditorPreviewMemoryBucket>& OutBuckets) const;
@@ -194,13 +185,18 @@ class SWetClothingTransparencyPreviewViewport
     void ResetDiagnosticCounters();
 
   private:
-    struct FInteractivePaintWork
+    struct FPendingAlphaCommand
     {
-        TOptional<FDWCTransparencyBrushStroke> AlphaStroke;
-        TOptional<FDWCTransparencyRevealColorStroke> RevealStroke;
+        FDWCTransparencyBrushStroke Stroke;
         FDWCTransparencyBrushSample Sample;
-        TArray<FIntRect> Regions;
-        int32 NextRegionIndex = 0;
+        uint64 Sequence = 0;
+    };
+
+    struct FPendingRevealColorCommand
+    {
+        FDWCTransparencyRevealColorStroke Stroke;
+        FDWCTransparencyBrushSample Sample;
+        uint64 Sequence = 0;
     };
 
     TWeakObjectPtr<UWetClothingAsset> WetClothingAsset;
@@ -209,6 +205,8 @@ class SWetClothingTransparencyPreviewViewport
     TSharedPtr<FDWCEditorSessionStore> SessionStore;
     TSharedPtr<FDWCEditorSpatialQueryService> SpatialQueryService;
     TSharedPtr<FDWCEditorTextureWorkspace> TextureWorkspace;
+    TSharedPtr<FDWCEditorPreviewCommitCoordinator> PreviewCommitCoordinator;
+    FDWCEditorPreviewConsumerLifetime PreviewCommitLifetime;
     TSharedPtr<FDWCEditorRenderUploadQueue> RenderUploadQueue;
     TSharedPtr<FAdvancedPreviewScene> PreviewScene;
     TUniquePtr<FDWCEditorInteractiveToolsHost> InputToolsHost;
@@ -220,6 +218,8 @@ class SWetClothingTransparencyPreviewViewport
     TUniquePtr<FDWCEditorPreviewOrchestrator> PreviewOrchestrator;
     FDWCEditorTextureLease TransparencyPreviewHandle;
     FDWCEditorTextureLease WrinkleSuppressionPreviewHandle;
+    FDWCEditorTextureLease HoverBaselinePreviewHandle;
+    FDWCEditorTextureLease HoverIslandMaskPreviewHandle;
     TObjectPtr<UProceduralMeshComponent> BrushCursorComponent = nullptr;
     TSharedPtr<const FDWCTransparencyAutoBakeResult> AutoBakePreviewResult;
     TArray<uint8> WrinkleSuppressionBuffer;
@@ -228,34 +228,31 @@ class SWetClothingTransparencyPreviewViewport
     FIntPoint CachedWrinkleSuppressionResolution = FIntPoint::ZeroValue;
     TArray<uint16> CachedWrinkleSuppressionCoverageBuffer;
     TArray<uint8> OuterEdgeFeatherBuffer;
-    TArray<uint8> ManualPremultipliedBuffer;
-    TArray<uint8> ManualWeightBuffer;
-    // Authored reveal-color strokes are composited over the immutable
-    // auto-bake color buffer by a worker job.
-    TArray<FColor> RevealColorBuffer;
-    TArray<uint8> SmoothBrushPremultipliedScratch;
-    TArray<uint8> SmoothBrushWeightScratch;
-    // Reveal-color smoothing needs a stable source snapshot while it writes
-    // into InnerColorBuffer. Keep the scratch allocation across samples.
-    TArray<FColor> SmoothRevealColorScratch;
+    FDWCTransparencyAlphaTileStore ManualAlphaTileStore;
+    FDWCTransparencyRevealColorTileStore RevealColorTileStore;
     // Sparse transient stroke state is never serialized into the WCA. It
     // tracks only touched tiles until the controller commits or cancels.
     TUniquePtr<FDWCTransparencyLiveStrokeLayer> LiveStrokeLayer;
     bool bManualOverridesRequireWorkerRebuild = false;
     bool bRevealColorRequiresWorkerRebuild = false;
-    // Large brush strokes commit their full preview composition once at
-    // interaction end instead of snapshotting a 2K/4K result per sample.
-    bool bDeferredBrushPreviewRebuild = false;
-    // A saved stroke always receives one authoritative worker replay after
-    // mouse-up. Interactive tiles remain feedback only until that replay.
     bool bAuthoringWorkerRebuildRequested = false;
     bool bAuthoringFinishPending = false;
-    TArray<FInteractivePaintWork> PendingInteractivePaintWork;
+    TArray<FPendingAlphaCommand> PendingAlphaCommands;
+    FDWCEditorWorkerJobTicket PendingAlphaIncrementalTicket;
+    uint64 NextAlphaCommandSequence = 1;
+    uint64 AlphaIncrementalEpoch = 1;
+    FDWCEditorPreviewRecoveryController AlphaPreviewRecovery;
+    TArray<FPendingRevealColorCommand> PendingRevealColorCommands;
+    FDWCEditorWorkerJobTicket PendingRevealColorIncrementalTicket;
+    uint64 NextRevealColorCommandSequence = 1;
+    uint64 RevealColorIncrementalEpoch = 1;
+    FDWCEditorPreviewRecoveryController RevealColorPreviewRecovery;
     FDWCEditorSpatialLease SpatialLease;
     FDWCEditorSpatialHandle SpatialHandle;
     FDWCTransparencyPaintSettings PaintSettings;
     FDWCTransparencySurfaceHit CurrentSurfaceHit;
-    FIntRect LastHoverDirtyRect;
+    int32 HoverLayerMaterialSlotIndex = INDEX_NONE;
+    int32 HoverIslandMaskID = INDEX_NONE;
     EWetClothingTransparencyPreviewMode PreviewMode = EWetClothingTransparencyPreviewMode::TargetMeshOnly;
     EDWCTransparencyVisualizationMode VisualizationMode = EDWCTransparencyVisualizationMode::Final;
     float WetnessPreviewPercent = 100.0f;
@@ -275,18 +272,24 @@ class SWetClothingTransparencyPreviewViewport
     uint64 PreviewClearCount = 0;
     uint64 HitTrianglePrepareCount = 0;
     uint64 PreviewTextureRebuildCount = 0;
-    uint64 PreviewTextureRegionUploadCount = 0;
-    uint64 PreviewTextureRegionUploadBytes = 0;
+    uint64 HoverParameterUpdateCount = 0;
+    uint64 HoverBaselineBuildCount = 0;
+    uint64 HoverIslandMaskBuildCount = 0;
     uint64 WrinkleSuppressionRebuildCount = 0;
     uint64 OuterEdgeFeatherRebuildCount = 0;
-    uint64 InteractivePaintQueuedRegionCount = 0;
-    uint64 InteractivePaintProcessedRegionCount = 0;
-    uint64 InteractivePaintCanceledRegionCount = 0;
-    uint64 InteractivePaintPeakQueuedRegionCount = 0;
     uint64 InteractivePaintAuthoritativeReplayCount = 0;
+    uint64 AlphaIncrementalCommitCount = 0;
+    uint64 AlphaIncrementalCommittedTileCount = 0;
+    uint64 AlphaIncrementalCommittedBytes = 0;
+    uint64 AlphaIncrementalFallbackCount = 0;
+    uint64 RevealColorIncrementalCommitCount = 0;
+    uint64 RevealColorIncrementalCommittedTileCount = 0;
+    uint64 RevealColorIncrementalCommittedBytes = 0;
+    uint64 RevealColorIncrementalFallbackCount = 0;
     // A visualization job owns an immutable content snapshot. This revision
     // prevents an older asynchronous result from replacing newer brush edits.
     uint64 PreviewContentRevision = 0;
     uint64 PendingPreviewContentRevision = 0;
     FDWCEditorWorkerJobTicket PendingPreviewTicket;
+    FDWCEditorPreviewRecoveryController PreviewTextureRecovery;
 };

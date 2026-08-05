@@ -78,6 +78,7 @@ class FDWCEditorPreviewMaterialCache final : public FGCObject
     {
         TObjectPtr<UMaterial> Material = nullptr;
         TObjectPtr<UMaterialInterface> SourceMaterial = nullptr;
+        EDWCEditorPreviewMaterialState State = EDWCEditorPreviewMaterialState::Failed;
         FString FailureMessage;
     };
 

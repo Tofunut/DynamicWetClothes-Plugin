@@ -158,3 +158,107 @@ FVector3f FDWCEditorNormalRasterSurface::UnpackNormalXY(const uint32 PackedNorma
     const float Z = FMath::Sqrt(FMath::Max(1.0f - X * X - Y * Y, 0.0f));
     return FVector3f(X, Y, Z).GetSafeNormal(UE_SMALL_NUMBER, FVector3f(0.0f, 0.0f, 1.0f));
 }
+
+bool FDWCEditorNormalRasterRegion::Initialize(
+    const FIntPoint InCanvasSize,
+    const FIntRect& InRect,
+    const bool bWithCoverage)
+{
+    CanvasSize = InCanvasSize;
+    Rect = FIntRect(
+        FMath::Clamp(InRect.Min.X, 0, CanvasSize.X),
+        FMath::Clamp(InRect.Min.Y, 0, CanvasSize.Y),
+        FMath::Clamp(InRect.Max.X, 0, CanvasSize.X),
+        FMath::Clamp(InRect.Max.Y, 0, CanvasSize.Y));
+    if (CanvasSize.X <= 0 || CanvasSize.Y <= 0 || Rect.IsEmpty())
+    {
+        CanvasSize = FIntPoint::ZeroValue;
+        Rect = FIntRect();
+        Surface = FDWCEditorNormalRasterSurface();
+        return false;
+    }
+    return Surface.Initialize(FIntPoint(Rect.Width(), Rect.Height()), bWithCoverage);
+}
+
+bool FDWCEditorNormalRasterRegion::InitializeFromSurface(
+    const FDWCEditorNormalRasterSurface& Source,
+    const FIntRect& InRect)
+{
+    if (!Source.IsValid() || !Initialize(Source.Size, InRect, Source.HasCoverage()))
+    {
+        return false;
+    }
+    for (int32 Y = Rect.Min.Y; Y < Rect.Max.Y; ++Y)
+    {
+        const int32 SourceStart = Y * Source.Size.X + Rect.Min.X;
+        const int32 DestinationStart = (Y - Rect.Min.Y) * Rect.Width();
+        FMemory::Memcpy(
+            Surface.PackedNormalXY.GetData() + DestinationStart,
+            Source.PackedNormalXY.GetData() + SourceStart,
+            Rect.Width() * sizeof(uint32));
+        if (Source.HasCoverage())
+        {
+            FMemory::Memcpy(
+                Surface.Coverage.GetData() + DestinationStart,
+                Source.Coverage.GetData() + SourceStart,
+                Rect.Width() * sizeof(float));
+        }
+    }
+    return true;
+}
+
+bool FDWCEditorNormalRasterRegion::IsValid() const
+{
+    return CanvasSize.X > 0 && CanvasSize.Y > 0 && !Rect.IsEmpty() &&
+        Rect.Min.X >= 0 && Rect.Min.Y >= 0 && Rect.Max.X <= CanvasSize.X &&
+        Rect.Max.Y <= CanvasSize.Y && Surface.IsValid() &&
+        Surface.Size == FIntPoint(Rect.Width(), Rect.Height());
+}
+
+bool FDWCEditorNormalRasterRegion::Contains(const int32 X, const int32 Y) const
+{
+    return IsValid() && X >= Rect.Min.X && X < Rect.Max.X && Y >= Rect.Min.Y && Y < Rect.Max.Y;
+}
+
+uint64 FDWCEditorNormalRasterRegion::GetAllocatedSizeBytes() const
+{
+    return Surface.GetAllocatedSizeBytes();
+}
+
+int32 FDWCEditorNormalRasterRegion::ToLocalIndex(const int32 X, const int32 Y) const
+{
+    return Contains(X, Y)
+        ? (Y - Rect.Min.Y) * Rect.Width() + (X - Rect.Min.X)
+        : INDEX_NONE;
+}
+
+FVector3f FDWCEditorNormalRasterRegion::GetNormal(const int32 X, const int32 Y) const
+{
+    return Surface.GetNormal(ToLocalIndex(X, Y));
+}
+
+void FDWCEditorNormalRasterRegion::SetNormal(
+    const int32 X,
+    const int32 Y,
+    const FVector3f& Normal)
+{
+    Surface.SetNormal(ToLocalIndex(X, Y), Normal);
+}
+
+float FDWCEditorNormalRasterRegion::GetCoverage(const int32 X, const int32 Y) const
+{
+    const int32 Index = ToLocalIndex(X, Y);
+    return Surface.Coverage.IsValidIndex(Index) ? Surface.Coverage[Index] : 0.0f;
+}
+
+void FDWCEditorNormalRasterRegion::SetCoverage(
+    const int32 X,
+    const int32 Y,
+    const float Value)
+{
+    const int32 Index = ToLocalIndex(X, Y);
+    if (Surface.Coverage.IsValidIndex(Index))
+    {
+        Surface.Coverage[Index] = Value;
+    }
+}

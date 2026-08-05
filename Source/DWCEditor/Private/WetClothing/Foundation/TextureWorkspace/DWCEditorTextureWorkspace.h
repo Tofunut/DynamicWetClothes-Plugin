@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "UObject/GCObject.h"
+#include "WetClothing/Foundation/Preview/Region/DWCEditorPreviewRegionTypes.h"
 #include "WetClothing/Foundation/TextureWorkspace/DWCEditorTextureWorkspaceTypes.h"
 
 class FDWCEditorRenderUploadQueue;
@@ -27,6 +28,22 @@ class FDWCEditorTextureWorkspace final : public FGCObject
         const FDWCEditorTextureKey& Key,
         const FDWCEditorTextureDescriptor& Descriptor);
     FDWCEditorTextureLease AcquireLease(const FDWCEditorTextureHandle& Entry);
+    FDWCEditorTextureLease TransferBGRA8AndAcquireLease(
+        const FDWCEditorTextureKey& Key,
+        const FDWCEditorTextureDescriptor& Descriptor,
+        TArray<FColor>&& Pixels,
+        EDWCEditorTextureUploadPriority Priority = EDWCEditorTextureUploadPriority::Normal);
+    FDWCEditorTextureLease TransferNormalBGRA8AndAcquireLease(
+        const FDWCEditorTextureKey& Key,
+        const FDWCEditorTextureDescriptor& Descriptor,
+        TArray<FColor>&& Pixels,
+        FDWCEditorNormalRasterSurface&& WorkingSurface,
+        EDWCEditorTextureUploadPriority Priority = EDWCEditorTextureUploadPriority::Normal);
+    FDWCEditorTextureLease TransferG8AndAcquireLease(
+        const FDWCEditorTextureKey& Key,
+        const FDWCEditorTextureDescriptor& Descriptor,
+        TArray<uint8>&& Pixels,
+        EDWCEditorTextureUploadPriority Priority = EDWCEditorTextureUploadPriority::Normal);
     FDWCEditorTextureHandle PublishBGRA8(
         const FDWCEditorTextureKey& Key,
         const FDWCEditorTextureDescriptor& Descriptor,
@@ -43,12 +60,33 @@ class FDWCEditorTextureWorkspace final : public FGCObject
         const FDWCEditorTextureDescriptor& Descriptor,
         TArray<uint8>&& Pixels,
         EDWCEditorTextureUploadPriority Priority = EDWCEditorTextureUploadPriority::Normal);
+    FDWCEditorPreviewRegionCommitOutcome CommitBGRA8Regions(
+        const FDWCEditorTextureLease& Lease,
+        const FDWCEditorPreviewRegionTarget& Target,
+        const TArray<FDWCEditorBGRA8RegionPayload>& Regions,
+        EDWCEditorTextureUploadPriority Priority = EDWCEditorTextureUploadPriority::Normal);
+    FDWCEditorPreviewRegionCommitOutcome CommitG8Regions(
+        const FDWCEditorTextureLease& Lease,
+        const FDWCEditorPreviewRegionTarget& Target,
+        const TArray<FDWCEditorG8RegionPayload>& Regions,
+        EDWCEditorTextureUploadPriority Priority = EDWCEditorTextureUploadPriority::Normal);
+    FDWCEditorPreviewRegionCommitOutcome CommitNormalRegions(
+        const FDWCEditorTextureLease& Lease,
+        const FDWCEditorPreviewRegionTarget& Target,
+        const TArray<FDWCEditorNormalRegionPayload>& Regions,
+        EDWCEditorTextureUploadPriority Priority = EDWCEditorTextureUploadPriority::Normal);
     void MarkDirty(
         const FDWCEditorTextureHandle& Entry,
         const FIntRect& DirtyRect,
         bool bWrap,
         EDWCEditorTextureUploadPriority Priority = EDWCEditorTextureUploadPriority::Interactive);
     void MarkDirty(
+        const FDWCEditorTextureLease& Lease,
+        const FIntRect& DirtyRect,
+        bool bWrap,
+        EDWCEditorTextureUploadPriority Priority = EDWCEditorTextureUploadPriority::Interactive);
+    /** Queues presentation-only pixels without advancing persistent DataRevision. */
+    void MarkPresentationDirty(
         const FDWCEditorTextureLease& Lease,
         const FIntRect& DirtyRect,
         bool bWrap,
@@ -101,6 +139,15 @@ class FDWCEditorTextureWorkspace final : public FGCObject
         bool bDeferLargeInitialUpload = false,
         bool* bOutDeferredInitialUpload = nullptr);
     void InitializeBuffers(const FDWCEditorTextureHandle& Entry);
+    EDWCEditorPreviewRegionCommitResult ValidateRegionTarget(
+        const FDWCEditorTextureLease& Lease,
+        const FDWCEditorPreviewRegionTarget& Target,
+        FDWCEditorTextureHandle& OutEntry) const;
+    void QueueCommittedRegions(
+        const FDWCEditorTextureHandle& Entry,
+        const TArray<FIntRect>& DirtyRegions,
+        EDWCEditorTextureUploadPriority Priority,
+        bool bDeferredInitialUpload);
     void RetireEntry(const FDWCEditorTextureKey& Key);
     void RetireEntry(const FDWCEditorTextureHandle& Entry);
     bool BeginGPUResourceRetire(const FDWCEditorTextureHandle& Entry);
@@ -131,4 +178,14 @@ class FDWCEditorTextureWorkspace final : public FGCObject
     uint64 GPUResourceReleaseCompleteCount = 0;
     uint64 GPUBudgetRejectCount = 0;
     uint64 GPUHighWaterBytes = 0;
+    uint64 RegionCommitRequestCount = 0;
+    uint64 RegionCommitAppliedCount = 0;
+    uint64 RegionCommitPixelCount = 0;
+    uint64 RegionCommitBytes = 0;
+    uint64 RegionCommitInvalidPayloadCount = 0;
+    uint64 RegionCommitDataRevisionMismatchCount = 0;
+    uint64 RegionCommitResourceGenerationMismatchCount = 0;
+    uint64 RegionCommitDescriptorMismatchCount = 0;
+    uint64 RegionCommitEntryMissingCount = 0;
+    uint64 RegionCommitWorkspaceRejectedCount = 0;
 };

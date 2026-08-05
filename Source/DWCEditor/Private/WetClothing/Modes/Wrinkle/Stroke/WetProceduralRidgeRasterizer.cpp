@@ -407,3 +407,47 @@ FWetProceduralRidgeRasterResult FWetProceduralRidgeRasterizer::RasterizeToSurfac
         },
         CancellationToken);
 }
+
+FWetProceduralRidgeRasterResult FWetProceduralRidgeRasterizer::RasterizeToRegion(
+    const FWetProceduralRidgeStroke& Stroke,
+    FDWCEditorNormalRasterRegion& Region,
+    const FIntRect* ClipRect,
+    const FDWCEditorCancellationToken* CancellationToken)
+{
+    FWetProceduralRidgeRasterResult Result;
+    if (!Region.IsValid() || !Stroke.bEnabled || Stroke.Points.Num() < 2)
+    {
+        return Result;
+    }
+
+    FIntRect EffectiveClip = Region.Rect;
+    if (ClipRect != nullptr)
+    {
+        EffectiveClip.Min.X = FMath::Max(EffectiveClip.Min.X, ClipRect->Min.X);
+        EffectiveClip.Min.Y = FMath::Max(EffectiveClip.Min.Y, ClipRect->Min.Y);
+        EffectiveClip.Max.X = FMath::Min(EffectiveClip.Max.X, ClipRect->Max.X);
+        EffectiveClip.Max.Y = FMath::Min(EffectiveClip.Max.Y, ClipRect->Max.Y);
+    }
+    const FIntRect Bounds = ResolveRasterBounds(Stroke, Region.CanvasSize, &EffectiveClip);
+    return RasterizeStrokePixels(
+        Stroke,
+        Region.CanvasSize,
+        Bounds,
+        [&Region](const int32 X, const int32 Y, const FVector& RidgeNormal, const double Coverage)
+        {
+            const FVector3f Detail = FVector3f(
+                RidgeNormal.X * Coverage,
+                RidgeNormal.Y * Coverage,
+                RidgeNormal.Z);
+            Region.SetNormal(X, Y, FDWCEditorNormalRasterCore::BlendAngleCorrected(
+                Region.GetNormal(X, Y),
+                Detail.GetSafeNormal(UE_SMALL_NUMBER, FVector3f(0.0f, 0.0f, 1.0f))));
+            if (Region.Surface.HasCoverage())
+            {
+                Region.SetCoverage(X, Y, FMath::Max(
+                    Region.GetCoverage(X, Y),
+                    static_cast<float>(Coverage)));
+            }
+        },
+        CancellationToken);
+}

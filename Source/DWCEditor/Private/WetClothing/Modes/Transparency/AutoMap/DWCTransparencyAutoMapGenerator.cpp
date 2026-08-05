@@ -373,13 +373,9 @@ namespace
         const int32 Height,
         const bool bWrap)
     {
-        if (UVIslandID != INDEX_NONE)
+        if (Result.OuterIslandIDBuffer.Num() != Width * Height || Width <= 0 || Height <= 0)
         {
             return UVIslandID;
-        }
-        if (Result.OuterIslandIDBuffer.Num() != Width * Height)
-        {
-            return INDEX_NONE;
         }
 
         int32 X = FMath::FloorToInt(PositionUV.X * Width);
@@ -398,8 +394,12 @@ namespace
             X = FMath::Clamp(X, 0, Width - 1);
             Y = FMath::Clamp(Y, 0, Height - 1);
         }
-        return FDWCTransparencyAutoBakeResult::DecodeOuterIslandID(
+        const int32 RasterIslandID = FDWCTransparencyAutoBakeResult::DecodeOuterIslandID(
             Result.OuterIslandIDBuffer[Y * Width + X]);
+        // Keep saved stroke replay and live preview on the same texture-space
+        // island identity. The spatial hit ID is only a fallback when the
+        // exact center pixel has no raster coverage.
+        return RasterIslandID != INDEX_NONE ? RasterIslandID : UVIslandID;
     }
 }
 

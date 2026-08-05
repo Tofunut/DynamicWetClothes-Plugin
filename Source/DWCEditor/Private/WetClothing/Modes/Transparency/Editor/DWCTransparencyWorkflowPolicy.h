@@ -9,6 +9,21 @@
  */
 namespace DWCTransparencyWorkflow
 {
+    inline bool IsSourceTypeAvailable(const EDWCTransparencySourceType SourceType)
+    {
+        // The multi-component source path is present in the data model, but
+        // its generation path is not implemented by the current editor.
+        return SourceType != EDWCTransparencySourceType::OtherSkeletalMeshComponents;
+    }
+
+    inline bool CanContinueToGeneration(
+        const bool bHasAsset,
+        const bool bStructureTypeConfigured,
+        const EDWCTransparencySourceType SourceType)
+    {
+        return bHasAsset && bStructureTypeConfigured && IsSourceTypeAvailable(SourceType);
+    }
+
     struct FDWCTransparencyPreviewContext
     {
         EDWCTransparencyEditorStage Stage = EDWCTransparencyEditorStage::StructureSetup;

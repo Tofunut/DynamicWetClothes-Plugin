@@ -3,6 +3,8 @@
 #include "CoreMinimal.h"
 
 class FDWCEditorPreviewSession;
+class FDWCEditorPreviewCommitCoordinator;
+class FDWCEditorWorkerJobScheduler;
 class UTexture2D;
 
 DECLARE_LOG_CATEGORY_EXTERN(LogDWCEditorPreview, Log, All);
@@ -39,6 +41,10 @@ class FDWCEditorPreviewDiagnostics final
   public:
     static void RegisterSession(FDWCEditorPreviewSession* Session);
     static void UnregisterSession(FDWCEditorPreviewSession* Session);
+    static void RegisterWorkerScheduler(FDWCEditorWorkerJobScheduler* Scheduler);
+    static void UnregisterWorkerScheduler(FDWCEditorWorkerJobScheduler* Scheduler);
+    static void RegisterCommitCoordinator(FDWCEditorPreviewCommitCoordinator* Coordinator);
+    static void UnregisterCommitCoordinator(FDWCEditorPreviewCommitCoordinator* Coordinator);
     static void DumpAllSessions();
     static void ResetAllCounters();
 

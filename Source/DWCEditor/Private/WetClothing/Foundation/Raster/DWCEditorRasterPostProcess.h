@@ -11,6 +11,11 @@ class FDWCEditorRasterPostProcess final
         FIntPoint SourceSize,
         FIntPoint DestinationSize);
 
+    static FIntRect MapDestinationRectToSourceReadRect(
+        const FIntRect& DestinationRect,
+        FIntPoint SourceSize,
+        FIntPoint DestinationSize);
+
     static bool DownsampleNormalSurface(
         const FDWCEditorNormalRasterSurface& Source,
         FIntPoint DestinationSize,
@@ -31,6 +36,14 @@ class FDWCEditorRasterPostProcess final
         FIntPoint DestinationSize,
         TArray<FColor>& InOutPixels,
         const FIntRect* DestinationRect = nullptr,
+        bool bEncodeCoverageInAlpha = false);
+
+    /** Encodes a compact source region into compact destination-rect pixels. */
+    static bool ResampleAndEncodeNormalRegion(
+        const FDWCEditorNormalRasterRegion& SourceRegion,
+        FIntPoint DestinationSize,
+        const FIntRect& DestinationRect,
+        TArray<FColor>& OutPixels,
         bool bEncodeCoverageInAlpha = false);
 
     static void EncodeCoveragePixels(

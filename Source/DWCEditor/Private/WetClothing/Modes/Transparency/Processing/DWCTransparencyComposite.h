@@ -5,6 +5,8 @@
 #include "WetClothing/Modes/Transparency/AutoMap/DWCTransparencyAutoMapGenerator.h"
 
 class FDWCEditorCancellationToken;
+class FDWCTransparencyAlphaTileStore;
+class FDWCTransparencyRevealColorTileStore;
 
 struct FDWCTransparencyPixelComposeContext
 {
@@ -12,8 +14,14 @@ struct FDWCTransparencyPixelComposeContext
     // Optional authored reveal-color layer. When present it replaces the
     // immutable auto-bake inner color for display and bake composition.
     TConstArrayView<FColor> RevealColorBuffer;
+    // Preferred sparse authoring representation. Missing tiles resolve to
+    // AutoResult->InnerColorBuffer.
+    const FDWCTransparencyRevealColorTileStore* RevealColorTileStore = nullptr;
     TConstArrayView<uint8> ManualPremultipliedBuffer;
     TConstArrayView<uint8> ManualWeightBuffer;
+    // Preferred sparse authoring representation. Dense arrays remain only as
+    // a compatibility input for bake/full-rebuild producers.
+    const FDWCTransparencyAlphaTileStore* ManualAlphaTileStore = nullptr;
     TConstArrayView<uint8> WrinkleSuppressionBuffer;
     TConstArrayView<uint8> OuterEdgeFeatherBuffer;
     EDWCTransparencyVisualizationMode VisualizationMode = EDWCTransparencyVisualizationMode::Final;
@@ -36,7 +44,10 @@ class FDWCTransparencyComposite
     static FColor ComposeVisualizationPixel(
         const FDWCTransparencyPixelComposeContext& Context,
         int32 PixelIndex,
-        TOptional<float> EditedAlphaOverride = TOptional<float>());
+        TOptional<float> EditedAlphaOverride = TOptional<float>(),
+        TOptional<FColor> RevealColorOverride = TOptional<FColor>(),
+        TOptional<uint8> WrinkleSuppressionOverride = TOptional<uint8>(),
+        TOptional<uint8> OuterEdgeFeatherOverride = TOptional<uint8>());
 
     static bool ComposeVisualizationPixels(
         const FDWCTransparencyPixelComposeContext& Context,

@@ -40,6 +40,7 @@ struct FDWCEditorPreviewSessionSlot
     TWeakObjectPtr<UMaterialInstanceDynamic> PreviewMID;
     uint64 LastMaterialUseSerial = 0;
     bool bActiveInPreviewScope = false;
+    bool bMaterialBuildPending = false;
     bool bMaterialBuildFailed = false;
     FString MaterialBuildError;
     FDWCEditorPreviewParameterSet DesiredLayerParameters;
@@ -48,7 +49,9 @@ struct FDWCEditorPreviewSessionSlot
 
 struct FDWCEditorPreviewSessionMaterialResult
 {
+    EDWCEditorPreviewMaterialState State = EDWCEditorPreviewMaterialState::Failed;
     bool bSucceeded = false;
+    bool bPending = false;
     bool bCreated = false;
     UMaterialInstanceDynamic* PreviewMID = nullptr;
     UMaterialInterface* FallbackMaterial = nullptr;

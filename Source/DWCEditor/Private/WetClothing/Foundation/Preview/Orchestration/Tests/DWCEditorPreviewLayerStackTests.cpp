@@ -66,4 +66,42 @@ bool FDWCEditorPreviewLayerReplaceTest::RunTest(const FString& Parameters)
     return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FDWCEditorPreviewTransparencyHoverLayerOrderTest,
+    "DWC.Editor.Preview.Orchestration.TransparencyHoverLayerOrder",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDWCEditorPreviewTransparencyHoverLayerOrderTest::RunTest(const FString& Parameters)
+{
+    const FName HoverEnable(TEXT("DWC_TestTransparencyHoverEnable"));
+
+    FDWCEditorPreviewLayer StableTransparency;
+    StableTransparency.Kind = EDWCEditorPreviewLayerKind::LiveTransparency;
+    StableTransparency.MaterialSlotIndex = 2;
+    StableTransparency.AddScalar(HoverEnable, 0.0f);
+
+    FDWCEditorPreviewLayer Hover;
+    Hover.Kind = EDWCEditorPreviewLayerKind::LiveTransparencyHover;
+    Hover.MaterialSlotIndex = 2;
+    Hover.AddScalar(HoverEnable, 1.0f);
+
+    FDWCEditorPreviewLayerStack Stack;
+    Stack.MaterialSlotIndex = 2;
+    Stack.AddOrReplace(MoveTemp(Hover));
+    Stack.AddOrReplace(MoveTemp(StableTransparency));
+
+    FDWCEditorPreviewParameterSet ParametersOut;
+    Stack.BuildParameterSet(ParametersOut);
+    TestEqual(TEXT("The ephemeral hover layer overrides the stable transparency layer"),
+        ParametersOut.Scalars.Num(), 1);
+    TestEqual(TEXT("The hover enable value wins regardless of insertion order"),
+        ParametersOut.Scalars[0].Value, 1.0f);
+
+    Stack.Remove(EDWCEditorPreviewLayerKind::LiveTransparencyHover);
+    Stack.BuildParameterSet(ParametersOut);
+    TestEqual(TEXT("Removing hover restores the stable transparency value"),
+        ParametersOut.Scalars[0].Value, 0.0f);
+    return true;
+}
+
 #endif

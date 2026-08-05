@@ -4,6 +4,8 @@
 #include "WetClothing/Foundation/Authoring/State/DWCEditorSessionState.h"
 #include "WetClothing/Foundation/Jobs/DWCEditorWorkerJobTypes.h"
 #include "WetClothing/Modes/Transparency/AutoMap/DWCTransparencyAutoMapGenerator.h"
+#include "WetClothing/Modes/Transparency/Brush/DWCTransparencyAlphaTileStore.h"
+#include "WetClothing/Modes/Transparency/Brush/DWCTransparencyRevealColorTileStore.h"
 #include "DataAssets/WetClothingTransparencyData.h"
 
 class FDWCEditorCancellationToken;
@@ -12,9 +14,8 @@ struct FDWCTransparencyVisualizationJobInput
 {
     // The auto bake result is immutable while a visualization job is running.
     TSharedPtr<const FDWCTransparencyAutoBakeResult> AutoResult;
-    TArray<FColor> RevealColorBuffer;
-    TArray<uint8> ManualPremultipliedBuffer;
-    TArray<uint8> ManualWeightBuffer;
+    FDWCTransparencyRevealColorTileStore RevealColorTileStore;
+    FDWCTransparencyAlphaTileStore ManualAlphaTileStore;
     TArray<uint8> WrinkleSuppressionBuffer;
     TArray<uint8> OuterEdgeFeatherBuffer;
     bool bRebuildManualOverridesFromStrokes = false;
@@ -36,10 +37,9 @@ struct FDWCTransparencyVisualizationJobResult final : FDWCEditorWorkerJobResult
 {
     FIntPoint Resolution = FIntPoint::ZeroValue;
     TArray<FColor> Pixels;
-    TArray<uint8> RebuiltManualPremultipliedBuffer;
-    TArray<uint8> RebuiltManualWeightBuffer;
+    FDWCTransparencyAlphaTileStore RebuiltManualAlphaTileStore;
     bool bIncludesRebuiltManualOverrides = false;
-    TArray<FColor> RebuiltRevealColorBuffer;
+    FDWCTransparencyRevealColorTileStore RebuiltRevealColorTileStore;
     bool bIncludesRebuiltRevealColor = false;
 };
 

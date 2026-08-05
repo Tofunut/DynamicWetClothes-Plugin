@@ -8,13 +8,17 @@
 #include "WetClothing/Foundation/Preview/Orchestration/DWCEditorPreviewOrchestrator.h"
 #include "WetClothing/Foundation/Spatial/DWCEditorSpatialQueryTypes.h"
 #include "WetClothing/Foundation/TextureWorkspace/DWCEditorTextureWorkspaceTypes.h"
+#include "WetClothing/Foundation/Preview/Commit/DWCEditorPreviewCommitTypes.h"
+#include "WetClothing/Foundation/Preview/Recovery/DWCEditorPreviewRecovery.h"
 #include "WetClothing/Foundation/Input/DWCEditorSurfaceAuthoringTool.h"
 #include "WetClothing/Foundation/Input/DWCEditorInteractiveToolsHost.h"
 #include "WetClothing/Foundation/Jobs/DWCEditorWorkerJobTypes.h"
+#include "WetClothing/Modes/Wrinkle/Viewport/WetWrinkleIncrementalPreviewWorker.h"
 #include "WetWrinkleHitData.h"
 
 class FAdvancedPreviewScene;
 class FDWCEditorWorkerJobScheduler;
+class FDWCEditorPreviewCommitCoordinator;
 class FWetWrinkleAuthoringController;
 class FDWCEditorSessionStore;
 class FDWCEditorSpatialQueryService;
@@ -53,6 +57,11 @@ struct FWetWrinkleAccumulatedPreviewState
     uint64 ContentRevision = 0;
     uint64 PendingContentRevision = 0;
     uint64 LastUsedSerial = 0;
+    FDWCEditorPreviewRecoveryController Recovery;
+    TArray<FWetWrinkleIncrementalCommand> PendingIncrementalCommands;
+    FDWCEditorWorkerJobTicket PendingIncrementalTicket;
+    uint64 IncrementalGeneration = 1;
+    uint64 NextIncrementalSequence = 0;
 };
 
 struct FWetProceduralRidgeTransientPreviewState
@@ -63,18 +72,9 @@ struct FWetProceduralRidgeTransientPreviewState
     FDWCEditorTextureLease TextureHandle;
     FIntPoint TextureSize = FIntPoint::ZeroValue;
     FIntPoint WorkingTextureSize = FIntPoint::ZeroValue;
-    TArray<FVector2D> PreviousPointUVs;
-    uint8 PreviousShape = 0;
-    bool bPreviousFlipFoldSide = false;
-    float PreviousWidthUV = 0.0f;
-    float PreviousStrength = 0.0f;
-    float PreviousFalloff = 0.0f;
-    float PreviousStartTaper = 0.0f;
-    float PreviousEndTaper = 0.0f;
-    uint8 PreviousStartEndpointMode = 0;
-    uint8 PreviousEndEndpointMode = 0;
-    FWetProceduralRidgeFlareSettings PreviousFlareSettings;
-    FWetProceduralRidgeVariationSettings PreviousNaturalVariation;
+    TOptional<FWetProceduralRidgeStroke> LastCommittedStroke;
+    FDWCEditorWorkerJobTicket PendingIncrementalTicket;
+    uint64 RequestSerial = 0;
 };
 
 class SWetWrinkleViewport : public SEditorViewport, public FGCObject, public IDWCEditorSurfaceToolTarget
@@ -88,6 +88,7 @@ class SWetWrinkleViewport : public SEditorViewport, public FGCObject, public IDW
     SLATE_ARGUMENT(TSharedPtr<FDWCEditorSessionStore>, SessionStore)
     SLATE_ARGUMENT(TSharedPtr<FDWCEditorSpatialQueryService>, SpatialQueryService)
     SLATE_ARGUMENT(TSharedPtr<FDWCEditorTextureWorkspace>, TextureWorkspace)
+    SLATE_ARGUMENT(TSharedPtr<FDWCEditorPreviewCommitCoordinator>, PreviewCommitCoordinator)
     SLATE_ARGUMENT(TSharedPtr<FDWCEditorRenderUploadQueue>, RenderUploadQueue)
     SLATE_EVENT(FOnWetWrinkleSurfaceHitChanged, OnSurfaceHitChanged)
     SLATE_END_ARGS()
@@ -168,7 +169,6 @@ class SWetWrinkleViewport : public SEditorViewport, public FGCObject, public IDW
     USkeletalMesh* ResolveTargetMesh() const;
     void ApplyMaterialSlotVisibility();
     void RebuildHitTriangles();
-    void FlushTransientProceduralPreviewUpload();
     void HandleSurfaceHitFromClient(const FWetWrinkleSurfaceHit& SurfaceHit);
     void RefreshBrushCursor();
     void ClearBrushCursor();
@@ -200,10 +200,16 @@ class SWetWrinkleViewport : public SEditorViewport, public FGCObject, public IDW
     FWetWrinkleAccumulatedPreviewState* FindOrAddAccumulatedPreviewState(UTexture* SourceTexture, int32 MaterialSlotIndex, int32 UVChannelIndex);
     UTexture2D* ResolveAccumulatedPreviewTexture(UTexture* SourceTexture, int32 MaterialSlotIndex, int32 UVChannelIndex);
     bool RebuildAccumulatedPreviewTexture(FWetWrinkleAccumulatedPreviewState& PreviewState);
-    bool ShouldDeferInteractiveNormalRaster(const FIntPoint& WorkingTextureSize) const;
+    void QueueAccumulatedIncrementalCommand(
+        FWetWrinkleAccumulatedPreviewState& PreviewState,
+        FWetWrinkleIncrementalCommand&& Command);
+    bool ScheduleAccumulatedIncrementalPreview(FWetWrinkleAccumulatedPreviewState& PreviewState);
+    void InvalidateAccumulatedIncrementalState(FWetWrinkleAccumulatedPreviewState& PreviewState);
+    void ResetTransientProceduralPreviewResources();
     void ReleaseTransientProceduralPreviewState();
     bool EnsureTransientProceduralPreviewState(int32 MaterialSlotIndex, int32 UVChannelIndex);
     bool UpdateTransientProceduralPreview(const FWetProceduralRidgeStroke& Stroke);
+    bool ScheduleTransientProceduralPreview(const FWetProceduralRidgeStroke& Stroke);
     int32 ResolveActivePreviewMaterialSlot() const;
     void FindProjectedSurfacesAtUV(int32 MaterialSlotIndex, int32 UVChannelIndex, const FVector2D& UV, TArray<FWetWrinkleProjectedSurface>& OutSurfaces) const;
     void DrawProceduralStrokeGuides(FPrimitiveDrawInterface* PDI) const;
@@ -217,6 +223,8 @@ class SWetWrinkleViewport : public SEditorViewport, public FGCObject, public IDW
     TSharedPtr<FDWCEditorSessionStore> SessionStore;
     TSharedPtr<FDWCEditorSpatialQueryService> SpatialQueryService;
     TSharedPtr<FDWCEditorTextureWorkspace> TextureWorkspace;
+    TSharedPtr<FDWCEditorPreviewCommitCoordinator> PreviewCommitCoordinator;
+    FDWCEditorPreviewConsumerLifetime PreviewCommitLifetime;
     TSharedPtr<FDWCEditorRenderUploadQueue> RenderUploadQueue;
     FOnWetWrinkleSurfaceHitChanged OnSurfaceHitChanged;
     TWeakPtr<FWetWrinkleAuthoringController> AuthoringController;
@@ -254,6 +262,7 @@ class SWetWrinkleViewport : public SEditorViewport, public FGCObject, public IDW
     bool bTransientProceduralPreviewBound = false;
     TOptional<FWetProceduralRidgeStroke> EditedProceduralStrokePreview;
     TOptional<FWetProceduralRidgeStroke> PendingTransientProceduralStroke;
-    FIntRect PendingTransientProceduralUploadRect;
-    bool bHasPendingTransientProceduralUpload = false;
+    uint64 AccumulatedIncrementalCommitCount = 0;
+    uint64 AccumulatedIncrementalFallbackCount = 0;
+    uint64 TransientIncrementalCommitCount = 0;
 };

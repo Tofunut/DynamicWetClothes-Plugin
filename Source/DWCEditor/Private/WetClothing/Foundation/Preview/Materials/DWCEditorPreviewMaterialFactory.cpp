@@ -3,6 +3,7 @@
 #include "MaterialEditingLibrary.h"
 #include "MaterialShared.h"
 #include "Materials/Material.h"
+#include "Materials/MaterialExpressionMaterialFunctionCall.h"
 #include "Materials/MaterialExpressionScalarParameter.h"
 #include "Materials/MaterialInstance.h"
 #include "Materials/MaterialInstanceConstant.h"
@@ -14,6 +15,29 @@
 namespace
 {
     constexpr int32 MaxGpuSkinUVChannelCount = 4;
+    constexpr const TCHAR* PreviewEvaluateSurfaceAppearanceFunctionName = TEXT("MF_DWC_EvaluateSurfaceAppearance");
+
+    bool ContainsGeneratedDwcSurfaceGraph(const UMaterial* Material)
+    {
+        if (Material == nullptr)
+        {
+            return false;
+        }
+
+        for (const UMaterialExpression* Expression : Material->GetExpressions())
+        {
+            const UMaterialExpressionMaterialFunctionCall* FunctionCall =
+                Cast<UMaterialExpressionMaterialFunctionCall>(Expression);
+            if (FunctionCall != nullptr && FunctionCall->MaterialFunction != nullptr &&
+                FunctionCall->MaterialFunction->GetName().Equals(
+                    PreviewEvaluateSurfaceAppearanceFunctionName,
+                    ESearchCase::CaseSensitive))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
 
     bool ConnectMaterialProperty(
         const FDWCMaterialGraphPin& Pin,
@@ -67,6 +91,14 @@ UMaterial* FDWCEditorPreviewMaterialFactory::BuildTransientBaseMaterialGraph(
         OutErrorMessage = FString::Printf(
             TEXT("Preview source '%s' uses Material Attributes, which the common DWC preview graph does not support yet."),
             *GetNameSafe(Request.SourceMaterial));
+        return nullptr;
+    }
+    if (ContainsGeneratedDwcSurfaceGraph(SourceBaseMaterial))
+    {
+        OutErrorMessage = FString::Printf(
+            TEXT("Preview source '%s' already contains %s. Resolve the original source material before building the editor preview graph."),
+            *GetNameSafe(Request.SourceMaterial),
+            PreviewEvaluateSurfaceAppearanceFunctionName);
         return nullptr;
     }
 

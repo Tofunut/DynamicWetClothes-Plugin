@@ -7,6 +7,7 @@
 #include "Materials/MaterialInterface.h"
 #include "Misc/Crc.h"
 #include "ProfilingDebugging/CpuProfilerTrace.h"
+#include "WetClothing/DerivedAssets/Materials/WCAMaterialGenerator.h"
 #include "WetClothing/DerivedAssets/Textures/WetnessProfile/WetClothingWetPartDataTextureBaker.h"
 #include "WetClothing/DerivedAssets/Textures/WetnessProfile/WetClothingSurfaceTextureNormalizer.h"
 
@@ -85,7 +86,10 @@ FDWCEditorPreviewSlotCollection FDWCEditorPreviewSlotResolver::Resolve(
         FDWCEditorPreviewSlotState& State = Result.Slots.AddDefaulted_GetRef();
         State.MaterialSlotIndex = MaterialSlotIndex;
         State.MaterialSlotName = SkeletalMaterial.MaterialSlotName;
-        State.SourceMaterial = SkeletalMaterial.MaterialInterface;
+        State.SourceMaterial = FWCAMaterialGenerator::ResolveGeneratedMaterialSource(
+            WetClothingAsset,
+            MaterialSlotIndex,
+            SkeletalMaterial.MaterialInterface);
         State.bWettable = WetClothingAsset->IsMaterialSlotWettable(MaterialSlotIndex);
 
         if (!State.bWettable)
@@ -95,8 +99,8 @@ FDWCEditorPreviewSlotCollection FDWCEditorPreviewSlotResolver::Resolve(
         else
         {
             ++Result.WettableSlotCount;
-            UMaterial* SourceBaseMaterial = SkeletalMaterial.MaterialInterface != nullptr
-                ? SkeletalMaterial.MaterialInterface->GetMaterial()
+            UMaterial* SourceBaseMaterial = State.SourceMaterial.IsValid()
+                ? State.SourceMaterial->GetMaterial()
                 : nullptr;
             if (SourceBaseMaterial == nullptr)
             {

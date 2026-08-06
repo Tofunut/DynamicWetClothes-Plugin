@@ -20,6 +20,10 @@ namespace
         // Simulation | Absorbed Wetness
         { TEXT("Parameters.AbsorbedWetness.AbsorptionFraction"), 0.0, 1.0, 0.5 },
         { TEXT("Parameters.AbsorbedWetness.AbsorptionRate"), 0.0, 10.0, 1.0 },
+        { TEXT("Parameters.AbsorbedWetness.MaxPendingWaterPerPixel"),
+          0.0,
+          static_cast<double>(TNumericLimits<float>::Max()),
+          0.0 },
         { TEXT("Parameters.AbsorbedWetness.SpreadRate"), 0.0, 10.0, 6.5 },
         { TEXT("Parameters.AbsorbedWetness.DryRate"), 0.0, 100.0, 20.0 },
         { TEXT("Parameters.AbsorbedWetness.GravityFlowStrength"), 0.0, 10.0, 1.0 },
@@ -479,7 +483,7 @@ namespace
                 MinRenderableDropletRadiusPixels));
         }
     }
-}
+} // namespace
 
 bool FWetnessProfileEditorPolicy::SanitizeProfile(UWetnessProfile* Profile, TArray<FString>* OutChanges)
 {

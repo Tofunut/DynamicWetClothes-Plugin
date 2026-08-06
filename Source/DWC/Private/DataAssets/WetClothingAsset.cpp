@@ -242,6 +242,7 @@ namespace
     bool AreRequiredWrinkleBakeAssetReferencesValid(const UWetClothingAsset& Asset)
     {
         const FWetClothingWrinkleData& WrinkleData = Asset.Authored.WrinkleData;
+
         TSet<int32> MaterialSlotIndices;
         for (const FWetWrinklePatchPlacement& Patch : WrinkleData.EditablePatches)
         {
@@ -249,7 +250,8 @@ namespace
                 Patch.MaterialSlotIndex == INDEX_NONE ||
                 Patch.WrinkleNormalTexture == nullptr ||
                 !Asset.IsMaterialSlotWettable(Patch.MaterialSlotIndex) ||
-                WrinkleData.IsUsingCustomWrinkleNormalMap(Patch.MaterialSlotIndex))
+                WrinkleData.IsUsingCustomWrinkleNormalMap(
+                    Patch.MaterialSlotIndex))
             {
                 continue;
             }
@@ -264,7 +266,8 @@ namespace
                 Stroke.WidthUV <= 0.0f ||
                 Stroke.Strength <= 0.0f ||
                 !Asset.IsMaterialSlotWettable(Stroke.MaterialSlotIndex) ||
-                WrinkleData.IsUsingCustomWrinkleNormalMap(Stroke.MaterialSlotIndex))
+                WrinkleData.IsUsingCustomWrinkleNormalMap(
+                    Stroke.MaterialSlotIndex))
             {
                 continue;
             }
@@ -274,15 +277,15 @@ namespace
         bool bFoundRequiredBake = false;
         for (const int32 MaterialSlotIndex : MaterialSlotIndices)
         {
-            if (!DoesWrinkleBakeSlotHaveContent(Asset, MaterialSlotIndex))
-            {
-                continue;
-            }
+                if (!DoesWrinkleBakeSlotHaveContent(Asset, MaterialSlotIndex))
+                {
+                    continue;
+                }
 
-            bFoundRequiredBake = true;
-            if (!HasUsableBakedWrinkleMapForSlot(Asset, MaterialSlotIndex))
-            {
-                return false;
+                bFoundRequiredBake = true;
+                if (!HasUsableBakedWrinkleMapForSlot(Asset, MaterialSlotIndex))
+                {
+                    return false;
             }
         }
 
@@ -292,6 +295,7 @@ namespace
     bool AreRequiredTransparencyBakeAssetReferencesValid(const UWetClothingAsset& Asset)
     {
         bool bFoundRequiredLayer = false;
+
         for (const FWetClothingTransparencyLayerData& Layer : Asset.Authored.TransparencyData.TransparencyLayers)
         {
             const int32 MaterialSlotIndex = Layer.TargetSurface.OuterMaterialSlotIndex;
@@ -330,10 +334,11 @@ namespace
         const FSurfaceWaterProfileParameters& Surface = Parameters.SurfaceWater;
 
         const FString AbsorbedKey = FString::Printf(
-            TEXT("Abs{%d,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g}"),
+            TEXT("Abs{%d,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g}"),
             Absorbed.bEnabled ? 1 : 0,
             Parameters.GetAbsorptionFraction(),
             AbsorbedSimulation.AbsorptionMultiplier,
+            Parameters.GetMaxPendingWaterPerPixel(),
             AbsorbedSimulation.SpreadRatePerSecond,
             AbsorbedSimulation.DryRatePerSecond,
             AbsorbedSimulation.GravityFlowStrength,
@@ -521,7 +526,7 @@ namespace
             {
                 if (bIncludeEditorDisplayFields || Slot.WetPartEntries[EntryIndex].WetPartID != 0)
                 {
-                    EntryIndices.Add(EntryIndex);
+                EntryIndices.Add(EntryIndex);
                 }
             }
             EntryIndices.Sort(
@@ -579,14 +584,13 @@ namespace
     }
 
 
-    void ResolveWetnessProfilesForDerivedInline(
-        FWetClothingEditableWetPartData& WetPartData,
+    void ResolveWetnessProfilesForDerivedInline( FWetClothingEditableWetPartData& WetPartData,
         TArray<FWetnessProfileParameters>& OutResolvedParameters)
     {
         OutResolvedParameters.Reset();
         OutResolvedParameters.Reserve(WetPartData.Profiles.Num());
 
-        for (FWetPartProfileAssignment& ProfileAssignment : WetPartData.Profiles)
+        for ( FWetPartProfileAssignment& ProfileAssignment : WetPartData.Profiles)
         {
             FWetnessProfileParameters Parameters = ProfileAssignment.Parameters;
 #if WITH_EDITOR
@@ -597,8 +601,8 @@ namespace
                 {
                     SourceObject = ProfileAssignment.SourceProfile.TryLoad();
                 }
-
-                if (const UWetnessProfile* SourceProfile = Cast<UWetnessProfile>(SourceObject))
+                if (const UWetnessProfile* SourceProfile =
+                        Cast<UWetnessProfile>(SourceObject))
                 {
                     Parameters = SourceProfile->GetParameters();
                 }
@@ -878,10 +882,8 @@ namespace
         SerializeBoneOptimizationCache(Ar, Data.BoneOptimizationCache);
     }
 
-    void SerializeGPUProfile(
-        FArchive& Ar,
-        FDWCGPUProfileParameters& Profile,
-        const int32 PayloadVersion)
+    void SerializeGPUProfile(FArchive& Ar, FDWCGPUProfileParameters& Profile,
+        const int32               PayloadVersion)
     {
         Ar << Profile.AbsorptionMultiplier;
         Ar << Profile.SpreadRatePerSecond;
@@ -1615,7 +1617,6 @@ bool UWetClothingAsset::DoesMaterialSlotUseSurfaceWater(const int32 MaterialSlot
         {
             continue;
         }
-
         const int32 ProfileIndex = WetPartData.Profiles.IsValidIndex(Entry.ProfileIndex)
             ? Entry.ProfileIndex
             : 0;
@@ -1633,8 +1634,8 @@ bool UWetClothingAsset::DoesMaterialSlotUseSurfaceWater(const int32 MaterialSlot
                 {
                     SourceObject = ProfileAssignment.SourceProfile.TryLoad();
                 }
-
-                if (const UWetnessProfile* SourceProfile = Cast<UWetnessProfile>(SourceObject))
+                if (const UWetnessProfile* SourceProfile =
+                        Cast<UWetnessProfile>(SourceObject))
                 {
                     Parameters = SourceProfile->GetParameters();
                     bHasParameters = true;
@@ -1787,9 +1788,7 @@ void UWetClothingAsset::Serialize(FArchive& Ar)
     bool bHasSerializedRuntimeBulkData = RuntimeBulkData.GetBulkDataSize() > 0;
     // Version 4 already appended this custom BulkData block. Older layouts are not
     // supported semantically, but their serialized bytes still must be consumed.
-    const bool bLoadSerializedRuntimeBulkData =
-        Ar.IsLoadingFromCookedPackage() ||
-        Metadata.AssetDataVersion >= FirstAssetVersionWithSerializedRuntimeBulkData;
+    const bool bLoadSerializedRuntimeBulkData =Ar.IsLoadingFromCookedPackage() || Metadata.AssetDataVersion >= FirstAssetVersionWithSerializedRuntimeBulkData;
     if (Ar.IsSaving() || bLoadSerializedRuntimeBulkData)
     {
         Ar << bHasSerializedRuntimeBulkData;
@@ -1802,7 +1801,6 @@ void UWetClothingAsset::Serialize(FArchive& Ar)
                     BULKDATA_LazyLoadable);
                 RuntimeBulkData.ClearBulkDataFlags(BULKDATA_ForceInlinePayload);
             }
-
             RuntimeBulkData.Serialize(Ar, this, INDEX_NONE, false, EFileRegionType::None);
 
             if (Ar.IsLoadingFromCookedPackage())
@@ -1823,6 +1821,8 @@ void UWetClothingAsset::Serialize(FArchive& Ar)
 void UWetClothingAsset::PostLoad()
 {
     Super::PostLoad();
+
+
 
     FWetClothingEditableWetPartData& EditableWetPartData = Authored.PartData.EditableWetPartData;
     EditableWetPartData.EnsureDefaultProfile();
@@ -1846,7 +1846,6 @@ void UWetClothingAsset::PostLoad()
         Metadata.DWCSkeletalMesh = nullptr;
         Metadata.DWCDataUVChannelIndex = INDEX_NONE;
     }
-
     bRuntimeBulkDataLoaded = RuntimeBulkData.GetBulkDataSize() == 0;
     bRuntimeBulkDataLoadFailed = false;
     bRuntimeBulkDataDirty = false;
@@ -1859,7 +1858,6 @@ void UWetClothingAsset::PostLoad()
         !Derived.Inline.DataUVMetadata.IsEmpty() &&
         !Derived.Inline.OriginalUVTopologies.IsEmpty();
     Metadata.bDataUVLayoutSealed = Metadata.bDataUVLayoutSealed || bHadPersistentDataUVLayout;
-
     if (Metadata.AssetDataVersion != CurrentAssetDataVersion)
     {
         // Unsupported asset schemas are invalidated and must be rebuilt with the current data contract.
@@ -1910,7 +1908,6 @@ void UWetClothingAsset::PostLoad()
                                          ? EDWCBakeStatus::Valid
                                          : EDWCBakeStatus::OutOfDate;
     }
-
 #endif
 #if WITH_EDITOR
     PendingRuntimeSaveOutputMask = 0;
@@ -2162,7 +2159,6 @@ uint64 UWetClothingAsset::GetResidentRuntimeBulkPayloadBytesForEditor() const
     }
     return Bytes;
 }
-
 void UWetClothingAsset::ReleaseLoadedRuntimeBulkPayloadForEditor()
 {
     if (bRuntimeBulkDataDirty || RuntimeBulkData.GetBulkDataSize() <= 0)
@@ -2306,8 +2302,7 @@ void UWetClothingAsset::StoreRuntimeDataToBulkData()
 
     RuntimeBulkData.RemoveBulkData();
     RuntimeBulkData.SetBulkDataFlags(
-        BULKDATA_Force_NOT_InlinePayload |
-        BULKDATA_LazyLoadable);
+        BULKDATA_Force_NOT_InlinePayload | BULKDATA_LazyLoadable);
     RuntimeBulkData.ClearBulkDataFlags(BULKDATA_ForceInlinePayload);
     RuntimeBulkData.Lock(LOCK_READ_WRITE);
     void* BulkBytes = RuntimeBulkData.Realloc(Bytes.Num());
@@ -2438,7 +2433,6 @@ bool UWetClothingAsset::InitializeNewAsset(
             TEXT("This Wet Clothing Asset is already initialized. Create a new WCA instead of replacing its Original UV or DWC UV Channel layout."));
         return false;
     }
-
     if (InSourceMesh == nullptr)
     {
         DWC::Error::SetMessage(OutErrorMessage, TEXT("No source skeletal mesh is assigned."));
@@ -2513,7 +2507,6 @@ bool UWetClothingAsset::ApplySetupSettings(
         return false;
     }
     NewSettings.OriginalUVChannelIndex = Metadata.OriginalUVChannelIndex;
-
     if (!ValidateSetupUVChannels(GetSourceSkeletalMesh(), NewSettings, OutChangeSummary))
     {
         return false;
@@ -2529,7 +2522,6 @@ bool UWetClothingAsset::ApplySetupSettings(
     // A sealed WCA may change its active range. The editor synchronizes the retained
     // per-LOD DWC UV metadata after these settings are accepted instead of blocking the
     // change merely because newly included LODs have not been generated yet.
-
     const bool bCPUSimulationSettingChanged =
         PreviousSettings.bBuildCPUVertexSimulationData != NewSettings.bBuildCPUVertexSimulationData;
     const bool bGPUSimulationSettingChanged =
@@ -2550,7 +2542,7 @@ bool UWetClothingAsset::ApplySetupSettings(
     Authored.WrinkleData.BakeSettings.DefaultResolution = Metadata.SetupSettings.GetWrinkleMapResolution();
     Authored.TransparencyData.TransparencyBakeResolution = Metadata.SetupSettings.GetTransparencyMapResolution();
 
-    if (bDataUVTargetChanged)
+    if ( bDataUVTargetChanged)
     {
         // The packed UV layout and Original-UV island records remain sealed. Only the destination
         // channel is stale until the editor copies the existing values verbatim to the new channel.
@@ -2578,7 +2570,7 @@ bool UWetClothingAsset::ApplySetupSettings(
             : EDWCBakeStatus::Disabled;
     }
 
-    if (bDataUVTargetChanged)
+    if ( bDataUVTargetChanged)
     {
         MarkVisualBakeOutOfDate();
     }
@@ -2605,9 +2597,7 @@ bool UWetClothingAsset::ApplySetupSettings(
     TArray<FString> Changes;
     if (bDataUVTargetChanged)
     {
-        Changes.Add(FString::Printf(
-            TEXT("DWC UV Channel changed: UV%d -> UV%d. The existing packed layout will be copied without rebuilding island topology."),
-            Metadata.DWCDataUVChannelIndex,
+        Changes.Add(FString::Printf(TEXT("DWC UV Channel changed: UV%d -> UV%d. The existing packed layout will be copied without rebuilding island topology."), Metadata.DWCDataUVChannelIndex,
             Metadata.SetupSettings.PreferredDWCDataUVChannelIndex));
     }
     if (bCPUSimulationSettingChanged)
@@ -2662,12 +2652,10 @@ bool UWetClothingAsset::HasLockedDataUVLayout() const
 #endif
 }
 
-bool UWetClothingAsset::CommitInitialDataUVLayout(
-    USkeletalMesh* InRuntimeMesh,
-    const int32 InDWCDataUVChannelIndex,
-    TArray<FDWCDataUVLODMetadata>&& InMetadata,
+bool UWetClothingAsset::CommitInitialDataUVLayout(USkeletalMesh* InRuntimeMesh, const int32 InDWCDataUVChannelIndex,
+    TArray<FDWCDataUVLODMetadata>&&    InMetadata,
     TArray<FDWCEditorUVTopologyData>&& InTopologies,
-    FString* OutErrorMessage)
+    FString*                           OutErrorMessage)
 {
 #if WITH_EDITORONLY_DATA
     const bool bHasAnyExistingLayoutPayload =
@@ -2698,7 +2686,6 @@ bool UWetClothingAsset::CommitInitialDataUVLayout(
         DWC::Error::SetMessage(OutErrorMessage, TEXT("The initial DWC UV Channel commit requires both metadata and Original UV topology payloads."));
         return false;
     }
-
     Metadata.DWCSkeletalMesh = InRuntimeMesh;
     Metadata.DWCDataUVChannelIndex = InDWCDataUVChannelIndex;
     Metadata.SetupSettings.PreferredDWCDataUVChannelIndex = InDWCDataUVChannelIndex;
@@ -2706,9 +2693,8 @@ bool UWetClothingAsset::CommitInitialDataUVLayout(
     Derived.Inline.OriginalUVTopologies = MoveTemp(InTopologies);
     Metadata.bDataUVLayoutSealed = true;
 
-    Derived.Inline.BakeState.GeneratedDataUV = EDWCBakeStatus::Valid;
-    Derived.Inline.BakeState.OriginalUVTopology = EDWCBakeStatus::Valid;
-    MarkBakeOutputGenerated(DWCBakeOutput::GeneratedDataUV | DWCBakeOutput::OriginalUVTopology);
+    Derived.Inline.BakeState.GeneratedDataUV = EDWCBakeStatus::Valid;Derived.Inline.BakeState.OriginalUVTopology = EDWCBakeStatus::Valid;
+        MarkBakeOutputGenerated(DWCBakeOutput::GeneratedDataUV | DWCBakeOutput::OriginalUVTopology);
     MarkSimulationBakeOutOfDate();
     Derived.Inline.BakeState.LastFailure.Reset();
     MarkPackageDirty();
@@ -2721,11 +2707,10 @@ bool UWetClothingAsset::CommitInitialDataUVLayout(
 }
 
 bool UWetClothingAsset::ReplaceDataUVLayout(
-    USkeletalMesh* InRuntimeMesh,
-    const int32 InDWCDataUVChannelIndex,
-    TArray<FDWCDataUVLODMetadata>&& InMetadata,
-    TArray<FDWCEditorUVTopologyData>&& InTopologies,
-    FString* OutErrorMessage)
+    USkeletalMesh*                     InRuntimeMesh,
+    const int32                        InDWCDataUVChannelIndex,
+    TArray<FDWCDataUVLODMetadata>&&    InMetadata,TArray<FDWCEditorUVTopologyData>&& InTopologies,
+    FString*                           OutErrorMessage)
 {
 #if WITH_EDITORONLY_DATA
     if (!HasLockedDataUVLayout())
@@ -2760,10 +2745,9 @@ bool UWetClothingAsset::ReplaceDataUVLayout(
 
     Derived.Inline.BakeState.GeneratedDataUV = EDWCBakeStatus::Valid;
     Derived.Inline.BakeState.OriginalUVTopology = EDWCBakeStatus::Valid;
-    MarkBakeOutputGenerated(DWCBakeOutput::GeneratedDataUV | DWCBakeOutput::OriginalUVTopology);
+    MarkBakeOutputGenerated (DWCBakeOutput::GeneratedDataUV | DWCBakeOutput::OriginalUVTopology);
     MarkSimulationBakeOutOfDate();
-    MarkVisualBakeOutOfDate();
-    Derived.Inline.BakeState.LastFailure.Reset();
+    MarkVisualBakeOutOfDate();Derived.Inline.BakeState.LastFailure.Reset();
     MarkPackageDirty();
     DWC::Error::SetMessage(OutErrorMessage, TEXT(""));
     return true;
@@ -2775,7 +2759,7 @@ bool UWetClothingAsset::ReplaceDataUVLayout(
 
 bool UWetClothingAsset::CommitDataUVChannelRelocation(
     const int32 InDWCDataUVChannelIndex,
-    FString* OutErrorMessage)
+    FString*    OutErrorMessage)
 {
 #if WITH_EDITORONLY_DATA
     if (!HasLockedDataUVLayout())
@@ -2803,7 +2787,7 @@ bool UWetClothingAsset::CommitDataUVChannelRelocation(
             LODMetadata.LODIndex,
             InDWCDataUVChannelIndex);
         if (Signature.IsEmpty())
-        {
+    {
             DWC::Error::SetMessage(
                 OutErrorMessage,
                 FString::Printf(TEXT("Could not validate relocated DWC UV Channel on LOD%d."), LODMetadata.LODIndex));
@@ -2823,7 +2807,7 @@ bool UWetClothingAsset::CommitDataUVChannelRelocation(
     }
 
     Derived.Inline.BakeState.GeneratedDataUV = EDWCBakeStatus::Valid;
-    MarkBakeOutputGenerated(DWCBakeOutput::GeneratedDataUV);
+        MarkBakeOutputGenerated(DWCBakeOutput::GeneratedDataUV);
     MarkSimulationBakeOutOfDate();
     MarkVisualBakeOutOfDate();
     Derived.Inline.BakeState.LastFailure.Reset();
@@ -2843,7 +2827,7 @@ int32 UWetClothingAsset::PruneDataUVLODData(const TSet<int32>& RetainedLODIndice
         [&RetainedLODIndices](const FDWCDataUVLODMetadata& Metadata)
         {
             return !RetainedLODIndices.Contains(Metadata.LODIndex);
-        });
+    });
 
     Derived.Inline.LastDataUVSlotLODResults.RemoveAll(
         [&RetainedLODIndices](const FDWCDataUVSlotLODResult& Result)
@@ -2877,7 +2861,7 @@ int32 UWetClothingAsset::PruneDataUVLODData(const TSet<int32>& RetainedLODIndice
         [&RetainedLODIndices](const FWCALODVertexColorRuntimeData& Data)
         {
             return Data.TargetLODIndex != INDEX_NONE &&
-                !RetainedLODIndices.Contains(Data.TargetLODIndex);
+                   !RetainedLODIndices.Contains(Data.TargetLODIndex);
         });
 
     if (RemovedMetadataCount > 0 || RemovedGPUDataCount > 0 || RemovedVertexColorDataCount > 0)
@@ -3771,8 +3755,8 @@ void UWetClothingAsset::MarkRuntimeBakeOutputsDirty(const int32 OutputMask)
     MarkPackageDirty();
 }
 
-
 #endif // WITH_EDITOR
+
 
 FString UWetClothingAsset::BuildMeshContentSignature(
     const USkeletalMesh* SkeletalMesh,
@@ -3792,6 +3776,7 @@ FString UWetClothingAsset::BuildMeshContentSignature(
 }
 
 #if WITH_EDITOR
+
 void UWetClothingAsset::ClearMeshContentSignatureCache()
 {
     FWetGPUMapBakeBuilder::ClearSignatureCache();
@@ -4166,7 +4151,6 @@ bool UWetClothingAsset::RebuildPrecomputedSimulationData(FString* OutErrorMessag
             ClearPrecomputedSimulationData();
             return false;
         }
-
         TMap<int32, int32> AssignedUVIslandToEntryIndex;
         for (int32 EntryIndex = 0; EntryIndex < Slot.WetPartEntries.Num(); ++EntryIndex)
         {
@@ -4185,7 +4169,7 @@ bool UWetClothingAsset::RebuildPrecomputedSimulationData(FString* OutErrorMessag
         for (const FDWCRuntimeOriginalUVIsland& Island : Islands)
         {
             const int32* AssignedEntryIndex = AssignedUVIslandToEntryIndex.Find(Island.UVIslandID);
-            if (AssignedEntryIndex == nullptr || !Slot.WetPartEntries.IsValidIndex(*AssignedEntryIndex))
+            if (AssignedEntryIndex == nullptr ||!Slot.WetPartEntries.IsValidIndex(*AssignedEntryIndex))
             {
                 continue;
             }

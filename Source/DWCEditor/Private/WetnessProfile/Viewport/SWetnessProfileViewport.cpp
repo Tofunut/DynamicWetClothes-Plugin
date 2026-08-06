@@ -156,14 +156,15 @@ namespace
         const FResolvedAbsorbedWaterSimulationParameters Resolved =
             Parameters.ResolveAbsorbedWaterSimulation();
         const FSurfaceWaterProfileParameters& Surface = Parameters.SurfaceWater;
-        uint32 Hash = 0u;
-        const auto AddValue = [&Hash](const auto& Value)
+        uint32                                Hash = 0u;
+        const auto                            AddValue = [&Hash](const auto& Value)
         {
             Hash = HashCombine(Hash, GetTypeHash(Value));
-        };
+};
 
         AddValue(Parameters.AbsorbedWetness.bEnabled);
         AddValue(Resolved.AbsorptionMultiplier);
+        AddValue(Parameters.GetMaxPendingWaterPerPixel());
         AddValue(Resolved.SpreadRatePerSecond);
         AddValue(Resolved.DryRatePerSecond);
         AddValue(Resolved.GravityFlowStrength);
@@ -178,7 +179,7 @@ namespace
         AddValue(Surface.DropletFlowSpawnPositionSpread);
         return Hash;
     }
-}
+} // namespace
 
 void SWetnessProfileViewport::Construct(const FArguments& InArgs)
 {
@@ -271,7 +272,7 @@ void SWetnessProfileViewport::Tick(
 {
     SEditorViewport::Tick(AllottedGeometry, InCurrentTime, InDeltaTime);
 
-    if (PreviewBehavior == EPreviewBehavior::Simulation)
+    if (PreviewBehavior== EPreviewBehavior::Simulation)
     {
         TickGPUPreviewSimulation(InDeltaTime);
     }
@@ -301,8 +302,7 @@ void SWetnessProfileViewport::SetPreviewSurfaceWater(float InAmount)
     RefreshPreviewMaterialParameters();
 }
 
-void SWetnessProfileViewport::SetPreviewDropletDetailSizes(
-    const float InDroplet1DetailSize,
+void SWetnessProfileViewport::SetPreviewDropletDetailSizes(const float InDroplet1DetailSize,
     const float InDroplet2DetailSize)
 {
     const float NewDroplet1DetailSize = FMath::Clamp(InDroplet1DetailSize, 0.0f, 4.0f);
@@ -623,6 +623,7 @@ void SWetnessProfileViewport::ApplyResolvedPreviewMesh(bool bFocus)
     PreviewMeshComponent->SetStaticMesh(PreviewSphereMesh);
     PreviewMeshComponent->SetRelativeRotation(FRotator::ZeroRotator);
     PreviewMeshComponent->SetRelativeScale3D(FVector(PreviewSphereScale));
+
     USkeletalMesh* ResolvedSkeletalMesh =
         bHasPreviewMeshOverride ? PreviewMeshOverride.Get() : ResolveProfilePreviewSkeletalMesh();
     if (ResolvedSkeletalMesh != nullptr)
@@ -847,16 +848,14 @@ void SWetnessProfileViewport::RefreshPreviewMaterialParameters()
     {
         using namespace DWCWetnessProfilePreviewMaterial;
         const bool bManualPreview = PreviewBehavior == EPreviewBehavior::Manual;
-        PreviewMaterialInstance->SetScalarParameterValue(
-            AbsorbedWaterParameter,
+        PreviewMaterialInstance->SetScalarParameterValue(AbsorbedWaterParameter,
             bManualPreview ? PreviewAbsorbedWater : 0.0f);
-        PreviewMaterialInstance->SetScalarParameterValue(
-            SurfaceWaterParameter,
+        PreviewMaterialInstance->SetScalarParameterValue(SurfaceWaterParameter,
             bManualPreview ? PreviewSurfaceWater : 0.0f);
         const bool bPreviewAbsorbedEnabled = Absorbed.bEnabled &&
-            (PreviewBehavior == EPreviewBehavior::Manual || bPreviewAbsorbedLayerEnabled);
+                                             (PreviewBehavior == EPreviewBehavior::Manual || bPreviewAbsorbedLayerEnabled);
         const bool bPreviewSurfaceEnabled = Surface.bEnabled &&
-            (PreviewBehavior == EPreviewBehavior::Manual || bPreviewSurfaceLayerEnabled);
+                                            (PreviewBehavior == EPreviewBehavior::Manual || bPreviewSurfaceLayerEnabled);
         PreviewMaterialInstance->SetScalarParameterValue(AbsorbedEnabledParameter, bPreviewAbsorbedEnabled ? 1.0f : 0.0f);
         PreviewMaterialInstance->SetScalarParameterValue(SurfaceEnabledParameter, bPreviewSurfaceEnabled ? 1.0f : 0.0f);
         PreviewMaterialInstance->SetScalarParameterValue(
@@ -925,9 +924,10 @@ void SWetnessProfileViewport::RefreshGeneratedPreviewMaterialParameters()
 
     if (PreviewBehavior == EPreviewBehavior::Manual)
     {
-        WriteSinglePixelTexture(PreviewWetnessMapTexture, MakeScalarPreviewColor(PreviewAbsorbedWater));
-        WriteSinglePixelTexture(PreviewSurfaceDropletTexture, MakeScalarPreviewColor(PreviewSurfaceWater));
-        WriteSinglePixelTexture(PreviewSurfaceFlowDropletTexture, MakeScalarPreviewColor(PreviewSurfaceWater));
+
+    WriteSinglePixelTexture(PreviewWetnessMapTexture, MakeScalarPreviewColor(PreviewAbsorbedWater));
+    WriteSinglePixelTexture(PreviewSurfaceDropletTexture, MakeScalarPreviewColor(PreviewSurfaceWater));
+    WriteSinglePixelTexture(PreviewSurfaceFlowDropletTexture, MakeScalarPreviewColor(PreviewSurfaceWater));
     }
     WriteSinglePixelTexture(
         PreviewWetPartDataTexture,
@@ -940,8 +940,7 @@ void SWetnessProfileViewport::RefreshGeneratedPreviewMaterialParameters()
     const FLinearColor FallbackProfile0(
         Parameters.GetAbsorbedDarkeningStrength(),
         Parameters.GetAbsorbedGlossinessStrength(),
-        0.0f,
-        0.0f);
+        0.0f, 0.0f);
     const FLinearColor FallbackProfile1(
         FMath::Clamp(Surface.SurfaceWaterNormalStrength, 0.0f, 3.0f),
         FMath::Clamp(Surface.SurfaceWaterRoughnessBlend, 0.0f, 1.0f),
@@ -965,10 +964,8 @@ void SWetnessProfileViewport::RefreshGeneratedPreviewMaterialParameters()
         FMath::Clamp(Surface.DropletFlowNormalStrength, 0.0f, 3.0f),
         0.0f);
 
-    const bool bManualPreview = PreviewBehavior == EPreviewBehavior::Manual;
-    const float SurfacePreviewAmount = Surface.bEnabled && bManualPreview
-        ? PreviewSurfaceWater
-        : 0.0f;
+    const bool                     bManualPreview = PreviewBehavior == EPreviewBehavior::Manual;
+    const float SurfacePreviewAmount = Surface.bEnabled && bManualPreview ? PreviewSurfaceWater : 0.0f;
     FWetClothingLocalRenderProfile PreviewLocalProfile;
     PreviewLocalProfile.Parameters = Parameters;
     PreviewLocalProfile.StableKey = FString::Printf(
@@ -1026,12 +1023,13 @@ void SWetnessProfileViewport::RefreshGeneratedPreviewMaterialParameters()
         }
         else
         {
-            PreviewMID->SetTextureParameterValue(DWCWetMaterialParameters::WetnessMap(), PreviewWetnessMapTexture);
-            PreviewMID->SetTextureParameterValue(DWCWetMaterialParameters::SurfaceDroplet1RT(), PreviewSurfaceDropletTexture);
-            PreviewMID->SetTextureParameterValue(
-                DWCWetMaterialParameters::SurfaceDroplet2RT(),
-                PreviewSurfaceFlowDropletTexture);
-            PreviewMID->SetScalarParameterValue(DWCWetMaterialParameters::SurfaceWaterTexelSize(), 1.0f);
+
+        PreviewMID->SetTextureParameterValue(DWCWetMaterialParameters::WetnessMap(), PreviewWetnessMapTexture);
+        PreviewMID->SetTextureParameterValue(DWCWetMaterialParameters::SurfaceDroplet1RT(), PreviewSurfaceDropletTexture);
+        PreviewMID->SetTextureParameterValue(
+            DWCWetMaterialParameters::SurfaceDroplet2RT(),
+            PreviewSurfaceFlowDropletTexture);
+        PreviewMID->SetScalarParameterValue(DWCWetMaterialParameters::SurfaceWaterTexelSize(), 1.0f);
         }
         PreviewMID->SetScalarParameterValue(DWCWetMaterialParameters::UseRenderProfileLUT(), 0.0f);
         const bool bAppliedProfileTextures =
@@ -1051,8 +1049,7 @@ void SWetnessProfileViewport::RefreshGeneratedPreviewMaterialParameters()
             PreviewMID->SetVectorParameterValue(DWCWetMaterialParameters::FallbackRenderProfileTexel(5), FallbackProfile5);
             PreviewMID->SetVectorParameterValue(DWCWetMaterialParameters::FallbackRenderProfileTexel(6), FallbackProfile6);
         }
-        PreviewMID->SetScalarParameterValue(
-            PreviewSurfaceWaterOverrideParameter,
+        PreviewMID->SetScalarParameterValue(PreviewSurfaceWaterOverrideParameter,
             bManualPreview ? 1.0f : 0.0f);
         PreviewMID->SetScalarParameterValue(PreviewSurfaceWaterAmountParameter, SurfacePreviewAmount);
         const bool bSurfaceLayerVisible = bManualPreview || bPreviewSurfaceLayerEnabled;
@@ -1091,7 +1088,7 @@ FVector2f SWetnessProfileViewport::ResolveScenarioSplashUV() const
     }
 
     TArray<int32> MaterialSlots;
-    const int32 MaterialCount = SkeletalMesh->GetMaterials().Num();
+    const int32   MaterialCount = SkeletalMesh->GetMaterials().Num();
     MaterialSlots.Reserve(MaterialCount);
     for (int32 MaterialIndex = 0; MaterialIndex < MaterialCount; ++MaterialIndex)
     {
@@ -1099,7 +1096,7 @@ FVector2f SWetnessProfileViewport::ResolveScenarioSplashUV() const
     }
 
     TArray<FWCAUVPreviewSourceTriangle> Triangles;
-    FString ReadError;
+    FString                             ReadError;
     if (!FWCAUVPreviewTriangleReader::ReadFromSkeletalMesh(
             SkeletalMesh,
             0,
@@ -1119,20 +1116,20 @@ FVector2f SWetnessProfileViewport::ResolveScenarioSplashUV() const
     }
 
     const FBoxSphereBounds ImportedBounds = SkeletalMesh->GetImportedBounds();
-    const FVector3f TargetPoint(
+    const FVector3f        TargetPoint(
         static_cast<float>(ImportedBounds.Origin.X + ImportedBounds.BoxExtent.X * 0.82),
         static_cast<float>(ImportedBounds.Origin.Y),
         static_cast<float>(ImportedBounds.Origin.Z + ImportedBounds.BoxExtent.Z * 0.15));
 
     const FWCAUVPreviewSourceTriangle* BestTriangle = nullptr;
-    double BestScore = TNumericLimits<double>::Max();
+    double                             BestScore = TNumericLimits<double>::Max();
     for (const FWCAUVPreviewSourceTriangle& Triangle : Triangles)
     {
         const FVector3f Center =
             (Triangle.LocalPositions[0] + Triangle.LocalPositions[1] + Triangle.LocalPositions[2]) / 3.0f;
         const FVector3f Edge0 = Triangle.LocalPositions[1] - Triangle.LocalPositions[0];
         const FVector3f Edge1 = Triangle.LocalPositions[2] - Triangle.LocalPositions[0];
-        const double AreaWeight = FMath::Max(
+        const double    AreaWeight = FMath::Max(
             static_cast<double>(FVector3f::CrossProduct(Edge0, Edge1).Size()),
             1.0e-4);
         const double DistanceSquared = static_cast<double>((Center - TargetPoint).SizeSquared());
@@ -1150,7 +1147,7 @@ FVector2f SWetnessProfileViewport::ResolveScenarioSplashUV() const
     }
 
     const FVector2f UV0 = BestTriangle->UVs[0];
-    const auto UnwrapNear = [](const FVector2f UV, const FVector2f Reference)
+    const auto      UnwrapNear = [](const FVector2f UV, const FVector2f Reference)
     {
         return FVector2f(
             Reference.X + (UV.X - Reference.X) - FMath::RoundToFloat(UV.X - Reference.X),
@@ -1205,7 +1202,7 @@ bool SWetnessProfileViewport::EnsureGPUPreviewSimulator()
     }
 
     const FWetClothingSettings Defaults;
-    FDWCGPUPreviewInitArgs Args;
+    FDWCGPUPreviewInitArgs     Args;
     Args.WorldContextObject = PreviewScene->GetWorld();
     Args.Resolution = 512;
     Args.MaxWetness = Defaults.MaxWetness;
@@ -1257,7 +1254,7 @@ void SWetnessProfileViewport::TickGPUPreviewSimulation(const float InDeltaTime)
     }
 
     PreviewSimulationAccumulator += FMath::Max(InDeltaTime, 0.0f) * PreviewAnimationSpeed;
-    bool bStepped = false;
+    bool  bStepped = false;
     int32 SafetyCounter = 0;
     while (PreviewSimulationAccumulator >= PreviewFixedStep && SafetyCounter++ < 8)
     {
@@ -1306,14 +1303,15 @@ void SWetnessProfileViewport::BindGPUPreviewTextures()
         {
             continue;
         }
-        PreviewMID->SetScalarParameterValue(DWCWetMaterialParameters::UseGPUBackend(), 1.0f);
+            PreviewMID->SetScalarParameterValue(
+                DWCWetMaterialParameters::UseGPUBackend(), 1.0f);
         PreviewMID->SetScalarParameterValue(PreviewSurfaceWaterOverrideParameter, 0.0f);
         PreviewMID->SetScalarParameterValue(PreviewSurfaceWaterAmountParameter, 0.0f);
         PreviewMID->SetTextureParameterValue(DWCWetMaterialParameters::WetnessMap(), GPUPreviewSimulator->GetWetnessMap());
         PreviewMID->SetTextureParameterValue(DWCWetMaterialParameters::SurfaceDroplet1RT(), GPUPreviewSimulator->GetDroplet1Map());
         PreviewMID->SetTextureParameterValue(DWCWetMaterialParameters::SurfaceDroplet2RT(), GPUPreviewSimulator->GetDroplet2Map());
         PreviewMID->SetScalarParameterValue(DWCWetMaterialParameters::SurfaceWaterTexelSize(), TexelSize);
-    }
+        }
 }
 
 void SWetnessProfileViewport::ScheduleSimulationRestart()
@@ -1356,9 +1354,9 @@ FText SWetnessProfileViewport::GetOverlayText() const
             FText::AsNumber(PreviewAnimationSpeed),
             bPreviewAnimationEnabled ? LOCTEXT("SimulationPlaying", "Playing") : LOCTEXT("SimulationPaused", "Paused"));
     }
-
     const FWetnessProfileParameters Parameters = GetSanitizedProfileParameters(WetnessProfile.Get());
     const FSurfaceWaterProfileParameters& Surface = Parameters.SurfaceWater;
+
     return FText::Format(
         LOCTEXT(
             "PreviewHint",

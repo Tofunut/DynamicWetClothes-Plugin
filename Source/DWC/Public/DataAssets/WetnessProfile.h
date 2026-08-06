@@ -58,6 +58,10 @@ struct DWC_API FAbsorbedWetnessProfileParameters
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Absorbed Wetness|Simulation", meta = (ClampMin = "0.0", DisplayName = "Absorption Rate"))
     float AbsorptionRate = 1.0f;
 
+    /** Maximum Pending Water stored by one GPU simulation texel. Zero keeps the legacy unlimited behavior. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Absorbed Wetness|Simulation", meta = (ClampMin = "0.0", UIMin = "0.0", UIMax = "1000.0", DisplayName = "Max Pending Water Per Pixel (GPU Only)"))
+    float MaxPendingWaterPerPixel = 0.0f;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Absorbed Wetness|Simulation", meta = (ClampMin = "0.0"))
     float SpreadRate = 6.5f;
 
@@ -221,6 +225,13 @@ struct DWC_API FWetnessProfileParameters
         return AbsorbedWetness.bEnabled ? FMath::Max(0.0f, AbsorbedWetness.AbsorptionRate) : 0.0f;
     }
 
+    float GetMaxPendingWaterPerPixel() const
+    {
+        return FMath::IsFinite(AbsorbedWetness.MaxPendingWaterPerPixel)
+                   ? FMath::Max(0.0f, AbsorbedWetness.MaxPendingWaterPerPixel)
+                   : 0.0f;
+    }
+
     bool SupportsAbsorbedWetness() const
     {
         return GetAbsorptionFraction() > 0.0f;
@@ -336,6 +347,8 @@ class DWC_API UWetnessProfile : public UDataAsset
     float GetDropletDryRatePerSecond() const { return Parameters.GetDropletDryRatePerSecond(); }
     UFUNCTION(BlueprintPure, Category = "Wetness Profile")
     float GetGravityFlowStrength() const { return Parameters.GetGravityFlowStrength(); }
+    UFUNCTION(BlueprintPure, Category = "Wetness Profile")
+    float GetMaxPendingWaterPerPixel() const { return Parameters.GetMaxPendingWaterPerPixel(); }
     UFUNCTION(BlueprintPure, Category = "Wetness Profile")
     float GetSurfaceWaterStrength() const { return Parameters.GetSurfaceWaterStrength(); }
     UFUNCTION(BlueprintPure, Category = "Wetness Profile")

@@ -6,6 +6,8 @@ Buffer<float4> Contacts;
 Buffer<int> ContactCount;
 StructuredBuffer<uint4> TexelLookup;
 StructuredBuffer<float4> TrianglePositions;
+StructuredBuffer<float> PendingWaterLimits;
+StructuredBuffer<uint> TriangleProfileIndices;
 
 int2 TextureSize;
 int MaxContacts;
@@ -30,6 +32,14 @@ bool IsInside(int2 Texel)
 bool IsValidLookup(uint4 Lookup)
 {
     return Lookup.w != 0u && Lookup.x != 0xffffffffu;
+}
+
+float ApplyPendingWaterLimit(float PendingWater, uint4 Lookup)
+{
+    const float SafePendingWater = isfinite(PendingWater) ? max(PendingWater, 0.0) : 0.0;
+    const uint ProfileIndex = TriangleProfileIndices[Lookup.x];
+    const float Limit = max(PendingWaterLimits[ProfileIndex], 0.0);
+    return Limit > 0.0 ? min(SafePendingWater, Limit) : SafePendingWater;
 }
 
 float3 UnpackBarycentricXY(uint Packed)
@@ -99,6 +109,8 @@ void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 
     if (PendingDelta > 0.0 && isfinite(PendingDelta))
     {
-        PendingWetnessTexture[Texel] = max(PendingWetnessTexture[Texel], 0.0) + PendingDelta;
+        PendingWetnessTexture[Texel] = ApplyPendingWaterLimit(
+            max(PendingWetnessTexture[Texel], 0.0) + PendingDelta,
+            Lookup);
     }
 }

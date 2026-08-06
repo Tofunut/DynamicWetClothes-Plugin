@@ -11,6 +11,7 @@ StructuredBuffer<float4> SeamIncoming;
 StructuredBuffer<uint4> TexelLookup;
 StructuredBuffer<float4> TriangleFlow;
 StructuredBuffer<float4> Profiles;
+StructuredBuffer<float> PendingWaterLimits;
 StructuredBuffer<uint> TriangleProfileIndices;
 
 int2 TextureSize;
@@ -21,6 +22,13 @@ float MaxWetness;
 
 static const float DWCSeamSpreadResponseScale = 1.75;
 static const float DWCMaxSeamTransferFraction = 0.35;
+
+float ApplyPendingWaterLimit(float PendingWater, uint ProfileIndex)
+{
+    const float SafePendingWater = isfinite(PendingWater) ? max(PendingWater, 0.0) : 0.0;
+    const float Limit = max(PendingWaterLimits[ProfileIndex], 0.0);
+    return Limit > 0.0 ? min(SafePendingWater, Limit) : SafePendingWater;
+}
 
 float GetArea(uint TexelIndex)
 {
@@ -104,5 +112,8 @@ void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
         max(NewMass, 0.0) / max(DestinationArea, 1.0e-10),
         0.0,
         MaxWetness);
-    DestinationPendingWetnessTexture[DestinationTexel] = max(NewPendingWetness, 0.0);
+    const uint DestinationProfileIndex = TriangleProfileIndices[DestinationLookup.x];
+    DestinationPendingWetnessTexture[DestinationTexel] = ApplyPendingWaterLimit(
+        NewPendingWetness,
+        DestinationProfileIndex);
 }

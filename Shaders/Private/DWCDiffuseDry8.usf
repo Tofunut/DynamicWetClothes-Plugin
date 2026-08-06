@@ -9,6 +9,7 @@ StructuredBuffer<uint4> TexelLookup;
 StructuredBuffer<float4> TriangleFlow;
 StructuredBuffer<float4> TriangleMetric;
 StructuredBuffer<float4> Profiles;
+StructuredBuffer<float> PendingWaterLimits;
 StructuredBuffer<uint> TriangleProfileIndices;
 
 int2 TextureSize;
@@ -169,6 +170,13 @@ float SanitizeWetness(float Value)
     return isfinite(Value) ? max(Value, 0.0) : 0.0;
 }
 
+float ApplyPendingWaterLimit(float PendingWater, uint ProfileIndex)
+{
+    const float SafePendingWater = SanitizeWetness(PendingWater);
+    const float Limit = max(PendingWaterLimits[ProfileIndex], 0.0);
+    return Limit > 0.0 ? min(SafePendingWater, Limit) : SafePendingWater;
+}
+
 float IncomingPendingFromNeighbor(
     int2 CenterTexel,
     uint DirectionIndex,
@@ -315,5 +323,5 @@ void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
     DestinationWetnessTexture[Texel] =
         clamp(NewWetness, 0.0, MaxWetness);
     DestinationPendingWetnessTexture[Texel] =
-        max(PendingNextWetness, 0.0);
+        ApplyPendingWaterLimit(PendingNextWetness, ProfileIndex);
 }

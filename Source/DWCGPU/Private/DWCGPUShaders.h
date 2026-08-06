@@ -21,6 +21,8 @@ public:
         SHADER_PARAMETER(FVector4f, P1AndMaxWetness)
         SHADER_PARAMETER(FVector4f, P2AndMode)
         SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint4>, TexelLookup)
+    SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float>, PendingWaterLimits)
+    SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, TriangleProfileIndices)
         SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float>, WetnessTexture)
         SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float>, PendingWetnessTexture)
     END_SHADER_PARAMETER_STRUCT()
@@ -43,6 +45,8 @@ public:
         SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint2>, TileBins)
         SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, TileContactIndices)
         SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint4>, TexelLookup)
+    SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float>, PendingWaterLimits)
+    SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, TriangleProfileIndices)
         SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float>, PendingWetnessTexture)
     END_SHADER_PARAMETER_STRUCT()
 
@@ -113,6 +117,8 @@ public:
         SHADER_PARAMETER_RDG_BUFFER_SRV(Buffer<int>, ContactCount)
         SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint4>, TexelLookup)
         SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float4>, TrianglePositions)
+    SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float>, PendingWaterLimits)
+    SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, TriangleProfileIndices)
         SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float>, PendingWetnessTexture)
     END_SHADER_PARAMETER_STRUCT()
 
@@ -192,6 +198,7 @@ public:
         SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float4>, TriangleFlow)
         SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float4>, TriangleMetric)
         SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float4>, Profiles)
+        SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float>, PendingWaterLimits)
         SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, TriangleProfileIndices)
     END_SHADER_PARAMETER_STRUCT()
 
@@ -219,6 +226,7 @@ public:
         SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float4>, TriangleFlow)
         SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float4>, TriangleMetric)
         SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float4>, Profiles)
+        SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float>, PendingWaterLimits)
         SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, TriangleProfileIndices)
     END_SHADER_PARAMETER_STRUCT()
 
@@ -247,6 +255,7 @@ public:
         SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint4>, TexelLookup)
         SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float4>, TriangleFlow)
         SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float4>, Profiles)
+        SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float>, PendingWaterLimits)
         SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, TriangleProfileIndices)
     END_SHADER_PARAMETER_STRUCT()
 
@@ -279,19 +288,18 @@ public:
 /** Applies the shared Wetness Profile Droplet Dry Rate to single-channel Droplet1/2 wetness. */
 class FDWCSurfaceWetnessDryInPlaceCS final : public FGlobalShader
 {
-public:
+  public:
     DECLARE_GLOBAL_SHADER(FDWCSurfaceWetnessDryInPlaceCS);
     SHADER_USE_PARAMETER_STRUCT(FDWCSurfaceWetnessDryInPlaceCS, FGlobalShader);
 
     BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
-        SHADER_PARAMETER(FIntPoint, TextureSize)
-        SHADER_PARAMETER(float, DeltaSeconds)
-        SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float>, Surface)
-        SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint4>, TexelLookup)
-        SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float4>, Profiles)
-        SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, TriangleProfileIndices)
+    SHADER_PARAMETER(FIntPoint, TextureSize)
+    SHADER_PARAMETER(float, DeltaSeconds)
+    SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float>, Surface)
+    SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint4>, TexelLookup)
+    SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float4>, Profiles)
+    SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, TriangleProfileIndices)
     END_SHADER_PARAMETER_STRUCT()
 
     static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters);
 };
-

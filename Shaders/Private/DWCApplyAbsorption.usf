@@ -3,6 +3,8 @@
 RWTexture2D<float> WetnessTexture;
 RWTexture2D<float> PendingWetnessTexture;
 StructuredBuffer<uint4> TexelLookup;
+StructuredBuffer<float> PendingWaterLimits;
+StructuredBuffer<uint> TriangleProfileIndices;
 
 int2 TextureSize;
 int2 DispatchMin;
@@ -20,6 +22,19 @@ float4 P0AndAmount;
 float4 P1AndMaxWetness;
 // P2AndMode = (TriangleP2.xyz, Mode), 0 = world contact, 1 = wet all, 2 = Data-UV stamp
 float4 P2AndMode;
+
+bool IsValidLookup(uint4 Lookup)
+{
+    return Lookup.w != 0u && Lookup.x != 0xffffffffu;
+}
+
+float ApplyPendingWaterLimit(float PendingWater, uint4 Lookup)
+{
+    const float SafePendingWater = isfinite(PendingWater) ? max(PendingWater, 0.0) : 0.0;
+    const uint ProfileIndex = TriangleProfileIndices[Lookup.x];
+    const float Limit = max(PendingWaterLimits[ProfileIndex], 0.0);
+    return Limit > 0.0 ? min(SafePendingWater, Limit) : SafePendingWater;
+}
 
 bool ComputeBarycentricUV(float2 Point, float2 A, float2 B, float2 C, out float3 Barycentric)
 {
@@ -57,6 +72,8 @@ void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
         return;
     }
 
+    const uint4 PixelLookup = TexelLookup[Texel.y * TextureSize.x + Texel.x];
+
     const float2 UV = (float2(Texel) + 0.5) / float2(TextureSize);
     const float2 UV0 = UV01.xy;
     const float2 UV1 = UV01.zw;
@@ -66,7 +83,6 @@ void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
     const float Mode = P2AndMode.w;
     if (Mode > 1.5)
     {
-        const uint4 PixelLookup = TexelLookup[Texel.y * TextureSize.x + Texel.x];
         const uint StampIsland = (uint)round(max(UV2AndSettings.x, 0.0));
         if (PixelLookup.w == 0u || PixelLookup.w != StampIsland)
         {
@@ -117,7 +133,13 @@ void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
     }
     else if (AppliedWetness > 0.0)
     {
+        if (!IsValidLookup(PixelLookup))
+        {
+            return;
+        }
         const float OldPendingWetness = max(PendingWetnessTexture[Texel], 0.0);
-        PendingWetnessTexture[Texel] = OldPendingWetness + AppliedWetness;
+        PendingWetnessTexture[Texel] = ApplyPendingWaterLimit(
+            OldPendingWetness + AppliedWetness,
+            PixelLookup);
     }
 }

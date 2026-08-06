@@ -29,16 +29,16 @@ namespace DWCGPUPreviewPrivate
     {
         FVector2f UV = FVector2f::ZeroVector;
         FVector2f HalfSizePixels = FVector2f(8.0f, 8.0f);
-        float Amount = 0.0f;
-        bool bDroplet2 = false;
+        float     Amount = 0.0f;
+        bool      bDroplet2 = false;
     };
 
     template <typename ElementType>
     FRDGBufferRef RegisterOrUpload(
-        FRDGBuilder& GraphBuilder,
+        FRDGBuilder&                    GraphBuilder,
         TRefCountPtr<FRDGPooledBuffer>& PooledBuffer,
-        const TCHAR* Name,
-        const TArray<ElementType>& Data)
+        const TCHAR*                    Name,
+        const TArray<ElementType>&      Data)
     {
         if (PooledBuffer.IsValid())
         {
@@ -53,16 +53,16 @@ namespace DWCGPUPreviewPrivate
         return Buffer;
     }
 
-}
+} // namespace DWCGPUPreviewPrivate
 
 using namespace DWCGPUPreviewPrivate;
 
 struct FDWCGPUPreviewSimulator::FRenderState
 {
-    TArray<FUint4> TexelLookup;
-    TArray<FVector4f> TriangleFlow;
-    TArray<FVector4f> TriangleMetric;
-    TArray<uint32> TriangleProfileIndices;
+    TArray<FUint4>                 TexelLookup;
+    TArray<FVector4f>              TriangleFlow;
+    TArray<FVector4f>              TriangleMetric;
+    TArray<uint32>                 TriangleProfileIndices;
     TRefCountPtr<FRDGPooledBuffer> TexelLookupBuffer;
     TRefCountPtr<FRDGPooledBuffer> TriangleFlowBuffer;
     TRefCountPtr<FRDGPooledBuffer> TriangleMetricBuffer;
@@ -76,11 +76,11 @@ FDWCGPUPreviewSimulator::~FDWCGPUPreviewSimulator()
 
 TStrongObjectPtr<UTextureRenderTarget2D> FDWCGPUPreviewSimulator::CreateRenderTarget(
     const FName& Name,
-    const bool bBilinear) const
+    const bool   bBilinear) const
 {
-    UObject* Outer = WorldContextObject.IsValid()
-        ? WorldContextObject.Get()
-        : GetTransientPackage();
+    UObject*                Outer = WorldContextObject.IsValid()
+                                        ? WorldContextObject.Get()
+                                        : GetTransientPackage();
     UTextureRenderTarget2D* RT = NewObject<UTextureRenderTarget2D>(Outer, Name, RF_Transient);
     RT->RenderTargetFormat = ETextureRenderTargetFormat::RTF_R16f;
     RT->ClearColor = FLinearColor::Black;
@@ -165,14 +165,18 @@ void FDWCGPUPreviewSimulator::ClearAllRenderTargets()
     UObject* Context = WorldContextObject.IsValid() ? WorldContextObject.Get() : GetTransientPackage();
     for (const TStrongObjectPtr<UTextureRenderTarget2D>& RT : WetnessMaps)
     {
-        if (RT.IsValid()) UKismetRenderingLibrary::ClearRenderTarget2D(Context, RT.Get(), FLinearColor::Black);
+        if (RT.IsValid())
+            UKismetRenderingLibrary::ClearRenderTarget2D(Context, RT.Get(), FLinearColor::Black);
     }
     for (const TStrongObjectPtr<UTextureRenderTarget2D>& RT : PendingWetnessMaps)
     {
-        if (RT.IsValid()) UKismetRenderingLibrary::ClearRenderTarget2D(Context, RT.Get(), FLinearColor::Black);
+        if (RT.IsValid())
+            UKismetRenderingLibrary::ClearRenderTarget2D(Context, RT.Get(), FLinearColor::Black);
     }
-    if (Droplet1Map.IsValid()) UKismetRenderingLibrary::ClearRenderTarget2D(Context, Droplet1Map.Get(), FLinearColor::Black);
-    if (Droplet2Map.IsValid()) UKismetRenderingLibrary::ClearRenderTarget2D(Context, Droplet2Map.Get(), FLinearColor::Black);
+    if (Droplet1Map.IsValid())
+        UKismetRenderingLibrary::ClearRenderTarget2D(Context, Droplet1Map.Get(), FLinearColor::Black);
+    if (Droplet2Map.IsValid())
+        UKismetRenderingLibrary::ClearRenderTarget2D(Context, Droplet2Map.Get(), FLinearColor::Black);
 }
 
 void FDWCGPUPreviewSimulator::Restart()
@@ -199,9 +203,9 @@ void FDWCGPUPreviewSimulator::Step(const float DeltaSeconds, const float Scenari
         return;
     }
 
-    const float SafeDelta = FMath::Clamp(DeltaSeconds, 0.0f, 0.25f);
-    const FVector2f SplashUV = ScenarioSplashUV;
-    const FWetnessProfileParameters Parameters = *CachedParameters;
+    const float                                      SafeDelta = FMath::Clamp(DeltaSeconds, 0.0f, 0.25f);
+    const FVector2f                                  SplashUV = ScenarioSplashUV;
+    const FWetnessProfileParameters                  Parameters = *CachedParameters;
     const FResolvedAbsorbedWaterSimulationParameters Absorbed =
         Parameters.ResolveAbsorbedWaterSimulation();
     TArray<FVector4f> ProfileValues;
@@ -210,10 +214,12 @@ void FDWCGPUPreviewSimulator::Step(const float DeltaSeconds, const float Scenari
         FMath::Max(0.0f, Absorbed.DryRatePerSecond),
         FMath::Max(0.0f, Absorbed.GravityFlowStrength),
         FMath::Max(0.0f, Parameters.GetDropletDryRatePerSecond())));
+    TArray<float> PendingWaterLimitValues;
+    PendingWaterLimitValues.Add(Parameters.GetMaxPendingWaterPerPixel());
 
     const bool bWriteSingleSplash =
         !bInitialSplashWritten && ScenarioTimeSeconds + KINDA_SMALL_NUMBER >= PreviewScenarioSplashTime;
-    bool bWriteAbsorptionSplash = false;
+    bool                  bWriteAbsorptionSplash = false;
     TArray<FSurfaceStamp> SurfaceStamps;
     if (bWriteSingleSplash)
     {
@@ -228,8 +234,8 @@ void FDWCGPUPreviewSimulator::Step(const float DeltaSeconds, const float Scenari
             // amount so its own parameters can still be inspected even when the profile
             // absorbs 100% of runtime contact water. Combined mode keeps the runtime split.
             const float SurfaceInputFraction = bPreviewAbsorbedEnabled
-                ? FMath::Clamp(Parameters.GetRejectedWaterFraction(), 0.0f, 1.0f)
-                : 1.0f;
+                                                   ? FMath::Clamp(Parameters.GetRejectedWaterFraction(), 0.0f, 1.0f)
+                                                   : 1.0f;
             const float SurfaceAmount = PreviewScenarioContactAmount * SurfaceInputFraction;
             const float Droplet1Probability = FMath::Clamp(
                 Surface.DropletSpawnProbability,
@@ -253,7 +259,7 @@ void FDWCGPUPreviewSimulator::Step(const float DeltaSeconds, const float Scenari
                     FMath::Max(0.5f, Surface.DropletHeightPixels),
                     FMath::Max(0.5f, Surface.DropletRadiusPixels));
                 Stamp.Amount = SurfaceAmount *
-                    FMath::Lerp(0.35f, 1.0f, FMath::Sqrt(Droplet1Probability));
+                               FMath::Lerp(0.35f, 1.0f, FMath::Sqrt(Droplet1Probability));
             }
 
             if (bPreviewDroplet2Enabled &&
@@ -275,7 +281,7 @@ void FDWCGPUPreviewSimulator::Step(const float DeltaSeconds, const float Scenari
                     FMath::Max(0.5f, Surface.DropletFlowHeightPixels),
                     FMath::Max(0.5f, Surface.DropletFlowRadiusPixels));
                 Stamp.Amount = SurfaceAmount *
-                    FMath::Lerp(0.35f, 1.0f, FMath::Sqrt(Droplet2Probability));
+                               FMath::Lerp(0.35f, 1.0f, FMath::Sqrt(Droplet2Probability));
             }
         }
     }
@@ -290,19 +296,19 @@ void FDWCGPUPreviewSimulator::Step(const float DeltaSeconds, const float Scenari
         return;
     }
 
-    FTextureRenderTargetResource* CurrentWetnessResource = CurrentWetness->GameThread_GetRenderTargetResource();
-    FTextureRenderTargetResource* NextWetnessResource = NextWetness->GameThread_GetRenderTargetResource();
-    FTextureRenderTargetResource* CurrentPendingResource = CurrentPending->GameThread_GetRenderTargetResource();
-    FTextureRenderTargetResource* NextPendingResource = NextPending->GameThread_GetRenderTargetResource();
-    FTextureRenderTargetResource* Droplet1Resource = Droplet1Map->GameThread_GetRenderTargetResource();
-    FTextureRenderTargetResource* Droplet2Resource = Droplet2Map->GameThread_GetRenderTargetResource();
+    FTextureRenderTargetResource*                       CurrentWetnessResource = CurrentWetness->GameThread_GetRenderTargetResource();
+    FTextureRenderTargetResource*                       NextWetnessResource = NextWetness->GameThread_GetRenderTargetResource();
+    FTextureRenderTargetResource*                       CurrentPendingResource = CurrentPending->GameThread_GetRenderTargetResource();
+    FTextureRenderTargetResource*                       NextPendingResource = NextPending->GameThread_GetRenderTargetResource();
+    FTextureRenderTargetResource*                       Droplet1Resource = Droplet1Map->GameThread_GetRenderTargetResource();
+    FTextureRenderTargetResource*                       Droplet2Resource = Droplet2Map->GameThread_GetRenderTargetResource();
     const TSharedPtr<FRenderState, ESPMode::ThreadSafe> RTState = RenderState;
-    const int32 RTResolution = Resolution;
-    const float RTMaxWetness = MaxWetness;
-    const float RTImmediateAbsorption = CapillaryImmediateAbsorptionFraction;
-    const bool bRTUseEightDirections = bUseEightDirectionDiffusion;
-    const float AbsorptionAmount = PreviewScenarioContactAmount *
-        FMath::Max(0.0f, Absorbed.AbsorptionMultiplier);
+    const int32                                         RTResolution = Resolution;
+    const float                                         RTMaxWetness = MaxWetness;
+    const float                                         RTImmediateAbsorption = CapillaryImmediateAbsorptionFraction;
+    const bool                                          bRTUseEightDirections = bUseEightDirectionDiffusion;
+    const float                                         AbsorptionAmount = PreviewScenarioContactAmount *
+                                   FMath::Max(0.0f, Absorbed.AbsorptionMultiplier);
 
     ENQUEUE_RENDER_COMMAND(DWCGPUPreviewStep)(
         [RTState,
@@ -321,6 +327,7 @@ void FDWCGPUPreviewSimulator::Step(const float DeltaSeconds, const float Scenari
          SplashUV,
          AbsorptionAmount,
          ProfileValues = MoveTemp(ProfileValues),
+         PendingWaterLimitValues = MoveTemp(PendingWaterLimitValues),
          SurfaceStamps = MoveTemp(SurfaceStamps)](FRHICommandListImmediate& RHICmdList)
         {
             if (!RTState.IsValid() || !CurrentWetnessResource || !NextWetnessResource ||
@@ -340,7 +347,7 @@ void FDWCGPUPreviewSimulator::Step(const float DeltaSeconds, const float Scenari
                 return;
             }
 
-            FRDGBuilder GraphBuilder(RHICmdList);
+            FRDGBuilder   GraphBuilder(RHICmdList);
             FRDGBufferRef LookupBuffer = RegisterOrUpload(
                 GraphBuilder, RTState->TexelLookupBuffer, TEXT("DWC.WPPreview.Lookup"), RTState->TexelLookup);
             FRDGBufferRef FlowBuffer = RegisterOrUpload(
@@ -348,14 +355,21 @@ void FDWCGPUPreviewSimulator::Step(const float DeltaSeconds, const float Scenari
             FRDGBufferRef MetricBuffer = RegisterOrUpload(
                 GraphBuilder, RTState->TriangleMetricBuffer, TEXT("DWC.WPPreview.Metric"), RTState->TriangleMetric);
             FRDGBufferRef ProfileBuffer = ProfileValues.IsEmpty()
-                ? nullptr
-                : CreateStructuredBuffer(GraphBuilder, TEXT("DWC.WPPreview.Profiles"), ProfileValues);
+                                              ? nullptr
+                                              : CreateStructuredBuffer(GraphBuilder, TEXT("DWC.WPPreview.Profiles"), ProfileValues);
+            FRDGBufferRef PendingWaterLimitBuffer = PendingWaterLimitValues.IsEmpty()
+                                                        ? nullptr
+                                                        : CreateStructuredBuffer(
+                                                              GraphBuilder,
+                                                              TEXT("DWC.WPPreview.PendingWaterLimits"),
+                                                              PendingWaterLimitValues);
             FRDGBufferRef ProfileIndicesBuffer = RegisterOrUpload(
                 GraphBuilder,
                 RTState->TriangleProfileIndicesBuffer,
                 TEXT("DWC.WPPreview.ProfileIndices"),
                 RTState->TriangleProfileIndices);
-            if (!LookupBuffer || !FlowBuffer || !MetricBuffer || !ProfileBuffer || !ProfileIndicesBuffer)
+            if (!LookupBuffer || !FlowBuffer || !MetricBuffer || !ProfileBuffer ||
+                !PendingWaterLimitBuffer || !ProfileIndicesBuffer)
             {
                 GraphBuilder.Execute();
                 return;
@@ -365,6 +379,7 @@ void FDWCGPUPreviewSimulator::Step(const float DeltaSeconds, const float Scenari
             FRDGBufferSRVRef FlowSRV = GraphBuilder.CreateSRV(FlowBuffer);
             FRDGBufferSRVRef MetricSRV = GraphBuilder.CreateSRV(MetricBuffer);
             FRDGBufferSRVRef ProfileSRV = GraphBuilder.CreateSRV(ProfileBuffer);
+            FRDGBufferSRVRef PendingWaterLimitSRV = GraphBuilder.CreateSRV(PendingWaterLimitBuffer);
             FRDGBufferSRVRef ProfileIndicesSRV = GraphBuilder.CreateSRV(ProfileIndicesBuffer);
 
             auto RegisterTexture = [&GraphBuilder](FRHITexture* Texture, const TCHAR* Name)
@@ -390,7 +405,7 @@ void FDWCGPUPreviewSimulator::Step(const float DeltaSeconds, const float Scenari
             AddCopyTexturePass(GraphBuilder, CurrentPendingTexture, AppliedPending);
 
             TShaderMapRef<FDWCSurfaceWetnessDryInPlaceCS> SurfaceDryShader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
-            auto AddSurfaceDry = [&](FRDGTextureRef SurfaceTexture, const TCHAR* Name)
+            auto                                          AddSurfaceDry = [&](FRDGTextureRef SurfaceTexture, const TCHAR* Name)
             {
                 FDWCSurfaceWetnessDryInPlaceCS::FParameters* P =
                     GraphBuilder.AllocParameters<FDWCSurfaceWetnessDryInPlaceCS::FParameters>();
@@ -420,7 +435,7 @@ void FDWCGPUPreviewSimulator::Step(const float DeltaSeconds, const float Scenari
                 const FIntPoint MaxPixel(
                     FMath::Clamp(FMath::CeilToInt(CenterPixels.X + Stamp.HalfSizePixels.X + 1.0f), 0, RTResolution - 1),
                     FMath::Clamp(FMath::CeilToInt(CenterPixels.Y + Stamp.HalfSizePixels.Y + 1.0f), 0, RTResolution - 1));
-                const FIntPoint DispatchSize = MaxPixel - MinPixel + FIntPoint(1, 1);
+                const FIntPoint                         DispatchSize = MaxPixel - MinPixel + FIntPoint(1, 1);
                 FDWCSurfaceDropletStampCS::FParameters* P =
                     GraphBuilder.AllocParameters<FDWCSurfaceDropletStampCS::FParameters>();
                 P->TextureSize = FIntPoint(RTResolution, RTResolution);
@@ -452,7 +467,7 @@ void FDWCGPUPreviewSimulator::Step(const float DeltaSeconds, const float Scenari
                 const FIntPoint MaxPixel(
                     FMath::Clamp(FMath::CeilToInt(CenterPixels.X + HalfSizePixels.X + 1.0f), 0, RTResolution - 1),
                     FMath::Clamp(FMath::CeilToInt(CenterPixels.Y + HalfSizePixels.Y + 1.0f), 0, RTResolution - 1));
-                const FIntPoint DispatchSize = MaxPixel - MinPixel + FIntPoint(1, 1);
+                const FIntPoint                             DispatchSize = MaxPixel - MinPixel + FIntPoint(1, 1);
                 FDWCApplyTriangleAbsorptionCS::FParameters* P =
                     GraphBuilder.AllocParameters<FDWCApplyTriangleAbsorptionCS::FParameters>();
                 P->TextureSize = FIntPoint(RTResolution, RTResolution);
@@ -469,6 +484,8 @@ void FDWCGPUPreviewSimulator::Step(const float DeltaSeconds, const float Scenari
                 P->P1AndMaxWetness = FVector4f(0.0f, 0.0f, 0.0f, RTMaxWetness);
                 P->P2AndMode = FVector4f(0.0f, 0.0f, 0.0f, 2.0f);
                 P->TexelLookup = LookupSRV;
+                P->PendingWaterLimits = PendingWaterLimitSRV;
+                P->TriangleProfileIndices = ProfileIndicesSRV;
                 P->WetnessTexture = GraphBuilder.CreateUAV(AppliedWetness);
                 P->PendingWetnessTexture = GraphBuilder.CreateUAV(AppliedPending);
                 TShaderMapRef<FDWCApplyTriangleAbsorptionCS> Shader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
@@ -496,6 +513,7 @@ void FDWCGPUPreviewSimulator::Step(const float DeltaSeconds, const float Scenari
                 P->TriangleFlow = FlowSRV;
                 P->TriangleMetric = MetricSRV;
                 P->Profiles = ProfileSRV;
+                P->PendingWaterLimits = PendingWaterLimitSRV;
                 P->TriangleProfileIndices = ProfileIndicesSRV;
                 TShaderMapRef<FDWCDiffuseDry8CS> Shader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
                 FComputeShaderUtils::AddPass(
@@ -521,6 +539,7 @@ void FDWCGPUPreviewSimulator::Step(const float DeltaSeconds, const float Scenari
                 P->TriangleFlow = FlowSRV;
                 P->TriangleMetric = MetricSRV;
                 P->Profiles = ProfileSRV;
+                P->PendingWaterLimits = PendingWaterLimitSRV;
                 P->TriangleProfileIndices = ProfileIndicesSRV;
                 TShaderMapRef<FDWCDiffuseDryCS> Shader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
                 FComputeShaderUtils::AddPass(

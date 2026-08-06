@@ -6,12 +6,27 @@ StructuredBuffer<float4> Contacts;
 StructuredBuffer<uint2> TileBins;
 StructuredBuffer<uint> TileContactIndices;
 StructuredBuffer<uint4> TexelLookup;
+StructuredBuffer<float> PendingWaterLimits;
+StructuredBuffer<uint> TriangleProfileIndices;
 
 int2 TextureSize;
 int2 TileGridSize;
 uint TileSize;
 
 static const uint DWCAbsorptionContactFloat4Count = 6u;
+
+bool IsValidLookup(uint4 Lookup)
+{
+    return Lookup.w != 0u && Lookup.x != 0xffffffffu;
+}
+
+float ApplyPendingWaterLimit(float PendingWater, uint4 Lookup)
+{
+    const float SafePendingWater = isfinite(PendingWater) ? max(PendingWater, 0.0) : 0.0;
+    const uint ProfileIndex = TriangleProfileIndices[Lookup.x];
+    const float Limit = max(PendingWaterLimits[ProfileIndex], 0.0);
+    return Limit > 0.0 ? min(SafePendingWater, Limit) : SafePendingWater;
+}
 
 bool ComputeBarycentricUV(float2 Point, float2 A, float2 B, float2 C, out float3 Barycentric)
 {
@@ -97,6 +112,10 @@ void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 
     const float2 UV = (float2(Texel) + 0.5) / float2(TextureSize);
     const uint4 PixelLookup = TexelLookup[Texel.y * TextureSize.x + Texel.x];
+    if (!IsValidLookup(PixelLookup))
+    {
+        return;
+    }
     float PendingDelta = 0.0;
 
     for (uint BinOffset = 0u; BinOffset < Bin.y; ++BinOffset)
@@ -109,6 +128,8 @@ void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 
     if (PendingDelta > 0.0 && isfinite(PendingDelta))
     {
-        PendingWetnessTexture[Texel] = max(PendingWetnessTexture[Texel], 0.0) + PendingDelta;
+        PendingWetnessTexture[Texel] = ApplyPendingWaterLimit(
+            max(PendingWetnessTexture[Texel], 0.0) + PendingDelta,
+            PixelLookup);
     }
 }

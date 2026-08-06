@@ -9,6 +9,8 @@ class IDetailCategoryBuilder;
 class IDetailGroup;
 class IPropertyHandle;
 class IPropertyUtilities;
+class FProperty;
+class SWidget;
 class UWetnessProfile;
 
 enum class EWetnessProfileDetailsMode : uint8
@@ -40,6 +42,23 @@ private:
         const FString& ParentPath);
 
     TSharedPtr<IPropertyHandle> FindPropertyByPath(const TCHAR* PropertyPath) const;
+    bool ResolveSavedPropertyValue(
+        TWeakPtr<IPropertyHandle> WeakHandle,
+        FProperty*& OutProperty,
+        void*& OutCurrentValue,
+        const void*& OutSavedValue) const;
+    bool IsPropertyDifferentFromSaved(TWeakPtr<IPropertyHandle> WeakHandle) const;
+    bool AreStampSizePropertiesDifferentFromSaved(
+        TWeakPtr<IPropertyHandle> WeakWidth,
+        TWeakPtr<IPropertyHandle> WeakHeight) const;
+    FReply RevertPropertyToSaved(TWeakPtr<IPropertyHandle> WeakHandle);
+    FReply RevertStampSizeToSaved(
+        TWeakPtr<IPropertyHandle> WeakWidth,
+        TWeakPtr<IPropertyHandle> WeakHeight);
+    TSharedRef<SWidget> BuildRevertButton(const TSharedPtr<IPropertyHandle>& Handle);
+    TSharedRef<SWidget> BuildStampSizeRevertButton(
+        const TSharedPtr<IPropertyHandle>& WidthHandle,
+        const TSharedPtr<IPropertyHandle>& HeightHandle);
 
     void AddDefaultProperty(
         IDetailCategoryBuilder& Category,
@@ -122,6 +141,13 @@ private:
         float RawHardMax,
         TAttribute<bool> IsEnabled = TAttribute<bool>(true));
 
+    void AddStampSizeProperty(
+        IDetailCategoryBuilder& Category,
+        const TSharedPtr<IPropertyHandle>& WidthHandle,
+        const TSharedPtr<IPropertyHandle>& HeightHandle,
+        const FText& Tooltip,
+        TAttribute<bool> IsEnabled = TAttribute<bool>(true));
+
     TOptional<float> GetDisplayedFloatValue(
         TWeakPtr<IPropertyHandle> WeakHandle,
         float DisplayScale) const;
@@ -142,6 +168,9 @@ private:
         float RawHardMax);
 
     FText GetValidationText() const;
+    FText GetValidationActionText() const;
+    FText GetValidationActionTooltip() const;
+    bool IsOnlySurfaceAbsorptionWarning() const;
     FReply HandleClampValuesClicked();
     void RefreshValidationIssues();
 
@@ -151,4 +180,5 @@ private:
     TWeakPtr<IPropertyUtilities> PropertyUtilities;
     TArray<FCollectedProperty> CollectedProperties;
     TArray<FString> ValidationIssues;
+    bool bLockStampAspectRatio = true;
 };

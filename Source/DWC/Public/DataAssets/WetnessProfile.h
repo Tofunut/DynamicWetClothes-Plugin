@@ -93,6 +93,10 @@ struct DWC_API FSurfaceWaterProfileParameters
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water", meta = (DisplayName = "Enabled (GPU Simulation Only)", ToolTip = "Surface Water is available only when the component uses GPU Simulation."))
     bool bEnabled = false;
 
+    /** Enables the optional Secondary Droplet layer without discarding its authored values. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water", meta = (DisplayName = "Use Secondary Droplets"))
+    bool bUseSecondaryDroplets = true;
+
     /** Shared fade-out rate for wetness stored in the Droplet1 and Droplet2 RTs. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water", meta = (ClampMin = "0.0", ClampMax = "100.0", UIMin = "0.0", UIMax = "100.0", Units = "Percent", DisplayName = "Droplet Dry Rate"))
     float DropletDryRate = 20.0f;
@@ -187,6 +191,11 @@ struct DWC_API FSurfaceWaterProfileParameters
     /** Optional mask used to localize the Droplet normal detail. Null means no authored mask. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Water|Droplet1|Rendering")
     TObjectPtr<UTexture2D> DropletMaskTexture = nullptr;
+
+    bool SupportsSecondaryDroplets() const
+    {
+        return bEnabled && bUseSecondaryDroplets;
+    }
 
     float GetDropletDryRatePerSecond() const
     {
@@ -318,6 +327,19 @@ class DWC_API UWetnessProfile : public UDataAsset
     const FWetnessProfileParameters& GetParameters() const { return Parameters; }
 
 #if WITH_EDITORONLY_DATA
+    /** Captures the last saved values used by the dedicated editor's per-property Revert buttons. */
+    void CaptureEditorSavedParametersSnapshot()
+    {
+        EditorSavedParametersSnapshot = Parameters;
+        bEditorHasSavedParametersSnapshot = true;
+    }
+
+    bool HasEditorSavedParametersSnapshot() const { return bEditorHasSavedParametersSnapshot; }
+    const FWetnessProfileParameters& GetEditorSavedParametersSnapshot() const
+    {
+        return EditorSavedParametersSnapshot;
+    }
+
     bool HasPreparedSurfaceTextures() const { return bHasPreparedSurfaceTextures; }
     UTexture2D* GetPreparedDropletNormalTexture() const { return PreparedDropletNormalTexture; }
     UTexture2D* GetPreparedDropletMaskTexture() const { return PreparedDropletMaskTexture; }
@@ -356,6 +378,13 @@ class DWC_API UWetnessProfile : public UDataAsset
     UFUNCTION(BlueprintPure, Category = "Wetness Profile")
     float GetAbsorbedGlossinessStrength() const { return Parameters.GetAbsorbedGlossinessStrength(); }
 #if WITH_EDITORONLY_DATA
+    /** Snapshot of the values loaded from disk when the dedicated editor opened or last saved. */
+    UPROPERTY(Transient)
+    FWetnessProfileParameters EditorSavedParametersSnapshot;
+
+    UPROPERTY(Transient)
+    bool bEditorHasSavedParametersSnapshot = false;
+
     /** Latest array-compatible textures prepared directly from this WP while editing. */
     UPROPERTY()
     bool bHasPreparedSurfaceTextures = false;
@@ -382,5 +411,9 @@ class DWC_API UWetnessProfile : public UDataAsset
     /** Editor-only display filter. It does not enable or disable Droplet2 at runtime. */
     UPROPERTY(Transient)
     bool bEditorShowDroplet2 = false;
+
+    /** Editor-only Details panel selection: 0 = Primary Droplet, 1 = Secondary Droplet. */
+    UPROPERTY(Transient)
+    uint8 EditorActiveDropletLayer = 0;
 #endif
 };

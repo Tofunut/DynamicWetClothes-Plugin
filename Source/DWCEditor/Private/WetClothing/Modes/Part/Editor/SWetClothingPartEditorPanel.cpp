@@ -182,6 +182,13 @@ namespace SWetClothingPartEditorPanelLocal
 
         return FAppStyle::GetBrush(TEXT("Icons.Layout"));
     }
+
+    bool IsMissingPreparedMeshForSealedLayout(const UWetClothingAsset* Asset)
+    {
+        return Asset != nullptr &&
+               Asset->HasLockedDataUVLayout() &&
+               Asset->GetRuntimeSkeletalMesh() == nullptr;
+    }
 } // namespace SWetClothingPartEditorPanelLocal
 
 void SWetClothingPartEditorPanel::Construct(const FArguments& InArgs)
@@ -1999,7 +2006,7 @@ bool SWetClothingPartEditorPanel::IsMaterialSlotPartMapComplete(const int32 Mate
         }
 
         const FWetPartProfileAssignment* Profile = EditableData.FindProfile(Entry);
-        if (Profile == nullptr || !Profile->SourceProfile.IsValid())
+        if (Profile == nullptr || !Profile->HasSourceProfile())
         {
             return false;
         }
@@ -2078,7 +2085,7 @@ FText SWetClothingPartEditorPanel::GetMaterialSlotPartMapWarningText(const int32
             }
 
             const FWetPartProfileAssignment* Profile = EditableData.FindProfile(Entry);
-            if (Profile == nullptr || !Profile->SourceProfile.IsValid())
+            if (Profile == nullptr || !Profile->HasSourceProfile())
             {
                 ++MissingProfilePartCount;
             }
@@ -2190,11 +2197,12 @@ TSet<int32> SWetClothingPartEditorPanel::CollectExistingDataUVSlotIndices() cons
 TSet<int32> SWetClothingPartEditorPanel::CollectSelectableDataUVOperationSlotIndices() const
 {
     TSet<int32> Result;
+    const bool bCanRecoverMissingPreparedMesh = IsMissingPreparedMeshRecoveryRequired();
     for (const FMaterialSlotItemPtr& Item : MaterialSlotItems)
     {
         if (Item.IsValid() &&
             Item->SlotIndex != INDEX_NONE &&
-            !IsMaterialSlotIncludedInDataUVLayout(Item->SlotIndex))
+            (bCanRecoverMissingPreparedMesh || !IsMaterialSlotIncludedInDataUVLayout(Item->SlotIndex)))
         {
             Result.Add(Item->SlotIndex);
         }
@@ -2206,10 +2214,11 @@ TSet<int32> SWetClothingPartEditorPanel::CollectSelectedGenerateDataUVSlotIndice
 {
     TSet<int32> Result;
     const TSet<int32> SelectableSlots = CollectSelectableDataUVOperationSlotIndices();
+    const bool bCanRecoverMissingPreparedMesh = IsMissingPreparedMeshRecoveryRequired();
     for (const int32 MaterialSlotIndex : SelectedDataUVOperationSlotIndices)
     {
         if (SelectableSlots.Contains(MaterialSlotIndex) &&
-            !IsMaterialSlotIncludedInDataUVLayout(MaterialSlotIndex))
+            (bCanRecoverMissingPreparedMesh || !IsMaterialSlotIncludedInDataUVLayout(MaterialSlotIndex)))
         {
             Result.Add(MaterialSlotIndex);
         }
@@ -2220,6 +2229,27 @@ TSet<int32> SWetClothingPartEditorPanel::CollectSelectedGenerateDataUVSlotIndice
 TSet<int32> SWetClothingPartEditorPanel::CollectSelectedUpdateDataUVSlotIndices() const
 {
     return TSet<int32>();
+}
+
+bool SWetClothingPartEditorPanel::IsMissingPreparedMeshRecoveryRequired() const
+{
+    return SWetClothingPartEditorPanelLocal::IsMissingPreparedMeshForSealedLayout(WetClothingAsset.Get());
+}
+
+bool SWetClothingPartEditorPanel::ConfirmMissingPreparedMeshRecovery() const
+{
+    const UWetClothingAsset* Asset = WetClothingAsset.Get();
+    if (!SWetClothingPartEditorPanelLocal::IsMissingPreparedMeshForSealedLayout(Asset))
+    {
+        return true;
+    }
+
+    const FText Message = FText::Format(
+        LOCTEXT(
+            "ConfirmMissingPreparedMeshRecovery",
+            "The Prepared Mesh referenced by this Wet Clothing Asset is missing.\n\nDWC can recreate the Prepared Mesh from the Source Mesh and rebuild the DWC UV Channel for the selected material slots.\n\nAsset: {0}\n\nContinue?"),
+        FText::FromString(GetNameSafe(Asset)));
+    return FMessageDialog::Open(EAppMsgType::YesNo, Message) == EAppReturnType::Yes;
 }
 
 bool SWetClothingPartEditorPanel::IsDataUVOperationSelectable(const int32 MaterialSlotIndex) const
@@ -2321,7 +2351,8 @@ void SWetClothingPartEditorPanel::SyncDataUVOperationSelection()
 }
 
 FDWCDataUVBuildResult SWetClothingPartEditorPanel::GenerateDataUVForTargetSlots(
-    const TSet<int32>& TargetMaterialSlotIndices)
+    const TSet<int32>& TargetMaterialSlotIndices,
+    const TSet<int32>* ConfirmedVisibleExclusionMaterialSlotIndices)
 {
     FDWCDataUVBuildResult Result;
     UWetClothingAsset* Asset = WetClothingAsset.Get();
@@ -2348,11 +2379,21 @@ FDWCDataUVBuildResult SWetClothingPartEditorPanel::GenerateDataUVForTargetSlots(
         EditableData.FindOrAddMaterialSlot(MaterialSlotIndex).bIsWettableSlot = true;
     }
 
+    FDWCDataUVBuildOptions BuildOptions;
+    BuildOptions.bMergeWithExistingLayout = true;
+    BuildOptions.bRequireAllMaterialSlots = true;
+    if (ConfirmedVisibleExclusionMaterialSlotIndices != nullptr)
+    {
+        BuildOptions.ConfirmedVisibleExclusionMaterialSlotIndices =
+            *ConfirmedVisibleExclusionMaterialSlotIndices;
+    }
+
     Result = FDWCDataUVBuildService::Generate(
         *Asset,
         false,
         Asset->GetSetupSettings().bAllowOverwritePreferredDWCDataUVChannel,
-        true);
+        true,
+        &BuildOptions);
 
     EditableData.MaterialSlots = MoveTemp(OriginalMaterialSlots);
     return Result;
@@ -2419,6 +2460,11 @@ FText SWetClothingPartEditorPanel::GetDataUVOperationSummaryText() const
             FText::AsNumber(GenerateCount));
     }
 
+    if (IsMissingPreparedMeshRecoveryRequired())
+    {
+        return LOCTEXT("SelectPreparedMeshRecoveryDataUVTasksText", "Select material slots to recreate the missing Prepared Mesh.");
+    }
+
     return LOCTEXT("SelectDataUVTasksText", "Select material slots in the left column to build DWC UV.");
 }
 
@@ -2436,6 +2482,11 @@ FText SWetClothingPartEditorPanel::GetDataUVOperationButtonText() const
 
 FText SWetClothingPartEditorPanel::GetDataUVOperationButtonTooltip() const
 {
+    if (IsMissingPreparedMeshRecoveryRequired())
+    {
+        return LOCTEXT("RecoverMissingPreparedMeshTooltip", "Recreate the missing Prepared Mesh and rebuild DWC UV for the selected material slots.");
+    }
+
     if (!CollectSelectedGenerateDataUVSlotIndices().IsEmpty())
     {
         return LOCTEXT("GenerateDataUVTooltip", "Build DWC UV for the selected material slots that do not have DWC UV data.");
@@ -2458,13 +2509,55 @@ FReply SWetClothingPartEditorPanel::HandleDataUVOperationClicked()
         return FReply::Handled();
     }
 
+    if (!ConfirmMissingPreparedMeshRecovery())
+    {
+        return FReply::Handled();
+    }
+
     const FText ProgressText = LOCTEXT("GenerateDataUVProgress", "Building DWC UV for selected material slots...");
 
     FScopedSlowTask SlowTask(1.0f, ProgressText);
     SlowTask.MakeDialog(false);
     SlowTask.EnterProgressFrame(1.0f);
 
-    const FDWCDataUVBuildResult BuildResult = GenerateDataUVForTargetSlots(TargetSlots);
+    FDWCDataUVBuildResult BuildResult = GenerateDataUVForTargetSlots(TargetSlots);
+    TSet<int32> ConfirmedVisibleExclusionMaterialSlotIndices;
+    const int32 MaxBuildAttempts = FMath::Max(TargetSlots.Num(), 1) + 2;
+    for (int32 PassIndex = 0; PassIndex < MaxBuildAttempts; ++PassIndex)
+    {
+        if (!BuildResult.bRequiresUserConfirmation ||
+            BuildResult.ConfirmationRequiredMaterialSlotIndices.IsEmpty())
+        {
+            break;
+        }
+
+        const TSet<int32> NewlyAcceptedMaterialSlotIndices =
+            WCAReportDialogs::ConfirmDWCDataUVVisibleExclusion(
+                BuildResult,
+                BuildResult.PreparedMesh != nullptr
+                    ? BuildResult.PreparedMesh
+                    : Asset->GetRuntimeSkeletalMesh(),
+                TargetSlots);
+
+        int32 AddedAcceptedSlotCount = 0;
+        for (const int32 MaterialSlotIndex : NewlyAcceptedMaterialSlotIndices)
+        {
+            if (!ConfirmedVisibleExclusionMaterialSlotIndices.Contains(MaterialSlotIndex))
+            {
+                ConfirmedVisibleExclusionMaterialSlotIndices.Add(MaterialSlotIndex);
+                ++AddedAcceptedSlotCount;
+            }
+        }
+
+        if (AddedAcceptedSlotCount == 0)
+        {
+            break;
+        }
+
+        BuildResult = GenerateDataUVForTargetSlots(
+            TargetSlots,
+            &ConfirmedVisibleExclusionMaterialSlotIndices);
+    }
     for (const int32 MaterialSlotIndex : TargetSlots)
     {
         SelectedDataUVOperationSlotIndices.Remove(MaterialSlotIndex);
@@ -4826,9 +4919,13 @@ bool SWetClothingPartEditorPanel::IsSurfaceWaterTilingEnabled(const FWetPartEntr
     }
 
     const FWetnessProfileParameters* Parameters = &Assignment->Parameters;
-    if (const UWetnessProfile* SourceProfile = Cast<UWetnessProfile>(Assignment->SourceProfile.ResolveObject()))
+    if (Assignment->HasSourceProfile())
     {
-        Parameters = &SourceProfile->GetParameters();
+        if (const UWetnessProfile* SourceProfile =
+                Cast<UWetnessProfile>(Assignment->GetSourceProfilePath().ResolveObject()))
+        {
+            Parameters = &SourceProfile->GetParameters();
+        }
     }
     return Parameters->SurfaceWater.bEnabled;
 }

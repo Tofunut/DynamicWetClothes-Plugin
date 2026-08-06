@@ -79,6 +79,102 @@ namespace
     const FLinearColor InfoIconTint(0.32f, 0.65f, 1.0f, 1.0f);
     const FLinearColor WarningIconTint(1.0f, 0.78f, 0.18f, 1.0f);
 
+    TSet<int32> CollectWettableMaterialSlotIndices(const UWetClothingAsset& Asset)
+    {
+        TSet<int32> MaterialSlotIndices;
+        for (const FWetClothingAuthoredMaterialSlot& SlotState :
+             Asset.Authored.PartData.EditableWetPartData.MaterialSlots)
+        {
+            if (SlotState.bIsWettableSlot && SlotState.MaterialSlotIndex != INDEX_NONE)
+            {
+                MaterialSlotIndices.Add(SlotState.MaterialSlotIndex);
+            }
+        }
+        return MaterialSlotIndices;
+    }
+
+    bool IsMissingPreparedMeshForSealedLayout(const UWetClothingAsset* Asset)
+    {
+        return Asset != nullptr &&
+               Asset->HasLockedDataUVLayout() &&
+               Asset->GetRuntimeSkeletalMesh() == nullptr;
+    }
+
+    bool ConfirmMissingPreparedMeshRecovery(const UWetClothingAsset& Asset)
+    {
+        if (!IsMissingPreparedMeshForSealedLayout(&Asset))
+        {
+            return true;
+        }
+
+        const FText Message = FText::Format(
+            LOCTEXT(
+                "ConfirmMissingPreparedMeshRecovery",
+                "The Prepared Mesh referenced by this Wet Clothing Asset is missing.\n\nDWC can recreate the Prepared Mesh from the Source Mesh and rebuild the DWC UV Channel.\n\nAsset: {0}\n\nContinue?"),
+            FText::FromString(GetNameSafe(&Asset)));
+        return FMessageDialog::Open(EAppMsgType::YesNo, Message) == EAppReturnType::Yes;
+    }
+
+    FDWCDataUVBuildResult GenerateDWCDataUVWithVisibleExclusionConfirmation(
+        UWetClothingAsset& Asset,
+        const bool bForceNewAsset,
+        const bool bAllowOverwriteExistingDataUVChannel,
+        const bool bUsePreferredDataUVChannel,
+        const TSet<int32>& IncludedMaterialSlotIndices,
+        const FDWCDataUVBuildOptions* Options = nullptr)
+    {
+        FDWCDataUVBuildOptions RetryOptions =
+            Options != nullptr ? *Options : FDWCDataUVBuildOptions();
+        const FDWCDataUVBuildOptions* OptionsToUse = Options;
+
+        FDWCDataUVBuildResult Result;
+        TSet<int32> AcceptedMaterialSlotIndices =
+            RetryOptions.ConfirmedVisibleExclusionMaterialSlotIndices;
+        const int32 MaxBuildAttempts = FMath::Max(IncludedMaterialSlotIndices.Num(), 1) + 2;
+
+        for (int32 PassIndex = 0; PassIndex < MaxBuildAttempts; ++PassIndex)
+        {
+            Result = FDWCDataUVBuildService::Generate(
+                Asset,
+                bForceNewAsset,
+                bAllowOverwriteExistingDataUVChannel,
+                bUsePreferredDataUVChannel,
+                OptionsToUse);
+
+            if (!Result.bRequiresUserConfirmation ||
+                Result.ConfirmationRequiredMaterialSlotIndices.IsEmpty())
+            {
+                return Result;
+            }
+
+            const TSet<int32> NewlyAcceptedMaterialSlotIndices =
+                WCAReportDialogs::ConfirmDWCDataUVVisibleExclusion(
+                    Result,
+                    Result.PreparedMesh != nullptr ? Result.PreparedMesh : Asset.GetRuntimeSkeletalMesh(),
+                    IncludedMaterialSlotIndices);
+
+            int32 AddedAcceptedSlotCount = 0;
+            for (const int32 MaterialSlotIndex : NewlyAcceptedMaterialSlotIndices)
+            {
+                if (!AcceptedMaterialSlotIndices.Contains(MaterialSlotIndex))
+                {
+                    AcceptedMaterialSlotIndices.Add(MaterialSlotIndex);
+                    ++AddedAcceptedSlotCount;
+                }
+            }
+
+            if (AddedAcceptedSlotCount == 0)
+            {
+                return Result;
+            }
+
+            RetryOptions.ConfirmedVisibleExclusionMaterialSlotIndices = AcceptedMaterialSlotIndices;
+            OptionsToUse = &RetryOptions;
+        }
+
+        return Result;
+    }
+
     const FCheckBoxStyle& GetWetClothingModeToggleStyle()
     {
         static const FSlateRoundedBoxBrush UncheckedBrush(FStyleColors::Header, 4.0f);
@@ -3550,6 +3646,7 @@ void FWCAEditor::HandleAssetSetupClicked()
 
         if (NewSettings.bBuildGPUWetnessMapSimulationData)
         {
+            const TSet<int32> IncludedMaterialSlotIndices = CollectWettableMaterialSlotIndices(*Asset);
             for (const int32 LODIndex : LODIndicesRequiringGeneration)
             {
                 FDWCDataUVBuildOptions BuildOptions;
@@ -3559,12 +3656,14 @@ void FWCAEditor::HandleAssetSetupClicked()
                 // The range remains unchanged until every required slot succeeds, but completed
                 // LOD payloads stay available for reuse on the next attempt.
                 BuildOptions.bRequireAllMaterialSlots = false;
-                const FDWCDataUVBuildResult LODResult = FDWCDataUVBuildService::Generate(
-                    *Asset,
-                    false,
-                    true,
-                    false,
-                    &BuildOptions);
+                const FDWCDataUVBuildResult LODResult =
+                    GenerateDWCDataUVWithVisibleExclusionConfirmation(
+                        *Asset,
+                        false,
+                        true,
+                        false,
+                        IncludedMaterialSlotIndices,
+                        &BuildOptions);
 
                 const bool bLODComplete =
                     LODResult.bSucceeded && LODResult.FailedMaterialSlotIndices.IsEmpty();
@@ -3642,12 +3741,15 @@ void FWCAEditor::HandleAssetSetupClicked()
     {
         FDWCDataUVBuildOptions BuildOptions;
         BuildOptions.bRequireAllMaterialSlots = true;
-        const FDWCDataUVBuildResult RangeSyncResult = FDWCDataUVBuildService::Generate(
-            *Asset,
-            false,
-            true,
-            false,
-            &BuildOptions);
+        const TSet<int32> IncludedMaterialSlotIndices = CollectWettableMaterialSlotIndices(*Asset);
+        const FDWCDataUVBuildResult RangeSyncResult =
+            GenerateDWCDataUVWithVisibleExclusionConfirmation(
+                *Asset,
+                false,
+                true,
+                false,
+                IncludedMaterialSlotIndices,
+                &BuildOptions);
         if (!RangeSyncResult.bSucceeded)
         {
             FString RevertSummary;
@@ -3660,7 +3762,7 @@ void FWCAEditor::HandleAssetSetupClicked()
                 RangeSyncResult.PreparedMesh != nullptr
                     ? RangeSyncResult.PreparedMesh
                     : Asset->GetRuntimeSkeletalMesh(),
-                TSet<int32>());
+                IncludedMaterialSlotIndices);
             return;
         }
         RangeSyncSummary = RangeSyncResult.Message;
@@ -3760,6 +3862,11 @@ void FWCAEditor::HandleInitializeGeneratedDataUVClicked()
         return;
     }
 
+    if (!ConfirmMissingPreparedMeshRecovery(*Asset))
+    {
+        return;
+    }
+
     FWCAGeneratedDataInvalidator::InvalidateAsset(*Asset);
 
     bool bAllowOverwriteExistingDataUVChannel = false;
@@ -3789,14 +3896,7 @@ void FWCAEditor::InitializeGeneratedDataUV(
     }
 
     Asset->Modify();
-    TSet<int32> IncludedMaterialSlotIndices;
-    for (const FWetClothingAuthoredMaterialSlot& SlotState : Asset->Authored.PartData.EditableWetPartData.MaterialSlots)
-    {
-        if (SlotState.bIsWettableSlot && SlotState.MaterialSlotIndex != INDEX_NONE)
-        {
-            IncludedMaterialSlotIndices.Add(SlotState.MaterialSlotIndex);
-        }
-    }
+    const TSet<int32> IncludedMaterialSlotIndices = CollectWettableMaterialSlotIndices(*Asset);
     FScopedSlowTask SlowTask(
         2.0f,
         FText::FromString(FString::Printf(TEXT("Initializing DWC UV Channel for %s..."), *GetNameSafe(Asset))));
@@ -3804,11 +3904,12 @@ void FWCAEditor::InitializeGeneratedDataUV(
     SlowTask.EnterProgressFrame(
         1.0f,
         LOCTEXT("GenerateDataUVBuildProgress", "Building DWC mesh UV data..."));
-    const FDWCDataUVBuildResult Result = FDWCDataUVBuildService::Generate(
+    const FDWCDataUVBuildResult Result = GenerateDWCDataUVWithVisibleExclusionConfirmation(
         *Asset,
         false,
         bAllowOverwriteExistingDataUVChannel,
-        bUsePreferredDataUVChannel);
+        bUsePreferredDataUVChannel,
+        IncludedMaterialSlotIndices);
     if (!Result.bSucceeded)
     {
         Asset->SetLastBakeFailure(Result.Message);
@@ -4843,7 +4944,13 @@ bool FWCAEditor::ResolveIssuesAndSave(FString& OutFailure, FString* OutSuccessSu
         SlowTask.EnterProgressFrame(
             1.0f,
             LOCTEXT("ResolveIssuesGenerateDataUVProgress", "Initializing DWC UV Channel for an asset that has no sealed layout..."));
-        const FDWCDataUVBuildResult DataUVResult = FDWCDataUVBuildService::Generate(*Asset, false, false, true);
+        const FDWCDataUVBuildResult DataUVResult =
+            GenerateDWCDataUVWithVisibleExclusionConfirmation(
+                *Asset,
+                false,
+                false,
+                true,
+                CollectWettableMaterialSlotIndices(*Asset));
         if (!DataUVResult.bSucceeded)
         {
             Asset->SetLastBakeFailure(DataUVResult.Message);

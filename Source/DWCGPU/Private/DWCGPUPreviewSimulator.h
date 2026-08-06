@@ -20,6 +20,7 @@ public:
         bool bDroplet1Enabled,
         bool bDroplet2Enabled) override;
     virtual void Restart() override;
+    virtual void RequestSplash() override;
     virtual void Step(float DeltaSeconds, float ScenarioTimeSeconds) override;
     virtual bool IsReady() const override { return bInitialized; }
     virtual int32 GetResolution() const override { return Resolution; }
@@ -52,6 +53,7 @@ private:
     bool bPreviewSurfaceEnabled = true;
     bool bPreviewDroplet1Enabled = true;
     bool bPreviewDroplet2Enabled = false;
+    bool bManualSplashRequested = false;
     bool bInitialSplashWritten = false;
     FVector2f ScenarioSplashUV = FVector2f(0.5f, 0.5f);
 };

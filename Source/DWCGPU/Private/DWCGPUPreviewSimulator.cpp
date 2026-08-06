@@ -160,6 +160,11 @@ void FDWCGPUPreviewSimulator::SetPreviewChannels(
     bPreviewDroplet2Enabled = bDroplet2Enabled;
 }
 
+void FDWCGPUPreviewSimulator::RequestSplash()
+{
+    bManualSplashRequested = true;
+}
+
 void FDWCGPUPreviewSimulator::ClearAllRenderTargets()
 {
     UObject* Context = WorldContextObject.IsValid() ? WorldContextObject.Get() : GetTransientPackage();
@@ -187,6 +192,7 @@ void FDWCGPUPreviewSimulator::Restart()
     }
     CurrentWetnessIndex = 0;
     CurrentPendingIndex = 0;
+    bManualSplashRequested = false;
     bInitialSplashWritten = false;
     ClearAllRenderTargets();
     // ClearRenderTarget2D queues work on the render thread. Restart is an editor-only,
@@ -218,11 +224,13 @@ void FDWCGPUPreviewSimulator::Step(const float DeltaSeconds, const float Scenari
     PendingWaterLimitValues.Add(Parameters.GetMaxPendingWaterPerPixel());
 
     const bool bWriteSingleSplash =
-        !bInitialSplashWritten && ScenarioTimeSeconds + KINDA_SMALL_NUMBER >= PreviewScenarioSplashTime;
+        bManualSplashRequested ||
+        (!bInitialSplashWritten && ScenarioTimeSeconds + KINDA_SMALL_NUMBER >= PreviewScenarioSplashTime);
     bool                  bWriteAbsorptionSplash = false;
     TArray<FSurfaceStamp> SurfaceStamps;
     if (bWriteSingleSplash)
     {
+        bManualSplashRequested = false;
         bInitialSplashWritten = true;
         bWriteAbsorptionSplash =
             bPreviewAbsorbedEnabled && Parameters.SupportsAbsorbedWetness();
@@ -590,5 +598,6 @@ void FDWCGPUPreviewSimulator::Shutdown()
     CachedParameters.Reset();
     CurrentWetnessIndex = 0;
     CurrentPendingIndex = 0;
+    bManualSplashRequested = false;
     bInitialSplashWritten = false;
 }

@@ -13,6 +13,8 @@
 #include "RuntimeState/WCALODVertexColorBuilder.h"
 #include "Serialization/MemoryReader.h"
 #include "Serialization/MemoryWriter.h"
+#include "UObject/MetaData.h"
+#include "UObject/Package.h"
 #include "DataAssets/WetnessProfile.h"
 #include "Utility/DWCError.h"
 #include "Utility/DWCLog.h"
@@ -46,6 +48,9 @@ namespace
         DWCRuntimeBulkCPUProgress +
         DWCRuntimeBulkGPUHeaderProgress +
         DWCRuntimeBulkGPUProgress;
+#if WITH_EDITOR
+    const FName GeneratedAssetOwnerGuidMetadataKey(TEXT("DWC.GeneratedAssetOwnerGuid"));
+#endif
 
     int32 GetLODCount(const USkeletalMesh* Mesh)
     {
@@ -2407,6 +2412,169 @@ void UWetClothingAsset::PreSave(FObjectPreSaveContext SaveContext)
             *GetNameSafe(this),
             *RuntimePreparationMessage);
     }
+}
+
+void UWetClothingAsset::EnsureAssetGuid()
+{
+#if WITH_EDITORONLY_DATA
+    if (Metadata.AssetGuid.IsValid())
+    {
+        return;
+    }
+
+    Modify();
+    Metadata.AssetGuid = FGuid::NewGuid();
+    MarkPackageDirty();
+#endif
+}
+
+bool UWetClothingAsset::TagGeneratedAsset(UObject* GeneratedAsset)
+{
+#if WITH_EDITORONLY_DATA
+    if (GeneratedAsset == nullptr)
+    {
+        return false;
+    }
+
+    EnsureAssetGuid();
+    if (!Metadata.AssetGuid.IsValid())
+    {
+        return false;
+    }
+
+    FGuid ExistingOwnerGuid;
+    if (TryGetGeneratedAssetOwnerGuid(GeneratedAsset, ExistingOwnerGuid) &&
+        ExistingOwnerGuid.IsValid() &&
+        ExistingOwnerGuid != Metadata.AssetGuid)
+    {
+        return false;
+    }
+
+    UPackage* Package = GeneratedAsset->GetOutermost();
+    if (Package == nullptr)
+    {
+        return false;
+    }
+
+    Package->Modify();
+    Package->GetMetaData().SetValue(
+        GeneratedAsset,
+        GeneratedAssetOwnerGuidMetadataKey,
+        *Metadata.AssetGuid.ToString(EGuidFormats::DigitsWithHyphens));
+
+    const FSoftObjectPath GeneratedAssetPath(GeneratedAsset);
+    const bool bAlreadyTracked = Metadata.GeneratedAssetManifest.ContainsByPredicate(
+        [&GeneratedAssetPath](const TSoftObjectPtr<UObject>& Entry)
+        {
+            return Entry.ToSoftObjectPath() == GeneratedAssetPath;
+        });
+    if (!bAlreadyTracked)
+    {
+        Modify();
+        Metadata.GeneratedAssetManifest.Add(TSoftObjectPtr<UObject>(GeneratedAsset));
+        MarkPackageDirty();
+    }
+
+    Package->MarkPackageDirty();
+    return true;
+#else
+    return false;
+#endif
+}
+
+bool UWetClothingAsset::TryGetGeneratedAssetOwnerGuid(
+    const UObject* GeneratedAsset,
+    FGuid& OutOwnerGuid) const
+{
+    OutOwnerGuid.Invalidate();
+
+#if WITH_EDITORONLY_DATA
+    UPackage* Package = GeneratedAsset != nullptr ? GeneratedAsset->GetOutermost() : nullptr;
+    if (Package == nullptr)
+    {
+        return false;
+    }
+
+    const FString StoredGuid = Package->GetMetaData().GetValue(
+        GeneratedAsset,
+        GeneratedAssetOwnerGuidMetadataKey);
+    if (StoredGuid.IsEmpty())
+    {
+        return false;
+    }
+
+    return FGuid::Parse(StoredGuid, OutOwnerGuid);
+#else
+    return false;
+#endif
+}
+
+bool UWetClothingAsset::IsGeneratedAssetOwnedByThisWCA(const UObject* GeneratedAsset) const
+{
+#if WITH_EDITORONLY_DATA
+    if (!Metadata.AssetGuid.IsValid())
+    {
+        return false;
+    }
+
+    FGuid ExistingOwnerGuid;
+    return TryGetGeneratedAssetOwnerGuid(GeneratedAsset, ExistingOwnerGuid) &&
+           ExistingOwnerGuid == Metadata.AssetGuid;
+#else
+    return false;
+#endif
+}
+
+void UWetClothingAsset::GetOwnedGeneratedAssets(
+    TArray<UObject*>& OutAssets,
+    UClass* RequiredClass) const
+{
+#if WITH_EDITORONLY_DATA
+    for (const TSoftObjectPtr<UObject>& ManifestEntry : Metadata.GeneratedAssetManifest)
+    {
+        UObject* GeneratedAsset = ManifestEntry.LoadSynchronous();
+        if (GeneratedAsset == nullptr ||
+            (RequiredClass != nullptr && !GeneratedAsset->IsA(RequiredClass)) ||
+            !IsGeneratedAssetOwnedByThisWCA(GeneratedAsset))
+        {
+            continue;
+        }
+
+        OutAssets.AddUnique(GeneratedAsset);
+    }
+#endif
+}
+
+void UWetClothingAsset::RemoveGeneratedAssetFromManifest(const UObject* GeneratedAsset)
+{
+#if WITH_EDITORONLY_DATA
+    if (GeneratedAsset == nullptr)
+    {
+        return;
+    }
+
+    const FSoftObjectPath RemovedPath(GeneratedAsset);
+    const int32 RemovedCount = Metadata.GeneratedAssetManifest.RemoveAll(
+        [&RemovedPath](const TSoftObjectPtr<UObject>& Entry)
+        {
+            return Entry.IsNull() || Entry.ToSoftObjectPath() == RemovedPath;
+        });
+    if (RemovedCount > 0)
+    {
+        Modify();
+        MarkPackageDirty();
+    }
+#endif
+}
+
+void UWetClothingAsset::BumpPreviewTopologyRevision()
+{
+#if WITH_EDITORONLY_DATA
+    Modify();
+    Derived.Inline.PreviewTopologyRevision =
+        FMath::Max<uint64>(Derived.Inline.PreviewTopologyRevision, 1) + 1;
+    MarkPackageDirty();
+#endif
 }
 
 bool UWetClothingAsset::InitializeNewAsset(

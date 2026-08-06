@@ -146,13 +146,17 @@ class SWetClothingPartEditorPanel : public SCompoundWidget
     TSet<int32>                                    CollectSelectableDataUVOperationSlotIndices() const;
     TSet<int32>                                    CollectSelectedGenerateDataUVSlotIndices() const;
     TSet<int32>                                    CollectSelectedUpdateDataUVSlotIndices() const;
+    bool                                           IsMissingPreparedMeshRecoveryRequired() const;
+    bool                                           ConfirmMissingPreparedMeshRecovery() const;
     bool                                           IsDataUVOperationSelectable(int32 MaterialSlotIndex) const;
     ECheckBoxState                                 GetDataUVOperationCheckState(int32 MaterialSlotIndex) const;
     void                                           HandleDataUVOperationCheckStateChanged(ECheckBoxState NewState, int32 MaterialSlotIndex);
     ECheckBoxState                                 GetAllDataUVOperationCheckState() const;
     void                                           HandleAllDataUVOperationCheckStateChanged(ECheckBoxState NewState);
     void                                           SyncDataUVOperationSelection();
-    FDWCDataUVBuildResult                          GenerateDataUVForTargetSlots(const TSet<int32>& TargetMaterialSlotIndices);
+    FDWCDataUVBuildResult                          GenerateDataUVForTargetSlots(
+                                                        const TSet<int32>& TargetMaterialSlotIndices,
+                                                        const TSet<int32>* ConfirmedVisibleExclusionMaterialSlotIndices = nullptr);
     void                                           RestorePersistedDataUVFailureState();
     void                                           PersistDataUVFailureState();
     EVisibility                                    GetDataUVUpdateBarVisibility() const;
@@ -186,6 +190,9 @@ class SWetClothingPartEditorPanel : public SCompoundWidget
     FText                                          GetCommonPartEditingEmptyStateText() const;
     FText                                          GetWetPartSectionText() const;
     FText                                          GetSelectedAssignWetPartText() const;
+    FText                                          GetSelectedAssignWetPartNameText() const;
+    FText                                          GetSelectedAssignWetPartIDText() const;
+    EVisibility                                    GetSelectedAssignWetPartIDVisibility() const;
     FSlateColor                                    GetSelectedAssignWetPartColor() const;
     FText                                          GetSelectedWetPartText() const;
     EVisibility                                    GetSelectedWetPartTextVisibility() const;

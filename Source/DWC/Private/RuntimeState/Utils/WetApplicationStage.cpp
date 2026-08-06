@@ -52,19 +52,55 @@ namespace
         }
     };
 
-    int32 GetDominantTriangleVertexIndex(
-        const FDWCGPUBakedTriangle& Triangle,
-        const FVector3f&             Barycentric)
+    struct FResolvedSurfaceWaterPart
     {
-        if (Barycentric.X >= Barycentric.Y && Barycentric.X >= Barycentric.Z)
+        const FWetClothingWetPartEntry* WetPart = nullptr;
+        const FWetnessProfileParameters* WetnessProfile = nullptr;
+        uint16 ProfileIndex = FWetClothingRuntimeData::InvalidWetnessProfileIndex;
+    };
+
+    FResolvedSurfaceWaterPart ResolveSurfaceWaterPartForTriangle(
+        const FDWCWetMeshReceiverRuntime& Receiver,
+        const FWetClothingAuthoredMaterialSlot& MaterialSlot,
+        const FDWCGPUBakedTriangle& Triangle)
+    {
+        FResolvedSurfaceWaterPart Result;
+        const UWetClothingAsset* Asset = Receiver.WetClothingAsset.Get();
+        if (Asset == nullptr || !Receiver.SharedRuntimeData.IsValid())
         {
-            return Triangle.VertexIndices.X;
+            return Result;
         }
-        if (Barycentric.Y >= Barycentric.Z)
+
+        const FWetClothingEditableWetPartData& WetPartData =
+            Asset->Authored.PartData.EditableWetPartData;
+        const FWetClothingWetPartEntry* WetPart =
+            MaterialSlot.WetPartEntries.FindByPredicate(
+                [&Triangle](const FWetClothingWetPartEntry& Candidate)
+                {
+                    return Candidate.WetPartID != 0 &&
+                           Candidate.AssignedUVIslandIDs.Contains(Triangle.UVIslandID);
+                });
+        if (WetPart == nullptr)
         {
-            return Triangle.VertexIndices.Y;
+            return Result;
         }
-        return Triangle.VertexIndices.Z;
+
+        const int32 EffectiveProfileIndex =
+            WetPartData.Profiles.IsValidIndex(WetPart->ProfileIndex)
+                ? WetPart->ProfileIndex
+                : 0;
+        if (EffectiveProfileIndex < 0 ||
+            EffectiveProfileIndex >= static_cast<int32>(FWetClothingRuntimeData::InvalidWetnessProfileIndex) ||
+            !Receiver.SharedRuntimeData->WetnessProfileTable.IsValidIndex(EffectiveProfileIndex))
+        {
+            return Result;
+        }
+
+        Result.WetPart = WetPart;
+        Result.WetnessProfile =
+            &Receiver.SharedRuntimeData->WetnessProfileTable[EffectiveProfileIndex];
+        Result.ProfileIndex = static_cast<uint16>(EffectiveProfileIndex);
+        return Result;
     }
 
     FVector2f MakeIndependentFlowStampUV(
@@ -149,36 +185,21 @@ namespace
                 continue;
             }
 
-            const int32 ProfileVertexIndex = GetDominantTriangleVertexIndex(Triangle, Contact.Barycentric);
-            if (!Receiver.SharedRuntimeData->VertexWetnessProfileIndices.IsValidIndex(ProfileVertexIndex) ||
-                !Receiver.SharedRuntimeData->VertexWetPartIDs.IsValidIndex(ProfileVertexIndex))
+            const FResolvedSurfaceWaterPart ResolvedPart =
+                ResolveSurfaceWaterPartForTriangle(Receiver, *MaterialSlot, Triangle);
+            if (ResolvedPart.WetPart == nullptr ||
+                ResolvedPart.WetnessProfile == nullptr ||
+                ResolvedPart.ProfileIndex == FWetClothingRuntimeData::InvalidWetnessProfileIndex ||
+                !ResolvedPart.WetnessProfile->SupportsSurfaceWater())
             {
                 continue;
             }
 
-            const uint16 ProfileIndex =
-                Receiver.SharedRuntimeData->VertexWetnessProfileIndices[ProfileVertexIndex];
-            const int32 WetPartID =
-                Receiver.SharedRuntimeData->VertexWetPartIDs[ProfileVertexIndex];
-            const FWetnessProfileParameters* WetnessProfile =
-                Receiver.SharedRuntimeData->GetWetnessProfileParameters(ProfileVertexIndex);
-            if (ProfileIndex == FWetClothingRuntimeData::InvalidWetnessProfileIndex ||
-                WetnessProfile == nullptr ||
-                !WetnessProfile->SupportsSurfaceWater())
-            {
-                continue;
-            }
-
-            const FWetClothingWetPartEntry* WetPart = MaterialSlot->FindPart(WetPartID);
-            if (WetPart == nullptr)
-            {
-                continue;
-            }
-
-            const FSurfaceWaterProfileParameters& SurfaceProfile = WetnessProfile->SurfaceWater;
+            const FWetnessProfileParameters& WetnessProfile = *ResolvedPart.WetnessProfile;
+            const FSurfaceWaterProfileParameters& SurfaceProfile = WetnessProfile.SurfaceWater;
             const float SurfaceAmount = Contact.Amount *
                 FMath::Clamp(Contact.TriangleInfluence, 0.0f, 1.0f) *
-                WetnessProfile->GetRejectedWaterFraction();
+                WetnessProfile.GetRejectedWaterFraction();
             if (SurfaceAmount <= 0.0f)
             {
                 continue;
@@ -186,21 +207,24 @@ namespace
 
             const FGPUSurfaceWaterAccumulatorKey AccumulatorKey{
                 Contact.MaterialSlotIndex,
-                WetPartID,
-                ProfileIndex};
+                ResolvedPart.WetPart->WetPartID,
+                ResolvedPart.ProfileIndex};
             FGPUSurfaceWaterAccumulator& Accumulator = Accumulators.FindOrAdd(AccumulatorKey);
             Accumulator.MaterialSlotIndex = Contact.MaterialSlotIndex;
             Accumulator.TotalSurfaceAmount += SurfaceAmount;
 
             // Droplet2 uses a weighted reservoir sample instead of reusing Droplet1's strongest contact.
-            Accumulator.FlowSelectionWeight += SurfaceAmount;
-            if (!Accumulator.bHasFlowCandidate ||
-                RandomStream.FRand() * Accumulator.FlowSelectionWeight < SurfaceAmount)
+            if (SurfaceProfile.bUseSecondaryDroplets)
             {
-                Accumulator.FlowCandidateUV = Contact.ContactUV;
-                Accumulator.FlowCandidateBarycentric = Contact.Barycentric;
-                Accumulator.FlowCandidateTriangleID = Contact.TriangleID;
-                Accumulator.bHasFlowCandidate = true;
+                Accumulator.FlowSelectionWeight += SurfaceAmount;
+                if (!Accumulator.bHasFlowCandidate ||
+                    RandomStream.FRand() * Accumulator.FlowSelectionWeight < SurfaceAmount)
+                {
+                    Accumulator.FlowCandidateUV = Contact.ContactUV;
+                    Accumulator.FlowCandidateBarycentric = Contact.Barycentric;
+                    Accumulator.FlowCandidateTriangleID = Contact.TriangleID;
+                    Accumulator.bHasFlowCandidate = true;
+                }
             }
 
             if (Contact.TriangleInfluence > Accumulator.BestInfluence)
@@ -208,8 +232,10 @@ namespace
                 Accumulator.BestInfluence = Contact.TriangleInfluence;
                 Accumulator.BestUV = Contact.ContactUV;
                 Accumulator.Profile = SurfaceProfile;
-                Accumulator.DropletRadiusScale = WetPart->SurfaceWater.GetResolvedDropletStampSizeScale();
-                Accumulator.Droplet2SizeScale = WetPart->SurfaceWater.GetResolvedDropletFlowStampSizeScale();
+                Accumulator.DropletRadiusScale =
+                    ResolvedPart.WetPart->SurfaceWater.GetResolvedDropletStampSizeScale();
+                Accumulator.Droplet2SizeScale =
+                    ResolvedPart.WetPart->SurfaceWater.GetResolvedDropletFlowStampSizeScale();
                 Accumulator.bHasProfile = true;
             }
         }
@@ -239,7 +265,8 @@ namespace
                 Request.bDroplet2 = false;
             }
 
-            if (Surface.DropletFlowRadiusPixels > 0.0f &&
+            if (Surface.bUseSecondaryDroplets &&
+                Surface.DropletFlowRadiusPixels > 0.0f &&
                 Surface.DropletFlowHeightPixels > 0.0f &&
                 Accumulator.bHasFlowCandidate &&
                 RandomStream.FRand() < FMath::Clamp(Surface.DropletFlowSpawnProbability, 0.0f, 1.0f))

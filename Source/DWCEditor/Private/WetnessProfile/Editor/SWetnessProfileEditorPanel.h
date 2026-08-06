@@ -18,6 +18,8 @@ public:
     SLATE_ARGUMENT(UWetnessProfile*, WetnessProfile)
     SLATE_ARGUMENT(TSharedPtr<IDetailsView>, AbsorbedDetailsView)
     SLATE_ARGUMENT(TSharedPtr<IDetailsView>, SurfaceDetailsView)
+    SLATE_ATTRIBUTE(bool, HasWaterChannelSelection)
+    SLATE_ATTRIBUTE(bool, IsSurfaceWaterSelected)
     SLATE_END_ARGS()
 
     void Construct(const FArguments& InArgs);
@@ -33,16 +35,29 @@ private:
     TSharedRef<SWidget> BuildPreviewWaterSection();
     TSharedRef<SWidget> BuildPreviewSimulationSection();
     TSharedRef<SWidget> BuildPreviewDetailSizeSection();
+    TSharedRef<SWidget> BuildPreviewViewMenu();
+    TSharedRef<SWidget> BuildPreviewSettingsSection();
 
     FString GetCurrentPreviewMeshObjectPath() const;
     void HandleCurrentPreviewMeshChanged(const FAssetData& AssetData);
+    FReply HandleFramePreviewMeshClicked();
     FReply HandleUseReferenceMeshClicked();
     FReply HandleSaveCurrentMeshAsReferenceClicked();
     FReply HandleUseSphereMeshClicked();
+    ECheckBoxState GetReferencedMeshSourceState() const;
+    ECheckBoxState GetTemporaryMeshSourceState() const;
+    void HandleReferencedMeshSourceChanged(ECheckBoxState NewState);
+    void HandleTemporaryMeshSourceChanged(ECheckBoxState NewState);
+    float GetPreviewCursorScale() const;
+    void HandlePreviewCursorScaleChanged(float InValue);
+    FText GetPreviewCursorScaleText() const;
 
     float GetPreviewAbsorbedWaterPercent() const;
     void HandlePreviewAbsorbedWaterPercentChanged(float InPercent);
     FText GetPreviewAbsorbedWaterPercentText() const;
+    float GetPreviewSurfaceWaterPercent() const;
+    void HandlePreviewSurfaceWaterPercentChanged(float InPercent);
+    FText GetPreviewSurfaceWaterPercentText() const;
 
     float GetPreviewDroplet1DetailSize() const;
     void HandlePreviewDroplet1DetailSizeChanged(float InValue);
@@ -50,6 +65,11 @@ private:
     float GetPreviewDroplet2DetailSize() const;
     void HandlePreviewDroplet2DetailSizeChanged(float InValue);
     FText GetPreviewDroplet2DetailSizeText() const;
+    float GetSelectedPreviewDetailSize() const;
+    void HandleSelectedPreviewDetailSizeChanged(float InValue);
+    FText GetSelectedPreviewDetailSizeText() const;
+    EVisibility GetSelectedPreviewDetailSizeVisibility() const;
+    bool IsSecondaryDropletSelected() const;
 
     TSharedRef<SWidget> GeneratePreviewModeWidget(TSharedPtr<SWetnessProfileViewport::EPreviewMode> InMode) const;
     void HandlePreviewModeChanged(TSharedPtr<SWetnessProfileViewport::EPreviewMode> InMode, ESelectInfo::Type SelectInfo);
@@ -64,17 +84,25 @@ private:
     EVisibility GetSimulationControlsVisibility() const;
     FReply HandlePlayPauseClicked();
     FReply HandleRestartSimulationClicked();
+    FReply HandleApplySplashClicked();
     const FSlateBrush* GetPlayPauseBrush() const;
     FText GetPlayPauseToolTip() const;
     FText GetSimulationTimeText() const;
+    bool IsSelectedWaterChannelEnabled() const;
     ECheckBoxState GetAbsorbedLayerCheckState() const;
     void HandleAbsorbedLayerCheckStateChanged(ECheckBoxState NewState);
+    bool IsAbsorbedLayerToggleEnabled() const;
+    FText GetAbsorbedLayerTooltip() const;
     ECheckBoxState GetSurfaceLayerCheckState() const;
     void HandleSurfaceLayerCheckStateChanged(ECheckBoxState NewState);
+    bool IsSurfaceLayerToggleEnabled() const;
+    FText GetSurfaceLayerTooltip() const;
     ECheckBoxState GetDroplet1CheckState() const;
     void HandleDroplet1CheckStateChanged(ECheckBoxState NewState);
     ECheckBoxState GetDroplet2CheckState() const;
     void HandleDroplet2CheckStateChanged(ECheckBoxState NewState);
+    EVisibility GetSurfaceDetailsVisibility() const;
+    EVisibility GetSecondaryDropletDisplayVisibility() const;
     EVisibility GetDroplet1ControlsVisibility() const;
     EVisibility GetDroplet2ControlsVisibility() const;
     TSharedRef<SWidget> GeneratePreviewSpeedWidget(TSharedPtr<float> InSpeed) const;
@@ -86,11 +114,17 @@ private:
     void LoadPersistedPreviewSettings();
     void PersistPreviewDetailSizes();
     void ApplyPreviewSettingsToViewport();
+    void ApplyPreviewLayerSettingsToViewport();
 
 private:
     TWeakObjectPtr<UWetnessProfile> WetnessProfile;
+    // Session-only mesh used by Preview Settings > Temporary Override.
+    // Keep this weak because SWetnessProfileEditorPanel is not a UObject/GC owner.
+    TWeakObjectPtr<USkeletalMesh> TemporaryPreviewMesh;
     TSharedPtr<IDetailsView> AbsorbedDetailsView;
     TSharedPtr<IDetailsView> SurfaceDetailsView;
+    TAttribute<bool> HasWaterChannelSelectionAttribute;
+    TAttribute<bool> IsSurfaceWaterSelectedAttribute;
     TSharedPtr<SWetnessProfileViewport> PreviewViewport;
     TArray<TSharedPtr<SWetnessProfileViewport::EPreviewMode>> PreviewModeItems;
     TSharedPtr<SWetnessProfileViewport::EPreviewMode> SelectedPreviewModeItem;
@@ -105,4 +139,6 @@ private:
     bool bPreviewDroplet2Enabled = false;
     float PreviewDroplet1DetailSize = 1.0f;
     float PreviewDroplet2DetailSize = 1.0f;
+    float PreviewCursorScale = 1.0f;
+    bool bUseTemporaryPreviewMesh = false;
 };

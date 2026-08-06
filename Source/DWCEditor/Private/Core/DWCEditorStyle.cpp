@@ -63,6 +63,12 @@ void FDWCEditorStyle::Initialize()
     SetSvgBrush(*StyleSet, TEXT("DWCEditor.AutoPartitioning"), TEXT("EditorIcons/MagicWandTool"), Icon20x20);
     SetSvgBrush(*StyleSet, TEXT("DWCEditor.Bake"), TEXT("EditorIcons/Bake_400"), Icon24x24);
     SetSvgBrush(*StyleSet, TEXT("DWCEditor.SurfaceWaterTiling"), TEXT("EditorIcons/SurfaceWaterTiling"), Icon20x20);
+    SetSvgBrush(*StyleSet, TEXT("DWCEditor.WetnessProfile.AddWater"), TEXT("EditorIcons/WetnessProfile_AddWater"), Icon20x20);
+    SetSvgBrush(*StyleSet, TEXT("DWCEditor.WetnessProfile.Play"), TEXT("EditorIcons/WetnessProfile_Play"), Icon20x20);
+    SetSvgBrush(*StyleSet, TEXT("DWCEditor.WetnessProfile.Pause"), TEXT("EditorIcons/WetnessProfile_Pause"), Icon20x20);
+    SetSvgBrush(*StyleSet, TEXT("DWCEditor.WetnessProfile.Crosshair"), TEXT("EditorIcons/WetnessProfile_Crosshair"), FVector2D(64.0f, 64.0f));
+    SetSvgBrush(*StyleSet, TEXT("DWCEditor.WetnessProfile.StatusDot"), TEXT("EditorIcons/WetnessProfile_StatusDot"), FVector2D(10.0f, 10.0f));
+    SetSvgBrush(*StyleSet, TEXT("DWCEditor.WetnessProfile.RevertSaved"), TEXT("EditorIcons/WetnessProfile_RevertSaved"), Icon16x16);
     SetSvgBrush(*StyleSet, TEXT("DWCEditor.Status.Error"), TEXT("EditorIcons/StatusError"), Icon16x16);
     SetSvgBrush(*StyleSet, TEXT("DWCEditor.Validation.Failure"), TEXT("EditorIcons/ValidationFailure"), Icon24x24);
     SetSvgBrush(*StyleSet, TEXT("DWCEditor.Validation.Diagnostics"), TEXT("EditorIcons/ValidationDiagnostics"), Icon24x24);

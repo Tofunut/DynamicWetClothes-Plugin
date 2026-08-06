@@ -56,14 +56,22 @@ class SWetnessProfileViewport : public SEditorViewport, public FGCObject
     /** Updates only MID parameters and invalidates the viewport. */
     void RefreshFromProfile();
     virtual void Tick(const FGeometry& AllottedGeometry, double InCurrentTime, float InDeltaTime) override;
+    virtual bool SupportsKeyboardFocus() const override { return true; }
+    virtual FReply OnMouseButtonDown(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override;
+    virtual FReply OnKeyDown(const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent) override;
+    virtual FReply OnKeyUp(const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent) override;
+    virtual void OnFocusLost(const FFocusEvent& InFocusEvent) override;
     void FocusOnPreviewMesh(bool bInstant = false);
 
     void SetPreviewAbsorbedWater(float InAmount);
     float GetPreviewAbsorbedWater() const { return PreviewAbsorbedWater; }
 
     void SetPreviewSurfaceWater(float InAmount);
+    float GetPreviewSurfaceWater() const { return PreviewSurfaceWater; }
 
     void SetPreviewDropletDetailSizes(float InDroplet1DetailSize, float InDroplet2DetailSize);
+    void SetInteractionCursorScale(float InScale);
+    float GetInteractionCursorScale() const { return InteractionCursorScale; }
 
     void SetPreviewMode(EPreviewMode InPreviewMode);
     EPreviewMode GetPreviewMode() const { return PreviewMode; }
@@ -73,9 +81,15 @@ class SWetnessProfileViewport : public SEditorViewport, public FGCObject
     void SetPreviewAnimationEnabled(bool bInEnabled);
     void SetPreviewAnimationSpeed(float InSpeed);
     void SetPreviewLoopEnabled(bool bInEnabled);
+    void SetPreviewSimulationTarget(
+        bool bHasSelection,
+        bool bSurfaceSelected,
+        bool bSecondarySelected,
+        bool bSelectedChannelEnabled);
     void SetPreviewSimulationLayers(bool bAbsorbedEnabled, bool bSurfaceEnabled);
     void SetPreviewDropletVisibility(bool bDroplet1Enabled, bool bDroplet2Enabled);
     void RestartPreviewSimulation();
+    void ApplyPreviewSplash();
     bool IsPreviewAnimationEnabled() const { return bPreviewAnimationEnabled; }
     bool IsPreviewLoopEnabled() const { return bPreviewLoopEnabled; }
     bool IsPreviewAbsorbedLayerEnabled() const { return bPreviewAbsorbedLayerEnabled; }
@@ -113,7 +127,9 @@ class SWetnessProfileViewport : public SEditorViewport, public FGCObject
     void TickGPUPreviewSimulation(float InDeltaTime);
     void BindGPUPreviewTextures();
     FVector2f ResolveScenarioSplashUV() const;
+    bool TryResolveCameraCenterSplashUV(FVector2f& OutUV) const;
     void RefreshScenarioSplashUV();
+    void RefreshScenarioSplashUVFromCamera();
     void ScheduleSimulationRestart();
     void UpdateRealtimeState();
     FText GetOverlayText() const;
@@ -144,12 +160,16 @@ class SWetnessProfileViewport : public SEditorViewport, public FGCObject
 
     bool bHasPreviewMeshOverride = false;
     bool bPreviewAnimationEnabled = true;
-    bool bPreviewLoopEnabled = true;
+    bool bPreviewLoopEnabled = false;
     bool bGPUPreviewUnavailable = false;
     bool bPreviewAbsorbedLayerEnabled = true;
     bool bPreviewSurfaceLayerEnabled = true;
     bool bPreviewDroplet1Enabled = true;
     bool bPreviewDroplet2Enabled = false;
+    bool bHasPreviewWaterSelection = false;
+    bool bPreviewSurfaceSelection = false;
+    bool bPreviewSecondarySelection = false;
+    bool bPreviewSelectedChannelEnabled = false;
     float PreviewAbsorbedWater = 0.5f;
     float PreviewSurfaceWater = 1.0f;
     float PreviewDroplet1DetailSize = 1.0f;
@@ -162,5 +182,6 @@ class SWetnessProfileViewport : public SEditorViewport, public FGCObject
     float PendingSimulationRestartDelay = -1.0f;
     uint32 LastSimulationParameterHash = 0u;
     bool bHasSimulationParameterHash = false;
+    float InteractionCursorScale = 1.15f;
     FVector2f PreviewScenarioSplashUV = FVector2f(0.5f, 0.5f);
 };

@@ -2063,12 +2063,13 @@ FWCAMaterialGenerator::FOptions FWCAMaterialGenerator::MakeOptionsForAsset(
 
                 const FWetPartProfileAssignment* Profile = EditableData.FindProfile(Entry);
                 FWetnessProfileParameters        Parameters = Profile != nullptr ? Profile->Parameters : FWetnessProfileParameters();
-                if (Profile != nullptr && Profile->SourceProfile.IsValid())
+                if (Profile != nullptr && Profile->HasSourceProfile())
                 {
-                    UObject* SourceObject = Profile->SourceProfile.ResolveObject();
+                    const FSoftObjectPath SourceProfilePath = Profile->GetSourceProfilePath();
+                    UObject* SourceObject = SourceProfilePath.ResolveObject();
                     if (SourceObject == nullptr)
                     {
-                        SourceObject = Profile->SourceProfile.TryLoad();
+                        SourceObject = SourceProfilePath.TryLoad();
                     }
 
                     if (const UWetnessProfile* SourceProfile = Cast<UWetnessProfile>(SourceObject))

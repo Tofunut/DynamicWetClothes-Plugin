@@ -16,6 +16,7 @@
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SExpandableArea.h"
 #include "Widgets/Layout/SScrollBox.h"
+#include "Widgets/Layout/SSpacer.h"
 #include "Widgets/Layout/SSeparator.h"
 #include "Widgets/Layout/SWrapBox.h"
 #include "Widgets/SBoxPanel.h"
@@ -171,7 +172,7 @@ namespace
                     : LOCTEXT("DWCDataUVWereSkipped", "were"));
         }
 
-        if (Result.ResultSeverity == EDWCDataUVResultSeverity::Ready)
+        if (DWCDataUVResultSeverity::Normalize(Result.ResultSeverity) == EDWCDataUVResultSeverity::Ready)
         {
             return FText::Format(
                 LOCTEXT("DWCDataUVCleanGenerationSummary", "DWC UV data was generated successfully for all {0} target LODs."),
@@ -304,7 +305,8 @@ namespace
 
     TSharedRef<SWidget> BuildIssueSummarySection(const FDWCDataUVBuildResult& Result)
     {
-        const bool bWarning = Result.ResultSeverity == EDWCDataUVResultSeverity::ReadyWithWarnings;
+        const bool bWarning = DWCDataUVResultSeverity::Normalize(Result.ResultSeverity) ==
+            EDWCDataUVResultSeverity::ReadyWithWarnings;
         TSharedRef<SWrapBox> Metrics = SNew(SWrapBox).UseAllottedSize(true);
         AddMetricIfNonZero(Metrics, LOCTEXT("ExcludedTrianglesMetric", "Excluded triangles"), Result.ExcludedTriangleCount);
         AddMetricIfNonZero(Metrics, LOCTEXT("Degenerate3DMetric", "3D Degenerate"), Result.Degenerate3DTriangleCount);
@@ -335,8 +337,8 @@ namespace
                         .HeightOverride(16.0f)
                         [
                             SNew(SImage)
-                            .Image(FAppStyle::GetBrush(bWarning ? TEXT("Icons.WarningWithColor") : TEXT("Icons.InfoWithColor")))
-                            .ColorAndOpacity(bWarning ? ColoredStatusIconTint() : DataUVInfoColor())
+                            .Image(FAppStyle::GetBrush(bWarning ? TEXT("Icons.WarningWithColor") : TEXT("Icons.SuccessWithColor")))
+                            .ColorAndOpacity(ColoredStatusIconTint())
                         ]
                     ]
                     + SHorizontalBox::Slot()
@@ -346,9 +348,9 @@ namespace
                         SNew(STextBlock)
                         .Text(bWarning
                             ? LOCTEXT("DWCDataUVSourceUVWarningsHeading", "Warnings")
-                            : LOCTEXT("DWCDataUVSourceUVNotesHeading", "Notes"))
+                            : LOCTEXT("DWCDataUVSourceUVDiagnosticsHeading", "Diagnostics"))
                         .Font(MakeReportFont(10, true))
-                        .ColorAndOpacity(bWarning ? WarningColor() : DataUVInfoColor())
+                        .ColorAndOpacity(bWarning ? WarningColor() : DataUVReadyColor())
                     ]
                 ]
                 + SVerticalBox::Slot()
@@ -401,7 +403,8 @@ namespace
         const int32 LODIndex = INDEX_NONE,
         const bool bShowSlotLabel = true)
     {
-        const bool bWarning = Diagnostic.ResultSeverity == EDWCDataUVResultSeverity::ReadyWithWarnings;
+        const bool bWarning = DWCDataUVResultSeverity::Normalize(Diagnostic.ResultSeverity) ==
+            EDWCDataUVResultSeverity::ReadyWithWarnings;
         TSharedRef<SWrapBox> Metrics = SNew(SWrapBox).UseAllottedSize(true);
         AddMetricIfNonZero(Metrics, LOCTEXT("SlotDegenerate3DMetric", "3D Degenerate"), Diagnostic.Degenerate3DTriangleCount);
         AddMetricIfNonZero(Metrics, LOCTEXT("SlotDegenerateSourceUVMetric", "Degenerate Source UV"), Diagnostic.DegenerateSourceUVTriangleCount);
@@ -474,7 +477,7 @@ namespace
                         SNew(STextBlock)
                         .Text(bWarning
                             ? LOCTEXT("DWCDataUVReadyWithWarningsLabel", "Ready with warnings")
-                            : LOCTEXT("DWCDataUVReadyWithNotesLabel", "Ready with notes"))
+                            : LOCTEXT("DWCDataUVReadyLabel", "Ready"))
                         .Font(MakeReportFont(10, true))
                         .ColorAndOpacity(DataUVReadyColor())
                     ]
@@ -488,8 +491,8 @@ namespace
                         .HeightOverride(14.0f)
                         [
                             SNew(SImage)
-                            .Image(FAppStyle::GetBrush(bWarning ? TEXT("Icons.WarningWithColor") : TEXT("Icons.InfoWithColor")))
-                            .ColorAndOpacity(bWarning ? ColoredStatusIconTint() : DataUVInfoColor())
+                            .Image(FAppStyle::GetBrush(bWarning ? TEXT("Icons.WarningWithColor") : TEXT("Icons.SuccessWithColor")))
+                            .ColorAndOpacity(ColoredStatusIconTint())
                         ]
                     ]
                 ]
@@ -602,7 +605,6 @@ namespace
     enum class EDataUVSlotLODStatus : uint8
     {
         Ready,
-        ReadyWithNotes,
         ReadyWithWarnings,
         NotPresent,
         NotCommitted,
@@ -692,22 +694,16 @@ namespace
             Display.Warning = FindSlotWarning(*Metadata, MaterialSlotIndex);
             if (Asset.HasValidDataUVForLOD(LODIndex))
             {
-                const EDWCDataUVResultSeverity Severity = Display.Warning != nullptr
-                    ? Display.Warning->ResultSeverity
-                    : EDWCDataUVResultSeverity::Ready;
+                const EDWCDataUVResultSeverity Severity = DWCDataUVResultSeverity::Normalize(
+                    Display.Warning != nullptr
+                        ? Display.Warning->ResultSeverity
+                        : EDWCDataUVResultSeverity::Ready);
                 if (Severity == EDWCDataUVResultSeverity::ReadyWithWarnings)
                 {
                     Display.Status = EDataUVSlotLODStatus::ReadyWithWarnings;
                     Display.StatusText = LOCTEXT("DWCDataUVDetailsReadyWithWarnings", "Ready");
                     Display.IconName = TEXT("Icons.WarningWithColor");
                     Display.IconColor = ColoredStatusIconTint();
-                }
-                else if (Severity == EDWCDataUVResultSeverity::ReadyWithNotes)
-                {
-                    Display.Status = EDataUVSlotLODStatus::ReadyWithNotes;
-                    Display.StatusText = LOCTEXT("DWCDataUVDetailsReadyWithNotes", "Ready");
-                    Display.IconName = TEXT("Icons.InfoWithColor");
-                    Display.IconColor = DataUVInfoColor();
                 }
                 else
                 {
@@ -748,7 +744,6 @@ namespace
         const TArray<int32> LODIndices = CollectMappedLODIndices(Asset, PreparedMesh);
         const bool bSlotFailed = FailedMaterialSlotIndices.Contains(MaterialSlotIndex);
         bool bHasReady = false;
-        bool bHasNotes = false;
         bool bHasWarnings = false;
         bool bHasNotPresent = false;
         bool bHasOutOfDate = false;
@@ -761,9 +756,7 @@ namespace
                 MaterialSlotIndex,
                 LODIndex);
             bHasReady |= Display.Status == EDataUVSlotLODStatus::Ready ||
-                Display.Status == EDataUVSlotLODStatus::ReadyWithNotes ||
                 Display.Status == EDataUVSlotLODStatus::ReadyWithWarnings;
-            bHasNotes |= Display.Status == EDataUVSlotLODStatus::ReadyWithNotes;
             bHasWarnings |= Display.Status == EDataUVSlotLODStatus::ReadyWithWarnings;
             bHasNotPresent |= Display.Status == EDataUVSlotLODStatus::NotPresent;
             bHasOutOfDate |= Display.Status == EDataUVSlotLODStatus::OutOfDate;
@@ -810,15 +803,7 @@ namespace
             Overall.IconColor = ColoredStatusIconTint();
             Overall.TextColor = DataUVReadyColor();
         }
-        else if (bHasNotes || bHasNotPresent)
-        {
-            Overall.Status = EDataUVSlotLODStatus::ReadyWithNotes;
-            Overall.StatusText = LOCTEXT("DWCDataUVDetailsOverallReadyNotes", "Ready");
-            Overall.IconName = TEXT("Icons.InfoWithColor");
-            Overall.IconColor = DataUVInfoColor();
-            Overall.TextColor = DataUVReadyColor();
-        }
-        else if (bHasReady)
+        else if (bHasReady || bHasNotPresent)
         {
             Overall.Status = EDataUVSlotLODStatus::Ready;
             Overall.StatusText = LOCTEXT("DWCDataUVDetailsOverallReady", "Ready");
@@ -1057,7 +1042,7 @@ namespace
 
         }
 
-        bool bAddedNotes = false;
+        bool bAddedDiagnostics = false;
         bool bAddedWarnings = false;
         for (const int32 LODIndex : LODIndices)
         {
@@ -1065,15 +1050,14 @@ namespace
             const FDWCDataUVSlotWarning* Diagnostic = Metadata != nullptr
                 ? FindSlotWarning(*Metadata, MaterialSlotIndex)
                 : nullptr;
-            if (Diagnostic == nullptr ||
-                (Diagnostic->ResultSeverity != EDWCDataUVResultSeverity::ReadyWithNotes &&
-                 Diagnostic->ResultSeverity != EDWCDataUVResultSeverity::ReadyWithWarnings))
+            if (Diagnostic == nullptr || !Diagnostic->HasDiagnostics())
             {
                 continue;
             }
 
-            const bool bWarning = Diagnostic->ResultSeverity == EDWCDataUVResultSeverity::ReadyWithWarnings;
-            bool& bHeadingAdded = bWarning ? bAddedWarnings : bAddedNotes;
+            const bool bWarning = DWCDataUVResultSeverity::Normalize(Diagnostic->ResultSeverity) ==
+                EDWCDataUVResultSeverity::ReadyWithWarnings;
+            bool& bHeadingAdded = bWarning ? bAddedWarnings : bAddedDiagnostics;
             if (!bHeadingAdded)
             {
                 Card->AddSlot()
@@ -1083,7 +1067,7 @@ namespace
                     SNew(STextBlock)
                     .Text(bWarning
                         ? LOCTEXT("DWCDataUVDetailsWarningsHeading", "Warnings")
-                        : LOCTEXT("DWCDataUVDetailsNotesHeading", "Notes"))
+                        : LOCTEXT("DWCDataUVDetailsDiagnosticsHeading", "Diagnostics"))
                     .Font(MakeReportFont(10, true))
                 ];
                 bHeadingAdded = true;
@@ -1171,7 +1155,7 @@ namespace
         }
 #endif
 
-        if (bSlotFailed && !bAddedErrors && !LastFailureMessage.IsEmpty())
+        if (bSlotFailed && !bAddedErrors)
         {
             Card->AddSlot()
             .AutoHeight()
@@ -1191,7 +1175,9 @@ namespace
                 .BorderBackgroundColor(ErrorBackground())
                 [
                     SNew(STextBlock)
-                    .Text(FText::FromString(LastFailureMessage))
+                    .Text(LOCTEXT(
+                        "DWCDataUVDetailsLegacyFailureMessage",
+                        "The latest DWC UV build failed for this material slot, but no slot-specific LOD diagnostic was recorded."))
                     .AutoWrapText(true)
                     .Font(MakeReportFont())
                     .ColorAndOpacity(ErrorColor())
@@ -1356,7 +1342,7 @@ namespace
                     PreparedMesh,
                     MaterialSlotIndex,
                     FailedMaterialSlotIndices,
-                    LastFailureMessage,
+                    FString(),
                     SlotListIndex > 0)
             ];
         }
@@ -1374,7 +1360,6 @@ namespace
         for (const int32 LODIndex : LODIndices)
         {
             int32 ReadyCount = 0;
-            int32 NoteCount = 0;
             int32 WarningCount = 0;
             int32 FailedCount = 0;
             int32 MissingCount = 0;
@@ -1388,9 +1373,8 @@ namespace
                 switch (Display.Status)
                 {
                 case EDataUVSlotLODStatus::Ready: ++ReadyCount; break;
-                case EDataUVSlotLODStatus::ReadyWithNotes: ++NoteCount; break;
                 case EDataUVSlotLODStatus::ReadyWithWarnings: ++WarningCount; break;
-                case EDataUVSlotLODStatus::NotPresent: ++NoteCount; break;
+                case EDataUVSlotLODStatus::NotPresent: ++ReadyCount; break;
                 case EDataUVSlotLODStatus::Failed: ++FailedCount; break;
                 case EDataUVSlotLODStatus::OutOfDate: ++OutOfDateCount; break;
                 case EDataUVSlotLODStatus::NotCommitted:
@@ -1418,14 +1402,6 @@ namespace
                 [
                     BuildCompactStatusCount(TEXT("Icons.SuccessWithColor"), ColoredStatusIconTint(), ReadyCount,
                         LOCTEXT("DWCDataUVOverallReadyCountTooltip", "Ready slots"))
-                ];
-            }
-            if (NoteCount > 0)
-            {
-                CompactCounts->AddSlot().AutoWidth().Padding(6.0f, 0.0f, 0.0f, 0.0f)
-                [
-                    BuildCompactStatusCount(TEXT("Icons.InfoWithColor"), DataUVInfoColor(), NoteCount,
-                        LOCTEXT("DWCDataUVOverallNoteCountTooltip", "Slots with notes"))
                 ];
             }
             const int32 AttentionCount = WarningCount + OutOfDateCount + MissingCount;
@@ -1556,14 +1532,14 @@ namespace
                         PreparedMesh,
                         MaterialSlotIndex,
                         FailedMaterialSlotIndices,
-                        LastFailureMessage,
+                        FString(),
                         SlotListIndex > 0)
                     : BuildSlotLODStatusCard(
                         Asset,
                         PreparedMesh,
                         MaterialSlotIndex,
                         FailedMaterialSlotIndices,
-                        LastFailureMessage)
+                        FString())
             ];
         }
 
@@ -2075,12 +2051,13 @@ namespace WCAReportDialogs
         if (!bUsesMaterialSlotCards)
         {
             for (const EDWCDataUVResultSeverity SectionSeverity :
-                { EDWCDataUVResultSeverity::ReadyWithNotes, EDWCDataUVResultSeverity::ReadyWithWarnings })
+                { EDWCDataUVResultSeverity::Ready, EDWCDataUVResultSeverity::ReadyWithWarnings })
             {
                 const bool bHasSection = SlotWarnings.ContainsByPredicate(
                     [SectionSeverity](const FDWCDataUVSlotWarning& Diagnostic)
                     {
-                        return Diagnostic.ResultSeverity == SectionSeverity;
+                        return DWCDataUVResultSeverity::Normalize(Diagnostic.ResultSeverity) == SectionSeverity &&
+                            Diagnostic.HasDiagnostics();
                     });
                 if (!bHasSection)
                 {
@@ -2092,13 +2069,13 @@ namespace WCAReportDialogs
                     SNew(STextBlock)
                     .Text(SectionSeverity == EDWCDataUVResultSeverity::ReadyWithWarnings
                         ? LOCTEXT("DWCDataUVSlotWarningsHeading", "Warnings")
-                        : LOCTEXT("DWCDataUVSlotNotesHeading", "Notes"))
+                        : LOCTEXT("DWCDataUVSlotDiagnosticsHeading", "Diagnostics"))
                     .Font(MakeReportFont(10, true))
                 ];
 
                 for (const FDWCDataUVSlotWarning& Diagnostic : SlotWarnings)
                 {
-                    if (Diagnostic.ResultSeverity != SectionSeverity)
+                    if (DWCDataUVResultSeverity::Normalize(Diagnostic.ResultSeverity) != SectionSeverity)
                     {
                         continue;
                     }
@@ -2144,15 +2121,12 @@ namespace WCAReportDialogs
                     [
                         SNew(SImage)
                         .Image(FAppStyle::GetBrush(
-                            Result.ResultSeverity == EDWCDataUVResultSeverity::ReadyWithWarnings || bHasSkippedLODs
+                            DWCDataUVResultSeverity::Normalize(Result.ResultSeverity) ==
+                                    EDWCDataUVResultSeverity::ReadyWithWarnings ||
+                                bHasSkippedLODs
                                 ? TEXT("Icons.WarningWithColor")
-                                : Result.ResultSeverity == EDWCDataUVResultSeverity::ReadyWithNotes
-                                    ? TEXT("Icons.InfoWithColor")
-                                    : TEXT("Icons.SuccessWithColor")))
-                        .ColorAndOpacity(
-                            Result.ResultSeverity == EDWCDataUVResultSeverity::ReadyWithNotes && !bHasSkippedLODs
-                                ? DataUVInfoColor()
-                                : ColoredStatusIconTint())
+                                : TEXT("Icons.SuccessWithColor")))
+                        .ColorAndOpacity(ColoredStatusIconTint())
                     ]
                     + SHorizontalBox::Slot()
                     .FillWidth(1.0f)
@@ -2162,11 +2136,11 @@ namespace WCAReportDialogs
                         .AutoHeight()
                         [
                             SNew(STextBlock)
-                            .Text(Result.ResultSeverity == EDWCDataUVResultSeverity::ReadyWithWarnings || bHasSkippedLODs
+                            .Text(DWCDataUVResultSeverity::Normalize(Result.ResultSeverity) ==
+                                        EDWCDataUVResultSeverity::ReadyWithWarnings ||
+                                    bHasSkippedLODs
                                 ? LOCTEXT("DWCDataUVWarningsHeader", "DWC UV Channel Generated With Warnings")
-                                : Result.ResultSeverity == EDWCDataUVResultSeverity::ReadyWithNotes
-                                    ? LOCTEXT("DWCDataUVNotesHeader", "DWC UV Channel Generated With Notes")
-                                    : LOCTEXT("DWCDataUVSuccessHeader", "DWC UV Channel Generated Successfully"))
+                                : LOCTEXT("DWCDataUVSuccessHeader", "DWC UV Channel Generated Successfully"))
                             .Font(MakeReportFont(10, true))
                         ]
                         + SVerticalBox::Slot()
@@ -2210,6 +2184,199 @@ namespace WCAReportDialogs
 
         FSlateApplication::Get().AddModalWindow(DialogWindow, nullptr);
     }
+
+    TSet<int32> ConfirmDWCDataUVVisibleExclusion(
+        const FDWCDataUVBuildResult& Result,
+        const USkeletalMesh* PreparedMesh,
+        const TSet<int32>& IncludedMaterialSlotIndices)
+    {
+        TSet<int32> AcceptedMaterialSlotIndices;
+
+        TArray<const FDWCDataUVSlotWarning*> AffectedWarnings;
+        for (const FDWCDataUVSlotWarning& Warning : Result.SlotWarnings)
+        {
+            if (Warning.bVisibleExclusionSafetyLimitExceeded &&
+                (IncludedMaterialSlotIndices.IsEmpty() ||
+                 IncludedMaterialSlotIndices.Contains(Warning.MaterialSlotIndex)))
+            {
+                AffectedWarnings.Add(&Warning);
+            }
+        }
+        AffectedWarnings.Sort([](const FDWCDataUVSlotWarning& A, const FDWCDataUVSlotWarning& B)
+        {
+            return A.MaterialSlotIndex < B.MaterialSlotIndex;
+        });
+
+        for (const FDWCDataUVSlotWarning* Warning : AffectedWarnings)
+        {
+            if (Warning == nullptr)
+            {
+                continue;
+            }
+
+            bool bAccepted = false;
+            bool bCancelRemaining = false;
+            TSharedRef<SWindow> DialogWindow =
+                SNew(SWindow)
+                .Title(LOCTEXT("DWCDataUVSlotExclusionConfirmationTitle", "Continue This Material Slot with Warnings?"))
+                .ClientSize(FVector2D(640.0f, 390.0f))
+                .SizingRule(ESizingRule::UserSized)
+                .SupportsMaximize(false)
+                .SupportsMinimize(false);
+
+            DialogWindow->SetContent(
+                SNew(SBorder)
+                .Padding(FMargin(16.0f, 14.0f))
+                .BorderImage(FAppStyle::GetBrush(TEXT("Brushes.Panel")))
+                [
+                    SNew(SVerticalBox)
+                    + SVerticalBox::Slot()
+                    .AutoHeight()
+                    [
+                        SNew(SHorizontalBox)
+                        + SHorizontalBox::Slot()
+                        .AutoWidth()
+                        .VAlign(VAlign_Top)
+                        .Padding(0.0f, 2.0f, 10.0f, 0.0f)
+                        [
+                            SNew(SImage)
+                            .Image(FAppStyle::GetBrush(TEXT("Icons.WarningWithColor")))
+                        ]
+                        + SHorizontalBox::Slot()
+                        .FillWidth(1.0f)
+                        [
+                            SNew(SVerticalBox)
+                            + SVerticalBox::Slot()
+                            .AutoHeight()
+                            [
+                                SNew(STextBlock)
+                                .Text(BuildSlotLabel(PreparedMesh, Warning->MaterialSlotIndex))
+                                .Font(MakeReportFont(10, true))
+                            ]
+                            + SVerticalBox::Slot()
+                            .AutoHeight()
+                            .Padding(0.0f, 4.0f, 0.0f, 0.0f)
+                            [
+                                SNew(STextBlock)
+                                .Text(LOCTEXT(
+                                    "DWCDataUVSlotExclusionConfirmationHeader",
+                                    "Visible surface exclusion exceeds the automatic safety limit."))
+                                .Font(MakeReportFont())
+                                .ColorAndOpacity(WarningColor())
+                                .AutoWrapText(true)
+                            ]
+                        ]
+                    ]
+                    + SVerticalBox::Slot()
+                    .AutoHeight()
+                    .Padding(0.0f, 14.0f, 0.0f, 0.0f)
+                    [
+                        SNew(SBorder)
+                        .Padding(FMargin(10.0f, 8.0f))
+                        .BorderImage(FAppStyle::GetBrush(TEXT("Brushes.Panel")))
+                        .BorderBackgroundColor(WarningBackground())
+                        [
+                            SNew(SVerticalBox)
+                            + SVerticalBox::Slot()
+                            .AutoHeight()
+                            [
+                                SNew(STextBlock)
+                                .Text(FText::FromString(FString::Printf(
+                                    TEXT("Excluded visible surface: %.4f%%"),
+                                    Warning->ExcludedVisible3DSurfaceRatio * 100.0)))
+                                .Font(MakeReportFont())
+                            ]
+                            + SVerticalBox::Slot()
+                            .AutoHeight()
+                            .Padding(0.0f, 3.0f, 0.0f, 0.0f)
+                            [
+                                SNew(STextBlock)
+                                .Text(FText::FromString(FString::Printf(
+                                    TEXT("Largest connected excluded region: %.4f%%"),
+                                    Warning->LargestConnectedExcluded3DSurfaceRatio * 100.0)))
+                                .Font(MakeReportFont())
+                            ]
+                            + SVerticalBox::Slot()
+                            .AutoHeight()
+                            .Padding(0.0f, 8.0f, 0.0f, 0.0f)
+                            [
+                                SNew(STextBlock)
+                                .Text(LOCTEXT(
+                                    "DWCDataUVSlotExclusionConfirmationResult",
+                                    "Continue: this slot is committed and shown as a yellow warning icon with Ready. Skip: this slot is left unchanged while other selected slots may continue."))
+                                .AutoWrapText(true)
+                                .Font(MakeReportFont())
+                                .ColorAndOpacity(FSlateColor(FStyleColors::ForegroundHover))
+                            ]
+                        ]
+                    ]
+                    + SVerticalBox::Slot()
+                    .FillHeight(1.0f)
+                    [
+                        SNew(SSpacer)
+                    ]
+                    + SVerticalBox::Slot()
+                    .AutoHeight()
+                    [
+                        SNew(SHorizontalBox)
+                        + SHorizontalBox::Slot()
+                        .FillWidth(1.0f)
+                        [ SNew(SSpacer) ]
+                        + SHorizontalBox::Slot()
+                        .AutoWidth()
+                        .Padding(0.0f, 0.0f, 8.0f, 0.0f)
+                        [
+                            SNew(SButton)
+                            .Text(LOCTEXT("DWCDataUVExclusionCancelRemaining", "Cancel Remaining"))
+                            .OnClicked_Lambda([DialogWindow, &bCancelRemaining]()
+                            {
+                                bCancelRemaining = true;
+                                DialogWindow->RequestDestroyWindow();
+                                return FReply::Handled();
+                            })
+                        ]
+                        + SHorizontalBox::Slot()
+                        .AutoWidth()
+                        .Padding(0.0f, 0.0f, 8.0f, 0.0f)
+                        [
+                            SNew(SButton)
+                            .Text(LOCTEXT("DWCDataUVExclusionSkipSlot", "Skip Slot"))
+                            .OnClicked_Lambda([DialogWindow]()
+                            {
+                                DialogWindow->RequestDestroyWindow();
+                                return FReply::Handled();
+                            })
+                        ]
+                        + SHorizontalBox::Slot()
+                        .AutoWidth()
+                        [
+                            SNew(SButton)
+                            .ButtonStyle(FAppStyle::Get(), TEXT("PrimaryButton"))
+                            .Text(LOCTEXT("DWCDataUVExclusionContinueSlot", "Continue with Warning"))
+                            .OnClicked_Lambda([DialogWindow, &bAccepted]()
+                            {
+                                bAccepted = true;
+                                DialogWindow->RequestDestroyWindow();
+                                return FReply::Handled();
+                            })
+                        ]
+                    ]
+                ]);
+
+            FSlateApplication::Get().AddModalWindow(DialogWindow, nullptr);
+            if (bAccepted)
+            {
+                AcceptedMaterialSlotIndices.Add(Warning->MaterialSlotIndex);
+            }
+            if (bCancelRemaining)
+            {
+                break;
+            }
+        }
+
+        return AcceptedMaterialSlotIndices;
+    }
+
 
     void OpenDWCDataUVBuildFailureDialog(
         const FDWCDataUVBuildResult& Result,
@@ -2444,11 +2611,6 @@ namespace WCAReportDialogs
             {
                 return Detail.bHasWarnings;
             });
-        const bool bHasNotes = Report.LODDetails.ContainsByPredicate(
-            [](const FDWCLODRangeUpdateLODDetail& Detail)
-            {
-                return Detail.bHasNotes;
-            });
 
         auto BuildLODRangeText = [](const int32 FirstLODIndex, const int32 LastLODIndex)
         {
@@ -2654,9 +2816,7 @@ namespace WCAReportDialogs
                             LOCTEXT("LODRangeStatus", "Status"),
                             bHasWarnings
                                 ? LOCTEXT("LODRangeStatusWarnings", "Ready with warnings")
-                                : bHasNotes
-                                    ? LOCTEXT("LODRangeStatusNotes", "Ready with notes")
-                                    : LOCTEXT("LODRangeStatusReady", "Ready"))
+                                : LOCTEXT("LODRangeStatusReady", "Ready"))
                     ]
                 ]
             ];
@@ -2670,13 +2830,9 @@ namespace WCAReportDialogs
                 const TCHAR* IconName = Detail.bSucceeded
                     ? Detail.bHasWarnings
                         ? TEXT("Icons.WarningWithColor")
-                        : Detail.bHasNotes
-                            ? TEXT("Icons.InfoWithColor")
-                            : TEXT("Icons.SuccessWithColor")
+                        : TEXT("Icons.SuccessWithColor")
                     : TEXT("Icons.ErrorWithColor");
-                const FSlateColor IconColor = Detail.bHasNotes && !Detail.bHasWarnings
-                    ? DataUVInfoColor()
-                    : ColoredStatusIconTint();
+                const FSlateColor IconColor = ColoredStatusIconTint();
                 const FSlateColor TextColor = Detail.bSucceeded
                     ? DataUVReadyColor()
                     : ErrorColor();

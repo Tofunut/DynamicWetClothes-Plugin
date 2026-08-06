@@ -15,6 +15,7 @@
 #include "Engine/Texture2D.h"
 #include "Engine/TextureRenderTarget2D.h"
 #include "Engine/World.h"
+#include "InputCoreTypes.h"
 #include "Materials/Material.h"
 #include "Materials/MaterialInstanceConstant.h"
 #include "Materials/MaterialInstanceDynamic.h"
@@ -278,6 +279,40 @@ void SWetnessProfileViewport::Tick(
     }
 }
 
+FReply SWetnessProfileViewport::OnMouseButtonDown(
+    const FGeometry& MyGeometry,
+    const FPointerEvent& MouseEvent)
+{
+    RefreshScenarioSplashUVFromCamera();
+    return SEditorViewport::OnMouseButtonDown(MyGeometry, MouseEvent);
+}
+
+FReply SWetnessProfileViewport::OnKeyDown(
+    const FGeometry& MyGeometry,
+    const FKeyEvent& InKeyEvent)
+{
+    if (InKeyEvent.GetKey() == EKeys::SpaceBar &&
+        PreviewBehavior == EPreviewBehavior::Simulation)
+    {
+        SetPreviewAnimationEnabled(!bPreviewAnimationEnabled);
+        return FReply::Handled();
+    }
+
+    return SEditorViewport::OnKeyDown(MyGeometry, InKeyEvent);
+}
+
+FReply SWetnessProfileViewport::OnKeyUp(
+    const FGeometry& MyGeometry,
+    const FKeyEvent& InKeyEvent)
+{
+    return SEditorViewport::OnKeyUp(MyGeometry, InKeyEvent);
+}
+
+void SWetnessProfileViewport::OnFocusLost(const FFocusEvent& InFocusEvent)
+{
+    SEditorViewport::OnFocusLost(InFocusEvent);
+}
+
 void SWetnessProfileViewport::SetPreviewAbsorbedWater(float InAmount)
 {
     const float NewAmount = FMath::Clamp(InAmount, 0.0f, 1.0f);
@@ -316,6 +351,22 @@ void SWetnessProfileViewport::SetPreviewDropletDetailSizes(const float InDroplet
     PreviewDroplet1DetailSize = NewDroplet1DetailSize;
     PreviewDroplet2DetailSize = NewDroplet2DetailSize;
     RefreshPreviewMaterialParameters();
+}
+
+void SWetnessProfileViewport::SetInteractionCursorScale(const float InScale)
+{
+    const float NewScale = FMath::Clamp(InScale, 0.05f, 8.0f);
+    if (FMath::IsNearlyEqual(InteractionCursorScale, NewScale))
+    {
+        return;
+    }
+
+    InteractionCursorScale = NewScale;
+    RefreshScenarioSplashUVFromCamera();
+    if (ViewportClient.IsValid())
+    {
+        ViewportClient->Invalidate();
+    }
 }
 
 void SWetnessProfileViewport::SetPreviewMode(const EPreviewMode InPreviewMode)
@@ -385,6 +436,28 @@ void SWetnessProfileViewport::SetPreviewLoopEnabled(const bool bInEnabled)
     bPreviewLoopEnabled = bInEnabled;
 }
 
+void SWetnessProfileViewport::SetPreviewSimulationTarget(
+    const bool bHasSelection,
+    const bool bSurfaceSelected,
+    const bool bSecondarySelected,
+    const bool bSelectedChannelEnabled)
+{
+    if (bHasPreviewWaterSelection == bHasSelection &&
+        bPreviewSurfaceSelection == bSurfaceSelected &&
+        bPreviewSecondarySelection == bSecondarySelected &&
+        bPreviewSelectedChannelEnabled == bSelectedChannelEnabled)
+    {
+        return;
+    }
+
+    bHasPreviewWaterSelection = bHasSelection;
+    bPreviewSurfaceSelection = bSurfaceSelected;
+    bPreviewSecondarySelection = bSecondarySelected;
+    bPreviewSelectedChannelEnabled = bSelectedChannelEnabled;
+    ScheduleSimulationRestart();
+    RefreshPreviewMaterialParameters();
+}
+
 void SWetnessProfileViewport::SetPreviewSimulationLayers(
     const bool bAbsorbedEnabled,
     const bool bSurfaceEnabled)
@@ -435,6 +508,30 @@ void SWetnessProfileViewport::RestartPreviewSimulation()
         GPUPreviewSimulator->Restart();
         BindGPUPreviewTextures();
     }
+    if (ViewportClient.IsValid())
+    {
+        ViewportClient->Invalidate();
+    }
+}
+
+void SWetnessProfileViewport::ApplyPreviewSplash()
+{
+    if (PreviewBehavior != EPreviewBehavior::Simulation ||
+        !EnsureGPUPreviewSimulator())
+    {
+        return;
+    }
+
+    RefreshScenarioSplashUVFromCamera();
+    GPUPreviewSimulator->SetScenarioSplashUV(PreviewScenarioSplashUV);
+    GPUPreviewSimulator->SetPreviewChannels(
+        bPreviewAbsorbedLayerEnabled,
+        bPreviewSurfaceLayerEnabled,
+        bPreviewDroplet1Enabled,
+        bPreviewDroplet2Enabled);
+    GPUPreviewSimulator->RequestSplash();
+    GPUPreviewSimulator->Step(0.0f, PreviewAnimationTime);
+    BindGPUPreviewTextures();
     if (ViewportClient.IsValid())
     {
         ViewportClient->Invalidate();
@@ -1166,9 +1263,33 @@ FVector2f SWetnessProfileViewport::ResolveScenarioSplashUV() const
         FMath::Clamp(UV.Y - FMath::Floor(UV.Y), 0.001f, 0.999f));
 }
 
+bool SWetnessProfileViewport::TryResolveCameraCenterSplashUV(FVector2f& OutUV) const
+{
+    OutUV = ResolveScenarioSplashUV();
+    return true;
+}
+
 void SWetnessProfileViewport::RefreshScenarioSplashUV()
 {
     PreviewScenarioSplashUV = ResolveScenarioSplashUV();
+    if (GPUPreviewSimulator && GPUPreviewSimulator->IsReady())
+    {
+        GPUPreviewSimulator->SetScenarioSplashUV(PreviewScenarioSplashUV);
+    }
+}
+
+void SWetnessProfileViewport::RefreshScenarioSplashUVFromCamera()
+{
+    FVector2f ResolvedUV = FVector2f(0.5f, 0.5f);
+    if (TryResolveCameraCenterSplashUV(ResolvedUV))
+    {
+        PreviewScenarioSplashUV = ResolvedUV;
+    }
+    else
+    {
+        PreviewScenarioSplashUV = ResolveScenarioSplashUV();
+    }
+
     if (GPUPreviewSimulator && GPUPreviewSimulator->IsReady())
     {
         GPUPreviewSimulator->SetScenarioSplashUV(PreviewScenarioSplashUV);

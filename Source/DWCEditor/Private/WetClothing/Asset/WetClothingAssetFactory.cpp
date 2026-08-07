@@ -653,18 +653,22 @@ bool UWetClothingAssetFactory::ConfigureProperties()
                         + SVerticalBox::Slot()
                         .AutoHeight()
                         [
-                            SNew(SObjectPropertyEntryBox)
-                            .AllowedClass(USkeletalMesh::StaticClass())
-                            .AllowClear(true)
-                            .AllowCreate(false)
-                            .DisplayThumbnail(false)
-                            .ObjectPath_Lambda([this]()
-                            {
-                                return PendingCreationSettings != nullptr && PendingCreationSettings->SourceSkeletalMesh != nullptr
-                                    ? PendingCreationSettings->SourceSkeletalMesh->GetPathName()
-                                    : FString();
-                            })
-                            .OnObjectChanged_Lambda(HandleSourceMeshPicked)
+                            SNew(SBox)
+                            .HeightOverride(40.0f)
+                            [
+                                SNew(SObjectPropertyEntryBox)
+                                .AllowedClass(USkeletalMesh::StaticClass())
+                                .AllowClear(true)
+                                .AllowCreate(false)
+                                .DisplayThumbnail(false)
+                                .ObjectPath_Lambda([this]()
+                                {
+                                    return PendingCreationSettings != nullptr && PendingCreationSettings->SourceSkeletalMesh != nullptr
+                                        ? PendingCreationSettings->SourceSkeletalMesh->GetPathName()
+                                        : FString();
+                                })
+                                .OnObjectChanged_Lambda(HandleSourceMeshPicked)
+                            ]
                         ]
                         + SVerticalBox::Slot()
                         .AutoHeight()

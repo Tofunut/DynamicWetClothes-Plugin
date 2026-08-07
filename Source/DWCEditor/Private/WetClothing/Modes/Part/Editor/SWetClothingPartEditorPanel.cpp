@@ -1399,6 +1399,7 @@ void SWetClothingPartEditorPanel::RefreshSurfaceWaterTilingPreview()
     SurfaceWaterTilingPreviewViewport->SetSurfaceWaterTilingPreviewDisplayMode(SurfaceWaterPreviewDisplayMode);
     SurfaceWaterTilingPreviewViewport->SetPreviewWetness(0.0f, 1.0f);
     SurfaceWaterTilingPreviewViewport->SetSurfaceWaterPreviewDropletsEnabled(true);
+    SurfaceWaterTilingPreviewViewport->SetSurfaceWaterPreviewNormalFlip(false, false);
 
     // The tiling popup renders only the actual material result. Editor Part
     // boundaries remain exclusive to the main Part-edit viewport.
@@ -1806,14 +1807,18 @@ FText SWetClothingPartEditorPanel::GetMaterialSlotStatusText(const int32 Materia
     }
 
     // The table answers one question only: can this slot's DWC UV be used now?
-    // Diagnostics remain available through the status cell and details report.
+    // A persisted failure takes precedence over otherwise structurally valid prepared-mesh data.
+    if (FailedDataUVSlotIndices.Contains(MaterialSlotIndex))
+    {
+        return LOCTEXT("DataUVStatusFailed", "Failed");
+    }
+
     if (IsMaterialSlotDataUVReadyForEditing(MaterialSlotIndex))
     {
         return LOCTEXT("DataUVStatusReady", "Ready");
     }
 
-    if (IsMaterialSlotIncludedInDataUVLayout(MaterialSlotIndex) ||
-        FailedDataUVSlotIndices.Contains(MaterialSlotIndex))
+    if (IsMaterialSlotIncludedInDataUVLayout(MaterialSlotIndex))
     {
         return LOCTEXT("DataUVStatusFailed", "Failed");
     }
@@ -1828,12 +1833,15 @@ FSlateColor SWetClothingPartEditorPanel::GetMaterialSlotStatusColor(const int32 
         return FSlateColor(FStyleColors::Foreground);
     }
 
+    if (FailedDataUVSlotIndices.Contains(MaterialSlotIndex))
+    {
+        return FSlateColor(FStyleColors::Error);
+    }
     if (IsMaterialSlotDataUVReadyForEditing(MaterialSlotIndex))
     {
         return FSlateColor(FLinearColor(0.24f, 0.78f, 0.38f, 1.0f));
     }
-    if (IsMaterialSlotIncludedInDataUVLayout(MaterialSlotIndex) ||
-        FailedDataUVSlotIndices.Contains(MaterialSlotIndex))
+    if (IsMaterialSlotIncludedInDataUVLayout(MaterialSlotIndex))
     {
         return FSlateColor(FStyleColors::Error);
     }
@@ -1855,6 +1863,13 @@ FText SWetClothingPartEditorPanel::GetMaterialSlotStatusTooltip(const int32 Mate
             "View DWC UV generation details and diagnostics for all material slots.");
     }
 
+    if (FailedDataUVSlotIndices.Contains(MaterialSlotIndex))
+    {
+        return LOCTEXT(
+            "DataUVFailedTooltip",
+            "Failed\nThe DWC UV for this material slot is invalid and can be rebuilt.\nClick to view details.");
+    }
+
     if (IsMaterialSlotDataUVReadyForEditing(MaterialSlotIndex))
     {
         return DoesMaterialSlotHaveDataUVWarnings(MaterialSlotIndex)
@@ -1873,12 +1888,6 @@ FText SWetClothingPartEditorPanel::GetMaterialSlotStatusTooltip(const int32 Mate
             "Failed\nThe current DWC UV is not usable for editing.\nClick to view details.");
     }
 
-    if (FailedDataUVSlotIndices.Contains(MaterialSlotIndex))
-    {
-        return LOCTEXT(
-            "DataUVFailedTooltip",
-            "Failed\nClick to view the build error and diagnostics.");
-    }
 
     return LOCTEXT(
         "DataUVNotGeneratedTooltip",
@@ -2251,7 +2260,10 @@ TSet<int32> SWetClothingPartEditorPanel::CollectSelectableDataUVOperationSlotInd
     {
         if (Item.IsValid() &&
             Item->SlotIndex != INDEX_NONE &&
-            (bCanRecoverMissingPreparedMesh || !IsMaterialSlotIncludedInDataUVLayout(Item->SlotIndex)))
+            (bCanRecoverMissingPreparedMesh ||
+             FailedDataUVSlotIndices.Contains(Item->SlotIndex) ||
+             !IsMaterialSlotIncludedInDataUVLayout(Item->SlotIndex) ||
+             !IsMaterialSlotDataUVReadyForEditing(Item->SlotIndex)))
         {
             Result.Add(Item->SlotIndex);
         }
@@ -2267,7 +2279,10 @@ TSet<int32> SWetClothingPartEditorPanel::CollectSelectedGenerateDataUVSlotIndice
     for (const int32 MaterialSlotIndex : SelectedDataUVOperationSlotIndices)
     {
         if (SelectableSlots.Contains(MaterialSlotIndex) &&
-            (bCanRecoverMissingPreparedMesh || !IsMaterialSlotIncludedInDataUVLayout(MaterialSlotIndex)))
+            (bCanRecoverMissingPreparedMesh ||
+             FailedDataUVSlotIndices.Contains(MaterialSlotIndex) ||
+             !IsMaterialSlotIncludedInDataUVLayout(MaterialSlotIndex) ||
+             !IsMaterialSlotDataUVReadyForEditing(MaterialSlotIndex)))
         {
             Result.Add(MaterialSlotIndex);
         }
@@ -2453,17 +2468,19 @@ void SWetClothingPartEditorPanel::RestorePersistedDataUVFailureState()
     FailedDataUVSlotIndices.Reset();
     LastDataUVUpdateError.Reset();
 
-    const UWetClothingAsset* Asset = WetClothingAsset.Get();
+    UWetClothingAsset* Asset = WetClothingAsset.Get();
     if (Asset == nullptr)
     {
         return;
     }
 
 #if WITH_EDITORONLY_DATA
+    // Deep refresh also detects in-place edits/reimports of the locked Original Mesh and
+    // persists every generated DWC UV slot as Failed until the user rebuilds it.
+    Asset->RefreshBakeState(true);
     for (const int32 MaterialSlotIndex : Asset->Derived.Inline.FailedDataUVMaterialSlotIndices)
     {
-        // A committed DWC UV Channel is authoritative and takes precedence over stale failure history.
-        if (MaterialSlotIndex != INDEX_NONE && !IsMaterialSlotIncludedInDataUVLayout(MaterialSlotIndex))
+        if (MaterialSlotIndex != INDEX_NONE)
         {
             FailedDataUVSlotIndices.Add(MaterialSlotIndex);
         }
@@ -2619,23 +2636,16 @@ FReply SWetClothingPartEditorPanel::HandleDataUVOperationClicked()
         TSet<int32> NewlyFailedSlots;
         for (const int32 FailedMaterialSlotIndex : BuildResult.FailedMaterialSlotIndices)
         {
-            if (TargetSlots.Contains(FailedMaterialSlotIndex) &&
-                !IsMaterialSlotIncludedInDataUVLayout(FailedMaterialSlotIndex))
+            if (TargetSlots.Contains(FailedMaterialSlotIndex))
             {
                 NewlyFailedSlots.Add(FailedMaterialSlotIndex);
             }
         }
-        // Global failures cannot identify a single slot. Only targets without committed DWC UV Channel
-        // become Failed; existing Warning data remains available and can be selected again.
+        // Global failures cannot identify a single slot, so every requested target remains Failed
+        // and retryable regardless of whether it previously had a committed layout.
         if (NewlyFailedSlots.IsEmpty())
         {
-            for (const int32 MaterialSlotIndex : TargetSlots)
-            {
-                if (!IsMaterialSlotIncludedInDataUVLayout(MaterialSlotIndex))
-                {
-                    NewlyFailedSlots.Add(MaterialSlotIndex);
-                }
-            }
+            NewlyFailedSlots.Append(TargetSlots);
         }
         FailedDataUVSlotIndices.Append(NewlyFailedSlots);
         LastDataUVUpdateError = BuildResult.Message;
@@ -4762,6 +4772,7 @@ bool SWetClothingPartEditorPanel::IsMaterialSlotDataUVReadyForEditing(const int3
     const UWetClothingAsset* Asset = WetClothingAsset.Get();
     if (Asset == nullptr ||
         MaterialSlotIndex == INDEX_NONE ||
+        FailedDataUVSlotIndices.Contains(MaterialSlotIndex) ||
         Asset->GetRuntimeSkeletalMesh() == nullptr ||
         !IsMaterialSlotIncludedInDataUVLayout(MaterialSlotIndex))
     {

@@ -73,7 +73,6 @@ bool FDWCPreparedMeshEditTransaction::CaptureEditableLOD(const int32 LODIndex, F
     Backup.LODIndex = LODIndex;
     Backup.MeshDescription = *MeshDescription;
     Backup.bHadMeshDescriptionBeforeCapture = bHadMeshDescriptionBeforeCapture;
-
     if (OutErrorMessage) OutErrorMessage->Reset();
     return true;
 }

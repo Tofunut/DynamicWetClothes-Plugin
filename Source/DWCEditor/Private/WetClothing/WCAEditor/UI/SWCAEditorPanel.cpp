@@ -4,6 +4,7 @@
 #include "DataAssets/WetClothingAsset.h"
 #include "Editor.h"
 #include "IDetailsView.h"
+#include "Misc/MessageDialog.h"
 #include "WetClothing/Foundation/Authoring/DWCEditorAuthoringDocument.h"
 #include "WetClothing/Foundation/Cache/DWCEditorCacheStore.h"
 #include "WetClothing/Foundation/Spatial/DWCEditorSpatialQueryService.h"
@@ -264,6 +265,12 @@ void SWCAEditorPanel::Construct(const FArguments& InArgs)
     RegisterActiveTimer(
         0.0,
         FWidgetActiveTimerDelegate::CreateSP(this, &SWCAEditorPanel::HandleTextureUploadTimer));
+    // Do not validate merely after a time delay: an active timer can run while the
+    // asset editor is still being assembled. Wait until this panel has actually been
+    // painted at least once, then show the warning on the following Slate tick.
+    RegisterActiveTimer(
+        0.0,
+        FWidgetActiveTimerDelegate::CreateSP(this, &SWCAEditorPanel::HandleInitialSourceMeshValidationTimer));
 
     PreBeginPIEHandle = FEditorDelegates::PreBeginPIE.AddSP(
         this,
@@ -271,6 +278,61 @@ void SWCAEditorPanel::Construct(const FArguments& InArgs)
     EndPIEHandle = FEditorDelegates::EndPIE.AddSP(
         this,
         &SWCAEditorPanel::HandleEndPIE);
+}
+
+int32 SWCAEditorPanel::OnPaint(
+    const FPaintArgs& Args,
+    const FGeometry& AllottedGeometry,
+    const FSlateRect& MyCullingRect,
+    FSlateWindowElementList& OutDrawElements,
+    int32 LayerId,
+    const FWidgetStyle& InWidgetStyle,
+    bool bParentEnabled) const
+{
+    const int32 Result = SCompoundWidget::OnPaint(
+        Args,
+        AllottedGeometry,
+        MyCullingRect,
+        OutDrawElements,
+        LayerId,
+        InWidgetStyle,
+        bParentEnabled);
+
+    // This flag is deliberately set only after the base widget has painted.
+    // The source-mesh warning timer waits for it, which guarantees the user sees
+    // the WCA editor itself before any modal warning is opened.
+    bHasCompletedInitialPaint = true;
+    return Result;
+}
+
+EActiveTimerReturnType SWCAEditorPanel::HandleInitialSourceMeshValidationTimer(double, float)
+{
+    if (!bHasCompletedInitialPaint)
+    {
+        return EActiveTimerReturnType::Continue;
+    }
+    UWetClothingAsset* Asset = WetClothingAsset.Get();
+    if (Asset == nullptr || !Asset->HasSourceMeshContentChanged())
+    {
+        return EActiveTimerReturnType::Stop;
+    }
+
+    // Use the public deep-validation entry point. This marks previously generated
+    // DWC UV slots Failed before the user acknowledges the warning, so the Part
+    // editor already reflects the invalid state.
+    Asset->RefreshBakeState(true);
+    RefreshFromAsset(false);
+
+    FMessageDialog::Open(
+        EAppMsgCategory::Warning,
+        EAppMsgType::Ok,
+        LOCTEXT(
+            "SourceMeshChangedAfterEditorOpen",
+            "The Original Mesh content has changed since the last successful DWC UV build.\n\n"
+            "Existing generated DWC UV material slots have been marked Failed because their prepared-mesh data no longer matches the current Original Mesh.\n\n"
+            "Open Part Edit and rebuild the Failed DWC UV slots before using Build for Runtime."));
+
+    return EActiveTimerReturnType::Stop;
 }
 
 EActiveTimerReturnType SWCAEditorPanel::HandleTextureUploadTimer(double, float)

@@ -71,6 +71,14 @@ public:
 
     virtual ~SWCAEditorPanel() override;
     void Construct(const FArguments& InArgs);
+    virtual int32 OnPaint(
+        const FPaintArgs& Args,
+        const FGeometry& AllottedGeometry,
+        const FSlateRect& MyCullingRect,
+        FSlateWindowElementList& OutDrawElements,
+        int32 LayerId,
+        const FWidgetStyle& InWidgetStyle,
+        bool bParentEnabled) const override;
 
     void RefreshFromAsset(bool bRebuildActiveModePreview = true);
     void RefreshStatusFromAsset();
@@ -95,6 +103,7 @@ private:
     TSharedRef<SWidget> EnsureModeWidget(EWCAEditorMode Mode);
     EActiveTimerReturnType HandleDeferredRefresh(double CurrentTime, float DeltaTime);
     EActiveTimerReturnType HandleStatusRefreshTimer(double CurrentTime, float DeltaTime);
+    EActiveTimerReturnType HandleInitialSourceMeshValidationTimer(double CurrentTime, float DeltaTime);
     EActiveTimerReturnType HandleTextureUploadTimer(double CurrentTime, float DeltaTime);
     void UpdateCachedStatus(bool bRefreshAssetState = true);
     void HandleAuthoringDocumentChanged(const FDWCEditorAuthoringChange& Change);
@@ -125,6 +134,7 @@ private:
     bool bRefreshPending = false;
     bool bPendingFullModeRefresh = false;
     bool bSuppressStatusChangedNotification = false;
+    mutable bool bHasCompletedInitialPaint = false;
     bool bHasActiveEditorMode = false;
     EWCAEditorMode ActiveEditorMode = EWCAEditorMode::PartEdit;
     int32 CachedIssueCount = 0;

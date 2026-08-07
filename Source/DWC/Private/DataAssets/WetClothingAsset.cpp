@@ -2855,12 +2855,22 @@ bool UWetClothingAsset::CommitInitialDataUVLayout(USkeletalMesh* InRuntimeMesh, 
         DWC::Error::SetMessage(OutErrorMessage, TEXT("The initial DWC UV Channel commit requires both metadata and Original UV topology payloads."));
         return false;
     }
+    const FString CurrentSourceMeshSignature = BuildMeshContentSignature(
+        Metadata.SourceSkeletalMesh,
+        RuntimeSimulationLODIndex,
+        Metadata.OriginalUVChannelIndex);
+    if (CurrentSourceMeshSignature.IsEmpty())
+    {
+        DWC::Error::SetMessage(OutErrorMessage, TEXT("Could not validate the current Original Mesh content before committing DWC UV data."));
+        return false;
+    }
     Metadata.DWCSkeletalMesh = InRuntimeMesh;
     Metadata.DWCDataUVChannelIndex = InDWCDataUVChannelIndex;
     Metadata.SetupSettings.PreferredDWCDataUVChannelIndex = InDWCDataUVChannelIndex;
     Derived.Inline.DataUVMetadata = MoveTemp(InMetadata);
     Derived.Inline.OriginalUVTopologies = MoveTemp(InTopologies);
     Metadata.bDataUVLayoutSealed = true;
+    Derived.Inline.SourceMeshSignature = CurrentSourceMeshSignature;
 
     Derived.Inline.BakeState.GeneratedDataUV = EDWCBakeStatus::Valid;Derived.Inline.BakeState.OriginalUVTopology = EDWCBakeStatus::Valid;
         MarkBakeOutputGenerated(DWCBakeOutput::GeneratedDataUV | DWCBakeOutput::OriginalUVTopology);
@@ -2904,6 +2914,15 @@ bool UWetClothingAsset::ReplaceDataUVLayout(
         DWC::Error::SetMessage(OutErrorMessage, TEXT("The rebuilt DWC UV Channel commit requires both metadata and Original UV topology payloads."));
         return false;
     }
+    const FString CurrentSourceMeshSignature = BuildMeshContentSignature(
+        Metadata.SourceSkeletalMesh,
+        RuntimeSimulationLODIndex,
+        Metadata.OriginalUVChannelIndex);
+    if (CurrentSourceMeshSignature.IsEmpty())
+    {
+        DWC::Error::SetMessage(OutErrorMessage, TEXT("Could not validate the current Original Mesh content before committing rebuilt DWC UV data."));
+        return false;
+    }
 
     Metadata.DWCSkeletalMesh = InRuntimeMesh;
     Metadata.DWCDataUVChannelIndex = InDWCDataUVChannelIndex;
@@ -2911,6 +2930,7 @@ bool UWetClothingAsset::ReplaceDataUVLayout(
     Derived.Inline.DataUVMetadata = MoveTemp(InMetadata);
     Derived.Inline.OriginalUVTopologies = MoveTemp(InTopologies);
     Metadata.bDataUVLayoutSealed = true;
+    Derived.Inline.SourceMeshSignature = CurrentSourceMeshSignature;
 
     Derived.Inline.BakeState.GeneratedDataUV = EDWCBakeStatus::Valid;
     Derived.Inline.BakeState.OriginalUVTopology = EDWCBakeStatus::Valid;
@@ -3103,6 +3123,40 @@ void UWetClothingAsset::SetLastBakeFailure(const FString& InFailure)
     Derived.Inline.BakeState.LastFailure = InFailure;
 }
 
+bool UWetClothingAsset::HasSourceMeshContentChanged(FString* OutCurrentSignature) const
+{
+#if WITH_EDITORONLY_DATA
+    const USkeletalMesh* SourceMesh = GetSourceSkeletalMesh();
+    if (SourceMesh == nullptr || Derived.Inline.SourceMeshSignature.IsEmpty())
+    {
+        if (OutCurrentSignature != nullptr)
+        {
+            OutCurrentSignature->Reset();
+        }
+        return false;
+    }
+
+    const FString CurrentSignature = BuildMeshContentSignature(
+        SourceMesh,
+        RuntimeSimulationLODIndex,
+        Metadata.OriginalUVChannelIndex);
+    if (OutCurrentSignature != nullptr)
+    {
+        *OutCurrentSignature = CurrentSignature;
+    }
+
+    // An unreadable signature is treated as changed once a baseline exists. This keeps
+    // previously generated DWC UV data from silently remaining usable after source edits.
+    return CurrentSignature.IsEmpty() || CurrentSignature != Derived.Inline.SourceMeshSignature;
+#else
+    if (OutCurrentSignature != nullptr)
+    {
+        OutCurrentSignature->Reset();
+    }
+    return false;
+#endif
+}
+
 void UWetClothingAsset::SetCPURuntimeDataStatus(const EDWCBakeStatus InStatus, const FString& InFailure)
 {
     Derived.Inline.BakeState.CPURuntimeData = InStatus;
@@ -3205,6 +3259,64 @@ void UWetClothingAsset::RefreshBakeStateInternal(const bool bRunDeepValidation)
     };
 
     const bool bHasWettableSlots = HasAnyWettableMaterialSlot();
+
+    // The Original Mesh reference is write-once, but Unreal can still reimport or edit the
+    // referenced Skeletal Mesh in place. Deep validation compares the current source content
+    // against the signature accepted by the last successful DWC UV build. If it changed, every
+    // generated DWC UV material slot becomes Failed and remains retryable.
+    const bool bSourceMeshContentChanged = bRunDeepValidation && HasSourceMeshContentChanged();
+    if (bSourceMeshContentChanged)
+    {
+#if WITH_EDITORONLY_DATA
+        TSet<int32> FailedGeneratedSlots;
+        for (const int32 ExistingFailedSlot : Derived.Inline.FailedDataUVMaterialSlotIndices)
+        {
+            if (ExistingFailedSlot != INDEX_NONE)
+            {
+                FailedGeneratedSlots.Add(ExistingFailedSlot);
+            }
+        }
+        bool bNeedsLegacyFallback = false;
+        for (const FDWCDataUVLODMetadata& LODMetadata : Derived.Inline.DataUVMetadata)
+        {
+            if (LODMetadata.GeneratedMaterialSlotIndices.IsEmpty())
+            {
+                bNeedsLegacyFallback = true;
+                continue;
+            }
+            for (const int32 MaterialSlotIndex : LODMetadata.GeneratedMaterialSlotIndices)
+            {
+                if (MaterialSlotIndex != INDEX_NONE)
+                {
+                    FailedGeneratedSlots.Add(MaterialSlotIndex);
+                }
+            }
+        }
+
+        if (bNeedsLegacyFallback)
+        {
+            for (const FWetClothingAuthoredMaterialSlot& Slot : Authored.PartData.EditableWetPartData.MaterialSlots)
+            {
+                if (Slot.bIsWettableSlot && Slot.MaterialSlotIndex != INDEX_NONE)
+                {
+                    FailedGeneratedSlots.Add(Slot.MaterialSlotIndex);
+                }
+            }
+        }
+
+        TArray<int32> NewFailedSlots = FailedGeneratedSlots.Array();
+        NewFailedSlots.Sort();
+        if (Derived.Inline.FailedDataUVMaterialSlotIndices != NewFailedSlots)
+        {
+            Derived.Inline.FailedDataUVMaterialSlotIndices = MoveTemp(NewFailedSlots);
+            MarkPackageDirty();
+        }
+        Derived.Inline.LastDataUVGenerationFailure = TEXT(
+            "The Original Mesh content changed after DWC UV generation. Existing DWC UV slots are invalid and must be rebuilt.");
+        Derived.Inline.BakeState.LastFailure = Derived.Inline.LastDataUVGenerationFailure;
+#endif
+    }
+
     USkeletalMesh* RuntimeMesh = GetRuntimeSkeletalMesh();
     auto IsDataUVMetadataCurrent = [this, RuntimeMesh, bRunDeepValidation](const int32 LODIndex)
     {
@@ -3230,9 +3342,11 @@ void UWetClothingAsset::RefreshBakeStateInternal(const bool bRunDeepValidation)
     const bool bDataUVMetadataValid = bRunDeepValidation
         ? DoesMappedLODRangeHavePayload(RuntimeMesh, Metadata.SetupSettings, IsDataUVMetadataCurrent)
         : DoesSavedDataUVLODRangeHavePayload(Metadata.SetupSettings, Derived.Inline.DataUVMetadata, IsDataUVMetadataCurrent);
-    Derived.Inline.BakeState.GeneratedDataUV = bDataUVMetadataValid
-                                     ? EDWCBakeStatus::Valid
-                                     : (!Derived.Inline.DataUVMetadata.IsEmpty() ? EDWCBakeStatus::OutOfDate : EDWCBakeStatus::Required);
+    Derived.Inline.BakeState.GeneratedDataUV = bSourceMeshContentChanged
+                                     ? EDWCBakeStatus::Failed
+                                     : (bDataUVMetadataValid
+                                            ? EDWCBakeStatus::Valid
+                                            : (!Derived.Inline.DataUVMetadata.IsEmpty() ? EDWCBakeStatus::OutOfDate : EDWCBakeStatus::Required));
 
     const int32 CanonicalTopologyLODIndex = RuntimeSimulationLODIndex;
     bool bTopologyValid = false;
@@ -3251,9 +3365,11 @@ void UWetClothingAsset::RefreshBakeStateInternal(const bool bRunDeepValidation)
             bTopologyValid = !CurrentTopologySignature.IsEmpty() && Topology->BuildSignature == CurrentTopologySignature;
         }
     }
-    Derived.Inline.BakeState.OriginalUVTopology = bTopologyValid
-                                       ? EDWCBakeStatus::Valid
-                                       : (!Derived.Inline.OriginalUVTopologies.IsEmpty() ? EDWCBakeStatus::OutOfDate : EDWCBakeStatus::Required);
+    Derived.Inline.BakeState.OriginalUVTopology = bSourceMeshContentChanged
+                                       ? EDWCBakeStatus::Failed
+                                       : (bTopologyValid
+                                              ? EDWCBakeStatus::Valid
+                                              : (!Derived.Inline.OriginalUVTopologies.IsEmpty() ? EDWCBakeStatus::OutOfDate : EDWCBakeStatus::Required));
 
     if (!bHasWettableSlots)
     {

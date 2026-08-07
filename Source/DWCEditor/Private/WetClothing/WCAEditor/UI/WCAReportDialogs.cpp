@@ -656,7 +656,7 @@ namespace
             {
             case EDWCDataUVSlotLODResultState::NotPresent:
                 Display.Status = EDataUVSlotLODStatus::NotPresent;
-                Display.StatusText = LOCTEXT("DWCDataUVDetailsNotPresent", "Not Present");
+                Display.StatusText = LOCTEXT("DWCDataUVDetailsNotPresent", "Not Used in This LOD");
                 Display.IconName = TEXT("Icons.InfoWithColor");
                 Display.IconColor = DataUVInfoColor();
                 Display.TextColor = FSlateColor(FStyleColors::ForegroundHover);
@@ -1178,7 +1178,7 @@ namespace
                     SNew(STextBlock)
                     .Text(LOCTEXT(
                         "DWCDataUVDetailsLegacyFailureMessage",
-                        "The latest DWC UV build failed for this material slot, but no slot-specific LOD diagnostic was recorded."))
+                        "DWC could not finalize this material slot. DWC UV channels are created automatically on the Prepared Mesh; no manual DWC UV channel is required on the Source Mesh."))
                     .AutoWrapText(true)
                     .Font(MakeReportFont())
                     .ColorAndOpacity(ErrorColor())
@@ -1842,7 +1842,7 @@ namespace
             .AutoHeight()
             [
                 SNew(STextBlock)
-                .Text(LOCTEXT("DWCDataUVFailureLODStatusHeading", "LOD Generation Status"))
+                .Text(LOCTEXT("DWCDataUVFailureLODStatusHeading", "LOD Build Status"))
                 .Font(MakeReportFont(10, true))
             ]
             + SVerticalBox::Slot()
@@ -1924,7 +1924,7 @@ namespace
         .Padding(0.0f, 8.0f, 0.0f, 0.0f)
         [
             SNew(STextBlock)
-            .Text(LOCTEXT("DWCDataUVFailureNoResult", "Result: No usable DWC UV channel was generated."))
+            .Text(LOCTEXT("DWCDataUVFailureNoResult", "Result: DWC UV changes were not committed to the Prepared Mesh."))
             .Font(MakeReportFont(10, true))
             .ColorAndOpacity(ErrorColor())
         ];
@@ -2455,7 +2455,7 @@ namespace WCAReportDialogs
 
         TSharedRef<SWindow> DialogWindow =
             SNew(SWindow)
-            .Title(LOCTEXT("DWCDataUVFailureTitle", "DWC UV Channel Generation Failed"))
+            .Title(LOCTEXT("DWCDataUVFailureTitle", "DWC UV Build Failed"))
             .ClientSize(FVector2D(720.0f, 520.0f))
             .SizingRule(ESizingRule::UserSized)
             .SupportsMaximize(true)
@@ -2488,7 +2488,7 @@ namespace WCAReportDialogs
                         .AutoHeight()
                         [
                             SNew(STextBlock)
-                            .Text(LOCTEXT("DWCDataUVFailureHeader", "DWC UV Channel Generation Failed"))
+                            .Text(LOCTEXT("DWCDataUVFailureHeader", "DWC UV Build Failed"))
                             .Font(MakeReportFont(10, true))
                             .ColorAndOpacity(ErrorColor())
                         ]
@@ -2507,7 +2507,7 @@ namespace WCAReportDialogs
                                         "LOD0 generation failed, so no usable DWC UV channel was generated.")
                                     : LOCTEXT(
                                         "DWCDataUVFailureGenericSummary",
-                                        "DWC UV data could not be generated. No usable DWC UV channel was created."))
+                                        "DWC could not finalize the Prepared Mesh UV data. The Source Mesh was not modified, and no manual DWC UV channel setup is required."))
                             .AutoWrapText(true)
                             .Font(MakeReportFont())
                             .ColorAndOpacity(FSlateColor(FStyleColors::ForegroundHover))

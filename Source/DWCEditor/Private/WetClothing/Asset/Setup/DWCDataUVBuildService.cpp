@@ -329,8 +329,10 @@ FDWCDataUVBuildResult FDWCDataUVBuildService::Generate(
     FDWCDataUVBuildResult Result;
     USkeletalMesh* TouchedMesh = Asset.GetRuntimeSkeletalMesh();
     const bool bReplacingExistingLayout = Asset.HasLockedDataUVLayout();
+    const bool bSourceMeshContentChanged = Asset.HasSourceMeshContentChanged();
+    const bool bEffectiveForceNewAsset = bForceNewAsset || bSourceMeshContentChanged;
     const bool bMergeWithExistingLayout =
-        Options != nullptr && Options->bMergeWithExistingLayout && bReplacingExistingLayout;
+        Options != nullptr && Options->bMergeWithExistingLayout && bReplacingExistingLayout && !bSourceMeshContentChanged;
     const bool bRequireAllMaterialSlots =
         Options != nullptr && Options->bRequireAllMaterialSlots;
     const TSet<int32>* ConfirmedVisibleExclusionMaterialSlotIndices =
@@ -363,7 +365,7 @@ FDWCDataUVBuildResult FDWCDataUVBuildService::Generate(
     // Cheap ownership/path validation must finish before invalidation, progress UI,
     // project-wide recovery, or UV analysis begins.
     const FDWCPreparedMeshPreflightResult PreparedMeshPreflight =
-        FDWCPreparedMeshResolver::Preflight(Asset, bForceNewAsset);
+        FDWCPreparedMeshResolver::Preflight(Asset, bEffectiveForceNewAsset);
     if (!PreparedMeshPreflight.bCanProceed)
     {
         SetFailure(Result, PreparedMeshPreflight.ErrorMessage.IsEmpty()
@@ -374,7 +376,7 @@ FDWCDataUVBuildResult FDWCDataUVBuildService::Generate(
 
     const FDWCPreparedMeshResolveResult ResolveResult = FDWCPreparedMeshResolver::Resolve(
         Asset,
-        bForceNewAsset);
+        bEffectiveForceNewAsset);
     USkeletalMesh* PreparedMesh = ResolveResult.Mesh;
     TouchedMesh = PreparedMesh != nullptr ? PreparedMesh : TouchedMesh;
     if (PreparedMesh == nullptr)
@@ -994,8 +996,8 @@ FDWCDataUVBuildResult FDWCDataUVBuildService::Generate(
         }
     }
 
-    // Commit each changed LOD once, then trigger one skeletal-mesh rebuild instead of
-    // SlotCount x LODCount commits and PostEditChange calls.
+    // Commit each changed LOD once, then trigger one skeletal-mesh render-data rebuild instead
+    // of SlotCount x LODCount commits and PostEditChange calls.
     TArray<int32> SortedModifiedLODIndices = ModifiedLODIndices.Array();
     SortedModifiedLODIndices.Sort();
     for (const int32 LODIndex : SortedModifiedLODIndices)
@@ -1126,10 +1128,67 @@ FDWCDataUVBuildResult FDWCDataUVBuildService::Generate(
             Result.GeneratedMaterialSlotIndices.Reset();
             Result.FailedMaterialSlotIndices = WettableMaterialSlotIndices;
             Result.FailureLODIndex = LODIndex;
-            SetFailure(Result, FString::Printf(
-                TEXT("LOD%d generated invalid DWC UV Channel metadata: %s"),
-                LODIndex,
-                *MetadataError));
+
+            const bool bMissingGeneratedChannel =
+                MetadataError.Contains(TEXT("does not contain DWC UV Channel"));
+            const FString SlotFailureMessage = bMissingGeneratedChannel
+                ? FString::Printf(
+                    TEXT("DWC created UV%d for LOD%d, but the Prepared Mesh rebuild did not retain that channel. The Source Mesh does not need a manually created DWC UV channel."),
+                    DataUVChannelIndex,
+                    LODIndex)
+                : FString::Printf(
+                    TEXT("LOD%d DWC UV final validation failed: %s"),
+                    LODIndex,
+                    *MetadataError);
+
+            // Final metadata validation happens after the per-slot generation records were
+            // produced. Propagate the failure back into those records so the UI reports the
+            // actual failing LOD instead of a generic missing-diagnostic message.
+            for (FDWCDataUVSlotLODResult& Record : Result.SlotLODResults)
+            {
+                if (!SuccessfulMaterialSlotIndices.Contains(Record.MaterialSlotIndex) ||
+                    Record.State != EDWCDataUVSlotLODResultState::Ready)
+                {
+                    continue;
+                }
+
+                if (Record.LODIndex < LODIndex)
+                {
+                    Record.State = EDWCDataUVSlotLODResultState::NotCommitted;
+                    Record.Message = TEXT("Generated successfully, but the DWC UV build was rolled back because a later LOD failed final validation.");
+                }
+                else if (Record.LODIndex == LODIndex)
+                {
+                    Record.State = EDWCDataUVSlotLODResultState::Failed;
+                    Record.Message = SlotFailureMessage;
+                }
+                else
+                {
+                    Record.State = EDWCDataUVSlotLODResultState::NotGenerated;
+                    Record.Message = TEXT("Not committed because an earlier LOD failed final validation.");
+                }
+            }
+
+            if (bMissingGeneratedChannel)
+            {
+                SetFailure(Result, FString::Printf(
+                    TEXT("DWC could not finalize the Prepared Mesh for LOD%d because the generated UV channel was not retained during the render-data rebuild. Source Mesh UV setup is not required. Technical detail: %s"),
+                    LODIndex,
+                    *MetadataError));
+            }
+            else
+            {
+                SetFailure(Result, FString::Printf(
+                    TEXT("LOD%d generated invalid DWC UV Channel metadata: %s"),
+                    LODIndex,
+                    *MetadataError));
+            }
+#if WITH_EDITORONLY_DATA
+            PersistLastSlotLODResults(Asset, Result, bMergeWithExistingLayout);
+            RefreshPersistedFailedSlots(Asset);
+            Asset.Derived.Inline.LastDataUVGenerationFailure = Result.Message;
+            Asset.MarkPackageDirty();
+#endif
             return Result;
         }
 

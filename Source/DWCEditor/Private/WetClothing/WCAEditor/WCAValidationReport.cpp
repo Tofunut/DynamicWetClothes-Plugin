@@ -852,7 +852,9 @@ FWCAValidationReport BuildWCAValidationReport(
 {
     FWCAValidationReport Report;
 #if WITH_EDITORONLY_DATA
-    if (bRefreshAssetState)
+    const bool bSourceMeshContentChangedBeforeRefresh =
+        Mode == EWCAValidationMode::Deep && Asset.HasSourceMeshContentChanged();
+    if (bRefreshAssetState || bSourceMeshContentChangedBeforeRefresh)
     {
         Asset.RefreshBakeState(Mode == EWCAValidationMode::Deep);
     }
@@ -917,12 +919,24 @@ FWCAValidationReport BuildWCAValidationReport(
     };
 
     const bool bDataUVLayoutLocked = Asset.HasLockedDataUVLayout();
+    const bool bSourceMeshContentChanged =
+        bSourceMeshContentChangedBeforeRefresh ||
+        (Mode == EWCAValidationMode::Deep && Asset.HasSourceMeshContentChanged());
     if (IsActionRequiredStatus(State.GeneratedDataUV))
     {
-        const FDataUVLayoutDiagnosis Diagnosis = DiagnoseDataUVLayout(
+        FDataUVLayoutDiagnosis Diagnosis = DiagnoseDataUVLayout(
             Asset,
             State.GeneratedDataUV,
             Mode == EWCAValidationMode::Deep);
+        if (bSourceMeshContentChanged)
+        {
+            Diagnosis.Detail = TEXT(
+                "Original Mesh content changed after the last successful DWC UV build. Existing generated DWC UV material slots were marked Failed because their prepared-mesh data no longer represents the current Original Mesh.");
+            Diagnosis.RequiredAction = NSLOCTEXT(
+                "WCAValidationReport",
+                "DWCDataUVSourceMeshChangedAction",
+                "Open Part Edit and rebuild the Failed DWC UV slots. DWC will recreate the Prepared Mesh from the current Original Mesh and accept the new source signature only after a successful rebuild.");
+        }
         AddIssue(
             Report,
             TEXT("DWCDataUV"),
@@ -945,9 +959,11 @@ FWCAValidationReport BuildWCAValidationReport(
         State.OriginalUVTopology,
         EWCAValidationSection::DataUV,
         bDataUVLayoutLocked ? EWCAValidationFixKind::Manual : EWCAValidationFixKind::InitializeDataUV,
-        bDataUVLayoutLocked
-            ? NSLOCTEXT("WCAValidationReport", "OriginalUVTopologyLockedAction", "Original UV island topology is locked. Create a new WCA to generate different topology.")
-            : NSLOCTEXT("WCAValidationReport", "OriginalUVTopologyInitializeAction", "Initialize the prepared mesh UV layout and Original UV topology."),
+        bSourceMeshContentChanged
+            ? NSLOCTEXT("WCAValidationReport", "OriginalUVTopologySourceChangedAction", "Rebuild the Failed DWC UV slots to regenerate Original UV topology from the current Original Mesh.")
+            : (bDataUVLayoutLocked
+                ? NSLOCTEXT("WCAValidationReport", "OriginalUVTopologyLockedAction", "Original UV island topology is locked unless the Original Mesh content changed and requires an explicit DWC UV rebuild.")
+                : NSLOCTEXT("WCAValidationReport", "OriginalUVTopologyInitializeAction", "Initialize the prepared mesh UV layout and Original UV topology.")),
         FString::Printf(TEXT("Original UV Topology: %s.%s"),
             *BakeStatusToString(State.OriginalUVTopology),
             bDataUVLayoutLocked ? TEXT(" The stored island identities are immutable") : TEXT("")));

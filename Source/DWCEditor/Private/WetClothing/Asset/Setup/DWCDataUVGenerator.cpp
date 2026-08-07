@@ -189,6 +189,7 @@ namespace DWCDataUVGeneratorInternal
 
     static int32 ResolveMaterialSlotIndex(
         const USkeletalMesh* SkeletalMesh,
+        const int32 LODIndex,
         const FMeshDescription& MeshDescription,
         FSkeletalMeshAttributes& Attributes,
         FTriangleID TriangleID,
@@ -201,41 +202,58 @@ namespace DWCDataUVGeneratorInternal
         }
 
         const FPolygonGroupID PolygonGroupID = MeshDescription.GetPolygonPolygonGroup(PolygonID);
-        int32 FallbackIndex = PolygonGroupID.GetValue();
+        if (!IsValidElementID(PolygonGroupID))
+        {
+            return INDEX_NONE;
+        }
+
+        const int32 LODLocalMaterialIndex = PolygonGroupID.GetValue();
+        if (SkeletalMesh == nullptr)
+        {
+            return LODLocalMaterialIndex;
+        }
+
+        const TArray<FSkeletalMaterial>& Materials = SkeletalMesh->GetMaterials();
+
+        // Imported/custom LODs can use a compact local material/section index that is
+        // remapped to the Skeletal Mesh's global material-slot index through LODMaterialMap.
+        // DWC authoring is keyed by global material-slot index, so apply that remap before
+        // falling back to polygon-group names or the local index.
+        if (const FSkeletalMeshLODInfo* LODInfo = SkeletalMesh->GetLODInfo(LODIndex))
+        {
+            if (LODInfo->LODMaterialMap.IsValidIndex(LODLocalMaterialIndex))
+            {
+                const int32 RemappedMaterialSlotIndex = LODInfo->LODMaterialMap[LODLocalMaterialIndex];
+                if (Materials.IsValidIndex(RemappedMaterialSlotIndex))
+                {
+                    return RemappedMaterialSlotIndex;
+                }
+            }
+        }
 
         const auto MaterialSlotNames = Attributes.GetPolygonGroupMaterialSlotNames();
-        const FName PolygonGroupMaterialName = IsValidElementID(PolygonGroupID) ? MaterialSlotNames[PolygonGroupID] : NAME_None;
+        const FName PolygonGroupMaterialName = MaterialSlotNames[PolygonGroupID];
         if (MaterialSlotIndexByNameOverride != nullptr)
         {
             if (const int32* ResolvedIndex = MaterialSlotIndexByNameOverride->Find(PolygonGroupMaterialName))
             {
                 return *ResolvedIndex;
             }
-            return SkeletalMesh != nullptr && SkeletalMesh->GetMaterials().IsValidIndex(FallbackIndex)
-                ? FallbackIndex
-                : INDEX_NONE;
         }
-
-        if (SkeletalMesh == nullptr || !IsValidElementID(PolygonGroupID))
-        {
-            return FallbackIndex;
-        }
-
-        const TArray<FSkeletalMaterial>& Materials = SkeletalMesh->GetMaterials();
-
-        if (!PolygonGroupMaterialName.IsNone())
+        else if (!PolygonGroupMaterialName.IsNone())
         {
             for (int32 MaterialIndex = 0; MaterialIndex < Materials.Num(); ++MaterialIndex)
             {
                 const FSkeletalMaterial& Material = Materials[MaterialIndex];
-                if (Material.MaterialSlotName == PolygonGroupMaterialName || Material.ImportedMaterialSlotName == PolygonGroupMaterialName)
+                if (Material.MaterialSlotName == PolygonGroupMaterialName ||
+                    Material.ImportedMaterialSlotName == PolygonGroupMaterialName)
                 {
                     return MaterialIndex;
                 }
             }
         }
 
-        return Materials.IsValidIndex(FallbackIndex) ? FallbackIndex : INDEX_NONE;
+        return Materials.IsValidIndex(LODLocalMaterialIndex) ? LODLocalMaterialIndex : INDEX_NONE;
     }
 
     struct FDataUVTransferSourceTriangle
@@ -781,6 +799,7 @@ FDWCDataUVGenerationResult FDWCDataUVGenerator::GenerateForSkeletalMesh(
     {
         const int32 MaterialSlotIndex = ResolveMaterialSlotIndex(
             SkeletalMesh,
+            LODIndex,
             *MeshDescription,
             Attributes,
             TriangleID,

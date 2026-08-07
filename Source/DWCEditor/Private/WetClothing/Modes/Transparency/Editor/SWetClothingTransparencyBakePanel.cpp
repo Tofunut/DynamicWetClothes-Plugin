@@ -3019,21 +3019,24 @@ TSharedRef<ITableRow> SWetClothingTransparencyBakePanel::GenerateLayerRow(FLayer
 
     const FDWCEditorPreviewSlotState* PreviewState = Item.IsValid() ? FindPreviewSlotState(Item->MaterialSlotIndex) : nullptr;
     const bool bPreviewReady = PreviewState != nullptr && PreviewState->bPreviewReady;
-    const FText PreviewTooltip = PreviewState != nullptr ? FDWCEditorPreviewSlotResolver::GetIssueText(PreviewState->Issue) : FText::GetEmpty();
 
+    // Unavailable target rows remain clickable so selecting one can explain
+    // exactly how to resolve the prerequisite. Keep the disabled appearance
+    // through render opacity instead of SWidget::IsEnabled(false), which would
+    // swallow the selection input before the warning dialog can be shown.
     return SNew(STableRow<FLayerItemPtr>, Owner)
         .Padding(FMargin(2.0f, 3.0f))
-        .IsEnabled(bPreviewReady)
-        .ToolTipText(PreviewTooltip)
-        [SNew(SHorizontalBox)
-         + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
-           [SNew(SBox).WidthOverride(48.0f).HAlign(HAlign_Center)
-            [SNew(STextBlock).Text(Item.IsValid() ? FText::AsNumber(Item->MaterialSlotIndex) : FText::FromString(TEXT("-"))).Font(FAppStyle::GetFontStyle(TEXT("NormalFontBold")))]]
-         + SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center).Padding(8.0f,0.0f)
-           [SNew(STextBlock).Text(Item.IsValid() ? FText::FromName(Item->MaterialSlotName) : LOCTEXT("MissingTransparencyTargetPart", "Missing Target Part")).Font(FAppStyle::GetFontStyle(TEXT("NormalFontBold"))).OverflowPolicy(ETextOverflowPolicy::Ellipsis)]
-         + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
-           [SNew(SBox).WidthOverride(64.0f).HeightOverride(52.0f).HAlign(HAlign_Center).VAlign(VAlign_Center)
-            [SNew(SBox).WidthOverride(48.0f).HeightOverride(48.0f)[ThumbnailWidget]]]];
+        [SNew(SBox)
+         .RenderOpacity(bPreviewReady ? 1.0f : 0.45f)
+         [SNew(SHorizontalBox)
+          + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+            [SNew(SBox).WidthOverride(48.0f).HAlign(HAlign_Center)
+             [SNew(STextBlock).Text(Item.IsValid() ? FText::AsNumber(Item->MaterialSlotIndex) : FText::FromString(TEXT("-"))).Font(FAppStyle::GetFontStyle(TEXT("NormalFontBold")))]]
+          + SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center).Padding(8.0f,0.0f)
+            [SNew(STextBlock).Text(Item.IsValid() ? FText::FromName(Item->MaterialSlotName) : LOCTEXT("MissingTransparencyTargetPart", "Missing Target Part")).Font(FAppStyle::GetFontStyle(TEXT("NormalFontBold"))).OverflowPolicy(ETextOverflowPolicy::Ellipsis)]
+          + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+            [SNew(SBox).WidthOverride(64.0f).HeightOverride(52.0f).HAlign(HAlign_Center).VAlign(VAlign_Center)
+             [SNew(SBox).WidthOverride(48.0f).HeightOverride(48.0f)[ThumbnailWidget]]]]];
 }
 
 void SWetClothingTransparencyBakePanel::HandleLayerSelectionChanged(FLayerItemPtr Item, ESelectInfo::Type)
@@ -3062,6 +3065,60 @@ void SWetClothingTransparencyBakePanel::HandleLayerSelectionChanged(FLayerItemPt
         return;
     }
 
+    // Stage 2 deliberately keeps unavailable Wettable rows clickable. Rather
+    // than hiding the reason in a tooltip, explain the prerequisite when the
+    // user selects the row and keep the previous valid selection unchanged.
+    if (!PreviewSlotStates.IsReady(Item->MaterialSlotIndex))
+    {
+        const FDWCEditorPreviewSlotState* State = FindPreviewSlotState(Item->MaterialSlotIndex);
+        FText WarningMessage;
+        if (State != nullptr)
+        {
+            switch (State->Issue)
+            {
+            case EDWCEditorPreviewSlotIssue::WetPartDataMissing:
+            case EDWCEditorPreviewSlotIssue::WetPartDataOutOfDate:
+            case EDWCEditorPreviewSlotIssue::SlotTextureMissing:
+            case EDWCEditorPreviewSlotIssue::SlotTextureOutOfDate:
+                WarningMessage = LOCTEXT(
+                    "TransparencyWetPartDataRequiredDialog",
+                    "This material slot is not ready for Transparency editing because its Wet Part Data is missing or out of date.\n\nUse Build for Runtime > Bake Render Profile Lookup Texture, then try again.");
+                break;
+            case EDWCEditorPreviewSlotIssue::MissingDataUV:
+                WarningMessage = LOCTEXT(
+                    "TransparencyDataUVRequiredDialog",
+                    "This material slot does not have usable DWC UV data. Build the DWC UV for this slot in Wet Part mode, then try again.");
+                break;
+            default:
+                WarningMessage = FDWCEditorPreviewSlotResolver::GetIssueText(State->Issue);
+                break;
+            }
+        }
+        else
+        {
+            WarningMessage = LOCTEXT(
+                "TransparencyTargetUnavailableDialog",
+                "This material slot is not available for Transparency editing.");
+        }
+
+        FMessageDialog::Open(EAppMsgType::Ok, WarningMessage);
+
+        if (LayerListView.IsValid())
+        {
+            const FLayerItemPtr* PreviousItem = LayerItems.FindByPredicate(
+                [this](const FLayerItemPtr& Candidate)
+                {
+                    return Candidate.IsValid() && Candidate->LayerGuid == SelectedLayerGuid;
+                });
+            bRefreshingLayerSelection = true;
+            PreviousItem != nullptr
+                ? LayerListView->SetSelection(*PreviousItem, ESelectInfo::Direct)
+                : LayerListView->ClearSelection();
+            bRefreshingLayerSelection = false;
+        }
+        return;
+    }
+
     const int32 DataUVChannel = GetTransparencyDataUVChannel();
     if (!Item->LayerGuid.IsValid())
     {
@@ -3077,16 +3134,6 @@ void SWetClothingTransparencyBakePanel::HandleLayerSelectionChanged(FLayerItemPt
             PanelStatus = EDWCTransparencyPanelStatus::Warning;
             return;
         }
-        if (!PreviewSlotStates.IsReady(Item->MaterialSlotIndex))
-        {
-            const FDWCEditorPreviewSlotState* State = FindPreviewSlotState(Item->MaterialSlotIndex);
-            StatusMessage = State != nullptr
-                ? FDWCEditorPreviewSlotResolver::GetIssueText(State->Issue).ToString()
-                : TEXT("The selected material slot is unavailable for preview.");
-            PanelStatus = EDWCTransparencyPanelStatus::Warning;
-            return;
-        }
-
         const FGuid NewLayerGuid = FGuid::NewGuid();
         FDWCEditorAuthoringChange Change;
         Change.Domain = EDWCEditorAuthoringDomain::Transparency;
@@ -3566,14 +3613,40 @@ TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildTransparencyLayersSe
           [SNew(SBox)
             .HeightOverride_Lambda([this]()
             {
+                // Give the Stage 2 empty state enough room to read as an
+                // intentional instruction instead of an empty one-row list.
+                if (LayerItems.IsEmpty())
+                {
+                    return 112.0f;
+                }
+
                 // Keep Stage 2 compact when only a few target parts exist.
                 // The list starts scrolling only after four rows instead of reserving a large empty panel.
                 return FMath::Clamp(static_cast<float>(LayerItems.Num()) * 56.0f, 56.0f, 224.0f);
             })
-            [SAssignNew(LayerListView, SListView<FLayerItemPtr>)
-                .ListItemsSource(&LayerItems)
-                .OnGenerateRow(this, &SWetClothingTransparencyBakePanel::GenerateLayerRow)
-                .OnSelectionChanged(this, &SWetClothingTransparencyBakePanel::HandleLayerSelectionChanged)]]
+            [SNew(SOverlay)
+             + SOverlay::Slot()
+               [SAssignNew(LayerListView, SListView<FLayerItemPtr>)
+                    .ListItemsSource(&LayerItems)
+                    .OnGenerateRow(this, &SWetClothingTransparencyBakePanel::GenerateLayerRow)
+                    .OnSelectionChanged(this, &SWetClothingTransparencyBakePanel::HandleLayerSelectionChanged)]
+             + SOverlay::Slot()
+               .HAlign(HAlign_Center)
+               .VAlign(VAlign_Center)
+               .Padding(16.0f)
+               [SNew(STextBlock)
+                    .Text(LOCTEXT(
+                        "NoTransparencyWettableMaterialSlots",
+                        "No Wettable material slots.\nEnable a slot in WetPart mode first."))
+                    .Justification(ETextJustify::Center)
+                    .AutoWrapText(true)
+                    .ColorAndOpacity(FSlateColor::UseSubduedForeground())
+                    .Visibility_Lambda([this]()
+                    {
+                        return LayerItems.IsEmpty()
+                            ? EVisibility::HitTestInvisible
+                            : EVisibility::Collapsed;
+                    })]]]
         ;
 }
 

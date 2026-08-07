@@ -90,13 +90,14 @@ struct DWC_API FWCADerivedInlineData
     UPROPERTY(VisibleAnywhere, Category = "Wet Clothing|Bake Status", meta = (ShowOnlyInnerProperties))
     FDWCAssetBakeState BakeState;
 
+    /** Original Mesh content accepted at WCA creation or the last successful DWC UV rebuild. */
     UPROPERTY(VisibleAnywhere, Category = "Wet Clothing|Mesh")
     FString SourceMeshSignature;
 
     UPROPERTY(VisibleAnywhere, Category = "Wet Clothing|Validation")
     FDWCTriangleValidationSummary ValidationSummary;
 
-    /** Material slots whose latest explicit DWC UV Channel generation attempt failed. */
+    /** Material slots whose DWC UV data is invalid, including build failures and Original Mesh content changes. */
     UPROPERTY(VisibleAnywhere, Category = "Wet Clothing|DWC UV Channel")
     TArray<int32> FailedDataUVMaterialSlotIndices;
 
@@ -240,6 +241,8 @@ class DWC_API UWetClothingAsset : public UDataAsset
     void MarkWrinkleBakeOutOfDate();
     void MarkVisualBakeOutOfDate();
     void SetLastBakeFailure(const FString& InFailure);
+    /** Returns true when the referenced Original Mesh no longer matches the content signature accepted by this WCA. */
+    bool HasSourceMeshContentChanged(FString* OutCurrentSignature = nullptr) const;
     void SetCPURuntimeDataStatus(EDWCBakeStatus InStatus, const FString& InFailure = FString());
     void SetGPURuntimeDataStatus(EDWCBakeStatus InStatus, const FString& InFailure = FString());
     void SetGPUMapBakeStatus(EDWCBakeStatus InStatus, const FString& InFailure = FString());

@@ -384,21 +384,24 @@ namespace
             MinRenderableDropletRadiusPixels,
             TEXT("Droplet1 height"),
             OutChanges);
-        bChanged |= ClampRenderableFloat(
-            Surface.DropletFlowSpawnProbability,
-            MinRenderableDropletSpawnProbability,
-            TEXT("Droplet2 spawn chance"),
-            OutChanges);
-        bChanged |= ClampRenderableFloat(
-            Surface.DropletFlowRadiusPixels,
-            MinRenderableDropletRadiusPixels,
-            TEXT("Droplet2 width"),
-            OutChanges);
-        bChanged |= ClampRenderableFloat(
-            Surface.DropletFlowHeightPixels,
-            MinRenderableDropletRadiusPixels,
-            TEXT("Droplet2 height"),
-            OutChanges);
+        if (Surface.bUseSecondaryDroplets)
+        {
+            bChanged |= ClampRenderableFloat(
+                Surface.DropletFlowSpawnProbability,
+                MinRenderableDropletSpawnProbability,
+                TEXT("Secondary spawn chance"),
+                OutChanges);
+            bChanged |= ClampRenderableFloat(
+                Surface.DropletFlowRadiusPixels,
+                MinRenderableDropletRadiusPixels,
+                TEXT("Secondary stamp width"),
+                OutChanges);
+            bChanged |= ClampRenderableFloat(
+                Surface.DropletFlowHeightPixels,
+                MinRenderableDropletRadiusPixels,
+                TEXT("Secondary stamp height"),
+                OutChanges);
+        }
 
         if (Parameters.AbsorbedWetness.bEnabled)
         {
@@ -448,40 +451,29 @@ namespace
                 Surface.DropletSpawnProbability * 100.0f,
                 MinRenderableDropletSpawnProbability * 100.0f));
         }
-        if (Surface.DropletRadiusPixels < MinRenderableDropletRadiusPixels)
+        if (Surface.DropletRadiusPixels < MinRenderableDropletRadiusPixels ||
+            Surface.DropletHeightPixels < MinRenderableDropletRadiusPixels)
         {
             OutIssues.Add(FString::Printf(
-                TEXT("Droplet1 width is %.2f RT pixel(s); values below %.2f cannot produce a stable stamp."),
-                Surface.DropletRadiusPixels,
+                TEXT("Primary stamp radius is too small; both internal stamp axes must be at least %.2f RT pixel(s)."),
                 MinRenderableDropletRadiusPixels));
         }
-        if (Surface.DropletHeightPixels < MinRenderableDropletRadiusPixels)
+        if (Surface.bUseSecondaryDroplets)
         {
-            OutIssues.Add(FString::Printf(
-                TEXT("Droplet1 height is %.2f RT pixel(s); values below %.2f cannot produce a stable stamp."),
-                Surface.DropletHeightPixels,
-                MinRenderableDropletRadiusPixels));
-        }
-        if (Surface.DropletFlowSpawnProbability < MinRenderableDropletSpawnProbability)
-        {
-            OutIssues.Add(FString::Printf(
-                TEXT("Droplet2 spawn chance is %.1f%%; values below %.1f%% can prevent stamps from spawning."),
-                Surface.DropletFlowSpawnProbability * 100.0f,
-                MinRenderableDropletSpawnProbability * 100.0f));
-        }
-        if (Surface.DropletFlowRadiusPixels < MinRenderableDropletRadiusPixels)
-        {
-            OutIssues.Add(FString::Printf(
-                TEXT("Droplet2 width is %.2f RT pixel(s); values below %.2f cannot produce a stable stamp."),
-                Surface.DropletFlowRadiusPixels,
-                MinRenderableDropletRadiusPixels));
-        }
-        if (Surface.DropletFlowHeightPixels < MinRenderableDropletRadiusPixels)
-        {
-            OutIssues.Add(FString::Printf(
-                TEXT("Droplet2 height is %.2f RT pixel(s); values below %.2f cannot produce a stable stamp."),
-                Surface.DropletFlowHeightPixels,
-                MinRenderableDropletRadiusPixels));
+            if (Surface.DropletFlowSpawnProbability < MinRenderableDropletSpawnProbability)
+            {
+                OutIssues.Add(FString::Printf(
+                    TEXT("Secondary spawn chance is %.1f%%; values below %.1f%% can prevent stamps from spawning."),
+                    Surface.DropletFlowSpawnProbability * 100.0f,
+                    MinRenderableDropletSpawnProbability * 100.0f));
+            }
+            if (Surface.DropletFlowRadiusPixels < MinRenderableDropletRadiusPixels ||
+                Surface.DropletFlowHeightPixels < MinRenderableDropletRadiusPixels)
+            {
+                OutIssues.Add(FString::Printf(
+                    TEXT("Secondary stamp radius is too small; both internal stamp axes must be at least %.2f RT pixel(s)."),
+                    MinRenderableDropletRadiusPixels));
+            }
         }
     }
 } // namespace

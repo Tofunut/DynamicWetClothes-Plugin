@@ -105,12 +105,10 @@ void SWetnessProfileEditorPanel::Construct(const FArguments& InArgs)
     HasWaterChannelSelectionAttribute = InArgs._HasWaterChannelSelection;
     IsSurfaceWaterSelectedAttribute = InArgs._IsSurfaceWaterSelected;
     LoadPersistedPreviewSettings();
+    // Keep the public preview view intentionally small for release. The other
+    // internal debug modes remain available in code but are not exposed here.
     PreviewModeItems = {
         MakeShared<SWetnessProfileViewport::EPreviewMode>(SWetnessProfileViewport::EPreviewMode::Lit),
-        MakeShared<SWetnessProfileViewport::EPreviewMode>(SWetnessProfileViewport::EPreviewMode::Absorbed),
-        MakeShared<SWetnessProfileViewport::EPreviewMode>(SWetnessProfileViewport::EPreviewMode::SurfaceCoverage),
-        MakeShared<SWetnessProfileViewport::EPreviewMode>(SWetnessProfileViewport::EPreviewMode::FinalDropletCoverage),
-        MakeShared<SWetnessProfileViewport::EPreviewMode>(SWetnessProfileViewport::EPreviewMode::DropletNormal),
         MakeShared<SWetnessProfileViewport::EPreviewMode>(SWetnessProfileViewport::EPreviewMode::DropletStampTest),
     };
     SelectedPreviewModeItem = PreviewModeItems[0];
@@ -404,33 +402,6 @@ TSharedRef<SWidget> SWetnessProfileEditorPanel::BuildPreviewWaterSection()
                     return Profile != nullptr && Profile->Parameters.SurfaceWater.bEnabled;
                 }),
                 100.0f)
-        ]
-
-        + SVerticalBox::Slot()
-        .AutoHeight()
-        .Padding(0.0f, 4.0f, 0.0f, 0.0f)
-        [
-            SNew(SBox)
-            .Visibility(this, &SWetnessProfileEditorPanel::GetSelectedPreviewDetailSizeVisibility)
-            [
-                BuildSliderRow(
-                    LOCTEXT("PreviewDetailSizeLabel", "Detail Size"),
-                    TAttribute<float>::Create(TAttribute<float>::FGetter::CreateSP(
-                        this, &SWetnessProfileEditorPanel::GetSelectedPreviewDetailSize)),
-                    FOnFloatValueChanged::CreateSP(
-                        this, &SWetnessProfileEditorPanel::HandleSelectedPreviewDetailSizeChanged),
-                    TAttribute<FText>::Create(TAttribute<FText>::FGetter::CreateSP(
-                        this, &SWetnessProfileEditorPanel::GetSelectedPreviewDetailSizeText)),
-                    TAttribute<bool>::CreateLambda([this]()
-                    {
-                        const UWetnessProfile* Profile = WetnessProfile.Get();
-                        return Profile != nullptr &&
-                            Profile->Parameters.SurfaceWater.bEnabled &&
-                            (!IsSecondaryDropletSelected() ||
-                                Profile->Parameters.SurfaceWater.bUseSecondaryDroplets);
-                    }),
-                    4.0f)
-            ]
         ];
 }
 
@@ -516,30 +487,87 @@ TSharedRef<SWidget> SWetnessProfileEditorPanel::BuildPreviewModeSection()
             ];
     };
 
-    return SNew(SHorizontalBox)
+    return SNew(SVerticalBox)
 
-        + SHorizontalBox::Slot()
-        .FillWidth(1.0f)
-        .Padding(0.0f, 0.0f, 3.0f, 0.0f)
+        + SVerticalBox::Slot()
+        .AutoHeight()
         [
-            BuildModeButton(
-                SWetnessProfileViewport::EPreviewBehavior::Manual,
-                LOCTEXT("PreviewBehaviorStaticSegment", "Static"),
-                LOCTEXT(
-                    "PreviewBehaviorStaticTooltip",
-                    "Adjust fixed wetness values without advancing the simulation."))
-        ]
+            SNew(SHorizontalBox)
 
-        + SHorizontalBox::Slot()
-        .FillWidth(1.0f)
-        .Padding(3.0f, 0.0f, 0.0f, 0.0f)
-        [
-            BuildModeButton(
-                SWetnessProfileViewport::EPreviewBehavior::Simulation,
-                LOCTEXT("PreviewBehaviorSimulationSegment", "Simulation"),
-                LOCTEXT(
-                    "PreviewBehaviorSimulationTooltip",
-                    "Add water and preview spreading and drying."))
+            + SHorizontalBox::Slot()
+            .FillWidth(1.0f)
+            .Padding(0.0f, 0.0f, 3.0f, 0.0f)
+            [
+                BuildModeButton(
+                    SWetnessProfileViewport::EPreviewBehavior::Manual,
+                    LOCTEXT("PreviewBehaviorStaticSegment", "Static"),
+                    LOCTEXT(
+                        "PreviewBehaviorStaticTooltip",
+                        "Adjust fixed wetness values without advancing the simulation."))
+            ]
+
+            + SHorizontalBox::Slot()
+            .FillWidth(1.0f)
+            .Padding(3.0f, 0.0f, 0.0f, 0.0f)
+            [
+                BuildModeButton(
+                    SWetnessProfileViewport::EPreviewBehavior::Simulation,
+                    LOCTEXT("PreviewBehaviorSimulationSegment", "Simulation"),
+                    LOCTEXT(
+                        "PreviewBehaviorSimulationTooltip",
+                        "Add water and preview spreading and drying."))
+            ]
+
+            + SHorizontalBox::Slot()
+            .AutoWidth()
+            .VAlign(VAlign_Center)
+            .Padding(10.0f, 0.0f, 0.0f, 0.0f)
+            [
+                SNew(SHorizontalBox)
+                + SHorizontalBox::Slot()
+                .AutoWidth()
+                .VAlign(VAlign_Center)
+                .Padding(0.0f, 0.0f, 6.0f, 0.0f)
+                [
+                    SNew(STextBlock)
+                    .Text(LOCTEXT("PreviewViewLabel", "View"))
+                    .Font(FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 10))
+                ]
+                + SHorizontalBox::Slot()
+                .AutoWidth()
+                [
+                    SNew(SBox)
+                    .WidthOverride(138.0f)
+                    [
+                        SNew(SComboBox<TSharedPtr<SWetnessProfileViewport::EPreviewMode>>)
+                        .OptionsSource(&PreviewModeItems)
+                        .InitiallySelectedItem(SelectedPreviewModeItem)
+                        .OnGenerateWidget(this, &SWetnessProfileEditorPanel::GeneratePreviewModeWidget)
+                        .OnSelectionChanged(this, &SWetnessProfileEditorPanel::HandlePreviewModeChanged)
+                        [
+                            SNew(STextBlock)
+                            .Text(this, &SWetnessProfileEditorPanel::GetPreviewModeText)
+                        ]
+                    ]
+                ]
+                + SHorizontalBox::Slot()
+                .AutoWidth()
+                .VAlign(VAlign_Center)
+                .Padding(8.0f, 0.0f, 0.0f, 0.0f)
+                [
+                    SNew(SComboButton)
+                    .ContentPadding(FMargin(8.0f, 3.0f))
+                    .ToolTipText(LOCTEXT(
+                        "PreviewDisplayMenuTooltip",
+                        "Preview-only visibility filters. These options do not change runtime Wetness Profile settings."))
+                    .OnGetMenuContent(this, &SWetnessProfileEditorPanel::BuildPreviewViewMenu)
+                    .ButtonContent()
+                    [
+                        SNew(STextBlock)
+                        .Text(LOCTEXT("PreviewDisplayMenuLabel", "Display"))
+                    ]
+                ]
+            ]
         ];
 }
 
@@ -575,42 +603,93 @@ TSharedRef<SWidget> SWetnessProfileEditorPanel::BuildPreviewSimulationSection()
         .AutoHeight()
         .Padding(0.0f, 10.0f, 0.0f, 0.0f)
         [
-            SNew(SHorizontalBox)
+            SNew(SWidgetSwitcher)
+            .WidgetIndex_Lambda([this]()
+            {
+                return IsSurfaceWaterSelectedAttribute.Get(false) ? 1 : 0;
+            })
 
-            + SHorizontalBox::Slot()
-            .AutoWidth()
-            .VAlign(VAlign_Center)
+            + SWidgetSwitcher::Slot()
             [
-                SNew(SBox)
-                .WidthOverride(86.0f)
+                SNew(SHorizontalBox)
+
+                + SHorizontalBox::Slot()
+                .AutoWidth()
+                .VAlign(VAlign_Center)
                 [
-                    SNew(STextBlock)
-                    .Text(LOCTEXT("PreviewCursorSizeLabel", "Cursor Size"))
+                    SNew(SBox)
+                    .WidthOverride(86.0f)
+                    [
+                        SNew(STextBlock)
+                        .Text(LOCTEXT("PreviewCursorSizeLabel", "Cursor Size"))
+                    ]
+                ]
+
+                + SHorizontalBox::Slot()
+                .FillWidth(1.0f)
+                .VAlign(VAlign_Center)
+                .Padding(6.0f, 0.0f)
+                [
+                    SNew(SSlider)
+                    .MinValue(0.5f)
+                    .MaxValue(3.0f)
+                    .Value(this, &SWetnessProfileEditorPanel::GetPreviewCursorScale)
+                    .OnValueChanged(this, &SWetnessProfileEditorPanel::HandlePreviewCursorScaleChanged)
+                ]
+
+                + SHorizontalBox::Slot()
+                .AutoWidth()
+                .VAlign(VAlign_Center)
+                [
+                    SNew(SBox)
+                    .WidthOverride(42.0f)
+                    [
+                        SNew(STextBlock)
+                        .Text(this, &SWetnessProfileEditorPanel::GetPreviewCursorScaleText)
+                        .Justification(ETextJustify::Right)
+                    ]
                 ]
             ]
 
-            + SHorizontalBox::Slot()
-            .FillWidth(1.0f)
-            .VAlign(VAlign_Center)
-            .Padding(6.0f, 0.0f)
+            + SWidgetSwitcher::Slot()
             [
-                SNew(SSlider)
-                .MinValue(0.5f)
-                .MaxValue(3.0f)
-                .Value(this, &SWetnessProfileEditorPanel::GetPreviewCursorScale)
-                .OnValueChanged(this, &SWetnessProfileEditorPanel::HandlePreviewCursorScaleChanged)
-            ]
-
-            + SHorizontalBox::Slot()
-            .AutoWidth()
-            .VAlign(VAlign_Center)
-            [
-                SNew(SBox)
-                .WidthOverride(42.0f)
+                SNew(SBorder)
+                .Padding(FMargin(8.0f, 6.0f))
+                .BorderImage(FAppStyle::GetBrush(TEXT("ToolPanel.GroupBorder")))
                 [
-                    SNew(STextBlock)
-                    .Text(this, &SWetnessProfileEditorPanel::GetPreviewCursorScaleText)
-                    .Justification(ETextJustify::Right)
+                    SNew(SVerticalBox)
+                    + SVerticalBox::Slot()
+                    .AutoHeight()
+                    [
+                        SNew(STextBlock)
+                        .Text(LOCTEXT(
+                            "SurfaceStampRadiusHint",
+                            "Spray size follows Stamp Radius. Adjust Stamp Radius in Surface Water settings."))
+                        .AutoWrapText(true)
+                    ]
+                    + SVerticalBox::Slot()
+                    .AutoHeight()
+                    .Padding(0.0f, 3.0f, 0.0f, 0.0f)
+                    [
+                        SNew(STextBlock)
+                        .Text_Lambda([this]()
+                        {
+                            const UWetnessProfile* Profile = WetnessProfile.Get();
+                            if (Profile == nullptr)
+                            {
+                                return FText::GetEmpty();
+                            }
+                            const FSurfaceWaterProfileParameters& Surface = Profile->Parameters.SurfaceWater;
+                            const float Radius = IsSecondaryDropletSelected()
+                                ? Surface.DropletFlowRadiusPixels
+                                : Surface.DropletRadiusPixels;
+                            return FText::Format(
+                                LOCTEXT("SurfaceStampRadiusValue", "Current Stamp Radius: {0} px"),
+                                FText::AsNumber(FMath::RoundToInt(FMath::Max(0.0f, Radius))));
+                        })
+                        .Font(FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 9))
+                        .ColorAndOpacity(FSlateColor::UseSubduedForeground())
+                    ]
                 ]
             ]
         ];
@@ -618,6 +697,54 @@ TSharedRef<SWidget> SWetnessProfileEditorPanel::BuildPreviewSimulationSection()
 
 TSharedRef<SWidget> SWetnessProfileEditorPanel::BuildPreviewSettingsSection()
 {
+    const auto BuildDetailSizeRow = [](
+        const FText& Label,
+        const TAttribute<float>& Value,
+        const FOnFloatValueChanged& OnChanged,
+        const TAttribute<FText>& ValueText)
+    {
+        return SNew(SHorizontalBox)
+            + SHorizontalBox::Slot()
+            .AutoWidth()
+            .VAlign(VAlign_Center)
+            [
+                SNew(SBox)
+                .WidthOverride(128.0f)
+                [
+                    SNew(STextBlock)
+                    .Text(Label)
+                    .Font(FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 10))
+                    .ToolTipText(LOCTEXT(
+                        "PreviewDetailSizeTooltip",
+                        "Preview-only droplet texture detail size. This does not change runtime stamp size."))
+                ]
+            ]
+            + SHorizontalBox::Slot()
+            .FillWidth(1.0f)
+            .VAlign(VAlign_Center)
+            .Padding(8.0f, 0.0f)
+            [
+                SNew(SSlider)
+                .MinValue(0.0f)
+                .MaxValue(4.0f)
+                .Value(Value)
+                .OnValueChanged(OnChanged)
+            ]
+            + SHorizontalBox::Slot()
+            .AutoWidth()
+            .VAlign(VAlign_Center)
+            [
+                SNew(SBox)
+                .WidthOverride(44.0f)
+                [
+                    SNew(STextBlock)
+                    .Justification(ETextJustify::Right)
+                    .Text(ValueText)
+                    .Font(FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 10))
+                ]
+            ];
+    };
+
     return SNew(SBorder)
         .Padding(FMargin(10.0f, 8.0f))
         .BorderImage(FAppStyle::GetBrush(TEXT("ToolPanel.GroupBorder")))
@@ -644,9 +771,63 @@ TSharedRef<SWidget> SWetnessProfileEditorPanel::BuildPreviewSettingsSection()
             .Padding(0.0f, 3.0f, 0.0f, 0.0f)
             [
                 SNew(STextBlock)
-                .Text(LOCTEXT("PreviewSettingsSummary", "Viewport-only mesh and display options."))
+                .Text(LOCTEXT("PreviewSettingsSummary", "Viewport-only mesh, droplet detail, and display options."))
                 .Font(FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 9))
                 .ColorAndOpacity(FSlateColor::UseSubduedForeground())
+            ]
+
+            + SVerticalBox::Slot()
+            .AutoHeight()
+            .Padding(0.0f, 10.0f, 0.0f, 0.0f)
+            [
+                SNew(SBox)
+                .Visibility(this, &SWetnessProfileEditorPanel::GetSelectedPreviewDetailSizeVisibility)
+                [
+                    SNew(SVerticalBox)
+
+                    + SVerticalBox::Slot()
+                    .AutoHeight()
+                    [
+                        SNew(STextBlock)
+                        .Text(LOCTEXT("PreviewSurfaceDetailHeading", "Surface Water Detail"))
+                        .Font(FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), 10))
+                    ]
+
+                    + SVerticalBox::Slot()
+                    .AutoHeight()
+                    .Padding(0.0f, 5.0f, 0.0f, 0.0f)
+                    [
+                        BuildDetailSizeRow(
+                            LOCTEXT("PreviewPrimaryDetailSizeLabel", "Primary Detail Size"),
+                            TAttribute<float>::Create(TAttribute<float>::FGetter::CreateSP(
+                                this, &SWetnessProfileEditorPanel::GetPreviewDroplet1DetailSize)),
+                            FOnFloatValueChanged::CreateSP(
+                                this, &SWetnessProfileEditorPanel::HandlePreviewDroplet1DetailSizeChanged),
+                            TAttribute<FText>::Create(TAttribute<FText>::FGetter::CreateSP(
+                                this, &SWetnessProfileEditorPanel::GetPreviewDroplet1DetailSizeText)))
+                    ]
+
+                    + SVerticalBox::Slot()
+                    .AutoHeight()
+                    .Padding(0.0f, 4.0f, 0.0f, 0.0f)
+                    [
+                        BuildDetailSizeRow(
+                            LOCTEXT("PreviewSecondaryDetailSizeLabel", "Secondary Detail Size"),
+                            TAttribute<float>::Create(TAttribute<float>::FGetter::CreateSP(
+                                this, &SWetnessProfileEditorPanel::GetPreviewDroplet2DetailSize)),
+                            FOnFloatValueChanged::CreateSP(
+                                this, &SWetnessProfileEditorPanel::HandlePreviewDroplet2DetailSizeChanged),
+                            TAttribute<FText>::Create(TAttribute<FText>::FGetter::CreateSP(
+                                this, &SWetnessProfileEditorPanel::GetPreviewDroplet2DetailSizeText)))
+                    ]
+                ]
+            ]
+
+            + SVerticalBox::Slot()
+            .AutoHeight()
+            .Padding(0.0f, 10.0f, 0.0f, 0.0f)
+            [
+                SNew(SSeparator)
             ]
 
             + SVerticalBox::Slot()
@@ -727,42 +908,6 @@ TSharedRef<SWidget> SWetnessProfileEditorPanel::BuildPreviewSettingsSection()
         ];
 }
 
-TSharedRef<SWidget> SWetnessProfileEditorPanel::BuildPreviewDetailSizeSection()
-{
-    const auto BuildDetailSlider = [](const FText& Label, const TAttribute<float>& Value, const FOnFloatValueChanged& OnChanged, const TAttribute<FText>& ValueText)
-    {
-        return SNew(SHorizontalBox)
-            + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
-                  [SNew(SBox).WidthOverride(150.0f)[SNew(STextBlock).Text(Label)]]
-            + SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
-                  [SNew(SSlider).MinValue(0.0f).MaxValue(4.0f).Value(Value).OnValueChanged(OnChanged)]
-            + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(8.0f, 0.0f)
-                  [SNew(SBox).WidthOverride(42.0f)
-                       [SNew(STextBlock).Justification(ETextJustify::Right).Text(ValueText)]];
-    };
-
-    return SNew(SExpandableArea)
-        .InitiallyCollapsed(true)
-        .AreaTitle(LOCTEXT("PreviewDisplaySettingsHeading", "Preview Display Settings"))
-        .ToolTipText(LOCTEXT("PreviewDisplaySettingsTooltip", "Preview-only display controls. These values do not change runtime Wetness Profile parameters."))
-        .BodyContent()
-        [SNew(SVerticalBox)
-         + SVerticalBox::Slot().AutoHeight()
-               [SNew(SBox).Visibility(this, &SWetnessProfileEditorPanel::GetDroplet1ControlsVisibility)
-                    [BuildDetailSlider(
-                        LOCTEXT("PreviewPrimaryDropletScale", "Primary Droplet Detail Scale"),
-                        TAttribute<float>::Create(TAttribute<float>::FGetter::CreateSP(this, &SWetnessProfileEditorPanel::GetPreviewDroplet1DetailSize)),
-                        FOnFloatValueChanged::CreateSP(this, &SWetnessProfileEditorPanel::HandlePreviewDroplet1DetailSizeChanged),
-                        TAttribute<FText>::Create(TAttribute<FText>::FGetter::CreateSP(this, &SWetnessProfileEditorPanel::GetPreviewDroplet1DetailSizeText)))]]
-         + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 6.0f, 0.0f, 0.0f)
-               [SNew(SBox).Visibility(this, &SWetnessProfileEditorPanel::GetDroplet2ControlsVisibility)
-                    [BuildDetailSlider(
-                        LOCTEXT("PreviewSecondaryDropletScale", "Secondary Droplet Detail Scale"),
-                        TAttribute<float>::Create(TAttribute<float>::FGetter::CreateSP(this, &SWetnessProfileEditorPanel::GetPreviewDroplet2DetailSize)),
-                        FOnFloatValueChanged::CreateSP(this, &SWetnessProfileEditorPanel::HandlePreviewDroplet2DetailSizeChanged),
-                        TAttribute<FText>::Create(TAttribute<FText>::FGetter::CreateSP(this, &SWetnessProfileEditorPanel::GetPreviewDroplet2DetailSizeText)))]]];
-}
-
 TSharedRef<SWidget> SWetnessProfileEditorPanel::BuildPreviewViewMenu()
 {
     const auto BuildLayerToggle = [](const FText& Label,
@@ -807,40 +952,6 @@ TSharedRef<SWidget> SWetnessProfileEditorPanel::BuildPreviewViewMenu()
                     FOnCheckStateChanged::CreateSP(this, &SWetnessProfileEditorPanel::HandleSurfaceLayerCheckStateChanged),
                     TAttribute<bool>::Create(TAttribute<bool>::FGetter::CreateSP(this, &SWetnessProfileEditorPanel::IsSurfaceLayerToggleEnabled)),
                     TAttribute<FText>::Create(TAttribute<FText>::FGetter::CreateSP(this, &SWetnessProfileEditorPanel::GetSurfaceLayerTooltip)))
-            ]
-            + SVerticalBox::Slot().AutoHeight()
-            [
-                SNew(SBox)
-                .Visibility(this, &SWetnessProfileEditorPanel::GetSurfaceDetailsVisibility)
-                [
-                    SNew(SVerticalBox)
-                    + SVerticalBox::Slot().AutoHeight().Padding(14.0f, 5.0f, 0.0f, 1.0f)
-                    [
-                        SNew(SCheckBox)
-                        .IsChecked(this, &SWetnessProfileEditorPanel::GetDroplet1CheckState)
-                        .OnCheckStateChanged(this, &SWetnessProfileEditorPanel::HandleDroplet1CheckStateChanged)
-                        [SNew(STextBlock).Text(LOCTEXT("PreviewPrimaryDroplets", "Primary Droplets"))]
-                    ]
-                    + SVerticalBox::Slot().AutoHeight().Padding(14.0f, 1.0f, 0.0f, 3.0f)
-                    [
-                        SNew(SBox)
-                        .Visibility(this, &SWetnessProfileEditorPanel::GetSecondaryDropletDisplayVisibility)
-                        [
-                            SNew(SCheckBox)
-                            .IsChecked(this, &SWetnessProfileEditorPanel::GetDroplet2CheckState)
-                            .OnCheckStateChanged(this, &SWetnessProfileEditorPanel::HandleDroplet2CheckStateChanged)
-                            [SNew(STextBlock).Text(LOCTEXT("PreviewSecondaryDroplets", "Secondary Droplets"))]
-                        ]
-                    ]
-                ]
-            ]
-            + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 7.0f, 0.0f, 0.0f)
-            [
-                SNew(SSeparator)
-            ]
-            + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 7.0f, 0.0f, 0.0f)
-            [
-                BuildPreviewDetailSizeSection()
             ]
         ];
 }
@@ -890,7 +1001,7 @@ FText SWetnessProfileEditorPanel::GetPreviewModeText(const SWetnessProfileViewpo
     case SWetnessProfileViewport::EPreviewMode::DropletNormal:
         return LOCTEXT("PreviewModeDropletNormal", "Droplet Normal");
     case SWetnessProfileViewport::EPreviewMode::DropletStampTest:
-        return LOCTEXT("PreviewModeDropletStampTest", "Droplet Stamp Test");
+        return LOCTEXT("PreviewModeDropletStampTest", "Stamp Footprint");
     default:
         return FText::GetEmpty();
     }
@@ -997,6 +1108,19 @@ FText SWetnessProfileEditorPanel::GetPlayPauseToolTip() const
     return PreviewViewport.IsValid() && PreviewViewport->IsPreviewAnimationEnabled()
         ? LOCTEXT("PauseSimulationTooltip", "Pause Simulation")
         : LOCTEXT("PlaySimulationTooltip", "Play Simulation");
+}
+
+bool SWetnessProfileEditorPanel::IsSelectedWaterChannelEnabled() const
+{
+    const UWetnessProfile* Profile = WetnessProfile.Get();
+    if (Profile == nullptr || !HasWaterChannelSelectionAttribute.Get(false))
+    {
+        return false;
+    }
+
+    return IsSurfaceWaterSelectedAttribute.Get(false)
+        ? Profile->Parameters.SurfaceWater.bEnabled
+        : Profile->Parameters.AbsorbedWetness.bEnabled;
 }
 
 ECheckBoxState SWetnessProfileEditorPanel::GetAbsorbedLayerCheckState() const
@@ -1128,50 +1252,6 @@ EVisibility SWetnessProfileEditorPanel::GetSecondaryDropletDisplayVisibility() c
     return Profile->Parameters.SurfaceWater.bUseSecondaryDroplets
         ? EVisibility::Visible
         : EVisibility::Collapsed;
-}
-
-EVisibility SWetnessProfileEditorPanel::GetDroplet1ControlsVisibility() const
-{
-    return IsSurfaceLayerToggleEnabled() && bPreviewSurfaceLayerEnabled && bPreviewDroplet1Enabled
-        ? EVisibility::Visible
-        : EVisibility::Collapsed;
-}
-
-EVisibility SWetnessProfileEditorPanel::GetDroplet2ControlsVisibility() const
-{
-    return IsSurfaceLayerToggleEnabled() && bPreviewSurfaceLayerEnabled && bPreviewDroplet2Enabled
-        ? EVisibility::Visible
-        : EVisibility::Collapsed;
-}
-
-bool SWetnessProfileEditorPanel::IsSelectedWaterChannelEnabled() const
-{
-    if (!HasWaterChannelSelectionAttribute.Get(false))
-    {
-        return false;
-    }
-
-    const UWetnessProfile* Profile = WetnessProfile.Get();
-    if (Profile == nullptr)
-    {
-        return false;
-    }
-
-    return IsSurfaceWaterSelectedAttribute.Get(false)
-        ? Profile->Parameters.SurfaceWater.bEnabled
-        : Profile->Parameters.AbsorbedWetness.bEnabled;
-}
-
-FText SWetnessProfileEditorPanel::GetSimulationTimeText() const
-{
-    const float Time = PreviewViewport.IsValid() ? PreviewViewport->GetPreviewAnimationTime() : 0.0f;
-    FNumberFormattingOptions Options;
-    Options.MinimumFractionalDigits = 1;
-    Options.MaximumFractionalDigits = 1;
-    return FText::Format(
-        LOCTEXT("SimulationTimeFormat", "{0} / {1} s"),
-        FText::AsNumber(Time, &Options),
-        FText::AsNumber(SWetnessProfileViewport::GetPreviewLoopDuration(), &Options));
 }
 
 TSharedRef<SWidget> SWetnessProfileEditorPanel::GeneratePreviewSpeedWidget(TSharedPtr<float> InSpeed) const
@@ -1508,9 +1588,7 @@ bool SWetnessProfileEditorPanel::IsSecondaryDropletSelected() const
 {
 #if WITH_EDITORONLY_DATA
     const UWetnessProfile* Profile = WetnessProfile.Get();
-    return Profile != nullptr &&
-        Profile->Parameters.SurfaceWater.bUseSecondaryDroplets &&
-        Profile->EditorActiveDropletLayer == 1u;
+    return Profile != nullptr && Profile->EditorActiveDropletLayer == 1u;
 #else
     return false;
 #endif
@@ -1527,19 +1605,10 @@ void SWetnessProfileEditorPanel::LoadPersistedPreviewSettings()
         ReadFloatMetadata(Profile, PreviewDroplet2DetailSizeMetadataKey, 1.0f),
         0.0f,
         4.0f);
-#if WITH_EDITORONLY_DATA
-    if (Profile != nullptr)
-    {
-        bPreviewDroplet1Enabled = true;
-        bPreviewDroplet2Enabled = Profile->Parameters.SurfaceWater.bUseSecondaryDroplets;
-        Profile->bEditorShowDroplet1 = true;
-        Profile->bEditorShowDroplet2 = bPreviewDroplet2Enabled;
-        if (!bPreviewDroplet2Enabled && Profile->EditorActiveDropletLayer == 1u)
-        {
-            Profile->EditorActiveDropletLayer = 0u;
-        }
-    }
-#endif
+    // Surface Water preview is intentionally composited: Primary and Secondary
+    // are shown together. Layer selection controls editing/cursor feedback only.
+    bPreviewDroplet1Enabled = true;
+    bPreviewDroplet2Enabled = true;
 }
 
 void SWetnessProfileEditorPanel::PersistPreviewDetailSizes()
@@ -1574,25 +1643,23 @@ void SWetnessProfileEditorPanel::ApplyPreviewLayerSettingsToViewport()
     const bool bSimulation = SelectedPreviewBehaviorItem.IsValid() &&
         *SelectedPreviewBehaviorItem == SWetnessProfileViewport::EPreviewBehavior::Simulation;
 
-    bool bEffectiveAbsorbed = Profile != nullptr && Profile->Parameters.AbsorbedWetness.bEnabled;
-    bool bEffectiveSurface = Profile != nullptr && Profile->Parameters.SurfaceWater.bEnabled;
-    bool bEffectiveDroplet1 = bEffectiveSurface;
-    bool bEffectiveDroplet2 = bEffectiveSurface &&
-        Profile->Parameters.SurfaceWater.bUseSecondaryDroplets;
+    bool bEffectiveAbsorbed = Profile != nullptr &&
+        Profile->Parameters.AbsorbedWetness.bEnabled &&
+        bPreviewAbsorbedLayerEnabled;
+    bool bEffectiveSurface = Profile != nullptr &&
+        Profile->Parameters.SurfaceWater.bEnabled &&
+        bPreviewSurfaceLayerEnabled;
 
     if (bSimulation)
     {
         bEffectiveAbsorbed = bHasSelection && !bSurfaceSelected && bEffectiveAbsorbed;
         bEffectiveSurface = bSurfaceSelected && bEffectiveSurface;
-        bEffectiveDroplet1 = bEffectiveSurface && !bSecondarySelected;
-        bEffectiveDroplet2 = bEffectiveSurface && bSecondarySelected &&
-            Profile->Parameters.SurfaceWater.bUseSecondaryDroplets;
     }
 
-    bPreviewAbsorbedLayerEnabled = bEffectiveAbsorbed;
-    bPreviewSurfaceLayerEnabled = bEffectiveSurface;
-    bPreviewDroplet1Enabled = bEffectiveDroplet1;
-    bPreviewDroplet2Enabled = bEffectiveDroplet2;
+    // Surface Water preview always renders the composed result. Primary/Secondary
+    // selection is only an editing target and must not hide the other layer.
+    const bool bEffectiveDroplet1 = bEffectiveSurface;
+    const bool bEffectiveDroplet2 = bEffectiveSurface;
 
     PreviewViewport->SetPreviewSimulationTarget(
         bHasSelection,
@@ -1601,6 +1668,9 @@ void SWetnessProfileEditorPanel::ApplyPreviewLayerSettingsToViewport()
         bSelectedChannelEnabled);
     PreviewViewport->SetPreviewSimulationLayers(bEffectiveAbsorbed, bEffectiveSurface);
     PreviewViewport->SetPreviewDropletVisibility(bEffectiveDroplet1, bEffectiveDroplet2);
+    // Surface Water uses the authored Stamp Radius directly. Cursor Size remains
+    // a preview-only control for Absorbed Water.
+    PreviewViewport->SetInteractionCursorScale(bSurfaceSelected ? 1.0f : PreviewCursorScale);
 }
 
 void SWetnessProfileEditorPanel::ApplyPreviewSettingsToViewport()
@@ -1611,7 +1681,6 @@ void SWetnessProfileEditorPanel::ApplyPreviewSettingsToViewport()
     }
 
     PreviewViewport->SetPreviewDropletDetailSizes(PreviewDroplet1DetailSize, PreviewDroplet2DetailSize);
-    PreviewViewport->SetInteractionCursorScale(PreviewCursorScale);
     ApplyPreviewLayerSettingsToViewport();
     if (SelectedPreviewModeItem.IsValid())
     {

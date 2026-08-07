@@ -661,8 +661,8 @@ void SWetnessProfileViewport::PopulateViewportOverlays(TSharedRef<SOverlay> Over
         .VAlign(VAlign_Center)
         [
             SNew(SBox)
-            .WidthOverride_Lambda([this]() { return 84.0f * InteractionCursorScale; })
-            .HeightOverride_Lambda([this]() { return 84.0f * InteractionCursorScale; })
+            .WidthOverride_Lambda([this]() { return GetInteractionCursorVisualSize(); })
+            .HeightOverride_Lambda([this]() { return GetInteractionCursorVisualSize(); })
             .HAlign(HAlign_Center)
             .VAlign(VAlign_Center)
             .Visibility_Lambda([this]()
@@ -681,7 +681,7 @@ void SWetnessProfileViewport::PopulateViewportOverlays(TSharedRef<SOverlay> Over
                     .Image(FDWCEditorStyle::GetBrush(TEXT("DWCEditor.WetnessProfile.Crosshair")))
                     .DesiredSizeOverride_Lambda([this]()
                     {
-                        const float CursorSize = 84.0f * InteractionCursorScale;
+                        const float CursorSize = GetInteractionCursorVisualSize();
                         return TOptional<FVector2D>(FVector2D(CursorSize, CursorSize));
                     })
                 ]
@@ -1051,6 +1051,15 @@ void SWetnessProfileViewport::RefreshPreviewMaterialParameters()
     const FWetnessProfileParameters Parameters = GetSanitizedProfileParameters(WetnessProfile.Get());
     const FAbsorbedWetnessProfileParameters& Absorbed = Parameters.AbsorbedWetness;
     const FSurfaceWaterProfileParameters& Surface = Parameters.SurfaceWater;
+#if WITH_EDITORONLY_DATA
+    const UWetnessProfile* SourceProfile = WetnessProfile.Get();
+    const bool bPreviewSecondaryLayer =
+        SourceProfile != nullptr &&
+        SourceProfile->EditorActiveDropletLayer == 1u &&
+        Surface.bUseSecondaryDroplets;
+#else
+    constexpr bool bPreviewSecondaryLayer = false;
+#endif
 
     if (PreviewMaterialInstance != nullptr)
     {
@@ -1072,43 +1081,74 @@ void SWetnessProfileViewport::RefreshPreviewMaterialParameters()
         PreviewMaterialInstance->SetScalarParameterValue(
             AbsorbedGlossinessStrengthParameter,
             Parameters.GetAbsorbedGlossinessStrength());
+        const float SelectedTargetRoughness = bPreviewSecondaryLayer
+            ? Surface.DropletFlowTargetRoughness
+            : Surface.SurfaceWaterTargetRoughness;
+        const float SelectedNormalStrength = bPreviewSecondaryLayer
+            ? Surface.DropletFlowNormalStrength
+            : Surface.SurfaceWaterNormalStrength;
+        const float SelectedRoughnessBlend = bPreviewSecondaryLayer
+            ? Surface.DropletFlowRoughnessBlend
+            : Surface.SurfaceWaterRoughnessBlend;
+        const float SelectedTotalStrength = bPreviewSecondaryLayer
+            ? Surface.DropletFlowTotalStrength
+            : Surface.SurfaceWaterTotalStrength;
+        const float SelectedSpecular = bPreviewSecondaryLayer
+            ? Surface.DropletFlowSpecular
+            : Surface.SurfaceWaterSpecular;
+        const float SelectedStampRadius = bPreviewSecondaryLayer
+            ? Surface.DropletFlowRadiusPixels
+            : Surface.DropletRadiusPixels;
+        const float SelectedDetailSize = bPreviewSecondaryLayer
+            ? PreviewDroplet2DetailSize
+            : PreviewDroplet1DetailSize;
+        const bool bSelectedDropletVisible = bPreviewSecondaryLayer
+            ? bPreviewDroplet2Enabled
+            : bPreviewDroplet1Enabled;
+
         PreviewMaterialInstance->SetScalarParameterValue(
             SurfaceTargetRoughnessParameter,
-            FMath::Clamp(Surface.SurfaceWaterTargetRoughness, 0.0f, 1.0f));
+            FMath::Clamp(SelectedTargetRoughness, 0.0f, 1.0f));
         PreviewMaterialInstance->SetScalarParameterValue(
             SurfaceNormalStrengthParameter,
-            FMath::Clamp(Surface.SurfaceWaterNormalStrength, 0.0f, 3.0f));
+            FMath::Clamp(SelectedNormalStrength, 0.0f, 3.0f));
         PreviewMaterialInstance->SetScalarParameterValue(
             SurfaceRoughnessBlendParameter,
-            FMath::Clamp(Surface.SurfaceWaterRoughnessBlend, 0.0f, 1.0f));
+            FMath::Clamp(SelectedRoughnessBlend, 0.0f, 1.0f));
         PreviewMaterialInstance->SetScalarParameterValue(
             SurfaceTotalStrengthParameter,
-            FMath::Clamp(Surface.SurfaceWaterTotalStrength, 0.0f, 1.0f));
+            FMath::Clamp(SelectedTotalStrength, 0.0f, 1.0f));
         PreviewMaterialInstance->SetScalarParameterValue(
             SurfaceSpecularParameter,
-            FMath::Clamp(Surface.SurfaceWaterSpecular, 0.0f, 1.0f));
+            FMath::Clamp(SelectedSpecular, 0.0f, 1.0f));
         PreviewMaterialInstance->SetScalarParameterValue(
             DropletsEnabledParameter,
-            bPreviewSurfaceEnabled && bPreviewDroplet1Enabled ? 1.0f : 0.0f);
+            bPreviewSurfaceEnabled && bSelectedDropletVisible ? 1.0f : 0.0f);
         PreviewMaterialInstance->SetScalarParameterValue(
             DropletStampSizeParameter,
-            FMath::Clamp(Surface.DropletRadiusPixels, 1.0f, 256.0f));
+            FMath::Clamp(SelectedStampRadius, 1.0f, 256.0f));
         PreviewMaterialInstance->SetScalarParameterValue(
             DropletDetailSizeParameter,
-            FMath::Clamp(PreviewDroplet1DetailSize, 0.0f, 4.0f));
+            FMath::Clamp(SelectedDetailSize, 0.0f, 4.0f));
         PreviewMaterialInstance->SetScalarParameterValue(
             DebugModeParameter,
             static_cast<float>(PreviewMode));
 
+        UTexture2D* SelectedNormalTexture = bPreviewSecondaryLayer
+            ? Surface.DropletFlowNormalTexture.Get()
+            : Surface.DropletNormalTexture.Get();
+        UTexture2D* SelectedMaskTexture = bPreviewSecondaryLayer
+            ? Surface.DropletFlowMaskTexture.Get()
+            : Surface.DropletMaskTexture.Get();
         PreviewMaterialInstance->SetTextureParameterValue(
             DropletNormalTextureParameter,
-            Surface.DropletNormalTexture != nullptr
-                ? Surface.DropletNormalTexture.Get()
+            SelectedNormalTexture != nullptr
+                ? SelectedNormalTexture
                 : PreviewDefaultNormalTexture.Get());
         PreviewMaterialInstance->SetTextureParameterValue(
             DropletMaskTextureParameter,
-            Surface.DropletMaskTexture != nullptr
-                ? Surface.DropletMaskTexture.Get()
+            SelectedMaskTexture != nullptr
+                ? SelectedMaskTexture
                 : PreviewDefaultMaskTexture.Get());
     }
 
@@ -1665,6 +1705,29 @@ void SWetnessProfileViewport::UpdateRealtimeState()
     }
 }
 
+float SWetnessProfileViewport::GetInteractionCursorVisualSize() const
+{
+    if (bPreviewSurfaceSelection)
+    {
+        const UWetnessProfile* Profile = WetnessProfile.Get();
+        if (Profile != nullptr)
+        {
+            const FSurfaceWaterProfileParameters& Surface = Profile->Parameters.SurfaceWater;
+            const float RadiusPixels = bPreviewSecondarySelection
+                ? Surface.DropletFlowRadiusPixels
+                : Surface.DropletRadiusPixels;
+            // Preserve the previous default visual size at the default 16 px
+            // stamp radius while making the cursor grow/shrink with authored size.
+            return FMath::Clamp(
+                84.0f * (FMath::Max(0.5f, RadiusPixels) / 16.0f),
+                24.0f,
+                280.0f);
+        }
+    }
+
+    return 84.0f * InteractionCursorScale;
+}
+
 FText SWetnessProfileViewport::GetOverlayText() const
 {
     if (PreviewBehavior == EPreviewBehavior::Simulation)
@@ -1705,7 +1768,7 @@ FText SWetnessProfileViewport::GetOverlayText() const
     return FText::Format(
         LOCTEXT(
             "PreviewHint",
-            "Manual Preview\nAbsorbed Wetness {0}%  |  Droplet1/Droplet2 Strength {1}%/{6}%\nDarkening {2}%  |  Absorbed Glossiness {3}%\nDroplet1/Droplet2 Normal {4}%/{8}%  |  Roughness Blend {5}%/{7}%"),
+            "Manual Preview\nAbsorbed Wetness {0}%  |  Primary/Secondary Strength {1}%/{6}%\nDarkening {2}%  |  Absorbed Glossiness {3}%\nPrimary/Secondary Normal {4}%/{8}%  |  Roughness Blend {5}%/{7}%"),
         FText::AsNumber(FMath::RoundToInt(PreviewAbsorbedWater * 100.0f)),
         FText::AsNumber(FMath::RoundToInt(FMath::Clamp(Surface.SurfaceWaterTotalStrength, 0.0f, 1.0f) * 100.0f)),
         FText::AsNumber(FMath::RoundToInt(Parameters.GetAbsorbedDarkeningStrength() * 100.0f)),

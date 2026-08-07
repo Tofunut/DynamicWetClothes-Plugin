@@ -1085,14 +1085,16 @@ TSharedRef<SWidget> SWetWrinkleEditorPanel::BuildPatchBrushSection()
                                   [SNew(SBox)
                                        .HeightOverride(32.0f)
                                            [SNew(SCheckBox)
-                                                .Style(FAppStyle::Get(), TEXT("DetailsView.SectionButton"))
-                                                .Type(ESlateCheckBoxType::ToggleButton)
-                                                .HAlign(HAlign_Center)
-                                                .IsChecked(this, &SWetWrinkleEditorPanel::GetToolModeCheckState, EWetWrinkleToolMode::Patch)
-                                                .OnCheckStateChanged(this, &SWetWrinkleEditorPanel::HandleToolModeChanged, EWetWrinkleToolMode::Patch)
-                                                    [SNew(STextBlock)
-                                                         .Text(LOCTEXT("PatchToolMode", "Patch"))
-                                                         .Justification(ETextJustify::Center)]]]
+                                                 .Style(FAppStyle::Get(), TEXT("DetailsView.SectionButton"))
+                                                 .Type(ESlateCheckBoxType::ToggleButton)
+                                                  .HAlign(HAlign_Center)
+                                                  .IsChecked(this, &SWetWrinkleEditorPanel::GetToolModeCheckState, EWetWrinkleToolMode::Patch)
+                                                  .OnCheckStateChanged(this, &SWetWrinkleEditorPanel::HandleToolModeChanged, EWetWrinkleToolMode::Patch)
+                                                     [SNew(SBox)
+                                                          .VAlign(VAlign_Center)
+                                                              [SNew(STextBlock)
+                                                                   .Text(LOCTEXT("PatchToolMode", "Patch"))
+                                                                   .Justification(ETextJustify::Center)]]]]
 
                         + SHorizontalBox::Slot()
                               .FillWidth(1.0f)
@@ -1100,14 +1102,16 @@ TSharedRef<SWidget> SWetWrinkleEditorPanel::BuildPatchBrushSection()
                                   [SNew(SBox)
                                        .HeightOverride(32.0f)
                                            [SNew(SCheckBox)
-                                                .Style(FAppStyle::Get(), TEXT("DetailsView.SectionButton"))
-                                                .Type(ESlateCheckBoxType::ToggleButton)
-                                                .HAlign(HAlign_Center)
-                                                .IsChecked(this, &SWetWrinkleEditorPanel::GetToolModeCheckState, EWetWrinkleToolMode::ProceduralRidgeStroke)
-                                                .OnCheckStateChanged(this, &SWetWrinkleEditorPanel::HandleToolModeChanged, EWetWrinkleToolMode::ProceduralRidgeStroke)
-                                                    [SNew(STextBlock)
-                                                         .Text(LOCTEXT("RidgeStrokeToolMode", "Ridge Stroke"))
-                                                         .Justification(ETextJustify::Center)]]]]
+                                                 .Style(FAppStyle::Get(), TEXT("DetailsView.SectionButton"))
+                                                 .Type(ESlateCheckBoxType::ToggleButton)
+                                                  .HAlign(HAlign_Center)
+                                                  .IsChecked(this, &SWetWrinkleEditorPanel::GetToolModeCheckState, EWetWrinkleToolMode::ProceduralRidgeStroke)
+                                                  .OnCheckStateChanged(this, &SWetWrinkleEditorPanel::HandleToolModeChanged, EWetWrinkleToolMode::ProceduralRidgeStroke)
+                                                     [SNew(SBox)
+                                                          .VAlign(VAlign_Center)
+                                                              [SNew(STextBlock)
+                                                                   .Text(LOCTEXT("RidgeStrokeToolMode", "Ridge Stroke"))
+                                                                   .Justification(ETextJustify::Center)]]]]]
 
              + SVerticalBox::Slot()
                    .AutoHeight()
@@ -1119,7 +1123,7 @@ TSharedRef<SWidget> SWetWrinkleEditorPanel::BuildPatchBrushSection()
                    .Padding(0.0f, 0.0f, 0.0f, 8.0f)
                        [SNew(STextBlock)
                             .Visibility(this, &SWetWrinkleEditorPanel::GetProceduralRidgeToolVisibility)
-                            .Text(LOCTEXT("RidgeStrokeSettingsHeading", "Ridge Stroke Settings"))
+                            .Text(LOCTEXT("RidgeStrokeSettingsHeading", "Stroke Setup"))
                             .Font(FAppStyle::GetFontStyle(TEXT("NormalFontBold")))]
 
              + SVerticalBox::Slot()
@@ -1129,24 +1133,24 @@ TSharedRef<SWidget> SWetWrinkleEditorPanel::BuildPatchBrushSection()
                             .Visibility(this, &SWetWrinkleEditorPanel::GetProceduralRidgeToolVisibility)
                                 [SNew(SHorizontalBox)
 
-                        + SHorizontalBox::Slot()
-                              .FillWidth(1.0f)
-                                  [SNew(SCheckBox)
-                                       .Style(FAppStyle::Get(), "ToggleButtonCheckbox")
-                                       .HAlign(HAlign_Center)
-                                       .IsChecked(this, &SWetWrinkleEditorPanel::GetRidgeEditModeCheckState, EWetProceduralRidgeEditMode::Draw)
-                                       .OnCheckStateChanged(this, &SWetWrinkleEditorPanel::HandleRidgeEditModeChanged, EWetProceduralRidgeEditMode::Draw)
-                                           [SNew(STextBlock).Text(LOCTEXT("RidgeDrawMode", "Draw"))]]
+                         + SHorizontalBox::Slot()
+                               .AutoWidth()
+                               .VAlign(VAlign_Center)
+                                   [SNew(SCheckBox)
+                                        .Style(FAppStyle::Get(), TEXT("RadioButton"))
+                                        .IsChecked(this, &SWetWrinkleEditorPanel::GetRidgeEditModeCheckState, EWetProceduralRidgeEditMode::Draw)
+                                        .OnCheckStateChanged(this, &SWetWrinkleEditorPanel::HandleRidgeEditModeChanged, EWetProceduralRidgeEditMode::Draw)
+                                            [SNew(STextBlock).Text(LOCTEXT("RidgeDrawMode", "Draw"))]]
 
-                        + SHorizontalBox::Slot()
-                              .FillWidth(1.0f)
-                              .Padding(4.0f, 0.0f, 0.0f, 0.0f)
-                                  [SNew(SCheckBox)
-                                       .Style(FAppStyle::Get(), "ToggleButtonCheckbox")
-                                       .HAlign(HAlign_Center)
-                                       .IsChecked(this, &SWetWrinkleEditorPanel::GetRidgeEditModeCheckState, EWetProceduralRidgeEditMode::Edit)
-                                       .OnCheckStateChanged(this, &SWetWrinkleEditorPanel::HandleRidgeEditModeChanged, EWetProceduralRidgeEditMode::Edit)
-                                           [SNew(STextBlock).Text(LOCTEXT("RidgeEditMode", "Edit"))]]]]
+                         + SHorizontalBox::Slot()
+                               .AutoWidth()
+                               .VAlign(VAlign_Center)
+                               .Padding(16.0f, 0.0f, 0.0f, 0.0f)
+                                   [SNew(SCheckBox)
+                                        .Style(FAppStyle::Get(), TEXT("RadioButton"))
+                                        .IsChecked(this, &SWetWrinkleEditorPanel::GetRidgeEditModeCheckState, EWetProceduralRidgeEditMode::Edit)
+                                        .OnCheckStateChanged(this, &SWetWrinkleEditorPanel::HandleRidgeEditModeChanged, EWetProceduralRidgeEditMode::Edit)
+                                            [SNew(STextBlock).Text(LOCTEXT("RidgeEditMode", "Edit"))]]]]
 
              + SVerticalBox::Slot()
                    .AutoHeight()
@@ -1172,34 +1176,34 @@ TSharedRef<SWidget> SWetWrinkleEditorPanel::BuildPatchBrushSection()
                             .Visibility(this, &SWetWrinkleEditorPanel::GetProceduralRidgeToolVisibility)
                                 [SNew(SHorizontalBox)
 
-                                 + SHorizontalBox::Slot()
-                                       .FillWidth(1.0f)
-                                           [SNew(SCheckBox)
-                                                .Style(FAppStyle::Get(), "ToggleButtonCheckbox")
-                                                .HAlign(HAlign_Center)
-                                                .IsChecked(this, &SWetWrinkleEditorPanel::GetRidgeShapeCheckState, EWetProceduralRidgeShape::Convex)
-                                                .OnCheckStateChanged(this, &SWetWrinkleEditorPanel::HandleRidgeShapeChanged, EWetProceduralRidgeShape::Convex)
-                                                    [SNew(STextBlock).Text(LOCTEXT("RidgeShapeConvex", "Convex"))]]
+                                  + SHorizontalBox::Slot()
+                                        .AutoWidth()
+                                        .VAlign(VAlign_Center)
+                                            [SNew(SCheckBox)
+                                                  .Style(FAppStyle::Get(), TEXT("RadioButton"))
+                                                  .IsChecked(this, &SWetWrinkleEditorPanel::GetRidgeShapeCheckState, EWetProceduralRidgeShape::Convex)
+                                                  .OnCheckStateChanged(this, &SWetWrinkleEditorPanel::HandleRidgeShapeChanged, EWetProceduralRidgeShape::Convex)
+                                                     [SNew(STextBlock).Text(LOCTEXT("RidgeShapeConvex", "Convex"))]]
 
-                                 + SHorizontalBox::Slot()
-                                       .FillWidth(1.0f)
-                                       .Padding(4.0f, 0.0f, 0.0f, 0.0f)
-                                           [SNew(SCheckBox)
-                                                .Style(FAppStyle::Get(), "ToggleButtonCheckbox")
-                                                .HAlign(HAlign_Center)
-                                                .IsChecked(this, &SWetWrinkleEditorPanel::GetRidgeShapeCheckState, EWetProceduralRidgeShape::Concave)
-                                                .OnCheckStateChanged(this, &SWetWrinkleEditorPanel::HandleRidgeShapeChanged, EWetProceduralRidgeShape::Concave)
-                                                    [SNew(STextBlock).Text(LOCTEXT("RidgeShapeConcave", "Concave"))]]
+                                  + SHorizontalBox::Slot()
+                                        .AutoWidth()
+                                        .VAlign(VAlign_Center)
+                                        .Padding(16.0f, 0.0f, 0.0f, 0.0f)
+                                            [SNew(SCheckBox)
+                                                  .Style(FAppStyle::Get(), TEXT("RadioButton"))
+                                                  .IsChecked(this, &SWetWrinkleEditorPanel::GetRidgeShapeCheckState, EWetProceduralRidgeShape::Concave)
+                                                  .OnCheckStateChanged(this, &SWetWrinkleEditorPanel::HandleRidgeShapeChanged, EWetProceduralRidgeShape::Concave)
+                                                     [SNew(STextBlock).Text(LOCTEXT("RidgeShapeConcave", "Concave"))]]
 
-                                 + SHorizontalBox::Slot()
-                                       .FillWidth(1.0f)
-                                       .Padding(4.0f, 0.0f, 0.0f, 0.0f)
-                                           [SNew(SCheckBox)
-                                                .Style(FAppStyle::Get(), "ToggleButtonCheckbox")
-                                                .HAlign(HAlign_Center)
-                                                .IsChecked(this, &SWetWrinkleEditorPanel::GetRidgeShapeCheckState, EWetProceduralRidgeShape::Fold)
-                                                .OnCheckStateChanged(this, &SWetWrinkleEditorPanel::HandleRidgeShapeChanged, EWetProceduralRidgeShape::Fold)
-                                                    [SNew(STextBlock).Text(LOCTEXT("RidgeShapeFold", "Fold"))]]]]
+                                  + SHorizontalBox::Slot()
+                                        .AutoWidth()
+                                        .VAlign(VAlign_Center)
+                                        .Padding(16.0f, 0.0f, 0.0f, 0.0f)
+                                            [SNew(SCheckBox)
+                                                  .Style(FAppStyle::Get(), TEXT("RadioButton"))
+                                                  .IsChecked(this, &SWetWrinkleEditorPanel::GetRidgeShapeCheckState, EWetProceduralRidgeShape::Fold)
+                                                  .OnCheckStateChanged(this, &SWetWrinkleEditorPanel::HandleRidgeShapeChanged, EWetProceduralRidgeShape::Fold)
+                                                     [SNew(STextBlock).Text(LOCTEXT("RidgeShapeFold", "Fold"))]]]]
 
              + SVerticalBox::Slot()
                    .AutoHeight()
@@ -1286,12 +1290,44 @@ TSharedRef<SWidget> SWetWrinkleEditorPanel::BuildPatchBrushSection()
                 + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(4.0f,0.0f)[SNew(STextBlock).Text(LOCTEXT("PercentUnit", "%"))]
                 + SHorizontalBox::Slot().AutoWidth()[SNew(SButton).ButtonStyle(FAppStyle::Get(), "SimpleButton").Visibility_Lambda([this](){ return FMath::IsNearlyEqual(GetRidgeFalloffPercentValue(), 50.0f) ? EVisibility::Hidden : EVisibility::Visible; }).ToolTipText(LOCTEXT("ResetEdgeSoftness", "Reset Edge Softness to default.")).OnClicked_Lambda([this](){ HandleFalloffChanged(50.0f); return FReply::Handled(); })[SNew(SImage).Image(FAppStyle::GetBrush("PropertyWindow.DiffersFromDefault"))]]]
 
+             + SVerticalBox::Slot()
+                   .AutoHeight()
+                   .Padding(0.0f, 0.0f, 0.0f, 4.0f)
+                       [SNew(STextBlock)
+                            .Visibility(this, &SWetWrinkleEditorPanel::GetProceduralRidgeToolVisibility)
+                            .Text(LOCTEXT("RidgePointSpacingLabel", "Point Spacing"))]
+
+             + SVerticalBox::Slot()
+                   .AutoHeight()
+                   .Padding(0.0f, 0.0f, 0.0f, 10.0f)
+                       [SNew(SSpinBox<float>)
+                            .Visibility(this, &SWetWrinkleEditorPanel::GetProceduralRidgeToolVisibility)
+                            .MinValue(0.05f)
+                            .MaxValue(1.0f)
+                            .Delta(0.05f)
+                            .Value(BrushSettings.RidgePointSpacingScale)
+                            .OnValueChanged(this, &SWetWrinkleEditorPanel::HandleRidgePointSpacingChanged)]
+
              + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 10.0f)
                [SNew(SHorizontalBox).Visibility(this, &SWetWrinkleEditorPanel::GetPatchToolVisibility)
                 + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)[SNew(SBox).WidthOverride(104.0f)[SNew(STextBlock).Text(LOCTEXT("RotationLabel", "Rotation"))]]
                 + SHorizontalBox::Slot().FillWidth(1.0f)[SNew(SSpinBox<float>).MinValue(-180.0f).MaxValue(180.0f).Value_Lambda([this](){ return FMath::RadiansToDegrees(BrushSettings.RotationRadians); }).OnValueChanged(this, &SWetWrinkleEditorPanel::HandleRotationChanged)]
                 + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(4.0f,0.0f)[SNew(STextBlock).Text(LOCTEXT("DegreeUnit", "°"))]
                 + SHorizontalBox::Slot().AutoWidth()[SNew(SButton).ButtonStyle(FAppStyle::Get(), "SimpleButton").Visibility_Lambda([this](){ return FMath::IsNearlyZero(BrushSettings.RotationRadians) ? EVisibility::Hidden : EVisibility::Visible; }).ToolTipText(LOCTEXT("ResetBrushRotation", "Reset Rotation to default.")).OnClicked_Lambda([this](){ HandleRotationChanged(0.0f); return FReply::Handled(); })[SNew(SImage).Image(FAppStyle::GetBrush("PropertyWindow.DiffersFromDefault"))]]]
+
+             + SVerticalBox::Slot()
+                   .AutoHeight()
+                   .Padding(0.0f, 6.0f, 0.0f, 8.0f)
+                       [SNew(SSeparator)
+                            .Visibility(this, &SWetWrinkleEditorPanel::GetProceduralRidgeToolVisibility)]
+
+             + SVerticalBox::Slot()
+                   .AutoHeight()
+                   .Padding(0.0f, 0.0f, 0.0f, 8.0f)
+                       [SNew(STextBlock)
+                            .Visibility(this, &SWetWrinkleEditorPanel::GetProceduralRidgeToolVisibility)
+                            .Text(LOCTEXT("RidgeTaperHeading", "Taper"))
+                            .Font(FAppStyle::GetFontStyle(TEXT("NormalFontBold")))]
 
              + SVerticalBox::Slot()
                    .AutoHeight()
@@ -1344,11 +1380,22 @@ TSharedRef<SWidget> SWetWrinkleEditorPanel::BuildPatchBrushSection()
 
                                  + SVerticalBox::Slot()
                                        .AutoHeight()
-                                       .Padding(0.0f, 0.0f, 0.0f, 6.0f)
-                                           [SNew(SCheckBox)
+                                       .Padding(0.0f, 6.0f, 0.0f, 8.0f)
+                                           [SNew(SSeparator)]
+
+                                 + SVerticalBox::Slot()
+                                       .AutoHeight()
+                                       .Padding(0.0f, 0.0f, 0.0f, 8.0f)
+                                           [SNew(SHorizontalBox)
+                                            + SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
+                                              [SNew(STextBlock)
+                                                .Text(LOCTEXT("RidgeVariationHeading", "Variation"))
+                                                .Font(FAppStyle::GetFontStyle(TEXT("NormalFontBold")))]
+                                            + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+                                              [SNew(SCheckBox)
                                                 .IsChecked(this, &SWetWrinkleEditorPanel::GetRidgeNaturalVariationEnabledState)
                                                 .OnCheckStateChanged(this, &SWetWrinkleEditorPanel::HandleRidgeNaturalVariationEnabledChanged)
-                                                    [SNew(STextBlock).Text(LOCTEXT("RidgeNaturalVariation", "Natural Variation"))]]
+                                                [SNew(STextBlock).Text(LOCTEXT("RidgeNaturalVariationEnabled", "Enabled"))]]]
 
                                  + SVerticalBox::Slot()
                                        .AutoHeight()
@@ -1452,6 +1499,20 @@ TSharedRef<SWidget> SWetWrinkleEditorPanel::BuildPatchBrushSection()
                                                            .ToolTipText(LOCTEXT("RandomizeRidgeNoiseSeedTooltip", "Generate a different deterministic variation for this ridge."))
                                                            .OnClicked(this, &SWetWrinkleEditorPanel::HandleRandomizeRidgeNoiseSeedClicked)
                                                                [SNew(SImage).Image(FAppStyle::GetBrush("Icons.Refresh"))]]]]]
+
+             + SVerticalBox::Slot()
+                   .AutoHeight()
+                   .Padding(0.0f, 8.0f, 0.0f, 8.0f)
+                       [SNew(SSeparator)
+                            .Visibility(this, &SWetWrinkleEditorPanel::GetProceduralRidgeEditVisibility)]
+
+             + SVerticalBox::Slot()
+                   .AutoHeight()
+                   .Padding(0.0f, 0.0f, 0.0f, 8.0f)
+                       [SNew(STextBlock)
+                            .Visibility(this, &SWetWrinkleEditorPanel::GetProceduralRidgeEditVisibility)
+                            .Text(LOCTEXT("RidgeEndpointEditingHeading", "Endpoint Editing"))
+                            .Font(FAppStyle::GetFontStyle(TEXT("NormalFontBold")))]
 
              + SVerticalBox::Slot()
                    .AutoHeight()
@@ -1595,24 +1656,6 @@ TSharedRef<SWidget> SWetWrinkleEditorPanel::BuildPatchBrushSection()
                                                  .OnEndSliderMovement(this, &SWetWrinkleEditorPanel::HandleRidgePropertySliderEnd)
                                                  .OnValueCommitted(this, &SWetWrinkleEditorPanel::HandleRidgePropertyCommitted)
                                                  .OnValueChanged(this, &SWetWrinkleEditorPanel::HandleRidgeFlareSoftnessChanged)]]]
-
-             + SVerticalBox::Slot()
-                   .AutoHeight()
-                   .Padding(0.0f, 0.0f, 0.0f, 4.0f)
-                       [SNew(STextBlock)
-                            .Visibility(this, &SWetWrinkleEditorPanel::GetProceduralRidgeToolVisibility)
-                            .Text(LOCTEXT("RidgePointSpacingLabel", "Point Spacing"))]
-
-             + SVerticalBox::Slot()
-                   .AutoHeight()
-                   .Padding(0.0f, 0.0f, 0.0f, 10.0f)
-                       [SNew(SSpinBox<float>)
-                            .Visibility(this, &SWetWrinkleEditorPanel::GetProceduralRidgeToolVisibility)
-                            .MinValue(0.05f)
-                            .MaxValue(1.0f)
-                            .Delta(0.05f)
-                            .Value(BrushSettings.RidgePointSpacingScale)
-                            .OnValueChanged(this, &SWetWrinkleEditorPanel::HandleRidgePointSpacingChanged)]
 
              + SVerticalBox::Slot()
                    .AutoHeight()

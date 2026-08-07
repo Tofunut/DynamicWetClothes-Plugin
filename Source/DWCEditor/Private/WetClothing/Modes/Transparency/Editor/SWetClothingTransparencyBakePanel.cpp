@@ -91,6 +91,13 @@ const TCHAR* GetTransparencyStrokeModeLabel(const EDWCTransparencyBrushMode Mode
     }
 }
 
+TSharedRef<SWidget> BuildTransparencyStageHeading(const FText& Title)
+{
+    return SNew(STextBlock)
+        .Text(Title)
+        .Font(FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), 16));
+}
+
 const FWetClothingBakedTransparencyMap* FindExactBakedTransparencyMap(
     const UWetClothingAsset* Asset,
     const FWetClothingTransparencyLayerData* Layer)
@@ -3327,7 +3334,10 @@ TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildStageNavigation()
                     HandleStageClicked(Stage);
                 }
             })
-            [SNew(STextBlock).Text(Label).Justification(ETextJustify::Center)]];
+            [SNew(SBox)
+                .HAlign(HAlign_Center)
+                .VAlign(VAlign_Center)
+                [SNew(STextBlock).Text(Label).Justification(ETextJustify::Center)]]];
     };
 
     return SNew(SVerticalBox)
@@ -3389,7 +3399,7 @@ TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildStructureSetupStage(
 {
     return SNew(SVerticalBox)
         + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,8)
-          [FWCAEditorWidgets::BuildSectionHeader(LOCTEXT("StructureSetupStage", "Stage 1 - Character Structure"))]
+          [BuildTransparencyStageHeading(LOCTEXT("StructureSetupStage", "Stage 1 - Character Structure"))]
         + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,12)[SNew(SSeparator)]
         + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,10)
           [SNew(STextBlock)
@@ -3420,7 +3430,31 @@ TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildStructureSetupStage(
 
 TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildMapGenerationStage()
 {
-    const auto BuildSameMeshSettings = [this]()
+    const auto BuildGeneratePreviewMapCTA = [this]()
+    {
+        return SNew(SVerticalBox)
+            + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,6)
+              [SNew(STextBlock)
+                .Text(LOCTEXT("GeneratePreviewMapToContinue", "Generate the preview map to continue to Stage 3 editing."))
+                .AutoWrapText(true)
+                .ColorAndOpacity(FSlateColor::UseSubduedForeground())]
+            + SVerticalBox::Slot().AutoHeight()
+              [SNew(SBox)
+                .HeightOverride(44.0f)
+                [SNew(SButton)
+                    .HAlign(HAlign_Center)
+                    .VAlign(VAlign_Center)
+                    .ContentPadding(FMargin(12.0f, 9.0f))
+                    .ToolTipText(this, &SWetClothingTransparencyBakePanel::GetGenerateTooltipText)
+                    .IsEnabled(this, &SWetClothingTransparencyBakePanel::IsGenerateEnabled)
+                    .OnClicked(this, &SWetClothingTransparencyBakePanel::HandleGenerateTransparencyMapClicked)
+                    [SNew(STextBlock)
+                        .Text(LOCTEXT("GeneratePreviewTransparencyMapAndContinue", "Generate Preview Map -> Stage 3"))
+                        .Font(FAppStyle::GetFontStyle(TEXT("NormalFontBold")))
+                        .Justification(ETextJustify::Center)]]];
+    };
+
+    const auto BuildSameMeshSettings = [this, BuildGeneratePreviewMapCTA]()
     {
         return SNew(SVerticalBox)
             + SVerticalBox::Slot().AutoHeight().Padding(0,10,0,8)
@@ -3430,61 +3464,43 @@ TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildMapGenerationStage()
             + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,18)[BuildRaySettingsSection()]
             + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,18)[BuildBakeSettingsSection(false)]
             + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,8)
-              [SNew(SButton)
-                .HAlign(HAlign_Center)
-                .Text(LOCTEXT("GeneratePreviewTransparencyMap", "Generate Preview Transparency Map"))
-                .ToolTipText(this, &SWetClothingTransparencyBakePanel::GetGenerateTooltipText)
-                .IsEnabled(this, &SWetClothingTransparencyBakePanel::IsGenerateEnabled)
-                .OnClicked(this, &SWetClothingTransparencyBakePanel::HandleGenerateTransparencyMapClicked)];
+              [BuildGeneratePreviewMapCTA()];
     };
 
     // Multi-component Transparency source support remains in the internal data model for future development.
     // It is intentionally not exposed in the shipping editor UI in this release.
 
-    const auto BuildManualSettings = [this]()
+    const auto BuildManualSettings = [this, BuildGeneratePreviewMapCTA]()
     {
         return SNew(SVerticalBox)
             + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,14)[BuildManualSourceSection()]
             + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,8)
-              [SNew(SButton)
-                .HAlign(HAlign_Fill)
-                .ContentPadding(FMargin(8.0f, 7.0f))
-                .Text(LOCTEXT("GenerateManualPreviewTransparencyMap", "Generate Preview Transparency Map"))
-                .ToolTipText(this, &SWetClothingTransparencyBakePanel::GetGenerateTooltipText)
-                .IsEnabled(this, &SWetClothingTransparencyBakePanel::IsGenerateEnabled)
-                .OnClicked(this, &SWetClothingTransparencyBakePanel::HandleGenerateTransparencyMapClicked)];
+              [BuildGeneratePreviewMapCTA()];
     };
 
     return SNew(SVerticalBox)
         + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,8)
-          [FWCAEditorWidgets::BuildSectionHeader(LOCTEXT("MapGenerationStage", "Stage 2 - Preview Map Generation"))]
+          [BuildTransparencyStageHeading(LOCTEXT("MapGenerationStage", "Stage 2 - Preview Map Generation"))]
         + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,14)[SNew(SSeparator)]
+        + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,10)
+          [SNew(STextBlock)
+            .Text(LOCTEXT("SelectTargetPartForGeneration", "Select a ready Wettable Transparency Target Part to configure its source and generate a preview map."))
+            .AutoWrapText(true)
+            .ColorAndOpacity(FSlateColor::UseSubduedForeground())]
+        + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,18)
+          [BuildTransparencyLayersSection()]
         + SVerticalBox::Slot().AutoHeight()
-          [SNew(SSplitter)
-            .Orientation(Orient_Vertical)
-            + SSplitter::Slot()
-                .SizeRule(SSplitter::SizeToContent)
-                .MinSize(148.0f)
-                .Resizable(true)
-                .OnSlotResized(this, &SWetClothingTransparencyBakePanel::HandleTransparencyTargetPartsResized)
-                [BuildTransparencyLayersSection()]
-            + SSplitter::Slot()
-                .SizeRule(SSplitter::SizeToContent)
-                .MinSize(180.0f)
-                .Resizable(true)
-                .OnSlotResized_Lambda([](float) {})
-                [SAssignNew(MapGenerationSettingsSwitcher, SWidgetSwitcher)
-                    + SWidgetSwitcher::Slot()
-                      [BuildEmptyAssetRow(LOCTEXT("SelectTargetPartForGeneration", "Select a ready Wettable Transparency Target Part above to configure its source and generate a preview map."))]
-                    + SWidgetSwitcher::Slot()[BuildSameMeshSettings()]
-                    + SWidgetSwitcher::Slot()[BuildManualSettings()]]];
+          [SAssignNew(MapGenerationSettingsSwitcher, SWidgetSwitcher)
+            + SWidgetSwitcher::Slot()[SNullWidget::NullWidget]
+            + SWidgetSwitcher::Slot()[BuildSameMeshSettings()]
+            + SWidgetSwitcher::Slot()[BuildManualSettings()]];
 }
 
 TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildFinalEditingStage()
 {
     TSharedRef<SVerticalBox> Box = SNew(SVerticalBox)
         + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,8)
-          [FWCAEditorWidgets::BuildSectionHeader(LOCTEXT("FinalEditingStage", "Stage 3 - Transparency Editing & Bake"))]
+          [BuildTransparencyStageHeading(LOCTEXT("FinalEditingStage", "Stage 3 - Transparency Editing & Bake"))]
         + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,14)[SNew(SSeparator)];
     Box->AddSlot().AutoHeight().Padding(0,0,0,14)
         [SAssignNew(FinalEditingNoticeContainer, SBox)[BuildFinalEditingNotice()]];
@@ -3532,7 +3548,9 @@ TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildTransparencyLayersSe
         + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,6)
           [SNew(SHorizontalBox)
             + SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
-              [FWCAEditorWidgets::BuildSectionHeader(LOCTEXT("TransparencyLayers", "Transparency Target Parts"))]
+              [SNew(STextBlock)
+                .Text(LOCTEXT("TransparencyLayers", "Target Parts"))
+                .Font(FAppStyle::GetFontStyle(TEXT("NormalFontBold")))]
             + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
               [SNew(SButton)
                 .ButtonStyle(FAppStyle::Get(), TEXT("SimpleButton"))
@@ -3546,7 +3564,18 @@ TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildTransparencyLayersSe
            + SHorizontalBox::Slot().FillWidth(1.0f).Padding(8.0f,0.0f)[SNew(STextBlock).Text(LOCTEXT("TransparencyTargetNameColumn", "Name")).Font(FAppStyle::GetFontStyle(TEXT("SmallFontBold")))]
            + SHorizontalBox::Slot().AutoWidth()[SNew(SBox).WidthOverride(64.0f).HAlign(HAlign_Center)[SNew(STextBlock).Text(LOCTEXT("TransparencyTargetThumbnailColumn", "Thumbnail")).Font(FAppStyle::GetFontStyle(TEXT("SmallFontBold")))]]]
         + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,4)[SNew(SSeparator)]
-        + SVerticalBox::Slot().AutoHeight()[SNew(SBox).HeightOverride_Lambda([this]() { return TransparencyTargetPartsListHeight; })[SAssignNew(LayerListView, SListView<FLayerItemPtr>).ListItemsSource(&LayerItems).OnGenerateRow(this, &SWetClothingTransparencyBakePanel::GenerateLayerRow).OnSelectionChanged(this, &SWetClothingTransparencyBakePanel::HandleLayerSelectionChanged)]]
+        + SVerticalBox::Slot().AutoHeight()
+          [SNew(SBox)
+            .HeightOverride_Lambda([this]()
+            {
+                // Keep Stage 2 compact when only a few target parts exist.
+                // The list starts scrolling only after four rows instead of reserving a large empty panel.
+                return FMath::Clamp(static_cast<float>(LayerItems.Num()) * 56.0f, 56.0f, 224.0f);
+            })
+            [SAssignNew(LayerListView, SListView<FLayerItemPtr>)
+                .ListItemsSource(&LayerItems)
+                .OnGenerateRow(this, &SWetClothingTransparencyBakePanel::GenerateLayerRow)
+                .OnSelectionChanged(this, &SWetClothingTransparencyBakePanel::HandleLayerSelectionChanged)]]
         ;
 }
 

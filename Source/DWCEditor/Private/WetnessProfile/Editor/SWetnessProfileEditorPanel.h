@@ -35,7 +35,6 @@ private:
     TSharedRef<SWidget> BuildPreviewModeSection();
     TSharedRef<SWidget> BuildPreviewWaterSection();
     TSharedRef<SWidget> BuildPreviewSimulationSection();
-    TSharedRef<SWidget> BuildPreviewDetailSizeSection();
     TSharedRef<SWidget> BuildPreviewViewMenu();
     TSharedRef<SWidget> BuildPreviewSettingsSection();
 
@@ -103,8 +102,6 @@ private:
     void HandleDroplet2CheckStateChanged(ECheckBoxState NewState);
     EVisibility GetSurfaceDetailsVisibility() const;
     EVisibility GetSecondaryDropletDisplayVisibility() const;
-    EVisibility GetDroplet1ControlsVisibility() const;
-    EVisibility GetDroplet2ControlsVisibility() const;
     TSharedRef<SWidget> GeneratePreviewSpeedWidget(TSharedPtr<float> InSpeed) const;
     void HandlePreviewSpeedChanged(TSharedPtr<float> InSpeed, ESelectInfo::Type SelectInfo);
     FText GetPreviewSpeedText() const;

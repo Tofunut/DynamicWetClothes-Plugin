@@ -11,12 +11,14 @@
 #include "PropertyHandle.h"
 #include "UObject/UnrealType.h"
 #include "Styling/AppStyle.h"
+#include "Styling/CoreStyle.h"
 #include "WetnessProfile/Editor/WetnessProfileEditorPolicy.h"
 #include "Widgets/Images/SImage.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SCheckBox.h"
 #include "Widgets/Input/SNumericEntryBox.h"
 #include "Widgets/Layout/SBorder.h"
+#include "Widgets/Layout/SSpacer.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/Text/STextBlock.h"
 
@@ -382,13 +384,6 @@ void FWetnessProfileDetailsCustomization::CustomizeDetails(IDetailLayoutBuilder&
     const bool bShowAbsorbed = Mode != EWetnessProfileDetailsMode::SurfaceWater;
     const bool bShowSurface = Mode != EWetnessProfileDetailsMode::AbsorbedWater;
     const bool bSingleChannel = Mode != EWetnessProfileDetailsMode::Combined;
-#if WITH_EDITORONLY_DATA
-    const bool bShowDroplet1 = !Profile.IsValid() || Profile->bEditorShowDroplet1;
-    const bool bShowDroplet2 = Profile.IsValid() && Profile->bEditorShowDroplet2;
-#else
-    constexpr bool bShowDroplet1 = true;
-    constexpr bool bShowDroplet2 = true;
-#endif
 
     if (bShowAbsorbed)
     {
@@ -421,13 +416,6 @@ void FWetnessProfileDetailsCustomization::CustomizeDetails(IDetailLayoutBuilder&
             LOCTEXT("AbsorptionTooltip", "Amount of incoming water routed to absorbed water. Lower values leave more water available for surface effects."),
             0.0f, 1.0f, 0.0f, 1.0f, 0.01f, 100.0f, 1, LOCTEXT("PercentSuffix1", "%"),
             AbsorbedSettingsEnabled);
-        AddFloatProperty(
-            SimulationCategory,
-            FindPropertyByPath(TEXT("Parameters.AbsorbedWetness.MaxPendingWaterPerPixel")),
-            LOCTEXT("MaxPendingWaterPerPixel", "Max Pending Water Per Pixel"),
-            LOCTEXT("MaxPendingWaterPerPixelTooltip", "Maximum Pending Water stored by one GPU simulation texel. Excess water is discarded. Zero means unlimited."),
-            0.0f, TNumericLimits<float>::Max(), 0.0f, 10.0f, 0.01f, 1.0f, 3, FText::GetEmpty(),
-            AbsorbedSettingsEnabled);
         AddMappedFloatProperty(
             SimulationCategory,
             FindPropertyByPath(TEXT("Parameters.AbsorbedWetness.SpreadRate")),
@@ -451,6 +439,19 @@ void FWetnessProfileDetailsCustomization::CustomizeDetails(IDetailLayoutBuilder&
             LOCTEXT("GravityInfluenceTooltip", "How much absorbed water prefers to spread downward instead of evenly in all directions."),
             0.0f, 100.0f, 0.0f, 100.0f, 1.0f, 1, LOCTEXT("PercentSuffixGravity", "%"),
             MakeLinearRawToPercent(2.0f), MakeLinearPercentToRaw(2.0f), 0.0f, 10.0f,
+            AbsorbedSettingsEnabled);
+
+        IDetailGroup& AbsorbedAdvancedGroup = SimulationCategory.AddGroup(
+            TEXT("DWCAbsorbedAdvanced"),
+            LOCTEXT("AbsorbedAdvancedGroup", "Advanced"),
+            true,
+            false);
+        AddFloatProperty(
+            AbsorbedAdvancedGroup,
+            FindPropertyByPath(TEXT("Parameters.AbsorbedWetness.MaxPendingWaterPerPixel")),
+            LOCTEXT("MaxPendingWaterPerPixel", "Max Pending Water Per Pixel"),
+            LOCTEXT("MaxPendingWaterPerPixelTooltip", "Maximum Pending Water stored by one GPU simulation texel. Excess water is discarded. Zero means unlimited."),
+            0.0f, TNumericLimits<float>::Max(), 0.0f, 10.0f, 0.01f, 1.0f, 3, FText::GetEmpty(),
             AbsorbedSettingsEnabled);
 
         IDetailCategoryBuilder& RenderingCategory = DetailBuilder.EditCategory(
@@ -480,12 +481,21 @@ void FWetnessProfileDetailsCustomization::CustomizeDetails(IDetailLayoutBuilder&
     if (bShowSurface)
     {
         const int32 BaseSortOrder = bSingleChannel ? 5 : 30;
+        const TSharedPtr<IPropertyHandle> SecondaryEnabled =
+            FindPropertyByPath(TEXT("Parameters.SurfaceWater.bUseSecondaryDroplets"));
+#if WITH_EDITORONLY_DATA
+        const bool bEditSecondary = Profile.IsValid() && Profile->EditorActiveDropletLayer == 1u;
+#else
+        constexpr bool bEditSecondary = false;
+#endif
+        const TAttribute<bool> SecondarySettingsEnabled =
+            EnabledWhenBoth(SurfaceEnabled, SecondaryEnabled);
+        const TAttribute<bool> ActiveLayerSettingsEnabled =
+            bEditSecondary ? SecondarySettingsEnabled : SurfaceSettingsEnabled;
 
         IDetailCategoryBuilder& GeneralCategory = DetailBuilder.EditCategory(
             TEXT("DWCSurfaceAmount"),
-            bSingleChannel
-                ? LOCTEXT("SurfaceAmountCategory", "Surface Water")
-                : LOCTEXT("SurfaceWaterCategory", "Surface Water"),
+            LOCTEXT("SurfaceWaterCategory", "Surface Water"),
             ECategoryPriority::Important);
         ConfigurePrimaryCategory(GeneralCategory, BaseSortOrder);
 
@@ -499,50 +509,165 @@ void FWetnessProfileDetailsCustomization::CustomizeDetails(IDetailLayoutBuilder&
         }
 
 #if WITH_EDITORONLY_DATA
-        GeneralCategory.AddCustomRow(LOCTEXT("SurfaceTypeVisibilityFilter", "Droplet1 Droplet2 Show"))
-            .NameContent()
-                [SNew(STextBlock)
-                     .Text(LOCTEXT("SurfaceTypeVisibilityLabel", "Show"))
-                     .ToolTipText(LOCTEXT(
-                         "SurfaceTypeVisibilityTooltip",
-                         "Editor-only display filters. They control which Droplet sections and preview layers are shown; runtime behavior is unchanged."))
-                     .Font(IDetailLayoutBuilder::GetDetailFont())]
-            .ValueContent()
-            .MinDesiredWidth(260.0f)
-                [SNew(SHorizontalBox) + SHorizontalBox::Slot().AutoWidth().Padding(0.0f, 0.0f, 14.0f, 0.0f)[SNew(SCheckBox).IsChecked(bShowDroplet1 ? ECheckBoxState::Checked : ECheckBoxState::Unchecked).OnCheckStateChanged_Lambda([WeakProfile = Profile, WeakUtilities = PropertyUtilities](const ECheckBoxState NewState)
-                                                                                                                                                                                                                                      {
-                            if (UWetnessProfile* MutableProfile = WeakProfile.Get())
+        GeneralCategory.AddCustomRow(LOCTEXT("SurfaceLayerSelectorFilter", "Primary Secondary Enabled"))
+            .WholeRowContent()
+            [
+                SNew(SBorder)
+                .Padding(FMargin(8.0f, 6.0f))
+                .BorderImage(FAppStyle::GetBrush(TEXT("ToolPanel.GroupBorder")))
+                [
+                    SNew(SHorizontalBox)
+                    + SHorizontalBox::Slot()
+                    .AutoWidth()
+                    .VAlign(VAlign_Center)
+                    .Padding(0.0f, 0.0f, 14.0f, 0.0f)
+                    [
+                        SNew(STextBlock)
+                        .Text(LOCTEXT("SurfaceLayerLabel", "Layer"))
+                        .Font(FAppStyle::GetFontStyle(TEXT("PropertyWindow.BoldFont")))
+                    ]
+                    + SHorizontalBox::Slot()
+                    .AutoWidth()
+                    .VAlign(VAlign_Center)
+                    [
+                        SNew(SCheckBox)
+                        .Style(FAppStyle::Get(), TEXT("RadioButton"))
+                        .IsChecked_Lambda([WeakProfile = Profile]()
+                        {
+                            const UWetnessProfile* CurrentProfile = WeakProfile.Get();
+                            return CurrentProfile == nullptr || CurrentProfile->EditorActiveDropletLayer == 0u
+                                ? ECheckBoxState::Checked
+                                : ECheckBoxState::Unchecked;
+                        })
+                        .OnCheckStateChanged_Lambda(
+                            [WeakProfile = Profile, WeakUtilities = PropertyUtilities](const ECheckBoxState NewState)
                             {
-                                MutableProfile->bEditorShowDroplet1 = NewState == ECheckBoxState::Checked;
-                                NotifyDetailsPreviewDisplayFilterChanged(
-                                    *MutableProfile,
-                                    GET_MEMBER_NAME_CHECKED(UWetnessProfile, bEditorShowDroplet1));
-                            }
-                            if (const TSharedPtr<IPropertyUtilities> Utilities = WeakUtilities.Pin())
+                                if (NewState != ECheckBoxState::Checked)
+                                {
+                                    return;
+                                }
+                                if (UWetnessProfile* MutableProfile = WeakProfile.Get())
+                                {
+                                    MutableProfile->EditorActiveDropletLayer = 0u;
+                                    NotifyDetailsPreviewDisplayFilterChanged(
+                                        *MutableProfile,
+                                        GET_MEMBER_NAME_CHECKED(UWetnessProfile, EditorActiveDropletLayer));
+                                }
+                                if (const TSharedPtr<IPropertyUtilities> Utilities = WeakUtilities.Pin())
+                                {
+                                    Utilities->ForceRefresh();
+                                }
+                            })
+                        [
+                            SNew(STextBlock)
+                            .Text(LOCTEXT("PrimaryLayer", "Primary"))
+                        ]
+                    ]
+                    + SHorizontalBox::Slot()
+                    .AutoWidth()
+                    .VAlign(VAlign_Center)
+                    .Padding(14.0f, 0.0f, 0.0f, 0.0f)
+                    [
+                        SNew(SCheckBox)
+                        .Style(FAppStyle::Get(), TEXT("RadioButton"))
+                        .IsChecked_Lambda([WeakProfile = Profile]()
+                        {
+                            const UWetnessProfile* CurrentProfile = WeakProfile.Get();
+                            return CurrentProfile != nullptr && CurrentProfile->EditorActiveDropletLayer == 1u
+                                ? ECheckBoxState::Checked
+                                : ECheckBoxState::Unchecked;
+                        })
+                        .OnCheckStateChanged_Lambda(
+                            [WeakProfile = Profile, WeakUtilities = PropertyUtilities](const ECheckBoxState NewState)
                             {
-                                Utilities->ForceRefresh();
-                            } })[SNew(STextBlock).Text(LOCTEXT("ShowDroplet1", "Droplet 1"))]] +
-                 SHorizontalBox::Slot()
-                     .AutoWidth()
-                         [SNew(SCheckBox)
-                              .IsChecked(bShowDroplet2 ? ECheckBoxState::Checked : ECheckBoxState::Unchecked)
-                              .OnCheckStateChanged_Lambda(
-                                  [WeakProfile = Profile, WeakUtilities = PropertyUtilities](const ECheckBoxState NewState)
-                                  {
-                                      if (UWetnessProfile* MutableProfile = WeakProfile.Get())
-                                      {
-                                          MutableProfile->bEditorShowDroplet2 = NewState == ECheckBoxState::Checked;
-                                          NotifyDetailsPreviewDisplayFilterChanged(
-                                              *MutableProfile,
-                                              GET_MEMBER_NAME_CHECKED(UWetnessProfile, bEditorShowDroplet2));
-                                      }
-                                      if (const TSharedPtr<IPropertyUtilities> Utilities = WeakUtilities.Pin())
-                                      {
-                                          Utilities->ForceRefresh();
-                                      }
-                                  })
-                                  [SNew(STextBlock)
-                                       .Text(LOCTEXT("ShowDroplet2", "Droplet 2"))]]];
+                                if (NewState != ECheckBoxState::Checked)
+                                {
+                                    return;
+                                }
+                                if (UWetnessProfile* MutableProfile = WeakProfile.Get())
+                                {
+                                    MutableProfile->EditorActiveDropletLayer = 1u;
+                                    NotifyDetailsPreviewDisplayFilterChanged(
+                                        *MutableProfile,
+                                        GET_MEMBER_NAME_CHECKED(UWetnessProfile, EditorActiveDropletLayer));
+                                }
+                                if (const TSharedPtr<IPropertyUtilities> Utilities = WeakUtilities.Pin())
+                                {
+                                    Utilities->ForceRefresh();
+                                }
+                            })
+                        [
+                            SNew(STextBlock)
+                            .Text(LOCTEXT("SecondaryLayer", "Secondary"))
+                        ]
+                    ]
+                    + SHorizontalBox::Slot()
+                    .FillWidth(1.0f)
+                    [
+                        SNew(SSpacer)
+                    ]
+                    + SHorizontalBox::Slot()
+                    .AutoWidth()
+                    .VAlign(VAlign_Center)
+                    [
+                        SNew(SCheckBox)
+                        .Visibility_Lambda([WeakProfile = Profile]()
+                        {
+                            const UWetnessProfile* CurrentProfile = WeakProfile.Get();
+                            return CurrentProfile != nullptr && CurrentProfile->EditorActiveDropletLayer == 1u
+                                ? EVisibility::Visible
+                                : EVisibility::Collapsed;
+                        })
+                        .IsEnabled(SurfaceSettingsEnabled)
+                        .IsChecked_Lambda([WeakHandle = TWeakPtr<IPropertyHandle>(SecondaryEnabled)]()
+                        {
+                            return GetBoolCheckState(WeakHandle);
+                        })
+                        .OnCheckStateChanged_Lambda(
+                            [WeakHandle = TWeakPtr<IPropertyHandle>(SecondaryEnabled),
+                             WeakUtilities = PropertyUtilities](const ECheckBoxState NewState)
+                            {
+                                SetBoolProperty(WeakHandle, NewState);
+                                if (const TSharedPtr<IPropertyUtilities> Utilities = WeakUtilities.Pin())
+                                {
+                                    Utilities->ForceRefresh();
+                                }
+                            })
+                        .ToolTipText(LOCTEXT(
+                            "SecondaryRuntimeEnabledTooltip",
+                            "Enable or disable the Secondary droplet layer in the saved Wetness Profile and at runtime."))
+                        [
+                            SNew(STextBlock)
+                            .Text(LOCTEXT("SecondaryRuntimeEnabled", "Enabled"))
+                            .Font(FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), 10))
+                        ]
+                    ]
+                ]
+            ];
+
+        GeneralCategory.AddCustomRow(LOCTEXT("SecondaryRuntimeStateFilter", "Secondary runtime state"))
+            .WholeRowContent()
+            [
+                SNew(SBox)
+                .Visibility_Lambda([WeakProfile = Profile]()
+                {
+                    const UWetnessProfile* CurrentProfile = WeakProfile.Get();
+                    return CurrentProfile != nullptr && CurrentProfile->EditorActiveDropletLayer == 1u
+                        ? EVisibility::Visible
+                        : EVisibility::Collapsed;
+                })
+                [
+                    SNew(STextBlock)
+                    .Text_Lambda([WeakHandle = TWeakPtr<IPropertyHandle>(SecondaryEnabled)]()
+                    {
+                        return ReadBoolProperty(WeakHandle)
+                            ? LOCTEXT("SecondaryRuntimeEnabledState", "Secondary droplets are enabled at runtime.")
+                            : LOCTEXT("SecondaryRuntimeDisabledState", "Secondary droplets are disabled at runtime.");
+                    })
+                    .Font(FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 9))
+                    .ColorAndOpacity(FSlateColor::UseSubduedForeground())
+                ]
+            ];
 #endif
 
         IDetailCategoryBuilder& SimulationCategory = DetailBuilder.EditCategory(
@@ -552,85 +677,54 @@ void FWetnessProfileDetailsCustomization::CustomizeDetails(IDetailLayoutBuilder&
                 : LOCTEXT("CombinedSurfaceSimulationCategory", "Surface Water | Simulation"),
             ECategoryPriority::Important);
         ConfigurePrimaryCategory(SimulationCategory, BaseSortOrder + 5);
+
         AddMappedFloatProperty(
             SimulationCategory,
             FindPropertyByPath(TEXT("Parameters.SurfaceWater.DropletDryRate")),
             LOCTEXT("DropletDryRate", "Droplet Dry Rate"),
-            LOCTEXT("DropletDryRateTooltip", "Shared fade-out rate for wetness in both the Droplet1 and Droplet2 render targets."),
+            LOCTEXT("DropletDryRateTooltip", "Shared fade-out rate for Primary and Secondary Surface Water stamps."),
             0.0f, 100.0f, 0.0f, 100.0f, 1.0f, 1, LOCTEXT("PercentSuffixDropletDryRate", "%"),
             MakeMidpointRawToPercent(20.0f, 40.0f), MakeMidpointPercentToRaw(20.0f, 40.0f), 0.0f, 100.0f,
             SurfaceSettingsEnabled);
 
-        if(bShowDroplet1)
+        if (!bEditSecondary)
         {
-
-        IDetailGroup& Droplet1Group = SimulationCategory.AddGroup(
-            TEXT("DWCDroplet1"),
-            LOCTEXT("Droplet1Group", "Droplet1"),
-            false,
-            true);
-        AddFloatProperty(
-                Droplet1Group,
-            FindPropertyByPath(TEXT("Parameters.SurfaceWater.DropletSpawnProbability")),
-            LOCTEXT("Droplet1SpawnChance", "Spawn Chance"),
-            LOCTEXT("Droplet1SpawnChanceTooltip", "Chance that eligible surface water produces a Droplet1 stamp."),
-            0.0f, 1.0f, 0.0f, 1.0f, 0.01f, 100.0f, 1, LOCTEXT("PercentSuffixDroplet1Spawn", "%"),
+            AddFloatProperty(
+                SimulationCategory,
+                FindPropertyByPath(TEXT("Parameters.SurfaceWater.DropletSpawnProbability")),
+                LOCTEXT("PrimarySpawnChance", "Spawn Chance"),
+                LOCTEXT("PrimarySpawnChanceTooltip", "Chance that eligible Surface Water produces a Primary stamp."),
+                0.0f, 1.0f, 0.0f, 1.0f, 0.01f, 100.0f, 1, LOCTEXT("PercentSuffixPrimarySpawn", "%"),
                 SurfaceSettingsEnabled);
-        AddMappedFloatProperty(
-                Droplet1Group,
-            FindPropertyByPath(TEXT("Parameters.SurfaceWater.DropletRadiusPixels")),
-            LOCTEXT("Droplet1StampWidth", "Stamp Width"),
-            LOCTEXT("Droplet1StampWidthTooltip", "Horizontal half-size of Droplet1 stamps. Wet Parts can apply a local scale."),
-            0.0f, 100.0f, 0.0f, 100.0f, 1.0f, 1, LOCTEXT("PercentSuffixDroplet1Width", "%"),
-            MakeSquaredRawToPercent(64.0f), MakeSquaredPercentToRaw(64.0f), 0.0f, 256.0f,
-                SurfaceSettingsEnabled);
-        AddMappedFloatProperty(
-                Droplet1Group,
-            FindPropertyByPath(TEXT("Parameters.SurfaceWater.DropletHeightPixels")),
-            LOCTEXT("Droplet1StampHeight", "Stamp Height"),
-            LOCTEXT("Droplet1StampHeightTooltip", "Vertical half-size of Droplet1 stamps. Wet Parts can apply a local scale."),
-            0.0f, 100.0f, 0.0f, 100.0f, 1.0f, 1, LOCTEXT("PercentSuffixDroplet1Height", "%"),
-            MakeSquaredRawToPercent(64.0f), MakeSquaredPercentToRaw(64.0f), 0.0f, 256.0f,
+            AddStampSizeProperty(
+                SimulationCategory,
+                FindPropertyByPath(TEXT("Parameters.SurfaceWater.DropletRadiusPixels")),
+                FindPropertyByPath(TEXT("Parameters.SurfaceWater.DropletHeightPixels")),
+                LOCTEXT("PrimaryStampRadiusTooltip", "Radius of the circular Primary stamp in wetness-map pixels. Changing this value writes the same radius to both internal stamp axes. Wet Parts can apply a local scale."),
                 SurfaceSettingsEnabled);
         }
-
-        if (bShowDroplet2)
+        else
         {
-            IDetailGroup& Droplet2Group = SimulationCategory.AddGroup(
-                TEXT("DWCDroplet2"),
-                LOCTEXT("Droplet2Group", "Droplet2"),
-                false,
-                true);
-        AddFloatProperty(
-                Droplet2Group,
-            FindPropertyByPath(TEXT("Parameters.SurfaceWater.DropletFlowSpawnProbability")),
-            LOCTEXT("Droplet2SpawnChance", "Spawn Chance"),
-            LOCTEXT("Droplet2SpawnChanceTooltip", "Independent chance that eligible surface water produces a Droplet2 stamp."),
-            0.0f, 1.0f, 0.0f, 1.0f, 0.01f, 100.0f, 1, LOCTEXT("PercentSuffixDroplet2Spawn", "%"),
-                SurfaceSettingsEnabled);
-            AddMappedFloatProperty(
-                Droplet2Group,
-            FindPropertyByPath(TEXT("Parameters.SurfaceWater.DropletFlowRadiusPixels")),
-            LOCTEXT("Droplet2StampWidth", "Stamp Width"),
-            LOCTEXT("Droplet2StampWidthTooltip", "Horizontal half-size of stamps written to the Droplet2 RT."),
-            0.0f, 100.0f, 0.0f, 100.0f, 1.0f, 1, LOCTEXT("PercentSuffixDroplet2Width", "%"),
-                MakeSquaredRawToPercent(64.0f), MakeSquaredPercentToRaw(64.0f), 0.0f, 256.0f,
-                SurfaceSettingsEnabled);
-            AddMappedFloatProperty(
-                Droplet2Group,
-            FindPropertyByPath(TEXT("Parameters.SurfaceWater.DropletFlowHeightPixels")),
-            LOCTEXT("Droplet2StampHeight", "Stamp Height"),
-            LOCTEXT("Droplet2StampHeightTooltip", "Vertical half-size of stamps written to the Droplet2 RT."),
-            0.0f, 100.0f, 0.0f, 100.0f, 1.0f, 1, LOCTEXT("PercentSuffixDroplet2Height", "%"),
-                MakeSquaredRawToPercent(64.0f), MakeSquaredPercentToRaw(64.0f), 0.0f, 256.0f,
-                SurfaceSettingsEnabled);
-        AddFloatProperty(
-                Droplet2Group,
-            FindPropertyByPath(TEXT("Parameters.SurfaceWater.DropletFlowSpawnPositionSpread")),
-            LOCTEXT("Droplet2SpawnSpreadRate", "Spawn Spread Rate"),
-            LOCTEXT("Droplet2SpawnSpreadRateTooltip", "Spreads Droplet2 spawn positions within the same eligible UV triangle."),
-            0.0f, 1.0f, 0.0f, 1.0f, 0.01f, 100.0f, 1, LOCTEXT("PercentSuffixDroplet2Spread", "%"),
-                SurfaceSettingsEnabled);
+            AddFloatProperty(
+                SimulationCategory,
+                FindPropertyByPath(TEXT("Parameters.SurfaceWater.DropletFlowSpawnProbability")),
+                LOCTEXT("SecondarySpawnChance", "Spawn Chance"),
+                LOCTEXT("SecondarySpawnChanceTooltip", "Independent chance that eligible Surface Water produces a Secondary stamp."),
+                0.0f, 1.0f, 0.0f, 1.0f, 0.01f, 100.0f, 1, LOCTEXT("PercentSuffixSecondarySpawn", "%"),
+                SecondarySettingsEnabled);
+            AddStampSizeProperty(
+                SimulationCategory,
+                FindPropertyByPath(TEXT("Parameters.SurfaceWater.DropletFlowRadiusPixels")),
+                FindPropertyByPath(TEXT("Parameters.SurfaceWater.DropletFlowHeightPixels")),
+                LOCTEXT("SecondaryStampRadiusTooltip", "Radius of the circular Secondary stamp in wetness-map pixels. Changing this value writes the same radius to both internal stamp axes."),
+                SecondarySettingsEnabled);
+            AddFloatProperty(
+                SimulationCategory,
+                FindPropertyByPath(TEXT("Parameters.SurfaceWater.DropletFlowSpawnPositionSpread")),
+                LOCTEXT("PrimaryOffsetRadius", "Primary Offset Radius"),
+                LOCTEXT("PrimaryOffsetRadiusTooltip", "Maximum relative offset of a Secondary stamp from its Primary contact within the same eligible UV triangle."),
+                0.0f, 1.0f, 0.0f, 1.0f, 0.01f, 100.0f, 1, LOCTEXT("PercentSuffixPrimaryOffsetRadius", "%"),
+                SecondarySettingsEnabled);
         }
 
         IDetailCategoryBuilder& RenderingCategory = DetailBuilder.EditCategory(
@@ -640,111 +734,59 @@ void FWetnessProfileDetailsCustomization::CustomizeDetails(IDetailLayoutBuilder&
                 : LOCTEXT("CombinedSurfaceRenderingCategory", "Surface Water | Rendering"),
             ECategoryPriority::Important);
         ConfigurePrimaryCategory(RenderingCategory, BaseSortOrder + 10);
-        if (bShowDroplet1)
-        {
-        IDetailGroup& StaticRenderingGroup = RenderingCategory.AddGroup(
-            TEXT("DWCDroplet1Rendering"),
-            LOCTEXT("Droplet1RenderingGroup", "Droplet1"),
-            false,
-            true);
 
-        AddFloatProperty(
-            StaticRenderingGroup,
-            FindPropertyByPath(TEXT("Parameters.SurfaceWater.SurfaceWaterTotalStrength")),
-            LOCTEXT("SurfaceTotalStrength", "Total Strength"),
-            LOCTEXT("SurfaceTotalStrengthTooltip", "Overall Surface Water rendering strength after final droplet coverage is resolved. This does not change the preview Surface Water amount."),
-            0.0f, 1.0f, 0.0f, 1.0f, 0.01f, 100.0f, 1, LOCTEXT("PercentSuffixSurfaceTotalStrength", "%"),
-            SurfaceSettingsEnabled);
-        AddFloatProperty(
-            StaticRenderingGroup,
-            FindPropertyByPath(TEXT("Parameters.SurfaceWater.SurfaceWaterColorBlend")),
-            LOCTEXT("SurfaceColorBlend", "Color Blend"),
-            LOCTEXT("SurfaceColorBlendTooltip", "How strongly Droplet1 coverage modifies the underlying Base Color. This does not affect normal, roughness, or specular."),
-            0.0f, 1.0f, 0.0f, 1.0f, 0.01f, 100.0f, 1, LOCTEXT("PercentSuffixSurfaceColorBlend", "%"),
-            SurfaceSettingsEnabled);
+        const TSharedPtr<IPropertyHandle> NormalStrengthHandle = FindPropertyByPath(
+            bEditSecondary
+                ? TEXT("Parameters.SurfaceWater.DropletFlowNormalStrength")
+                : TEXT("Parameters.SurfaceWater.SurfaceWaterNormalStrength"));
+        const TSharedPtr<IPropertyHandle> RoughnessHandle = FindPropertyByPath(
+            bEditSecondary
+                ? TEXT("Parameters.SurfaceWater.DropletFlowTargetRoughness")
+                : TEXT("Parameters.SurfaceWater.SurfaceWaterTargetRoughness"));
+        const TSharedPtr<IPropertyHandle> TotalStrengthHandle = FindPropertyByPath(
+            bEditSecondary
+                ? TEXT("Parameters.SurfaceWater.DropletFlowTotalStrength")
+                : TEXT("Parameters.SurfaceWater.SurfaceWaterTotalStrength"));
+        const TSharedPtr<IPropertyHandle> ColorBlendHandle = FindPropertyByPath(
+            bEditSecondary
+                ? TEXT("Parameters.SurfaceWater.DropletFlowColorBlend")
+                : TEXT("Parameters.SurfaceWater.SurfaceWaterColorBlend"));
+
         AddMappedFloatProperty(
-            StaticRenderingGroup,
-            FindPropertyByPath(TEXT("Parameters.SurfaceWater.SurfaceWaterNormalStrength")),
+            RenderingCategory,
+            NormalStrengthHandle,
             LOCTEXT("SurfaceNormalStrength", "Water Normal Strength"),
-            LOCTEXT("SurfaceNormalStrengthTooltip", "Droplet1 normal-map strength. 100% is the authored normal texture strength."),
-            0.0f, 300.0f, 0.0f, 300.0f, 1.0f, 1, LOCTEXT("PercentSuffix7", "%"),
+            LOCTEXT("SurfaceNormalStrengthTooltip", "Normal-map strength for the selected Surface Water layer. 100% is the authored normal texture strength."),
+            0.0f, 300.0f, 0.0f, 300.0f, 1.0f, 1, LOCTEXT("PercentSuffixSurfaceNormalStrength", "%"),
             MakeLinearRawToPercent(1.0f, 300.0f), MakeLinearPercentToRaw(1.0f, 300.0f), 0.0f, 3.0f,
-            SurfaceSettingsEnabled);
+            ActiveLayerSettingsEnabled);
         AddFloatProperty(
-            StaticRenderingGroup,
-            FindPropertyByPath(TEXT("Parameters.SurfaceWater.SurfaceWaterTargetRoughness")),
+            RenderingCategory,
+            RoughnessHandle,
             LOCTEXT("WaterRoughness", "Water Roughness"),
-            LOCTEXT("WaterRoughnessTooltip", "Target roughness reached inside final droplet coverage."),
-            0.0f, 1.0f, 0.0f, 1.0f, 0.01f, 100.0f, 1, LOCTEXT("PercentSuffixWetSurfaceRoughness", "%"),
-            SurfaceSettingsEnabled);
-        AddFloatProperty(
-            StaticRenderingGroup,
-            FindPropertyByPath(TEXT("Parameters.SurfaceWater.SurfaceWaterRoughnessBlend")),
-            LOCTEXT("WetRoughnessBlend", "Roughness Blend"),
-            LOCTEXT("WetRoughnessBlendTooltip", "How strongly final droplet coverage blends from source roughness to Water Roughness."),
-            0.0f, 1.0f, 0.0f, 1.0f, 0.01f, 100.0f, 1, LOCTEXT("PercentSuffix8", "%"),
-            SurfaceSettingsEnabled);
-        AddFloatProperty(
-            StaticRenderingGroup,
-            FindPropertyByPath(TEXT("Parameters.SurfaceWater.SurfaceWaterSpecular")),
-            LOCTEXT("WaterSpecular", "Water Specular"),
-            LOCTEXT("WaterSpecularTooltip", "Target specular reached inside final droplet coverage."),
-            0.0f, 1.0f, 0.0f, 1.0f, 0.01f, 100.0f, 1, LOCTEXT("PercentSuffixWaterSpecular", "%"),
-            SurfaceSettingsEnabled);
-        }
+            LOCTEXT("WaterRoughnessTooltip", "Target roughness reached inside the selected Surface Water layer."),
+            0.0f, 1.0f, 0.0f, 1.0f, 0.01f, 100.0f, 1, LOCTEXT("PercentSuffixWaterRoughness", "%"),
+            ActiveLayerSettingsEnabled);
 
-        if (bShowDroplet2)
-        {
-
-        IDetailGroup& FlowRenderingGroup = RenderingCategory.AddGroup(
-            TEXT("DWCDroplet2Rendering"),
-            LOCTEXT("Droplet2RenderingGroup", "Droplet2"),
-            false,
-            true);
+        IDetailGroup& RenderingAdvancedGroup = RenderingCategory.AddGroup(
+            TEXT("DWCSurfaceRenderingAdvanced"),
+            LOCTEXT("SurfaceRenderingAdvancedGroup", "Advanced"),
+            true,
+            false);
         AddFloatProperty(
-            FlowRenderingGroup,
-            FindPropertyByPath(TEXT("Parameters.SurfaceWater.DropletFlowTotalStrength")),
-            LOCTEXT("DropletFlowTotalStrength", "Total Strength"),
-            LOCTEXT("DropletFlowTotalStrengthTooltip", "Overall Droplet2 rendering strength after its coverage is resolved."),
-            0.0f, 1.0f, 0.0f, 1.0f, 0.01f, 100.0f, 1, LOCTEXT("PercentSuffixFlowTotalStrength", "%"),
-                SurfaceSettingsEnabled);
+            RenderingAdvancedGroup,
+            TotalStrengthHandle,
+            LOCTEXT("SurfaceTotalStrength", "Total Strength"),
+            LOCTEXT("SurfaceTotalStrengthTooltip", "Overall rendering strength for the selected Surface Water layer."),
+            0.0f, 1.0f, 0.0f, 1.0f, 0.01f, 100.0f, 1, LOCTEXT("PercentSuffixSurfaceTotalStrength", "%"),
+            ActiveLayerSettingsEnabled);
         AddFloatProperty(
-            FlowRenderingGroup,
-            FindPropertyByPath(TEXT("Parameters.SurfaceWater.DropletFlowColorBlend")),
-            LOCTEXT("DropletFlowColorBlend", "Color Blend"),
-            LOCTEXT("DropletFlowColorBlendTooltip", "How strongly Droplet2 coverage modifies the underlying Base Color. This does not affect normal, roughness, or specular."),
-            0.0f, 1.0f, 0.0f, 1.0f, 0.01f, 100.0f, 1, LOCTEXT("PercentSuffixFlowColorBlend", "%"),
-                SurfaceSettingsEnabled);
-        AddMappedFloatProperty(
-            FlowRenderingGroup,
-            FindPropertyByPath(TEXT("Parameters.SurfaceWater.DropletFlowNormalStrength")),
-            LOCTEXT("DropletFlowNormalStrength", "Water Normal Strength"),
-            LOCTEXT("DropletFlowNormalStrengthTooltip", "Droplet2 normal-map strength. 100% is the authored normal texture strength."),
-            0.0f, 300.0f, 0.0f, 300.0f, 1.0f, 1, LOCTEXT("PercentSuffixFlowNormalStrength", "%"),
-            MakeLinearRawToPercent(1.0f, 300.0f), MakeLinearPercentToRaw(1.0f, 300.0f), 0.0f, 3.0f,
-                SurfaceSettingsEnabled);
-        AddFloatProperty(
-            FlowRenderingGroup,
-            FindPropertyByPath(TEXT("Parameters.SurfaceWater.DropletFlowTargetRoughness")),
-            LOCTEXT("DropletFlowWaterRoughness", "Water Roughness"),
-            LOCTEXT("DropletFlowWaterRoughnessTooltip", "Target roughness reached inside Droplet2 coverage."),
-            0.0f, 1.0f, 0.0f, 1.0f, 0.01f, 100.0f, 1, LOCTEXT("PercentSuffixFlowRoughness", "%"),
-                SurfaceSettingsEnabled);
-        AddFloatProperty(
-            FlowRenderingGroup,
-            FindPropertyByPath(TEXT("Parameters.SurfaceWater.DropletFlowRoughnessBlend")),
-            LOCTEXT("DropletFlowRoughnessBlend", "Roughness Blend"),
-            LOCTEXT("DropletFlowRoughnessBlendTooltip", "How strongly Droplet2 coverage blends from source roughness to its Water Roughness."),
-            0.0f, 1.0f, 0.0f, 1.0f, 0.01f, 100.0f, 1, LOCTEXT("PercentSuffixFlowRoughnessBlend", "%"),
-                SurfaceSettingsEnabled);
-        AddFloatProperty(
-            FlowRenderingGroup,
-            FindPropertyByPath(TEXT("Parameters.SurfaceWater.DropletFlowSpecular")),
-            LOCTEXT("DropletFlowWaterSpecular", "Water Specular"),
-            LOCTEXT("DropletFlowWaterSpecularTooltip", "Target specular reached inside Droplet2 coverage."),
-            0.0f, 1.0f, 0.0f, 1.0f, 0.01f, 100.0f, 1, LOCTEXT("PercentSuffixFlowSpecular", "%"),
-                SurfaceSettingsEnabled);
-        }
+            RenderingAdvancedGroup,
+            ColorBlendHandle,
+            LOCTEXT("SurfaceColorBlend", "Color Blend"),
+            LOCTEXT("SurfaceColorBlendTooltip", "How strongly the selected Surface Water layer modifies the underlying Base Color."),
+            0.0f, 1.0f, 0.0f, 1.0f, 0.01f, 100.0f, 1, LOCTEXT("PercentSuffixSurfaceColorBlend", "%"),
+            ActiveLayerSettingsEnabled);
 
         IDetailCategoryBuilder& DetailTexturesCategory = DetailBuilder.EditCategory(
             TEXT("DWCSurfaceDetailTextures"),
@@ -754,50 +796,24 @@ void FWetnessProfileDetailsCustomization::CustomizeDetails(IDetailLayoutBuilder&
             ECategoryPriority::Important);
         ConfigurePrimaryCategory(DetailTexturesCategory, BaseSortOrder + 15);
 
-        if (bShowDroplet1)
-        {
-
-        IDetailGroup& DropletTexturesGroup = DetailTexturesCategory.AddGroup(
-            TEXT("DWCDroplet1Textures"),
-            LOCTEXT("Droplet1TexturesGroup", "Droplet1"),
-            false,
-            true);
         AddDefaultProperty(
-            DropletTexturesGroup,
-            FindPropertyByPath(TEXT("Parameters.SurfaceWater.DropletNormalTexture")),
-            LOCTEXT("DropletNormal", "Normal Texture"),
-            LOCTEXT("DropletNormalTooltip", "Normal texture used by droplet rendering. Empty uses the DWC default."),
-            SurfaceSettingsEnabled);
+            DetailTexturesCategory,
+            FindPropertyByPath(
+                bEditSecondary
+                    ? TEXT("Parameters.SurfaceWater.DropletFlowNormalTexture")
+                    : TEXT("Parameters.SurfaceWater.DropletNormalTexture")),
+            LOCTEXT("SelectedDropletNormal", "Normal Texture"),
+            LOCTEXT("SelectedDropletNormalTooltip", "Normal texture used by the selected Surface Water layer."),
+            ActiveLayerSettingsEnabled);
         AddDefaultProperty(
-            DropletTexturesGroup,
-            FindPropertyByPath(TEXT("Parameters.SurfaceWater.DropletMaskTexture")),
-            LOCTEXT("DropletMask", "Mask Texture"),
-            LOCTEXT("DropletMaskTooltip", "Optional mask used to localize visible Surface Water coverage and droplet detail. Empty means unmasked coverage."),
-            SurfaceSettingsEnabled);
-        }
-
-        if (bShowDroplet2)
-        {
-
-        IDetailGroup& DropletFlowTexturesGroup = DetailTexturesCategory.AddGroup(
-            TEXT("DWCDroplet2Textures"),
-            LOCTEXT("Droplet2TexturesGroup", "Droplet2"),
-            false,
-            true);
-        AddDefaultProperty(
-            DropletFlowTexturesGroup,
-            FindPropertyByPath(TEXT("Parameters.SurfaceWater.DropletFlowNormalTexture")),
-            LOCTEXT("DropletFlowNormal", "Normal Texture"),
-            LOCTEXT("DropletFlowNormalTooltip", "Optional normal texture used by Droplet2. Empty uses the neutral flat-normal slice and never copies Droplet1."),
-                SurfaceSettingsEnabled);
-        AddDefaultProperty(
-            DropletFlowTexturesGroup,
-            FindPropertyByPath(TEXT("Parameters.SurfaceWater.DropletFlowMaskTexture")),
-            LOCTEXT("DropletFlowMask", "Mask Texture"),
-            LOCTEXT("DropletFlowMaskTooltip", "Optional mask texture used by Droplet2. Empty uses the neutral unmasked slice and never copies Droplet1."),
-                SurfaceSettingsEnabled);
-        }
-
+            DetailTexturesCategory,
+            FindPropertyByPath(
+                bEditSecondary
+                    ? TEXT("Parameters.SurfaceWater.DropletFlowMaskTexture")
+                    : TEXT("Parameters.SurfaceWater.DropletMaskTexture")),
+            LOCTEXT("SelectedDropletMask", "Mask Texture"),
+            LOCTEXT("SelectedDropletMaskTooltip", "Mask texture used by the selected Surface Water layer."),
+            ActiveLayerSettingsEnabled);
     }
 }
 
@@ -1197,6 +1213,93 @@ void FWetnessProfileDetailsCustomization::AddMappedFloatProperty(
             [
                 SNew(STextBlock)
                 .Text(Suffix)
+                .ColorAndOpacity(FSlateColor::UseSubduedForeground())
+            ]
+        ];
+}
+
+void FWetnessProfileDetailsCustomization::AddStampSizeProperty(
+    IDetailCategoryBuilder& Category,
+    const TSharedPtr<IPropertyHandle>& WidthHandle,
+    const TSharedPtr<IPropertyHandle>& HeightHandle,
+    const FText& Tooltip,
+    const TAttribute<bool> IsEnabled)
+{
+    if (!WidthHandle.IsValid() || !WidthHandle->IsValidHandle() ||
+        !HeightHandle.IsValid() || !HeightHandle->IsValidHandle())
+    {
+        return;
+    }
+
+    const FText DisplayName = LOCTEXT("CircularStampRadius", "Stamp Radius");
+    Category.AddCustomRow(DisplayName)
+        .FilterString(DisplayName)
+        .IsEnabled(IsEnabled)
+        .NameContent()
+        [
+            WidthHandle->CreatePropertyNameWidget(DisplayName, Tooltip)
+        ]
+        .ValueContent()
+        .MinDesiredWidth(190.0f)
+        .MaxDesiredWidth(420.0f)
+        [
+            SNew(SHorizontalBox)
+            + SHorizontalBox::Slot()
+            .FillWidth(1.0f)
+            [
+                SNew(SNumericEntryBox<float>)
+                .MinValue(0.0f)
+                .MaxValue(256.0f)
+                .MinSliderValue(0.0f)
+                .MaxSliderValue(128.0f)
+                .Delta(1.0f)
+                .MinFractionalDigits(0)
+                .MaxFractionalDigits(0)
+                .AllowSpin(true)
+                .Value_Lambda([WeakWidth = TWeakPtr<IPropertyHandle>(WidthHandle)]() -> TOptional<float>
+                {
+                    const TSharedPtr<IPropertyHandle> Handle = WeakWidth.Pin();
+                    float Value = 0.0f;
+                    return Handle.IsValid() && Handle->GetValue(Value) == FPropertyAccess::Success
+                        ? TOptional<float>(Value)
+                        : TOptional<float>();
+                })
+                .OnValueChanged_Lambda(
+                    [WeakWidth = TWeakPtr<IPropertyHandle>(WidthHandle),
+                     WeakHeight = TWeakPtr<IPropertyHandle>(HeightHandle)](const float NewValue)
+                    {
+                        const float Radius = FMath::Clamp(NewValue, 0.0f, 256.0f);
+                        if (const TSharedPtr<IPropertyHandle> Width = WeakWidth.Pin())
+                        {
+                            Width->SetValue(Radius);
+                        }
+                        if (const TSharedPtr<IPropertyHandle> Height = WeakHeight.Pin())
+                        {
+                            Height->SetValue(Radius);
+                        }
+                    })
+                .OnValueCommitted_Lambda(
+                    [WeakWidth = TWeakPtr<IPropertyHandle>(WidthHandle),
+                     WeakHeight = TWeakPtr<IPropertyHandle>(HeightHandle)](const float NewValue, ETextCommit::Type)
+                    {
+                        const float Radius = FMath::Clamp(NewValue, 0.0f, 256.0f);
+                        if (const TSharedPtr<IPropertyHandle> Width = WeakWidth.Pin())
+                        {
+                            Width->SetValue(Radius);
+                        }
+                        if (const TSharedPtr<IPropertyHandle> Height = WeakHeight.Pin())
+                        {
+                            Height->SetValue(Radius);
+                        }
+                    })
+            ]
+            + SHorizontalBox::Slot()
+            .AutoWidth()
+            .VAlign(VAlign_Center)
+            .Padding(6.0f, 0.0f, 0.0f, 0.0f)
+            [
+                SNew(STextBlock)
+                .Text(LOCTEXT("PixelSuffixCircularStamp", "px"))
                 .ColorAndOpacity(FSlateColor::UseSubduedForeground())
             ]
         ];

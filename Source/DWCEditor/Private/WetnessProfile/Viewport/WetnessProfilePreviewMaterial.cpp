@@ -28,7 +28,7 @@ namespace DWCWetnessProfilePreviewMaterial
 namespace
 {
     constexpr const TCHAR* DynamicWetClothesPluginName = TEXT("DynamicWetClothes");
-    constexpr const TCHAR* PreviewMaterialAssetName = TEXT("M_DWC_WetnessProfilePreviewV14");
+    constexpr const TCHAR* PreviewMaterialAssetName = TEXT("M_DWC_WetnessProfilePreview");
 
     enum class EPreviewMaterialCreationState : uint8
     {

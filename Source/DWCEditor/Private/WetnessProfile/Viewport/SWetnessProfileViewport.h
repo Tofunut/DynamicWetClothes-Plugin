@@ -133,6 +133,7 @@ class SWetnessProfileViewport : public SEditorViewport, public FGCObject
     void ScheduleSimulationRestart();
     void UpdateRealtimeState();
     FText GetOverlayText() const;
+    float GetInteractionCursorVisualSize() const;
 
     TWeakObjectPtr<UWetnessProfile> WetnessProfile;
     TSharedPtr<FAdvancedPreviewScene> PreviewScene;

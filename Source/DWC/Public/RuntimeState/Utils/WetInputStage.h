@@ -53,6 +53,12 @@ class DWC_API FWetInputStage
         const FVector&              Normal,
         const FWetClothingSettings& Settings);
 
+    static float CalculateAreaExposure(
+        const FVector&              WorldNormal,
+        const FVector&              Direction,
+        const FVector&              Normal,
+        const FWetClothingSettings& Settings);
+
     static void ApplyWetAll(FWetInputStageArgs& Args, float Amount);
     static bool ApplyWetSurface(
         FWetInputStageArgs&         Args,

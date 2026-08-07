@@ -67,7 +67,7 @@ bool PassSurfaceFilter(
         return true;
     }
 
-    const float NormalExposureMin = FMath::Min(Settings.RainExposureMin, Settings.RainExposureMax);
+    const float NormalExposureMin = FMath::Min(Settings.ContactExposureMin, Settings.ContactExposureMax);
     if (!TriangleNormal.IsNearlyZero() && FVector::DotProduct(TriangleNormal, ContactNormal) < NormalExposureMin)
     {
         return false;
@@ -715,14 +715,14 @@ bool FWetSurfaceContactResolver::ResolveWetArea(
                 continue;
             }
 
-            RawExposure = FWetInputStage::CalculateContactExposure(
+            RawExposure = FWetInputStage::CalculateAreaExposure(
                 AverageWorldNormal,
                 SafeDirection,
                 SafeNormal,
                 *Args.WetnessSettings);
         }
 
-        const float MinInfluence = FMath::Clamp(Args.WetnessSettings->RainExposureMinInfluence, 0.0f, 1.0f);
+        const float MinInfluence = FMath::Clamp(Args.WetnessSettings->AreaExposureMinInfluence, 0.0f, 1.0f);
         const float EffectiveExposure = FMath::Clamp(RawExposure, MinInfluence, 1.0f);
         Candidates.Add({
             TriangleID,

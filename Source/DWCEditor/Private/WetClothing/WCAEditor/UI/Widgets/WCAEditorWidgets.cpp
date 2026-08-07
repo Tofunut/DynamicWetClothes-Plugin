@@ -915,6 +915,26 @@ TSharedRef<ITableRow> FWCAEditorWidgets::GenerateMaterialSlotRow(
                                                       : FSlateColor(FStyleColors::Foreground);
                                               })]]]];
 
+    if (Args.BuildBeforeWettableWidget)
+    {
+        RowContent->AddSlot()
+            .AutoWidth()
+            .VAlign(VAlign_Center)
+            [
+                SNew(SBox)
+                .WidthOverride(FWCAEditorWidgets::MaterialSlotAuxColumnWidth)
+                .HAlign(HAlign_Center)
+                .VAlign(VAlign_Center)
+                [
+                    bIsAllSlotsRow
+                        ? StaticCastSharedRef<SWidget>(SNew(STextBlock)
+                            .Text(FText::FromString(TEXT("-")))
+                            .Font(FAppStyle::GetFontStyle(TEXT("SmallFont"))))
+                        : Args.BuildBeforeWettableWidget(MaterialSlotIndex)
+                ]
+            ];
+    }
+
     if (Args.bShowWettableToggle)
     {
         RowContent->AddSlot()

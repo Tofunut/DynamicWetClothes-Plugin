@@ -48,6 +48,7 @@ struct FWCAMaterialSlotRowArgs
     TFunction<TSharedRef<SWidget>(int32)> BuildLeadingWidget;
     TFunction<bool(int32)> IsMaterialSlotEnabled;
     TFunction<FText(int32)> GetMaterialSlotTooltipText;
+    TFunction<TSharedRef<SWidget>(int32)> BuildBeforeWettableWidget;
     TFunction<TSharedRef<SWidget>(int32)> BuildTrailingWidget;
 };
 
@@ -79,6 +80,7 @@ class FWCAEditorWidgets
     static constexpr float MaterialSlotThumbnailColumnWidth = 112.0f;
     static constexpr float MaterialSlotDataUVColumnWidth = 112.0f;
     static constexpr float MaterialSlotWettableColumnWidth = 76.0f;
+    static constexpr float MaterialSlotAuxColumnWidth = 72.0f;
 
     static TSharedRef<SWidget> BuildSectionHeader(const TAttribute<FText>& Title, const TAttribute<FText>& Detail = TAttribute<FText>());
     static TSharedRef<SWidget> BuildPreviewSection(

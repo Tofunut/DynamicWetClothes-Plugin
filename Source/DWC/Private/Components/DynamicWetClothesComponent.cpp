@@ -36,6 +36,10 @@
 
 namespace
 {
+    // Shipping GPU tuning is intentionally fixed and not user-configurable.
+    constexpr int32 DWC_GPU_CONTACT_NEAREST_SEED_VERTEX_COUNT = 12;
+    constexpr float DWC_GPU_IMMEDIATE_ABSORPTION_FRACTION = 0.35f;
+
     bool IsMaterialSlotWettableForRuntime(const UWetClothingAsset* WetClothingAsset, const int32 MaterialSlotIndex)
     {
         if (WetClothingAsset == nullptr || MaterialSlotIndex == INDEX_NONE)
@@ -196,15 +200,9 @@ bool UDynamicWetClothesComponent::InitializeWetRuntime()
                 World->GetSubsystem<UDWCRuntimeDataSubsystem>();
             UDWCGPUResourceSubsystem* GPUResourceSubsystem =
                 World->GetSubsystem<UDWCGPUResourceSubsystem>();
-            TSet<const UWetClothingAsset*> InvalidatedAssets;
-            for (const TObjectPtr<UWetClothingAsset>& WetClothingAsset : WetClothingAssets)
+            const UWetClothingAsset* Asset = WetClothingAsset.Get();
+            if (Asset != nullptr)
             {
-                const UWetClothingAsset* Asset = WetClothingAsset.Get();
-                if (Asset == nullptr || InvalidatedAssets.Contains(Asset))
-                {
-                    continue;
-                }
-
                 if (RuntimeDataSubsystem != nullptr)
                 {
                     RuntimeDataSubsystem->InvalidateSharedRuntimeData(Asset);
@@ -213,7 +211,6 @@ bool UDynamicWetClothesComponent::InitializeWetRuntime()
                 {
                     GPUResourceSubsystem->InvalidateAssetResources(Asset);
                 }
-                InvalidatedAssets.Add(Asset);
             }
         }
     }
@@ -406,7 +403,7 @@ FWetMeshReceiverInitializerContext UDynamicWetClothesComponent::MakeWetMeshRecei
     Context.Component = this;
     Context.Owner = GetOwner();
     Context.World = GetWorld();
-    Context.WetClothingAssets = &WetClothingAssets;
+    Context.WetClothingAsset = WetClothingAsset.Get();
     Context.Receivers = &Receivers;
     Context.SimulationMode = GetActiveSimulationMode();
     Context.LODVertexColorTransferCoordinator = LODVertexColorTransferCoordinator.Get();
@@ -422,13 +419,13 @@ FWetApplicationStageContext UDynamicWetClothesComponent::MakeWetApplicationStage
     FWetApplicationStageContext Context;
     Context.OwnerForLogs = GetOwner();
     Context.WetnessSettings = &WetnessSettings;
-    Context.MaxNearestSeedVertices = GPUContactNearestSeedVertexCount;
+    Context.MaxNearestSeedVertices = DWC_GPU_CONTACT_NEAREST_SEED_VERTEX_COUNT;
     Context.SimulationMode = GetActiveSimulationMode();
     Context.Receivers = &Receivers;
     Context.PendingWetContacts = &PendingWetContacts;
     Context.bPendingWetContactsApplyMaterial = &bPendingWetContactsApplyMaterial;
-    Context.bBatchWetContactsPerFrame = bBatchWetContactsPerFrame;
-    Context.MaxBatchedWetContactsPerFrame = MaxBatchedWetContactsPerFrame;
+    Context.bBatchWetContactsPerFrame = true;
+    Context.MaxBatchedWetContactsPerFrame = MaxWetContactsPerFrame;
     Context.EnsureWetRuntimeInitialized = [this]()
     {
         return InitializeWetRuntime();
@@ -552,10 +549,9 @@ bool UDynamicWetClothesComponent::InitializeGPUBackend(FDWCWetMeshReceiverRuntim
     InitArgs.SpreadRateScale = 1.0f;
     InitArgs.DryRateScale = 1.0f;
     InitArgs.GravityFlowStrengthScale = 1.0f;
-    InitArgs.CapillaryImmediateAbsorptionFraction = GPUImmediateAbsorptionFraction;
+    InitArgs.CapillaryImmediateAbsorptionFraction = DWC_GPU_IMMEDIATE_ABSORPTION_FRACTION;
     InitArgs.ReceiverGPUId = MakeDWCReceiverGPUId(Receiver.ReceiverId);
-    InitArgs.bUseEightDirectionDiffusion =
-        GPUDiffusionNeighborMode == EDWCGPUDiffusionNeighborMode::EightDirections;
+    InitArgs.bUseEightDirectionDiffusion = true;
 
     if (!Backend->Initialize(InitArgs))
     {
@@ -1261,21 +1257,12 @@ void UDynamicWetClothesComponent::PostEditChangeProperty(FPropertyChangedEvent& 
 
     const FName PropertyName = PropertyChangedEvent.GetPropertyName();
     const bool bRequiresRuntimeRebuild =
-        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, WetClothingAssets) ||
-        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, SimulationMode) ||
-        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, GPUDiffusionNeighborMode) ||
-        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, GPUImmediateAbsorptionFraction);
+        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, WetClothingAsset) ||
+        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, SimulationMode);
     const bool bRequiresMaterialRefresh =
         bRequiresRuntimeRebuild ||
         PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, bEnableDWCQualityLOD) ||
         PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, QualityLODProfile) ||
-        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, WrinkleStrength) ||
-        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, WrinkleWetnessMin) ||
-        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, WrinkleWetnessMax) ||
-        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, TransparencyWetnessMin) ||
-        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, TransparencyWetnessMax) ||
-        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, FallbackUnderColor) ||
-        PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, WetUnderColorBlendStrength) ||
         PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, bShowWetPartDebugColors) ||
         PropertyName == GET_MEMBER_NAME_CHECKED(UDynamicWetClothesComponent, bShowSurfaceWaterDebugColors);
 

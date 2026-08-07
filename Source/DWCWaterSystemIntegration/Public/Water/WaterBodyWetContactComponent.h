@@ -11,7 +11,7 @@ class UPrimitiveComponent;
 class UWaterBodyComponent;
 struct FDWCWaterSurfaceData;
 
-UCLASS(ClassGroup = (Wetness), DisplayName = "Water Body Wet Contact", meta = (BlueprintSpawnableComponent))
+UCLASS(ClassGroup = (DWC), DisplayName = "Water Body Wet Contact", meta = (BlueprintSpawnableComponent))
 class DWCWATERSYSTEMINTEGRATION_API UWaterBodyWetContactComponent : public UActorComponent
 {
     GENERATED_BODY()
@@ -56,22 +56,14 @@ class DWCWATERSYSTEMINTEGRATION_API UWaterBodyWetContactComponent : public UActo
         int32                OtherBodyIndex);
 
   private:
-    UPROPERTY(EditAnywhere, Category = "Wetness")
+    // Internal integration policy. These values are intentionally not exposed in Details or Blueprint.
     bool bApplyToExistingOverlapsOnBeginPlay = true;
-
-    UPROPERTY(EditAnywhere, Category = "Wetness")
     bool bRefreshReceiversInsideBounds = true;
-
-    UPROPERTY(EditAnywhere, Category = "Wetness", meta = (ClampMin = "0.0"))
     float ReceiverRefreshInterval = 0.25f;
-
-    UPROPERTY(EditAnywhere, Category = "Wetness|Overlap Proxy")
     bool bCreateOverlapProxy = true;
 
-    UPROPERTY(EditAnywhere, Category = "Wetness|Profiling")
+    // Profiling remains available in C++ without becoming part of the product-facing component UI.
     bool bEnablePerformanceLogging = false;
-
-    UPROPERTY(EditAnywhere, Category = "Wetness|Profiling", meta = (ClampMin = "0.1"))
     float PerformanceLogInterval = 1.0f;
 
     UPROPERTY(Transient)

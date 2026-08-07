@@ -147,8 +147,7 @@ namespace
 
 bool FWetMeshReceiverInitializer::RebuildReceivers(FWetMeshReceiverInitializerContext& Context)
 {
-    if (Context.WetClothingAssets == nullptr ||
-        Context.Receivers == nullptr)
+    if (Context.Receivers == nullptr)
     {
         return false;
     }
@@ -162,8 +161,34 @@ bool FWetMeshReceiverInitializer::RebuildReceivers(FWetMeshReceiverInitializerCo
     }
     Context.Receivers->Reset();
 
-    if (Context.Owner == nullptr)
+    if (Context.Owner == nullptr || Context.WetClothingAsset == nullptr)
     {
+        return false;
+    }
+
+    UWetClothingAsset* Asset = Context.WetClothingAsset;
+    if (!Asset->IsCurrentAssetDataVersion())
+    {
+        UE_LOG(
+            LogDWC,
+            Error,
+            TEXT("DynamicWetClothesComponent: Wet Clothing Asset '%s' uses unsupported schema version %d (current: %d). Recreate or regenerate the WCA before play."),
+            *GetNameSafe(Asset),
+            Asset->Metadata.AssetDataVersion,
+            UWetClothingAsset::CurrentAssetDataVersion);
+        return false;
+    }
+
+    USkeletalMesh* RequiredMesh = Asset->GetDWCSkeletalMesh();
+    USkeletalMesh* SourceMesh = Asset->GetSourceSkeletalMesh();
+    if (RequiredMesh == nullptr)
+    {
+        UE_LOG(
+            LogDWC,
+            Warning,
+            TEXT("DynamicWetClothesComponent: Wet Clothing Asset '%s' has no generated DWC Skeletal Mesh on %s."),
+            *GetNameSafe(Asset),
+            *GetNameSafe(Context.Owner));
         return false;
     }
 
@@ -179,130 +204,17 @@ bool FWetMeshReceiverInitializer::RebuildReceivers(FWetMeshReceiverInitializerCo
         return false;
     }
 
-    TSet<UWetClothingAsset*> SeenAssets;
-    TMap<USkeletalMeshComponent*, UWetClothingAsset*> FirstClaimByMesh;
-    TArray<TPair<USkeletalMeshComponent*, UWetClothingAsset*>> OrderedClaims;
-    TSet<USkeletalMeshComponent*> ConflictingMeshes;
-
-    for (UWetClothingAsset* Asset : *Context.WetClothingAssets)
+    bool bFoundSourceMesh = false;
+    for (USkeletalMeshComponent* MeshComponent : MeshComponents)
     {
-        if (Asset == nullptr)
+        if (MeshComponent == nullptr)
         {
             continue;
         }
 
-        if (SeenAssets.Contains(Asset))
-        {
-            UE_LOG(
-                LogDWC,
-                Warning,
-                TEXT("DynamicWetClothesComponent: Wet Clothing Asset '%s' is registered more than once on %s; duplicate entries are ignored."),
-                *GetNameSafe(Asset),
-                *GetNameSafe(Context.Owner));
-            continue;
-        }
-        SeenAssets.Add(Asset);
-
-        if (!Asset->IsCurrentAssetDataVersion())
-        {
-            UE_LOG(
-                LogDWC,
-                Error,
-                TEXT("DynamicWetClothesComponent: Wet Clothing Asset '%s' uses unsupported schema version %d (current: %d). Recreate or regenerate the WCA before play."),
-                *GetNameSafe(Asset),
-                Asset->Metadata.AssetDataVersion,
-                UWetClothingAsset::CurrentAssetDataVersion);
-            continue;
-        }
-
-        USkeletalMesh* RequiredMesh = Asset->GetDWCSkeletalMesh();
-        USkeletalMesh* SourceMesh = Asset->GetSourceSkeletalMesh();
-        if (RequiredMesh == nullptr)
-        {
-            UE_LOG(
-                LogDWC,
-                Warning,
-                TEXT("DynamicWetClothesComponent: Wet Clothing Asset '%s' has no DWC Skeletal Mesh on %s."),
-                *GetNameSafe(Asset),
-                *GetNameSafe(Context.Owner));
-            continue;
-        }
-
-        bool bMatchedRequiredMesh = false;
-        bool bFoundSourceMesh = false;
-        for (USkeletalMeshComponent* MeshComponent : MeshComponents)
-        {
-            if (MeshComponent == nullptr)
-            {
-                continue;
-            }
-
-            USkeletalMesh* CurrentMesh = MeshComponent->GetSkeletalMeshAsset();
-            bFoundSourceMesh |= SourceMesh != nullptr && CurrentMesh == SourceMesh;
-            if (CurrentMesh != RequiredMesh)
-            {
-                continue;
-            }
-
-            bMatchedRequiredMesh = true;
-            if (UWetClothingAsset** ExistingAsset = FirstClaimByMesh.Find(MeshComponent))
-            {
-                if (*ExistingAsset != Asset)
-                {
-                    ConflictingMeshes.Add(MeshComponent);
-                    UE_LOG(
-                        LogDWC,
-                        Error,
-                        TEXT("DynamicWetClothesComponent: Skeletal mesh component '%s' on %s is targeted by both '%s' and '%s'. Remove one conflicting WCA entry."),
-                        *GetNameSafe(MeshComponent),
-                        *GetNameSafe(Context.Owner),
-                        *GetNameSafe(*ExistingAsset),
-                        *GetNameSafe(Asset));
-                }
-            }
-            else
-            {
-                FirstClaimByMesh.Add(MeshComponent, Asset);
-                OrderedClaims.Emplace(MeshComponent, Asset);
-            }
-        }
-
-        if (!bMatchedRequiredMesh)
-        {
-            if (bFoundSourceMesh && SourceMesh != RequiredMesh)
-            {
-                UE_LOG(
-                    LogDWC,
-                    Warning,
-                    TEXT("DynamicWetClothesComponent: WCA '%s' requires '%s', but %s still uses source mesh '%s'. Use the Details-panel Apply action before play."),
-                    *GetNameSafe(Asset),
-                    *GetNameSafe(RequiredMesh),
-                    *GetNameSafe(Context.Owner),
-                    *GetNameSafe(SourceMesh));
-            }
-            else
-            {
-                UE_LOG(
-                    LogDWC,
-                    Warning,
-                    TEXT("DynamicWetClothesComponent: No SkeletalMeshComponent on %s uses DWC mesh '%s' required by WCA '%s'."),
-                    *GetNameSafe(Context.Owner),
-                    *GetNameSafe(RequiredMesh),
-                    *GetNameSafe(Asset));
-            }
-        }
-    }
-
-    for (const TPair<USkeletalMeshComponent*, UWetClothingAsset*>& Claim : OrderedClaims)
-    {
-        if (ConflictingMeshes.Contains(Claim.Key))
-        {
-            continue;
-        }
-
-        USkeletalMeshComponent* Mesh = Claim.Key;
-        UWetClothingAsset* Asset = Claim.Value;
-        if (Mesh == nullptr || Asset == nullptr)
+        USkeletalMesh* CurrentMesh = MeshComponent->GetSkeletalMeshAsset();
+        bFoundSourceMesh |= SourceMesh != nullptr && CurrentMesh == SourceMesh;
+        if (CurrentMesh != RequiredMesh)
         {
             continue;
         }
@@ -310,14 +222,39 @@ bool FWetMeshReceiverInitializer::RebuildReceivers(FWetMeshReceiverInitializerCo
         TUniquePtr<FDWCWetMeshReceiverRuntime> Receiver = MakeUnique<FDWCWetMeshReceiverRuntime>();
         Receiver->ReceiverId = FName(*FString::Printf(
             TEXT("%s__%s"),
-            *Mesh->GetPathName(),
+            *MeshComponent->GetPathName(),
             *Asset->GetFName().ToString()));
-        Receiver->MeshComponent = Mesh;
+        Receiver->MeshComponent = MeshComponent;
         Receiver->WetClothingAsset = Asset;
         Receiver->SimulationState = MakeUnique<FAbsorbedWetnessSimulationState>();
         Receiver->MeshSampler = MakeUnique<FWetClothingMeshSampler>();
         Receiver->RenderStage = MakeUnique<FWetRenderStage>();
         Context.Receivers->Add(MoveTemp(Receiver));
+    }
+
+    if (Context.Receivers->IsEmpty())
+    {
+        if (bFoundSourceMesh && SourceMesh != RequiredMesh)
+        {
+            UE_LOG(
+                LogDWC,
+                Warning,
+                TEXT("DynamicWetClothesComponent: WCA '%s' requires DWC mesh '%s', but %s still uses source mesh '%s'. Assign the generated DWC mesh to the target SkeletalMeshComponent before play."),
+                *GetNameSafe(Asset),
+                *GetNameSafe(RequiredMesh),
+                *GetNameSafe(Context.Owner),
+                *GetNameSafe(SourceMesh));
+        }
+        else
+        {
+            UE_LOG(
+                LogDWC,
+                Warning,
+                TEXT("DynamicWetClothesComponent: No SkeletalMeshComponent on %s uses DWC mesh '%s' required by WCA '%s'."),
+                *GetNameSafe(Context.Owner),
+                *GetNameSafe(RequiredMesh),
+                *GetNameSafe(Asset));
+        }
     }
 
     return !Context.Receivers->IsEmpty();

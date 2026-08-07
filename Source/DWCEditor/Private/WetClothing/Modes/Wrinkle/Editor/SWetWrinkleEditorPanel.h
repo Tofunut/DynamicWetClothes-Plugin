@@ -107,6 +107,7 @@ class SWetWrinkleEditorPanel : public SCompoundWidget, public FEditorUndoClient
     FReply HandleFocusClicked();
     void HandleSurfaceHitChanged(const FWetWrinkleSurfaceHit& SurfaceHit);
     TSharedRef<SWidget> BuildPatchBrushSection();
+    TSharedRef<SWidget> BuildPreviewDisplayPanel();
     TSharedRef<SWidget> BuildPatchListSection();
     FWetWrinkleBrushSettings MakeViewportBrushSettings() const;
     void PushBrushSettingsToViewport();
@@ -175,10 +176,14 @@ class SWetWrinkleEditorPanel : public SCompoundWidget, public FEditorUndoClient
     EVisibility GetProceduralRidgeEditVisibility() const;
     FText GetMaterialSlotCountText() const;
     TSharedRef<ITableRow> GenerateMaterialSlotRow(FMaterialSlotItemPtr Item, const TSharedRef<STableViewBase>& OwnerTable);
+    TSharedRef<SWidget> BuildMaterialSlotPreviewWidget(int32 MaterialSlotIndex) const;
     void HandleMaterialSlotSelectionChanged(FMaterialSlotItemPtr Item, ESelectInfo::Type SelectInfo);
     void ApplyMaterialSlotSelection(int32 MaterialSlotIndex, bool bShowFailureDialog);
 
     FString GetWrinkleNormalTextureObjectPath() const;
+    FText GetWrinkleNormalTextureDisplayName() const;
+    TSharedRef<SWidget> BuildWrinkleNormalTextureMenu();
+    FReply HandleWrinkleNormalPresetClicked(FSoftObjectPath TexturePath);
     void HandleWrinkleNormalTextureChanged(const FAssetData& AssetData);
     TSharedRef<SWidget> BuildWrinkleTexturePalette();
     TSharedRef<ITableRow> GenerateWrinkleTexturePaletteTileRow(

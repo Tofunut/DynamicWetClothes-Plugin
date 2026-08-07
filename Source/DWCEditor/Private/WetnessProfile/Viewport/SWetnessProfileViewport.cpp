@@ -1555,7 +1555,7 @@ bool SWetnessProfileViewport::EnsureGPUPreviewSimulator()
     Args.Resolution = 512;
     Args.MaxWetness = Defaults.MaxWetness;
     Args.CapillaryImmediateAbsorptionFraction = Defaults.CapillaryImmediateAbsorptionFraction;
-    Args.bUseEightDirectionDiffusion = false;
+    Args.bUseEightDirectionDiffusion = true;
     if (!NewSimulator->Initialize(Args))
     {
         bGPUPreviewUnavailable = true;

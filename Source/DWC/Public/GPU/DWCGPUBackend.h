@@ -39,7 +39,7 @@ struct DWC_API FDWCGPUBackendInitArgs
     float GravityFlowStrengthScale = 1.0f;
     float CapillaryImmediateAbsorptionFraction = 0.65f;
     int32 ReceiverGPUId = 0;
-    bool bUseEightDirectionDiffusion = false;
+    bool bUseEightDirectionDiffusion = true;
 };
 
 struct DWC_API FDWCGPUBackendStats
@@ -77,7 +77,7 @@ struct DWC_API FDWCGPUPreviewInitArgs
     int32 Resolution = 512;
     float MaxWetness = 1.15f;
     float CapillaryImmediateAbsorptionFraction = 0.65f;
-    bool bUseEightDirectionDiffusion = false;
+    bool bUseEightDirectionDiffusion = true;
 };
 
 /** Optional DWCGPU-backed Wetness Profile preview. No RHI types cross this interface. */

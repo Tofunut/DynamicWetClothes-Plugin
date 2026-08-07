@@ -20,7 +20,7 @@ struct FWetMeshReceiverInitializerContext
     AActor* Owner = nullptr;
     UWorld* World = nullptr;
 
-    const TArray<TObjectPtr<UWetClothingAsset>>* WetClothingAssets = nullptr;
+    UWetClothingAsset* WetClothingAsset = nullptr;
     TArray<TUniquePtr<FDWCWetMeshReceiverRuntime>>* Receivers = nullptr;
     EDWCSimulationMode SimulationMode = EDWCSimulationMode::VertexCPU;
 

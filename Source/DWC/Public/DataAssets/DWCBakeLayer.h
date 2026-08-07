@@ -9,7 +9,7 @@
 class UMaterialInterface;
 class USkeletalMesh;
 
-UENUM(BlueprintType)
+UENUM()
 enum class EDWCBakeSourceType : uint8
 {
     Unknown UMETA(DisplayName = "Unknown"),
@@ -18,108 +18,108 @@ enum class EDWCBakeSourceType : uint8
     ComponentTemplate UMETA(DisplayName = "Component Template")
 };
 
-USTRUCT(BlueprintType)
+USTRUCT()
 struct FDWCBakeSourceContext
 {
     GENERATED_BODY()
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DWC|Bake")
+    UPROPERTY(VisibleAnywhere, Category = "DWC|Bake")
     EDWCBakeSourceType SourceType = EDWCBakeSourceType::Unknown;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DWC|Bake")
+    UPROPERTY(VisibleAnywhere, Category = "DWC|Bake")
     FSoftObjectPath SourceObjectPath;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DWC|Bake")
+    UPROPERTY(VisibleAnywhere, Category = "DWC|Bake")
     FString SourceDisplayName;
 };
 
-USTRUCT(BlueprintType)
+USTRUCT()
 struct FDWCBakeLayer
 {
     GENERATED_BODY()
 
     //Id is name of Layer which is for human readable
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Layer")
+    UPROPERTY(EditAnywhere, Category = "Layer")
     FName LayerId;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Layer")
+    UPROPERTY(EditAnywhere, Category = "Layer")
     FComponentReference ComponentReference;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Layer")
+    UPROPERTY(EditAnywhere, Category = "Layer")
     int32 LayerOrder = 0;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Reveal")
+    UPROPERTY(EditAnywhere, Category = "Reveal")
     bool bCanBeRevealSource = true;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Reveal")
+    UPROPERTY(EditAnywhere, Category = "Reveal")
     bool bCanBeWetOuterLayer = true;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Reveal")
+    UPROPERTY(EditAnywhere, Category = "Reveal")
     bool bBlocksReveal = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Reveal", meta = (ClampMin = "0.0"))
+    UPROPERTY(EditAnywhere, Category = "Reveal", meta = (ClampMin = "0.0"))
     float MaxRevealDistance = 5.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "UV", meta = (ClampMin = "0"))
+    UPROPERTY(EditAnywhere, Category = "UV", meta = (ClampMin = "0"))
     int32 SourceUVChannel = 0;
 };
 
-USTRUCT(BlueprintType)
+USTRUCT()
 struct FDWCBakeResolvedLayer
 {
     GENERATED_BODY()
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DWC|Bake")
+    UPROPERTY(VisibleAnywhere, Category = "DWC|Bake")
     FName LayerId;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DWC|Bake")
+    UPROPERTY(VisibleAnywhere, Category = "DWC|Bake")
     int32 LayerOrder = 0;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DWC|Bake")
+    UPROPERTY(VisibleAnywhere, Category = "DWC|Bake")
     FName ComponentDisplayName;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DWC|Bake")
+    UPROPERTY(VisibleAnywhere, Category = "DWC|Bake")
     FString ComponentPath;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DWC|Bake")
+    UPROPERTY(VisibleAnywhere, Category = "DWC|Bake")
     TObjectPtr<USkeletalMesh> SkeletalMesh = nullptr;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DWC|Bake")
+    UPROPERTY(VisibleAnywhere, Category = "DWC|Bake")
     TArray<TObjectPtr<UMaterialInterface>> Materials;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DWC|Bake")
+    UPROPERTY(VisibleAnywhere, Category = "DWC|Bake")
     FTransform BakeTransform = FTransform::Identity;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DWC|Bake")
+    UPROPERTY(VisibleAnywhere, Category = "DWC|Bake")
     bool bCanBeRevealSource = true;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DWC|Bake")
+    UPROPERTY(VisibleAnywhere, Category = "DWC|Bake")
     bool bCanBeWetOuterLayer = true;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DWC|Bake")
+    UPROPERTY(VisibleAnywhere, Category = "DWC|Bake")
     bool bBlocksReveal = false;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DWC|Bake")
+    UPROPERTY(VisibleAnywhere, Category = "DWC|Bake")
     float MaxRevealDistance = 5.0f;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DWC|Bake")
+    UPROPERTY(VisibleAnywhere, Category = "DWC|Bake")
     int32 SourceUVChannel = 0;
 };
 
-USTRUCT(BlueprintType)
+USTRUCT()
 struct FDWCBakeSnapshot
 {
     GENERATED_BODY()
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DWC|Bake")
+    UPROPERTY(VisibleAnywhere, Category = "DWC|Bake")
     FDWCBakeSourceContext SourceContext;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DWC|Bake")
+    UPROPERTY(VisibleAnywhere, Category = "DWC|Bake")
     TArray<FDWCBakeResolvedLayer> Layers;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DWC|Bake")
+    UPROPERTY(VisibleAnywhere, Category = "DWC|Bake")
     FGuid SnapshotGuid;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DWC|Bake")
+    UPROPERTY(VisibleAnywhere, Category = "DWC|Bake")
     FString BuildSignature;
 };

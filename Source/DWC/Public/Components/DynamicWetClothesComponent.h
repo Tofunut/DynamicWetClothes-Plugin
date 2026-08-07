@@ -25,13 +25,6 @@
 
 #include "DynamicWetClothesComponent.generated.h"
 
-UENUM(BlueprintType)
-enum class EDWCGPUDiffusionNeighborMode : uint8
-{
-    FourDirections UMETA(DisplayName = "4 Directions"),
-    EightDirections UMETA(DisplayName = "8 Directions")
-};
-
 class USkeletalMeshComponent;
 class USkeletalMesh;
 class UMaterialInstanceDynamic;
@@ -95,7 +88,7 @@ struct FDWCWetMeshReceiverRuntime
     bool bLODVertexColorTransferRequestedAgain = false;
 };
 
-UCLASS(ClassGroup = (Wetness), DisplayName = "Dynamic Wet Clothes", meta = (BlueprintSpawnableComponent))
+UCLASS(ClassGroup = (DWC), DisplayName = "Dynamic Wet Clothes", meta = (BlueprintSpawnableComponent))
 class DWC_API UDynamicWetClothesComponent : public UActorComponent
 {
     GENERATED_BODY()
@@ -135,9 +128,9 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
     int32 GetDWCReceiverGPUId(FName ReceiverId = NAME_None) const;
     void GetDWCReceiverGPUIds(TArray<int32>& OutReceiverGPUIds) const;
     // User-facing debug API.
-    UFUNCTION(BlueprintCallable, Category = "Wetness|Debug")
+    UFUNCTION(BlueprintCallable, Category = "Debug")
     void SetWetPartDebugColorsEnabled(bool bEnabled);
-    UFUNCTION(BlueprintCallable, Category = "Wetness|Debug")
+    UFUNCTION(BlueprintCallable, Category = "Debug")
     void SetSurfaceWaterDebugColorsEnabled(bool bEnabled);
     // Reserved for future DWC quality LOD support. Intentionally not exposed to users in this release.
     void SetDWCQualityLOD(int32 InQualityLOD);
@@ -218,37 +211,26 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
     void                     FlushAsyncTaskQueueGameThread();
 
   public:
-    // Input assets and simulation mode.
-    /** WCA assets handled by this component. Every matching SkeletalMeshComponent becomes a receiver. */
-    UPROPERTY(EditAnywhere, Category = "Wetness")
-    TArray<TObjectPtr<UWetClothingAsset>> WetClothingAssets;
+    // Input asset and simulation mode.
+    /** The single Wet Clothing Asset handled by this component. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Setup", meta = (DisplayName = "Wet Clothing Asset"))
+    TObjectPtr<UWetClothingAsset> WetClothingAsset = nullptr;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness", meta = (ShowOnlyInnerProperties))
+    // User-facing rows are explicitly arranged by the Details customization.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Simulation")
     FWetClothingSettings WetnessSettings;
 
     /** Selected per component instance and locked when BeginPlay starts. */
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Wetness|Simulation")
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Simulation")
     EDWCSimulationMode SimulationMode = EDWCSimulationMode::VertexCPU;
 
-    // GPU simulation configuration.
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Simulation|GPU", meta = (EditCondition = "SimulationMode == EDWCSimulationMode::WetnessMapGPU", ClampMin = "3", ClampMax = "64", AdvancedDisplay))
-    int32 GPUContactNearestSeedVertexCount = 12;
+    // GPU implementation tuning is fixed internally and intentionally not exposed to Details or Blueprint.
 
-    /** Number of neighboring texels used by GPU wetness diffusion. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Simulation|GPU", meta = (EditCondition = "SimulationMode == EDWCSimulationMode::WetnessMapGPU"))
-    EDWCGPUDiffusionNeighborMode GPUDiffusionNeighborMode = EDWCGPUDiffusionNeighborMode::FourDirections;
+    // Contact processing configuration. Contacts are always batched internally.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance", meta = (DisplayName = "Max Contacts Per Frame", ClampMin = "1", AdvancedDisplay))
+    int32 MaxWetContactsPerFrame = 64;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Simulation|GPU|Tuning", meta = (EditCondition = "SimulationMode == EDWCSimulationMode::WetnessMapGPU", ClampMin = "0.0", ClampMax = "1.0", UIMin = "0.0", UIMax = "1.0", AdvancedDisplay))
-    float GPUImmediateAbsorptionFraction = 0.35f;
-
-    // Contact and surface-water configuration.
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Contact", meta = (AllowPrivateAccess = "true"))
-    bool bBatchWetContactsPerFrame = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Contact", meta = (ClampMin = "1", AllowPrivateAccess = "true", AdvancedDisplay))
-    int32 MaxBatchedWetContactsPerFrame = 64;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Surface", meta = (ClampMin = "2", ClampMax = "64", AllowPrivateAccess = "true", AdvancedDisplay))
+    // Internal sampling resolution retained for runtime integration; intentionally not user-configurable.
     int32 WetSurfaceSampleResolution = 8;
 
     // Reserved for future DWC quality LOD support. The implementation remains compiled for future development,
@@ -261,37 +243,26 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
     TArray<FDWCQualityLODScreenSizeThreshold> QualityLODScreenSizeThresholds;
     float RenderLODEvaluationInterval = 0.1f;
 
-    // Visual appearance and optional rendering features.
-    UPROPERTY(EditAnywhere, Category = "Wetness|Visual")
+    // Legacy component-level appearance overrides are intentionally not exposed.
+    // Rendering appearance is authored by WCA/Wetness Profile data. These defaults preserve
+    // the existing runtime behavior without duplicating authoring controls on the component.
     FLinearColor FallbackUnderColor = FLinearColor(0.8f, 0.55f, 0.42f, 1.0f);
-
-    UPROPERTY(EditAnywhere, Category = "Wetness|Visual", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float WetUnderColorBlendStrength = 0.3f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Wrinkle", meta = (ClampMin = "0.0"))
     float WrinkleStrength = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Wrinkle", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float WrinkleWetnessMin = 0.25f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Wrinkle", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float WrinkleWetnessMax = 1.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Transparency", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float TransparencyWetnessMin = 0.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Transparency", meta = (ClampMin = "0.0", ClampMax = "1.0"))
     float TransparencyWetnessMax = 1.0f;
 
     /**
      * Keeps the normal material while dry and displays each Wet Part's configured color while wet.
      * CPU wetness uses VertexColor.R; GPU wetness stays in the existing wetness texture path.
      */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Debug")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Debug")
     bool bShowWetPartDebugColors = false;
 
     /** Displays GPU surface-water droplets as a debug color over the wet part debug overlay. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Debug", meta = (EditCondition = "SimulationMode == EDWCSimulationMode::WetnessMapGPU"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Debug", meta = (EditCondition = "SimulationMode == EDWCSimulationMode::WetnessMapGPU"))
     bool bShowSurfaceWaterDebugColors = false;
 
   private:

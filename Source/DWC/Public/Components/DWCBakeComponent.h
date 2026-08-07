@@ -7,7 +7,7 @@
 
 #include "DWCBakeComponent.generated.h"
 
-UCLASS(ClassGroup = (DWC), DisplayName = "DWC Bake Component", meta = (BlueprintSpawnableComponent))
+UCLASS(NotBlueprintable, ClassGroup = (DWC), DisplayName = "DWC Bake Component")
 class DWC_API UDWCBakeComponent : public UActorComponent
 {
     GENERATED_BODY()
@@ -15,10 +15,12 @@ class DWC_API UDWCBakeComponent : public UActorComponent
   public:
     UDWCBakeComponent();
 
-    UFUNCTION(BlueprintCallable, Category = "DWC|Bake")
+    // Internal editor bake API. Intentionally not exposed to Blueprint.
     bool BuildBakeSnapshot(FDWCBakeSnapshot& OutSnapshot) const;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DWC|Bake")
+    // Retained as a reflected property so existing serialized bake sources remain readable,
+    // but it is intentionally hidden from Details panels and Blueprint.
+    UPROPERTY()
     TArray<FDWCBakeLayer> Layers;
 
   private:

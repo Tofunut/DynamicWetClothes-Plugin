@@ -82,6 +82,6 @@ private:
     int32 ReceiverGPUId = 0;
     int32 LODIndex = 0;
     int32 DebugDispatchLogCount = 0;
-    bool bUseEightDirectionDiffusion = false;
+    bool bUseEightDirectionDiffusion = true;
     bool bInitialized = false;
 };

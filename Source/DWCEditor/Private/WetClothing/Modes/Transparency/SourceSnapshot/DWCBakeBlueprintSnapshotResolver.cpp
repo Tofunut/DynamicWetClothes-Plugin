@@ -76,14 +76,14 @@ UDWCBakeComponent* FDWCBakeBlueprintSnapshotResolver::FindBakeComponent(AActor& 
 
     if (BakeComponents.Num() == 0)
     {
-        OutErrorMessage = FString::Printf(TEXT("Blueprint class '%s' has no DWC Bake Component."), *GetNameSafe(Actor.GetClass()));
+        OutErrorMessage = FString::Printf(TEXT("Blueprint class '%s' is not configured for DWC transparency baking."), *GetNameSafe(Actor.GetClass()));
         return nullptr;
     }
 
     if (BakeComponents.Num() > 1)
     {
         OutErrorMessage = FString::Printf(
-            TEXT("Blueprint class '%s' has multiple DWC Bake Components. Keep exactly one bake component per wet clothing source."),
+            TEXT("Blueprint class '%s' has an invalid internal DWC bake configuration."),
             *GetNameSafe(Actor.GetClass()));
         return nullptr;
     }

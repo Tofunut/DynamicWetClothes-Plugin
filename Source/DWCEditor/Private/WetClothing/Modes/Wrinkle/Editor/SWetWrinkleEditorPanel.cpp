@@ -21,6 +21,7 @@
 #include "AssetThumbnail.h"
 #include "Core/DWCEditorStyle.h"
 #include "Brushes/SlateImageBrush.h"
+#include "Brushes/SlateRoundedBoxBrush.h"
 #include "Framework/MultiBox/MultiBoxBuilder.h"
 #include "Materials/MaterialInterface.h"
 #include "Modules/ModuleManager.h"
@@ -39,6 +40,8 @@
 #include "WetClothing/Foundation/Preview/Commit/DWCEditorPreviewCommitCoordinator.h"
 #include "WetClothing/Foundation/Jobs/DWCEditorWorkerJobScheduler.h"
 #include "WetClothing/WCAEditor/UI/Widgets/WCAEditorWidgets.h"
+#include "WetClothing/WCAEditor/UI/Widgets/SWCAMaterialSlotPreview.h"
+#include "WetClothing/WCAEditor/UI/UVView/WCAUVIslandViewCache.h"
 #include "WetClothing/Modes/Part/Partition/WetPartEditingService.h"
 #include "WetClothing/DerivedAssets/Textures/Wrinkle/WetWrinkleBakeService.h"
 #include "WetClothing/Modes/Wrinkle/Correction/SWetWrinkleNormalCorrectionDialog.h"
@@ -54,6 +57,7 @@
 #include "Widgets/Input/SEditableTextBox.h"
 #include "Widgets/Images/SImage.h"
 #include "Widgets/Input/SSpinBox.h"
+#include "Widgets/Input/SSlider.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/SNullWidget.h"
@@ -71,6 +75,7 @@
 #include "Widgets/Views/STableRow.h"
 #include "UObject/GCObject.h"
 #include "Widgets/SWindow.h"
+#include "Widgets/SToolTip.h"
 #include "Framework/Application/SlateApplication.h"
 
 #define LOCTEXT_NAMESPACE "WCAEditorPanel"
@@ -803,33 +808,18 @@ void SWetWrinkleEditorPanel::Construct(const FArguments& InArgs)
     SizeUV = WetWrinkleDefaultSizeUV;
     BrushSettings.BrushRadiusUV = SizeUV;
     DispatchWrinkleBrushState(EDWCEditorSessionEffect::None);
-    SelectedWrinkleNormalThumbnailBrush.SetImageSize(FVector2D(128.0f, 128.0f));
+    SelectedWrinkleNormalThumbnailBrush.SetImageSize(FVector2D(40.0f, 40.0f));
     FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
     AssetRegistryModule.Get().OnAssetAdded().AddSP(this, &SWetWrinkleEditorPanel::HandleWrinkleTextureAssetAdded);
     AssetRegistryModule.Get().OnAssetRemoved().AddSP(this, &SWetWrinkleEditorPanel::HandleWrinkleTextureAssetRemoved);
     AssetRegistryModule.Get().OnAssetUpdated().AddSP(this, &SWetWrinkleEditorPanel::HandleWrinkleTextureAssetUpdated);
 
-    const FSlateFontInfo PanelHeadingFont = FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), 16);
-
     ChildSlot
         [SNew(SVerticalBox)
 
          + SVerticalBox::Slot()
-               .AutoHeight()
-               .Padding(10.0f, 10.0f, 10.0f, 8.0f)
-                   [SNew(STextBlock)
-                        .Text(LOCTEXT("EditorHeading", "Wet Wrinkle"))
-                        .Font(PanelHeadingFont)]
-
-         + SVerticalBox::Slot()
-               .AutoHeight()
-               .Padding(10.0f, 0.0f, 10.0f, 10.0f)
-                   [SNew(SSeparator)
-                        .Orientation(Orient_Horizontal)]
-
-         + SVerticalBox::Slot()
                .FillHeight(1.0f)
-               .Padding(10.0f, 0.0f, 10.0f, 10.0f)
+               .Padding(10.0f)
                    [SNew(SSplitter)
 
                     + SSplitter::Slot()
@@ -839,30 +829,6 @@ void SWetWrinkleEditorPanel::Construct(const FArguments& InArgs)
                                        [SNew(SVerticalBox)
 
                                         + SVerticalBox::Slot()
-                                              .AutoHeight()
-                                              .Padding(0.0f, 0.0f, 0.0f, 8.0f)
-                                                  [SNew(SHorizontalBox)
-
-                                                   + SHorizontalBox::Slot()
-                                                         .AutoWidth()
-                                                         .VAlign(VAlign_Center)
-                                                         .Padding(0.0f, 0.0f, 6.0f, 0.0f)
-                                                             [SNew(STextBlock)
-                                                                  .Text(LOCTEXT("UVChannelLabel", "DWC Data UV"))]
-
-                                                   + SHorizontalBox::Slot()
-                                                         .FillWidth(1.0f)
-                                                         .VAlign(VAlign_Center)
-                                                             [SNew(SBorder)
-                                                                  .Padding(FMargin(8.0f, 3.0f))
-                                                                  .BorderImage(FAppStyle::Get().GetBrush(TEXT("ToolPanel.GroupBorder")))
-                                                                      [SNew(STextBlock)
-                                                                           .Text(this, &SWetWrinkleEditorPanel::GetDWCDataUVChannelText)
-                                                                           .ToolTipText(LOCTEXT(
-                                                                               "DWCDataUVReadOnlyTooltip",
-                                                                               "The generated DWC Data UV channel configured by Asset Setup."))]]]
-
-                                        + SVerticalBox::Slot()
                                               .FillHeight(1.0f)
                                                   [SNew(SSplitter)
                                                        .Orientation(Orient_Vertical)
@@ -870,7 +836,6 @@ void SWetWrinkleEditorPanel::Construct(const FArguments& InArgs)
                                                    + SSplitter::Slot()
                                                          .Value(0.52f)
                                                              [SNew(SVerticalBox)
-
                                                               + SVerticalBox::Slot()
                                                                     .AutoHeight()
                                                                     .Padding(0.0f, FWCAEditorWidgets::MaterialSlotListHeaderTopPadding, 0.0f, 4.0f)
@@ -880,48 +845,14 @@ void SWetWrinkleEditorPanel::Construct(const FArguments& InArgs)
 
                                                               + SVerticalBox::Slot()
                                                                     .AutoHeight()
-                                                                    .Padding(0.0f, 0.0f, 0.0f, 8.0f)
-                                                                        [SNew(SButton)
-                                                                             .ToolTipText(LOCTEXT("AutoGenerateWrinkleTextureTooltip", "Generate wrinkle texture maps for the currently selected material slot."))
-                                                                             .ContentPadding(FMargin(8.0f, 5.0f))
-                                                                             .OnClicked(this, &SWetWrinkleEditorPanel::HandleAutoGenerateClicked)
-                                                                                 [SNew(SHorizontalBox)
-
-                                                                                  + SHorizontalBox::Slot()
-                                                                                        .AutoWidth()
-                                                                                        .VAlign(VAlign_Center)
-                                                                                        .Padding(0.0f, 0.0f, 8.0f, 0.0f)
-                                                                                            [SNew(SImage)
-                                                                                                 .DesiredSizeOverride(FVector2D(24.0f, 24.0f))
-                                                                                                 .Image(FDWCEditorStyle::GetBrush(TEXT("DWCEditor.MagicWandTool.Large")))]
-
-                                                                                  + SHorizontalBox::Slot()
-                                                                                        .FillWidth(1.0f)
-                                                                                        .VAlign(VAlign_Center)
-                                                                                            [SNew(STextBlock)
-                                                                                                 .Text(LOCTEXT("AutoGenerateWrinkleButton", "Generate Wrinkle Textures"))]]]
-
-                                                              + SVerticalBox::Slot()
-                                                                    .AutoHeight()
                                                                     .Padding(6.0f, 0.0f, 6.0f, 4.0f)
                                                                         [SNew(SHorizontalBox)
-
-                                                                         + SHorizontalBox::Slot()
-                                                                               .FillWidth(1.0f)
-                                                                               .VAlign(VAlign_Center)
-                                                                                   [SNew(STextBlock)
-                                                                                        .Text(LOCTEXT("MaterialSlotColumn", "Material Slot"))
-                                                                                        .Font(FAppStyle::GetFontStyle(TEXT("SmallFontBold")))]
-
-                                                                         + SHorizontalBox::Slot()
-                                                                               .AutoWidth()
-                                                                               .VAlign(VAlign_Center)
-                                                                                   [SNew(SBox)
-                                                                                        .WidthOverride(140.0f)
-                                                                                        .HAlign(HAlign_Center)
-                                                                                            [SNew(STextBlock)
-                                                                                                 .Text(LOCTEXT("CustomWrinkleMapColumn", "Custom Wrinkle Map"))
-                                                                                                 .Font(FAppStyle::GetFontStyle(TEXT("SmallFontBold")))]]]
+                                                                         + SHorizontalBox::Slot().AutoWidth()[SNew(SBox).WidthOverride(FWCAEditorWidgets::MaterialSlotSlotColumnWidth)[SNew(STextBlock).Text(LOCTEXT("WrinkleSlotColumn", "Slot")).Font(FAppStyle::GetFontStyle(TEXT("SmallFontBold")))]]
+                                                                         + SHorizontalBox::Slot().FillWidth(1.0f).Padding(10.0f, 0.0f)[SNew(STextBlock).Text(LOCTEXT("WrinkleNameColumn", "Name")).Font(FAppStyle::GetFontStyle(TEXT("SmallFontBold")))]
+                                                                         + SHorizontalBox::Slot().AutoWidth()[SNew(SBox).WidthOverride(FWCAEditorWidgets::MaterialSlotThumbnailColumnWidth).HAlign(HAlign_Center)[SNew(STextBlock).Text(LOCTEXT("WrinkleThumbnailColumn", "Thumbnail")).Font(FAppStyle::GetFontStyle(TEXT("SmallFontBold")))]]
+                                                                         + SHorizontalBox::Slot().AutoWidth()[SNew(SBox).WidthOverride(FWCAEditorWidgets::MaterialSlotDataUVColumnWidth).HAlign(HAlign_Center)[SNew(STextBlock).Text(LOCTEXT("WrinkleUVColumn", "Wrinkle UV")).Font(FAppStyle::GetFontStyle(TEXT("SmallFontBold")))]]
+                                                                         + SHorizontalBox::Slot().AutoWidth()[SNew(SBox).WidthOverride(FWCAEditorWidgets::MaterialSlotAuxColumnWidth).HAlign(HAlign_Center)[SNew(STextBlock).Text(LOCTEXT("CustomWrinkleMapColumn", "Custom")).Font(FAppStyle::GetFontStyle(TEXT("SmallFontBold")))]]
+                                                                         + SHorizontalBox::Slot().AutoWidth()[SNew(SBox).WidthOverride(FWCAEditorWidgets::MaterialSlotWettableColumnWidth).HAlign(HAlign_Center)[SNew(STextBlock).Text(LOCTEXT("WrinkleWettableColumn", "Wettable")).Font(FAppStyle::GetFontStyle(TEXT("SmallFontBold")))]]]
 
                                                               + SVerticalBox::Slot()
                                                                     .AutoHeight()
@@ -970,15 +901,22 @@ void SWetWrinkleEditorPanel::Construct(const FArguments& InArgs)
 
                                       + SSplitter::Slot()
                                             .Value(0.68f)
-                                                [SAssignNew(PreviewViewport, SWetWrinkleViewport)
-                                                               .WetClothingAsset(WetClothingAsset.Get())
-                                                     .WorkerJobScheduler(WorkerJobScheduler)
-                                                     .SessionStore(SessionStore)
-                                                     .SpatialQueryService(SpatialQueryService)
-                                                     .TextureWorkspace(TextureWorkspace)
-                                                     .PreviewCommitCoordinator(PreviewCommitCoordinator)
-                                                     .RenderUploadQueue(RenderUploadQueue)
-                                                     .OnSurfaceHitChanged(FOnWetWrinkleSurfaceHitChanged::CreateSP(this, &SWetWrinkleEditorPanel::HandleSurfaceHitChanged))]
+                                                [SNew(SOverlay)
+                                                 + SOverlay::Slot()
+                                                       [SAssignNew(PreviewViewport, SWetWrinkleViewport)
+                                                            .WetClothingAsset(WetClothingAsset.Get())
+                                                            .WorkerJobScheduler(WorkerJobScheduler)
+                                                            .SessionStore(SessionStore)
+                                                            .SpatialQueryService(SpatialQueryService)
+                                                            .TextureWorkspace(TextureWorkspace)
+                                                            .PreviewCommitCoordinator(PreviewCommitCoordinator)
+                                                            .RenderUploadQueue(RenderUploadQueue)
+                                                            .OnSurfaceHitChanged(FOnWetWrinkleSurfaceHitChanged::CreateSP(this, &SWetWrinkleEditorPanel::HandleSurfaceHitChanged))]
+                                                 + SOverlay::Slot()
+                                                       .HAlign(HAlign_Left)
+                                                       .VAlign(VAlign_Top)
+                                                       .Padding(14.0f, 42.0f, 14.0f, 14.0f)
+                                                           [BuildPreviewDisplayPanel()]]
 
                                       + SSplitter::Slot()
                                             .Value(0.32f)
@@ -1094,6 +1032,32 @@ TSharedRef<SWidget> SWetWrinkleEditorPanel::BuildCustomNormalRightPanel()
         .OnSettingsChanged(FSimpleDelegate::CreateSP(this, &SWetWrinkleEditorPanel::HandleCustomNormalSettingsChanged));
 }
 
+TSharedRef<SWidget> SWetWrinkleEditorPanel::BuildPreviewDisplayPanel()
+{
+    static const FSlateRoundedBoxBrush PreviewControlsBackgroundBrush(
+        FLinearColor(0.025f, 0.025f, 0.025f, 0.86f), 6.0f,
+        FLinearColor(0.22f, 0.22f, 0.22f, 0.9f), 1.0f);
+
+    return SNew(SBox)
+        .WidthOverride(280.0f)
+        [SNew(SBorder)
+            .BorderImage(&PreviewControlsBackgroundBrush)
+            .Padding(8.0f)
+            [SNew(SVerticalBox)
+             + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 4.0f)
+               [SNew(SBorder).BorderImage(FAppStyle::Get().GetBrush(TEXT("Brushes.Header"))).Padding(FMargin(8.0f, 6.0f))
+                [SNew(STextBlock).Text(LOCTEXT("WrinklePreviewDisplayHeading", "Display")).Font(FAppStyle::GetFontStyle(TEXT("NormalFontBold")))]]
+             + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 4.0f)
+               [SNew(SHorizontalBox)
+                + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)[SNew(SBox).WidthOverride(112.0f)[SNew(STextBlock).Text(LOCTEXT("WrinklePreviewWetnessShort", "Wetness"))]]
+                + SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)[SNew(SSlider).MinValue(0.0f).MaxValue(1.0f).Value_Lambda([this](){ return BrushSettings.PreviewWetness; }).OnValueChanged(this, &SWetWrinkleEditorPanel::HandlePreviewWetnessChanged)]
+                + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(8.0f,0.0f,0.0f,0.0f)[SNew(SBox).WidthOverride(36.0f)[SNew(STextBlock).Justification(ETextJustify::Right).Text_Lambda([this](){ return FText::AsNumber(BrushSettings.PreviewWetness); })]]]
+             + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 2.0f)
+               [SNew(SCheckBox).IsChecked(this, &SWetWrinkleEditorPanel::GetShowBakedTransparencyState).OnCheckStateChanged(this, &SWetWrinkleEditorPanel::HandleShowBakedTransparencyChanged).ToolTipText(LOCTEXT("ShowBakedTransparencyTooltip", "Show the current baked Transparency Map. Live Transparency Editor paint data is not included."))[SNew(STextBlock).Text(LOCTEXT("BakedTransparencyShort", "Baked Transparency"))]]
+             + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 2.0f, 0.0f, 0.0f)
+               [SNew(SCheckBox).IsChecked(this, &SWetWrinkleEditorPanel::GetPreviewToggleState).OnCheckStateChanged(this, &SWetWrinkleEditorPanel::HandlePreviewToggleChanged)[SNew(STextBlock).Text(LOCTEXT("BrushCursorShort", "Brush Cursor"))]]]];
+}
+
 TSharedRef<SWidget> SWetWrinkleEditorPanel::BuildPatchBrushSection()
 {
     const FSlateFontInfo SectionHeadingFont = FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), 13);
@@ -1113,29 +1077,50 @@ TSharedRef<SWidget> SWetWrinkleEditorPanel::BuildPatchBrushSection()
 
              + SVerticalBox::Slot()
                    .AutoHeight()
-                   .Padding(0.0f, 0.0f, 0.0f, 10.0f)
+                   .Padding(0.0f, 0.0f, 0.0f, 16.0f)
                        [SNew(SHorizontalBox)
 
                         + SHorizontalBox::Slot()
                               .FillWidth(1.0f)
-                                  [SNew(SCheckBox)
-                                       .Style(FAppStyle::Get(), "ToggleButtonCheckbox")
-                                       .HAlign(HAlign_Center)
-                                       .IsChecked(this, &SWetWrinkleEditorPanel::GetToolModeCheckState, EWetWrinkleToolMode::Patch)
-                                       .OnCheckStateChanged(this, &SWetWrinkleEditorPanel::HandleToolModeChanged, EWetWrinkleToolMode::Patch)
-                                           [SNew(STextBlock)
-                                                .Text(LOCTEXT("PatchToolMode", "Patch"))]]
+                                  [SNew(SBox)
+                                       .HeightOverride(32.0f)
+                                           [SNew(SCheckBox)
+                                                .Style(FAppStyle::Get(), TEXT("DetailsView.SectionButton"))
+                                                .Type(ESlateCheckBoxType::ToggleButton)
+                                                .HAlign(HAlign_Center)
+                                                .IsChecked(this, &SWetWrinkleEditorPanel::GetToolModeCheckState, EWetWrinkleToolMode::Patch)
+                                                .OnCheckStateChanged(this, &SWetWrinkleEditorPanel::HandleToolModeChanged, EWetWrinkleToolMode::Patch)
+                                                    [SNew(STextBlock)
+                                                         .Text(LOCTEXT("PatchToolMode", "Patch"))
+                                                         .Justification(ETextJustify::Center)]]]
 
                         + SHorizontalBox::Slot()
                               .FillWidth(1.0f)
                               .Padding(4.0f, 0.0f, 0.0f, 0.0f)
-                                  [SNew(SCheckBox)
-                                       .Style(FAppStyle::Get(), "ToggleButtonCheckbox")
-                                       .HAlign(HAlign_Center)
-                                       .IsChecked(this, &SWetWrinkleEditorPanel::GetToolModeCheckState, EWetWrinkleToolMode::ProceduralRidgeStroke)
-                                       .OnCheckStateChanged(this, &SWetWrinkleEditorPanel::HandleToolModeChanged, EWetWrinkleToolMode::ProceduralRidgeStroke)
-                                           [SNew(STextBlock)
-                                                .Text(LOCTEXT("RidgeStrokeToolMode", "Ridge Stroke"))]]]
+                                  [SNew(SBox)
+                                       .HeightOverride(32.0f)
+                                           [SNew(SCheckBox)
+                                                .Style(FAppStyle::Get(), TEXT("DetailsView.SectionButton"))
+                                                .Type(ESlateCheckBoxType::ToggleButton)
+                                                .HAlign(HAlign_Center)
+                                                .IsChecked(this, &SWetWrinkleEditorPanel::GetToolModeCheckState, EWetWrinkleToolMode::ProceduralRidgeStroke)
+                                                .OnCheckStateChanged(this, &SWetWrinkleEditorPanel::HandleToolModeChanged, EWetWrinkleToolMode::ProceduralRidgeStroke)
+                                                    [SNew(STextBlock)
+                                                         .Text(LOCTEXT("RidgeStrokeToolMode", "Ridge Stroke"))
+                                                         .Justification(ETextJustify::Center)]]]]
+
+             + SVerticalBox::Slot()
+                   .AutoHeight()
+                   .Padding(0.0f, 0.0f, 0.0f, 10.0f)
+                       [SNew(SSeparator)]
+
+             + SVerticalBox::Slot()
+                   .AutoHeight()
+                   .Padding(0.0f, 0.0f, 0.0f, 8.0f)
+                       [SNew(STextBlock)
+                            .Visibility(this, &SWetWrinkleEditorPanel::GetProceduralRidgeToolVisibility)
+                            .Text(LOCTEXT("RidgeStrokeSettingsHeading", "Ridge Stroke Settings"))
+                            .Font(FAppStyle::GetFontStyle(TEXT("NormalFontBold")))]
 
              + SVerticalBox::Slot()
                    .AutoHeight()
@@ -1236,220 +1221,77 @@ TSharedRef<SWidget> SWetWrinkleEditorPanel::BuildPatchBrushSection()
                     .AutoHeight()
                     .Padding(0.0f, 0.0f, 0.0f, 6.0f)
                         [SNew(STextBlock)
-                             .Text(LOCTEXT("WrinkleNormalTextureLabel", "Wrinkle Normal Texture"))]
+                             .Text(LOCTEXT("WrinkleNormalTextureLabel", "Wrinkle Normal Texture"))
+                             .Font(FAppStyle::GetFontStyle(TEXT("NormalFontBold")))]
 
-             + SVerticalBox::Slot()
-                   .AutoHeight()
-                   .Padding(0.0f, 0.0f, 0.0f, 6.0f)
-                       [SNew(SHorizontalBox)
+              + SVerticalBox::Slot()
+                    .AutoHeight()
+                    .Padding(0.0f, 0.0f, 0.0f, 8.0f)
+                        [SNew(SComboButton)
+                             .IsEnabled_Lambda([this]() { return BrushSettings.ToolMode == EWetWrinkleToolMode::Patch; })
+                             .ButtonStyle(FAppStyle::Get(), TEXT("Button"))
+                             .ContentPadding(FMargin(8.0f, 5.0f))
+                             .OnGetMenuContent(this, &SWetWrinkleEditorPanel::BuildWrinkleNormalTextureMenu)
+                             .ButtonContent()
+                             [SNew(STextBlock)
+                                  .Text(this, &SWetWrinkleEditorPanel::GetWrinkleNormalTextureDisplayName)
+                                  .OverflowPolicy(ETextOverflowPolicy::Ellipsis)]]
 
-                        + SHorizontalBox::Slot()
-                              .FillWidth(1.0f)
-                                  [SNew(SObjectPropertyEntryBox)
-                                       .IsEnabled_Lambda([this]() { return BrushSettings.ToolMode == EWetWrinkleToolMode::Patch; })
-                                       .AllowedClass(UTexture2D::StaticClass())
-                                       .ObjectPath(this, &SWetWrinkleEditorPanel::GetWrinkleNormalTextureObjectPath)
-                                       .OnObjectChanged(this, &SWetWrinkleEditorPanel::HandleWrinkleNormalTextureChanged)]
+              + SVerticalBox::Slot()
+                    .AutoHeight()
+                    .Padding(0.0f, 0.0f, 0.0f, 16.0f)
+                        [SNew(SBox)
+                             .WidthOverride(160.0f)
+                             .HeightOverride(160.0f)
+                             .HAlign(HAlign_Center)
+                             .VAlign(VAlign_Center)
+                                 [SNew(SBorder)
+                                      .Padding(2.0f)
+                                      .BorderImage(FAppStyle::Get().GetBrush(TEXT("ToolPanel.GroupBorder")))
+                                          [SNew(SScaleBox)
+                                               .Stretch(EStretch::ScaleToFit)
+                                                   [SNew(SImage)
+                                                        .Image(this, &SWetWrinkleEditorPanel::GetWrinkleNormalThumbnailBrush)
+                                                        .Visibility(this, &SWetWrinkleEditorPanel::GetWrinkleNormalThumbnailVisibility)]]]]]]
 
-                        + SHorizontalBox::Slot()
-                              .AutoWidth()
-                              .Padding(0.0f)
-                              .VAlign(VAlign_Center)
-                                  [SNew(SBox)
-                                       .WidthOverride(18.0f)
-                                       .HeightOverride(18.0f)
-                                           [SNew(SButton)
-                                                .ButtonStyle(FAppStyle::Get(), "SimpleButton")
-                                                .ContentPadding(0.0f)
-                                                .ToolTipText(LOCTEXT("RefreshWrinkleTexturePaletteTooltip", "Refresh the wrinkle normal texture palette."))
-                                                .OnClicked(this, &SWetWrinkleEditorPanel::HandleRefreshWrinkleTexturePaletteClicked)
-                                                    [SNew(SImage)
-                                                         .Image(FAppStyle::GetBrush("Icons.Refresh"))
-                                                         .ColorAndOpacity(FSlateColor::UseForeground())]]]]
+             + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 8.0f)
+               [SNew(SSeparator)]
 
-             + SVerticalBox::Slot()
-                   .AutoHeight()
-                   .Padding(0.0f, 0.0f, 0.0f, 6.0f)
-                       [SNew(SHorizontalBox)
+             + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 8.0f)
+               [SNew(STextBlock).Text(LOCTEXT("WrinkleBrushSettingsHeading", "Brush Settings")).Font(FAppStyle::GetFontStyle(TEXT("NormalFontBold")))]
 
-                        + SHorizontalBox::Slot()
-                              .FillWidth(1.0f)
-                                  [SAssignNew(WrinkleTextureSearchPathTextBox, SEditableTextBox)
-                                   .HintText(LOCTEXT("WrinkleTexturePathHint", "/DynamicWetClothes/Textures/Wrinkles"))]
+             + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 4.0f)
+               [SNew(SHorizontalBox)
+                + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)[SNew(SBox).WidthOverride(104.0f)[SNew(STextBlock).Text(LOCTEXT("CompactBrushSizeLabel", "Size"))]]
+                + SHorizontalBox::Slot().FillWidth(1.0f)[SNew(SSpinBox<float>).MinValue(0.1f).MaxValue(100.0f).Value(this, &SWetWrinkleEditorPanel::GetBrushSizeCm).OnBeginSliderMovement(this, &SWetWrinkleEditorPanel::HandleRidgePropertySliderBegin).OnEndSliderMovement(this, &SWetWrinkleEditorPanel::HandleRidgePropertySliderEnd).OnValueCommitted(this, &SWetWrinkleEditorPanel::HandleRidgePropertyCommitted).OnValueChanged(this, &SWetWrinkleEditorPanel::HandleBrushRadiusChanged).ToolTipText(LOCTEXT("BrushSizeCmTooltip", "Brush size in centimeters."))]
+                + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(4.0f,0.0f)[SNew(STextBlock).Text(LOCTEXT("CentimeterUnit", "cm"))]
+                + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(2.0f,0.0f,0.0f,0.0f)
+                  [SAssignNew(BrushSizeComboButton, SComboButton)
+                    .ButtonStyle(FAppStyle::Get(), TEXT("SimpleButton"))
+                    .ToolTipText(LOCTEXT("BrushSizePresetTooltip", "Choose a brush size preset."))
+                    .MenuContent()[BuildBrushSizeMenu()]
+                    .ButtonContent()[SNew(STextBlock).Text(FText::FromString(TEXT("▼")))]]
+                + SHorizontalBox::Slot().AutoWidth()[SNew(SButton).ButtonStyle(FAppStyle::Get(), "SimpleButton").Visibility_Lambda([this](){ return FMath::IsNearlyEqual(GetBrushSizeCm(), WetWrinkleDefaultSizeCm) ? EVisibility::Hidden : EVisibility::Visible; }).ToolTipText(LOCTEXT("ResetBrushSize", "Reset Size to default.")).OnClicked_Lambda([this](){ HandleBrushRadiusChanged(WetWrinkleDefaultSizeCm); return FReply::Handled(); })[SNew(SImage).Image(FAppStyle::GetBrush("PropertyWindow.DiffersFromDefault"))]]]
 
-                        + SHorizontalBox::Slot()
-                              .AutoWidth()
-                              .Padding(4.0f, 0.0f)
-                                  [SNew(SButton)
-                                   .ButtonStyle(FAppStyle::Get(), "SimpleButton")
-                                   .ToolTipText(LOCTEXT("AddWrinkleTexturePathTooltip", "Add an Unreal Content path to the palette."))
-                                   .OnClicked(this, &SWetWrinkleEditorPanel::HandleAddWrinkleTextureSearchPathClicked)
-                                       [SNew(SImage).Image(FAppStyle::GetBrush("Icons.Plus"))]]
+             + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 4.0f)
+               [SNew(SHorizontalBox)
+                + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)[SNew(SBox).WidthOverride(104.0f)[SNew(STextBlock).Text(LOCTEXT("StrengthLabel", "Strength"))]]
+                + SHorizontalBox::Slot().FillWidth(1.0f)[SNew(SSpinBox<float>).MinValue(0.0f).MaxValue(4.0f).MinSliderValue(0.0f).MaxSliderValue(4.0f).Value(this, &SWetWrinkleEditorPanel::GetRidgeStrengthValue).OnBeginSliderMovement(this, &SWetWrinkleEditorPanel::HandleRidgePropertySliderBegin).OnEndSliderMovement(this, &SWetWrinkleEditorPanel::HandleRidgePropertySliderEnd).OnValueCommitted(this, &SWetWrinkleEditorPanel::HandleRidgePropertyCommitted).OnValueChanged(this, &SWetWrinkleEditorPanel::HandleStrengthChanged)]
+                + SHorizontalBox::Slot().AutoWidth()[SNew(SButton).ButtonStyle(FAppStyle::Get(), "SimpleButton").Visibility_Lambda([this](){ return FMath::IsNearlyEqual(GetRidgeStrengthValue(), 1.0f) ? EVisibility::Hidden : EVisibility::Visible; }).ToolTipText(LOCTEXT("ResetBrushStrength", "Reset Strength to default.")).OnClicked_Lambda([this](){ HandleStrengthChanged(1.0f); return FReply::Handled(); })[SNew(SImage).Image(FAppStyle::GetBrush("PropertyWindow.DiffersFromDefault"))]]]
 
-                        + SHorizontalBox::Slot()
-                              .AutoWidth()
-                                  [SNew(SComboButton)
-                                   .ButtonStyle(FAppStyle::Get(), "SimpleButton")
-                                   .ToolTipText(LOCTEXT("WrinkleTexturePathsTooltip", "View and remove wrinkle normal texture search paths."))
-                                   .OnGetMenuContent(this, &SWetWrinkleEditorPanel::BuildWrinkleTextureSearchPathMenu)
-                                   .ButtonContent()
-                                       [SNew(SImage).Image(FAppStyle::GetBrush("Icons.FolderOpen"))]]]
+             + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 4.0f)
+               [SNew(SHorizontalBox)
+                + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)[SNew(SBox).WidthOverride(104.0f)[SNew(STextBlock).Text(LOCTEXT("EdgeSoftnessLabel", "Edge Softness"))]]
+                + SHorizontalBox::Slot().FillWidth(1.0f)[SNew(SSpinBox<float>).MinValue(0.0f).MaxValue(100.0f).Value(this, &SWetWrinkleEditorPanel::GetRidgeFalloffPercentValue).OnBeginSliderMovement(this, &SWetWrinkleEditorPanel::HandleRidgePropertySliderBegin).OnEndSliderMovement(this, &SWetWrinkleEditorPanel::HandleRidgePropertySliderEnd).OnValueCommitted(this, &SWetWrinkleEditorPanel::HandleRidgePropertyCommitted).OnValueChanged(this, &SWetWrinkleEditorPanel::HandleFalloffChanged)]
+                + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(4.0f,0.0f)[SNew(STextBlock).Text(LOCTEXT("PercentUnit", "%"))]
+                + SHorizontalBox::Slot().AutoWidth()[SNew(SButton).ButtonStyle(FAppStyle::Get(), "SimpleButton").Visibility_Lambda([this](){ return FMath::IsNearlyEqual(GetRidgeFalloffPercentValue(), 50.0f) ? EVisibility::Hidden : EVisibility::Visible; }).ToolTipText(LOCTEXT("ResetEdgeSoftness", "Reset Edge Softness to default.")).OnClicked_Lambda([this](){ HandleFalloffChanged(50.0f); return FReply::Handled(); })[SNew(SImage).Image(FAppStyle::GetBrush("PropertyWindow.DiffersFromDefault"))]]]
 
-             + SVerticalBox::Slot()
-                   .AutoHeight()
-                   .Padding(0.0f, 0.0f, 0.0f, 6.0f)
-                       [SNew(SCheckBox)
-                        .IsChecked(this, &SWetWrinkleEditorPanel::GetShowHiddenWrinkleTexturesState)
-                        .OnCheckStateChanged(this, &SWetWrinkleEditorPanel::HandleShowHiddenWrinkleTexturesChanged)
-                            [SNew(STextBlock).Text(LOCTEXT("ShowHiddenWrinkleTextures", "Show Hidden Textures"))]]
-
-             + SVerticalBox::Slot()
-                   .AutoHeight()
-                   .Padding(0.0f, 0.0f, 0.0f, 8.0f)
-                       [SNew(SBox)
-                            .IsEnabled_Lambda([this]() { return BrushSettings.ToolMode == EWetWrinkleToolMode::Patch; })
-                                [BuildWrinkleTexturePalette()]]
-
-             + SVerticalBox::Slot()
-                   .AutoHeight()
-                   .Padding(0.0f, 0.0f, 0.0f, 8.0f)
-                       [SNew(SHorizontalBox)
-
-                        + SHorizontalBox::Slot()
-                              .FillWidth(1.0f)
-                              .VAlign(VAlign_Center)
-                                  [SNew(STextBlock)
-                                       .AutoWrapText(true)
-                                       .ColorAndOpacity(this, &SWetWrinkleEditorPanel::GetWrinkleNormalStatusColor)
-                                       .Text(this, &SWetWrinkleEditorPanel::GetWrinkleNormalStatusText)]
-
-                        + SHorizontalBox::Slot()
-                              .AutoWidth()
-                              .VAlign(VAlign_Center)
-                              .Padding(6.0f, 0.0f, 0.0f, 0.0f)
-                                      [SNew(SButton)
-                                       .IsEnabled_Lambda([this]() { return BrushSettings.ToolMode == EWetWrinkleToolMode::Patch && CanOpenWrinkleNormalTexture(); })
-                                       .Text(LOCTEXT("OpenWrinkleNormalTextureButton", "Open"))
-                                       .OnClicked(this, &SWetWrinkleEditorPanel::HandleOpenWrinkleNormalTextureClicked)]]
-
-             + SVerticalBox::Slot()
-                   .AutoHeight()
-                   .Padding(0.0f, 0.0f, 0.0f, 8.0f)
-                       [SNew(SVerticalBox)
-
-                        + SVerticalBox::Slot()
-                              .AutoHeight()
-                              .Padding(0.0f, 0.0f, 0.0f, 4.0f)
-                                  [SNew(STextBlock)
-                                       .Text(LOCTEXT("SelectedWrinkleNormalThumbnailLabel", "Wrinkle Normal"))]
-
-                        + SVerticalBox::Slot()
-                              .AutoHeight()
-                                  [SNew(SBox)
-                                           [SNew(SBorder)
-                                                .Padding(1.0f)
-                                                .BorderImage(FCoreStyle::Get().GetBrush("WhiteBrush"))
-                                                .BorderBackgroundColor(FLinearColor(0.45f, 0.45f, 0.45f))
-                                                    [SNew(SBorder)
-                                                         .BorderImage(FCoreStyle::Get().GetBrush("WhiteBrush"))
-                                                         .BorderBackgroundColor(FLinearColor::Black)
-                                                              [SNew(SScaleBox)
-                                                                   .Stretch(EStretch::ScaleToFitX)
-                                                                   .StretchDirection(EStretchDirection::Both)
-                                                                         [SNew(SImage)
-                                                                              .Image(this, &SWetWrinkleEditorPanel::GetWrinkleNormalThumbnailBrush)
-                                                                             .Visibility(this, &SWetWrinkleEditorPanel::GetWrinkleNormalThumbnailVisibility)]]]]]]]]
-
-             + SVerticalBox::Slot()
-                   .AutoHeight()
-                   .Padding(0.0f, 0.0f, 0.0f, 6.0f)
-                       [SNew(STextBlock)
-                            .Text(this, &SWetWrinkleEditorPanel::GetBrushSizeLabelText)]
-
-             + SVerticalBox::Slot()
-                   .AutoHeight()
-                   .Padding(0.0f, 0.0f, 0.0f, 10.0f)
-                       [SNew(SHorizontalBox)
-
-                        + SHorizontalBox::Slot()
-                              .AutoWidth()
-                                  [SNew(SBox)
-                                       .WidthOverride(64.0f)
-                                           [SNew(SSpinBox<float>)
-                                                .MinValue(0.1f)
-                                                .MaxValue(100.0f)
-                                                .Value(this, &SWetWrinkleEditorPanel::GetBrushSizeCm)
-                                                .OnBeginSliderMovement(this, &SWetWrinkleEditorPanel::HandleRidgePropertySliderBegin)
-                                                .OnEndSliderMovement(this, &SWetWrinkleEditorPanel::HandleRidgePropertySliderEnd)
-                                                .OnValueCommitted(this, &SWetWrinkleEditorPanel::HandleRidgePropertyCommitted)
-                                                .OnValueChanged(this, &SWetWrinkleEditorPanel::HandleBrushRadiusChanged)]]
-
-                        + SHorizontalBox::Slot()
-                              .FillWidth(1.0f)
-                              .Padding(4.0f, 0.0f, 0.0f, 0.0f)
-                                  [SAssignNew(BrushSizeComboButton, SComboButton)
-                                       .HasDownArrow(true)
-                                       .ContentPadding(FMargin(8.0f, 2.0f))
-                                       .ButtonContent()
-                                           [SNew(STextBlock)
-                                                .Text(this, &SWetWrinkleEditorPanel::GetBrushSizeDisplayText)]
-                                       .MenuContent()
-                                           [BuildBrushSizeMenu()]]]
-
-             + SVerticalBox::Slot()
-                   .AutoHeight()
-                   .Padding(0.0f, 0.0f, 0.0f, 6.0f)
-                       [SNew(STextBlock)
-                            .Text(LOCTEXT("StrengthLabel", "Strength"))]
-
-             + SVerticalBox::Slot()
-                   .AutoHeight()
-                   .Padding(0.0f, 0.0f, 0.0f, 10.0f)
-                       [SNew(SSpinBox<float>)
-                            .MinValue(0.0f)
-                            .MaxValue(4.0f)
-                            .MinSliderValue(0.0f)
-                            .MaxSliderValue(4.0f)
-                            .Value(this, &SWetWrinkleEditorPanel::GetRidgeStrengthValue)
-                            .OnBeginSliderMovement(this, &SWetWrinkleEditorPanel::HandleRidgePropertySliderBegin)
-                            .OnEndSliderMovement(this, &SWetWrinkleEditorPanel::HandleRidgePropertySliderEnd)
-                            .OnValueCommitted(this, &SWetWrinkleEditorPanel::HandleRidgePropertyCommitted)
-                            .OnValueChanged(this, &SWetWrinkleEditorPanel::HandleStrengthChanged)]
-
-             + SVerticalBox::Slot()
-                   .AutoHeight()
-                   .Padding(0.0f, 0.0f, 0.0f, 6.0f)
-                       [SNew(STextBlock)
-                            .Text(LOCTEXT("EdgeSoftnessLabel", "Edge Softness (%)"))]
-
-             + SVerticalBox::Slot()
-                   .AutoHeight()
-                   .Padding(0.0f, 0.0f, 0.0f, 10.0f)
-                       [SNew(SSpinBox<float>)
-                            .MinValue(0.0f)
-                            .MaxValue(100.0f)
-                            .Value(this, &SWetWrinkleEditorPanel::GetRidgeFalloffPercentValue)
-                            .OnBeginSliderMovement(this, &SWetWrinkleEditorPanel::HandleRidgePropertySliderBegin)
-                            .OnEndSliderMovement(this, &SWetWrinkleEditorPanel::HandleRidgePropertySliderEnd)
-                            .OnValueCommitted(this, &SWetWrinkleEditorPanel::HandleRidgePropertyCommitted)
-                            .OnValueChanged(this, &SWetWrinkleEditorPanel::HandleFalloffChanged)]
-
-             + SVerticalBox::Slot()
-                   .AutoHeight()
-                   .Padding(0.0f, 0.0f, 0.0f, 6.0f)
-                        [SNew(STextBlock)
-                            .Visibility(this, &SWetWrinkleEditorPanel::GetPatchToolVisibility)
-                            .Text(LOCTEXT("RotationLabel", "Rotation (°)"))]
-
-             + SVerticalBox::Slot()
-                   .AutoHeight()
-                   .Padding(0.0f, 0.0f, 0.0f, 10.0f)
-                        [SNew(SSpinBox<float>)
-                            .Visibility(this, &SWetWrinkleEditorPanel::GetPatchToolVisibility)
-                            .MinValue(-180.0f)
-                            .MaxValue(180.0f)
-                            .Value(FMath::RadiansToDegrees(BrushSettings.RotationRadians))
-                            .OnValueChanged(this, &SWetWrinkleEditorPanel::HandleRotationChanged)]
+             + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 10.0f)
+               [SNew(SHorizontalBox).Visibility(this, &SWetWrinkleEditorPanel::GetPatchToolVisibility)
+                + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)[SNew(SBox).WidthOverride(104.0f)[SNew(STextBlock).Text(LOCTEXT("RotationLabel", "Rotation"))]]
+                + SHorizontalBox::Slot().FillWidth(1.0f)[SNew(SSpinBox<float>).MinValue(-180.0f).MaxValue(180.0f).Value_Lambda([this](){ return FMath::RadiansToDegrees(BrushSettings.RotationRadians); }).OnValueChanged(this, &SWetWrinkleEditorPanel::HandleRotationChanged)]
+                + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(4.0f,0.0f)[SNew(STextBlock).Text(LOCTEXT("DegreeUnit", "°"))]
+                + SHorizontalBox::Slot().AutoWidth()[SNew(SButton).ButtonStyle(FAppStyle::Get(), "SimpleButton").Visibility_Lambda([this](){ return FMath::IsNearlyZero(BrushSettings.RotationRadians) ? EVisibility::Hidden : EVisibility::Visible; }).ToolTipText(LOCTEXT("ResetBrushRotation", "Reset Rotation to default.")).OnClicked_Lambda([this](){ HandleRotationChanged(0.0f); return FReply::Handled(); })[SNew(SImage).Image(FAppStyle::GetBrush("PropertyWindow.DiffersFromDefault"))]]]
 
              + SVerticalBox::Slot()
                    .AutoHeight()
@@ -1783,42 +1625,7 @@ TSharedRef<SWidget> SWetWrinkleEditorPanel::BuildPatchBrushSection()
                                      .ToolTipText(LOCTEXT("DeleteSelectedRidgePointTooltip", "Delete the selected control point. A ridge must keep at least two points."))
                                      .OnClicked(this, &SWetWrinkleEditorPanel::HandleDeleteSelectedRidgePointClicked)]]
 
-             + SVerticalBox::Slot()
-                   .AutoHeight()
-                   .Padding(0.0f, 0.0f, 0.0f, 6.0f)
-                       [SNew(STextBlock)
-                            .Text(LOCTEXT("PreviewWetnessLabel", "Preview Wetness"))]
-
-             + SVerticalBox::Slot()
-                   .AutoHeight()
-                   .Padding(0.0f, 0.0f, 0.0f, 10.0f)
-                       [SNew(SSpinBox<float>)
-                            .MinValue(0.0f)
-                            .MaxValue(1.0f)
-                            .MinSliderValue(0.0f)
-                            .MaxSliderValue(1.0f)
-                            .Delta(0.1f)
-                            .Value(BrushSettings.PreviewWetness)
-                            .OnValueChanged(this, &SWetWrinkleEditorPanel::HandlePreviewWetnessChanged)]
-
-             + SVerticalBox::Slot()
-                   .AutoHeight()
-                   .Padding(0.0f, 0.0f, 0.0f, 8.0f)
-                       [SNew(SCheckBox)
-                            .IsChecked(this, &SWetWrinkleEditorPanel::GetShowBakedTransparencyState)
-                            .OnCheckStateChanged(this, &SWetWrinkleEditorPanel::HandleShowBakedTransparencyChanged)
-                            .ToolTipText(LOCTEXT("ShowBakedTransparencyTooltip", "Show the current baked Transparency Map. Live Transparency Editor paint data is not included."))
-                                [SNew(STextBlock)
-                                     .Text(LOCTEXT("ShowBakedTransparency", "Show Baked Transparency"))]]
-
-             + SVerticalBox::Slot()
-                   .AutoHeight()
-                   .Padding(0.0f, 0.0f, 0.0f, 0.0f)
-                       [SNew(SCheckBox)
-                            .IsChecked(this, &SWetWrinkleEditorPanel::GetPreviewToggleState)
-                            .OnCheckStateChanged(this, &SWetWrinkleEditorPanel::HandlePreviewToggleChanged)
-                                [SNew(STextBlock)
-                                     .Text(LOCTEXT("PreviewToggle", "Show Preview Cursor"))]]]];
+             ]];
 }
 
 TSharedRef<SWidget> SWetWrinkleEditorPanel::BuildPatchListSection()
@@ -2717,9 +2524,10 @@ void SWetWrinkleEditorPanel::RebuildWrinkleUVViewPatchMarkerCache()
         FWCAUVViewCircleMarker Marker;
         Marker.CenterUV = Patch.PositionUV;
         Marker.RadiusUV = FMath::Max(Patch.BrushRadiusUV * static_cast<float>(FMath::Max(Patch.Scale.X, Patch.Scale.Y)), 0.001f);
-        Marker.FillColor = PatchFillColor;
-        Marker.OutlineColor = PatchOutlineColor;
-        Marker.OutlineThickness = 1.0f;
+        const bool bSelectedPatch = SelectedElementType == EWetWrinkleElementType::Patch && Patch.PatchGuid == SelectedStrokeGuid;
+        Marker.FillColor = bSelectedPatch ? FLinearColor(1.0f, 0.45f, 0.05f, 0.45f) : PatchFillColor;
+        Marker.OutlineColor = bSelectedPatch ? FLinearColor(1.0f, 0.55f, 0.08f, 1.0f) : PatchOutlineColor;
+        Marker.OutlineThickness = bSelectedPatch ? 1.5f : 1.0f;
         CachedWrinkleUVViewPatchMarkers.Add(Marker);
     }
 }
@@ -2975,6 +2783,7 @@ void SWetWrinkleEditorPanel::HandleWrinkleTextureAssetAdded(const FAssetData& As
 {
     if (UpsertWrinkleTexturePaletteItem(AssetData).IsValid())
     {
+        RefreshBrushPresetOptions();
         RefreshWrinkleTexturePaletteView();
     }
 }
@@ -2990,6 +2799,7 @@ void SWetWrinkleEditorPanel::HandleWrinkleTextureAssetRemoved(const FAssetData& 
         PushBrushPreviewSettingsToViewport();
     }
     RemoveWrinkleTexturePaletteItem(RemovedPath);
+    RefreshBrushPresetOptions();
     RefreshWrinkleTexturePaletteView();
     RefreshWrinkleNormalThumbnail();
 }
@@ -2999,6 +2809,7 @@ void SWetWrinkleEditorPanel::HandleWrinkleTextureAssetUpdated(const FAssetData& 
     if (FWrinkleTexturePaletteItemPtr Item = UpsertWrinkleTexturePaletteItem(AssetData))
     {
         Item->AssetThumbnail.Reset();
+        RefreshBrushPresetOptions();
         RefreshWrinkleTexturePaletteView();
         RefreshWrinkleNormalThumbnail();
     }
@@ -3191,6 +3002,7 @@ FText SWetWrinkleEditorPanel::GetDWCDataUVChannelText() const
         FText::AsNumber(DataUVChannelIndex));
 }
 
+// Reserved for a future authoring workflow. The generation code remains available but is intentionally hidden from the shipping UI.
 FReply SWetWrinkleEditorPanel::HandleAutoGenerateClicked()
 {
     UWetClothingAsset* Asset = WetClothingAsset.Get();
@@ -3463,12 +3275,101 @@ TSharedRef<ITableRow> SWetWrinkleEditorPanel::GenerateMaterialSlotRow(FMaterialS
             ? FDWCEditorPreviewSlotResolver::GetIssueText(State->Issue)
             : FText::GetEmpty();
     };
-    Args.BuildTrailingWidget = [this](const int32 MaterialSlotIndex)
+    Args.BuildBeforeWettableWidget = [this](const int32 MaterialSlotIndex)
     {
         return BuildCustomWrinkleMapToggle(MaterialSlotIndex);
     };
+    Args.BuildThumbnailWidget = [this](const int32 MaterialSlotIndex) -> TSharedRef<SWidget>
+    {
+        return BuildMaterialSlotPreviewWidget(MaterialSlotIndex);
+    };
 
     return FWCAEditorWidgets::GenerateMaterialSlotRow(Item, OwnerTable, Args);
+}
+
+TSharedRef<SWidget> SWetWrinkleEditorPanel::BuildMaterialSlotPreviewWidget(const int32 MaterialSlotIndex) const
+{
+    TArray<FWetClothingAssetUVTriangle> PreviewTriangles;
+    const UWetClothingAsset* Asset = WetClothingAsset.Get();
+    const USkeletalMesh* RuntimeMesh = Asset != nullptr ? Asset->GetRuntimeSkeletalMesh() : nullptr;
+    const USkeletalMesh* SourceMesh = Asset != nullptr ? Asset->GetSourceSkeletalMesh() : nullptr;
+    const int32 PreferredLODIndex = Asset != nullptr ? Asset->GetSimulationLODIndex() : 0;
+    const int32 PreferredUVChannelIndex = Asset != nullptr ? Asset->GetOriginalUVChannelIndex() : 0;
+
+    FWCAUVIslandViewCache::BuildMaterialSlotPreviewTriangles(Asset, MaterialSlotIndex, PreviewTriangles);
+
+    const auto TryUVPreview = [&PreviewTriangles, MaterialSlotIndex](
+                                  const USkeletalMesh* Mesh,
+                                  const int32 LODIndex,
+                                  const int32 UVChannelIndex)
+    {
+        if (PreviewTriangles.IsEmpty() && Mesh != nullptr)
+        {
+            FWCAUVIslandViewCache::BuildMaterialSlotPreviewTriangles(
+                Mesh, LODIndex, UVChannelIndex, MaterialSlotIndex, PreviewTriangles);
+        }
+    };
+
+    TryUVPreview(SourceMesh, PreferredLODIndex, PreferredUVChannelIndex);
+    if (PreferredLODIndex != 0)
+    {
+        TryUVPreview(RuntimeMesh, 0, PreferredUVChannelIndex);
+        TryUVPreview(SourceMesh, 0, PreferredUVChannelIndex);
+    }
+
+    const auto TryGeometryPreview = [&PreviewTriangles, MaterialSlotIndex](
+                                        const USkeletalMesh* Mesh,
+                                        const int32 LODIndex,
+                                        const int32 UVChannelIndex)
+    {
+        if (PreviewTriangles.IsEmpty() && Mesh != nullptr)
+        {
+            FWCAUVIslandViewCache::BuildMaterialSlotGeometryPreviewTriangles(
+                Mesh, LODIndex, UVChannelIndex, MaterialSlotIndex, PreviewTriangles);
+        }
+    };
+
+    TryGeometryPreview(RuntimeMesh, PreferredLODIndex, PreferredUVChannelIndex);
+    TryGeometryPreview(SourceMesh, PreferredLODIndex, PreferredUVChannelIndex);
+    if (PreferredLODIndex != 0)
+    {
+        TryGeometryPreview(RuntimeMesh, 0, PreferredUVChannelIndex);
+        TryGeometryPreview(SourceMesh, 0, PreferredUVChannelIndex);
+    }
+
+    TArray<TSharedPtr<FWCATextureItem>> LocalTextureItems;
+    TSharedPtr<FWCATextureItem> LocalSelectedTextureItem;
+    FWetClothingMaterialTextureResolver::BuildTextureItemsForMaterialSlot(
+        WetClothingAsset.Get(), MaterialSlotIndex, LocalTextureItems, LocalSelectedTextureItem);
+
+    UTexture* PreviewTexture = LocalSelectedTextureItem.IsValid() ? LocalSelectedTextureItem->Texture.Get() : nullptr;
+    if (Cast<UTexture2D>(PreviewTexture) == nullptr)
+    {
+        const auto ResolveFallbackTexture = [MaterialSlotIndex](const USkeletalMesh* Mesh) -> UTexture*
+        {
+            if (Mesh != nullptr)
+            {
+                const TArray<FSkeletalMaterial>& Materials = Mesh->GetMaterials();
+                if (Materials.IsValidIndex(MaterialSlotIndex))
+                {
+                    return FWetClothingMaterialTextureResolver::ResolveBestMaterialTexture(
+                        Materials[MaterialSlotIndex].MaterialInterface);
+                }
+            }
+            return nullptr;
+        };
+
+        PreviewTexture = ResolveFallbackTexture(RuntimeMesh);
+        if (Cast<UTexture2D>(PreviewTexture) == nullptr)
+        {
+            PreviewTexture = ResolveFallbackTexture(SourceMesh);
+        }
+    }
+
+    return SNew(SWCAMaterialSlotPreview)
+        .Triangles(PreviewTriangles)
+        .PreviewTexture(PreviewTexture)
+        .DrawWireframe(true);
 }
 
 void SWetWrinkleEditorPanel::HandleMaterialSlotSelectionChanged(FMaterialSlotItemPtr Item, ESelectInfo::Type SelectInfo)
@@ -3518,22 +3419,10 @@ void SWetWrinkleEditorPanel::ApplyMaterialSlotSelection(
 
 TSharedRef<SWidget> SWetWrinkleEditorPanel::BuildCustomWrinkleMapToggle(const int32 MaterialSlotIndex)
 {
-    return SNew(SBox)
-        .WidthOverride(140.0f)
-        .HAlign(HAlign_Center)
-        .VAlign(VAlign_Center)
-            [SNew(SCheckBox)
-                 .ToolTipText(LOCTEXT(
-                     "CustomWrinkleMapToggleTooltip",
-                     "Use a user-provided packed wrinkle normal map for this material slot instead of the baked wrinkle map."))
-                 .IsChecked_Lambda([this, MaterialSlotIndex]()
-                 {
-                     return GetCustomWrinkleMapCheckState(MaterialSlotIndex);
-                 })
-                 .OnCheckStateChanged_Lambda([this, MaterialSlotIndex](const ECheckBoxState NewState)
-                 {
-                     HandleCustomWrinkleMapCheckStateChanged(NewState, MaterialSlotIndex);
-                 })];
+    return SNew(SCheckBox)
+        .ToolTipText(LOCTEXT("CustomWrinkleMapToggleTooltip", "Use a user-provided packed wrinkle normal map for this material slot instead of the baked wrinkle map."))
+        .IsChecked(this, &SWetWrinkleEditorPanel::GetCustomWrinkleMapCheckState, MaterialSlotIndex)
+        .OnCheckStateChanged(this, &SWetWrinkleEditorPanel::HandleCustomWrinkleMapCheckStateChanged, MaterialSlotIndex);
 }
 
 ECheckBoxState SWetWrinkleEditorPanel::GetCustomWrinkleMapCheckState(const int32 MaterialSlotIndex) const
@@ -3757,6 +3646,111 @@ FString SWetWrinkleEditorPanel::GetWrinkleNormalTextureObjectPath() const
     return BrushSettings.WrinkleNormalTexture != nullptr ? BrushSettings.WrinkleNormalTexture->GetPathName() : FString();
 }
 
+FText SWetWrinkleEditorPanel::GetWrinkleNormalTextureDisplayName() const
+{
+    return BrushSettings.WrinkleNormalTexture != nullptr
+        ? FText::FromString(BrushSettings.WrinkleNormalTexture->GetName())
+        : LOCTEXT("NoWrinkleNormalTextureCompact", "None");
+}
+
+TSharedRef<SWidget> SWetWrinkleEditorPanel::BuildWrinkleNormalTextureMenu()
+{
+    RefreshBrushPresetOptions();
+
+    TSharedRef<SVerticalBox> Menu = SNew(SVerticalBox);
+    Menu->AddSlot()
+        .AutoHeight()
+        .Padding(8.0f, 6.0f, 8.0f, 4.0f)
+        [SNew(STextBlock)
+            .Text(LOCTEXT("DWCWrinkleNormalsMenuHeading", "DWC Wrinkle Normal Textures"))
+            .Font(FAppStyle::GetFontStyle(TEXT("SmallFontBold")))];
+
+    if (BrushPresetOptions.IsEmpty())
+    {
+        Menu->AddSlot()
+            .AutoHeight()
+            .Padding(8.0f, 4.0f, 8.0f, 8.0f)
+            [SNew(STextBlock)
+                .Text(LOCTEXT("NoDWCWrinkleNormals", "No textures found in the DWC wrinkle texture directory."))
+                .ColorAndOpacity(FSlateColor::UseSubduedForeground())];
+    }
+    else
+    {
+        TSharedRef<SVerticalBox> PresetList = SNew(SVerticalBox);
+        for (const TSharedPtr<FWetWrinkleBrushPresetOption>& Option : BrushPresetOptions)
+        {
+            if (!Option.IsValid())
+            {
+                continue;
+            }
+            const FSoftObjectPath TexturePath = Option->TexturePath;
+            PresetList->AddSlot()
+                .AutoHeight()
+                .Padding(2.0f, 1.0f)
+                [SNew(SButton)
+                    .ButtonStyle(FAppStyle::Get(), TEXT("SimpleButton"))
+                    .HAlign(HAlign_Left)
+                    .ContentPadding(FMargin(8.0f, 5.0f))
+                    .Text(Option->DisplayName)
+                    .ToolTipText(FText::FromString(TexturePath.ToString()))
+                    .OnClicked(this, &SWetWrinkleEditorPanel::HandleWrinkleNormalPresetClicked, TexturePath)];
+        }
+
+        Menu->AddSlot()
+            .AutoHeight()
+            [SNew(SBox)
+                .MaxDesiredHeight(300.0f)
+                [SNew(SScrollBox)
+                    + SScrollBox::Slot()
+                    [PresetList]]];
+    }
+
+    Menu->AddSlot()
+        .AutoHeight()
+        .Padding(6.0f, 6.0f, 6.0f, 4.0f)
+        [SNew(SSeparator)];
+
+    Menu->AddSlot()
+        .AutoHeight()
+        .Padding(8.0f, 2.0f, 8.0f, 8.0f)
+        [SNew(SVerticalBox)
+            + SVerticalBox::Slot()
+                .AutoHeight()
+                .Padding(0.0f, 0.0f, 0.0f, 4.0f)
+                [SNew(STextBlock)
+                    .Text(LOCTEXT("OtherWrinkleNormalTextureHeading", "Other Texture"))
+                    .Font(FAppStyle::GetFontStyle(TEXT("SmallFontBold")))]
+            + SVerticalBox::Slot()
+                .AutoHeight()
+                [SNew(SObjectPropertyEntryBox)
+                    .AllowedClass(UTexture2D::StaticClass())
+                    .ObjectPath(this, &SWetWrinkleEditorPanel::GetWrinkleNormalTextureObjectPath)
+                    .OnObjectChanged(this, &SWetWrinkleEditorPanel::HandleWrinkleNormalTextureChanged)]];
+
+    return SNew(SBox)
+        .WidthOverride(360.0f)
+        [Menu];
+}
+
+FReply SWetWrinkleEditorPanel::HandleWrinkleNormalPresetClicked(const FSoftObjectPath TexturePath)
+{
+    UTexture2D* Texture = Cast<UTexture2D>(TexturePath.TryLoad());
+    if (Texture == nullptr)
+    {
+        return FReply::Handled();
+    }
+
+    BrushSettings.WrinkleNormalTexture = Texture;
+    RefreshWrinkleNormalThumbnail();
+    PushBrushPreviewSettingsToViewport();
+    if (WrinklePalettePanel.IsValid())
+    {
+        WrinklePalettePanel->RequestRefresh();
+    }
+    FSlateApplication::Get().DismissAllMenus();
+    return FReply::Handled();
+}
+
 void SWetWrinkleEditorPanel::HandleWrinkleNormalTextureChanged(const FAssetData& AssetData)
 {
     BrushSettings.WrinkleNormalTexture = Cast<UTexture2D>(AssetData.GetAsset());
@@ -3978,68 +3972,65 @@ TSharedRef<ITableRow> SWetWrinkleEditorPanel::GenerateStrokeRow(FStrokeListItemP
 {
     return SNew(STableRow<FStrokeListItemPtr>, OwnerTable)
         .Padding(2.0f)
-            [SNew(SHorizontalBox)
-
-             + SHorizontalBox::Slot()
-                   .AutoWidth()
-                   .VAlign(VAlign_Center)
-                   .Padding(0.0f, 0.0f, 6.0f, 0.0f)
-                       [SNew(SCheckBox)
-                            .IsChecked_Lambda([this, Item]()
-                                              {
-                                                  if (!Item.IsValid())
-                                                  {
-                                                      return ECheckBoxState::Unchecked;
-                                                  }
-                                                  if (Item->ElementType == EWetWrinkleElementType::ProceduralRidgeStroke)
-                                                  {
-                                                      const FWetProceduralRidgeStroke* Stroke = ResolveProceduralRidgeListItem(Item);
-                                                      return Stroke != nullptr && Stroke->bEnabled ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
-                                                  }
-                                                  const FWetWrinklePatchPlacement* Patch = ResolvePatchListItem(Item);
-                                                  return Patch != nullptr && Patch->bEnabled ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
-                                              })
-                            .OnCheckStateChanged(this, &SWetWrinkleEditorPanel::HandleStrokeEnabledChanged, Item)]
-
-             + SHorizontalBox::Slot()
-                   .FillWidth(1.0f)
-                   .VAlign(VAlign_Center)
-                       [SNew(SInlineEditableTextBlock)
-                            .Text_Lambda([this, Item]()
-                                         {
-                                             if (Item.IsValid() && Item->ElementType == EWetWrinkleElementType::ProceduralRidgeStroke)
-                                             {
-                                                 const FWetProceduralRidgeStroke* Stroke = ResolveProceduralRidgeListItem(Item);
-                                                 return Stroke != nullptr ? FText::FromString(Stroke->DisplayName) : LOCTEXT("MissingRidgeStrokeName", "<missing ridge>");
-                                             }
-                                             const FWetWrinklePatchPlacement* Patch = ResolvePatchListItem(Item);
-                                             return Patch != nullptr ? FText::FromString(Patch->DisplayName) : LOCTEXT("MissingPatchListName", "<missing>");
-                                         })
-                            .OnTextCommitted(this, &SWetWrinkleEditorPanel::HandleStrokeNameCommitted, Item)]
-
-             + SHorizontalBox::Slot()
-                   .AutoWidth()
-                   .VAlign(VAlign_Center)
-                   .Padding(6.0f, 0.0f, 6.0f, 0.0f)
-                       [SNew(STextBlock)
-                            .Text_Lambda([this, Item]()
-                                         {
-                                             if (Item.IsValid() && Item->ElementType == EWetWrinkleElementType::ProceduralRidgeStroke)
-                                             {
-                                                 const FWetProceduralRidgeStroke* Stroke = ResolveProceduralRidgeListItem(Item);
-                                                 return FText::Format(
-                                                     LOCTEXT("RidgeStrokePointCount", "Ridge / {0}"),
-                                                     FText::AsNumber(Stroke != nullptr ? Stroke->Points.Num() : 0));
-                                             }
-                                             return LOCTEXT("PatchListItemType", "Patch");
-                                         })]
-
-             + SHorizontalBox::Slot()
-                   .AutoWidth()
-                   .VAlign(VAlign_Center)
-                       [SNew(SButton)
-                            .Text(LOCTEXT("DeleteStrokeButton", "Delete"))
-                            .OnClicked(this, &SWetWrinkleEditorPanel::HandleDeleteStrokeClicked, Item)]];
+        [SNew(SHorizontalBox)
+         + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+           [SNew(SBox).WidthOverride(28.0f).HAlign(HAlign_Center)
+            [SNew(SCheckBox)
+             .IsChecked_Lambda([this, Item]()
+             {
+                 if (!Item.IsValid()) return ECheckBoxState::Unchecked;
+                 if (Item->ElementType == EWetWrinkleElementType::ProceduralRidgeStroke)
+                 {
+                     const FWetProceduralRidgeStroke* Stroke = ResolveProceduralRidgeListItem(Item);
+                     return Stroke != nullptr && Stroke->bEnabled ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+                 }
+                 const FWetWrinklePatchPlacement* Patch = ResolvePatchListItem(Item);
+                 return Patch != nullptr && Patch->bEnabled ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+             })
+             .OnCheckStateChanged(this, &SWetWrinkleEditorPanel::HandleStrokeEnabledChanged, Item)]]
+         + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(4.0f,0.0f)
+           [SNew(SBox).WidthOverride(118.0f).VAlign(VAlign_Center)
+            [SNew(SInlineEditableTextBlock)
+            .Text_Lambda([this, Item]()
+            {
+                if (Item.IsValid() && Item->ElementType == EWetWrinkleElementType::ProceduralRidgeStroke)
+                {
+                    const FWetProceduralRidgeStroke* Stroke = ResolveProceduralRidgeListItem(Item);
+                    return Stroke != nullptr ? FText::FromString(Stroke->DisplayName) : LOCTEXT("MissingRidgeStrokeName", "<missing ridge>");
+                }
+                const FWetWrinklePatchPlacement* Patch = ResolvePatchListItem(Item);
+                return Patch != nullptr ? FText::FromString(Patch->DisplayName) : LOCTEXT("MissingPatchListName", "<missing>");
+            })
+            .OnTextCommitted(this, &SWetWrinkleEditorPanel::HandleStrokeNameCommitted, Item)]]
+         + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+           [SNew(SBox).WidthOverride(62.0f).HAlign(HAlign_Center)
+            [SNew(STextBlock).Text_Lambda([Item]()
+            {
+                return Item.IsValid() && Item->ElementType == EWetWrinkleElementType::ProceduralRidgeStroke
+                    ? LOCTEXT("RidgeListItemType", "Ridge") : LOCTEXT("PatchListItemType", "Patch");
+            }).Font(FAppStyle::GetFontStyle(TEXT("SmallFont")))]]
+         + SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center).Padding(4.0f,0.0f)
+           [SNew(STextBlock)
+             .Text_Lambda([this, Item]()
+             {
+                 if (!Item.IsValid() || Item->ElementType == EWetWrinkleElementType::ProceduralRidgeStroke) return FText::FromString(TEXT("-"));
+                 const FWetWrinklePatchPlacement* Patch = ResolvePatchListItem(Item);
+                 return Patch != nullptr && Patch->WrinkleNormalTexture != nullptr
+                     ? FText::FromString(Patch->WrinkleNormalTexture->GetName()) : FText::FromString(TEXT("-"));
+             })
+             .ToolTipText_Lambda([this, Item]()
+             {
+                 if (!Item.IsValid() || Item->ElementType == EWetWrinkleElementType::ProceduralRidgeStroke) return FText::GetEmpty();
+                 const FWetWrinklePatchPlacement* Patch = ResolvePatchListItem(Item);
+                 return Patch != nullptr && Patch->WrinkleNormalTexture != nullptr
+                     ? FText::FromString(Patch->WrinkleNormalTexture->GetPathName()) : FText::GetEmpty();
+             })
+             .OverflowPolicy(ETextOverflowPolicy::Ellipsis)
+             .Font(FAppStyle::GetFontStyle(TEXT("SmallFont")))]
+         + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+           [SNew(SBox).WidthOverride(28.0f).HAlign(HAlign_Center)
+            [SNew(SButton).ButtonStyle(FAppStyle::Get(), TEXT("SimpleButton")).ContentPadding(1.0f).ToolTipText(LOCTEXT("DeleteStrokeButton", "Delete element")).OnClicked(this, &SWetWrinkleEditorPanel::HandleDeleteStrokeClicked, Item)
+             [SNew(SImage).Image(FAppStyle::GetBrush(TEXT("Icons.Delete")))]]]];
 }
 
 void SWetWrinkleEditorPanel::HandleStrokeSelectionChanged(FStrokeListItemPtr Item, ESelectInfo::Type SelectInfo)
@@ -4080,6 +4071,8 @@ void SWetWrinkleEditorPanel::HandleStrokeSelectionChanged(FStrokeListItemPtr Ite
     }
 
     PushStrokeSelectionToViewport();
+    RebuildWrinkleUVViewPatchMarkerCache();
+    RefreshWrinkleUVViewMarkersOnly();
     if (PreviewViewport.IsValid())
     {
         if (bNeedsPreviewRefresh)

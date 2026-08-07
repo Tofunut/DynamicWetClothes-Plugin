@@ -42,16 +42,13 @@ void UDWCGPUNiagaraWetCollisionBridgeComponent::TickComponent(
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
-    if (bRefreshBridgeOnTick)
-    {
-        RefreshBridge();
-    }
+    RefreshBridge();
 }
 
 bool UDWCGPUNiagaraWetCollisionBridgeComponent::RefreshBridge()
 {
     UNiagaraComponent* TargetNiagaraComponent = NiagaraComponent;
-    if (!TargetNiagaraComponent && bFindNiagaraComponentOnOwner)
+    if (!TargetNiagaraComponent)
     {
         TargetNiagaraComponent = ResolveNiagaraComponent();
         NiagaraComponent = TargetNiagaraComponent;
@@ -77,8 +74,7 @@ bool UDWCGPUNiagaraWetCollisionBridgeComponent::RefreshBridge()
         BuildTargetReceiverGPUIds(ReceiverGPUIds);
     }
 
-    const bool bApplyTargetRestriction =
-        bRestrictToAllowedReceivers && !ReceiverGPUIds.IsEmpty();
+    const bool bApplyTargetRestriction = bRestrictToAllowedReceivers;
 
     return ApplyTargetReceivers(
         SystemInstanceController->GetSystemInstanceID(),
@@ -89,6 +85,7 @@ bool UDWCGPUNiagaraWetCollisionBridgeComponent::RefreshBridge()
 void UDWCGPUNiagaraWetCollisionBridgeComponent::SetAllowedReceivers(
     const TArray<UDynamicWetClothesComponent*>& InAllowedReceivers)
 {
+    AllowedReceivers.Reset();
     RuntimeAllowedReceivers.Reset();
     RuntimeAllowedReceivers.Reserve(InAllowedReceivers.Num());
 
@@ -101,7 +98,6 @@ void UDWCGPUNiagaraWetCollisionBridgeComponent::SetAllowedReceivers(
     }
 
     bRestrictToAllowedReceivers = true;
-    bFindAllowedReceiversInWorld = false;
     RefreshBridge();
 }
 
@@ -110,7 +106,6 @@ void UDWCGPUNiagaraWetCollisionBridgeComponent::ClearAllowedReceivers()
     RuntimeAllowedReceivers.Reset();
     AllowedReceivers.Reset();
     bRestrictToAllowedReceivers = false;
-    bFindAllowedReceiversInWorld = false;
     RefreshBridge();
 }
 
@@ -118,8 +113,31 @@ void UDWCGPUNiagaraWetCollisionBridgeComponent::SetAllowedReceiversFromWorld()
 {
     RuntimeAllowedReceivers.Reset();
     AllowedReceivers.Reset();
+
+    UWorld* World = GetWorld();
+    if (World)
+    {
+        for (TActorIterator<AActor> It(World); It; ++It)
+        {
+            AActor* CandidateActor = *It;
+            if (!IsValid(CandidateActor))
+            {
+                continue;
+            }
+
+            TArray<UDynamicWetClothesComponent*> ReceiverComponents;
+            CandidateActor->GetComponents<UDynamicWetClothesComponent>(ReceiverComponents);
+            for (UDynamicWetClothesComponent* ReceiverComponent : ReceiverComponents)
+            {
+                if (IsValid(ReceiverComponent))
+                {
+                    RuntimeAllowedReceivers.AddUnique(ReceiverComponent);
+                }
+            }
+        }
+    }
+
     bRestrictToAllowedReceivers = true;
-    bFindAllowedReceiversInWorld = true;
     RefreshBridge();
 }
 
@@ -156,21 +174,11 @@ UNiagaraComponent* UDWCGPUNiagaraWetCollisionBridgeComponent::ResolveNiagaraComp
 void UDWCGPUNiagaraWetCollisionBridgeComponent::ApplyWetContactUserParameters(
     UNiagaraComponent& TargetNiagaraComponent) const
 {
-    if (!bSetWetContactUserParameters)
-    {
-        return;
-    }
+    static const FName WetAmountUserParameterName(TEXT("User.DWCWetAmount"));
+    static const FName WetRadiusUserParameterName(TEXT("User.DWCWetRadius"));
 
-    if (!WetAmountUserParameterName.IsNone())
-    {
-        TargetNiagaraComponent.SetVariableFloat(WetAmountUserParameterName, WetAmount);
-    }
-
-    if (!WetRadiusUserParameterName.IsNone())
-    {
-        TargetNiagaraComponent.SetVariableFloat(WetRadiusUserParameterName, WetRadius);
-    }
-
+    TargetNiagaraComponent.SetVariableFloat(WetAmountUserParameterName, WetAmount);
+    TargetNiagaraComponent.SetVariableFloat(WetRadiusUserParameterName, WetRadius);
 }
 
 void UDWCGPUNiagaraWetCollisionBridgeComponent::BuildTargetReceiverGPUIds(
@@ -196,28 +204,6 @@ void UDWCGPUNiagaraWetCollisionBridgeComponent::BuildTargetReceiverGPUIds(
         AddReceiverGPUIds(Receiver);
     }
 
-    if (bFindAllowedReceiversInWorld)
-    {
-        UWorld* World = GetWorld();
-        if (World)
-        {
-            for (TActorIterator<AActor> It(World); It; ++It)
-            {
-                const AActor* CandidateActor = *It;
-                if (!IsValid(CandidateActor))
-                {
-                    continue;
-                }
-
-                TArray<UDynamicWetClothesComponent*> ReceiverComponents;
-                CandidateActor->GetComponents<UDynamicWetClothesComponent>(ReceiverComponents);
-                for (const UDynamicWetClothesComponent* ReceiverComponent : ReceiverComponents)
-                {
-                    AddReceiverGPUIds(ReceiverComponent);
-                }
-            }
-        }
-    }
 
     OutReceiverGPUIds.Sort();
 }

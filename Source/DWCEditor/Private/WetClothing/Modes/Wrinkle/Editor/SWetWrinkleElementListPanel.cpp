@@ -2,9 +2,12 @@
 #include "WetClothing/Modes/Wrinkle/Editor/SWetWrinkleElementListPanel.h"
 
 #include "Styling/CoreStyle.h"
+#include "Styling/AppStyle.h"
 #include "Widgets/Input/SButton.h"
+#include "Widgets/Images/SImage.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
+#include "Widgets/Layout/SSeparator.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/Text/STextBlock.h"
 
@@ -46,6 +49,21 @@ void SWetWrinkleElementListPanel::Construct(const FArguments& InArgs)
                             [SNew(STextBlock)
                                  .AutoWrapText(true)
                                  .Text(InArgs._SummaryText)]
+
+                  + SVerticalBox::Slot()
+                        .AutoHeight()
+                        .Padding(2.0f, 0.0f, 2.0f, 4.0f)
+                            [SNew(SHorizontalBox)
+                             + SHorizontalBox::Slot().AutoWidth()[SNew(SBox).WidthOverride(28.0f)]
+                             + SHorizontalBox::Slot().AutoWidth()[SNew(SBox).WidthOverride(118.0f).Padding(FMargin(4.0f,0.0f))[SNew(STextBlock).Text(LOCTEXT("ElementColumn", "Element")).Font(FAppStyle::GetFontStyle(TEXT("SmallFontBold")))]]
+                             + SHorizontalBox::Slot().AutoWidth()[SNew(SBox).WidthOverride(62.0f).HAlign(HAlign_Center)[SNew(STextBlock).Text(LOCTEXT("ElementTypeColumn", "Type")).Font(FAppStyle::GetFontStyle(TEXT("SmallFontBold")))]]
+                             + SHorizontalBox::Slot().FillWidth(1.0f).Padding(4.0f,0.0f)[SNew(STextBlock).Text(LOCTEXT("ElementTextureColumn", "Texture")).Font(FAppStyle::GetFontStyle(TEXT("SmallFontBold")))]
+                             + SHorizontalBox::Slot().AutoWidth()[SNew(SBox).WidthOverride(28.0f)]]
+
+                  + SVerticalBox::Slot()
+                        .AutoHeight()
+                        .Padding(0.0f, 0.0f, 0.0f, 4.0f)
+                            [SNew(SSeparator)]
 
                   + SVerticalBox::Slot()
                         .FillHeight(1.0f)

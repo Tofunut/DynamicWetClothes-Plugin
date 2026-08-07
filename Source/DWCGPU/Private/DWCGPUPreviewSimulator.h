@@ -49,7 +49,7 @@ private:
     int32 Resolution = 512;
     float MaxWetness = 1.15f;
     float CapillaryImmediateAbsorptionFraction = 0.65f;
-    bool bUseEightDirectionDiffusion = false;
+    bool bUseEightDirectionDiffusion = true;
     bool bInitialized = false;
     bool bPreviewAbsorbedEnabled = true;
     bool bPreviewSurfaceEnabled = true;

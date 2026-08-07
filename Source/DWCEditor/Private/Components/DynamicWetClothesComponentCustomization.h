@@ -2,9 +2,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-
 #include "IDetailCustomization.h"
-#include "Input/Reply.h"
 #include "Layout/Visibility.h"
 
 class IPropertyUtilities;
@@ -25,14 +23,11 @@ private:
     enum class EBindingState : uint8
     {
         Ready,
-        NeedsApply,
-        MissingAsset,
+        SourceMeshInUse,
         UnsupportedAssetVersion,
         NoMatchingComponent,
         MissingSourceMesh,
-        MissingDWCMesh,
-        DuplicateAsset,
-        ConflictingAsset
+        MissingDWCMesh
     };
 
     struct FBindingStatus
@@ -45,23 +40,16 @@ private:
         EBindingState State = EBindingState::NoMatchingComponent;
     };
 
-    void RebuildBindingStatuses();
+    void RebuildBindingStatus();
     void RequestRefresh();
     void HandleObjectPropertyChanged(UObject* ChangedObject, FPropertyChangedEvent& PropertyChangedEvent);
-    FText GetBindingText(int32 BindingIndex) const;
-    FText GetBindingStateText(int32 BindingIndex) const;
-    EVisibility GetBindingWarningVisibility(int32 BindingIndex) const;
-    EVisibility GetBindingApplyVisibility(int32 BindingIndex) const;
-    bool CanApplyBinding(int32 BindingIndex) const;
-    bool CanApplyAll() const;
-    FReply HandleApplyBinding(int32 BindingIndex);
-    FReply HandleApplyAll();
-    bool ApplyBinding(int32 BindingIndex, bool bUseTransaction);
+    FText GetBindingWarningText() const;
+    EVisibility GetBindingWarningVisibility() const;
 
 private:
     TWeakObjectPtr<UDynamicWetClothesComponent> Component;
     TWeakPtr<IPropertyUtilities> PropertyUtilities;
-    TArray<FBindingStatus> CachedBindingStatuses;
+    FBindingStatus CachedBindingStatus;
+    bool bHasBindingStatus = false;
     FDelegateHandle ObjectPropertyChangedHandle;
-    bool bApplyingBinding = false;
 };

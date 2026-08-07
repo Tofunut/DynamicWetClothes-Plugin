@@ -3279,7 +3279,7 @@ TSharedRef<ITableRow> SWetClothingPartEditorPanel::GenerateUVIslandRow(FUVIsland
                                                         if (AssignedEntry->WetPartID != 0)
                                                         {
                                                             return FText::Format(
-                                                                LOCTEXT("UVIslandPartNameWithID", "{0} (ID {1})"),
+                                                                LOCTEXT("UVIslandPartNameWithID", "{0} · ID {1}"),
                                                                 FText::FromString(GetWetPartDisplayName(*AssignedEntry)),
                                                                 FText::AsNumber(AssignedEntry->WetPartID));
                                                         }
@@ -3513,8 +3513,8 @@ TSharedRef<ITableRow> SWetClothingPartEditorPanel::GenerateWetPartRow(FWetPartEn
                                                                      .Padding(4.0f, 0.0f, 0.0f, 0.0f)
                                                                          [SNew(STextBlock)
                                                                               .Text(Item.IsValid()
-                                                                                        ? FText::Format(LOCTEXT("WetPartRowIDLabel", "(ID {0})"), FText::AsNumber(Item->WetPartID))
-                                                                                        : LOCTEXT("InvalidWetPartIDLabel", "(Invalid)"))
+                                                                                        ? FText::Format(LOCTEXT("WetPartRowIDLabel", "· ID {0}"), FText::AsNumber(Item->WetPartID))
+                                                                                        : LOCTEXT("InvalidWetPartIDLabel", "· Invalid"))
                                                                               .Visibility(Item.IsValid() && Item->WetPartID == 0 ? EVisibility::Collapsed : EVisibility::Visible)
                                                                               .ColorAndOpacity(FSlateColor(FLinearColor(0.62f, 0.62f, 0.62f, 1.0f)))]]
 

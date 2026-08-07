@@ -8,7 +8,7 @@
 class UDynamicWetClothesComponent;
 class UNiagaraComponent;
 
-UCLASS(ClassGroup = (Wetness), DisplayName = "DWC GPU Niagara Wet Collision Bridge", meta = (BlueprintSpawnableComponent))
+UCLASS(ClassGroup = (DWC), DisplayName = "DWC GPU Niagara Wet Collision Bridge", meta = (BlueprintSpawnableComponent))
 class DWCGPU_API UDWCGPUNiagaraWetCollisionBridgeComponent : public UActorComponent
 {
     GENERATED_BODY()
@@ -23,19 +23,19 @@ class DWCGPU_API UDWCGPUNiagaraWetCollisionBridgeComponent : public UActorCompon
         ELevelTick TickType,
         FActorComponentTickFunction* ThisTickFunction) override;
 
-    UFUNCTION(BlueprintCallable, Category = "DWC|Niagara Wet Collision")
+    // Internal refresh entry point used by the component lifecycle and C++ integrations.
     bool RefreshBridge();
 
-    UFUNCTION(BlueprintCallable, Category = "DWC|Niagara Wet Collision")
+    UFUNCTION(BlueprintCallable, Category = "DWC|Receiver Filter")
     void SetAllowedReceivers(const TArray<UDynamicWetClothesComponent*>& InAllowedReceivers);
 
-    UFUNCTION(BlueprintCallable, Category = "DWC|Niagara Wet Collision")
+    UFUNCTION(BlueprintCallable, Category = "DWC|Receiver Filter")
     void ClearAllowedReceivers();
 
-    UFUNCTION(BlueprintCallable, Category = "DWC|Niagara Wet Collision")
+    // C++ integration helper. Intentionally hidden from Blueprint.
     void SetAllowedReceiversFromWorld();
 
-    UFUNCTION(BlueprintCallable, Category = "DWC|Niagara Wet Collision")
+    UFUNCTION(BlueprintCallable, Category = "DWC|Wet Contact")
     void SetWetContactUserParameters(float InWetAmount, float InWetRadius);
 
   private:
@@ -48,38 +48,20 @@ class DWCGPU_API UDWCGPUNiagaraWetCollisionBridgeComponent : public UActorCompon
         const TArray<int32>& ReceiverGPUIds);
 
   public:
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DWC|Niagara Wet Collision")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DWC|Niagara")
     TObjectPtr<UNiagaraComponent> NiagaraComponent = nullptr;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DWC|Niagara Wet Collision")
-    bool bFindNiagaraComponentOnOwner = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DWC|Niagara Wet Collision")
-    bool bRestrictToAllowedReceivers = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DWC|Niagara Wet Collision", meta = (EditCondition = "bRestrictToAllowedReceivers"))
-    bool bFindAllowedReceiversInWorld = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DWC|Niagara Wet Collision", meta = (EditCondition = "bRestrictToAllowedReceivers"))
-    TArray<TObjectPtr<UDynamicWetClothesComponent>> AllowedReceivers;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DWC|Niagara Wet Collision")
-    bool bSetWetContactUserParameters = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DWC|Niagara Wet Collision", meta = (EditCondition = "bSetWetContactUserParameters"))
-    FName WetAmountUserParameterName = TEXT("User.DWCWetAmount");
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DWC|Niagara Wet Collision", meta = (EditCondition = "bSetWetContactUserParameters"))
-    FName WetRadiusUserParameterName = TEXT("User.DWCWetRadius");
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DWC|Niagara Wet Collision", meta = (ClampMin = "0.0", EditCondition = "bSetWetContactUserParameters"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DWC|Wet Contact", meta = (ClampMin = "0.0"))
     float WetAmount = 0.1f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DWC|Niagara Wet Collision", meta = (ClampMin = "0.0", EditCondition = "bSetWetContactUserParameters"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DWC|Wet Contact", meta = (ClampMin = "0.0"))
     float WetRadius = 10.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DWC|Niagara Wet Collision")
-    bool bRefreshBridgeOnTick = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DWC|Receiver Filter")
+    bool bRestrictToAllowedReceivers = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DWC|Receiver Filter", meta = (EditCondition = "bRestrictToAllowedReceivers", EditConditionHides))
+    TArray<TObjectPtr<UDynamicWetClothesComponent>> AllowedReceivers;
 
   private:
     UPROPERTY(Transient)

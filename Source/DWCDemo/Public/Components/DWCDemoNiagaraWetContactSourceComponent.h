@@ -10,7 +10,7 @@
 class UDynamicWetClothesComponent;
 class UNiagaraComponent;
 
-UCLASS(ClassGroup = (Wetness), DisplayName = "DWC Demo Niagara Wet Contact Source", meta = (BlueprintSpawnableComponent))
+UCLASS(ClassGroup = (DWC), DisplayName = "DWC Demo Niagara Wet Contact Source", meta = (BlueprintSpawnableComponent))
 class DWCDEMO_API UDWCDemoNiagaraWetContactSourceComponent
     : public UActorComponent,
       public INiagaraParticleCallbackHandler

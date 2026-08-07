@@ -53,6 +53,32 @@ namespace
     constexpr int32 WetAreaNormalExposureMinCandidateCount = 128;
     constexpr float WetAreaNormalExposurePickPower = 2.0f;
 
+    float CalculateDirectionalExposure(
+        const FVector& WorldNormal,
+        const FVector& Direction,
+        const FVector& Normal,
+        const float ExposureMin,
+        const float ExposureMax)
+    {
+        float Exposure = 1.0f;
+
+        if (!Direction.IsNearlyZero())
+        {
+            const float Facing = FVector::DotProduct(WorldNormal, -Direction.GetSafeNormal());
+            Exposure *= FMath::SmoothStep(
+                FMath::Min(ExposureMin, ExposureMax - KINDA_SMALL_NUMBER),
+                FMath::Max(ExposureMax, ExposureMin + KINDA_SMALL_NUMBER),
+                Facing);
+        }
+
+        if (!Normal.IsNearlyZero())
+        {
+            Exposure *= FMath::Clamp(FVector::DotProduct(WorldNormal, Normal.GetSafeNormal()), 0.0f, 1.0f);
+        }
+
+        return Exposure;
+    }
+
     bool RequestAsyncSkinning(FWetInputStageArgs& Receiver, const bool bComputePositions, const bool bComputeNormals)
     {
         if (!Receiver.RequestAsyncSkinning)
@@ -273,7 +299,7 @@ namespace
         if (WorldNormal && !WorldNormal->IsNearlyZero())
         {
             const float NormalExposureMin =
-                FMath::Min(Receiver.WetnessSettings->RainExposureMin, Receiver.WetnessSettings->RainExposureMax);
+                FMath::Min(Receiver.WetnessSettings->ContactExposureMin, Receiver.WetnessSettings->ContactExposureMax);
             if (FVector::DotProduct(*WorldNormal, Evaluation.SafeNormal) < NormalExposureMin)
             {
                 return false;
@@ -550,23 +576,26 @@ float FWetInputStage::CalculateContactExposure(
     const FVector&              Normal,
     const FWetClothingSettings& Settings)
 {
-    float Exposure = 1.0f;
+    return CalculateDirectionalExposure(
+        WorldNormal,
+        Direction,
+        Normal,
+        Settings.ContactExposureMin,
+        Settings.ContactExposureMax);
+}
 
-    if (!Direction.IsNearlyZero())
-    {
-        const float Facing = FVector::DotProduct(WorldNormal, -Direction.GetSafeNormal());
-        Exposure *= FMath::SmoothStep(
-            FMath::Min(Settings.RainExposureMin, Settings.RainExposureMax - KINDA_SMALL_NUMBER),
-            FMath::Max(Settings.RainExposureMax, Settings.RainExposureMin + KINDA_SMALL_NUMBER),
-            Facing);
-    }
-
-    if (!Normal.IsNearlyZero())
-    {
-        Exposure *= FMath::Clamp(FVector::DotProduct(WorldNormal, Normal.GetSafeNormal()), 0.0f, 1.0f);
-    }
-
-    return Exposure;
+float FWetInputStage::CalculateAreaExposure(
+    const FVector&              WorldNormal,
+    const FVector&              Direction,
+    const FVector&              Normal,
+    const FWetClothingSettings& Settings)
+{
+    return CalculateDirectionalExposure(
+        WorldNormal,
+        Direction,
+        Normal,
+        Settings.AreaExposureMin,
+        Settings.AreaExposureMax);
 }
 
 bool FWetInputStage::CanApplyWetAreaToVertex(
@@ -629,7 +658,7 @@ float FWetInputStage::CalculateWetAreaRawExposure(
         return 0.0f;
     }
 
-    return CalculateContactExposure(
+    return CalculateAreaExposure(
         WorldNormal,
         SafeDirection,
         SafeNormal,
@@ -937,7 +966,7 @@ bool FWetInputStage::ApplyWetArea(FWetInputStageArgs&    Receiver,
                 bHasSkinnedNormals,
                 VertexIndex);
             const float MinInfluence = Receiver.WetnessSettings
-                                           ? FMath::Clamp(Receiver.WetnessSettings->RainExposureMinInfluence, 0.0f, 1.0f)
+                                           ? FMath::Clamp(Receiver.WetnessSettings->AreaExposureMinInfluence, 0.0f, 1.0f)
                                            : 0.05f;
             const float EffectiveExposure = FMath::Clamp(RawExposure, MinInfluence, 1.0f);
             Candidates.Add({

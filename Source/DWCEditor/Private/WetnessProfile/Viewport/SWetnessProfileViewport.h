@@ -61,7 +61,6 @@ class SWetnessProfileViewport : public SEditorViewport, public FGCObject
     virtual FReply OnMouseButtonDown(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override;
     virtual FReply OnKeyDown(const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent) override;
     virtual FReply OnKeyUp(const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent) override;
-    virtual void OnFocusLost(const FFocusEvent& InFocusEvent) override;
     void FocusOnPreviewMesh(bool bInstant = false);
 
     void SetPreviewAbsorbedWater(float InAmount);

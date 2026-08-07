@@ -847,6 +847,11 @@ void SDWCPartViewport::AddReferencedObjects(FReferenceCollector& Collector)
     Collector.AddReferencedObject(WetPartOverlayMID);
     Collector.AddReferencedObject(PartPreviewColorTexture);
     Collector.AddReferencedObject(PartPreviewSelectionTexture);
+    for (TPair<uint32, FPartPreviewTextureCacheEntry>& Pair : PartPreviewTextureCache)
+    {
+        Collector.AddReferencedObject(Pair.Value.PartTexture);
+        Collector.AddReferencedObject(Pair.Value.SelectionTexture);
+    }
     Collector.AddReferencedObject(SurfaceWaterPreviewMaterialParent);
     Collector.AddReferencedObject(SurfaceWaterPreviewBaseMaterial);
     Collector.AddReferencedObject(SurfaceWaterPreviewStaticMaterial);
@@ -896,6 +901,12 @@ void SDWCPartViewport::RefreshPreviewMesh()
     }
 
     PreviewMeshComponent->SetSkeletalMeshAsset(TargetMesh);
+    PartPreviewTextureCache.Reset();
+    PartPreviewNearestOwnerTriangleCache.Reset();
+    if (ViewportClient.IsValid())
+    {
+        ViewportClient->ClearPickableIslandCache();
+    }
     ConfigureStaticPartPreviewPose(PreviewMeshComponent);
     PreviewMeshComponent->ShowAllMaterialSections(0);
     ClearPartPreviewOverlay();
@@ -1002,7 +1013,16 @@ void SDWCPartViewport::FlushPendingPreviewUpdates()
 
     if (bPickableTopologyDirty && ViewportClient.IsValid())
     {
-        ViewportClient->SetPickableIslands(CurrentSelectableIslands);
+        uint32 PickTopologyCacheKey = GetTypeHash(CurrentHighlightedMaterialSlot);
+        for (const TSharedPtr<FWetClothingAssetUVIsland>& Source : CurrentSelectableIslandSources)
+        {
+            PickTopologyCacheKey = HashCombine(PickTopologyCacheKey, PointerHash(Source.Get()));
+        }
+        if (PickTopologyCacheKey == 0)
+        {
+            PickTopologyCacheKey = 1;
+        }
+        ViewportClient->SetPickableIslands(CurrentSelectableIslands, PickTopologyCacheKey);
     }
 
     const bool bRefreshWetOverlay = bWetPartOverlayDirty;
@@ -1026,20 +1046,31 @@ void SDWCPartViewport::FlushPendingPreviewUpdates()
 void SDWCPartViewport::SetHighlightedMaterialSlot(const int32 SlotIndex)
 {
     const int32 MaterialCount = PreviewMeshComponent != nullptr ? PreviewMeshComponent->GetNumMaterials() : 0;
-    CurrentHighlightedMaterialSlot = SlotIndex >= 0 && SlotIndex < MaterialCount ? SlotIndex : INDEX_NONE;
+    const int32 NewHighlightedMaterialSlot = SlotIndex >= 0 && SlotIndex < MaterialCount ? SlotIndex : INDEX_NONE;
+    if (CurrentHighlightedMaterialSlot == NewHighlightedMaterialSlot)
+    {
+        return;
+    }
+
+    CurrentHighlightedMaterialSlot = NewHighlightedMaterialSlot;
     RefreshMaterialSectionVisibility();
     MarkWetPartOverlayDirty();
     MarkSelectionOverlayDirty();
 
     if (bSurfaceWaterTilingPreview)
     {
-        RefreshSurfaceWaterPreviewMaterial();
+        MarkSurfacePreviewDirty();
     }
     RequestViewportRedraw();
 }
 
 void SDWCPartViewport::ClearMaterialSlotHighlight()
 {
+    if (CurrentHighlightedMaterialSlot == INDEX_NONE)
+    {
+        return;
+    }
+
     CurrentHighlightedMaterialSlot = INDEX_NONE;
     RefreshMaterialSectionVisibility();
     MarkWetPartOverlayDirty();
@@ -1049,7 +1080,39 @@ void SDWCPartViewport::ClearMaterialSlotHighlight()
 
 void SDWCPartViewport::SetSelectableIslands(const TArray<TSharedPtr<FWetClothingAssetUVIsland>>& InIslands)
 {
+    TArray<TSharedPtr<FWetClothingAssetUVIsland>> NewIslandSources;
+    NewIslandSources.Reserve(InIslands.Num());
+    for (const TSharedPtr<FWetClothingAssetUVIsland>& Island : InIslands)
+    {
+        if (Island.IsValid())
+        {
+            NewIslandSources.Add(Island);
+        }
+    }
+
+    bool bSameTopology = CurrentSelectableIslandSources.Num() == NewIslandSources.Num();
+    if (bSameTopology)
+    {
+        for (int32 Index = 0; Index < NewIslandSources.Num(); ++Index)
+        {
+            if (CurrentSelectableIslandSources[Index].Get() != NewIslandSources[Index].Get())
+            {
+                bSameTopology = false;
+                break;
+            }
+        }
+    }
+
+    if (bSameTopology)
+    {
+        return;
+    }
+
+    // Only a real topology change should throw away the expensive Data-UV layout
+    // used by Surface Water Tiling Preview. Repeated UV-view refreshes receive the
+    // same shared cache objects and therefore stay on the fast path above.
     InvalidateSurfaceWaterPreviewLayoutCache();
+    CurrentSelectableIslandSources = MoveTemp(NewIslandSources);
     CurrentSelectableIslands.Reset();
 
     for (const TSharedPtr<FWetClothingAssetUVIsland>& Island : InIslands)
@@ -1075,6 +1138,23 @@ void SDWCPartViewport::SetSelectableIslands(const TArray<TSharedPtr<FWetClothing
 
 void SDWCPartViewport::SetHighlightedUVIslandIDs(const TSet<int32>& InUVIslandIDs)
 {
+    if (CurrentHighlightedUVIslandIDs.Num() == InUVIslandIDs.Num())
+    {
+        bool bSameSelection = true;
+        for (const int32 UVIslandID : InUVIslandIDs)
+        {
+            if (!CurrentHighlightedUVIslandIDs.Contains(UVIslandID))
+            {
+                bSameSelection = false;
+                break;
+            }
+        }
+        if (bSameSelection)
+        {
+            return;
+        }
+    }
+
     CurrentHighlightedUVIslandIDs = InUVIslandIDs;
     bWetPartOverlayDirty = true;
     MarkSelectionOverlayDirty();
@@ -1092,6 +1172,11 @@ void SDWCPartViewport::SetSelectionOverlayThicknessScale(float InThicknessScale)
 
 void SDWCPartViewport::ClearHighlightedIsland()
 {
+    if (CurrentHighlightedUVIslandIDs.IsEmpty())
+    {
+        return;
+    }
+
     CurrentHighlightedUVIslandIDs.Reset();
     bWetPartOverlayDirty = true;
     MarkSelectionOverlayDirty();
@@ -1099,6 +1184,29 @@ void SDWCPartViewport::ClearHighlightedIsland()
 
 void SDWCPartViewport::SetWetPartIslandAssignments(const TMap<int32, int32>& InUVIslandToWetPartID, const TMap<int32, FLinearColor>& InIslandColors)
 {
+    const auto MapsEqual = [](const auto& A, const auto& B)
+    {
+        if (A.Num() != B.Num())
+        {
+            return false;
+        }
+        for (const auto& Pair : A)
+        {
+            const auto* OtherValue = B.Find(Pair.Key);
+            if (OtherValue == nullptr || *OtherValue != Pair.Value)
+            {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    if (MapsEqual(CurrentWetPartIslandAssignments, InUVIslandToWetPartID) &&
+        MapsEqual(CurrentWetPartIslandColors, InIslandColors))
+    {
+        return;
+    }
+
     InvalidateSurfaceWaterPreviewLayoutCache();
     CurrentWetPartIslandAssignments = InUVIslandToWetPartID;
     CurrentWetPartIslandColors = InIslandColors;
@@ -1115,6 +1223,11 @@ void SDWCPartViewport::SetWetPartIslandAssignments(const TMap<int32, int32>& InU
 
 void SDWCPartViewport::ClearWetPartIslandColors()
 {
+    if (CurrentWetPartIslandAssignments.IsEmpty() && CurrentWetPartIslandColors.IsEmpty())
+    {
+        return;
+    }
+
     InvalidateSurfaceWaterPreviewLayoutCache();
     CurrentWetPartIslandAssignments.Reset();
     CurrentWetPartIslandColors.Reset();
@@ -1157,7 +1270,7 @@ void SDWCPartViewport::SetPreviewWetPart(const int32 MaterialSlotIndex, const in
     PreviewWetPartID = WetPartID;
     if (bSurfaceWaterTilingPreview)
     {
-        RefreshSurfaceWaterPreviewMaterial();
+        MarkSurfacePreviewDirty();
     }
 }
 
@@ -1252,6 +1365,58 @@ void SDWCPartViewport::SetSurfaceWaterTilingPreviewDisplayMode(
     }
 }
 
+void SDWCPartViewport::SetSurfaceWaterTilingPreviewPartSettingsOverride(
+    const FWetPartSurfaceWaterSettings& InSettings)
+{
+    if (SurfaceWaterPreviewPartSettingsOverride.IsSet())
+    {
+        const FWetPartSurfaceWaterSettings& Current = SurfaceWaterPreviewPartSettingsOverride.GetValue();
+        if (Current.bOverrideDropletStampSize == InSettings.bOverrideDropletStampSize &&
+            Current.bOverrideDropletFlowStampSize == InSettings.bOverrideDropletFlowStampSize &&
+            FMath::IsNearlyEqual(Current.DropletRadiusScale, InSettings.DropletRadiusScale) &&
+            FMath::IsNearlyEqual(Current.DropletFlowSizeScale, InSettings.DropletFlowSizeScale) &&
+            FMath::IsNearlyEqual(Current.DropletDetailSize, InSettings.DropletDetailSize) &&
+            FMath::IsNearlyEqual(Current.DropletFlowDetailSize, InSettings.DropletFlowDetailSize))
+        {
+            return;
+        }
+    }
+
+    SurfaceWaterPreviewPartSettingsOverride = InSettings;
+    if (bSurfaceWaterTilingPreview)
+    {
+        if (PreviewUpdateDepth > 0)
+        {
+            bSurfacePreviewDirty = true;
+        }
+        else
+        {
+            RefreshSurfaceWaterPreviewDynamicTextures();
+        }
+    }
+}
+
+void SDWCPartViewport::ClearSurfaceWaterTilingPreviewPartSettingsOverride()
+{
+    if (!SurfaceWaterPreviewPartSettingsOverride.IsSet())
+    {
+        return;
+    }
+
+    SurfaceWaterPreviewPartSettingsOverride.Reset();
+    if (bSurfaceWaterTilingPreview)
+    {
+        if (PreviewUpdateDepth > 0)
+        {
+            bSurfacePreviewDirty = true;
+        }
+        else
+        {
+            RefreshSurfaceWaterPreviewDynamicTextures();
+        }
+    }
+}
+
 
 void SDWCPartViewport::RefreshWetPartOverlayMesh()
 {
@@ -1280,8 +1445,81 @@ bool SDWCPartViewport::BuildPartPreviewTextures()
         return false;
     }
 
+    // A material-slot transition used to re-run the complete render-triangle scan,
+    // degenerate-UV ownership propagation and 1024x1024 rasterization every time.
+    // Build a cheap visual-state signature first so revisiting an unchanged slot can
+    // reuse its already-rasterized preview pixels.
+    uint32 TopologySignature = GetTypeHash(CurrentHighlightedMaterialSlot);
+    uint32 PreviewSignature = TopologySignature;
+    PreviewSignature = HashCombine(PreviewSignature, GetTypeHash(bShowWetPartColors));
+    PreviewSignature = HashCombine(PreviewSignature, GetTypeHash(FMath::RoundToInt(WetPartColorIntensity * 1000.0f)));
+    PreviewSignature = HashCombine(PreviewSignature, GetTypeHash(FMath::RoundToInt(SelectionOverlayThicknessScale * 1000.0f)));
+
+    bool bMayNeedPartColor = false;
+    bool bMayNeedSelection = false;
+    for (int32 IslandIndex = 0; IslandIndex < CurrentSelectableIslands.Num(); ++IslandIndex)
+    {
+        const FWetClothingAssetUVIsland& Island = CurrentSelectableIslands[IslandIndex];
+        if (CurrentSelectableIslandSources.IsValidIndex(IslandIndex))
+        {
+            const uint32 SourceIdentity = PointerHash(CurrentSelectableIslandSources[IslandIndex].Get());
+            TopologySignature = HashCombine(TopologySignature, SourceIdentity);
+            PreviewSignature = HashCombine(PreviewSignature, SourceIdentity);
+        }
+        TopologySignature = HashCombine(TopologySignature, GetTypeHash(Island.UVIslandID));
+        PreviewSignature = HashCombine(PreviewSignature, GetTypeHash(Island.UVIslandID));
+
+        const bool bSelected = CurrentHighlightedUVIslandIDs.Contains(Island.UVIslandID);
+        bMayNeedSelection |= bSelected;
+        PreviewSignature = HashCombine(PreviewSignature, GetTypeHash(bSelected));
+
+        const int32* WetPartID = CurrentWetPartIslandAssignments.Find(Island.UVIslandID);
+        const int32 EffectiveWetPartID = WetPartID != nullptr ? *WetPartID : INDEX_NONE;
+        PreviewSignature = HashCombine(PreviewSignature, GetTypeHash(EffectiveWetPartID));
+
+        const FLinearColor* IslandColor = CurrentWetPartIslandColors.Find(Island.UVIslandID);
+        if (IslandColor != nullptr)
+        {
+            const FColor Encoded = IslandColor->GetClamped(0.0f, 1.0f).ToFColor(false);
+            PreviewSignature = HashCombine(PreviewSignature, GetTypeHash(Encoded.R));
+            PreviewSignature = HashCombine(PreviewSignature, GetTypeHash(Encoded.G));
+            PreviewSignature = HashCombine(PreviewSignature, GetTypeHash(Encoded.B));
+            PreviewSignature = HashCombine(PreviewSignature, GetTypeHash(Encoded.A));
+        }
+
+        bMayNeedPartColor |=
+            bShowWetPartColors &&
+            WetPartColorIntensity > KINDA_SMALL_NUMBER &&
+            EffectiveWetPartID > 0 &&
+            IslandColor != nullptr;
+    }
+
+    // No assigned Part color and no island selection means there is literally
+    // nothing for the overlay texture to show. Avoid touching render triangles at all.
+    if (!bMayNeedPartColor && !bMayNeedSelection)
+    {
+        return false;
+    }
+
     const int32 Width = PartPreviewTextureResolution;
     const int32 Height = PartPreviewTextureResolution;
+    if (const FPartPreviewTextureCacheEntry* CachedPreview = PartPreviewTextureCache.Find(PreviewSignature))
+    {
+        if (!CachedPreview->bHasOverlay ||
+            CachedPreview->PartTexture == nullptr ||
+            CachedPreview->SelectionTexture == nullptr)
+        {
+            return false;
+        }
+
+        // Reuse the actual transient textures. UploadSurfacePreviewPixels() calls
+        // UTexture2D::UpdateResource(), which can synchronize with the render thread;
+        // avoiding that upload is important for instant A -> B -> A slot switching.
+        PartPreviewColorTexture = CachedPreview->PartTexture;
+        PartPreviewSelectionTexture = CachedPreview->SelectionTexture;
+        return true;
+    }
+
     TArray<FColor> PartPixels;
     PartPixels.Init(FColor(0, 0, 0, 0), Width * Height);
     TArray<uint8> SelectionMask;
@@ -1423,89 +1661,162 @@ bool SDWCPartViewport::BuildPartPreviewTextures()
     }
 
     // UV-degenerate triangles are intentionally absent from the authoring island list.
-    // Propagate their visual owner through shared render edges, without changing the
-    // persisted island topology or making those triangles selectable authoring islands.
-    for (int32 PassIndex = 0; PassIndex < RenderTriangles.Num(); ++PassIndex)
+    // The old implementation repeatedly scanned every render triangle until no more
+    // ownership changed. Long chains of omitted triangles therefore degraded toward
+    // O(N^2). Build connected components of omitted triangles once and resolve each
+    // component from its boundary edges instead.
+    TArray<int32> OrphanParents;
+    TArray<uint8> OrphanRanks;
+    OrphanParents.Init(INDEX_NONE, RenderTriangles.Num());
+    OrphanRanks.Init(0, RenderTriangles.Num());
+
+    const auto FindOrphanRoot = [&OrphanParents](int32 Index)
     {
-        bool bChanged = false;
-        for (const FWetClothingAssetUVTriangle& Triangle : RenderTriangles)
+        int32 Root = Index;
+        while (OrphanParents[Root] != Root)
         {
-            if (KnownIslandTriangleIDs.Contains(Triangle.TriangleID))
-            {
-                continue;
-            }
+            Root = OrphanParents[Root];
+        }
+        while (OrphanParents[Index] != Index)
+        {
+            const int32 Parent = OrphanParents[Index];
+            OrphanParents[Index] = Root;
+            Index = Parent;
+        }
+        return Root;
+    };
 
-            uint64 RenderEdgeKeys[3];
-            uint64 PositionEdgeKeys[3];
-            GetPartPreviewTriangleEdgeKeys(Triangle, RenderEdgeKeys);
-            GetPartPreviewTrianglePositionEdgeKeys(Triangle, PositionEdgeKeys);
+    const auto UnionOrphans = [&OrphanParents, &OrphanRanks, &FindOrphanRoot](const int32 A, const int32 B)
+    {
+        int32 RootA = FindOrphanRoot(A);
+        int32 RootB = FindOrphanRoot(B);
+        if (RootA == RootB)
+        {
+            return;
+        }
+        if (OrphanRanks[RootA] < OrphanRanks[RootB])
+        {
+            Swap(RootA, RootB);
+        }
+        OrphanParents[RootB] = RootA;
+        if (OrphanRanks[RootA] == OrphanRanks[RootB])
+        {
+            ++OrphanRanks[RootA];
+        }
+    };
 
-            if (!ResolvedColorByTriangleID.Contains(Triangle.TriangleID))
-            {
-                const FColor* InferredColor = nullptr;
-                bool bConflictingInference = false;
-                for (int32 EdgeIndex = 0; EdgeIndex < 3; ++EdgeIndex)
-                {
-                    const FColor* EdgeColor = ColorByRenderEdge.Find(RenderEdgeKeys[EdgeIndex]);
-                    if (EdgeColor == nullptr)
-                    {
-                        EdgeColor = ColorByPositionEdge.Find(PositionEdgeKeys[EdgeIndex]);
-                    }
-                    if (EdgeColor == nullptr)
-                    {
-                        continue;
-                    }
-                    if (InferredColor != nullptr && *InferredColor != *EdgeColor)
-                    {
-                        bConflictingInference = true;
-                        break;
-                    }
-                    InferredColor = EdgeColor;
-                }
+    TMap<uint64, int32> FirstOrphanByRenderEdge;
+    TMap<uint64, int32> FirstOrphanByPositionEdge;
+    TArray<int32> OrphanTriangleIndices;
+    OrphanTriangleIndices.Reserve(RenderTriangles.Num());
 
-                if (!bConflictingInference && InferredColor != nullptr)
-                {
-                    ResolvedColorByTriangleID.Add(Triangle.TriangleID, *InferredColor);
-                    for (int32 EdgeIndex = 0; EdgeIndex < 3; ++EdgeIndex)
-                    {
-                        RegisterColorEdge(
-                            ColorByRenderEdge,
-                            ConflictingRenderColorEdges,
-                            RenderEdgeKeys[EdgeIndex],
-                            *InferredColor);
-                        RegisterColorEdge(
-                            ColorByPositionEdge,
-                            ConflictingPositionColorEdges,
-                            PositionEdgeKeys[EdgeIndex],
-                            *InferredColor);
-                    }
-                    bChanged = true;
-                }
-            }
-
-            const bool bTouchesSelectedTriangle =
-                SelectedRenderEdges.Contains(RenderEdgeKeys[0]) ||
-                SelectedRenderEdges.Contains(RenderEdgeKeys[1]) ||
-                SelectedRenderEdges.Contains(RenderEdgeKeys[2]) ||
-                SelectedPositionEdges.Contains(PositionEdgeKeys[0]) ||
-                SelectedPositionEdges.Contains(PositionEdgeKeys[1]) ||
-                SelectedPositionEdges.Contains(PositionEdgeKeys[2]);
-            if (!ResolvedSelectedTriangleIDs.Contains(Triangle.TriangleID) &&
-                bTouchesSelectedTriangle)
-            {
-                ResolvedSelectedTriangleIDs.Add(Triangle.TriangleID);
-                for (int32 EdgeIndex = 0; EdgeIndex < 3; ++EdgeIndex)
-                {
-                    SelectedRenderEdges.Add(RenderEdgeKeys[EdgeIndex]);
-                    SelectedPositionEdges.Add(PositionEdgeKeys[EdgeIndex]);
-                }
-                bChanged = true;
-            }
+    for (int32 RenderTriangleIndex = 0; RenderTriangleIndex < RenderTriangles.Num(); ++RenderTriangleIndex)
+    {
+        const FWetClothingAssetUVTriangle& Triangle = RenderTriangles[RenderTriangleIndex];
+        if (KnownIslandTriangleIDs.Contains(Triangle.TriangleID))
+        {
+            continue;
         }
 
-        if (!bChanged)
+        OrphanParents[RenderTriangleIndex] = RenderTriangleIndex;
+        OrphanTriangleIndices.Add(RenderTriangleIndex);
+
+        uint64 RenderEdgeKeys[3];
+        uint64 PositionEdgeKeys[3];
+        GetPartPreviewTriangleEdgeKeys(Triangle, RenderEdgeKeys);
+        GetPartPreviewTrianglePositionEdgeKeys(Triangle, PositionEdgeKeys);
+        for (int32 EdgeIndex = 0; EdgeIndex < 3; ++EdgeIndex)
         {
-            break;
+            if (const int32* Existing = FirstOrphanByRenderEdge.Find(RenderEdgeKeys[EdgeIndex]))
+            {
+                UnionOrphans(RenderTriangleIndex, *Existing);
+            }
+            else
+            {
+                FirstOrphanByRenderEdge.Add(RenderEdgeKeys[EdgeIndex], RenderTriangleIndex);
+            }
+
+            if (const int32* Existing = FirstOrphanByPositionEdge.Find(PositionEdgeKeys[EdgeIndex]))
+            {
+                UnionOrphans(RenderTriangleIndex, *Existing);
+            }
+            else
+            {
+                FirstOrphanByPositionEdge.Add(PositionEdgeKeys[EdgeIndex], RenderTriangleIndex);
+            }
+        }
+    }
+
+    struct FOrphanComponentVisual
+    {
+        bool bHasColor = false;
+        bool bColorConflict = false;
+        FColor Color = FColor::Transparent;
+        bool bSelected = false;
+    };
+    TMap<int32, FOrphanComponentVisual> ComponentVisuals;
+
+    const auto AbsorbComponentColor = [](FOrphanComponentVisual& Visual, const FColor& Candidate)
+    {
+        if (Visual.bColorConflict)
+        {
+            return;
+        }
+        if (!Visual.bHasColor)
+        {
+            Visual.bHasColor = true;
+            Visual.Color = Candidate;
+            return;
+        }
+        if (Visual.Color != Candidate)
+        {
+            Visual.bHasColor = false;
+            Visual.bColorConflict = true;
+        }
+    };
+
+    for (const int32 RenderTriangleIndex : OrphanTriangleIndices)
+    {
+        const int32 Root = FindOrphanRoot(RenderTriangleIndex);
+        FOrphanComponentVisual& Visual = ComponentVisuals.FindOrAdd(Root);
+        const FWetClothingAssetUVTriangle& Triangle = RenderTriangles[RenderTriangleIndex];
+
+        uint64 RenderEdgeKeys[3];
+        uint64 PositionEdgeKeys[3];
+        GetPartPreviewTriangleEdgeKeys(Triangle, RenderEdgeKeys);
+        GetPartPreviewTrianglePositionEdgeKeys(Triangle, PositionEdgeKeys);
+        for (int32 EdgeIndex = 0; EdgeIndex < 3; ++EdgeIndex)
+        {
+            if (const FColor* EdgeColor = ColorByRenderEdge.Find(RenderEdgeKeys[EdgeIndex]))
+            {
+                AbsorbComponentColor(Visual, *EdgeColor);
+            }
+            if (const FColor* EdgeColor = ColorByPositionEdge.Find(PositionEdgeKeys[EdgeIndex]))
+            {
+                AbsorbComponentColor(Visual, *EdgeColor);
+            }
+            Visual.bSelected |=
+                SelectedRenderEdges.Contains(RenderEdgeKeys[EdgeIndex]) ||
+                SelectedPositionEdges.Contains(PositionEdgeKeys[EdgeIndex]);
+        }
+    }
+
+    for (const int32 RenderTriangleIndex : OrphanTriangleIndices)
+    {
+        const int32 Root = FindOrphanRoot(RenderTriangleIndex);
+        const FOrphanComponentVisual* Visual = ComponentVisuals.Find(Root);
+        if (Visual == nullptr)
+        {
+            continue;
+        }
+        const int32 TriangleID = RenderTriangles[RenderTriangleIndex].TriangleID;
+        if (Visual->bHasColor && !Visual->bColorConflict)
+        {
+            ResolvedColorByTriangleID.Add(TriangleID, Visual->Color);
+        }
+        if (Visual->bSelected)
+        {
+            ResolvedSelectedTriangleIDs.Add(TriangleID);
         }
     }
 
@@ -1535,6 +1846,23 @@ bool SDWCPartViewport::BuildPartPreviewTextures()
         int32 NearestInheritedSelectionCount = 0;
         int32 RemainingOrphanCount = 0;
 
+        if (!PartPreviewNearestOwnerTriangleCache.Contains(TopologySignature) &&
+            PartPreviewNearestOwnerTriangleCache.Num() >= 8)
+        {
+            PartPreviewNearestOwnerTriangleCache.Reset();
+        }
+        TMap<int32, int32>& NearestOwnerTriangleByOrphan =
+            PartPreviewNearestOwnerTriangleCache.FindOrAdd(TopologySignature);
+        TMap<int32, const FPartPreviewOwnerSource*> OwnerSourceByTriangleID;
+        OwnerSourceByTriangleID.Reserve(OwnerSources.Num());
+        for (const FPartPreviewOwnerSource& Candidate : OwnerSources)
+        {
+            if (Candidate.Triangle != nullptr)
+            {
+                OwnerSourceByTriangleID.Add(Candidate.Triangle->TriangleID, &Candidate);
+            }
+        }
+
         for (const FWetClothingAssetUVTriangle& Triangle : RenderTriangles)
         {
             if (KnownIslandTriangleIDs.Contains(Triangle.TriangleID))
@@ -1556,38 +1884,63 @@ bool SDWCPartViewport::BuildPartPreviewTextures()
                 Triangle.LocalPositions[2] - Triangle.LocalPositions[0]).GetSafeNormal();
 
             const FPartPreviewOwnerSource* BestOwner = nullptr;
-            double BestDistanceSquared = TNumericLimits<double>::Max();
-            for (const FPartPreviewOwnerSource& Candidate : OwnerSources)
+            if (const int32* CachedOwnerTriangleID =
+                    NearestOwnerTriangleByOrphan.Find(Triangle.TriangleID))
             {
-                if (Candidate.Triangle == nullptr)
+                if (*CachedOwnerTriangleID != INDEX_NONE)
                 {
-                    continue;
+                    if (const FPartPreviewOwnerSource* const* CachedOwner =
+                            OwnerSourceByTriangleID.Find(*CachedOwnerTriangleID))
+                    {
+                        BestOwner = *CachedOwner;
+                    }
+                }
+            }
+            else
+            {
+                double BestDistanceSquared = TNumericLimits<double>::Max();
+                for (const FPartPreviewOwnerSource& Candidate : OwnerSources)
+                {
+                    if (Candidate.Triangle == nullptr)
+                    {
+                        continue;
+                    }
+
+                    const FWetClothingAssetUVTriangle& SourceTriangle = *Candidate.Triangle;
+                    const FVector SourceNormal = FVector::CrossProduct(
+                        SourceTriangle.LocalPositions[1] - SourceTriangle.LocalPositions[0],
+                        SourceTriangle.LocalPositions[2] - SourceTriangle.LocalPositions[0]).GetSafeNormal();
+                    if (!TargetNormal.IsNearlyZero() && !SourceNormal.IsNearlyZero() &&
+                        FMath::Abs(FVector::DotProduct(TargetNormal, SourceNormal)) < 0.15)
+                    {
+                        continue;
+                    }
+
+                    const FVector ClosestPoint = FMath::ClosestPointOnTriangleToPoint(
+                        TargetCenter,
+                        SourceTriangle.LocalPositions[0],
+                        SourceTriangle.LocalPositions[1],
+                        SourceTriangle.LocalPositions[2]);
+                    const double DistanceSquared = FVector::DistSquared(TargetCenter, ClosestPoint);
+                    if (DistanceSquared < BestDistanceSquared)
+                    {
+                        BestDistanceSquared = DistanceSquared;
+                        BestOwner = &Candidate;
+                    }
                 }
 
-                const FWetClothingAssetUVTriangle& SourceTriangle = *Candidate.Triangle;
-                const FVector SourceNormal = FVector::CrossProduct(
-                    SourceTriangle.LocalPositions[1] - SourceTriangle.LocalPositions[0],
-                    SourceTriangle.LocalPositions[2] - SourceTriangle.LocalPositions[0]).GetSafeNormal();
-                if (!TargetNormal.IsNearlyZero() && !SourceNormal.IsNearlyZero() &&
-                    FMath::Abs(FVector::DotProduct(TargetNormal, SourceNormal)) < 0.15)
+                const int32 ResolvedOwnerTriangleID =
+                    BestOwner != nullptr && BestDistanceSquared <= MaxOwnerDistanceSquared
+                        ? BestOwner->Triangle->TriangleID
+                        : INDEX_NONE;
+                NearestOwnerTriangleByOrphan.Add(Triangle.TriangleID, ResolvedOwnerTriangleID);
+                if (ResolvedOwnerTriangleID == INDEX_NONE)
                 {
-                    continue;
-                }
-
-                const FVector ClosestPoint = FMath::ClosestPointOnTriangleToPoint(
-                    TargetCenter,
-                    SourceTriangle.LocalPositions[0],
-                    SourceTriangle.LocalPositions[1],
-                    SourceTriangle.LocalPositions[2]);
-                const double DistanceSquared = FVector::DistSquared(TargetCenter, ClosestPoint);
-                if (DistanceSquared < BestDistanceSquared)
-                {
-                    BestDistanceSquared = DistanceSquared;
-                    BestOwner = &Candidate;
+                    BestOwner = nullptr;
                 }
             }
 
-            if (BestOwner == nullptr || BestDistanceSquared > MaxOwnerDistanceSquared)
+            if (BestOwner == nullptr)
             {
                 ++RemainingOrphanCount;
                 continue;
@@ -1690,17 +2043,37 @@ bool SDWCPartViewport::BuildPartPreviewTextures()
         return false;
     }
 
+    // Keep the cache bounded. Eight full 1024x1024 color+selection pairs are
+    // enough for normal slot hopping without allowing an editing session to grow
+    // memory indefinitely as assignments/selections change.
+    if (PartPreviewTextureCache.Num() >= 8)
+    {
+        PartPreviewTextureCache.Reset();
+    }
+    TObjectPtr<UTexture2D> NewPartTexture = nullptr;
+    TObjectPtr<UTexture2D> NewSelectionTexture = nullptr;
     const bool bPartTextureReady = CreateOrUpdateSurfacePreviewByteTexture(
-        PartPreviewColorTexture,
+        NewPartTexture,
         PartPixels,
         Width,
         Height);
     const bool bSelectionTextureReady = CreateOrUpdateSurfacePreviewByteTexture(
-        PartPreviewSelectionTexture,
+        NewSelectionTexture,
         SelectionPixels,
         Width,
         Height);
-    return bPartTextureReady && bSelectionTextureReady;
+    if (!bPartTextureReady || !bSelectionTextureReady)
+    {
+        return false;
+    }
+
+    PartPreviewColorTexture = NewPartTexture;
+    PartPreviewSelectionTexture = NewSelectionTexture;
+    FPartPreviewTextureCacheEntry& CachedPreview = PartPreviewTextureCache.FindOrAdd(PreviewSignature);
+    CachedPreview.PartTexture = NewPartTexture;
+    CachedPreview.SelectionTexture = NewSelectionTexture;
+    CachedPreview.bHasOverlay = true;
+    return true;
 }
 
 void SDWCPartViewport::RefreshPartPreviewOverlayMaterial()
@@ -1825,6 +2198,11 @@ bool SDWCPartViewport::BuildSurfaceWaterPreviewTextures(FString& OutErrorMessage
         OutErrorMessage = TEXT("Mark the selected Material Slot as Wettable before using the Surface Water Tiling preview.");
         return false;
     }
+
+    const FWetPartSurfaceWaterSettings& PreviewPartSurfaceWater =
+        SurfaceWaterPreviewPartSettingsOverride.IsSet()
+            ? SurfaceWaterPreviewPartSettingsOverride.GetValue()
+            : Part->SurfaceWater;
 
     TSet<int32> SelectedTriangleIDs;
     for (const FWetClothingAssetUVIsland& Island : CurrentSelectableIslands)
@@ -1971,14 +2349,14 @@ bool SDWCPartViewport::BuildSurfaceWaterPreviewTextures(FString& OutErrorMessage
     }
     const FSurfaceWaterProfileParameters& Surface = PreviewProfileParameters.SurfaceWater;
     const FVector2D SingleCircleCenter = SurfacePreviewCachedSingleCircleCenter;
-    const float Droplet1StampSizeScale = Part->SurfaceWater.GetResolvedDropletStampSizeScale();
+    const float Droplet1StampSizeScale = PreviewPartSurfaceWater.GetResolvedDropletStampSizeScale();
     const float Droplet1HalfWidthPixels = Surface.DropletRadiusPixels > UE_KINDA_SMALL_NUMBER
         ? FMath::Clamp(Surface.DropletRadiusPixels * Droplet1StampSizeScale, 1.0f, 256.0f)
         : 0.0f;
     const float Droplet1HalfHeightPixels = Surface.DropletHeightPixels > UE_KINDA_SMALL_NUMBER
         ? FMath::Clamp(Surface.DropletHeightPixels * Droplet1StampSizeScale, 1.0f, 256.0f)
         : 0.0f;
-    const float FlowStampSizeScale = Part->SurfaceWater.GetResolvedDropletFlowStampSizeScale();
+    const float FlowStampSizeScale = PreviewPartSurfaceWater.GetResolvedDropletFlowStampSizeScale();
     const float FlowHalfWidthPixels = Surface.DropletFlowRadiusPixels > UE_KINDA_SMALL_NUMBER
         ? FMath::Clamp(Surface.DropletFlowRadiusPixels * FlowStampSizeScale, 1.0f, 256.0f)
         : 0.0f;
@@ -1994,9 +2372,9 @@ bool SDWCPartViewport::BuildSurfaceWaterPreviewTextures(FString& OutErrorMessage
     FlowDropletPixels.Init(0.0f, Width * Height);
 
     const float SurfaceAmount = FMath::Clamp(PreviewSurfaceWater, 0.0f, 1.0f);
-    const uint8 DropletDetailSize = EncodeSurfacePreviewDetailSize(Part->SurfaceWater.DropletDetailSize);
+    const uint8 DropletDetailSize = EncodeSurfacePreviewDetailSize(PreviewPartSurfaceWater.DropletDetailSize);
     const uint8 DropletFlowDetailSize =
-        EncodeSurfacePreviewDetailSize(Part->SurfaceWater.DropletFlowDetailSize);
+        EncodeSurfacePreviewDetailSize(PreviewPartSurfaceWater.DropletFlowDetailSize);
 
     for (int32 Y = 0; Y < Height; ++Y)
     {
@@ -2183,6 +2561,11 @@ void SDWCPartViewport::RefreshSurfaceWaterPreviewMaterial()
         RequestViewportRedraw();
         return;
     }
+
+    const FWetPartSurfaceWaterSettings& PreviewPartSurfaceWater =
+        SurfaceWaterPreviewPartSettingsOverride.IsSet()
+            ? SurfaceWaterPreviewPartSettingsOverride.GetValue()
+            : Part->SurfaceWater;
 
     USkeletalMesh* SourceMesh = Asset->GetSourceSkeletalMesh();
     USkeletalMesh* RuntimeMesh = Asset->GetRuntimeSkeletalMesh();
@@ -2498,11 +2881,11 @@ void SDWCPartViewport::RefreshSurfaceWaterPreviewMaterial()
             TEXT("\nSingleCircleSurface=%g Droplet1SpawnChance=%.3g Droplet1StampPx=(%.3g,%.3g) SizeScale=%.3g Droplet1DetailSize=%.3g Droplet2DetailSize=%.3g AbsorbedWetness=0 NormalFlipXY=%d/%d."),
             PreviewSurfaceWater,
             Surface.DropletSpawnProbability,
-            Surface.DropletRadiusPixels * Part->SurfaceWater.GetResolvedDropletStampSizeScale(),
-            Surface.DropletHeightPixels * Part->SurfaceWater.GetResolvedDropletStampSizeScale(),
-            Part->SurfaceWater.GetResolvedDropletStampSizeScale(),
-            Part->SurfaceWater.DropletDetailSize,
-            Part->SurfaceWater.DropletFlowDetailSize,
+            Surface.DropletRadiusPixels * PreviewPartSurfaceWater.GetResolvedDropletStampSizeScale(),
+            Surface.DropletHeightPixels * PreviewPartSurfaceWater.GetResolvedDropletStampSizeScale(),
+            PreviewPartSurfaceWater.GetResolvedDropletStampSizeScale(),
+            PreviewPartSurfaceWater.DropletDetailSize,
+            PreviewPartSurfaceWater.DropletFlowDetailSize,
             bSurfaceWaterPreviewFlipNormalX ? 1 : 0,
             bSurfaceWaterPreviewFlipNormalY ? 1 : 0);
     }
@@ -2521,11 +2904,11 @@ void SDWCPartViewport::RefreshSurfaceWaterPreviewMaterial()
             TEXT("\nFullPartSurface=%g Droplet1SpawnChance=%.3g Droplet1StampPx=(%.3g,%.3g) SizeScale=%.3g Droplet1DetailSize=%.3g Droplet2DetailSize=%.3g AbsorbedWetness=0 NormalFlipXY=%d/%d."),
             PreviewSurfaceWater,
             Surface.DropletSpawnProbability,
-            Surface.DropletRadiusPixels * Part->SurfaceWater.GetResolvedDropletStampSizeScale(),
-            Surface.DropletHeightPixels * Part->SurfaceWater.GetResolvedDropletStampSizeScale(),
-            Part->SurfaceWater.GetResolvedDropletStampSizeScale(),
-            Part->SurfaceWater.DropletDetailSize,
-            Part->SurfaceWater.DropletFlowDetailSize,
+            Surface.DropletRadiusPixels * PreviewPartSurfaceWater.GetResolvedDropletStampSizeScale(),
+            Surface.DropletHeightPixels * PreviewPartSurfaceWater.GetResolvedDropletStampSizeScale(),
+            PreviewPartSurfaceWater.GetResolvedDropletStampSizeScale(),
+            PreviewPartSurfaceWater.DropletDetailSize,
+            PreviewPartSurfaceWater.DropletFlowDetailSize,
             bSurfaceWaterPreviewFlipNormalX ? 1 : 0,
             bSurfaceWaterPreviewFlipNormalY ? 1 : 0);
     }

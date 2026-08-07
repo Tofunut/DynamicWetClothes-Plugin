@@ -15,6 +15,7 @@ public:
     virtual bool Initialize(const FDWCGPUPreviewInitArgs& Args) override;
     virtual void SetProfileParameters(const FWetnessProfileParameters& Parameters) override;
     virtual void SetScenarioSplashUV(FVector2f InSplashUV) override;
+    virtual void SetInteractionCursorScale(float InScale) override;
     virtual void SetPreviewChannels(
         bool bAbsorbedEnabled,
         bool bSurfaceEnabled,
@@ -55,6 +56,6 @@ private:
     bool bPreviewDroplet1Enabled = true;
     bool bPreviewDroplet2Enabled = false;
     bool bManualSplashRequested = false;
-    bool bInitialSplashWritten = false;
+    float InteractionCursorScale = 1.0f;
     FVector2f ScenarioSplashUV = FVector2f(0.5f, 0.5f);
 };

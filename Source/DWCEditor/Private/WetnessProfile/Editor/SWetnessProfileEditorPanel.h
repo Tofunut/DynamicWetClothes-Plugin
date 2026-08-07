@@ -41,7 +41,6 @@ private:
 
     FString GetCurrentPreviewMeshObjectPath() const;
     void HandleCurrentPreviewMeshChanged(const FAssetData& AssetData);
-    FReply HandleFramePreviewMeshClicked();
     FReply HandleUseReferenceMeshClicked();
     FReply HandleSaveCurrentMeshAsReferenceClicked();
     FReply HandleUseSphereMeshClicked();

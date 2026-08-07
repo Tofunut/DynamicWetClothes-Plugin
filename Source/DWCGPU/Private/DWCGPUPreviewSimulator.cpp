@@ -13,10 +13,13 @@
 
 namespace DWCGPUPreviewPrivate
 {
-    // Single Splash intentionally starts dry, waits briefly, then applies exactly one contact.
-    // Keep a 100% absorption profile below MaxWetness so spread/gravity/drying remain visible.
-    constexpr float PreviewScenarioContactAmount = 0.035f;
-    constexpr float PreviewScenarioSplashTime = 0.5f;
+    // The preview starts dry and writes water only after an explicit Add Water request.
+    // Use a visible contact amount so diffusion and drying can be inspected in the editor.
+    constexpr float PreviewScenarioContactAmount = 1.0f;
+
+    // Keep authored per-second rates aligned with runtime. The preview domain is
+    // synthetic, but speed controls should not change meaning in the WP editor.
+    constexpr float PreviewRateScale = 1.0f;
 
     struct alignas(16) FUint4
     {
@@ -25,6 +28,14 @@ namespace DWCGPUPreviewPrivate
         uint32 Z = 0;
         uint32 W = 0;
     };
+
+    uint32 PackFloatToBits(const float Value)
+    {
+        uint32 Bits = 0u;
+        static_assert(sizeof(Bits) == sizeof(Value), "Preview lookup float packing size mismatch.");
+        FMemory::Memcpy(&Bits, &Value, sizeof(Bits));
+        return Bits;
+    }
 
     struct FSurfaceStamp
     {
@@ -115,16 +126,24 @@ bool FDWCGPUPreviewSimulator::Initialize(const FDWCGPUPreviewInitArgs& Args)
     Droplet2Map = CreateRenderTarget(TEXT("DWC_WPPreview_Droplet2"), true);
 
     RenderState = MakeShared<FRenderState, ESPMode::ThreadSafe>();
+    constexpr float PreviewRestSurfaceArea = 1.0f;
+    const float PreviewRestTexelArea = PreviewRestSurfaceArea /
+        static_cast<float>(Resolution * Resolution);
+    const uint32 PackedRestTexelArea = PackFloatToBits(PreviewRestTexelArea);
+
     RenderState->TexelLookup.SetNum(Resolution * Resolution);
     for (FUint4& Lookup : RenderState->TexelLookup)
     {
-        Lookup.X = 0u;
-        Lookup.W = 1u;
+        Lookup.X = 0u;                       // Triangle ID.
+        Lookup.Y = 0u;                       // Packed barycentric coordinates.
+        Lookup.Z = PackedRestTexelArea;      // Positive rest area required by diffusion.
+        Lookup.W = 1u;                       // Island 0 + valid texel.
     }
-    // The normalized preview domain uses +U as its canonical downward direction.
-    // The resulting map is displayed through the currently selected preview mesh UVs.
-    RenderState->TriangleFlow.Add(FVector4f(0.01f, 0.0f, 1.0f, 1.0f));
-    RenderState->TriangleMetric.Add(FVector4f(10000.0f, 0.0f, 10000.0f, 1.0f));
+    // The normalized preview domain uses +V as its canonical downward direction.
+    // TriangleMetric is a local UV metric tensor, not the triangle's total surface
+    // area. Feeding the full preview area here suppresses visible diffusion.
+    RenderState->TriangleFlow.Add(FVector4f(0.0f, 1.0f, 1.0f, 1.0f));
+    RenderState->TriangleMetric.Add(FVector4f(1.0f, 0.0f, 1.0f, 1.0f));
     RenderState->TriangleProfileIndices.Add(0u);
 
     CachedParameters = MakeUnique<FWetnessProfileParameters>();
@@ -147,6 +166,11 @@ void FDWCGPUPreviewSimulator::SetScenarioSplashUV(const FVector2f InSplashUV)
     ScenarioSplashUV = FVector2f(
         FMath::Clamp(InSplashUV.X, 0.001f, 0.999f),
         FMath::Clamp(InSplashUV.Y, 0.001f, 0.999f));
+}
+
+void FDWCGPUPreviewSimulator::SetInteractionCursorScale(const float InScale)
+{
+    InteractionCursorScale = FMath::Clamp(InScale, 0.5f, 3.0f);
 }
 
 void FDWCGPUPreviewSimulator::SetPreviewChannels(
@@ -194,7 +218,6 @@ void FDWCGPUPreviewSimulator::Restart()
     CurrentWetnessIndex = 0;
     CurrentPendingIndex = 0;
     bManualSplashRequested = false;
-    bInitialSplashWritten = false;
     ClearAllRenderTargets();
     // ClearRenderTarget2D queues work on the render thread. Restart is an editor-only,
     // infrequent operation, so wait here to guarantee that no previous loop contents
@@ -202,7 +225,7 @@ void FDWCGPUPreviewSimulator::Restart()
     FlushRenderingCommands();
 }
 
-void FDWCGPUPreviewSimulator::Step(const float DeltaSeconds, const float ScenarioTimeSeconds)
+void FDWCGPUPreviewSimulator::Step(const float DeltaSeconds, const float /*ScenarioTimeSeconds*/)
 {
     if (!bInitialized || !RenderState.IsValid() || !CachedParameters ||
         WetnessMaps.Num() != 2 || PendingWetnessMaps.Num() != 2)
@@ -217,22 +240,20 @@ void FDWCGPUPreviewSimulator::Step(const float DeltaSeconds, const float Scenari
         Parameters.ResolveAbsorbedWaterSimulation();
     TArray<FVector4f> ProfileValues;
     ProfileValues.Add(FVector4f(
-        FMath::Max(0.0f, Absorbed.SpreadRatePerSecond),
+        FMath::Max(0.0f, Absorbed.SpreadRatePerSecond) * PreviewRateScale,
         FMath::Max(0.0f, Absorbed.DryRatePerSecond),
         FMath::Max(0.0f, Absorbed.GravityFlowStrength),
         FMath::Max(0.0f, Parameters.GetDropletDryRatePerSecond())));
     TArray<float> PendingWaterLimitValues;
     PendingWaterLimitValues.Add(Parameters.GetMaxPendingWaterPerPixel());
 
-    const bool bWriteSingleSplash =
-        bManualSplashRequested ||
-        (!bInitialSplashWritten && ScenarioTimeSeconds + KINDA_SMALL_NUMBER >= PreviewScenarioSplashTime);
+    const bool bWriteSingleSplash = bManualSplashRequested;
+    const float StampScale = FMath::Clamp(InteractionCursorScale, 0.5f, 3.0f);
     bool                  bWriteAbsorptionSplash = false;
     TArray<FSurfaceStamp> SurfaceStamps;
     if (bWriteSingleSplash)
     {
         bManualSplashRequested = false;
-        bInitialSplashWritten = true;
         bWriteAbsorptionSplash =
             bPreviewAbsorbedEnabled && Parameters.SupportsAbsorbedWetness();
 
@@ -265,13 +286,14 @@ void FDWCGPUPreviewSimulator::Step(const float DeltaSeconds, const float Scenari
                 FSurfaceStamp& Stamp = SurfaceStamps.AddDefaulted_GetRef();
                 Stamp.UV = SplashUV;
                 Stamp.HalfSizePixels = FVector2f(
-                    FMath::Max(0.5f, Surface.DropletHeightPixels),
-                    FMath::Max(0.5f, Surface.DropletRadiusPixels));
+                    FMath::Max(0.5f, Surface.DropletHeightPixels) * StampScale,
+                    FMath::Max(0.5f, Surface.DropletRadiusPixels) * StampScale);
                 Stamp.Amount = SurfaceAmount *
                                FMath::Lerp(0.35f, 1.0f, FMath::Sqrt(Droplet1Probability));
             }
 
-            if (bPreviewDroplet2Enabled &&
+            if (Surface.bUseSecondaryDroplets &&
+                bPreviewDroplet2Enabled &&
                 Droplet2Probability > KINDA_SMALL_NUMBER &&
                 SurfaceAmount > KINDA_SMALL_NUMBER)
             {
@@ -287,8 +309,8 @@ void FDWCGPUPreviewSimulator::Step(const float DeltaSeconds, const float Scenari
                     FMath::Clamp(SplashUV.X + 0.08f * Spread, 0.02f, 0.98f),
                     FMath::Clamp(SplashUV.Y + 0.05f * Spread, 0.02f, 0.98f));
                 Stamp.HalfSizePixels = FVector2f(
-                    FMath::Max(0.5f, Surface.DropletFlowHeightPixels),
-                    FMath::Max(0.5f, Surface.DropletFlowRadiusPixels));
+                    FMath::Max(0.5f, Surface.DropletFlowHeightPixels) * StampScale,
+                    FMath::Max(0.5f, Surface.DropletFlowRadiusPixels) * StampScale);
                 Stamp.Amount = SurfaceAmount *
                                FMath::Lerp(0.35f, 1.0f, FMath::Sqrt(Droplet2Probability));
             }
@@ -334,6 +356,7 @@ void FDWCGPUPreviewSimulator::Step(const float DeltaSeconds, const float Scenari
          bRTUseEightDirections,
          bWriteAbsorptionSplash,
          SplashUV,
+         StampScale,
          AbsorptionAmount,
          ProfileValues = MoveTemp(ProfileValues),
          PendingWaterLimitValues = MoveTemp(PendingWaterLimitValues),
@@ -468,7 +491,7 @@ void FDWCGPUPreviewSimulator::Step(const float DeltaSeconds, const float Scenari
             if (bWriteAbsorptionSplash && AbsorptionAmount > 0.0f)
             {
                 const FVector2f CenterUV = SplashUV;
-                const FVector2f HalfSizePixels(22.0f, 28.0f);
+                const FVector2f HalfSizePixels(7.0f * StampScale, 9.0f * StampScale);
                 const FVector2f CenterPixels = CenterUV * static_cast<float>(RTResolution);
                 const FIntPoint MinPixel(
                     FMath::Clamp(FMath::FloorToInt(CenterPixels.X - HalfSizePixels.X - 1.0f), 0, RTResolution - 1),
@@ -600,5 +623,4 @@ void FDWCGPUPreviewSimulator::Shutdown()
     CurrentWetnessIndex = 0;
     CurrentPendingIndex = 0;
     bManualSplashRequested = false;
-    bInitialSplashWritten = false;
 }

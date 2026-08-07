@@ -2,6 +2,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "DataAssets/WetClothingPartData.h"
 #include "WetClothing/Foundation/MeshAnalysis/WetClothingAssetMeshAnalyzer.h"
 #include "SEditorViewport.h"
 #include "UObject/GCObject.h"
@@ -77,6 +78,8 @@ class SDWCPartViewport : public SEditorViewport, public FGCObject
     void  SetSurfaceWaterPreviewNormalFlip(bool bInFlipX, bool bInFlipY);
     void  SetSurfaceWaterTilingPreviewCoverageMode(EDWCSurfaceWaterTilingPreviewCoverageMode InMode);
     void  SetSurfaceWaterTilingPreviewDisplayMode(EDWCSurfaceWaterTilingPreviewDisplayMode InMode);
+    void  SetSurfaceWaterTilingPreviewPartSettingsOverride(const FWetPartSurfaceWaterSettings& InSettings);
+    void  ClearSurfaceWaterTilingPreviewPartSettingsOverride();
     void  RefreshSurfaceWaterPreviewDynamicTextures();
     void  RefreshSurfaceWaterPreviewMaterial();
     void  FocusOnPreviewMesh(bool bInstant = false);
@@ -84,6 +87,7 @@ class SDWCPartViewport : public SEditorViewport, public FGCObject
     float GetSelectionOverlayThicknessScale() const { return SelectionOverlayThicknessScale; }
     FText GetSurfaceWaterPreviewStatusText() const;
     FSlateColor GetSurfaceWaterPreviewStatusColor() const;
+    bool HasSurfaceWaterPreviewError() const { return bSurfaceWaterPreviewStatusIsError; }
 
   protected:
     virtual TSharedRef<FEditorViewportClient> MakeEditorViewportClient() override;
@@ -114,6 +118,13 @@ class SDWCPartViewport : public SEditorViewport, public FGCObject
     UMaterialInterface* ResolveWetPartOverlayMaterial();
 
   private:
+    struct FPartPreviewTextureCacheEntry
+    {
+        TObjectPtr<UTexture2D> PartTexture = nullptr;
+        TObjectPtr<UTexture2D> SelectionTexture = nullptr;
+        bool bHasOverlay = false;
+    };
+
     TWeakObjectPtr<UWetClothingAsset>           WetClothingAsset;
     FOnWetClothingPreviewIslandPicked           OnIslandPicked;
     TSharedPtr<FAdvancedPreviewScene>           PreviewScene;
@@ -123,6 +134,13 @@ class SDWCPartViewport : public SEditorViewport, public FGCObject
     TObjectPtr<UMaterialInstanceDynamic>         WetPartOverlayMID = nullptr;
     TObjectPtr<UTexture2D>                       PartPreviewColorTexture = nullptr;
     TObjectPtr<UTexture2D>                       PartPreviewSelectionTexture = nullptr;
+    // Reusing already-rasterized 1024x1024 Part preview textures makes A -> B -> A
+    // material-slot switching cheap and avoids another UpdateResource() upload. The key
+    // includes topology object identity and assignment/selection state.
+    TMap<uint32, FPartPreviewTextureCacheEntry>  PartPreviewTextureCache;
+    // Topology-only cache for the expensive nearest-owner fallback used by UV-degenerate
+    // seam/piping triangles. Maps orphan TriangleID -> nearest editable TriangleID.
+    TMap<uint32, TMap<int32, int32>>             PartPreviewNearestOwnerTriangleCache;
     TObjectPtr<UMaterialInterface>               SurfaceWaterPreviewMaterialParent = nullptr;
     TObjectPtr<UMaterial>                        SurfaceWaterPreviewBaseMaterial = nullptr;
     TObjectPtr<UMaterialInstanceConstant>        SurfaceWaterPreviewStaticMaterial = nullptr;
@@ -158,6 +176,9 @@ class SDWCPartViewport : public SEditorViewport, public FGCObject
     FLinearColor                                SurfaceWaterPreviewBaseFallbackProfile6 = FLinearColor::Black;
     TArray<TObjectPtr<UMaterialInterface>>       OriginalPreviewMaterials;
     TArray<FWetClothingAssetUVIsland>            CurrentSelectableIslands;
+    // Shared FWCAUVIslandViewCache entries that produced CurrentSelectableIslands.
+    // Stable object identity lets repeated refreshes detect unchanged preview topology.
+    TArray<TSharedPtr<FWetClothingAssetUVIsland>> CurrentSelectableIslandSources;
     TSet<int32>                                  CurrentHighlightedUVIslandIDs;
     TMap<int32, int32>                           CurrentWetPartIslandAssignments;
     TMap<int32, FLinearColor>                    CurrentWetPartIslandColors;
@@ -178,6 +199,7 @@ class SDWCPartViewport : public SEditorViewport, public FGCObject
     bool                                         bSurfaceWaterPreviewFlipNormalX = false;
     bool                                         bSurfaceWaterPreviewFlipNormalY = false;
     EDWCSurfaceWaterTilingPreviewDisplayMode     SurfaceWaterPreviewDisplayMode = EDWCSurfaceWaterTilingPreviewDisplayMode::Lit;
+    TOptional<FWetPartSurfaceWaterSettings>       SurfaceWaterPreviewPartSettingsOverride;
     float                                        SelectionOverlayThicknessScale = 1.0f;
     FString                                      SurfaceWaterPreviewStatus;
     bool                                         bSurfaceWaterPreviewStatusIsError = false;

@@ -323,7 +323,48 @@ void FDWCPartViewportClient::RebuildPickBVH(
     }
 }
 
-void FDWCPartViewportClient::SetPickableIslands(const TArray<FWetClothingAssetUVIsland>& InIslands)
+void FDWCPartViewportClient::SetPickableIslands(
+    const TArray<FWetClothingAssetUVIsland>& InIslands,
+    const uint32 TopologyCacheKey)
 {
+    if (TopologyCacheKey != 0 && ActivePickTopologyCacheKey == TopologyCacheKey)
+    {
+        return;
+    }
+
+    if (TopologyCacheKey != 0)
+    {
+        if (const FPickBVHCacheEntry* Cached = PickBVHCache.Find(TopologyCacheKey))
+        {
+            PickTriangles = Cached->Triangles;
+            PickTriangleIndices = Cached->TriangleIndices;
+            PickBVHNodes = Cached->Nodes;
+            ActivePickTopologyCacheKey = TopologyCacheKey;
+            return;
+        }
+    }
+
     RebuildPickBVH(InIslands);
+    ActivePickTopologyCacheKey = TopologyCacheKey;
+
+    if (TopologyCacheKey != 0)
+    {
+        if (PickBVHCache.Num() >= 8)
+        {
+            PickBVHCache.Reset();
+        }
+        FPickBVHCacheEntry& Cached = PickBVHCache.FindOrAdd(TopologyCacheKey);
+        Cached.Triangles = PickTriangles;
+        Cached.TriangleIndices = PickTriangleIndices;
+        Cached.Nodes = PickBVHNodes;
+    }
+}
+
+void FDWCPartViewportClient::ClearPickableIslandCache()
+{
+    PickBVHCache.Reset();
+    ActivePickTopologyCacheKey = 0;
+    PickTriangles.Reset();
+    PickTriangleIndices.Reset();
+    PickBVHNodes.Reset();
 }

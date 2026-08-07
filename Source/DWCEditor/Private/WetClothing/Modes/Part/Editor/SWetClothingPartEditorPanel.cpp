@@ -32,6 +32,7 @@
 #include "Engine/Texture2D.h"
 #include "Editor.h"
 #include "Framework/Application/SlateApplication.h"
+#include "HAL/PlatformApplicationMisc.h"
 #include "IDetailsView.h"
 #include "IContentBrowserSingleton.h"
 #include "FileHelpers.h"
@@ -59,6 +60,7 @@
 #include "Widgets/Input/SSlider.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
+#include "Widgets/Layout/SExpandableArea.h"
 #include "Widgets/Layout/SScrollBar.h"
 #include "Widgets/Layout/SScrollBox.h"
 #include "Widgets/Layout/SScaleBox.h"
@@ -1075,24 +1077,14 @@ void SWetClothingPartEditorPanel::RefreshOriginalUVChannel()
 {
     // Part Edit is permanently bound to the Original UV channel configured in Asset Setup.
     RefreshUVIslandList();
-
-    if (PreviewViewport.IsValid())
-    {
-        if (SelectedMaterialSlotIndex != INDEX_NONE)
-        {
-            PreviewViewport->SetHighlightedMaterialSlot(SelectedMaterialSlotIndex);
-        }
-        else
-        {
-            PreviewViewport->ClearMaterialSlotHighlight();
-        }
-    }
+    RefreshPreviewWetPartOverlay();
 }
 
 void SWetClothingPartEditorPanel::RefreshUVIslandList()
 {
     const int32       PreviousPrimaryUVIslandID = SelectedUVIslandID;
     const TSet<int32> PreviousSelectedUVIslandIDs = SelectedUVIslandIDs;
+    const TArray<FUVIslandItemPtr> PreviousUVIslandItems = UVIslandItems;
 
     UVIslandItems.Reset();
     ResetIslandSelection();
@@ -1161,15 +1153,36 @@ void SWetClothingPartEditorPanel::RefreshUVIslandList()
         SelectedUVIslandID = *SelectedUVIslandIDs.CreateConstIterator();
     }
 
+    bool bIslandListChanged = PreviousUVIslandItems.Num() != UVIslandItems.Num();
+    if (!bIslandListChanged)
+    {
+        for (int32 Index = 0; Index < UVIslandItems.Num(); ++Index)
+        {
+            if (PreviousUVIslandItems[Index].Get() != UVIslandItems[Index].Get())
+            {
+                bIslandListChanged = true;
+                break;
+            }
+        }
+    }
+
     if (UVIslandListView.IsValid())
     {
-        UVIslandListView->RequestListRefresh();
+        if (bIslandListChanged)
+        {
+            UVIslandListView->RequestListRefresh();
+        }
+        else
+        {
+            UVIslandListView->Invalidate(EInvalidateWidget::Paint);
+        }
         SyncUVIslandListSelectionToState();
     }
 
     RefreshWetPartList(false);
     RefreshUVView();
-    RefreshPreviewIslandHighlight();
+    // Preview topology/highlight is applied together in RefreshPreviewWetPartOverlay().
+    // Flushing selection here can rebuild the OLD slot just before a material-slot switch.
 }
 
 void SWetClothingPartEditorPanel::RefreshUVView()
@@ -1194,7 +1207,6 @@ void SWetClothingPartEditorPanel::RefreshUVView()
         UVView->SetIslandColors(TMap<int32, FLinearColor>());
         UVView->SetHiddenUVIslandIDs(TSet<int32>());
         UVView->SetSelectedIslands(TSet<int32>());
-        RefreshPreviewWetPartOverlay();
         return;
     }
 
@@ -1206,7 +1218,6 @@ void SWetClothingPartEditorPanel::RefreshUVView()
         UVView->SetIslandColors(TMap<int32, FLinearColor>());
         UVView->SetHiddenUVIslandIDs(TSet<int32>());
         UVView->SetSelectedIslands(TSet<int32>());
-        RefreshPreviewWetPartOverlay();
         return;
     }
 
@@ -1216,8 +1227,6 @@ void SWetClothingPartEditorPanel::RefreshUVView()
     UVView->SetIslandColors(BuildUVIslandColorMap());
     UVView->SetHiddenUVIslandIDs(BuildHiddenUVIslandIDSet());
     UVView->SetSelectedIslands(SelectedUVIslandIDs);
-
-    RefreshPreviewWetPartOverlay();
 }
 
 void SWetClothingPartEditorPanel::RefreshPreviewIslandHighlight()
@@ -1227,7 +1236,6 @@ void SWetClothingPartEditorPanel::RefreshPreviewIslandHighlight()
         return;
     }
 
-    PreviewViewport->SetSelectableIslands(UVIslandItems);
     PreviewViewport->SetHighlightedUVIslandIDs(SelectedUVIslandIDs);
 }
 
@@ -1324,9 +1332,25 @@ void SWetClothingPartEditorPanel::RefreshPreviewWetPartOverlay()
 {
     if (PreviewViewport.IsValid())
     {
+        // Keep material isolation, pick topology and overlay texture rebuild in one
+        // transaction. Previously a slot switch rebuilt the overlay once with the
+        // old highlighted slot and then rebuilt it again when the new slot highlight
+        // was applied after this function returned. On dense meshes that duplicated
+        // the most expensive Part-preview work on every UV-view transition.
+        PreviewViewport->BeginPreviewUpdate();
+        if (SelectedMaterialSlotIndex != INDEX_NONE)
+        {
+            PreviewViewport->SetHighlightedMaterialSlot(SelectedMaterialSlotIndex);
+        }
+        else
+        {
+            PreviewViewport->ClearMaterialSlotHighlight();
+        }
         PreviewViewport->SetSelectableIslands(UVIslandItems);
         PreviewViewport->SetWetPartIslandAssignments(BuildUVIslandWetPartIDMap(), BuildPreviewUVIslandColorMap());
+        PreviewViewport->SetHighlightedUVIslandIDs(SelectedUVIslandIDs);
         PreviewViewport->SetShowWetPartColors(bShowPartColorsInPreview);
+        PreviewViewport->EndPreviewUpdate();
     }
 
     RefreshSurfaceWaterTilingPreview();
@@ -1339,6 +1363,21 @@ void SWetClothingPartEditorPanel::RefreshSurfaceWaterTilingPreview()
         return;
     }
 
+    if (bSurfaceWaterTilingEditSessionActive &&
+        (SurfaceWaterTilingEditMaterialSlotIndex != SelectedMaterialSlotIndex ||
+         SurfaceWaterTilingEditWetPartID != SelectedWetPartID))
+    {
+        // Keep the popup pinned to the Part it was opened for. Main-editor selection
+        // changes must not silently discard staged Surface Water edits or replace
+        // the preview target behind the user's back.
+        return;
+    }
+    if (!bSurfaceWaterTilingEditSessionActive)
+    {
+        ResetSurfaceWaterTilingPreviewState();
+    }
+
+    SurfaceWaterTilingPreviewViewport->BeginPreviewUpdate();
     SurfaceWaterTilingPreviewViewport->SetSelectableIslands(UVIslandItems);
     SurfaceWaterTilingPreviewViewport->SetWetPartIslandAssignments(
         BuildUVIslandWetPartIDMap(),
@@ -1347,6 +1386,14 @@ void SWetClothingPartEditorPanel::RefreshSurfaceWaterTilingPreview()
     SurfaceWaterTilingPreviewViewport->SetPreviewWetPart(
         SelectedMaterialSlotIndex,
         SelectedWetPartID);
+    if (const FWetPartSurfaceWaterSettings* WorkingSettings = GetSurfaceWaterTilingWorkingSettings())
+    {
+        SurfaceWaterTilingPreviewViewport->SetSurfaceWaterTilingPreviewPartSettingsOverride(*WorkingSettings);
+    }
+    else
+    {
+        SurfaceWaterTilingPreviewViewport->ClearSurfaceWaterTilingPreviewPartSettingsOverride();
+    }
     SurfaceWaterTilingPreviewViewport->SetSurfaceWaterTilingPreviewCoverageMode(SurfaceWaterPreviewCoverageMode);
     SurfaceWaterTilingPreviewViewport->SetSurfaceWaterTilingPreviewDisplayMode(SurfaceWaterPreviewDisplayMode);
     SurfaceWaterTilingPreviewViewport->SetPreviewWetness(0.0f, 1.0f);
@@ -1365,6 +1412,7 @@ void SWetClothingPartEditorPanel::RefreshSurfaceWaterTilingPreview()
     {
         SurfaceWaterTilingPreviewViewport->ClearMaterialSlotHighlight();
     }
+    SurfaceWaterTilingPreviewViewport->EndPreviewUpdate();
 }
 
 void SWetClothingPartEditorPanel::RefreshIslandSelectionViews()
@@ -2867,23 +2915,17 @@ void SWetClothingPartEditorPanel::HandleMaterialSlotSelectionChanged(FMaterialSl
     SelectedWetPartID = INDEX_NONE;
     ResetIslandSelection();
     RefreshMaterialTextures(false);
+
+    // Selection visuals are driven by Slate attributes / STableRow selection state.
+    // Rebuilding the entire material-slot list here recreates every thumbnail and
+    // repeatedly walks cached UV data for all visible slots. Keep the row widgets
+    // alive and only invalidate their paint state.
     if (MaterialSlotListView.IsValid())
     {
-        MaterialSlotListView->RequestListRefresh();
+        MaterialSlotListView->Invalidate(EInvalidateWidget::Paint);
     }
     RefreshUVIslandList();
-
-    if (PreviewViewport.IsValid())
-    {
-        if (SelectedMaterialSlotIndex != INDEX_NONE)
-        {
-            PreviewViewport->SetHighlightedMaterialSlot(SelectedMaterialSlotIndex);
-        }
-        else
-        {
-            PreviewViewport->ClearMaterialSlotHighlight();
-        }
-    }
+    RefreshPreviewWetPartOverlay();
 }
 
 void SWetClothingPartEditorPanel::HandleMaterialSlotDoubleClicked(FMaterialSlotItemPtr Item)
@@ -2959,6 +3001,7 @@ FReply SWetClothingPartEditorPanel::HandleWettableMaterialSlotClicked(int32 Mate
         RefreshWetPartAssignmentViews();
         RefreshMaterialTextures(false);
         RefreshUVIslandList();
+        RefreshPreviewWetPartOverlay();
     }
 
     return FReply::Handled();
@@ -4954,15 +4997,31 @@ FReply SWetClothingPartEditorPanel::HandleOpenSurfaceWaterTilingClicked(FWetPart
         return FReply::Handled();
     }
 
-    HandleWetPartSelectionChanged(Item, ESelectInfo::Direct);
-    ResetSurfaceWaterTilingPreviewState();
     if (const TSharedPtr<SWindow> ExistingWindow = SurfaceWaterTilingWindow.Pin())
     {
+        const bool bDifferentEditTarget =
+            SurfaceWaterTilingEditMaterialSlotIndex != SelectedMaterialSlotIndex ||
+            SurfaceWaterTilingEditWetPartID != Item->WetPartID;
+        if (bSurfaceWaterTilingHasPendingChanges && bDifferentEditTarget)
+        {
+            ExistingWindow->BringToFront(true);
+            return FReply::Handled();
+        }
+
+        HandleWetPartSelectionChanged(Item, ESelectInfo::Direct);
+        if (!bSurfaceWaterTilingEditSessionActive ||
+            SurfaceWaterTilingEditMaterialSlotIndex != SelectedMaterialSlotIndex ||
+            SurfaceWaterTilingEditWetPartID != SelectedWetPartID)
+        {
+            ResetSurfaceWaterTilingPreviewState();
+        }
         RefreshSurfaceWaterTilingPreview();
         ExistingWindow->BringToFront(true);
         return FReply::Handled();
     }
 
+    HandleWetPartSelectionChanged(Item, ESelectInfo::Direct);
+    ResetSurfaceWaterTilingPreviewState();
     const TSharedRef<SWindow> Window = SNew(SWindow)
         .Title(LOCTEXT("SurfaceWaterTilingWindowTitle", "Surface Water Tiling"))
         .ClientSize(FVector2D(1120.0f, 760.0f))
@@ -4993,326 +5052,458 @@ FReply SWetClothingPartEditorPanel::HandleOpenSurfaceWaterTilingClicked(FWetPart
 
 void SWetClothingPartEditorPanel::ResetSurfaceWaterTilingPreviewState()
 {
+    SurfaceWaterPreviewCoverageMode = EDWCSurfaceWaterTilingPreviewCoverageMode::FullPart;
+    SurfaceWaterPreviewDisplayMode = EDWCSurfaceWaterTilingPreviewDisplayMode::Lit;
+
+    const FWetClothingWetPartEntry* Entry = FindWetPartEntry(SelectedWetPartID);
+    bSurfaceWaterTilingEditSessionActive =
+        Entry != nullptr && SelectedMaterialSlotIndex != INDEX_NONE && SelectedWetPartID >= 0;
+    SurfaceWaterTilingEditMaterialSlotIndex =
+        bSurfaceWaterTilingEditSessionActive ? SelectedMaterialSlotIndex : INDEX_NONE;
+    SurfaceWaterTilingEditWetPartID =
+        bSurfaceWaterTilingEditSessionActive ? SelectedWetPartID : INDEX_NONE;
+
+    if (bSurfaceWaterTilingEditSessionActive)
+    {
+        SurfaceWaterTilingEditPartDisplayName = GetWetPartDisplayName(*Entry);
+        SurfaceWaterTilingOriginalSettings = Entry->SurfaceWater;
+        SurfaceWaterTilingEditedSettings = Entry->SurfaceWater;
+    }
+    else
+    {
+        SurfaceWaterTilingEditPartDisplayName.Reset();
+        SurfaceWaterTilingOriginalSettings = FWetPartSurfaceWaterSettings();
+        SurfaceWaterTilingEditedSettings = FWetPartSurfaceWaterSettings();
+    }
+
+    bSurfaceWaterTilingHasPendingChanges = false;
+    UpdateSurfaceWaterTilingWindowTitle();
+}
+
+void SWetClothingPartEditorPanel::UpdateSurfaceWaterTilingWindowTitle()
+{
+    if (const TSharedPtr<SWindow> Window = SurfaceWaterTilingWindow.Pin())
+    {
+        Window->SetTitle(
+            bSurfaceWaterTilingHasPendingChanges
+                ? LOCTEXT("SurfaceWaterTilingWindowTitleDirty", "Surface Water Tiling *")
+                : LOCTEXT("SurfaceWaterTilingWindowTitle", "Surface Water Tiling"));
+    }
+}
+
+bool SWetClothingPartEditorPanel::IsSurfaceWaterTilingDirty() const
+{
+    if (!bSurfaceWaterTilingEditSessionActive)
+    {
+        return false;
+    }
+
+    return SurfaceWaterTilingOriginalSettings.bOverrideDropletStampSize !=
+               SurfaceWaterTilingEditedSettings.bOverrideDropletStampSize ||
+           SurfaceWaterTilingOriginalSettings.bOverrideDropletFlowStampSize !=
+               SurfaceWaterTilingEditedSettings.bOverrideDropletFlowStampSize ||
+           !FMath::IsNearlyEqual(
+               SurfaceWaterTilingOriginalSettings.DropletRadiusScale,
+               SurfaceWaterTilingEditedSettings.DropletRadiusScale) ||
+           !FMath::IsNearlyEqual(
+               SurfaceWaterTilingOriginalSettings.DropletFlowSizeScale,
+               SurfaceWaterTilingEditedSettings.DropletFlowSizeScale) ||
+           !FMath::IsNearlyEqual(
+               SurfaceWaterTilingOriginalSettings.DropletDetailSize,
+               SurfaceWaterTilingEditedSettings.DropletDetailSize) ||
+           !FMath::IsNearlyEqual(
+               SurfaceWaterTilingOriginalSettings.DropletFlowDetailSize,
+               SurfaceWaterTilingEditedSettings.DropletFlowDetailSize);
+}
+
+const FWetPartSurfaceWaterSettings* SWetClothingPartEditorPanel::GetSurfaceWaterTilingWorkingSettings() const
+{
+    return bSurfaceWaterTilingEditSessionActive
+        ? &SurfaceWaterTilingEditedSettings
+        : nullptr;
+}
+
+void SWetClothingPartEditorPanel::NotifySurfaceWaterTilingWorkingSettingsChanged()
+{
+    if (!bSurfaceWaterTilingEditSessionActive)
+    {
+        return;
+    }
+
+    bSurfaceWaterTilingHasPendingChanges = IsSurfaceWaterTilingDirty();
+    UpdateSurfaceWaterTilingWindowTitle();
+
+    if (SurfaceWaterTilingPreviewViewport.IsValid())
+    {
+        SurfaceWaterTilingPreviewViewport->SetSurfaceWaterTilingPreviewPartSettingsOverride(
+            SurfaceWaterTilingEditedSettings);
+    }
+}
+
+FReply SWetClothingPartEditorPanel::HandleApplySurfaceWaterTilingChangesClicked()
+{
+    UWetClothingAsset* Asset = WetClothingAsset.Get();
+    FWetClothingWetPartEntry* Entry = bSurfaceWaterTilingEditSessionActive
+        ? FWetPartEditingService::FindMutableEntry(
+              Asset,
+              FWetPartEditingService::MakeScope(SurfaceWaterTilingEditMaterialSlotIndex),
+              SurfaceWaterTilingEditWetPartID)
+        : nullptr;
+    if (!bSurfaceWaterTilingEditSessionActive || !bSurfaceWaterTilingHasPendingChanges ||
+        Asset == nullptr || Entry == nullptr)
+    {
+        return FReply::Handled();
+    }
+
+    const bool bStampSettingsChanged =
+        SurfaceWaterTilingOriginalSettings.bOverrideDropletStampSize !=
+            SurfaceWaterTilingEditedSettings.bOverrideDropletStampSize ||
+        SurfaceWaterTilingOriginalSettings.bOverrideDropletFlowStampSize !=
+            SurfaceWaterTilingEditedSettings.bOverrideDropletFlowStampSize ||
+        !FMath::IsNearlyEqual(
+            SurfaceWaterTilingOriginalSettings.DropletRadiusScale,
+            SurfaceWaterTilingEditedSettings.DropletRadiusScale) ||
+        !FMath::IsNearlyEqual(
+            SurfaceWaterTilingOriginalSettings.DropletFlowSizeScale,
+            SurfaceWaterTilingEditedSettings.DropletFlowSizeScale);
+
+    const FScopedTransaction Transaction(
+        LOCTEXT("ApplySurfaceWaterTilingTransaction", "Apply Surface Water Tiling Settings"));
+    Asset->Modify();
+    Entry->SurfaceWater = SurfaceWaterTilingEditedSettings;
+    Asset->MarkRuntimeBakeOutputsDirty(
+        bStampSettingsChanged
+            ? (DWCBakeOutput::GPURuntimeData | DWCBakeOutput::GPUMaps)
+            : DWCBakeOutput::GPUMaps);
+    Asset->MarkPackageDirty();
+
+    SurfaceWaterTilingOriginalSettings = SurfaceWaterTilingEditedSettings;
+    bSurfaceWaterTilingHasPendingChanges = false;
+    UpdateSurfaceWaterTilingWindowTitle();
+    return FReply::Handled();
+}
+
+FReply SWetClothingPartEditorPanel::HandleRevertSurfaceWaterTilingChangesClicked()
+{
+    if (!bSurfaceWaterTilingEditSessionActive)
+    {
+        return FReply::Handled();
+    }
+
+    SurfaceWaterTilingEditedSettings = SurfaceWaterTilingOriginalSettings;
+    NotifySurfaceWaterTilingWorkingSettingsChanged();
+    return FReply::Handled();
+}
+
+void SWetClothingPartEditorPanel::ResetSelectedDropletStampOverrideToApplied()
+{
+    if (!bSurfaceWaterTilingEditSessionActive)
+    {
+        return;
+    }
+
+    SurfaceWaterTilingEditedSettings.bOverrideDropletStampSize =
+        SurfaceWaterTilingOriginalSettings.bOverrideDropletStampSize;
+    NotifySurfaceWaterTilingWorkingSettingsChanged();
+}
+
+void SWetClothingPartEditorPanel::ResetSelectedDropletStampScaleToApplied()
+{
+    if (!bSurfaceWaterTilingEditSessionActive)
+    {
+        return;
+    }
+
+    SurfaceWaterTilingEditedSettings.DropletRadiusScale =
+        SurfaceWaterTilingOriginalSettings.DropletRadiusScale;
+    NotifySurfaceWaterTilingWorkingSettingsChanged();
+}
+
+void SWetClothingPartEditorPanel::ResetSelectedDropletFlowStampOverrideToApplied()
+{
+    if (!bSurfaceWaterTilingEditSessionActive)
+    {
+        return;
+    }
+
+    SurfaceWaterTilingEditedSettings.bOverrideDropletFlowStampSize =
+        SurfaceWaterTilingOriginalSettings.bOverrideDropletFlowStampSize;
+    NotifySurfaceWaterTilingWorkingSettingsChanged();
+}
+
+void SWetClothingPartEditorPanel::ResetSelectedDropletFlowStampScaleToApplied()
+{
+    if (!bSurfaceWaterTilingEditSessionActive)
+    {
+        return;
+    }
+
+    SurfaceWaterTilingEditedSettings.DropletFlowSizeScale =
+        SurfaceWaterTilingOriginalSettings.DropletFlowSizeScale;
+    NotifySurfaceWaterTilingWorkingSettingsChanged();
+}
+
+void SWetClothingPartEditorPanel::ResetSelectedDropletDetailSizeToApplied()
+{
+    if (!bSurfaceWaterTilingEditSessionActive)
+    {
+        return;
+    }
+
+    SurfaceWaterTilingEditedSettings.DropletDetailSize =
+        SurfaceWaterTilingOriginalSettings.DropletDetailSize;
+    NotifySurfaceWaterTilingWorkingSettingsChanged();
+}
+
+void SWetClothingPartEditorPanel::ResetSelectedDropletFlowDetailSizeToApplied()
+{
+    if (!bSurfaceWaterTilingEditSessionActive)
+    {
+        return;
+    }
+
+    SurfaceWaterTilingEditedSettings.DropletFlowDetailSize =
+        SurfaceWaterTilingOriginalSettings.DropletFlowDetailSize;
+    NotifySurfaceWaterTilingWorkingSettingsChanged();
 }
 
 TSharedRef<SWidget> SWetClothingPartEditorPanel::BuildSurfaceWaterTilingWindowContent()
 {
-    const auto BuildScaleRow = [this](
+    const auto BuildResetButton = [](const FText& ToolTip, TFunction<void()> OnReset) -> TSharedRef<SWidget>
+    {
+        return SNew(SButton)
+            .ButtonStyle(FAppStyle::Get(), TEXT("NoBorder"))
+            .ContentPadding(FMargin(3.0f))
+            .ToolTipText(ToolTip)
+            .OnClicked_Lambda([OnReset = MoveTemp(OnReset)]()
+            {
+                OnReset();
+                return FReply::Handled();
+            })
+            [SNew(SImage)
+                 .Image(FAppStyle::Get().GetBrush(TEXT("PropertyWindow.DiffersFromDefault")))];
+    };
+
+    const auto BuildNumericEditor = [&BuildResetButton](
         const FText& Label,
         const FText& ToolTip,
+        const float MinValue,
+        const float MaxValue,
+        const float Delta,
         const TAttribute<bool>& IsEnabled,
         const TAttribute<float>& Value,
-        TFunction<void(float)> OnValueChanged) -> TSharedRef<SWidget>
-    {
-        return SNew(SHorizontalBox)
-            + SHorizontalBox::Slot()
-                  .FillWidth(1.0f)
-                  .VAlign(VAlign_Center)
-                      [SNew(STextBlock).Text(Label).ToolTipText(ToolTip)]
-            + SHorizontalBox::Slot()
-                  .AutoWidth()
-                  .Padding(12.0f, 0.0f, 0.0f, 0.0f)
-                      [SNew(SBox)
-                           .WidthOverride(104.0f)
-                               [SNew(SSpinBox<float>)
-                                    .MinValue(0.25f).MaxValue(4.0f)
-                                    .MinSliderValue(0.25f).MaxSliderValue(4.0f)
-                                    .Delta(0.05f)
-                                    .Value(Value)
-                                    .IsEnabled(IsEnabled)
-                                    .OnValueChanged_Lambda([OnValueChanged = MoveTemp(OnValueChanged)](const float NewValue)
-                                    {
-                                        OnValueChanged(NewValue);
-                                    })]];
-    };
-
-    const auto BuildPreviewToggle = [](
-        const FText& Label,
-        const FText& ToolTip,
-        TAttribute<ECheckBoxState> CheckState,
-        FOnCheckStateChanged OnChanged) -> TSharedRef<SWidget>
-    {
-        return SNew(SCheckBox)
-            .ToolTipText(ToolTip)
-            .IsChecked(CheckState)
-            .OnCheckStateChanged(OnChanged)
-            [SNew(STextBlock).Text(Label)];
-    };
-
-    const auto BuildPreviewSlider = [this](
-        const FText& Label,
-        const TAttribute<float>& Value,
         TFunction<void(float)> OnValueChanged,
-        const TAttribute<FText>& ValueText) -> TSharedRef<SWidget>
+        TFunction<void()> OnReset) -> TSharedRef<SWidget>
     {
-        return SNew(SHorizontalBox)
-            + SHorizontalBox::Slot()
-                  .AutoWidth()
-                  .VAlign(VAlign_Center)
-                      [SNew(SBox).WidthOverride(126.0f)[SNew(STextBlock).Text(Label)]]
-            + SHorizontalBox::Slot()
-                  .FillWidth(1.0f)
-                  .VAlign(VAlign_Center)
-                      [SNew(SSlider)
-                           .Value(Value)
-                           .OnValueChanged_Lambda([OnValueChanged = MoveTemp(OnValueChanged)](const float NewValue)
-                           {
-                               OnValueChanged(NewValue);
-                           })]
-            + SHorizontalBox::Slot()
-                  .AutoWidth()
-                  .VAlign(VAlign_Center)
-                  .Padding(10.0f, 0.0f, 0.0f, 0.0f)
-                      [SNew(SBox)
-                           .WidthOverride(48.0f)
-                               [SNew(STextBlock).Justification(ETextJustify::Right).Text(ValueText)]];
+        return SNew(SVerticalBox)
+            + SVerticalBox::Slot()
+                  .AutoHeight()
+                  .Padding(0.0f, 0.0f, 0.0f, 4.0f)
+                      [SNew(STextBlock)
+                           .Text(Label)
+                           .ToolTipText(ToolTip)]
+            + SVerticalBox::Slot()
+                  .AutoHeight()
+                      [SNew(SHorizontalBox)
+                       + SHorizontalBox::Slot()
+                             .FillWidth(1.0f)
+                             .VAlign(VAlign_Center)
+                                 [SNew(SSlider)
+                                      .IsEnabled(IsEnabled)
+                                      .MinValue(MinValue)
+                                      .MaxValue(MaxValue)
+                                      .Value(Value)
+                                      .OnValueChanged_Lambda(
+                                          [OnValueChanged](const float NewValue)
+                                          {
+                                              OnValueChanged(NewValue);
+                                          })]
+                       + SHorizontalBox::Slot()
+                             .AutoWidth()
+                             .VAlign(VAlign_Center)
+                             .Padding(8.0f, 0.0f, 0.0f, 0.0f)
+                                 [SNew(SBox)
+                                      .WidthOverride(68.0f)
+                                          [SNew(SSpinBox<float>)
+                                               .IsEnabled(IsEnabled)
+                                               .MinValue(MinValue)
+                                               .MaxValue(MaxValue)
+                                               .MinSliderValue(MinValue)
+                                               .MaxSliderValue(MaxValue)
+                                               .Delta(Delta)
+                                               .Value(Value)
+                                               .OnValueChanged_Lambda(
+                                                   [OnValueChanged](const float NewValue)
+                                                   {
+                                                       OnValueChanged(NewValue);
+                                                   })]]
+                       + SHorizontalBox::Slot()
+                             .AutoWidth()
+                             .VAlign(VAlign_Center)
+                             .Padding(3.0f, 0.0f, 0.0f, 0.0f)
+                                 [BuildResetButton(
+                                     LOCTEXT("SurfaceWaterResetToAppliedTooltip", "Reset this value to the last applied value."),
+                                     MoveTemp(OnReset))]];
     };
 
-    const auto BuildDetailSizeSlider = [this, &BuildPreviewSlider](
-        const FText& Label,
-        const TAttribute<float>& Value,
-        TFunction<void(float)> OnValueChanged,
-        const TAttribute<FText>& ValueText) -> TSharedRef<SWidget>
-    {
-        return BuildPreviewSlider(
-            Label,
-            Value,
-            [OnValueChanged = MoveTemp(OnValueChanged)](const float NewSliderValue)
-            {
-                OnValueChanged(FMath::Clamp(NewSliderValue, 0.0f, 1.0f) * 4.0f);
-            },
-            ValueText);
-    };
-
-    const auto BuildCoverageModeRadio = [this](
-        const FText& Label,
-        const FText& ToolTip,
-        const EDWCSurfaceWaterTilingPreviewCoverageMode Mode) -> TSharedRef<SWidget>
-    {
-        return SNew(SCheckBox)
-            .Style(FAppStyle::Get(), TEXT("RadioButton"))
-            .ToolTipText(ToolTip)
-            .IsChecked(this, &SWetClothingPartEditorPanel::GetSurfaceWaterPreviewCoverageModeState, Mode)
-            .OnCheckStateChanged(this, &SWetClothingPartEditorPanel::HandleSurfaceWaterPreviewCoverageModeChanged, Mode)
-            [SNew(STextBlock).Text(Label)];
-    };
-
-    const auto BuildDisplayModeRadio = [this](
-        const FText& Label,
-        const FText& ToolTip,
-        const EDWCSurfaceWaterTilingPreviewDisplayMode Mode) -> TSharedRef<SWidget>
-    {
-        return SNew(SCheckBox)
-            .Style(FAppStyle::Get(), TEXT("RadioButton"))
-            .ToolTipText(ToolTip)
-            .IsChecked(this, &SWetClothingPartEditorPanel::GetSurfaceWaterPreviewDisplayModeState, Mode)
-            .OnCheckStateChanged(this, &SWetClothingPartEditorPanel::HandleSurfaceWaterPreviewDisplayModeChanged, Mode)
-            [SNew(STextBlock).Text(Label)];
-    };
+    const TAttribute<bool> SurfaceSettingsEnabled = TAttribute<bool>::CreateLambda(
+        [this]() { return bSurfaceWaterTilingEditSessionActive; });
 
     return SNew(SBorder)
-        .Padding(10.0f)
+        .Padding(8.0f)
         .BorderImage(FAppStyle::Get().GetBrush(TEXT("ToolPanel.GroupBorder")))
             [SNew(SVerticalBox)
 
              + SVerticalBox::Slot()
-                   .AutoHeight()
-                   .Padding(4.0f, 2.0f, 4.0f, 8.0f)
-                       [SNew(SHorizontalBox)
-                        + SHorizontalBox::Slot()
-                              .FillWidth(1.0f)
-                              .VAlign(VAlign_Center)
-                                  [SNew(SVerticalBox)
-                                   + SVerticalBox::Slot().AutoHeight()
-                                         [SNew(STextBlock)
-                                              .Text_Lambda([this]()
-                                              {
-                                                  if (const FWetClothingWetPartEntry* Entry = FindWetPartEntry(SelectedWetPartID))
-                                                  {
-                                                      return FText::Format(
-                                                          LOCTEXT("SurfaceWaterTilingSelectedPart", "Selected Part: {0}"),
-                                                          FText::FromString(GetWetPartDisplayName(*Entry)));
-                                                  }
-                                                  return LOCTEXT("SurfaceWaterTilingNoPart", "No Wet Part selected.");
-                                              })
-                                              .Font(FAppStyle::GetFontStyle(TEXT("PropertyWindow.BoldFont")))]
-                                   + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 2.0f, 0.0f, 0.0f)
-                                         [SNew(STextBlock)
-                                              .Text(LOCTEXT(
-                                                  "SurfaceWaterTilingGPUOnly",
-                                                  "GPU Simulation Only · Uses the selected slot's generated GPU material on the original mesh."))
-                                              .ColorAndOpacity(FSlateColor(FStyleColors::ForegroundHover))]]
-                        + SHorizontalBox::Slot()
-                              .AutoWidth()
-                              .VAlign(VAlign_Center)
-                              .Padding(8.0f, 0.0f, 0.0f, 0.0f)
-                                  [SNew(SButton)
-                                       .Text(LOCTEXT("SurfaceWaterTilingFocusMesh", "Focus Mesh"))
-                                       .OnClicked_Lambda([this]()
-                                           {
-                                               if (SurfaceWaterTilingPreviewViewport.IsValid())
-                                               {
-                                                   SurfaceWaterTilingPreviewViewport->FocusOnPreviewMesh();
-                                               }
-                                               return FReply::Handled();
-                                       })]]
-
-             + SVerticalBox::Slot()
                    .FillHeight(1.0f)
-                       [SNew(SSplitter)
+                       [SNew(SVerticalBox)
 
-                        + SSplitter::Slot()
-                              .Value(0.72f)
+                        + SVerticalBox::Slot()
+                              .FillHeight(1.0f)
                                   [SNew(SBorder)
                                        .Padding(0.0f)
                                        .BorderImage(FAppStyle::Get().GetBrush(TEXT("ToolPanel.DarkGroupBorder")))
-                                           [SAssignNew(SurfaceWaterTilingPreviewViewport, SDWCPartViewport)
-                                                .WetClothingAsset(WetClothingAsset.Get())
-                                                .SurfaceWaterTilingPreview(true)]]
+                                           [SNew(SOverlay)
+                                            + SOverlay::Slot()
+                                                  [SAssignNew(SurfaceWaterTilingPreviewViewport, SDWCPartViewport)
+                                                       .WetClothingAsset(WetClothingAsset.Get())
+                                                       .SurfaceWaterTilingPreview(true)]
+                                            + SOverlay::Slot()
+                                                  .HAlign(HAlign_Right)
+                                                  .VAlign(VAlign_Top)
+                                                  .Padding(0.0f, 34.0f, 8.0f, 0.0f)
+                                                      [SNew(SButton)
+                                                           .ButtonStyle(FAppStyle::Get(), TEXT("SimpleButton"))
+                                                           .ContentPadding(FMargin(8.0f, 3.0f))
+                                                           .Text(LOCTEXT("SurfaceWaterTilingFrameMesh", "Frame"))
+                                                           .ToolTipText(LOCTEXT("SurfaceWaterTilingFrameMeshTooltip", "Frame the preview mesh in the viewport."))
+                                                           .OnClicked_Lambda([this]()
+                                                           {
+                                                               if (SurfaceWaterTilingPreviewViewport.IsValid())
+                                                               {
+                                                                   SurfaceWaterTilingPreviewViewport->FocusOnPreviewMesh();
+                                                               }
+                                                               return FReply::Handled();
+                                                           })]]]
 
-                        + SSplitter::Slot()
-                              .Value(0.28f)
+                        + SVerticalBox::Slot()
+                              .AutoHeight()
+                              .Padding(0.0f, 8.0f, 0.0f, 0.0f)
                                   [SNew(SBorder)
                                        .Padding(12.0f)
                                        .BorderImage(FAppStyle::Get().GetBrush(TEXT("ToolPanel.GroupBorder")))
                                            [SNew(SScrollBox)
                                             + SScrollBox::Slot()
                                                   [SNew(SVerticalBox)
-                                                   + SVerticalBox::Slot().AutoHeight()
-                                                         [SNew(STextBlock)
-                                                              .Text(LOCTEXT("SurfaceWaterTilingSettingsHeader", "Surface Water Droplet Sizes"))
-                                                              .Font(FAppStyle::GetFontStyle(TEXT("PropertyWindow.BoldFont")))]
-                                                   + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 8.0f, 0.0f, 8.0f)
-                                                         [SNew(SSeparator)]
-                                                   + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 3.0f)
-                                                         [SNew(STextBlock)
-                                                              .Text(LOCTEXT("SurfaceWaterCoverageMode", "Coverage Mode"))
-                                                              .Font(FAppStyle::GetFontStyle(TEXT("PropertyWindow.NormalFont")))]
-                                                   + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 4.0f, 0.0f, 3.0f)
-                                                         [BuildCoverageModeRadio(
-                                                             LOCTEXT("SurfaceWaterCoverageModeFullPart", "Full Part"),
-                                                             LOCTEXT("SurfaceWaterCoverageModeFullPartTooltip", "Fill the selected Wet Part with Surface Water to judge droplet detail normal tiling."),
-                                                             EDWCSurfaceWaterTilingPreviewCoverageMode::FullPart)]
-                                                   + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 3.0f)
-                                                         [BuildCoverageModeRadio(
-                                                             LOCTEXT("SurfaceWaterCoverageModeSingleCircle", "Single Circle"),
-                                                             LOCTEXT("SurfaceWaterCoverageModeSingleCircleTooltip", "Render one contact-sized Surface Water circle to judge Droplet Stamp Size."),
-                                                             EDWCSurfaceWaterTilingPreviewCoverageMode::SingleCircle)]
-                                                   + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 8.0f, 0.0f, 8.0f)
-                                                         [SNew(SSeparator)]
-                                                   + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 3.0f)
-                                                         [SNew(STextBlock)
-                                                              .Text(LOCTEXT("SurfaceWaterDisplayMode", "Display Mode"))
-                                                              .Font(FAppStyle::GetFontStyle(TEXT("PropertyWindow.NormalFont")))]
-                                                   + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 4.0f, 0.0f, 3.0f)
-                                                         [BuildDisplayModeRadio(
-                                                             LOCTEXT("SurfaceWaterDisplayModeLit", "Lit"),
-                                                             LOCTEXT("SurfaceWaterDisplayModeLitTooltip", "Render the generated material normally."),
-                                                             EDWCSurfaceWaterTilingPreviewDisplayMode::Lit)]
-                                                   + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 3.0f)
-                                                         [BuildDisplayModeRadio(
-                                                             LOCTEXT("SurfaceWaterDisplayModeDropletNormal", "Droplet Normal"),
-                                                             LOCTEXT("SurfaceWaterDisplayModeDropletNormalTooltip", "Show the evaluated droplet normal color like the Wetness Profile preview."),
-                                                             EDWCSurfaceWaterTilingPreviewDisplayMode::DropletNormal)]
-                                                   + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 8.0f, 0.0f, 8.0f)
-                                                         [SNew(SSeparator)]
-                                                   + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 3.0f)
-                                                         [SNew(SBox)
-                                                              .Visibility(this, &SWetClothingPartEditorPanel::GetSingleCirclePreviewVisibility)
-                                                                  [BuildPreviewToggle(
-                                                                      LOCTEXT("PopupOverrideDropletStampSize", "Override Droplet1 Stamp Size"),
-                                                                      LOCTEXT("PopupOverrideDropletStampSizeTooltip", "Use a part-local scale for this Wet Part instead of the Wetness Profile Droplet1 Stamp Size."),
-                                                                      TAttribute<ECheckBoxState>::Create(TAttribute<ECheckBoxState>::FGetter::CreateSP(this, &SWetClothingPartEditorPanel::GetSelectedDropletStampSizeOverrideCheckState)),
-                                                                      FOnCheckStateChanged::CreateSP(this, &SWetClothingPartEditorPanel::HandleSelectedDropletStampSizeOverrideChanged))]]
-                                                   + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 3.0f)
-                                                          [SNew(SBox)
-                                                               .Visibility(this, &SWetClothingPartEditorPanel::GetSingleCirclePreviewVisibility)
-                                                                   [BuildScaleRow(
-                                                                       LOCTEXT("PopupDropletStampSizeScale", "Droplet1 Stamp Size Scale"),
-                                                                       LOCTEXT("PopupDropletStampSizeScaleTooltip", "Multiplies the Wetness Profile Droplet1 Stamp Size for this Wet Part."),
-                                                                       TAttribute<bool>::Create(TAttribute<bool>::FGetter::CreateSP(this, &SWetClothingPartEditorPanel::IsSelectedDropletStampSizeOverrideEnabled)),
-                                                                       TAttribute<float>::Create(TAttribute<float>::FGetter::CreateSP(this, &SWetClothingPartEditorPanel::GetSelectedDropletRadiusScale)),
-                                                                       [this](const float NewValue) { HandleSelectedDropletRadiusScaleChanged(NewValue); })]]
-                                                   + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 8.0f, 0.0f, 3.0f)
-                                                         [SNew(SBox)
-                                                              .Visibility(this, &SWetClothingPartEditorPanel::GetSingleCirclePreviewVisibility)
-                                                                  [BuildPreviewToggle(
-                                                                      LOCTEXT("PopupOverrideDropletFlowStampSize", "Override Droplet2 Stamp Size"),
-                                                                      LOCTEXT("PopupOverrideDropletFlowStampSizeTooltip", "Use a separate part-local scale for Droplet2 stamps instead of the Wetness Profile Droplet2 Stamp Size."),
-                                                                      TAttribute<ECheckBoxState>::Create(TAttribute<ECheckBoxState>::FGetter::CreateSP(this, &SWetClothingPartEditorPanel::GetSelectedDropletFlowStampSizeOverrideCheckState)),
-                                                                      FOnCheckStateChanged::CreateSP(this, &SWetClothingPartEditorPanel::HandleSelectedDropletFlowStampSizeOverrideChanged))]]
-                                                   + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 3.0f)
-                                                         [SNew(SBox)
-                                                              .Visibility(this, &SWetClothingPartEditorPanel::GetSingleCirclePreviewVisibility)
-                                                                  [BuildScaleRow(
-                                                                      LOCTEXT("PopupDropletFlowStampSizeScale", "Droplet2 Stamp Size Scale"),
-                                                                      LOCTEXT("PopupDropletFlowStampSizeScaleTooltip", "Multiplies the Wetness Profile Droplet2 Stamp Width and Height for this Wet Part."),
-                                                                      TAttribute<bool>::Create(TAttribute<bool>::FGetter::CreateSP(this, &SWetClothingPartEditorPanel::IsSelectedDropletFlowStampSizeOverrideEnabled)),
-                                                                      TAttribute<float>::Create(TAttribute<float>::FGetter::CreateSP(this, &SWetClothingPartEditorPanel::GetSelectedDropletFlowSizeScale)),
-                                                                      [this](const float NewValue) { HandleSelectedDropletFlowSizeScaleChanged(NewValue); })]]
-                                                    + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 12.0f, 0.0f, 0.0f)
-                                                          [SNew(STextBlock)
-                                                               .Text_Lambda([this]()
-                                                              {
-                                                                  return SurfaceWaterTilingPreviewViewport.IsValid()
-                                                                      ? SurfaceWaterTilingPreviewViewport->GetSurfaceWaterPreviewStatusText()
-                                                                      : LOCTEXT("SurfaceWaterTilingPreviewInitializing", "Initializing preview...");
-                                                              })
-                                                              .AutoWrapText(true)
-                                                              .ColorAndOpacity_Lambda([this]()
-                                                              {
-                                                                  return SurfaceWaterTilingPreviewViewport.IsValid()
-                                                                      ? SurfaceWaterTilingPreviewViewport->GetSurfaceWaterPreviewStatusColor()
-                                                                      : FSlateColor(FStyleColors::ForegroundHover);
-                                                              })]]]]]
+
+                                                   + SVerticalBox::Slot()
+                                                         .AutoHeight()
+                                                             [SNew(STextBlock)
+                                                                  .Text(LOCTEXT("SurfaceWaterTilingDropletTilingHeader", "Droplet Tiling"))
+                                                                  .Font(FAppStyle::GetFontStyle(TEXT("PropertyWindow.BoldFont")))]
+
+                                                   + SVerticalBox::Slot()
+                                                         .AutoHeight()
+                                                         .Padding(0.0f, 10.0f, 0.0f, 0.0f)
+                                                             [BuildNumericEditor(
+                                                                 LOCTEXT("PopupPrimaryDetailSize", "Primary Detail Size"),
+                                                                 LOCTEXT("PopupPrimaryDetailSizeTooltip", "Controls the repeating detail-normal size for the Primary droplet layer on this Part."),
+                                                                 0.0f,
+                                                                 4.0f,
+                                                                 0.05f,
+                                                                 SurfaceSettingsEnabled,
+                                                                 TAttribute<float>::Create(TAttribute<float>::FGetter::CreateSP(this, &SWetClothingPartEditorPanel::GetSelectedDropletDetailSize)),
+                                                                 [this](const float NewValue) { HandleSelectedDropletDetailSizeChanged(NewValue); },
+                                                                 [this]() { ResetSelectedDropletDetailSizeToApplied(); })]
+
+                                                   + SVerticalBox::Slot()
+                                                         .AutoHeight()
+                                                         .Padding(0.0f, 12.0f, 0.0f, 0.0f)
+                                                             [BuildNumericEditor(
+                                                                 LOCTEXT("PopupSecondaryDetailSize", "Secondary Detail Size"),
+                                                                 LOCTEXT("PopupSecondaryDetailSizeTooltip", "Controls the repeating detail-normal size for the Secondary droplet layer on this Part."),
+                                                                 0.0f,
+                                                                 4.0f,
+                                                                 0.05f,
+                                                                 SurfaceSettingsEnabled,
+                                                                 TAttribute<float>::Create(TAttribute<float>::FGetter::CreateSP(this, &SWetClothingPartEditorPanel::GetSelectedDropletFlowDetailSize)),
+                                                                 [this](const float NewValue) { HandleSelectedDropletFlowDetailSizeChanged(NewValue); },
+                                                                 [this]() { ResetSelectedDropletFlowDetailSizeToApplied(); })]
+
+                                                   ]]]]
 
              + SVerticalBox::Slot()
                    .AutoHeight()
-                   .Padding(8.0f, 10.0f, 8.0f, 4.0f)
-                       [SNew(SBorder)
-                           .Padding(FMargin(12.0f, 10.0f))
-                           .BorderImage(FAppStyle::Get().GetBrush(TEXT("ToolPanel.GroupBorder")))
-                                [SNew(SVerticalBox)
-                                 + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 3.0f)
-                                        [BuildDetailSizeSlider(
-                                            LOCTEXT("PopupDropletDetailSize", "Droplet1 Detail Size"),
-                                            TAttribute<float>::Create(TAttribute<float>::FGetter::CreateLambda([this]()
-                                            {
-                                                return FMath::Clamp(GetSelectedDropletDetailSize() / 4.0f, 0.0f, 1.0f);
-                                            })),
-                                            [this](const float NewValue) { HandleSelectedDropletDetailSizeChanged(NewValue); },
-                                            TAttribute<FText>::Create(TAttribute<FText>::FGetter::CreateSP(this, &SWetClothingPartEditorPanel::GetSelectedDropletDetailSizeText)))]
-                                  + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 8.0f, 0.0f, 3.0f)
-                                        [BuildDetailSizeSlider(
-                                            LOCTEXT("PopupDropletFlowDetailSize", "Droplet2 Detail Size"),
-                                            TAttribute<float>::Create(TAttribute<float>::FGetter::CreateLambda([this]()
-                                            {
-                                                return FMath::Clamp(GetSelectedDropletFlowDetailSize() / 4.0f, 0.0f, 1.0f);
-                                            })),
-                                            [this](const float NewValue) { HandleSelectedDropletFlowDetailSizeChanged(NewValue); },
-                                            TAttribute<FText>::Create(TAttribute<FText>::FGetter::CreateSP(this, &SWetClothingPartEditorPanel::GetSelectedDropletFlowDetailSizeText)))]]]];
+                   .Padding(8.0f, 8.0f, 8.0f, 2.0f)
+                       [SNew(SHorizontalBox)
+                        + SHorizontalBox::Slot()
+                              .FillWidth(1.0f)
+                              .VAlign(VAlign_Center)
+                                  [SNew(STextBlock)
+                                       .Text(LOCTEXT(
+                                           "SurfaceWaterTilingApplyHint",
+                                           "Changes are previewed immediately. Closing the window discards unapplied changes."))
+                                       .ColorAndOpacity(FSlateColor(FStyleColors::ForegroundHover))]
+                        + SHorizontalBox::Slot()
+                              .AutoWidth()
+                              .VAlign(VAlign_Center)
+                              .Padding(8.0f, 0.0f, 0.0f, 0.0f)
+                                  [SNew(SButton)
+                                       .Text(LOCTEXT("SurfaceWaterTilingRevert", "Revert"))
+                                       .IsEnabled_Lambda([this]() { return bSurfaceWaterTilingHasPendingChanges; })
+                                       .OnClicked(this, &SWetClothingPartEditorPanel::HandleRevertSurfaceWaterTilingChangesClicked)]
+                        + SHorizontalBox::Slot()
+                              .AutoWidth()
+                              .VAlign(VAlign_Center)
+                              .Padding(6.0f, 0.0f, 0.0f, 0.0f)
+                                  [SNew(SButton)
+                                       .ButtonStyle(FAppStyle::Get(), TEXT("PrimaryButton"))
+                                       .Text(LOCTEXT("SurfaceWaterTilingApply", "Apply"))
+                                       .IsEnabled_Lambda([this]() { return bSurfaceWaterTilingHasPendingChanges; })
+                                       .OnClicked(this, &SWetClothingPartEditorPanel::HandleApplySurfaceWaterTilingChangesClicked)]]];
 }
 
 void SWetClothingPartEditorPanel::HandleSurfaceWaterTilingWindowClosed(const TSharedRef<SWindow>& /*Window*/)
 {
+    if (SurfaceWaterTilingPreviewViewport.IsValid())
+    {
+        SurfaceWaterTilingPreviewViewport->ClearSurfaceWaterTilingPreviewPartSettingsOverride();
+    }
     SurfaceWaterTilingPreviewViewport.Reset();
     SurfaceWaterTilingWindow.Reset();
+    bSurfaceWaterTilingEditSessionActive = false;
+    bSurfaceWaterTilingHasPendingChanges = false;
+    SurfaceWaterTilingEditMaterialSlotIndex = INDEX_NONE;
+    SurfaceWaterTilingEditWetPartID = INDEX_NONE;
+    SurfaceWaterTilingEditPartDisplayName.Reset();
 }
 
 float SWetClothingPartEditorPanel::GetSelectedDropletRadiusScale() const
 {
+    if (const FWetPartSurfaceWaterSettings* Settings = GetSurfaceWaterTilingWorkingSettings())
+    {
+        return FMath::Clamp(Settings->DropletRadiusScale, 0.25f, 4.0f);
+    }
     const FWetClothingWetPartEntry* Entry = FindWetPartEntry(SelectedWetPartID);
     return Entry != nullptr ? FMath::Clamp(Entry->SurfaceWater.DropletRadiusScale, 0.25f, 4.0f) : 1.0f;
 }
 
 float SWetClothingPartEditorPanel::GetSelectedDropletFlowSizeScale() const
 {
+    if (const FWetPartSurfaceWaterSettings* Settings = GetSurfaceWaterTilingWorkingSettings())
+    {
+        return FMath::Clamp(Settings->DropletFlowSizeScale, 0.25f, 4.0f);
+    }
     const FWetClothingWetPartEntry* Entry = FindWetPartEntry(SelectedWetPartID);
     return Entry != nullptr ? FMath::Clamp(Entry->SurfaceWater.DropletFlowSizeScale, 0.25f, 4.0f) : 1.0f;
 }
 
 ECheckBoxState SWetClothingPartEditorPanel::GetSelectedDropletStampSizeOverrideCheckState() const
 {
+    if (const FWetPartSurfaceWaterSettings* Settings = GetSurfaceWaterTilingWorkingSettings())
+    {
+        return Settings->bOverrideDropletStampSize ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+    }
     const FWetClothingWetPartEntry* Entry = FindWetPartEntry(SelectedWetPartID);
     return Entry != nullptr && Entry->SurfaceWater.bOverrideDropletStampSize
                ? ECheckBoxState::Checked
@@ -5321,6 +5512,10 @@ ECheckBoxState SWetClothingPartEditorPanel::GetSelectedDropletStampSizeOverrideC
 
 ECheckBoxState SWetClothingPartEditorPanel::GetSelectedDropletFlowStampSizeOverrideCheckState() const
 {
+    if (const FWetPartSurfaceWaterSettings* Settings = GetSurfaceWaterTilingWorkingSettings())
+    {
+        return Settings->bOverrideDropletFlowStampSize ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+    }
     const FWetClothingWetPartEntry* Entry = FindWetPartEntry(SelectedWetPartID);
     return Entry != nullptr && Entry->SurfaceWater.bOverrideDropletFlowStampSize
                ? ECheckBoxState::Checked
@@ -5329,73 +5524,61 @@ ECheckBoxState SWetClothingPartEditorPanel::GetSelectedDropletFlowStampSizeOverr
 
 void SWetClothingPartEditorPanel::HandleSelectedDropletStampSizeOverrideChanged(const ECheckBoxState NewState)
 {
-    UWetClothingAsset* Asset = WetClothingAsset.Get();
-    FWetClothingWetPartEntry* Entry = FindMutableWetPartEntry(SelectedWetPartID);
-    if (Asset == nullptr || Entry == nullptr || Entry->WetPartID < 0)
+    if (GetSurfaceWaterTilingWorkingSettings() == nullptr)
     {
         return;
     }
 
     const bool bNewValue = NewState == ECheckBoxState::Checked;
-    if (Entry->SurfaceWater.bOverrideDropletStampSize == bNewValue)
+    if (SurfaceWaterTilingEditedSettings.bOverrideDropletStampSize == bNewValue)
     {
         return;
     }
 
-    Asset->Modify();
-    Entry->SurfaceWater.bOverrideDropletStampSize = bNewValue;
-    Asset->MarkRuntimeBakeOutputsDirty(DWCBakeOutput::GPURuntimeData | DWCBakeOutput::GPUMaps);
-    Asset->MarkPackageDirty();
-    if (SurfaceWaterTilingPreviewViewport.IsValid())
-    {
-        SurfaceWaterTilingPreviewViewport->RefreshSurfaceWaterPreviewDynamicTextures();
-    }
+    SurfaceWaterTilingEditedSettings.bOverrideDropletStampSize = bNewValue;
+    NotifySurfaceWaterTilingWorkingSettingsChanged();
 }
 
 void SWetClothingPartEditorPanel::HandleSelectedDropletFlowStampSizeOverrideChanged(
     const ECheckBoxState NewState)
 {
-    UWetClothingAsset* Asset = WetClothingAsset.Get();
-    FWetClothingWetPartEntry* Entry = FindMutableWetPartEntry(SelectedWetPartID);
-    if (Asset == nullptr || Entry == nullptr || Entry->WetPartID < 0)
+    if (GetSurfaceWaterTilingWorkingSettings() == nullptr)
     {
         return;
     }
 
     const bool bNewValue = NewState == ECheckBoxState::Checked;
-    if (Entry->SurfaceWater.bOverrideDropletFlowStampSize == bNewValue)
+    if (SurfaceWaterTilingEditedSettings.bOverrideDropletFlowStampSize == bNewValue)
     {
         return;
     }
 
-    Asset->Modify();
-    Entry->SurfaceWater.bOverrideDropletFlowStampSize = bNewValue;
-    Asset->MarkRuntimeBakeOutputsDirty(DWCBakeOutput::GPURuntimeData | DWCBakeOutput::GPUMaps);
-    Asset->MarkPackageDirty();
-    if (SurfaceWaterTilingPreviewViewport.IsValid())
-    {
-        SurfaceWaterTilingPreviewViewport->RefreshSurfaceWaterPreviewDynamicTextures();
-    }
+    SurfaceWaterTilingEditedSettings.bOverrideDropletFlowStampSize = bNewValue;
+    NotifySurfaceWaterTilingWorkingSettingsChanged();
 }
 
 bool SWetClothingPartEditorPanel::IsSelectedDropletStampSizeOverrideEnabled() const
 {
-    const FWetClothingWetPartEntry* Entry = FindWetPartEntry(SelectedWetPartID);
-    return IsSelectedWetPartSurfaceSettingsEnabled() &&
-           Entry != nullptr &&
-           Entry->SurfaceWater.bOverrideDropletStampSize;
+    const FWetPartSurfaceWaterSettings* Settings = GetSurfaceWaterTilingWorkingSettings();
+    return bSurfaceWaterTilingEditSessionActive &&
+           Settings != nullptr &&
+           Settings->bOverrideDropletStampSize;
 }
 
 bool SWetClothingPartEditorPanel::IsSelectedDropletFlowStampSizeOverrideEnabled() const
 {
-    const FWetClothingWetPartEntry* Entry = FindWetPartEntry(SelectedWetPartID);
-    return IsSelectedWetPartSurfaceSettingsEnabled() &&
-           Entry != nullptr &&
-           Entry->SurfaceWater.bOverrideDropletFlowStampSize;
+    const FWetPartSurfaceWaterSettings* Settings = GetSurfaceWaterTilingWorkingSettings();
+    return bSurfaceWaterTilingEditSessionActive &&
+           Settings != nullptr &&
+           Settings->bOverrideDropletFlowStampSize;
 }
 
 float SWetClothingPartEditorPanel::GetSelectedDropletDetailSize() const
 {
+    if (const FWetPartSurfaceWaterSettings* Settings = GetSurfaceWaterTilingWorkingSettings())
+    {
+        return FMath::Clamp(Settings->DropletDetailSize, 0.0f, 4.0f);
+    }
     const FWetClothingWetPartEntry* Entry = FindWetPartEntry(SelectedWetPartID);
     return Entry != nullptr ? FMath::Clamp(Entry->SurfaceWater.DropletDetailSize, 0.0f, 4.0f) : 1.0f;
 }
@@ -5410,6 +5593,10 @@ FText SWetClothingPartEditorPanel::GetSelectedDropletDetailSizeText() const
 
 float SWetClothingPartEditorPanel::GetSelectedDropletFlowDetailSize() const
 {
+    if (const FWetPartSurfaceWaterSettings* Settings = GetSurfaceWaterTilingWorkingSettings())
+    {
+        return FMath::Clamp(Settings->DropletFlowDetailSize, 0.0f, 4.0f);
+    }
     const FWetClothingWetPartEntry* Entry = FindWetPartEntry(SelectedWetPartID);
     return Entry != nullptr ? FMath::Clamp(Entry->SurfaceWater.DropletFlowDetailSize, 0.0f, 4.0f) : 1.0f;
 }
@@ -5424,102 +5611,70 @@ FText SWetClothingPartEditorPanel::GetSelectedDropletFlowDetailSizeText() const
 
 void SWetClothingPartEditorPanel::HandleSelectedDropletRadiusScaleChanged(const float InValue)
 {
-    UWetClothingAsset* Asset = WetClothingAsset.Get();
-    FWetClothingWetPartEntry* Entry = FindMutableWetPartEntry(SelectedWetPartID);
-    if (Asset == nullptr || Entry == nullptr || Entry->WetPartID < 0)
+    if (GetSurfaceWaterTilingWorkingSettings() == nullptr)
     {
         return;
     }
 
     const float NewValue = FMath::Clamp(InValue, 0.25f, 4.0f);
-    if (FMath::IsNearlyEqual(Entry->SurfaceWater.DropletRadiusScale, NewValue))
+    if (FMath::IsNearlyEqual(SurfaceWaterTilingEditedSettings.DropletRadiusScale, NewValue))
     {
         return;
     }
 
-    Asset->Modify();
-    Entry->SurfaceWater.DropletRadiusScale = NewValue;
-    Asset->MarkRuntimeBakeOutputsDirty(DWCBakeOutput::GPURuntimeData | DWCBakeOutput::GPUMaps);
-    Asset->MarkPackageDirty();
-    if (SurfaceWaterTilingPreviewViewport.IsValid())
-    {
-        SurfaceWaterTilingPreviewViewport->RefreshSurfaceWaterPreviewDynamicTextures();
-    }
+    SurfaceWaterTilingEditedSettings.DropletRadiusScale = NewValue;
+    NotifySurfaceWaterTilingWorkingSettingsChanged();
 }
 
 void SWetClothingPartEditorPanel::HandleSelectedDropletFlowSizeScaleChanged(const float InValue)
 {
-    UWetClothingAsset* Asset = WetClothingAsset.Get();
-    FWetClothingWetPartEntry* Entry = FindMutableWetPartEntry(SelectedWetPartID);
-    if (Asset == nullptr || Entry == nullptr || Entry->WetPartID < 0)
+    if (GetSurfaceWaterTilingWorkingSettings() == nullptr)
     {
         return;
     }
 
     const float NewValue = FMath::Clamp(InValue, 0.25f, 4.0f);
-    if (FMath::IsNearlyEqual(Entry->SurfaceWater.DropletFlowSizeScale, NewValue))
+    if (FMath::IsNearlyEqual(SurfaceWaterTilingEditedSettings.DropletFlowSizeScale, NewValue))
     {
         return;
     }
 
-    Asset->Modify();
-    Entry->SurfaceWater.DropletFlowSizeScale = NewValue;
-    Asset->MarkRuntimeBakeOutputsDirty(DWCBakeOutput::GPURuntimeData | DWCBakeOutput::GPUMaps);
-    Asset->MarkPackageDirty();
-    if (SurfaceWaterTilingPreviewViewport.IsValid())
-    {
-        SurfaceWaterTilingPreviewViewport->RefreshSurfaceWaterPreviewDynamicTextures();
-    }
+    SurfaceWaterTilingEditedSettings.DropletFlowSizeScale = NewValue;
+    NotifySurfaceWaterTilingWorkingSettingsChanged();
 }
 
 void SWetClothingPartEditorPanel::HandleSelectedDropletDetailSizeChanged(const float InValue)
 {
-    UWetClothingAsset* Asset = WetClothingAsset.Get();
-    FWetClothingWetPartEntry* Entry = FindMutableWetPartEntry(SelectedWetPartID);
-    if (Asset == nullptr || Entry == nullptr || Entry->WetPartID < 0)
+    if (GetSurfaceWaterTilingWorkingSettings() == nullptr)
     {
         return;
     }
 
     const float NewValue = FMath::Clamp(InValue, 0.0f, 4.0f);
-    if (FMath::IsNearlyEqual(Entry->SurfaceWater.DropletDetailSize, NewValue))
+    if (FMath::IsNearlyEqual(SurfaceWaterTilingEditedSettings.DropletDetailSize, NewValue))
     {
         return;
     }
 
-    Asset->Modify();
-    Entry->SurfaceWater.DropletDetailSize = NewValue;
-    Asset->MarkRuntimeBakeOutputsDirty(DWCBakeOutput::GPUMaps);
-    Asset->MarkPackageDirty();
-    if (SurfaceWaterTilingPreviewViewport.IsValid())
-    {
-        SurfaceWaterTilingPreviewViewport->RefreshSurfaceWaterPreviewDynamicTextures();
-    }
+    SurfaceWaterTilingEditedSettings.DropletDetailSize = NewValue;
+    NotifySurfaceWaterTilingWorkingSettingsChanged();
 }
 
 void SWetClothingPartEditorPanel::HandleSelectedDropletFlowDetailSizeChanged(const float InValue)
 {
-    UWetClothingAsset* Asset = WetClothingAsset.Get();
-    FWetClothingWetPartEntry* Entry = FindMutableWetPartEntry(SelectedWetPartID);
-    if (Asset == nullptr || Entry == nullptr || Entry->WetPartID < 0)
+    if (GetSurfaceWaterTilingWorkingSettings() == nullptr)
     {
         return;
     }
 
     const float NewValue = FMath::Clamp(InValue, 0.0f, 4.0f);
-    if (FMath::IsNearlyEqual(Entry->SurfaceWater.DropletFlowDetailSize, NewValue))
+    if (FMath::IsNearlyEqual(SurfaceWaterTilingEditedSettings.DropletFlowDetailSize, NewValue))
     {
         return;
     }
 
-    Asset->Modify();
-    Entry->SurfaceWater.DropletFlowDetailSize = NewValue;
-    Asset->MarkRuntimeBakeOutputsDirty(DWCBakeOutput::GPUMaps);
-    Asset->MarkPackageDirty();
-    if (SurfaceWaterTilingPreviewViewport.IsValid())
-    {
-        SurfaceWaterTilingPreviewViewport->RefreshSurfaceWaterPreviewDynamicTextures();
-    }
+    SurfaceWaterTilingEditedSettings.DropletFlowDetailSize = NewValue;
+    NotifySurfaceWaterTilingWorkingSettingsChanged();
 }
 
 ECheckBoxState SWetClothingPartEditorPanel::GetSurfaceWaterPreviewCoverageModeState(

@@ -171,6 +171,51 @@ void SWCAUVView::Construct(const FArguments& InArgs)
 
 void SWCAUVView::SetIslands(const TArray<TSharedPtr<FWetClothingAssetUVIsland>>& InIslands)
 {
+    TArray<TSharedPtr<FWetClothingAssetUVIsland>> NewIslandSources;
+    NewIslandSources.Reserve(InIslands.Num());
+    for (const TSharedPtr<FWetClothingAssetUVIsland>& Island : InIslands)
+    {
+        if (Island.IsValid())
+        {
+            NewIslandSources.Add(Island);
+        }
+    }
+
+    UTexture* CurrentAddressTexture = BackgroundTexture.Get();
+    const UTexture2D* CurrentAddressTexture2D = Cast<UTexture2D>(CurrentAddressTexture);
+    const uint8 CurrentAddressX = CurrentAddressTexture2D != nullptr ? static_cast<uint8>(CurrentAddressTexture2D->AddressX) : 0xFF;
+    const uint8 CurrentAddressY = CurrentAddressTexture2D != nullptr ? static_cast<uint8>(CurrentAddressTexture2D->AddressY) : 0xFF;
+    bool bSameIslandSources = IslandSources.Num() == NewIslandSources.Num();
+    if (bSameIslandSources)
+    {
+        for (int32 Index = 0; Index < NewIslandSources.Num(); ++Index)
+        {
+            if (IslandSources[Index].Get() != NewIslandSources[Index].Get())
+            {
+                bSameIslandSources = false;
+                break;
+            }
+        }
+    }
+
+    // FWCAUVIslandViewCache returns the same shared island objects until the mesh /
+    // asset topology revision changes. If those identities and the texture-address
+    // source are unchanged, the copied triangles and canonical edge cache are still
+    // valid. Avoid rebuilding them on every tab/slot/UI refresh.
+    const UTexture* CachedAddressTexture = IslandGeometryAddressTexture.Get();
+    if (bSameIslandSources &&
+        CachedAddressTexture == CurrentAddressTexture &&
+        IslandGeometryAddressX == CurrentAddressX &&
+        IslandGeometryAddressY == CurrentAddressY)
+    {
+        Invalidate(EInvalidateWidget::Paint);
+        return;
+    }
+
+    IslandSources = MoveTemp(NewIslandSources);
+    IslandGeometryAddressTexture = CurrentAddressTexture;
+    IslandGeometryAddressX = CurrentAddressX;
+    IslandGeometryAddressY = CurrentAddressY;
     Islands.Reset();
 
     for (const TSharedPtr<FWetClothingAssetUVIsland>& Island : InIslands)
@@ -181,7 +226,7 @@ void SWCAUVView::SetIslands(const TArray<TSharedPtr<FWetClothingAssetUVIsland>>&
         }
     }
 
-    const UTexture2D* Texture = Cast<UTexture2D>(BackgroundTexture.Get());
+    const UTexture2D* Texture = CurrentAddressTexture2D;
     if (Texture != nullptr)
     {
         for (FWetClothingAssetUVIsland& Island : Islands)
@@ -313,6 +358,10 @@ void SWCAUVView::SetDisplayMode(EWCAUVDisplayMode InDisplayMode)
 void SWCAUVView::Clear()
 {
     Islands.Reset();
+    IslandSources.Reset();
+    IslandGeometryAddressTexture.Reset();
+    IslandGeometryAddressX = 0xFF;
+    IslandGeometryAddressY = 0xFF;
     SelectedUVIslandIDs.Reset();
     IslandColors.Reset();
     HiddenUVIslandIDs.Reset();

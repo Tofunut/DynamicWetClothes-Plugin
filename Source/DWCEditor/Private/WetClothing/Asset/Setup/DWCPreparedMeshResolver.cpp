@@ -167,6 +167,22 @@ namespace DWCPreparedMeshResolverPrivate
             Mesh.GetMaterials()[MaterialOverride.MaterialSlotIndex].MaterialInterface = GeneratedMaterialInstance;
         }
     }
+
+    void PreserveImportedTangentBasisForPreparedMesh(USkeletalMesh& Mesh)
+    {
+        const int32 LODCount = Mesh.GetLODNum();
+        for (int32 LODIndex = 0; LODIndex < LODCount; ++LODIndex)
+        {
+            FSkeletalMeshLODInfo* LODInfo = Mesh.GetLODInfo(LODIndex);
+            if (LODInfo == nullptr)
+            {
+                continue;
+            }
+
+            LODInfo->BuildSettings.bRecomputeNormals = false;
+            LODInfo->BuildSettings.bRecomputeTangents = false;
+        }
+    }
 }
 
 FDWCPreparedMeshPreflightResult FDWCPreparedMeshResolver::Preflight(
@@ -239,6 +255,7 @@ FDWCPreparedMeshResolveResult FDWCPreparedMeshResolver::Resolve(
 
     if (!bForceNewAsset && Asset.GetDWCSkeletalMesh() != nullptr && Asset.GetDWCSkeletalMesh() != SourceMesh)
     {
+        PreserveImportedTangentBasisForPreparedMesh(*Asset.GetDWCSkeletalMesh());
         FDWCPreparedMeshResolveResult Result;
         Result.Mesh = Asset.GetDWCSkeletalMesh();
         return Result;
@@ -282,6 +299,8 @@ FDWCPreparedMeshResolveResult FDWCPreparedMeshResolver::Resolve(
     {
         return Failure(TEXT("Failed to duplicate the Source Mesh for DWC UV Channel generation."));
     }
+
+    PreserveImportedTangentBasisForPreparedMesh(*PreparedMesh);
 
     // Reuse generated material instances on a newly created DWC mesh without
     // replacing an unrelated material explicitly assigned by the user.

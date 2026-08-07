@@ -103,6 +103,7 @@ public:
     virtual bool Initialize(const FDWCGPUPreviewInitArgs& Args) = 0;
     virtual void SetProfileParameters(const FWetnessProfileParameters& Parameters) = 0;
     virtual void SetScenarioSplashUV(FVector2f InSplashUV) = 0;
+    virtual void SetInteractionCursorScale(float InScale) {}
     virtual void SetPreviewChannels(
         bool bAbsorbedEnabled,
         bool bSurfaceEnabled,

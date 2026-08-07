@@ -155,6 +155,12 @@ class SWCAUVView : public SLeafWidget
     };
 
     TArray<FWetClothingAssetUVIsland>      Islands;
+    // Identity of the shared cached island objects used to build Islands. This lets
+    // repeated UV-view refreshes reuse the expensive edge/outline geometry cache.
+    TArray<TSharedPtr<FWetClothingAssetUVIsland>> IslandSources;
+    TWeakObjectPtr<UTexture>                 IslandGeometryAddressTexture;
+    uint8                                    IslandGeometryAddressX = 0xFF;
+    uint8                                    IslandGeometryAddressY = 0xFF;
     // A canonical, per-island edge list prevents triangle-shared edges from
     // being submitted more than once and becoming brighter than boundaries.
     TMap<int32, TArray<FCachedOutlineEdge>> CachedWireEdgesByIsland;

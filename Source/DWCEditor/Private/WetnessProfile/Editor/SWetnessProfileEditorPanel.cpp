@@ -209,7 +209,6 @@ TSharedRef<SWidget> SWetnessProfileEditorPanel::BuildPreviewToolbar()
     return SNew(SBorder)
         .Padding(FMargin(8.0f, 6.0f))
         .BorderImage(FAppStyle::GetBrush(TEXT("ToolPanel.GroupBorder")))
-        .BorderBackgroundColor(FLinearColor(0.035f, 0.038f, 0.044f, 1.0f))
         [
             SNew(SHorizontalBox)
 
@@ -235,21 +234,6 @@ TSharedRef<SWidget> SWetnessProfileEditorPanel::BuildPreviewToolbar()
                 .OnObjectChanged(this, &SWetnessProfileEditorPanel::HandleCurrentPreviewMeshChanged)
             ]
 
-            + SHorizontalBox::Slot()
-            .AutoWidth()
-            .VAlign(VAlign_Center)
-            [
-                SNew(SButton)
-                .ToolTipText(LOCTEXT(
-                    "FramePreviewMeshTooltip",
-                    "Frame the preview mesh in the viewport."))
-                .OnClicked(this, &SWetnessProfileEditorPanel::HandleFramePreviewMeshClicked)
-                .ContentPadding(FMargin(9.0f, 3.0f))
-                [
-                    SNew(STextBlock)
-                    .Text(LOCTEXT("FramePreviewMeshLabel", "Frame"))
-                ]
-            ]
         ];
 }
 
@@ -261,7 +245,6 @@ TSharedRef<SWidget> SWetnessProfileEditorPanel::BuildPreviewControlsSection()
             SNew(SBorder)
             .Padding(FMargin(8.0f))
             .BorderImage(FAppStyle::GetBrush(TEXT("ToolPanel.GroupBorder")))
-            .BorderBackgroundColor(FLinearColor(0.028f, 0.031f, 0.037f, 1.0f))
             [
                 SNew(SHorizontalBox)
 
@@ -472,18 +455,16 @@ TSharedRef<SWidget> SWetnessProfileEditorPanel::BuildPreviewModeSection()
         const FText& Label,
         const FText& Tooltip)
     {
-        return SNew(SBorder)
-            .BorderImage(FCoreStyle::Get().GetBrush(TEXT("WhiteBrush")))
-            .BorderBackgroundColor_Lambda([this, Behavior]()
+        const FLinearColor SelectedButtonBlue(0.0f, 0.45f, 1.0f, 1.0f);
+        return SNew(SButton)
+            .ButtonStyle(FAppStyle::Get(), TEXT("NoBorder"))
+            .ContentPadding(0.0f)
+            .ToolTipText(Tooltip)
+            .OnClicked_Lambda([SelectBehavior, Behavior]()
             {
-                const bool bSelected =
-                    SelectedPreviewBehaviorItem.IsValid() &&
-                    *SelectedPreviewBehaviorItem == Behavior;
-                return bSelected
-                    ? FStyleColors::Primary.GetSpecifiedColor()
-                    : FLinearColor(0.19f, 0.20f, 0.23f, 1.0f);
+                SelectBehavior(Behavior);
+                return FReply::Handled();
             })
-            .Padding(1.0f)
             [
                 SNew(SBorder)
                 .BorderImage(FCoreStyle::Get().GetBrush(TEXT("WhiteBrush")))
@@ -493,35 +474,42 @@ TSharedRef<SWidget> SWetnessProfileEditorPanel::BuildPreviewModeSection()
                         SelectedPreviewBehaviorItem.IsValid() &&
                         *SelectedPreviewBehaviorItem == Behavior;
                     return bSelected
-                        ? FStyleColors::Select.GetSpecifiedColor()
-                        : FLinearColor(0.068f, 0.071f, 0.080f, 1.0f);
+                        ? FStyleColors::Primary.GetSpecifiedColor()
+                        : FStyleColors::Hover.GetSpecifiedColor();
                 })
+                .Padding(1.0f)
                 [
-                    SNew(SBox)
-                    .HeightOverride(42.0f)
+                    SNew(SBorder)
+                    .BorderImage(FCoreStyle::Get().GetBrush(TEXT("WhiteBrush")))
+                    .BorderBackgroundColor_Lambda([this, Behavior, SelectedButtonBlue]()
+                    {
+                        const bool bSelected =
+                            SelectedPreviewBehaviorItem.IsValid() &&
+                            *SelectedPreviewBehaviorItem == Behavior;
+                        return bSelected
+                            ? SelectedButtonBlue
+                            : FStyleColors::Input.GetSpecifiedColor();
+                    })
+                    .Padding(FMargin(12.0f, 0.0f))
                     [
-                        SNew(SButton)
-                        .ButtonStyle(FAppStyle::Get(), TEXT("NoBorder"))
-                        .ContentPadding(FMargin(12.0f, 0.0f))
+                        SNew(SBox)
+                        .HeightOverride(38.0f)
                         .HAlign(HAlign_Center)
                         .VAlign(VAlign_Center)
-                        .ToolTipText(Tooltip)
-                        .OnClicked_Lambda([SelectBehavior, Behavior]()
-                        {
-                            SelectBehavior(Behavior);
-                            return FReply::Handled();
-                        })
                         [
-                            SNew(SBox)
-                            .HAlign(HAlign_Center)
-                            .VAlign(VAlign_Center)
-                            [
-                                SNew(STextBlock)
-                                .Text(Label)
-                                .Font(FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), 12))
-                                .ColorAndOpacity(FSlateColor(FLinearColor::White))
-                                .Justification(ETextJustify::Center)
-                            ]
+                            SNew(STextBlock)
+                            .Text(Label)
+                            .Font(FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), 12))
+                            .ColorAndOpacity_Lambda([this, Behavior]()
+                            {
+                                const bool bSelected =
+                                    SelectedPreviewBehaviorItem.IsValid() &&
+                                    *SelectedPreviewBehaviorItem == Behavior;
+                                return bSelected
+                                    ? FSlateColor(FLinearColor::White)
+                                    : FSlateColor::UseForeground();
+                            })
+                            .Justification(ETextJustify::Center)
                         ]
                     ]
                 ]
@@ -551,7 +539,7 @@ TSharedRef<SWidget> SWetnessProfileEditorPanel::BuildPreviewModeSection()
                 LOCTEXT("PreviewBehaviorSimulationSegment", "Simulation"),
                 LOCTEXT(
                     "PreviewBehaviorSimulationTooltip",
-                    "Add water and preview spreading and drying over time."))
+                    "Add water and preview spreading and drying."))
         ];
 }
 
@@ -563,42 +551,6 @@ TSharedRef<SWidget> SWetnessProfileEditorPanel::BuildPreviewSimulationSection()
         .AutoHeight()
         [
             SNew(SHorizontalBox)
-
-            + SHorizontalBox::Slot()
-            .AutoWidth()
-            .VAlign(VAlign_Center)
-            .Padding(0.0f, 0.0f, 8.0f, 0.0f)
-            [
-                SNew(SButton)
-                .ContentPadding(FMargin(12.0f, 6.0f))
-                .ToolTipText(LOCTEXT(
-                    "AddWaterTooltip",
-                    "Add one water contact at the center cursor."))
-                .IsEnabled(this, &SWetnessProfileEditorPanel::IsSelectedWaterChannelEnabled)
-                .OnClicked(this, &SWetnessProfileEditorPanel::HandleApplySplashClicked)
-                [
-                    SNew(SHorizontalBox)
-
-                    + SHorizontalBox::Slot()
-                    .AutoWidth()
-                    .VAlign(VAlign_Center)
-                    [
-                        SNew(SImage)
-                        .Image(FDWCEditorStyle::GetBrush(
-                            TEXT("DWCEditor.WetnessProfile.AddWater")))
-                    ]
-
-                    + SHorizontalBox::Slot()
-                    .AutoWidth()
-                    .VAlign(VAlign_Center)
-                    .Padding(6.0f, 0.0f, 0.0f, 0.0f)
-                    [
-                        SNew(STextBlock)
-                        .Text(LOCTEXT("AddWaterLabel", "Add Water"))
-                        .Font(FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), 10))
-                    ]
-                ]
-            ]
 
             + SHorizontalBox::Slot()
             .AutoWidth()
@@ -623,12 +575,44 @@ TSharedRef<SWidget> SWetnessProfileEditorPanel::BuildPreviewSimulationSection()
         .AutoHeight()
         .Padding(0.0f, 10.0f, 0.0f, 0.0f)
         [
-            SNew(STextBlock)
-            .Text(LOCTEXT(
-                "AddWaterSinglePressHint",
-                "Press Space or click Add Water to place one contact."))
-            .Font(FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 10))
-            .ColorAndOpacity(FSlateColor::UseSubduedForeground())
+            SNew(SHorizontalBox)
+
+            + SHorizontalBox::Slot()
+            .AutoWidth()
+            .VAlign(VAlign_Center)
+            [
+                SNew(SBox)
+                .WidthOverride(86.0f)
+                [
+                    SNew(STextBlock)
+                    .Text(LOCTEXT("PreviewCursorSizeLabel", "Cursor Size"))
+                ]
+            ]
+
+            + SHorizontalBox::Slot()
+            .FillWidth(1.0f)
+            .VAlign(VAlign_Center)
+            .Padding(6.0f, 0.0f)
+            [
+                SNew(SSlider)
+                .MinValue(0.5f)
+                .MaxValue(3.0f)
+                .Value(this, &SWetnessProfileEditorPanel::GetPreviewCursorScale)
+                .OnValueChanged(this, &SWetnessProfileEditorPanel::HandlePreviewCursorScaleChanged)
+            ]
+
+            + SHorizontalBox::Slot()
+            .AutoWidth()
+            .VAlign(VAlign_Center)
+            [
+                SNew(SBox)
+                .WidthOverride(42.0f)
+                [
+                    SNew(STextBlock)
+                    .Text(this, &SWetnessProfileEditorPanel::GetPreviewCursorScaleText)
+                    .Justification(ETextJustify::Right)
+                ]
+            ]
         ];
 }
 
@@ -637,7 +621,6 @@ TSharedRef<SWidget> SWetnessProfileEditorPanel::BuildPreviewSettingsSection()
     return SNew(SBorder)
         .Padding(FMargin(10.0f, 8.0f))
         .BorderImage(FAppStyle::GetBrush(TEXT("ToolPanel.GroupBorder")))
-        .BorderBackgroundColor(FLinearColor(0.040f, 0.044f, 0.052f, 1.0f))
         [
             SNew(SVerticalBox)
 
@@ -646,15 +629,32 @@ TSharedRef<SWidget> SWetnessProfileEditorPanel::BuildPreviewSettingsSection()
             [
                 SNew(STextBlock)
                 .Text(LOCTEXT("PreviewSettingsHeading", "Preview Settings"))
-                .Font(FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), 12))
+                .Font(FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), 14))
             ]
 
             + SVerticalBox::Slot()
             .AutoHeight()
-            .Padding(0.0f, 7.0f, 0.0f, 0.0f)
+            .Padding(0.0f, 6.0f, 0.0f, 0.0f)
+            [
+                SNew(SSeparator)
+            ]
+
+            + SVerticalBox::Slot()
+            .AutoHeight()
+            .Padding(0.0f, 3.0f, 0.0f, 0.0f)
             [
                 SNew(STextBlock)
-                .Text(LOCTEXT("PreviewMeshSettingLabel", "Preview Mesh"))
+                .Text(LOCTEXT("PreviewSettingsSummary", "Viewport-only mesh and display options."))
+                .Font(FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 9))
+                .ColorAndOpacity(FSlateColor::UseSubduedForeground())
+            ]
+
+            + SVerticalBox::Slot()
+            .AutoHeight()
+            .Padding(0.0f, 9.0f, 0.0f, 0.0f)
+            [
+                SNew(STextBlock)
+                .Text(LOCTEXT("PreviewMeshSettingLabel", "Mesh"))
                 .Font(FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 10))
             ]
 
@@ -687,7 +687,7 @@ TSharedRef<SWidget> SWetnessProfileEditorPanel::BuildPreviewSettingsSection()
                         "Edit the preview mesh reference stored on this Wetness Profile asset."))
                     [
                         SNew(STextBlock)
-                        .Text(LOCTEXT("ReferencedPreviewMeshSource", "Referenced"))
+                        .Text(LOCTEXT("ReferencedPreviewMeshSource", "Asset Reference"))
                     ]
                 ]
 
@@ -704,7 +704,7 @@ TSharedRef<SWidget> SWetnessProfileEditorPanel::BuildPreviewSettingsSection()
                         "Use a preview-only mesh override. This selection is not saved to the Wetness Profile asset."))
                     [
                         SNew(STextBlock)
-                        .Text(LOCTEXT("TemporaryPreviewMeshSource", "Temporary Override"))
+                        .Text(LOCTEXT("TemporaryPreviewMeshSource", "Session Override"))
                     ]
                 ]
             ]
@@ -717,55 +717,11 @@ TSharedRef<SWidget> SWetnessProfileEditorPanel::BuildPreviewSettingsSection()
                 .Text_Lambda([this]()
                 {
                     return bUseTemporaryPreviewMesh
-                        ? LOCTEXT("TemporaryPreviewMeshHelp", "Preview only — not saved with the asset.")
-                        : LOCTEXT("ReferencedPreviewMeshHelp", "Saved as this asset's preview mesh.");
+                        ? LOCTEXT("TemporaryPreviewMeshHelp", "Session only. The asset is unchanged.")
+                        : LOCTEXT("ReferencedPreviewMeshHelp", "Saved to this Wetness Profile.");
                 })
                 .Font(FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 9))
                 .ColorAndOpacity(FSlateColor::UseSubduedForeground())
-            ]
-
-            + SVerticalBox::Slot()
-            .AutoHeight()
-            .Padding(0.0f, 8.0f, 0.0f, 0.0f)
-            [
-                SNew(SHorizontalBox)
-
-                + SHorizontalBox::Slot()
-                .AutoWidth()
-                .VAlign(VAlign_Center)
-                [
-                    SNew(SBox)
-                    .WidthOverride(86.0f)
-                    [
-                        SNew(STextBlock)
-                        .Text(LOCTEXT("PreviewCursorSizeLabel", "Cursor Size"))
-                    ]
-                ]
-
-                + SHorizontalBox::Slot()
-                .FillWidth(1.0f)
-                .VAlign(VAlign_Center)
-                .Padding(6.0f, 0.0f)
-                [
-                    SNew(SSlider)
-                    .MinValue(0.5f)
-                    .MaxValue(2.5f)
-                    .Value(this, &SWetnessProfileEditorPanel::GetPreviewCursorScale)
-                    .OnValueChanged(this, &SWetnessProfileEditorPanel::HandlePreviewCursorScaleChanged)
-                ]
-
-                + SHorizontalBox::Slot()
-                .AutoWidth()
-                .VAlign(VAlign_Center)
-                [
-                    SNew(SBox)
-                    .WidthOverride(42.0f)
-                    [
-                        SNew(STextBlock)
-                        .Text(this, &SWetnessProfileEditorPanel::GetPreviewCursorScaleText)
-                        .Justification(ETextJustify::Right)
-                    ]
-                ]
             ]
 
         ];
@@ -1309,15 +1265,6 @@ void SWetnessProfileEditorPanel::HandleCurrentPreviewMeshChanged(const FAssetDat
 #endif
 }
 
-FReply SWetnessProfileEditorPanel::HandleFramePreviewMeshClicked()
-{
-    if (PreviewViewport.IsValid())
-    {
-        PreviewViewport->FocusOnPreviewMesh();
-    }
-    return FReply::Handled();
-}
-
 FReply SWetnessProfileEditorPanel::HandleUseReferenceMeshClicked()
 {
     if (PreviewViewport.IsValid())
@@ -1410,7 +1357,7 @@ float SWetnessProfileEditorPanel::GetPreviewCursorScale() const
 
 void SWetnessProfileEditorPanel::HandlePreviewCursorScaleChanged(const float InValue)
 {
-    PreviewCursorScale = FMath::Clamp(InValue, 0.5f, 2.5f);
+    PreviewCursorScale = FMath::Clamp(InValue, 0.5f, 3.0f);
     if (PreviewViewport.IsValid())
     {
         PreviewViewport->SetInteractionCursorScale(PreviewCursorScale);

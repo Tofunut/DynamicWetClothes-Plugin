@@ -24,7 +24,8 @@ class FDWCPartViewportClient : public FEditorViewportClient
     void FocusOnPreviewMesh(const USkeletalMeshComponent* InPreviewMeshComponent, bool bInstant = false);
     void RequestFocusOnPreviewMeshNextTick(const USkeletalMeshComponent* InPreviewMeshComponent);
     void SetPreviewMeshComponent(const USkeletalMeshComponent* InPreviewMeshComponent);
-    void SetPickableIslands(const TArray<FWetClothingAssetUVIsland>& InIslands);
+    void SetPickableIslands(const TArray<FWetClothingAssetUVIsland>& InIslands, uint32 TopologyCacheKey);
+    void ClearPickableIslandCache();
 
   private:
     struct FPickTriangle
@@ -46,6 +47,13 @@ class FDWCPartViewportClient : public FEditorViewportClient
         bool IsLeaf() const { return LeftChild == INDEX_NONE && RightChild == INDEX_NONE; }
     };
 
+    struct FPickBVHCacheEntry
+    {
+        TArray<FPickTriangle> Triangles;
+        TArray<int32> TriangleIndices;
+        TArray<FPickBVHNode> Nodes;
+    };
+
     int32 BuildPickBVHNode(int32 FirstTriangle, int32 TriangleCount);
     void RebuildPickBVH(const TArray<FWetClothingAssetUVIsland>& InIslands);
 
@@ -57,4 +65,6 @@ class FDWCPartViewportClient : public FEditorViewportClient
     TArray<FPickTriangle>                        PickTriangles;
     TArray<int32>                                PickTriangleIndices;
     TArray<FPickBVHNode>                         PickBVHNodes;
+    TMap<uint32, FPickBVHCacheEntry>             PickBVHCache;
+    uint32                                       ActivePickTopologyCacheKey = 0;
 };

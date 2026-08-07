@@ -6,6 +6,7 @@
 #include "Components/PrimitiveComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Core/DWCEditorStyle.h"
 #include "Core/WetClothingSettings.h"
 #include "GPU/DWCGPUBackend.h"
 #include "DataAssets/WetClothingPartData.h"
@@ -16,13 +17,13 @@
 #include "Engine/Texture2D.h"
 #include "Engine/TextureRenderTarget2D.h"
 #include "Engine/World.h"
-#include "InputCoreTypes.h"
 #include "Materials/Material.h"
 #include "Materials/MaterialInstanceConstant.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
 #include "Modules/ModuleManager.h"
 #include "Styling/AppStyle.h"
+#include "Styling/CoreStyle.h"
 #include "ToolMenus.h"
 #include "UObject/UObjectGlobals.h"
 #include "Utility/DWCLog.h"
@@ -36,6 +37,13 @@
 #include "WetnessProfile/Editor/WetnessProfileEditorPolicy.h"
 #include "WetnessProfilePreviewMaterial.h"
 #include "WetnessProfileViewportClient.h"
+#include "Widgets/Images/SImage.h"
+#include "Widgets/Input/SButton.h"
+#include "Widgets/Layout/SBorder.h"
+#include "Widgets/Layout/SBox.h"
+#include "Widgets/Layout/SScaleBox.h"
+#include "Widgets/SBoxPanel.h"
+#include "Widgets/SOverlay.h"
 #include "Widgets/Text/STextBlock.h"
 
 #define LOCTEXT_NAMESPACE "WetnessProfileViewport"
@@ -274,7 +282,7 @@ void SWetnessProfileViewport::Tick(
 {
     SEditorViewport::Tick(AllottedGeometry, InCurrentTime, InDeltaTime);
 
-    if (PreviewBehavior== EPreviewBehavior::Simulation)
+    if (PreviewBehavior == EPreviewBehavior::Simulation)
     {
         TickGPUPreviewSimulation(InDeltaTime);
     }
@@ -292,13 +300,6 @@ FReply SWetnessProfileViewport::OnKeyDown(
     const FGeometry& MyGeometry,
     const FKeyEvent& InKeyEvent)
 {
-    if (InKeyEvent.GetKey() == EKeys::SpaceBar &&
-        PreviewBehavior == EPreviewBehavior::Simulation)
-    {
-        SetPreviewAnimationEnabled(!bPreviewAnimationEnabled);
-        return FReply::Handled();
-    }
-
     return SEditorViewport::OnKeyDown(MyGeometry, InKeyEvent);
 }
 
@@ -307,11 +308,6 @@ FReply SWetnessProfileViewport::OnKeyUp(
     const FKeyEvent& InKeyEvent)
 {
     return SEditorViewport::OnKeyUp(MyGeometry, InKeyEvent);
-}
-
-void SWetnessProfileViewport::OnFocusLost(const FFocusEvent& InFocusEvent)
-{
-    SEditorViewport::OnFocusLost(InFocusEvent);
 }
 
 void SWetnessProfileViewport::SetPreviewAbsorbedWater(float InAmount)
@@ -356,7 +352,7 @@ void SWetnessProfileViewport::SetPreviewDropletDetailSizes(const float InDroplet
 
 void SWetnessProfileViewport::SetInteractionCursorScale(const float InScale)
 {
-    const float NewScale = FMath::Clamp(InScale, 0.05f, 8.0f);
+    const float NewScale = FMath::Clamp(InScale, 0.5f, 3.0f);
     if (FMath::IsNearlyEqual(InteractionCursorScale, NewScale))
     {
         return;
@@ -364,6 +360,10 @@ void SWetnessProfileViewport::SetInteractionCursorScale(const float InScale)
 
     InteractionCursorScale = NewScale;
     RefreshScenarioSplashUVFromCamera();
+    if (GPUPreviewSimulator && GPUPreviewSimulator->IsReady())
+    {
+        GPUPreviewSimulator->SetInteractionCursorScale(InteractionCursorScale);
+    }
     if (ViewportClient.IsValid())
     {
         ViewportClient->Invalidate();
@@ -400,7 +400,7 @@ void SWetnessProfileViewport::SetPreviewBehavior(const EPreviewBehavior InBehavi
         }
         RestartPreviewSimulation();
     }
-    ApplyResolvedPreviewMesh(true);
+    ApplyResolvedPreviewMesh(false);
     RefreshPreviewMaterialParameters();
     UpdateRealtimeState();
 }
@@ -494,6 +494,7 @@ void SWetnessProfileViewport::RestartPreviewSimulation()
     PreviewAnimationTime = 0.0f;
     PreviewSimulationAccumulator = 0.0f;
     PendingSimulationRestartDelay = -1.0f;
+    RefreshScenarioSplashUVFromCamera();
     if (EnsureGPUPreviewSimulator())
     {
         if (WetnessProfile.IsValid())
@@ -501,6 +502,7 @@ void SWetnessProfileViewport::RestartPreviewSimulation()
             GPUPreviewSimulator->SetProfileParameters(GetSanitizedProfileParameters(WetnessProfile.Get()));
         }
         GPUPreviewSimulator->SetScenarioSplashUV(PreviewScenarioSplashUV);
+        GPUPreviewSimulator->SetInteractionCursorScale(InteractionCursorScale);
         GPUPreviewSimulator->SetPreviewChannels(
             bPreviewAbsorbedLayerEnabled,
             bPreviewSurfaceLayerEnabled,
@@ -518,6 +520,7 @@ void SWetnessProfileViewport::RestartPreviewSimulation()
 void SWetnessProfileViewport::ApplyPreviewSplash()
 {
     if (PreviewBehavior != EPreviewBehavior::Simulation ||
+        !bHasPreviewWaterSelection || !bPreviewSelectedChannelEnabled ||
         !EnsureGPUPreviewSimulator())
     {
         return;
@@ -525,13 +528,16 @@ void SWetnessProfileViewport::ApplyPreviewSplash()
 
     RefreshScenarioSplashUVFromCamera();
     GPUPreviewSimulator->SetScenarioSplashUV(PreviewScenarioSplashUV);
+    GPUPreviewSimulator->SetInteractionCursorScale(InteractionCursorScale);
     GPUPreviewSimulator->SetPreviewChannels(
         bPreviewAbsorbedLayerEnabled,
         bPreviewSurfaceLayerEnabled,
         bPreviewDroplet1Enabled,
         bPreviewDroplet2Enabled);
     GPUPreviewSimulator->RequestSplash();
-    GPUPreviewSimulator->Step(0.0f, PreviewAnimationTime);
+    GPUPreviewSimulator->Step(PreviewFixedStep, PreviewAnimationTime);
+    PreviewAnimationTime += PreviewFixedStep;
+    PreviewSimulationAccumulator = 0.0f;
     BindGPUPreviewTextures();
     if (ViewportClient.IsValid())
     {
@@ -551,21 +557,21 @@ void SWetnessProfileViewport::SetPreviewSkeletalMeshOverride(USkeletalMesh* InPr
 {
     bHasPreviewMeshOverride = InPreviewMesh != nullptr;
     PreviewMeshOverride = InPreviewMesh;
-    ApplyResolvedPreviewMesh(true);
+    ApplyResolvedPreviewMesh(false);
 }
 
 void SWetnessProfileViewport::ClearPreviewSkeletalMeshOverride()
 {
     bHasPreviewMeshOverride = false;
     PreviewMeshOverride = nullptr;
-    ApplyResolvedPreviewMesh(true);
+    ApplyResolvedPreviewMesh(false);
 }
 
 void SWetnessProfileViewport::UseSpherePreview()
 {
     bHasPreviewMeshOverride = true;
     PreviewMeshOverride = nullptr;
-    ApplyResolvedPreviewMesh(true);
+    ApplyResolvedPreviewMesh(false);
 }
 
 USkeletalMesh* SWetnessProfileViewport::GetDisplayedPreviewSkeletalMesh() const
@@ -615,11 +621,115 @@ void SWetnessProfileViewport::PopulateViewportOverlays(TSharedRef<SOverlay> Over
         .HAlign(HAlign_Left)
         .VAlign(VAlign_Top)
         .Padding(10.0f)
-            [SAssignNew(OverlayText, STextBlock)
-                 .Text(this, &SWetnessProfileViewport::GetOverlayText)
-                 .ColorAndOpacity(FSlateColor(FLinearColor(1.0f, 0.92f, 0.30f, 1.0f)))
-                 .ShadowColorAndOpacity(FLinearColor::Black)
-                 .ShadowOffset(FVector2D(1.0f, 1.0f))];
+        [
+            SNew(SBorder)
+            .BorderImage(FAppStyle::GetBrush(TEXT("ToolPanel.GroupBorder")))
+            .BorderBackgroundColor(FLinearColor(0.0f, 0.0f, 0.0f, 0.72f))
+            .Padding(FMargin(10.0f, 6.0f))
+            [
+                SAssignNew(OverlayText, STextBlock)
+                .Text(this, &SWetnessProfileViewport::GetOverlayText)
+                .Font(FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), 10))
+                .ColorAndOpacity(FSlateColor(FLinearColor::White))
+                .ShadowColorAndOpacity(FLinearColor::Black)
+                .ShadowOffset(FVector2D(1.0f, 1.0f))
+            ]
+        ];
+
+    Overlay->AddSlot()
+        .HAlign(HAlign_Right)
+        .VAlign(VAlign_Top)
+        .Padding(12.0f)
+        [
+            SNew(SButton)
+            .ToolTipText(LOCTEXT("FocusMeshOverlayTooltip", "Frame the preview mesh in the viewport."))
+            .ContentPadding(FMargin(12.0f, 5.0f))
+            .OnClicked_Lambda([this]()
+            {
+                FocusOnPreviewMesh(true);
+                return FReply::Handled();
+            })
+            [
+                SNew(STextBlock)
+                .Text(LOCTEXT("FocusMeshOverlayLabel", "Focus Mesh"))
+                .Font(FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), 11))
+            ]
+        ];
+
+    Overlay->AddSlot()
+        .HAlign(HAlign_Center)
+        .VAlign(VAlign_Center)
+        [
+            SNew(SBox)
+            .WidthOverride_Lambda([this]() { return 84.0f * InteractionCursorScale; })
+            .HeightOverride_Lambda([this]() { return 84.0f * InteractionCursorScale; })
+            .HAlign(HAlign_Center)
+            .VAlign(VAlign_Center)
+            .Visibility_Lambda([this]()
+            {
+                return PreviewBehavior == EPreviewBehavior::Simulation &&
+                    bHasPreviewWaterSelection && bPreviewSelectedChannelEnabled
+                    ? EVisibility::HitTestInvisible
+                    : EVisibility::Collapsed;
+            })
+            [
+                SNew(SScaleBox)
+                .Stretch(EStretch::ScaleToFit)
+                .StretchDirection(EStretchDirection::Both)
+                [
+                    SNew(SImage)
+                    .Image(FDWCEditorStyle::GetBrush(TEXT("DWCEditor.WetnessProfile.Crosshair")))
+                    .DesiredSizeOverride_Lambda([this]()
+                    {
+                        const float CursorSize = 84.0f * InteractionCursorScale;
+                        return TOptional<FVector2D>(FVector2D(CursorSize, CursorSize));
+                    })
+                ]
+            ]
+        ];
+
+    Overlay->AddSlot()
+        .HAlign(HAlign_Center)
+        .VAlign(VAlign_Bottom)
+        .Padding(12.0f, 12.0f, 12.0f, 18.0f)
+        [
+            SNew(SButton)
+            .Visibility_Lambda([this]()
+            {
+                return PreviewBehavior == EPreviewBehavior::Simulation &&
+                    bHasPreviewWaterSelection && bPreviewSelectedChannelEnabled
+                    ? EVisibility::Visible
+                    : EVisibility::Collapsed;
+            })
+            .ToolTipText(LOCTEXT("AddWaterOverlayTooltip", "Add one water contact at the center cursor."))
+            .ContentPadding(FMargin(14.0f, 7.0f))
+            .OnClicked_Lambda([this]()
+            {
+                ApplyPreviewSplash();
+                return FReply::Handled();
+            })
+            [
+                SNew(SHorizontalBox)
+
+                + SHorizontalBox::Slot()
+                .AutoWidth()
+                .VAlign(VAlign_Center)
+                [
+                    SNew(SImage)
+                    .Image(FDWCEditorStyle::GetBrush(TEXT("DWCEditor.WetnessProfile.AddWater")))
+                ]
+
+                + SHorizontalBox::Slot()
+                .AutoWidth()
+                .VAlign(VAlign_Center)
+                .Padding(6.0f, 0.0f, 0.0f, 0.0f)
+                [
+                    SNew(STextBlock)
+                    .Text(LOCTEXT("AddWaterOverlayLabel", "Add Water"))
+                    .Font(FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), 12))
+                ]
+            ]
+        ];
 }
 
 void SWetnessProfileViewport::OnFocusViewportToSelection()
@@ -1266,7 +1376,123 @@ FVector2f SWetnessProfileViewport::ResolveScenarioSplashUV() const
 
 bool SWetnessProfileViewport::TryResolveCameraCenterSplashUV(FVector2f& OutUV) const
 {
-    OutUV = ResolveScenarioSplashUV();
+    const USkeletalMesh* SkeletalMesh = GetDisplayedPreviewSkeletalMesh();
+    const UPrimitiveComponent* PreviewComponent = GetActivePreviewComponent();
+    if (SkeletalMesh == nullptr || PreviewComponent == nullptr || !ViewportClient.IsValid())
+    {
+        return false;
+    }
+
+    const FVector RayOrigin = ViewportClient->GetViewLocation();
+    const FVector RayDirection = ViewportClient->GetViewRotation().Vector().GetSafeNormal();
+    if (RayDirection.IsNearlyZero())
+    {
+        return false;
+    }
+
+    TArray<int32> MaterialSlots;
+    const int32 MaterialCount = SkeletalMesh->GetMaterials().Num();
+    MaterialSlots.Reserve(MaterialCount);
+    for (int32 MaterialIndex = 0; MaterialIndex < MaterialCount; ++MaterialIndex)
+    {
+        MaterialSlots.Add(MaterialIndex);
+    }
+
+    TArray<FWCAUVPreviewSourceTriangle> Triangles;
+    FString ReadError;
+    if (!FWCAUVPreviewTriangleReader::ReadFromSkeletalMesh(
+            SkeletalMesh,
+            0,
+            0,
+            MakeArrayView(MaterialSlots),
+            Triangles,
+            &ReadError) ||
+        Triangles.IsEmpty())
+    {
+        UE_LOG(
+            LogDWC,
+            Verbose,
+            TEXT("DWC Wetness Profile preview could not read UV0 triangles for center-screen contact on '%s': %s"),
+            *GetPathNameSafe(SkeletalMesh),
+            *ReadError);
+        return false;
+    }
+
+    const FTransform ComponentTransform = PreviewComponent->GetComponentTransform();
+    const FWCAUVPreviewSourceTriangle* BestTriangle = nullptr;
+    double BestDistance = TNumericLimits<double>::Max();
+    double BestU = 0.0;
+    double BestV = 0.0;
+
+    constexpr double IntersectionEpsilon = 1.0e-8;
+    for (const FWCAUVPreviewSourceTriangle& Triangle : Triangles)
+    {
+        const FVector A = ComponentTransform.TransformPosition(FVector(Triangle.LocalPositions[0]));
+        const FVector B = ComponentTransform.TransformPosition(FVector(Triangle.LocalPositions[1]));
+        const FVector C = ComponentTransform.TransformPosition(FVector(Triangle.LocalPositions[2]));
+        const FVector Edge1 = B - A;
+        const FVector Edge2 = C - A;
+        const FVector P = FVector::CrossProduct(RayDirection, Edge2);
+        const double Determinant = FVector::DotProduct(Edge1, P);
+        if (FMath::Abs(Determinant) <= IntersectionEpsilon)
+        {
+            continue;
+        }
+
+        const double InverseDeterminant = 1.0 / Determinant;
+        const FVector T = RayOrigin - A;
+        const double U = FVector::DotProduct(T, P) * InverseDeterminant;
+        if (U < 0.0 || U > 1.0)
+        {
+            continue;
+        }
+
+        const FVector Q = FVector::CrossProduct(T, Edge1);
+        const double V = FVector::DotProduct(RayDirection, Q) * InverseDeterminant;
+        if (V < 0.0 || U + V > 1.0)
+        {
+            continue;
+        }
+
+        const double Distance = FVector::DotProduct(Edge2, Q) * InverseDeterminant;
+        if (Distance <= IntersectionEpsilon || Distance >= BestDistance)
+        {
+            continue;
+        }
+
+        BestTriangle = &Triangle;
+        BestDistance = Distance;
+        BestU = U;
+        BestV = V;
+    }
+
+    if (BestTriangle == nullptr)
+    {
+        return false;
+    }
+
+    const FVector2f UV0 = BestTriangle->UVs[0];
+    const auto UnwrapNear = [](const FVector2f UV, const FVector2f Reference)
+    {
+        return FVector2f(
+            Reference.X + (UV.X - Reference.X) - FMath::RoundToFloat(UV.X - Reference.X),
+            Reference.Y + (UV.Y - Reference.Y) - FMath::RoundToFloat(UV.Y - Reference.Y));
+    };
+    const FVector2f UV1 = UnwrapNear(BestTriangle->UVs[1], UV0);
+    const FVector2f UV2 = UnwrapNear(BestTriangle->UVs[2], UV0);
+    const float Barycentric0 = static_cast<float>(1.0 - BestU - BestV);
+    const FVector2f UV =
+        UV0 * Barycentric0 +
+        UV1 * static_cast<float>(BestU) +
+        UV2 * static_cast<float>(BestV);
+    if (!FMath::IsFinite(UV.X) || !FMath::IsFinite(UV.Y))
+    {
+        return false;
+    }
+
+    OutUV = FVector2f(
+        FMath::Clamp(UV.X - FMath::Floor(UV.X), 0.001f, 0.999f),
+        FMath::Clamp(UV.Y - FMath::Floor(UV.Y), 0.001f, 0.999f));
     return true;
 }
 
@@ -1340,6 +1566,7 @@ bool SWetnessProfileViewport::EnsureGPUPreviewSimulator()
         NewSimulator->SetProfileParameters(GetSanitizedProfileParameters(WetnessProfile.Get()));
     }
     NewSimulator->SetScenarioSplashUV(PreviewScenarioSplashUV);
+    NewSimulator->SetInteractionCursorScale(InteractionCursorScale);
     NewSimulator->SetPreviewChannels(
         bPreviewAbsorbedLayerEnabled,
         bPreviewSurfaceLayerEnabled,
@@ -1380,22 +1607,6 @@ void SWetnessProfileViewport::TickGPUPreviewSimulation(const float InDeltaTime)
     int32 SafetyCounter = 0;
     while (PreviewSimulationAccumulator >= PreviewFixedStep && SafetyCounter++ < 8)
     {
-        if (PreviewAnimationTime >= GetPreviewLoopDuration() - KINDA_SMALL_NUMBER)
-        {
-            if (bPreviewLoopEnabled)
-            {
-                GPUPreviewSimulator->Restart();
-                PreviewAnimationTime = 0.0f;
-                BindGPUPreviewTextures();
-            }
-            else
-            {
-                PreviewAnimationTime = GetPreviewLoopDuration();
-                bPreviewAnimationEnabled = false;
-                UpdateRealtimeState();
-                break;
-            }
-        }
         GPUPreviewSimulator->Step(PreviewFixedStep, PreviewAnimationTime);
         PreviewAnimationTime += PreviewFixedStep;
         PreviewSimulationAccumulator -= PreviewFixedStep;
@@ -1464,17 +1675,29 @@ FText SWetnessProfileViewport::GetOverlayText() const
                 "SimulationPreviewUnavailable",
                 "GPU Simulation Preview unavailable\nThe optional DWCGPU module could not be initialized.");
         }
-        FNumberFormattingOptions TimeOptions;
-        TimeOptions.MinimumFractionalDigits = 1;
-        TimeOptions.MaximumFractionalDigits = 1;
+        if (!bHasPreviewWaterSelection)
+        {
+            return LOCTEXT(
+                "SimulationPreviewSelectType",
+                "GPU Simulation Preview\nSelect Absorbed Water or Surface Water");
+        }
+        if (!bPreviewSelectedChannelEnabled)
+        {
+            return bPreviewSurfaceSelection
+                ? LOCTEXT("SimulationPreviewSurfaceDisabled", "GPU Simulation Preview\nSurface Water Disabled")
+                : LOCTEXT("SimulationPreviewAbsorbedDisabled", "GPU Simulation Preview\nAbsorbed Water Disabled");
+        }
+        if (!bPreviewSurfaceSelection)
+        {
+            return LOCTEXT("SimulationPreviewAbsorbed", "GPU Simulation Preview | Absorbed Water");
+        }
         return FText::Format(
             LOCTEXT(
-                "SimulationPreviewHint",
-                "GPU Simulation Preview  |  Single Splash\nTime {0} / {1} s  |  {2}x  |  {3}"),
-            FText::AsNumber(PreviewAnimationTime, &TimeOptions),
-            FText::AsNumber(GetPreviewLoopDuration(), &TimeOptions),
-            FText::AsNumber(PreviewAnimationSpeed),
-            bPreviewAnimationEnabled ? LOCTEXT("SimulationPlaying", "Playing") : LOCTEXT("SimulationPaused", "Paused"));
+                "SimulationPreviewSurface",
+                "GPU Simulation Preview | Surface Water | {0}"),
+            bPreviewSecondarySelection
+                ? LOCTEXT("SimulationPreviewSecondaryLayer", "Secondary")
+                : LOCTEXT("SimulationPreviewPrimaryLayer", "Primary"));
     }
     const FWetnessProfileParameters Parameters = GetSanitizedProfileParameters(WetnessProfile.Get());
     const FSurfaceWaterProfileParameters& Surface = Parameters.SurfaceWater;

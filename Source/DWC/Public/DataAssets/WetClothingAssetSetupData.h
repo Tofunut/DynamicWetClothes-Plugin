@@ -166,7 +166,7 @@ struct DWC_API FDWCWetClothingAssetSetupSettings
 
     /** Runtime Surface Water render-target resolution. This is independent from the GPU wetness-map bake resolution. */
     UPROPERTY(VisibleAnywhere, Category = "Texture Resolutions", meta = (DisplayName = "Surface Water"))
-    int32 SurfaceWaterRTResolution = 1024;
+    int32 SurfaceWaterRTResolution = 512;
 
     UPROPERTY(VisibleAnywhere, Category = "Texture Resolutions", meta = (DisplayName = "Wrinkle"))
     int32 WrinkleMapResolution = 1024;

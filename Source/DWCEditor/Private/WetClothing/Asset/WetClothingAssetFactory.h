@@ -48,7 +48,7 @@ public:
     EDWCMapResolution GPUSimulationMapResolution = EDWCMapResolution::Resolution512;
 
     UPROPERTY(EditAnywhere, Category = "Texture Resolutions", meta = (DisplayName = "Surface Water"))
-    EDWCMapResolution SurfaceWaterRTResolution = EDWCMapResolution::Resolution1024;
+    EDWCMapResolution SurfaceWaterRTResolution = EDWCMapResolution::Resolution512;
 
     UPROPERTY(EditAnywhere, Category = "Texture Resolutions", meta = (DisplayName = "Wrinkle"))
     EDWCMapResolution WrinkleMapResolution = EDWCMapResolution::Resolution1024;
@@ -106,7 +106,7 @@ public:
     EDWCMapResolution GPUSimulationMapResolution = EDWCMapResolution::Resolution512;
 
     UPROPERTY(EditAnywhere, Category = "Texture Resolutions", meta = (DisplayName = "Surface Water"))
-    EDWCMapResolution SurfaceWaterRTResolution = EDWCMapResolution::Resolution1024;
+    EDWCMapResolution SurfaceWaterRTResolution = EDWCMapResolution::Resolution512;
 
     UPROPERTY(EditAnywhere, Category = "Texture Resolutions", meta = (DisplayName = "Wrinkle"))
     EDWCMapResolution WrinkleMapResolution = EDWCMapResolution::Resolution1024;

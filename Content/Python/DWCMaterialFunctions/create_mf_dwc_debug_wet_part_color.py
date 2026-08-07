@@ -1,3 +1,4 @@
+# Copyright 2026 Team Tofunut. All Rights Reserved.
 """Create or recreate MF_DWC_DebugWetPartColor with droplet-only Surface Water debug."""
 from __future__ import annotations
 

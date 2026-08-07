@@ -1,3 +1,4 @@
+# Copyright 2026 Team Tofunut. All Rights Reserved.
 """Create or recreate MF_DWC_EvaluateSurfaceAppearance with droplet-only Surface Water."""
 from __future__ import annotations
 

@@ -1,3 +1,4 @@
+# Copyright 2026 Team Tofunut. All Rights Reserved.
 """Shared helpers for one-shot Dynamic Wet Clothes material-function authoring.
 
 This module never runs automatically.  Each entry script imports it only when the

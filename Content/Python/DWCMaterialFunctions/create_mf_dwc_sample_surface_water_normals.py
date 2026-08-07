@@ -1,3 +1,4 @@
+# Copyright 2026 Team Tofunut. All Rights Reserved.
 """Create MF_DWC_SampleSurfaceWaterNormals for two stationary droplet layers."""
 from __future__ import annotations
 

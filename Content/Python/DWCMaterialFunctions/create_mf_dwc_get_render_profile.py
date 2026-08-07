@@ -1,3 +1,4 @@
+# Copyright 2026 Team Tofunut. All Rights Reserved.
 """Create or recreate MF_DWC_GetRenderProfile with a spacious hierarchical graph."""
 from __future__ import annotations
 

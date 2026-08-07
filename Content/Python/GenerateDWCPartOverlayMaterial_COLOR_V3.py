@@ -1,3 +1,4 @@
+# Copyright 2026 Team Tofunut. All Rights Reserved.
 """Generate Original-UV Part Preview overlay materials for UE 5.8.
 
 Version 2026-08-05-color-v3.

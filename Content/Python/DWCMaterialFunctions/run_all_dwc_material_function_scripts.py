@@ -1,3 +1,4 @@
+# Copyright 2026 Team Tofunut. All Rights Reserved.
 """Run every DWC material-function authoring script in dependency order.
 
 Execute this inside Unreal Python, for example:

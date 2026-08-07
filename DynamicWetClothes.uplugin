@@ -1,5 +1,6 @@
 {
 	"FileVersion": 3,
+	"EngineVersion": "5.8.0",
 	"Version": 1,
 	"VersionName": "0.1",
 	"FriendlyName": "Dynamic Wet Clothes",
@@ -9,28 +10,34 @@
 	"FabURL": "com.epicgames.launcher://ue/Fab/product/3afb4688-435c-4484-9497-65dc11c872e2",
 	"EnabledByDefault": true,
 	"CanContainContent": true,
+	"SupportedTargetPlatforms": ["Win64"],
     "Modules": [
     {
         "Name": "DWC",
         "Type": "Runtime",
-        "LoadingPhase": "PostConfigInit"
+        "LoadingPhase": "PostConfigInit",
+        "PlatformAllowList": ["Win64"]
     },
     {
         "Name": "DWCGPU",
         "Type": "Runtime",
-        "LoadingPhase": "PostConfigInit"
+        "LoadingPhase": "PostConfigInit",
+        "PlatformAllowList": ["Win64"]
     },
     {
         "Name": "DWCEditor",
-        "Type": "Editor"
+        "Type": "Editor",
+        "PlatformAllowList": ["Win64"]
     },
     {
         "Name": "DWCWaterSystemIntegration",
-        "Type": "Runtime"
+        "Type": "Runtime",
+        "PlatformAllowList": ["Win64"]
     },
     {
         "Name": "DWCDemo",
-        "Type": "Runtime"
+        "Type": "Runtime",
+        "PlatformAllowList": ["Win64"]
     }
     ],
 	"Plugins": [

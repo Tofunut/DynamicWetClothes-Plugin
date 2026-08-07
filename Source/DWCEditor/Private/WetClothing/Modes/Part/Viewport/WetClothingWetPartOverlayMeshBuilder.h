@@ -1,3 +1,4 @@
+//Copyright 2026 Team Tofunut. All Rights Reserved.
 /*
  *  Wet Part 색상 Overlay Mesh 데이터 생성 함수를 선언합니다.
  */

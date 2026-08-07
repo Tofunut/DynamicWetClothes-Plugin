@@ -1,3 +1,4 @@
+//Copyright 2026 Team Tofunut. All Rights Reserved.
 #include "SWCAUVView.h"
 
 #include "Engine/Texture.h"

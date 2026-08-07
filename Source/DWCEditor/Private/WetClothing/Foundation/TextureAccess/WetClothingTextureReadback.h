@@ -1,3 +1,4 @@
+//Copyright 2026 Team Tofunut. All Rights Reserved.
 /*
  *  Texture readback 결과 구조체와 Texture2D Source 읽기 유틸리티를 선언합니다.
  */

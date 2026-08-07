@@ -1,3 +1,4 @@
+//Copyright 2026 Team Tofunut. All Rights Reserved.
 /*
  *  Wet Clothing Asset 에디터 UI에서 공유하는 Material Slot, Texture, Selection Tool, Profile 항목 타입을 정의합니다.
  */

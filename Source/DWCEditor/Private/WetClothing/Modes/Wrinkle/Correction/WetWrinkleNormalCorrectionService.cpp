@@ -1,3 +1,4 @@
+//Copyright 2026 Team Tofunut. All Rights Reserved.
 #include "WetWrinkleNormalCorrectionService.h"
 
 #include "AssetRegistry/AssetRegistryModule.h"

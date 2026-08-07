@@ -1,3 +1,4 @@
+//Copyright 2026 Team Tofunut. All Rights Reserved.
 #include "Components/DWCDemoNiagaraWetContactSourceComponent.h"
 
 #include "Components/SkeletalMeshComponent.h"

@@ -1,3 +1,4 @@
+//Copyright 2026 Team Tofunut. All Rights Reserved.
 /*
  * UV island view-data cache. Entries are transient and must never be treated as persistent topology.
  */

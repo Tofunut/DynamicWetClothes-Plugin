@@ -1,3 +1,4 @@
+//Copyright 2026 Team Tofunut. All Rights Reserved.
 #include "WetClothing/WCAEditor/WCAValidationReport.h"
 
 #include "DataAssets/WetClothingAsset.h"

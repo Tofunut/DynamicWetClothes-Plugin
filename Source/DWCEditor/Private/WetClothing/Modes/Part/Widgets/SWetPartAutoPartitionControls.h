@@ -1,3 +1,4 @@
+//Copyright 2026 Team Tofunut. All Rights Reserved.
 /*
  *  Auto Partitioning 컨트롤 Slate 위젯을 선언합니다.
  */

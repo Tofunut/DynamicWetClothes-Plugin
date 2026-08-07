@@ -1,3 +1,4 @@
+//Copyright 2026 Team Tofunut. All Rights Reserved.
 #include "WetRendering/DWCGPUResourceSubsystem.h"
 
 #include "DataAssets/WetClothingAsset.h"

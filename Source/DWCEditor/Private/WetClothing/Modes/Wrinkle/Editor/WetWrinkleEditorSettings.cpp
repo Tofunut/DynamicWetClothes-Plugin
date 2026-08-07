@@ -1,3 +1,4 @@
+//Copyright 2026 Team Tofunut. All Rights Reserved.
 #include "WetWrinkleEditorSettings.h"
 
 FString UWetWrinkleEditorSettings::NormalizeContentPath(const FString& InPath)

@@ -1,3 +1,4 @@
+//Copyright 2026 Team Tofunut. All Rights Reserved.
 #include "Water/WaterBodyWetContactComponent.h"
 
 #include "Components/BoxComponent.h"

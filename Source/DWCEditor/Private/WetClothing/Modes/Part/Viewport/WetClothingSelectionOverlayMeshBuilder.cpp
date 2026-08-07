@@ -1,3 +1,4 @@
+//Copyright 2026 Team Tofunut. All Rights Reserved.
 /*
  *  선택된 UV Island의 경계선을 두께 있는 3D Selection Overlay Mesh 데이터로 변환합니다.
  */

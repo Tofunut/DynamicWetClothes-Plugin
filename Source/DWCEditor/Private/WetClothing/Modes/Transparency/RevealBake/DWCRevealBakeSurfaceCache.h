@@ -1,3 +1,4 @@
+//Copyright 2026 Team Tofunut. All Rights Reserved.
 #pragma once
 
 #include "WetClothing/Modes/Transparency/RevealBake/DWCRevealBakeSurface.h"

@@ -1,3 +1,4 @@
+//Copyright 2026 Team Tofunut. All Rights Reserved.
 #include "WetClothing/Modes/Wrinkle/Material/WetWrinklePreviewGraphExtension.h"
 
 #include "Engine/Texture.h"

@@ -1,3 +1,4 @@
+//Copyright 2026 Team Tofunut. All Rights Reserved.
 #pragma once
 
 #include "AssetDefinitionDefault.h"

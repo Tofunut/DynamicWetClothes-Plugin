@@ -1,3 +1,4 @@
+//Copyright 2026 Team Tofunut. All Rights Reserved.
 #include "Core/DWCQualityLODEvaluator.h"
 
 void FDWCQualityLODEvaluator::NormalizeScreenSizeThresholds(

@@ -1,3 +1,4 @@
+//Copyright 2026 Team Tofunut. All Rights Reserved.
 #include "WetClothing/Foundation/Preview/Commit/DWCEditorPreviewCommitCoordinator.h"
 
 #include "WetClothing/Foundation/TextureWorkspace/DWCEditorTextureWorkspace.h"

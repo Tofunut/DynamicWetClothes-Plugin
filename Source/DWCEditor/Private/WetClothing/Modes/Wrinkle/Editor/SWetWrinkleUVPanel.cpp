@@ -1,3 +1,4 @@
+//Copyright 2026 Team Tofunut. All Rights Reserved.
 #include "WetClothing/Modes/Wrinkle/Editor/SWetWrinkleUVPanel.h"
 
 #include "Styling/AppStyle.h"

@@ -1,3 +1,4 @@
+//Copyright 2026 Team Tofunut. All Rights Reserved.
 /*
  *  UV Island 선택 도구에서 사용하는 사각형, 타원, 라쏘 교차 판정 기하 함수를 구현합니다.
  */

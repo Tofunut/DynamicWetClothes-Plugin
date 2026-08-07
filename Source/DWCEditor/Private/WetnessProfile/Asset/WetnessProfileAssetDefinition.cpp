@@ -1,3 +1,4 @@
+//Copyright 2026 Team Tofunut. All Rights Reserved.
 #include "WetnessProfileAssetDefinition.h"
 
 #include "Core/DWCEditorStyle.h"

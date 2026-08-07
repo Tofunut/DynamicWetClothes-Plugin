@@ -1,3 +1,4 @@
+//Copyright 2026 Team Tofunut. All Rights Reserved.
 /*
  * Wet Part colors are emitted on the original reference-pose surface.
  * Camera-facing depth bias is applied by the dedicated overlay material.

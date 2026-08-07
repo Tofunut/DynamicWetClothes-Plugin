@@ -1,3 +1,4 @@
+//Copyright 2026 Team Tofunut. All Rights Reserved.
 /*
  * Caches UV-island analysis by mesh/asset topology revision.
  */

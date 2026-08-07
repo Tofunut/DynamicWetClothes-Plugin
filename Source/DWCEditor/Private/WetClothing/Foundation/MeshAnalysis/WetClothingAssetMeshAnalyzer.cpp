@@ -1,3 +1,4 @@
+//Copyright 2026 Team Tofunut. All Rights Reserved.
 #include "WetClothingAssetMeshAnalyzer.h"
 
 #include "WetClothing/WCAEditor/UI/UVView/WCAUVPreviewDataBuilder.h"

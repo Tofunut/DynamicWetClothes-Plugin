@@ -1,3 +1,4 @@
+//Copyright 2026 Team Tofunut. All Rights Reserved.
 /*
  *  Texture2D의 Source 데이터를 읽어 UV 좌표 기반 색상 샘플링용 픽셀 버퍼로 변환합니다.
  */

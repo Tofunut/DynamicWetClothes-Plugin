@@ -1,3 +1,4 @@
+//Copyright 2026 Team Tofunut. All Rights Reserved.
 #include "Niagara/NiagaraDataInterfaceDWCWetCollision.h"
 
 #include "Niagara/DWCGPUNiagaraWetCollisionBridge.h"

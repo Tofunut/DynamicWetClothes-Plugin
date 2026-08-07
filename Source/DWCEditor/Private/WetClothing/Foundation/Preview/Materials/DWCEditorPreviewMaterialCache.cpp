@@ -1,3 +1,4 @@
+//Copyright 2026 Team Tofunut. All Rights Reserved.
 #include "WetClothing/Foundation/Preview/Materials/DWCEditorPreviewMaterialCache.h"
 
 #include "Materials/Material.h"

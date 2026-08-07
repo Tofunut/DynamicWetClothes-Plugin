@@ -1,3 +1,4 @@
+//Copyright 2026 Team Tofunut. All Rights Reserved.
 #include "Core/DWCQualityLODController.h"
 
 void FDWCQualityLODController::SetEnabled(const bool bInEnabled)

@@ -1,3 +1,4 @@
+//Copyright 2026 Team Tofunut. All Rights Reserved.
 #include "WetClothing/Modes/Transparency/Editor/SWetClothingTransparencyBakePanel.h"
 
 #include "WetClothing/Foundation/Bake/DWCEditorBakeCoordinator.h"

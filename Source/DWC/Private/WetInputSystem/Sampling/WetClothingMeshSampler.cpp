@@ -1,3 +1,4 @@
+//Copyright 2026 Team Tofunut. All Rights Reserved.
 #include "WetInputSystem/Sampling/WetClothingMeshSampler.h"
 
 uint64 FWetClothingMeshSampler::GetAllocatedMemoryBytes() const

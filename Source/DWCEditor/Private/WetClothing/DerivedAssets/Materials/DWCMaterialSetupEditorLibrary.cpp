@@ -1,3 +1,4 @@
+//Copyright 2026 Team Tofunut. All Rights Reserved.
 #include "WetClothing/DerivedAssets/Materials/DWCMaterialSetupEditorLibrary.h"
 
 #include "DataAssets/WetClothingAsset.h"

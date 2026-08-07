@@ -1,3 +1,4 @@
+//Copyright 2026 Team Tofunut. All Rights Reserved.
 #include "Core/DWCSkeletalMeshMerger.h"
 
 #include "Animation/Skeleton.h"

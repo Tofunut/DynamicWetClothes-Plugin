@@ -1,3 +1,4 @@
+//Copyright 2026 Team Tofunut. All Rights Reserved.
 #include "WetClothing/Foundation/UV/DWCUVIslandBuilder.h"
 #include "WetClothing/Foundation/UV/DWCUVEdgeKey.h"
 #include "WetClothing/Foundation/UV/DWCUVGeometry.h"

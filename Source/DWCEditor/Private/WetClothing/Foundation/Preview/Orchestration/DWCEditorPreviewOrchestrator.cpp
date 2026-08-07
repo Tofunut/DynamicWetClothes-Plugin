@@ -1,3 +1,4 @@
+//Copyright 2026 Team Tofunut. All Rights Reserved.
 #include "WetClothing/Foundation/Preview/Orchestration/DWCEditorPreviewOrchestrator.h"
 
 #include "DataAssets/WetClothingAsset.h"

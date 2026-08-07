@@ -1,3 +1,4 @@
+//Copyright 2026 Team Tofunut. All Rights Reserved.
 #include "WetClothing/Foundation/Jobs/DWCEditorWorkerJobScheduler.h"
 
 #include "Async/Async.h"

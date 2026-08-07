@@ -1,3 +1,4 @@
+//Copyright 2026 Team Tofunut. All Rights Reserved.
 /*
  * Material Slot 미리보기 Slate 위젯을 선언합니다.
  */

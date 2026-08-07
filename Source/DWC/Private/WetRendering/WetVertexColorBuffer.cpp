@@ -1,3 +1,4 @@
+//Copyright 2026 Team Tofunut. All Rights Reserved.
 #include "WetRendering/WetVertexColorBuffer.h"
 
 #include "Runtime/Engine/Classes/Components/SkeletalMeshComponent.h"

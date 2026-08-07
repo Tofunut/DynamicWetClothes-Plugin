@@ -1,3 +1,4 @@
+//Copyright 2026 Team Tofunut. All Rights Reserved.
 #include "WetClothing/Modes/Transparency/RevealBake/DWCRevealBakeSurface.h"
 
 #include "Runtime/Engine/Classes/Engine/SkeletalMesh.h"

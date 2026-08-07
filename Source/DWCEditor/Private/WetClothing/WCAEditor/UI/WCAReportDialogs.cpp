@@ -1,3 +1,4 @@
+//Copyright 2026 Team Tofunut. All Rights Reserved.
 #include "WetClothing/WCAEditor/UI/WCAReportDialogs.h"
 
 #include "DataAssets/WetClothingAssetSetupData.h"

@@ -1,4 +1,5 @@
-﻿#include "SWetWrinkleEditorPanel.h"
+﻿//Copyright 2026 Team Tofunut. All Rights Reserved.
+#include "SWetWrinkleEditorPanel.h"
 
 #include "SWetWrinkleElementListPanel.h"
 #include "SWetWrinklePalettePanel.h"

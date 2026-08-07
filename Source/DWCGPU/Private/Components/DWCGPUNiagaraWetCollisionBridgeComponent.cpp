@@ -1,3 +1,4 @@
+//Copyright 2026 Team Tofunut. All Rights Reserved.
 #include "Components/DWCGPUNiagaraWetCollisionBridgeComponent.h"
 
 #include "Components/DynamicWetClothesComponent.h"

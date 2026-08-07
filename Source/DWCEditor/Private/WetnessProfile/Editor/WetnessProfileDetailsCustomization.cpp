@@ -1,3 +1,4 @@
+//Copyright 2026 Team Tofunut. All Rights Reserved.
 #include "WetnessProfile/Editor/WetnessProfileDetailsCustomization.h"
 
 #include "DataAssets/WetnessProfile.h"

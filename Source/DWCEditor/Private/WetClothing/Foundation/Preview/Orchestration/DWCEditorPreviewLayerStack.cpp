@@ -1,3 +1,4 @@
+//Copyright 2026 Team Tofunut. All Rights Reserved.
 #include "WetClothing/Foundation/Preview/Orchestration/DWCEditorPreviewLayerStack.h"
 
 #include "Engine/Texture.h"

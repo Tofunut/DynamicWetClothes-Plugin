@@ -1,3 +1,4 @@
+//Copyright 2026 Team Tofunut. All Rights Reserved.
 #include "Profiling/DWCStatsSubsystem.h"
 
 #include "Async/DWCLODVertexColorTasks.h"

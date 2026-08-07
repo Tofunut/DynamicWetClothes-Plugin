@@ -1,3 +1,4 @@
+//Copyright 2026 Team Tofunut. All Rights Reserved.
 #include "DWCGPUBackend.h"
 #include "DWCGPUPreviewSimulator.h"
 #include "GPU/DWCGPUBackend.h"

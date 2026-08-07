@@ -1,3 +1,4 @@
+//Copyright 2026 Team Tofunut. All Rights Reserved.
 #include "Components/DynamicWetClothesComponentCustomization.h"
 
 #include "Components/DynamicWetClothesComponent.h"

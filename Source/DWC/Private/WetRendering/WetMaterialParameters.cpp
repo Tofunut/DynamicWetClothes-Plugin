@@ -19,8 +19,6 @@ namespace DWCWetMaterialParameters
     DWC_DEFINE_MATERIAL_PARAMETER(DropletMaskTextureArray, "DWC_DropletMaskTextureArray")
     DWC_DEFINE_MATERIAL_PARAMETER(DropletNormalTextureArray, "DWC_DropletNormalTextureArray")
     DWC_DEFINE_MATERIAL_PARAMETER(SurfaceWaterTargetRoughness, "DWC_SurfaceWaterTargetRoughness")
-    DWC_DEFINE_MATERIAL_PARAMETER(SurfaceWaterNormalFlipX, "DWC_SurfaceWaterNormalFlipX")
-    DWC_DEFINE_MATERIAL_PARAMETER(SurfaceWaterNormalFlipY, "DWC_SurfaceWaterNormalFlipY")
     DWC_DEFINE_MATERIAL_PARAMETER(UseSurfaceWater, "DWC_UseSurfaceWater")
     DWC_DEFINE_MATERIAL_PARAMETER(UseDropletNormal, "DWC_UseDropletNormal")
     DWC_DEFINE_MATERIAL_PARAMETER(UseGPUBackend, "DWC_UseGPUBackend")

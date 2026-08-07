@@ -6,6 +6,7 @@
 #include "Engine/Texture.h"
 #include "Engine/Texture2D.h"
 #include "Engine/Texture2DArray.h"
+#include "Engine/World.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Misc/SecureHash.h"
 #include "PixelFormat.h"
@@ -2154,12 +2155,6 @@ void UDWCGPUResourceSubsystem::ApplyResourcesToMaterials(
                 : NeutralProfileRemapLUT.Get());
         MID->SetScalarParameterValue(PreviewSurfaceWaterOverrideParameter, 0.0f);
         MID->SetScalarParameterValue(PreviewSurfaceWaterAmountParameter, 0.0f);
-        MID->SetScalarParameterValue(
-            DWCWetMaterialParameters::SurfaceWaterNormalFlipX(),
-            0.0f);
-        MID->SetScalarParameterValue(
-            DWCWetMaterialParameters::SurfaceWaterNormalFlipY(),
-            0.0f);
         BindGlobalResources(*MID, Usage);
     }
 }

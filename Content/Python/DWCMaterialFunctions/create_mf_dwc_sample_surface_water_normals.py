@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 import sys
 
+import unreal
+
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 if SCRIPT_DIR not in sys.path:
     sys.path.insert(0, SCRIPT_DIR)
@@ -38,17 +40,6 @@ def build() -> None:
         y = -3150 + index * 650
         node = c.function_input(mf, name, kind, preview, index, -7250, y, description)
         declarations[name] = c.named_declaration(mf, f"IN_{name}", node, ("", "Result"), -6200, y)
-
-    flip_x = c.scalar_parameter(
-        mf, "DWC_SurfaceWaterNormalFlipX", 0.0, -4200, 2850,
-        group="DWC Surface Water",
-        description="Invert final droplet tangent-normal X when greater than 0.5.",
-    )
-    flip_y = c.scalar_parameter(
-        mf, "DWC_SurfaceWaterNormalFlipY", 0.0, -3200, 2850,
-        group="DWC Surface Water",
-        description="Invert final droplet tangent-normal Y when greater than 0.5.",
-    )
 
     def build_layer(prefix: str, detail_name: str, mask_name: str, normal_name: str, y: int):
         uv = c.custom_expression(
@@ -91,21 +82,70 @@ def build() -> None:
             ],
             "float1", 0, y, f"Decode {prefix} mask; slice 0 is unmasked.",
         )
+        world_position = c.create_expression(
+            mf,
+            unreal.MaterialExpressionWorldPosition,
+            -700,
+            y + 2050,
+            description=f"Absolute world position for {prefix} cotangent TBN reconstruction.",
+        )
         normal = c.custom_expression(
             mf,
             """
 if (Slice <= 0.5) return float3(0.0, 0.0, 1.0);
-float2 XY = -(SampledNormal.rg * 2.0 - 1.0);
-float2 FlipSign = float2(FlipX > 0.5 ? -1.0 : 1.0, FlipY > 0.5 ? -1.0 : 1.0);
-return normalize(float3(XY * FlipSign, 1.0));
+
+float2 XY = float2(
+     SampledNormal.r * 2.0 - 1.0,
+    -(SampledNormal.g * 2.0 - 1.0));
+
+float3 MapNormal = normalize(float3(
+    XY,
+    sqrt(saturate(1.0 - dot(XY, XY)))
+));
+
+#if PIXELSHADER
+    float3 P = LWCToFloat(WorldPosition);
+    float3 N = normalize(Parameters.TangentToWorld[2]);
+
+    float3 dpdx = ddx(P);
+    float3 dpdy = ddy(P);
+    float2 duvdx = ddx(UV);
+    float2 duvdy = ddy(UV);
+
+    float3 dpdyPerp = cross(dpdy, N);
+    float3 dpdxPerp = cross(N, dpdx);
+
+    float3 T = dpdyPerp * duvdx.x + dpdxPerp * duvdy.x;
+    float3 B = dpdyPerp * duvdx.y + dpdxPerp * duvdy.y;
+
+    float invLength = rsqrt(max(dot(T, T), dot(B, B)));
+    T *= invLength;
+    B *= invLength;
+
+    float3 WorldNormal = normalize(
+        T * MapNormal.x +
+        B * MapNormal.y +
+        N * MapNormal.z
+    );
+
+    return normalize(
+        TransformWorldVectorToTangent(
+            Parameters.TangentToWorld,
+            WorldNormal
+        )
+    );
+#else
+    return MapNormal;
+#endif
 """,
             [
                 ("SampledNormal", normal_sample, ("RGB", "")),
                 ("Slice", c.named_usage(mf, declarations[normal_name], -700, y + 1450), ("", "Result")),
-                ("FlipX", flip_x, ("", "Result")),
-                ("FlipY", flip_y, ("", "Result")),
+                ("UV", uv, ("", "Result")),
+                ("WorldPosition", world_position, ("", "Result")),
             ],
-            "float3", 0, y + 1100, f"Decode {prefix} tangent normal.",
+            "float3", 0, y + 1100,
+            f"Decode {prefix} and reconstruct a cotangent TBN from its exact sampled UV.",
         )
         return mask, normal
 

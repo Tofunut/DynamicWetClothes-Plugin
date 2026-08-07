@@ -745,8 +745,8 @@ def create_or_replace_material_function(asset_name: str, overwrite_existing: boo
         log(f"Deleting existing material function: {package_path}")
         warn(
             "Existing generated DWC materials may log temporary 'Missing Material Function' "
-            "warnings while this function is replaced. Run all three DWC MF scripts, then "
-            "run Generate Materials for each affected Wet Clothing Asset."
+            "warnings while this function is replaced. Run the full DWC MF runner; after all "
+            "functions are rebuilt it repairs every generated Wet Clothing material set."
         )
         checkout_asset(package_path)
         if not EAL.delete_asset(package_path):

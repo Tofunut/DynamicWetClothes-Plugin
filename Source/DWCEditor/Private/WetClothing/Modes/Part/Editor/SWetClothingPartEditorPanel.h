@@ -10,7 +10,10 @@
 #include "WetClothing/Modes/Part/Partition/WetPartAutoPartitionTypes.h"
 #include "WetClothing/Modes/Part/Viewport/SDWCPartViewport.h"
 #include "WetClothing/WCAEditor/UI/UVView/SWCAUVView.h"
+#include "Widgets/Input/SComboBox.h"
 #include "Widgets/SCompoundWidget.h"
+#include "Widgets/Views/SListView.h"
+#include "Widgets/Views/STableRow.h"
 
 class FAssetThumbnail;
 class FAssetThumbnailPool;

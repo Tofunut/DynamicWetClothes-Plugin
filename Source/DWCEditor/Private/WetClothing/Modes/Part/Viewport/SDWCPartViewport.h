@@ -75,7 +75,6 @@ class SDWCPartViewport : public SEditorViewport, public FGCObject
     void  SetPreviewWetPart(int32 MaterialSlotIndex, int32 WetPartID);
     void  SetPreviewWetness(float AbsorbedWetness, float SurfaceWater);
     void  SetSurfaceWaterPreviewDropletsEnabled(bool bInDropletsEnabled);
-    void  SetSurfaceWaterPreviewNormalFlip(bool bInFlipX, bool bInFlipY);
     void  SetSurfaceWaterTilingPreviewCoverageMode(EDWCSurfaceWaterTilingPreviewCoverageMode InMode);
     void  SetSurfaceWaterTilingPreviewDisplayMode(EDWCSurfaceWaterTilingPreviewDisplayMode InMode);
     void  SetSurfaceWaterTilingPreviewPartSettingsOverride(const FWetPartSurfaceWaterSettings& InSettings);
@@ -197,8 +196,6 @@ class SDWCPartViewport : public SEditorViewport, public FGCObject
     float                                        PreviewAbsorbedWetness = 0.0f;
     float                                        PreviewSurfaceWater = 1.0f;
     bool                                         bSurfaceWaterPreviewDropletsEnabled = true;
-    bool                                         bSurfaceWaterPreviewFlipNormalX = false;
-    bool                                         bSurfaceWaterPreviewFlipNormalY = false;
     EDWCSurfaceWaterTilingPreviewDisplayMode     SurfaceWaterPreviewDisplayMode = EDWCSurfaceWaterTilingPreviewDisplayMode::Lit;
     TOptional<FWetPartSurfaceWaterSettings>       SurfaceWaterPreviewPartSettingsOverride;
     float                                        SelectionOverlayThicknessScale = 1.0f;

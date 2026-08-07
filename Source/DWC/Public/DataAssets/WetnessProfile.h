@@ -60,7 +60,7 @@ struct DWC_API FAbsorbedWetnessProfileParameters
     float AbsorptionRate = 1.0f;
 
     /** Maximum Pending Water stored by one GPU simulation texel. Zero keeps the legacy unlimited behavior. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Absorbed Wetness|Simulation", meta = (ClampMin = "0.0", UIMin = "0.0", UIMax = "1000.0", DisplayName = "Max Pending Water Per Pixel (GPU Only)"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Absorbed Wetness|Simulation", meta = (ClampMin = "0.0", UIMin = "0.0", UIMax = "50000.0", DisplayName = "Max Pending Water Per Pixel (GPU Only)"))
     float MaxPendingWaterPerPixel = 0.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Absorbed Wetness|Simulation", meta = (ClampMin = "0.0"))

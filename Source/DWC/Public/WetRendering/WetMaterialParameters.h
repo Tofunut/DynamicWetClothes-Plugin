@@ -17,8 +17,6 @@ namespace DWCWetMaterialParameters
     DWC_API const FName& DropletMaskTextureArray();
     DWC_API const FName& DropletNormalTextureArray();
     DWC_API const FName& SurfaceWaterTargetRoughness();
-    DWC_API const FName& SurfaceWaterNormalFlipX();
-    DWC_API const FName& SurfaceWaterNormalFlipY();
     DWC_API const FName& UseSurfaceWater();
     DWC_API const FName& UseDropletNormal();
     DWC_API const FName& UseGPUBackend();

@@ -434,14 +434,14 @@ void FWetnessProfileDetailsCustomization::CustomizeDetails(IDetailLayoutBuilder&
         IDetailGroup& AbsorbedAdvancedGroup = SimulationCategory.AddGroup(
             TEXT("DWCAbsorbedAdvanced"),
             LOCTEXT("AbsorbedAdvancedGroup", "Advanced"),
-            true,
+            false,
             false);
         AddFloatProperty(
             AbsorbedAdvancedGroup,
             FindPropertyByPath(TEXT("Parameters.AbsorbedWetness.MaxPendingWaterPerPixel")),
             LOCTEXT("MaxPendingWaterPerPixel", "Max Pending Water Per Pixel"),
             LOCTEXT("MaxPendingWaterPerPixelTooltip", "Maximum Pending Water stored by one GPU simulation texel. Excess water is discarded. Zero means unlimited."),
-            0.0f, TNumericLimits<float>::Max(), 0.0f, 10.0f, 0.01f, 1.0f, 3, FText::GetEmpty(),
+            0.0f, TNumericLimits<float>::Max(), 0.0f, 50000.0f, 0.01f, 1.0f, 3, FText::GetEmpty(),
             AbsorbedSettingsEnabled);
 
         IDetailCategoryBuilder& RenderingCategory = DetailBuilder.EditCategory(
@@ -761,7 +761,7 @@ void FWetnessProfileDetailsCustomization::CustomizeDetails(IDetailLayoutBuilder&
         IDetailGroup& RenderingAdvancedGroup = RenderingCategory.AddGroup(
             TEXT("DWCSurfaceRenderingAdvanced"),
             LOCTEXT("SurfaceRenderingAdvancedGroup", "Advanced"),
-            true,
+            false,
             false);
         AddFloatProperty(
             RenderingAdvancedGroup,

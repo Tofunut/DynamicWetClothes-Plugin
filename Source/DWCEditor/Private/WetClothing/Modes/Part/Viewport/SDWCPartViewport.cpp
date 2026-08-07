@@ -13,14 +13,17 @@
 #include "Engine/Texture2D.h"
 #include "Engine/Texture2DArray.h"
 #include "Engine/World.h"
+#include "Materials/Material.h"
 #include "Materials/MaterialInterface.h"
 #include "Materials/MaterialInstanceConstant.h"
 #include "Materials/MaterialInstanceDynamic.h"
+#include "MaterialDomain.h"
 #include "WetRendering/DWCGPUResourceSubsystem.h"
 #include "WetRendering/WetMaterialParameters.h"
 #include "WetRendering/DWCSurfaceTextureSharedAsset.h"
 #include "Rendering/SkeletalMeshLODRenderData.h"
 #include "Rendering/SkeletalMeshRenderData.h"
+#include "TextureResource.h"
 #include "Styling/AppStyle.h"
 #include "Styling/StyleColors.h"
 #include "ToolMenus.h"
@@ -1341,29 +1344,6 @@ void SDWCPartViewport::SetSurfaceWaterPreviewDropletsEnabled(const bool bInDropl
     }
 
     bSurfaceWaterPreviewDropletsEnabled = bInDropletsEnabled;
-    if (bSurfaceWaterTilingPreview)
-    {
-        RefreshSurfaceWaterPreviewMaterial();
-    }
-    else
-    {
-        ApplySurfaceWaterPreviewRenderOverrides();
-        RequestViewportRedraw();
-    }
-}
-
-void SDWCPartViewport::SetSurfaceWaterPreviewNormalFlip(
-    const bool bInFlipX,
-    const bool bInFlipY)
-{
-    if (bSurfaceWaterPreviewFlipNormalX == bInFlipX &&
-        bSurfaceWaterPreviewFlipNormalY == bInFlipY)
-    {
-        return;
-    }
-
-    bSurfaceWaterPreviewFlipNormalX = bInFlipX;
-    bSurfaceWaterPreviewFlipNormalY = bInFlipY;
     if (bSurfaceWaterTilingPreview)
     {
         RefreshSurfaceWaterPreviewMaterial();
@@ -2945,16 +2925,14 @@ void SDWCPartViewport::RefreshSurfaceWaterPreviewMaterial()
             Surface.SurfaceWaterTotalStrength,
             Surface.SurfaceWaterSpecular);
         SurfaceWaterPreviewStatus += FString::Printf(
-            TEXT("\nSingleCircleSurface=%g Droplet1SpawnChance=%.3g Droplet1StampPx=(%.3g,%.3g) SizeScale=%.3g Droplet1DetailSize=%.3g Droplet2DetailSize=%.3g AbsorbedWetness=0 NormalFlipXY=%d/%d."),
+            TEXT("\nSingleCircleSurface=%g Droplet1SpawnChance=%.3g Droplet1StampPx=(%.3g,%.3g) SizeScale=%.3g Droplet1DetailSize=%.3g Droplet2DetailSize=%.3g AbsorbedWetness=0."),
             PreviewSurfaceWater,
             Surface.DropletSpawnProbability,
             Surface.DropletRadiusPixels * PreviewPartSurfaceWater.GetResolvedDropletStampSizeScale(),
             Surface.DropletHeightPixels * PreviewPartSurfaceWater.GetResolvedDropletStampSizeScale(),
             PreviewPartSurfaceWater.GetResolvedDropletStampSizeScale(),
             PreviewPartSurfaceWater.DropletDetailSize,
-            PreviewPartSurfaceWater.DropletFlowDetailSize,
-            bSurfaceWaterPreviewFlipNormalX ? 1 : 0,
-            bSurfaceWaterPreviewFlipNormalY ? 1 : 0);
+            PreviewPartSurfaceWater.DropletFlowDetailSize);
     }
     else
     {
@@ -2968,16 +2946,14 @@ void SDWCPartViewport::RefreshSurfaceWaterPreviewMaterial()
             Surface.SurfaceWaterTotalStrength,
             Surface.SurfaceWaterSpecular);
         SurfaceWaterPreviewStatus += FString::Printf(
-            TEXT("\nFullPartSurface=%g Droplet1SpawnChance=%.3g Droplet1StampPx=(%.3g,%.3g) SizeScale=%.3g Droplet1DetailSize=%.3g Droplet2DetailSize=%.3g AbsorbedWetness=0 NormalFlipXY=%d/%d."),
+            TEXT("\nFullPartSurface=%g Droplet1SpawnChance=%.3g Droplet1StampPx=(%.3g,%.3g) SizeScale=%.3g Droplet1DetailSize=%.3g Droplet2DetailSize=%.3g AbsorbedWetness=0."),
             PreviewSurfaceWater,
             Surface.DropletSpawnProbability,
             Surface.DropletRadiusPixels * PreviewPartSurfaceWater.GetResolvedDropletStampSizeScale(),
             Surface.DropletHeightPixels * PreviewPartSurfaceWater.GetResolvedDropletStampSizeScale(),
             PreviewPartSurfaceWater.GetResolvedDropletStampSizeScale(),
             PreviewPartSurfaceWater.DropletDetailSize,
-            PreviewPartSurfaceWater.DropletFlowDetailSize,
-            bSurfaceWaterPreviewFlipNormalX ? 1 : 0,
-            bSurfaceWaterPreviewFlipNormalY ? 1 : 0);
+            PreviewPartSurfaceWater.DropletFlowDetailSize);
     }
     SurfaceWaterPreviewStatus += FString::Printf(
         TEXT("\nDisplayMode=%s."),
@@ -3035,12 +3011,6 @@ void SDWCPartViewport::ApplySurfaceWaterPreviewRenderOverrides()
         return;
     }
 
-    SurfaceWaterPreviewMaterial->SetScalarParameterValue(
-        DWCWetMaterialParameters::SurfaceWaterNormalFlipX(),
-        bSurfaceWaterPreviewFlipNormalX ? 1.0f : 0.0f);
-    SurfaceWaterPreviewMaterial->SetScalarParameterValue(
-        DWCWetMaterialParameters::SurfaceWaterNormalFlipY(),
-        bSurfaceWaterPreviewFlipNormalY ? 1.0f : 0.0f);
     SurfaceWaterPreviewMaterial->SetScalarParameterValue(
         PreviewDebugModeParameter,
         SurfaceWaterPreviewDisplayMode == EDWCSurfaceWaterTilingPreviewDisplayMode::DropletNormal ? 4.0f : 0.0f);

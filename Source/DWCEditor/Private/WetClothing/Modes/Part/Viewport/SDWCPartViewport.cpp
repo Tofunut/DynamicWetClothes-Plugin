@@ -943,6 +943,7 @@ void SDWCPartViewport::RefreshPreviewMesh()
     if (ViewportClient.IsValid())
     {
         ViewportClient->ClearPickableIslandCache();
+        bPickableTopologyDirty = TargetMesh != nullptr && !CurrentSelectableIslands.IsEmpty();
     }
     ConfigureStaticPartPreviewPose(PreviewMeshComponent);
     PreviewMeshComponent->ShowAllMaterialSections(0);
@@ -987,13 +988,16 @@ void SDWCPartViewport::RefreshPreviewMesh()
     if (ViewportClient.IsValid())
     {
         ViewportClient->SetPreviewMeshComponent(PreviewMeshComponent);
-        ViewportClient->FocusOnPreviewMesh(PreviewMeshComponent, true);
-        ViewportClient->RequestFocusOnPreviewMeshNextTick(PreviewMeshComponent);
-        ViewportClient->Invalidate();
+        if (!bPreviewPaused)
+        {
+            ViewportClient->FocusOnPreviewMesh(PreviewMeshComponent, true);
+            ViewportClient->RequestFocusOnPreviewMeshNextTick(PreviewMeshComponent);
+        }
+        RequestViewportRedraw();
     }
     else
     {
-        Invalidate();
+        RequestViewportRedraw();
     }
 }
 
@@ -2137,6 +2141,16 @@ void SDWCPartViewport::RefreshPartPreviewOverlayMaterial()
         return;
     }
 
+    // Do not attach the preview overlay until its generated textures are ready.
+    // RefreshPreviewMesh() can run before Part Mode has rebuilt the island/color data;
+    // binding the overlay material with null textures during that window darkens the
+    // base mesh even though there is no Part Color or selection to display yet.
+    if (PartPreviewColorTexture == nullptr || PartPreviewSelectionTexture == nullptr)
+    {
+        ClearPartPreviewOverlay();
+        return;
+    }
+
     UMaterialInterface* OverlayMaterial = ResolveWetPartOverlayMaterial();
     if (OverlayMaterial == nullptr)
     {
@@ -3084,6 +3098,11 @@ FSlateColor SDWCPartViewport::GetSurfaceWaterPreviewStatusColor() const
 
 void SDWCPartViewport::RequestViewportRedraw()
 {
+    if (bPreviewPaused)
+    {
+        return;
+    }
+
     if (ViewportClient.IsValid())
     {
         ViewportClient->Invalidate();
@@ -3094,9 +3113,34 @@ void SDWCPartViewport::RequestViewportRedraw()
 
 void SDWCPartViewport::FocusOnPreviewMesh(bool bInstant)
 {
+    if (bPreviewPaused)
+    {
+        return;
+    }
+
     if (ViewportClient.IsValid())
     {
         ViewportClient->FocusOnPreviewMesh(PreviewMeshComponent, bInstant);
+    }
+}
+
+void SDWCPartViewport::SetPreviewPaused(const bool bInPaused)
+{
+    if (bPreviewPaused == bInPaused)
+    {
+        return;
+    }
+
+    bPreviewPaused = bInPaused;
+    if (ViewportClient.IsValid())
+    {
+        ViewportClient->SetPreviewPaused(bPreviewPaused);
+    }
+
+    if (!bPreviewPaused)
+    {
+        FlushPendingPreviewUpdates();
+        RequestViewportRedraw();
     }
 }
 
@@ -3104,6 +3148,7 @@ TSharedRef<FEditorViewportClient> SDWCPartViewport::MakeEditorViewportClient()
 {
     check(PreviewScene.IsValid());
     ViewportClient = MakeShared<FDWCPartViewportClient>(PreviewScene.Get(), SharedThis(this));
+    ViewportClient->SetPreviewPaused(bPreviewPaused);
 
     if (PreviewMeshComponent != nullptr)
     {

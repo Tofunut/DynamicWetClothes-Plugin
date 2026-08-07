@@ -5000,6 +5000,7 @@ FReply SWetClothingPartEditorPanel::HandleOpenSurfaceWaterTilingClicked(FWetPart
 
     if (const TSharedPtr<SWindow> ExistingWindow = SurfaceWaterTilingWindow.Pin())
     {
+        PausePartPreviewForSurfaceWaterTiling();
         const bool bDifferentEditTarget =
             SurfaceWaterTilingEditMaterialSlotIndex != SelectedMaterialSlotIndex ||
             SurfaceWaterTilingEditWetPartID != Item->WetPartID;
@@ -5033,6 +5034,7 @@ FReply SWetClothingPartEditorPanel::HandleOpenSurfaceWaterTilingClicked(FWetPart
     Window->SetOnWindowClosed(FOnWindowClosed::CreateSP(
         this, &SWetClothingPartEditorPanel::HandleSurfaceWaterTilingWindowClosed));
     SurfaceWaterTilingWindow = Window;
+    PausePartPreviewForSurfaceWaterTiling();
 
     if (const TSharedPtr<SWindow> ParentWindow = FSlateApplication::Get().FindWidgetWindow(AsShared()))
     {
@@ -5049,6 +5051,22 @@ FReply SWetClothingPartEditorPanel::HandleOpenSurfaceWaterTilingClicked(FWetPart
         SurfaceWaterTilingPreviewViewport->FocusOnPreviewMesh(true);
     }
     return FReply::Handled();
+}
+
+void SWetClothingPartEditorPanel::PausePartPreviewForSurfaceWaterTiling()
+{
+    if (PreviewViewport.IsValid())
+    {
+        PreviewViewport->SetPreviewPaused(true);
+    }
+}
+
+void SWetClothingPartEditorPanel::ResumePartPreviewAfterSurfaceWaterTiling()
+{
+    if (PreviewViewport.IsValid())
+    {
+        PreviewViewport->SetPreviewPaused(false);
+    }
 }
 
 void SWetClothingPartEditorPanel::ResetSurfaceWaterTilingPreviewState()
@@ -5181,6 +5199,10 @@ FReply SWetClothingPartEditorPanel::HandleApplySurfaceWaterTilingChangesClicked(
     SurfaceWaterTilingOriginalSettings = SurfaceWaterTilingEditedSettings;
     bSurfaceWaterTilingHasPendingChanges = false;
     UpdateSurfaceWaterTilingWindowTitle();
+    if (const TSharedPtr<SWindow> Window = SurfaceWaterTilingWindow.Pin())
+    {
+        Window->RequestDestroyWindow();
+    }
     return FReply::Handled();
 }
 
@@ -5466,6 +5488,7 @@ TSharedRef<SWidget> SWetClothingPartEditorPanel::BuildSurfaceWaterTilingWindowCo
 
 void SWetClothingPartEditorPanel::HandleSurfaceWaterTilingWindowClosed(const TSharedRef<SWindow>& /*Window*/)
 {
+    ResumePartPreviewAfterSurfaceWaterTiling();
     if (SurfaceWaterTilingPreviewViewport.IsValid())
     {
         SurfaceWaterTilingPreviewViewport->ClearSurfaceWaterTilingPreviewPartSettingsOverride();
@@ -5828,7 +5851,10 @@ TSharedRef<SWidget> SWetClothingPartEditorPanel::BuildPartPreviewControlsPanel()
                                                     [SNew(SBox)
                                                          .WidthOverride(112.0f)
                                                              [SNew(STextBlock)
-                                                                  .Text(LOCTEXT("PartColorIntensityLabel", "Intensity"))]]
+                                                                  .Text(LOCTEXT("PartColorIntensityLabel", "Color Intensity"))
+                                                                  .ToolTipText(LOCTEXT(
+                                                                      "PartColorIntensityTooltip",
+                                                                      "Controls the display intensity of Wet Part colors in the preview."))]]
 
                                           + SHorizontalBox::Slot()
                                                 .FillWidth(1.0f)

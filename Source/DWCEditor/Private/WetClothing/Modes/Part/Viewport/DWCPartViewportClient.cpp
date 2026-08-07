@@ -39,6 +39,11 @@ FDWCPartViewportClient::FDWCPartViewportClient(
 
 void FDWCPartViewportClient::Tick(float DeltaSeconds)
 {
+    if (bPreviewPaused)
+    {
+        return;
+    }
+
     FEditorViewportClient::Tick(DeltaSeconds);
 
     if (PreviewScene != nullptr && PreviewScene->GetWorld() != nullptr)
@@ -63,6 +68,11 @@ void FDWCPartViewportClient::Tick(float DeltaSeconds)
 
 void FDWCPartViewportClient::ProcessClick(FSceneView& View, HHitProxy* HitProxy, FKey Key, EInputEvent Event, uint32 HitX, uint32 HitY)
 {
+    if (bPreviewPaused)
+    {
+        return;
+    }
+
     FEditorViewportClient::ProcessClick(View, HitProxy, Key, Event, HitX, HitY);
 
     if (Key != EKeys::LeftMouseButton || Event != IE_Released)
@@ -367,4 +377,9 @@ void FDWCPartViewportClient::ClearPickableIslandCache()
     PickTriangles.Reset();
     PickTriangleIndices.Reset();
     PickBVHNodes.Reset();
+}
+
+void FDWCPartViewportClient::SetPreviewPaused(const bool bInPaused)
+{
+    bPreviewPaused = bInPaused;
 }

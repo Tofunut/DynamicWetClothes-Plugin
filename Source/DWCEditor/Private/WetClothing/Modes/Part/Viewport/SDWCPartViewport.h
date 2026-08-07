@@ -83,6 +83,7 @@ class SDWCPartViewport : public SEditorViewport, public FGCObject
     void  RefreshSurfaceWaterPreviewDynamicTextures();
     void  RefreshSurfaceWaterPreviewMaterial();
     void  FocusOnPreviewMesh(bool bInstant = false);
+    void  SetPreviewPaused(bool bInPaused);
     void  SetSelectionOverlayThicknessScale(float InThicknessScale);
     float GetSelectionOverlayThicknessScale() const { return SelectionOverlayThicknessScale; }
     FText GetSurfaceWaterPreviewStatusText() const;
@@ -208,4 +209,5 @@ class SDWCPartViewport : public SEditorViewport, public FGCObject
     bool                                         bWetPartOverlayDirty = false;
     bool                                         bSelectionOverlayDirty = false;
     bool                                         bSurfacePreviewDirty = false;
+    bool                                         bPreviewPaused = false;
 };

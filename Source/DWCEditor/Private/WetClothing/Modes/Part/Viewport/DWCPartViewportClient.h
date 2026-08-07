@@ -26,6 +26,7 @@ class FDWCPartViewportClient : public FEditorViewportClient
     void SetPreviewMeshComponent(const USkeletalMeshComponent* InPreviewMeshComponent);
     void SetPickableIslands(const TArray<FWetClothingAssetUVIsland>& InIslands, uint32 TopologyCacheKey);
     void ClearPickableIslandCache();
+    void SetPreviewPaused(bool bInPaused);
 
   private:
     struct FPickTriangle
@@ -62,6 +63,7 @@ class FDWCPartViewportClient : public FEditorViewportClient
     TWeakObjectPtr<const USkeletalMeshComponent> PreviewMeshComponent;
     TWeakObjectPtr<const USkeletalMeshComponent> PendingFocusMeshComponent;
     bool                                         bFocusPreviewMeshOnNextTick = false;
+    bool                                         bPreviewPaused = false;
     TArray<FPickTriangle>                        PickTriangles;
     TArray<int32>                                PickTriangleIndices;
     TArray<FPickBVHNode>                         PickBVHNodes;

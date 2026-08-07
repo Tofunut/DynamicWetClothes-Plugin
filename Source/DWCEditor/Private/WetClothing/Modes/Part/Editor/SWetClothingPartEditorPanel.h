@@ -217,6 +217,8 @@ class SWetClothingPartEditorPanel : public SCompoundWidget
     bool                                           IsSurfaceWaterTilingEnabled(FWetPartEntryPtr Item) const;
     FReply                                         HandleOpenSurfaceWaterTilingClicked(FWetPartEntryPtr Item);
     TSharedRef<SWidget>                            BuildSurfaceWaterTilingWindowContent();
+    void                                           PausePartPreviewForSurfaceWaterTiling();
+    void                                           ResumePartPreviewAfterSurfaceWaterTiling();
     void                                           RefreshSurfaceWaterTilingPreview();
     void                                           ResetSurfaceWaterTilingPreviewState();
     void                                           UpdateSurfaceWaterTilingWindowTitle();

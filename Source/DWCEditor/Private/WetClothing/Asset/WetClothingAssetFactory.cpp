@@ -2,7 +2,6 @@
 #include "WetClothingAssetFactory.h"
 #include "Utility/DWCLog.h"
 
-#include "AssetThumbnail.h"
 #include "AssetRegistry/AssetData.h"
 #include "Core/DWCEditorStyle.h"
 #include "DataAssets/WetClothingAsset.h"
@@ -20,7 +19,6 @@
 #include "Rendering/SkeletalMeshRenderData.h"
 #include "Styling/AppStyle.h"
 #include "Styling/StyleColors.h"
-#include "ThumbnailRendering/ThumbnailManager.h"
 #include "UObject/UnrealType.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SComboBox.h"
@@ -37,7 +35,6 @@
 namespace
 {
     constexpr float CreateDialogWidth = 720.0f;
-    constexpr uint32 SourceMeshThumbnailSize = 112;
     constexpr int32 RecommendedDWCDataUVSelection = INDEX_NONE;
     constexpr int32 MaxDWCDataUVChannelIndex = 3;
     const FLinearColor InfoIconTint(0.32f, 0.65f, 1.0f, 1.0f);
@@ -461,32 +458,6 @@ namespace
             .Text(Text);
     }
 
-    void RefreshSourceMeshThumbnail(
-        const TSharedPtr<FAssetThumbnail>& SourceMeshThumbnail,
-        const TSharedPtr<FAssetThumbnailPool>& SourceMeshThumbnailPool,
-        USkeletalMesh* SourceMesh)
-    {
-        if (!SourceMeshThumbnail.IsValid())
-        {
-            return;
-        }
-
-        SourceMeshThumbnail->SetAsset(SourceMesh);
-        // This dialog only needs a static preview. Real-time thumbnails depend on continuous
-        // editor ticking and can remain black while the modal loop is active.
-        SourceMeshThumbnail->SetRealTime(false);
-        SourceMeshThumbnail->RefreshThumbnail();
-
-        if (SourceMeshThumbnailPool.IsValid())
-        {
-            TArray<TSharedPtr<FAssetThumbnail>> ThumbnailsToPrioritize;
-            ThumbnailsToPrioritize.Add(SourceMeshThumbnail);
-            SourceMeshThumbnailPool->PrioritizeThumbnails(
-                ThumbnailsToPrioritize,
-                SourceMeshThumbnailSize,
-                SourceMeshThumbnailSize);
-        }
-    }
 }
 
 #if WITH_EDITOR
@@ -555,24 +526,8 @@ bool UWetClothingAssetFactory::ConfigureProperties()
         SurfaceNormalUVChannelOptions.Add(MakeShared<int32>(UVChannelIndex));
     }
     bool bUseRecommendedDWCDataUVChannel = true;
-    TSharedPtr<FAssetThumbnailPool> SourceMeshThumbnailPool = UThumbnailManager::Get().GetSharedThumbnailPool();
-    TSharedPtr<FAssetThumbnail> SourceMeshThumbnail = MakeShared<FAssetThumbnail>(
-        PendingCreationSettings->SourceSkeletalMesh.Get(),
-        SourceMeshThumbnailSize,
-        SourceMeshThumbnailSize,
-        SourceMeshThumbnailPool);
-    FAssetThumbnailConfig SourceMeshThumbnailConfig;
-    SourceMeshThumbnailConfig.bAllowFadeIn = false;
-    SourceMeshThumbnailConfig.bAllowHintText = false;
-    SourceMeshThumbnailConfig.ThumbnailLabel = EThumbnailLabel::NoLabel;
-    SourceMeshThumbnailConfig.ShowAssetBorder = true;
-    RefreshSourceMeshThumbnail(
-        SourceMeshThumbnail,
-        SourceMeshThumbnailPool,
-        PendingCreationSettings->SourceSkeletalMesh.Get());
-
     auto HandleSourceMeshPicked =
-        [this, DetailsView, &bUseRecommendedDWCDataUVChannel, SourceMeshThumbnail, SourceMeshThumbnailPool](const FAssetData& AssetData)
+        [this, DetailsView, &bUseRecommendedDWCDataUVChannel](const FAssetData& AssetData)
         {
             if (PendingCreationSettings == nullptr)
             {
@@ -587,7 +542,6 @@ bool UWetClothingAssetFactory::ConfigureProperties()
             PendingCreationSettings->FirstGeneratedLODIndex = 0;
             PendingCreationSettings->LastGeneratedLODIndex = FMath::Max(0, GetSkeletalMeshLODCount(NewSourceMesh) - 1);
             ClampLODRangeForMesh(NewSourceMesh, PendingCreationSettings->FirstGeneratedLODIndex, PendingCreationSettings->LastGeneratedLODIndex);
-            RefreshSourceMeshThumbnail(SourceMeshThumbnail, SourceMeshThumbnailPool, NewSourceMesh);
             DetailsView->ForceRefresh();
         };
 
@@ -695,52 +649,33 @@ bool UWetClothingAssetFactory::ConfigureProperties()
                     .AutoHeight()
                     .Padding(0.0f, 6.0f, 0.0f, 0.0f)
                     [
-                        SNew(SHorizontalBox)
-                        + SHorizontalBox::Slot()
-                        .AutoWidth()
-                        .VAlign(VAlign_Top)
+                        SNew(SVerticalBox)
+                        + SVerticalBox::Slot()
+                        .AutoHeight()
                         [
-                            SNew(SBox)
-                            .WidthOverride(SourceMeshThumbnailSize)
-                            .HeightOverride(SourceMeshThumbnailSize)
-                            [
-                                SourceMeshThumbnail->MakeThumbnailWidget(SourceMeshThumbnailConfig)
-                            ]
+                            SNew(SObjectPropertyEntryBox)
+                            .AllowedClass(USkeletalMesh::StaticClass())
+                            .AllowClear(true)
+                            .AllowCreate(false)
+                            .DisplayThumbnail(false)
+                            .ObjectPath_Lambda([this]()
+                            {
+                                return PendingCreationSettings != nullptr && PendingCreationSettings->SourceSkeletalMesh != nullptr
+                                    ? PendingCreationSettings->SourceSkeletalMesh->GetPathName()
+                                    : FString();
+                            })
+                            .OnObjectChanged_Lambda(HandleSourceMeshPicked)
                         ]
-                        + SHorizontalBox::Slot()
-                        .FillWidth(1.0f)
-                        .Padding(10.0f, 0.0f, 0.0f, 0.0f)
-                        .VAlign(VAlign_Top)
+                        + SVerticalBox::Slot()
+                        .AutoHeight()
+                        .Padding(0.0f, 6.0f, 0.0f, 0.0f)
                         [
-                            SNew(SVerticalBox)
-                            + SVerticalBox::Slot()
-                            .AutoHeight()
-                            [
-                                SNew(SObjectPropertyEntryBox)
-                                .AllowedClass(USkeletalMesh::StaticClass())
-                                .AllowClear(true)
-                                .AllowCreate(false)
-                                .DisplayThumbnail(false)
-                                .ThumbnailPool(SourceMeshThumbnailPool)
-                                .ObjectPath_Lambda([this]()
-                                {
-                                    return PendingCreationSettings != nullptr && PendingCreationSettings->SourceSkeletalMesh != nullptr
-                                        ? PendingCreationSettings->SourceSkeletalMesh->GetPathName()
-                                        : FString();
-                                })
-                                .OnObjectChanged_Lambda(HandleSourceMeshPicked)
-                            ]
-                            + SVerticalBox::Slot()
-                            .AutoHeight()
-                            .Padding(0.0f, 6.0f, 0.0f, 0.0f)
-                            [
-                                BuildCreationHelperTextRow(TAttribute<FText>::Create(TAttribute<FText>::FGetter::CreateLambda([this]()
-                                {
-                                    return PendingCreationSettings != nullptr
-                                        ? BuildSourceMeshUVInfoText(PendingCreationSettings->SourceSkeletalMesh)
-                                        : BuildSourceMeshUVInfoText(nullptr);
-                                })))
-                            ]
+                            BuildCreationHelperTextRow(TAttribute<FText>::Create(TAttribute<FText>::FGetter::CreateLambda([this]()
+                            {
+                                return PendingCreationSettings != nullptr
+                                    ? BuildSourceMeshUVInfoText(PendingCreationSettings->SourceSkeletalMesh)
+                                    : BuildSourceMeshUVInfoText(nullptr);
+                            })))
                         ]
                     ]
                     ]
@@ -1277,27 +1212,7 @@ bool UWetClothingAssetFactory::ConfigureProperties()
             ]
         ]);
 
-    FSlateApplication& SlateApplication = FSlateApplication::Get();
-    FDelegateHandle ThumbnailModalTickHandle;
-    if (SourceMeshThumbnailPool.IsValid())
-    {
-        ThumbnailModalTickHandle = SlateApplication.GetOnModalLoopTickEvent().AddLambda(
-            [WeakThumbnailPool = TWeakPtr<FAssetThumbnailPool>(SourceMeshThumbnailPool)](const float DeltaTime)
-            {
-                if (const TSharedPtr<FAssetThumbnailPool> ThumbnailPool = WeakThumbnailPool.Pin();
-                    ThumbnailPool.IsValid() && ThumbnailPool->IsTickable())
-                {
-                    ThumbnailPool->Tick(DeltaTime);
-                }
-            });
-    }
-
-    SlateApplication.AddModalWindow(Dialog, SlateApplication.GetActiveTopLevelWindow());
-
-    if (ThumbnailModalTickHandle.IsValid())
-    {
-        SlateApplication.GetOnModalLoopTickEvent().Remove(ThumbnailModalTickHandle);
-    }
+    FSlateApplication::Get().AddModalWindow(Dialog, FSlateApplication::Get().GetActiveTopLevelWindow());
     if (!bAccepted)
     {
         PendingCreationSettings = nullptr;

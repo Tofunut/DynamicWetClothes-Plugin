@@ -63,17 +63,14 @@ class DWC_API FWetInputStage
     static bool ApplyWetSurface(
         FWetInputStageArgs&         Args,
         const FDWCWaterSurfaceData& WaterSurfaceData,
-        float                       Amount,
-        bool                        bApplyMaterial);
+        float                       Amount);
     static bool ApplyWetArea(
         FWetInputStageArgs&    Args,
-        const FDWCWetAreaData& AreaData,
-        bool                   bApplyMaterial);
-    static bool ApplyWetContact(FWetInputStageArgs& Args, const FDWCWetContact& Contact, bool bApplyMaterial);
+        const FDWCWetAreaData& AreaData);
+    static bool ApplyWetContact(FWetInputStageArgs& Args, const FDWCWetContact& Contact);
     static bool ApplyWetContacts(
         FWetInputStageArgs&           Args,
-        const TArray<FDWCWetContact>& Contacts,
-        bool                          bApplyMaterial);
+        const TArray<FDWCWetContact>& Contacts);
     static bool GetWetnessWorldBounds(const FWetInputStageArgs& Args, FBox& OutBounds);
     static bool QueryWaterSurfaceData(
         const FDWCWaterSurfaceData& WaterSurfaceData,

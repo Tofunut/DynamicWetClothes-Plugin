@@ -731,7 +731,7 @@ void FWetInputStage::ApplyWetAll(FWetInputStageArgs& Receiver, float Amount)
         bQueuedWetness);
 }
 
-bool FWetInputStage::ApplyWetSurface(FWetInputStageArgs& Receiver, const FDWCWaterSurfaceData& WaterSurfaceData, const float Amount, const bool bApplyMaterial)
+bool FWetInputStage::ApplyWetSurface(FWetInputStageArgs& Receiver, const FDWCWaterSurfaceData& WaterSurfaceData, const float Amount)
 {
     if (!Receiver.TargetSkeletalMesh ||
         FMath::IsNearlyZero(Amount) ||
@@ -827,7 +827,7 @@ bool FWetInputStage::ApplyWetSurface(FWetInputStageArgs& Receiver, const FDWCWat
 }
 
 bool FWetInputStage::ApplyWetArea(FWetInputStageArgs&    Receiver,
-                                  const FDWCWetAreaData& AreaData, const bool bApplyMaterial)
+                                  const FDWCWetAreaData& AreaData)
 {
     if (!Receiver.TargetSkeletalMesh ||
         FMath::IsNearlyZero(AreaData.Amount) ||
@@ -1005,8 +1005,7 @@ bool FWetInputStage::ApplyWetArea(FWetInputStageArgs&    Receiver,
 
 bool FWetInputStage::ApplyWetContact(
     FWetInputStageArgs&   Receiver,
-    const FDWCWetContact& Contact,
-    bool                  bApplyMaterial)
+    const FDWCWetContact& Contact)
 {
     if (!Receiver.TargetSkeletalMesh || FMath::IsNearlyZero(Contact.Amount))
     {
@@ -1086,7 +1085,7 @@ bool FWetInputStage::ApplyWetContact(
     return bDirty || bQueuedWetness;
 }
 
-bool FWetInputStage::ApplyWetContacts(FWetInputStageArgs& Receiver, const TArray<FDWCWetContact>& Contacts, bool bApplyMaterial)
+bool FWetInputStage::ApplyWetContacts(FWetInputStageArgs& Receiver, const TArray<FDWCWetContact>& Contacts)
 {
     if (!Receiver.TargetSkeletalMesh || Contacts.IsEmpty())
     {
@@ -1182,10 +1181,6 @@ bool FWetInputStage::ApplyWetContacts(FWetInputStageArgs& Receiver, const TArray
             PreparedData,
             bDirty,
             bQueuedWetness);
-    }
-
-    if ((bDirty || bQueuedWetness) && bApplyMaterial)
-    {
     }
 
     return bDirty || bQueuedWetness;

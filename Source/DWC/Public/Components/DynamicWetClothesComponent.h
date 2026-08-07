@@ -27,7 +27,6 @@
 
 class USkeletalMeshComponent;
 class USkeletalMesh;
-class UMaterialInstanceDynamic;
 class FDWCLodCoordinator;
 class FDWCLODVertexColorTransferCoordinator;
 class FDWCTaskQueue;
@@ -38,6 +37,7 @@ struct FDWCSkinningTaskResult;
 struct FDWCSkinningStaticData;
 struct FDWCLODVertexColorTransferResult;
 struct FDWCLODVertexStaticData;
+struct FPropertyChangedEvent;
 
 struct FDWCWetMeshReceiverRuntime
 {
@@ -99,14 +99,15 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
     virtual ~UDynamicWetClothesComponent() override;
 
     // Wetness input API.
+    UFUNCTION(BlueprintCallable, Category = "Wetness", meta = (ToolTip = "Adds wetness to every wettable vertex on this component. Negative values remove wetness."))
     void ApplyWetAll(float Amount);
-    UFUNCTION(BlueprintCallable, Category = "Wetness")
+    UFUNCTION(BlueprintCallable, Category = "Wetness", meta = (AdvancedDisplay = "bApplyMaterial", ToolTip = "Applies one world-space wet contact. Negative Amount values remove wetness."))
     bool ApplyWetContact(const FDWCWetContact& Contact, bool bApplyMaterial = true);
-    UFUNCTION(BlueprintCallable, Category = "Wetness")
+    UFUNCTION(BlueprintCallable, Category = "Wetness", meta = (AdvancedDisplay = "bApplyMaterial", ToolTip = "Applies multiple world-space wet contacts in one call. Prefer this for Niagara or batched splash input."))
     bool ApplyWetContacts(const TArray<FDWCWetContact>& Contacts, bool bApplyMaterial = true);
-    UFUNCTION(BlueprintCallable, Category = "Wetness")
+    UFUNCTION(BlueprintCallable, Category = "Wetness", meta = (AdvancedDisplay = "bApplyMaterial", ToolTip = "Distributes wetness across sampled receiver vertices, optionally weighted by the incoming direction and surface normals."))
     bool ApplyWetArea(const FDWCWetAreaData& AreaData, bool bApplyMaterial = true);
-    UFUNCTION(BlueprintCallable, Category = "Wetness")
+    UFUNCTION(BlueprintCallable, Category = "Wetness", meta = (AdvancedDisplay = "bApplyMaterial", ToolTip = "Applies wetness to vertices under the supplied water surface height grid. Negative Amount values remove wetness."))
     bool ApplyWetSurface(const FDWCWaterSurfaceData& WaterSurfaceData, float Amount, bool bApplyMaterial = true);
     UFUNCTION(BlueprintCallable, Category = "Wetness")
     void SetDryRateScale(float InDryRateScale);
@@ -160,6 +161,8 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
 
 #if WITH_EDITOR
     virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
+    void HandleExternalMaterialPropertyChanged(UObject* Object, FPropertyChangedEvent& PropertyChangedEvent);
+    void RebindMaterialsAfterExternalChange(USkeletalMeshComponent* MeshComponent);
 #endif
 
   protected:
@@ -197,7 +200,6 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
     void                     ApplyGeneratedWetMaterialOverrides();
     void                     ApplyQualityLODMaterialParameters(FDWCWetMeshReceiverRuntime& Receiver);
     void                     MarkCPUWetnessRenderingDirty(FDWCWetMeshReceiverRuntime& Receiver);
-
     // Internal quality-LOD implementation retained for future development.
     void                     RefreshResolvedQualityLODPolicies();
     void                     UpdateRenderLOD();
@@ -222,7 +224,7 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
 
     /** Selected per component instance and locked when BeginPlay starts. */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Simulation")
-    EDWCSimulationMode SimulationMode = EDWCSimulationMode::VertexCPU;
+    EDWCSimulationMode SimulationMode = EDWCSimulationMode::WetnessMapGPU;
 
     // GPU implementation tuning is fixed internally and intentionally not exposed to Details or Blueprint.
 
@@ -271,7 +273,7 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
     bool bDroplet2RenderingEnabled = true;
 
     UPROPERTY(Transient)
-    EDWCSimulationMode ActiveSimulationMode = EDWCSimulationMode::VertexCPU;
+    EDWCSimulationMode ActiveSimulationMode = EDWCSimulationMode::WetnessMapGPU;
 
     UPROPERTY(Transient)
     bool bSimulationModeLocked = false;
@@ -286,10 +288,13 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
     FTimerHandle           WetnessSimulationTimer;
     FTimerHandle           WetnessRenderTimer;
     FTimerHandle           RenderLODEvaluationTimer;
+#if WITH_EDITOR
+    FDelegateHandle        ExternalMaterialPropertyChangedHandle;
+    bool                   bRebindingExternalMaterials = false;
+#endif
     TArray<FDWCWetContact> PendingWetContacts;
     bool                   bPendingWetContactsApplyMaterial = false;
     bool                   bWetRenderDirty = false;
-
     // Internal runtime state for future DWC quality LOD support. Not exposed in this release.
     int32 CurrentQualityLOD = 0;
     float CurrentRenderLODScreenSize = 0.0f;

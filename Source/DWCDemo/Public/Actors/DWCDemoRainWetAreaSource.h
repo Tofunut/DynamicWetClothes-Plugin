@@ -11,6 +11,7 @@ class UBoxComponent;
 class UDynamicWetClothesComponent;
 class UPrimitiveComponent;
 class UNiagaraComponent;
+struct FDWCWetAreaData;
 
 UCLASS(BlueprintType, Blueprintable, meta = (DisplayName = "DWC Demo Rain Wet Area Source"))
 class DWCDEMO_API ADWCDemoRainWetAreaSource : public AActor
@@ -32,6 +33,8 @@ class DWCDEMO_API ADWCDemoRainWetAreaSource : public AActor
     void AddReceiverFromActor(AActor* OtherActor);
     void RemoveReceiverFromActor(AActor* OtherActor);
     bool IsReceiverInsideRainBounds(const UDynamicWetClothesComponent& Receiver) const;
+    FVector GetRainDirectionWorld() const;
+    void BuildRainWetAreaData(FDWCWetAreaData& OutAreaData) const;
     void ApplyRainToReceiver(UDynamicWetClothesComponent& Receiver) const;
     void ApplyRainNiagaraParameters() const;
     bool ShouldLogDebug() const;
@@ -55,7 +58,7 @@ class DWCDEMO_API ADWCDemoRainWetAreaSource : public AActor
     UPROPERTY(VisibleAnywhere)
     UBoxComponent* RainBounds;
 
-    UPROPERTY(VisibleAnywhere)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = "true"))
     UNiagaraComponent* RainNiagara;
 
     UPROPERTY(EditAnywhere, Category = "DWC Demo|Rain Wet Area Source", meta = (ClampMin = "0.0"))
@@ -70,13 +73,13 @@ class DWCDEMO_API ADWCDemoRainWetAreaSource : public AActor
     UPROPERTY(EditAnywhere, Category = "DWC Demo|Rain Wet Area Source", meta = (ClampMin = "1"))
     int32 RainSamplesPerTick = 300;
 
-    UPROPERTY(EditAnywhere, Category = "DWC Demo|Rain Wet Area Source")
+    UPROPERTY(EditAnywhere, Category = "DWC Demo|Rain Wet Area Source", meta = (AdvancedDisplay, ToolTip = "Uses the rain direction to favor surfaces facing the incoming rain."))
     bool bUseNormalExposure = true;
 
-    UPROPERTY(EditAnywhere, Category = "DWC Demo|Rain Wet Area Source", meta = (EditCondition = "bUseNormalExposure"))
+    UPROPERTY(EditAnywhere, Category = "DWC Demo|Rain Wet Area Source", meta = (AdvancedDisplay, EditCondition = "bUseNormalExposure", ToolTip = "When normal exposure is enabled, use current skinned normals when available instead of static mesh normals."))
     bool bUseSkinnedNormalsForExposure = true;
 
-    UPROPERTY(EditAnywhere, Category = "DWC Demo|Rain Wet Area Source")
+    UPROPERTY(EditAnywhere, Category = "DWC Demo|Rain Wet Area Source", meta = (ToolTip = "Local rain travel direction. The actor transform converts this to a normalized world direction before applying wetness and sending Niagara parameters."))
     FVector RainDirection = FVector(0.0f, 0.0f, -1.0f);
 
     UPROPERTY(EditAnywhere, Category = "DWC Demo|Rain Wet Area Source")

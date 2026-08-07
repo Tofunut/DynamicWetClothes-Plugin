@@ -445,7 +445,7 @@ bool FWetApplicationStage::ApplyWetContact(
         }
 
         FWetInputStageArgs InputArgs = MakeWetInputStageArgs(Context, *Receiver);
-        const bool bChanged = FWetInputStage::ApplyWetContact(InputArgs, Contact, bApplyMaterial);
+        const bool bChanged = FWetInputStage::ApplyWetContact(InputArgs, Contact);
         if (bChanged)
         {
             bAnyChanged = true;
@@ -539,7 +539,7 @@ bool FWetApplicationStage::ApplyWetContacts(
         }
 
         FWetInputStageArgs InputArgs = MakeWetInputStageArgs(Context, *Receiver);
-        const bool bChanged = FWetInputStage::ApplyWetContacts(InputArgs, ReceiverContacts, bApplyMaterial);
+        const bool bChanged = FWetInputStage::ApplyWetContacts(InputArgs, ReceiverContacts);
         if (bChanged)
         {
             bAnyChanged = true;
@@ -558,6 +558,12 @@ bool FWetApplicationStage::ApplyWetArea(
     const bool                    bApplyMaterial)
 {
     if (Context.Receivers == nullptr)
+    {
+        return false;
+    }
+
+    if (Context.Receivers->IsEmpty() &&
+        (!Context.EnsureWetRuntimeInitialized || !Context.EnsureWetRuntimeInitialized()))
     {
         return false;
     }
@@ -593,7 +599,7 @@ bool FWetApplicationStage::ApplyWetArea(
         }
 
         FWetInputStageArgs InputArgs = MakeWetInputStageArgs(Context, *Receiver);
-        const bool bChanged = FWetInputStage::ApplyWetArea(InputArgs, AreaData, bApplyMaterial);
+        const bool bChanged = FWetInputStage::ApplyWetArea(InputArgs, AreaData);
         if (bChanged)
         {
             bAnyChanged = true;
@@ -649,7 +655,7 @@ bool FWetApplicationStage::ApplyWetSurface(
         }
 
         FWetInputStageArgs InputArgs = MakeWetInputStageArgs(Context, *Receiver);
-        const bool bChanged = FWetInputStage::ApplyWetSurface(InputArgs, WaterSurfaceData, Amount, bApplyMaterial);
+        const bool bChanged = FWetInputStage::ApplyWetSurface(InputArgs, WaterSurfaceData, Amount);
         if (bChanged)
         {
             bAnyChanged = true;
@@ -766,7 +772,7 @@ bool FWetApplicationStage::FlushPendingWetContacts(FWetApplicationStageContext& 
         }
 
         FWetInputStageArgs InputArgs = MakeWetInputStageArgs(Context, *Receiver);
-        const bool bChanged = FWetInputStage::ApplyWetContacts(InputArgs, ReceiverContacts, bApplyMaterial);
+        const bool bChanged = FWetInputStage::ApplyWetContacts(InputArgs, ReceiverContacts);
         if (bChanged)
         {
             bAnyChanged = true;

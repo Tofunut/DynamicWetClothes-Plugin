@@ -10,6 +10,7 @@
 #include "NiagaraComponent.h"
 #include "TimerManager.h"
 #include "Utility/DWCProfiling.h"
+#include "WetInputSystem/WetContactTypes.h"
 
 ADWCDemoRainWetAreaSource::ADWCDemoRainWetAreaSource()
 {
@@ -269,6 +270,25 @@ bool ADWCDemoRainWetAreaSource::IsReceiverInsideRainBounds(const UDynamicWetClot
     return RainBounds->Bounds.GetBox().Intersect(WetBounds);
 }
 
+FVector ADWCDemoRainWetAreaSource::GetRainDirectionWorld() const
+{
+    if (RainDirection.IsNearlyZero())
+    {
+        return FVector::DownVector;
+    }
+
+    return GetActorTransform().TransformVectorNoScale(RainDirection).GetSafeNormal();
+}
+
+void ADWCDemoRainWetAreaSource::BuildRainWetAreaData(FDWCWetAreaData& OutAreaData) const
+{
+    OutAreaData.Amount = WetAmountPerSecond * UpdateInterval;
+    OutAreaData.Direction = GetRainDirectionWorld();
+    OutAreaData.SampleCount = RainSamplesPerTick;
+    OutAreaData.bUseNormalExposure = bUseNormalExposure;
+    OutAreaData.bUseSkinnedNormalsForExposure = bUseSkinnedNormalsForExposure;
+}
+
 void ADWCDemoRainWetAreaSource::ApplyRainToReceiver(UDynamicWetClothesComponent& Receiver) const
 {
     DWC_PROFILE_SCOPE(DWC_DemoRain_ApplyRainToReceiver);
@@ -290,17 +310,8 @@ void ADWCDemoRainWetAreaSource::ApplyRainToReceiver(UDynamicWetClothesComponent&
         return;
     }
 
-    const FVector SafeRainDirection =
-        RainDirection.IsNearlyZero()
-            ? FVector::DownVector
-            : GetActorTransform().TransformVectorNoScale(RainDirection).GetSafeNormal();
-
     FDWCWetAreaData AreaData;
-    AreaData.Amount = WetAmountPerSecond * UpdateInterval;
-    AreaData.Direction = SafeRainDirection;
-    AreaData.SampleCount = RainSamplesPerTick;
-    AreaData.bUseNormalExposure = bUseNormalExposure;
-    AreaData.bUseSkinnedNormalsForExposure = bUseSkinnedNormalsForExposure;
+    BuildRainWetAreaData(AreaData);
 
     const bool bChanged = Receiver.ApplyWetArea(AreaData, true);
     if (ShouldLogDebug())
@@ -325,7 +336,10 @@ void ADWCDemoRainWetAreaSource::ApplyRainNiagaraParameters() const
         return;
     }
 
-    RainNiagara->SetVariableVec3(RainDirectionParameterName, RainDirection);
+    FDWCWetAreaData AreaData;
+    BuildRainWetAreaData(AreaData);
+
+    RainNiagara->SetVariableVec3(RainDirectionParameterName, AreaData.Direction);
     RainNiagara->SetVariableVec3(RainBoundsExtentParameterName, RainBounds->GetScaledBoxExtent() * 2.0f);
     RainNiagara->SetVariableFloat(RainIntensityParameterName, WetAmountPerSecond);
 }

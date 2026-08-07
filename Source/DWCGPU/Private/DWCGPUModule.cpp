@@ -7,6 +7,8 @@
 #include "Modules/ModuleManager.h"
 #include "ShaderCore.h"
 
+DEFINE_LOG_CATEGORY_STATIC(LogDWCGPUModule, Log, All);
+
 class FDWCGPUModule final : public IDWCGPUModule
 {
 public:
@@ -20,7 +22,7 @@ public:
         }
         else
         {
-            UE_LOG(LogTemp, Warning, TEXT("DWCGPU: Could not find the DynamicWetClothes plugin for shader directory mapping."));
+            UE_LOG(LogDWCGPUModule, Warning, TEXT("DWCGPU: Could not find the DynamicWetClothes plugin for shader directory mapping."));
         }
     }
 

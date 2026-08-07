@@ -1,5 +1,4 @@
 //Copyright 2026 Team Tofunut. All Rights Reserved.
-// Fill out your copyright notice in the Description page of Project Settings.
 
 #include "RuntimeState/Utils/WetSimulationStage.h"
 
@@ -542,7 +541,6 @@ void FWetSimulationStage::SpreadPendingWetnessToNeighbors(FWetSimulationStageArg
         const float TargetCapacity = Receiver.WetnessSettings->MaxWetness - Receiver.SimulationState->AbsorbedWetnessPerVertex[NeighborIndex];
         if (TargetCapacity <= Receiver.WetnessSettings->MinPendingWetnessAmount)
         {
-            // RefreshWetnessDryHold(Receiver, NeighborIndex);
             continue;
         }
 

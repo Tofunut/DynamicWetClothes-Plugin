@@ -2,44 +2,57 @@
 	"FileVersion": 3,
 	"EngineVersion": "5.8.0",
 	"Version": 1,
-	"VersionName": "0.1",
+	"VersionName": "1.0.0",
 	"FriendlyName": "Dynamic Wet Clothes",
 	"Description": "Runtime data and editor tooling for wet clothing profiles.",
 	"Category": "Gameplay",
-	"DocsURL" : "https://app.notion.com/p/DWC-Overview-2c195fcac96583608c6d810bdfb548b4",
+	"DocsURL": "https://app.notion.com/p/DWC-Overview-2c195fcac96583608c6d810bdfb548b4",
 	"FabURL": "com.epicgames.launcher://ue/Fab/product/3afb4688-435c-4484-9497-65dc11c872e2",
 	"EnabledByDefault": true,
 	"CanContainContent": true,
-	"SupportedTargetPlatforms": ["Win64"],
-    "Modules": [
-    {
-        "Name": "DWC",
-        "Type": "Runtime",
-        "LoadingPhase": "PostConfigInit",
-        "PlatformAllowList": ["Win64"]
-    },
-    {
-        "Name": "DWCGPU",
-        "Type": "Runtime",
-        "LoadingPhase": "PostConfigInit",
-        "PlatformAllowList": ["Win64"]
-    },
-    {
-        "Name": "DWCEditor",
-        "Type": "Editor",
-        "PlatformAllowList": ["Win64"]
-    },
-    {
-        "Name": "DWCWaterSystemIntegration",
-        "Type": "Runtime",
-        "PlatformAllowList": ["Win64"]
-    },
-    {
-        "Name": "DWCDemo",
-        "Type": "Runtime",
-        "PlatformAllowList": ["Win64"]
-    }
-    ],
+	"SupportedTargetPlatforms": [
+		"Win64"
+	],
+	"Modules": [
+		{
+			"Name": "DWC",
+			"Type": "Runtime",
+			"LoadingPhase": "PostConfigInit",
+			"PlatformAllowList": [
+				"Win64"
+			]
+		},
+		{
+			"Name": "DWCGPU",
+			"Type": "Runtime",
+			"LoadingPhase": "PostConfigInit",
+			"PlatformAllowList": [
+				"Win64"
+			]
+		},
+		{
+			"Name": "DWCEditor",
+			"Type": "Editor",
+			"PlatformAllowList": [
+				"Win64"
+			]
+		},
+		{
+			"Name": "DWCWaterSystemIntegration",
+			"Type": "Runtime",
+			"PlatformAllowList": [
+				"Win64"
+			],
+			"LoadingPhase": "None"
+		},
+		{
+			"Name": "DWCDemo",
+			"Type": "Runtime",
+			"PlatformAllowList": [
+				"Win64"
+			]
+		}
+	],
 	"Plugins": [
 		{
 			"Name": "ProceduralMeshComponent",
@@ -51,7 +64,9 @@
 		},
 		{
 			"Name": "Water",
-			"Enabled": true
+			"Enabled": false,
+			"Optional": true,
+			"Description": "Optional. Required only for DWC Water Body integration."
 		}
 	]
 }

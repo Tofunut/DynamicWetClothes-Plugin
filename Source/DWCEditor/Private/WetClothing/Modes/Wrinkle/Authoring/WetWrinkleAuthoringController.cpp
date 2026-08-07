@@ -237,14 +237,6 @@ FWetWrinklePatchPlacement FWetWrinkleAuthoringController::MakePatchFromHit(
     Patch.Strength = Brush.Strength;
     Patch.Falloff = Brush.Falloff;
     Patch.WrinkleNormalTexture = Brush.WrinkleNormalTexture;
-    Patch.AffectedWetPartID = INDEX_NONE;
-#if WITH_EDITORONLY_DATA
-    Patch.bHasEditorSurface = true;
-    Patch.EditorSurfaceLocalPosition = SurfaceHit.LocalPosition;
-    Patch.EditorSurfaceLocalNormal = SurfaceHit.LocalNormal;
-    Patch.EditorSurfaceLocalTangent = SurfaceHit.LocalTangent;
-    Patch.EditorSurfaceLocalBitangent = SurfaceHit.LocalBitangent;
-#endif
     return Patch;
 }
 

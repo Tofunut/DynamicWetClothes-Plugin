@@ -2,6 +2,7 @@
 #if WITH_EDITOR
 
 #include "RuntimeState/WetGPUMapBakeBuilder.h"
+#include "Utility/DWCLog.h"
 #include "Utility/DWCDataUVBufferView.h"
 
 #include "Algo/Sort.h"
@@ -512,7 +513,7 @@ class FResolvedProfileParameterCache
             {
                 FailedSourceProfiles.Add(Profile->GetSourceProfilePath());
                 UE_LOG(
-                    LogTemp,
+                    LogDWC,
                     Warning,
                     TEXT("WetGPUMapBakeBuilder: Failed to resolve Wetness Profile '%s' for WCA '%s'. Using the WCA snapshot/fallback profile."),
                     *Profile->GetSourceProfilePath().ToString(),

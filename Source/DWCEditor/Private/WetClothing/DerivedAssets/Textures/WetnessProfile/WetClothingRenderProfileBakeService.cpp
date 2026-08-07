@@ -177,7 +177,7 @@ namespace
 
             if (!SourcePathMatches(
                     Surface.DropletNormalTexture,
-                    BakedProfile->SourceDropletNormal) ||
+                    BakedProfile->GetSourceDropletNormalPath()) ||
                 !FWetClothingSurfaceTextureNormalizer::IsPreparedTextureReferenceCurrent(
                     BakedProfile->NormalizedDropletNormal,
                     Surface.DropletNormalTexture,
@@ -190,7 +190,7 @@ namespace
             }
             if (!SourcePathMatches(
                     Surface.DropletMaskTexture,
-                    BakedProfile->SourceDropletMask) ||
+                    BakedProfile->GetSourceDropletMaskPath()) ||
                 !FWetClothingSurfaceTextureNormalizer::IsPreparedTextureReferenceCurrent(
                     BakedProfile->NormalizedDropletMask,
                     Surface.DropletMaskTexture,
@@ -203,7 +203,7 @@ namespace
             }
             if (!SourcePathMatches(
                     Surface.DropletFlowNormalTexture,
-                    BakedProfile->SourceDropletFlowNormal) ||
+                    BakedProfile->GetSourceDropletFlowNormalPath()) ||
                 !FWetClothingSurfaceTextureNormalizer::IsPreparedTextureReferenceCurrent(
                     BakedProfile->NormalizedDropletFlowNormal,
                     Surface.DropletFlowNormalTexture,
@@ -216,7 +216,7 @@ namespace
             }
             if (!SourcePathMatches(
                     Surface.DropletFlowMaskTexture,
-                    BakedProfile->SourceDropletFlowMask) ||
+                    BakedProfile->GetSourceDropletFlowMaskPath()) ||
                 !FWetClothingSurfaceTextureNormalizer::IsPreparedTextureReferenceCurrent(
                     BakedProfile->NormalizedDropletFlowMask,
                     Surface.DropletFlowMaskTexture,

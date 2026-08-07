@@ -9,6 +9,8 @@
 #include "WaterBodyTypes.h"
 #include "Utility/DWCProfiling.h"
 
+DEFINE_LOG_CATEGORY_STATIC(LogDWCWaterIntegration, Log, All);
+
 UWaterBodyWetContactComponent::UWaterBodyWetContactComponent()
 {
     PrimaryComponentTick.bCanEverTick = true;
@@ -77,7 +79,7 @@ void UWaterBodyWetContactComponent::InitializeWaterBody()
 
     if (!IsValid(WaterBodyComponent) && IsValid(Owner))
     {
-        UE_LOG(LogTemp, Warning, TEXT("WaterBodyWetContactComponent: WaterBodyComponent not found on %s."), *Owner->GetName());
+        UE_LOG(LogDWCWaterIntegration, Warning, TEXT("WaterBodyWetContactComponent: WaterBodyComponent not found on %s."), *Owner->GetName());
     }
 }
 
@@ -97,7 +99,7 @@ void UWaterBodyWetContactComponent::CreateOverlapProxy()
     FBox WaterBodyBounds(ForceInit);
     if (!GetWaterBodyProxyBounds(WaterBodyBounds))
     {
-        UE_LOG(LogTemp, Warning, TEXT("WaterBodyWetContactComponent: Could not resolve water body bounds on %s."), *Owner->GetName());
+        UE_LOG(LogDWCWaterIntegration, Warning, TEXT("WaterBodyWetContactComponent: Could not resolve water body bounds on %s."), *Owner->GetName());
         return;
     }
 
@@ -227,7 +229,7 @@ void UWaterBodyWetContactComponent::ApplyWetnessTick(const float DeltaTime)
             const int32  SafeReceivers = FMath::Max(1, AccumulatedProcessedReceivers);
 
             UE_LOG(
-                LogTemp,
+                LogDWCWaterIntegration,
                 Log,
                 TEXT("WaterBodyWetContact perf: frames=%d receivers=%d samples=%d total=%.3fms build/query=%.3fms apply=%.3fms avg/frame=%.3fms avg/receiver build=%.3fms apply=%.3fms"),
                 AccumulatedPerformanceFrames,

@@ -1,5 +1,6 @@
 //Copyright 2026 Team Tofunut. All Rights Reserved.
 #include "SWetnessProfileEditorPanel.h"
+#include "Utility/DWCLog.h"
 
 #include "AssetRegistry/AssetData.h"
 #include "Core/DWCEditorUtils.h"
@@ -170,7 +171,7 @@ FReply SWetnessProfileEditorPanel::HandleSaveClicked()
     if (FWetnessProfileEditorPolicy::SanitizeProfile(WetnessProfile.Get(), &ClampedValues))
     {
         UE_LOG(
-            LogTemp,
+            LogDWC,
             Warning,
             TEXT("Wetness Profile values were clamped before save:\n- %s"),
             *FString::Join(ClampedValues, TEXT("\n- ")));

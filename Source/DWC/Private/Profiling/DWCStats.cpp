@@ -226,7 +226,7 @@ namespace
 
     const FDWCStatAlias GDWCStatAliases[] =
     {
-        {TEXT("stat dwc"), TEXT("Toggle DWC memory summary stats.")},
+        {TEXT("stat dwc"), TEXT("Toggle DWC CPU and GPU memory stats.")},
         {TEXT("stat dwc mem"), TEXT("Toggle DWC CPU and GPU memory stats.")},
         {TEXT("stat dwc memory"), TEXT("Toggle DWC CPU and GPU memory stats.")},
         {TEXT("stat dwc workload"), TEXT("Toggle DWC workload rate stats.")},
@@ -277,6 +277,18 @@ namespace
         }
     }
 
+    void ToggleDWCStatGroup(UWorld* World, FCommonViewportClient* ViewportClient, const TCHAR* GroupName)
+    {
+        bool bEnabled = false;
+        if (IsDWCStatGroupEnabled(ViewportClient, GroupName, bEnabled))
+        {
+            SetDWCStatGroupEnabled(World, ViewportClient, GroupName, !bEnabled);
+            return;
+        }
+
+        ExecuteDWCStatCommand(World, ViewportClient, GroupName);
+    }
+
     void ToggleDWCMemoryStats(UWorld* World, FCommonViewportClient* ViewportClient)
     {
         bool bDWCEnabled = false;
@@ -304,10 +316,12 @@ namespace
         UE_LOG(LogDWC, Display, TEXT("DWC stat commands:"));
         UE_LOG(LogDWC, Display, TEXT("  stat dwc"));
         UE_LOG(LogDWC, Display, TEXT("  stat dwc mem"));
+        UE_LOG(LogDWC, Display, TEXT("  stat dwc memory"));
         UE_LOG(LogDWC, Display, TEXT("  stat dwc workload"));
         UE_LOG(LogDWC, Display, TEXT("  stat dwc instances"));
         UE_LOG(LogDWC, Display, TEXT("  stat dwc cpu"));
         UE_LOG(LogDWC, Display, TEXT("  stat dwc gpu"));
+        UE_LOG(LogDWC, Display, TEXT("  stat dwc help / stat dwc ?"));
     }
 
     void AppendDWCStatAutocomplete(TArray<FAutoCompleteCommand>& AutoCompleteList)
@@ -349,13 +363,13 @@ namespace
 
         if (FParse::Command(&Cmd, TEXT("CPU")))
         {
-            ToggleDWCMemoryStats(World, ViewportClient);
+            ToggleDWCStatGroup(World, ViewportClient, TEXT("DWCCPUMemory"));
             return true;
         }
 
         if (FParse::Command(&Cmd, TEXT("GPU")))
         {
-            ToggleDWCMemoryStats(World, ViewportClient);
+            ToggleDWCStatGroup(World, ViewportClient, TEXT("DWCGPUMemory"));
             return true;
         }
 

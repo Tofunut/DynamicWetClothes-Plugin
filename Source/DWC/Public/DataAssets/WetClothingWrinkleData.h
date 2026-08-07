@@ -7,7 +7,7 @@
 class UTexture;
 class UTexture2D;
 
-USTRUCT(BlueprintType)
+USTRUCT()
 struct DWC_API FWetWrinklePatchPlacement
 {
     GENERATED_BODY()
@@ -55,28 +55,9 @@ struct DWC_API FWetWrinklePatchPlacement
     UPROPERTY(EditAnywhere, Category = "Wet Wrinkle Patch")
     TObjectPtr<UTexture2D> WrinkleNormalTexture = nullptr;
 
-    UPROPERTY(EditAnywhere, Category = "Wet Wrinkle Patch")
-    int32 AffectedWetPartID = INDEX_NONE;
-
-#if WITH_EDITORONLY_DATA
-    UPROPERTY(VisibleAnywhere, Category = "Wet Wrinkle Patch|Editor Preview")
-    bool bHasEditorSurface = false;
-
-    UPROPERTY(VisibleAnywhere, Category = "Wet Wrinkle Patch|Editor Preview")
-    FVector EditorSurfaceLocalPosition = FVector::ZeroVector;
-
-    UPROPERTY(VisibleAnywhere, Category = "Wet Wrinkle Patch|Editor Preview")
-    FVector EditorSurfaceLocalNormal = FVector::UpVector;
-
-    UPROPERTY(VisibleAnywhere, Category = "Wet Wrinkle Patch|Editor Preview")
-    FVector EditorSurfaceLocalTangent = FVector::ForwardVector;
-
-    UPROPERTY(VisibleAnywhere, Category = "Wet Wrinkle Patch|Editor Preview")
-    FVector EditorSurfaceLocalBitangent = FVector::RightVector;
-#endif
 };
 
-USTRUCT(BlueprintType)
+USTRUCT()
 struct DWC_API FWetProceduralRidgeStrokePoint
 {
     GENERATED_BODY()
@@ -91,7 +72,7 @@ struct DWC_API FWetProceduralRidgeStrokePoint
     FVector3f AnchorBarycentric = FVector3f(1.0f, 0.0f, 0.0f);
 };
 
-UENUM(BlueprintType)
+UENUM()
 enum class EWetProceduralRidgeShape : uint8
 {
     Convex,
@@ -99,7 +80,7 @@ enum class EWetProceduralRidgeShape : uint8
     Fold
 };
 
-UENUM(BlueprintType)
+UENUM()
 enum class EWetProceduralRidgeEndpointMode : uint8
 {
     Pointed,
@@ -108,7 +89,7 @@ enum class EWetProceduralRidgeEndpointMode : uint8
     Flared
 };
 
-USTRUCT(BlueprintType)
+USTRUCT()
 struct DWC_API FWetProceduralRidgeEndpoint
 {
     GENERATED_BODY()
@@ -133,7 +114,7 @@ struct DWC_API FWetProceduralRidgeEndpoint
     }
 };
 
-USTRUCT(BlueprintType)
+USTRUCT()
 struct DWC_API FWetProceduralRidgeFlareSettings
 {
     GENERATED_BODY()
@@ -151,7 +132,7 @@ struct DWC_API FWetProceduralRidgeFlareSettings
     float Softness = 0.70f;
 };
 
-USTRUCT(BlueprintType)
+USTRUCT()
 struct DWC_API FWetProceduralRidgeVariationSettings
 {
     GENERATED_BODY()
@@ -175,7 +156,7 @@ struct DWC_API FWetProceduralRidgeVariationSettings
     int32 NoiseSeed = 1337;
 };
 
-USTRUCT(BlueprintType)
+USTRUCT()
 struct DWC_API FWetProceduralRidgeStroke
 {
     GENERATED_BODY()
@@ -229,7 +210,7 @@ struct DWC_API FWetProceduralRidgeStroke
     FWetProceduralRidgeVariationSettings NaturalVariation;
 };
 
-USTRUCT(BlueprintType)
+USTRUCT()
 struct DWC_API FWetWrinkleBakeSettings
 {
     GENERATED_BODY()
@@ -240,34 +221,25 @@ struct DWC_API FWetWrinkleBakeSettings
     UPROPERTY(EditAnywhere, Category = "Wet Wrinkle Bake", meta = (ClampMin = "0", ClampMax = "64"))
     int32 PaddingPixels = 8;
 
-    // Legacy serialized switches. A wrinkle bake now always produces both the
-    // runtime normal texture and the authoring-only separation mask.
-    UPROPERTY(meta = (DeprecatedProperty))
-    bool bBakeNormalMap = true;
-
-    UPROPERTY(meta = (DeprecatedProperty))
-    bool bBakeMask = true;
-
     UPROPERTY(EditAnywhere, Category = "Wet Wrinkle Bake")
     bool bIncludeDisabledPatches = false;
 };
 
-UENUM(BlueprintType)
+UENUM()
 enum class EDWCWrinkleAlphaSemantic : uint8
 {
-    None,
-    NormalDeviationCoverage_DEPRECATED UMETA(Hidden),
-    ConvexSeparation
+    None = 0,
+    ConvexSeparation = 2
 };
 
-UENUM(BlueprintType)
+UENUM()
 enum class EDWCWrinkleNormalSource : uint8
 {
     Baked,
     CustomTexture
 };
 
-USTRUCT(BlueprintType)
+USTRUCT()
 struct DWC_API FWetWrinkleBakedMapSet
 {
     GENERATED_BODY()
@@ -285,17 +257,6 @@ struct DWC_API FWetWrinkleBakedMapSet
     TObjectPtr<UTexture2D> BakedWrinkleMask = nullptr;
 #endif
 
-    // Legacy normal-alpha metadata. New bakes store separation only in
-    // BakedWrinkleMask and keep the normal texture alpha unused.
-    UPROPERTY(VisibleAnywhere, Category = "Wet Wrinkle Baked", meta = (DeprecatedProperty))
-    bool bHasCoverageAlpha = false;
-
-    UPROPERTY(VisibleAnywhere, Category = "Wet Wrinkle Baked", meta = (DeprecatedProperty))
-    EDWCWrinkleAlphaSemantic AlphaSemantic = EDWCWrinkleAlphaSemantic::None;
-
-    UPROPERTY(VisibleAnywhere, Category = "Wet Wrinkle Baked", meta = (DeprecatedProperty))
-    int32 AlphaBuildVersion = 0;
-
     UPROPERTY(VisibleAnywhere, Category = "Wet Wrinkle Baked")
     int32 Resolution = 1024;
 
@@ -309,7 +270,7 @@ struct DWC_API FWetWrinkleBakedMapSet
     FGuid BakeGuid;
 };
 
-USTRUCT(BlueprintType)
+USTRUCT()
 struct DWC_API FWetWrinkleRuntimeNormalSource
 {
     GENERATED_BODY()
@@ -359,7 +320,7 @@ struct DWC_API FWetWrinkleCoverageExtractionSettings
     bool bInvertConvexity = false;
 };
 
-USTRUCT(BlueprintType)
+USTRUCT()
 struct DWC_API FWetClothingWrinkleData
 {
     GENERATED_BODY()
@@ -424,8 +385,6 @@ struct DWC_API FWetClothingWrinkleData
         if (const FWetWrinkleBakedMapSet* BakedMap = FindBakedWrinkleMap(MaterialSlotIndex))
         {
             Result.Texture = BakedMap->BakedWrinkleNormalMap.Get();
-            Result.bHasCoverageAlpha = BakedMap->bHasCoverageAlpha;
-            Result.AlphaSemantic = BakedMap->AlphaSemantic;
         }
         return Result;
     }

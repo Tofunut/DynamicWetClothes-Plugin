@@ -1,5 +1,6 @@
 //Copyright 2026 Team Tofunut. All Rights Reserved.
 #include "SWetClothingPartEditorPanel.h"
+#include "Utility/DWCLog.h"
 
 #include "AssetThumbnail.h"
 #include "AssetRegistry/AssetRegistryModule.h"
@@ -4824,7 +4825,7 @@ FString SWetClothingPartEditorPanel::GetWetnessProfileObjectPath(FWetPartEntryPt
     const FWetPartProfileAssignment* Profile = Asset != nullptr && Entry != nullptr
         ? Asset->Authored.PartData.EditableWetPartData.FindProfile(*Entry)
         : nullptr;
-    return Profile != nullptr ? Profile->SourceProfile.ToString() : FString();
+    return Profile != nullptr ? Profile->GetSourceProfilePath().ToString() : FString();
 }
 
 bool SWetClothingPartEditorPanel::IsWetnessProfileControlEnabled(FWetPartEntryPtr Item) const
@@ -5942,7 +5943,7 @@ FReply SWetClothingPartEditorPanel::HandleBakeRenderProfileDataClicked()
         return FReply::Handled();
     }
 
-    UE_LOG(LogTemp, Display, TEXT("DWC: %s"), *Summary);
+    UE_LOG(LogDWC, Display, TEXT("DWC: %s"), *Summary);
     if (DetailsView.IsValid())
     {
         DetailsView->ForceRefresh();

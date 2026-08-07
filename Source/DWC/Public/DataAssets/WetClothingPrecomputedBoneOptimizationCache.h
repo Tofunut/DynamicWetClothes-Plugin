@@ -7,7 +7,7 @@
 
 class USkeletalMesh;
 
-USTRUCT(BlueprintType)
+USTRUCT()
 struct DWC_API FWetClothingPrecomputedResolvedBoneIncludeRule
 {
     GENERATED_BODY()
@@ -19,7 +19,7 @@ struct DWC_API FWetClothingPrecomputedResolvedBoneIncludeRule
     TArray<int32> IncludedBoneIndices;
 };
 
-USTRUCT(BlueprintType)
+USTRUCT()
 struct DWC_API FWetClothingPrecomputedBoneOptimizationCache
 {
     GENERATED_BODY()

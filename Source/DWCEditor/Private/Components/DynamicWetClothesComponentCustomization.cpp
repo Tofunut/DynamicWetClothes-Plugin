@@ -288,7 +288,7 @@ void FDynamicWetClothesComponentCustomization::CustomizeDetails(IDetailLayoutBui
         DetailBuilder.HideProperty(SurfaceDebugHandle);
     }
 
-    // Remove legacy implementation-oriented categories from the shipping Details surface.
+    // Hide implementation-oriented categories from the public Details panel.
     DetailBuilder.HideCategory(TEXT("Wetness"));
     DetailBuilder.HideCategory(TEXT("Wetness|Visual"));
     DetailBuilder.HideCategory(TEXT("Wetness|Wrinkle"));

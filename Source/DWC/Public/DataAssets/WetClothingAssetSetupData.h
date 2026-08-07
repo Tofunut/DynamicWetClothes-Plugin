@@ -4,7 +4,7 @@
 #include "CoreMinimal.h"
 #include "WetClothingAssetSetupData.generated.h"
 
-UENUM(BlueprintType)
+UENUM()
 enum class EDWCBakeStatus : uint8
 {
     Disabled UMETA(DisplayName = "Disabled"),
@@ -24,23 +24,19 @@ namespace DWCBuildStatus
     }
 }
 
-UENUM(BlueprintType)
+UENUM()
 enum class EDWCDataUVResultSeverity : uint8
 {
-    Ready UMETA(DisplayName = "Ready"),
-    /** Legacy serialized value. New code normalizes this to Ready. */
-    ReadyWithNotes UMETA(Hidden),
-    ReadyWithWarnings UMETA(DisplayName = "Ready With Warnings"),
-    Failed UMETA(DisplayName = "Failed")
+    Ready = 0 UMETA(DisplayName = "Ready"),
+    ReadyWithWarnings = 2 UMETA(DisplayName = "Ready With Warnings"),
+    Failed = 3 UMETA(DisplayName = "Failed")
 };
 
 namespace DWCDataUVResultSeverity
 {
     FORCEINLINE EDWCDataUVResultSeverity Normalize(const EDWCDataUVResultSeverity Severity)
     {
-        return Severity == EDWCDataUVResultSeverity::ReadyWithNotes
-            ? EDWCDataUVResultSeverity::Ready
-            : Severity;
+        return Severity;
     }
 
     FORCEINLINE int32 Rank(const EDWCDataUVResultSeverity Severity)
@@ -117,7 +113,7 @@ namespace DWCBakeOutput
     }
 }
 
-UENUM(BlueprintType)
+UENUM()
 enum class EDWCMapResolution : uint8
 {
     Resolution256 UMETA(DisplayName = "256"),
@@ -153,7 +149,7 @@ namespace DWCMapResolution
 }
 
 /** Settings selected when a Wet Clothing Asset is created or reconfigured. */
-USTRUCT(BlueprintType)
+USTRUCT()
 struct DWC_API FDWCWetClothingAssetSetupSettings
 {
     GENERATED_BODY()
@@ -230,7 +226,7 @@ struct DWC_API FDWCWetClothingAssetSetupSettings
     }
 };
 
-USTRUCT(BlueprintType)
+USTRUCT()
 struct DWC_API FDWCOriginalUVIslandTopology
 {
     GENERATED_BODY()
@@ -251,7 +247,7 @@ struct DWC_API FDWCOriginalUVIslandTopology
     double UVArea = 0.0;
 };
 
-USTRUCT(BlueprintType)
+USTRUCT()
 struct DWC_API FDWCEditorUVTopologyData
 {
     GENERATED_BODY()
@@ -275,7 +271,7 @@ struct DWC_API FDWCEditorUVTopologyData
     TArray<FDWCOriginalUVIslandTopology> Islands;
 };
 
-USTRUCT(BlueprintType)
+USTRUCT()
 struct DWC_API FDWCDataUVSlotWarning
 {
     GENERATED_BODY()
@@ -350,7 +346,7 @@ struct DWC_API FDWCDataUVSlotWarning
     }
 };
 
-USTRUCT(BlueprintType)
+USTRUCT()
 struct DWC_API FDWCDataUVLODMetadata
 {
     GENERATED_BODY()
@@ -399,7 +395,7 @@ struct DWC_API FDWCDataUVLODMetadata
     int32 GeneratorVersion = 1;
 };
 
-USTRUCT(BlueprintType)
+USTRUCT()
 struct DWC_API FDWCTriangleValidationSummary
 {
     GENERATED_BODY()
@@ -446,7 +442,7 @@ struct DWC_API FDWCTriangleValidationSummary
     }
 };
 
-USTRUCT(BlueprintType)
+USTRUCT()
 struct DWC_API FDWCAssetBakeState
 {
     GENERATED_BODY()

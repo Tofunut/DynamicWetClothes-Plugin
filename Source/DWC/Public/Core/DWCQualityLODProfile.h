@@ -8,7 +8,7 @@
 
 
 /**
- * Internal data model reserved for future DWC quality LOD support.
+ * Internal data model for DWC quality LOD support. Not exposed through the public API.
  * The feature is intentionally disabled and not exposed through the shipping component UI or Blueprint API.
  */
 USTRUCT()

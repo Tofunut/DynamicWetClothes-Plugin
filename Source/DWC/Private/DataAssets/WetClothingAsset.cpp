@@ -563,7 +563,7 @@ namespace
                 }
                 Signature += FString::Printf(
                     TEXT(",Profile=%s,Blend=%d,OverrideDropletStampSize=%d,DropletRadiusScale=%.9g,OverrideDropletFlowStampSize=%d,DropletFlowSizeScale=%.9g,DropletDetailSize=%.9g,DropletFlowDetailSize=%.9g"),
-                    Profile != nullptr ? *Profile->SourceProfile.ToString() : TEXT(""),
+                    Profile != nullptr ? *Profile->GetSourceProfilePath().ToString() : TEXT(""),
                     Profile != nullptr ? static_cast<int32>(Profile->BlendMode) : 0,
                     Entry.SurfaceWater.bOverrideDropletStampSize ? 1 : 0,
                     Entry.SurfaceWater.DropletRadiusScale,
@@ -600,12 +600,12 @@ namespace
         {
             FWetnessProfileParameters Parameters = ProfileAssignment.Parameters;
 #if WITH_EDITOR
-            if (ProfileAssignment.SourceProfile.IsValid())
+            if (ProfileAssignment.GetSourceProfilePath().IsValid())
             {
-                UObject* SourceObject = ProfileAssignment.SourceProfile.ResolveObject();
+                UObject* SourceObject = ProfileAssignment.GetSourceProfilePath().ResolveObject();
                 if (SourceObject == nullptr)
                 {
-                    SourceObject = ProfileAssignment.SourceProfile.TryLoad();
+                    SourceObject = ProfileAssignment.GetSourceProfilePath().TryLoad();
                 }
                 if (const UWetnessProfile* SourceProfile =
                         Cast<UWetnessProfile>(SourceObject))
@@ -618,7 +618,7 @@ namespace
                         LogDWC,
                         Warning,
                         TEXT("WetClothingAsset: Failed to resolve Wetness Profile '%s' while refreshing WCA snapshot. Using the WCA fallback profile."),
-                        *ProfileAssignment.SourceProfile.ToString());
+                        *ProfileAssignment.GetSourceProfilePath().ToString());
                 }
             }
 #endif
@@ -1633,12 +1633,12 @@ bool UWetClothingAsset::DoesMaterialSlotUseSurfaceWater(const int32 MaterialSlot
         {
             const FWetPartProfileAssignment& ProfileAssignment = WetPartData.Profiles[ProfileIndex];
 #if WITH_EDITOR
-            if (ProfileAssignment.SourceProfile.IsValid())
+            if (ProfileAssignment.GetSourceProfilePath().IsValid())
             {
-                UObject* SourceObject = ProfileAssignment.SourceProfile.ResolveObject();
+                UObject* SourceObject = ProfileAssignment.GetSourceProfilePath().ResolveObject();
                 if (SourceObject == nullptr)
                 {
-                    SourceObject = ProfileAssignment.SourceProfile.TryLoad();
+                    SourceObject = ProfileAssignment.GetSourceProfilePath().TryLoad();
                 }
                 if (const UWetnessProfile* SourceProfile =
                         Cast<UWetnessProfile>(SourceObject))
@@ -1991,7 +1991,7 @@ bool UWetClothingAsset::LoadRuntimeBulkData(const bool bForceProgressDialog) con
         bRuntimeBulkDataLoaded = true;
         bRuntimeBulkDataLoadFailed = true;
         UE_LOG(
-            LogTemp,
+            LogDWC,
             Error,
             TEXT("WetClothingAsset: Runtime bulk payload on '%s' is too large to load (%lld bytes)."),
             *GetNameSafe(this),
@@ -2019,7 +2019,7 @@ bool UWetClothingAsset::LoadRuntimeBulkData(const bool bForceProgressDialog) con
         bRuntimeBulkDataLoaded = true;
         bRuntimeBulkDataLoadFailed = true;
         UE_LOG(
-            LogTemp,
+            LogDWC,
             Error,
             TEXT("WetClothingAsset: Failed to lock runtime bulk payload on '%s' for reading (%lld bytes)."),
             *GetNameSafe(this),
@@ -2084,7 +2084,7 @@ bool UWetClothingAsset::LoadRuntimeBulkData(const bool bForceProgressDialog) con
         bRuntimeBulkDataLoaded = true;
         bRuntimeBulkDataLoadFailed = true;
         UE_LOG(
-            LogTemp,
+            LogDWC,
             Error,
             TEXT("WetClothingAsset: Failed to deserialize runtime bulk payload on '%s' (%d bytes). Re-save or rebuild the Wet Clothing Asset runtime data."),
             *GetNameSafe(this),
@@ -4395,7 +4395,7 @@ bool UWetClothingAsset::RebuildPrecomputedSimulationData(FString* OutErrorMessag
     {
         Derived.Bulk.NeighborRuntimeData.BoneOptimizationCache.Reset();
         UE_LOG(
-            LogTemp,
+            LogDWC,
             Warning,
             TEXT("WetClothingAsset: Failed to precompute bone optimization cache for %s. %s"),
             *GetNameSafe(RuntimeMesh),

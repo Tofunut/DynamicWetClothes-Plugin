@@ -1,5 +1,6 @@
 //Copyright 2026 Team Tofunut. All Rights Reserved.
 #include "Core/DWCEditorStyle.h"
+#include "Utility/DWCLog.h"
 
 #include "Brushes/SlateImageBrush.h"
 #include "Interfaces/IPluginManager.h"
@@ -30,7 +31,7 @@ void FDWCEditorStyle::Initialize()
     const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("DynamicWetClothes"));
     if (!Plugin.IsValid())
     {
-        UE_LOG(LogTemp, Warning, TEXT("DWCEditorStyle: DynamicWetClothes plugin was not found."));
+        UE_LOG(LogDWC, Warning, TEXT("DWCEditorStyle: DynamicWetClothes plugin was not found."));
         return;
     }
 

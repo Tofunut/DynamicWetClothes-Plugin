@@ -1,5 +1,6 @@
 //Copyright 2026 Team Tofunut. All Rights Reserved.
 #include "WetClothingAssetFactory.h"
+#include "Utility/DWCLog.h"
 
 #include "AssetThumbnail.h"
 #include "AssetRegistry/AssetData.h"
@@ -1334,7 +1335,7 @@ UObject* UWetClothingAssetFactory::FactoryCreateNew(
             InitialSettings,
             &ErrorMessage))
     {
-        UE_LOG(LogTemp, Error, TEXT("DWC: Failed to initialize Wet Clothing Asset: %s"), *ErrorMessage);
+        UE_LOG(LogDWC, Error, TEXT("DWC: Failed to initialize Wet Clothing Asset: %s"), *ErrorMessage);
         PendingCreationSettings = nullptr;
         bConfirmedOverwriteExistingDataUVChannel = false;
         return nullptr;

@@ -769,7 +769,7 @@ void SWetnessProfileViewport::InitializePreviewComponents()
     if (PreviewBaseMaterial == nullptr)
     {
         UE_LOG(
-            LogTemp,
+            LogDWC,
             Error,
             TEXT("DWC: M_DWC_WetnessProfilePreview could not be loaded or created. Using the engine default material for this preview."));
         PreviewBaseMaterial = UMaterial::GetDefaultMaterial(MD_Surface);
@@ -920,7 +920,7 @@ void SWetnessProfileViewport::RebuildGeneratedSpherePreviewMaterial()
         PreviewMaterialSet.GeneratedMaterialInstance == nullptr)
     {
         UE_LOG(
-            LogTemp,
+            LogDWC,
             Warning,
             TEXT("DWC: Wetness Profile sphere preview material generation failed. %s"),
             *PreviewMaterialSet.Message);
@@ -1012,7 +1012,7 @@ void SWetnessProfileViewport::RebuildGeneratedPreviewMaterials(USkeletalMesh* Sk
             PreviewMaterialSet.GeneratedMaterialInstance == nullptr)
         {
             UE_LOG(
-                LogTemp,
+                LogDWC,
                 Warning,
                 TEXT("DWC: Wetness Profile skeletal preview material generation failed for slot %d on '%s'. %s"),
                 MaterialIndex,

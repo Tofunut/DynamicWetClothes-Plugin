@@ -1,5 +1,4 @@
 //Copyright 2026 Team Tofunut. All Rights Reserved.
-// Fill out your copyright notice in the Description page of Project Settings.
 
 #pragma once
 
@@ -133,7 +132,7 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
     void SetWetPartDebugColorsEnabled(bool bEnabled);
     UFUNCTION(BlueprintCallable, Category = "Debug")
     void SetSurfaceWaterDebugColorsEnabled(bool bEnabled);
-    // Reserved for future DWC quality LOD support. Intentionally not exposed to users in this release.
+    // Internal DWC quality-LOD support. Not exposed through the public UI or Blueprint API.
     void SetDWCQualityLOD(int32 InQualityLOD);
     bool SetReceiverDWCQualityLOD(FName ReceiverId, int32 InQualityLOD);
     int32 GetDWCQualityLOD() const
@@ -200,7 +199,7 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
     void                     ApplyGeneratedWetMaterialOverrides();
     void                     ApplyQualityLODMaterialParameters(FDWCWetMeshReceiverRuntime& Receiver);
     void                     MarkCPUWetnessRenderingDirty(FDWCWetMeshReceiverRuntime& Receiver);
-    // Internal quality-LOD implementation retained for future development.
+    // Internal quality-LOD implementation. Not exposed through the public API.
     void                     RefreshResolvedQualityLODPolicies();
     void                     UpdateRenderLOD();
 
@@ -235,8 +234,7 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
     // Internal sampling resolution retained for runtime integration; intentionally not user-configurable.
     int32 WetSurfaceSampleResolution = 8;
 
-    // Reserved for future DWC quality LOD support. The implementation remains compiled for future development,
-    // but it is disabled by default and intentionally hidden from the current shipping UI and Blueprint API.
+    // Internal DWC quality-LOD support. Disabled by default and not exposed through the public UI or Blueprint API.
     bool bEnableDWCQualityLOD = false;
 
     UPROPERTY()
@@ -295,7 +293,7 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
     TArray<FDWCWetContact> PendingWetContacts;
     bool                   bPendingWetContactsApplyMaterial = false;
     bool                   bWetRenderDirty = false;
-    // Internal runtime state for future DWC quality LOD support. Not exposed in this release.
+    // Internal runtime state for DWC quality-LOD support. Not exposed through the public API.
     int32 CurrentQualityLOD = 0;
     float CurrentRenderLODScreenSize = 0.0f;
 };

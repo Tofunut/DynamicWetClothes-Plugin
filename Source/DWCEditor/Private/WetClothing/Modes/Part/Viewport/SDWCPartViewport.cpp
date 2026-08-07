@@ -1,5 +1,6 @@
 //Copyright 2026 Team Tofunut. All Rights Reserved.
 #include "SDWCPartViewport.h"
+#include "Utility/DWCLog.h"
 
 #include "DataAssets/WetClothingAsset.h"
 #include "DataAssets/WetnessProfile.h"
@@ -2012,7 +2013,7 @@ bool SDWCPartViewport::BuildPartPreviewTextures()
         if (NearestInheritedColorCount > 0 || NearestInheritedSelectionCount > 0 || RemainingOrphanCount > 0)
         {
             UE_LOG(
-                LogTemp,
+                LogDWC,
                 Verbose,
                 TEXT("DWC Part Preview orphan triangle ownership: color=%d selection=%d unresolved=%d maxDistance=%.3f."),
                 NearestInheritedColorCount,
@@ -2895,7 +2896,7 @@ void SDWCPartViewport::RefreshSurfaceWaterPreviewMaterial()
     if (bSurfaceWaterResourceDiagnosticError)
     {
         UE_LOG(
-            LogTemp,
+            LogDWC,
             Warning,
             TEXT("DWC Surface Water preview resource diagnostic for asset '%s' slot %d:%s"),
             *GetPathNameSafe(Asset),
@@ -3218,7 +3219,7 @@ UMaterialInterface* SDWCPartViewport::ResolveWetPartOverlayMaterial()
     if (WetPartOverlayMaterial == nullptr)
     {
         UE_LOG(
-            LogTemp,
+            LogDWC,
             Error,
             TEXT("DWC Part Preview overlay material is missing: %s. ")
             TEXT("Run Scripts/Python/GenerateDWCPartOverlayMaterial.py and save all generated UV variants."),

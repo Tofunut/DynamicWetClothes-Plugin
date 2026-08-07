@@ -10,7 +10,7 @@ struct FDWCWetMeshReceiverRuntime;
 class FDWCQualityLODController;
 class FDWCQualityLODEvaluator;
 
-/** Internal coordinator for future DWC quality-LOD policy and render-LOD selection. */
+/** Internal coordinator for DWC quality-LOD policy and render-LOD selection. Not exposed through the public API. */
 class FDWCLodCoordinator
 {
   public:

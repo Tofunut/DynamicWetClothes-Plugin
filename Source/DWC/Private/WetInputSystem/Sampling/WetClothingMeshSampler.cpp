@@ -1,5 +1,6 @@
 //Copyright 2026 Team Tofunut. All Rights Reserved.
 #include "WetInputSystem/Sampling/WetClothingMeshSampler.h"
+#include "Utility/DWCLog.h"
 
 uint64 FWetClothingMeshSampler::GetAllocatedMemoryBytes() const
 {
@@ -166,7 +167,7 @@ bool FWetClothingMeshSampler::UpdateSkinnedPositions(USkeletalMeshComponent* Tar
 
     if (!SkinWeightBuffer)
     {
-        UE_LOG(LogTemp, Warning, TEXT("DynamicWetClothesComponent: SkinWeightBuffer is null."));
+        UE_LOG(LogDWC, Warning, TEXT("DynamicWetClothesComponent: SkinWeightBuffer is null."));
         return false;
     }
 
@@ -222,7 +223,7 @@ bool FWetClothingMeshSampler::UpdateSkinnedPositionsDirect(USkeletalMeshComponen
 
     if (!SkinWeightBuffer)
     {
-        UE_LOG(LogTemp, Warning, TEXT("DynamicWetClothesComponent: SkinWeightBuffer is null."));
+        UE_LOG(LogDWC, Warning, TEXT("DynamicWetClothesComponent: SkinWeightBuffer is null."));
         return false;
     }
 
@@ -305,7 +306,7 @@ bool FWetClothingMeshSampler::UpdateSkinnedNormals(USkeletalMeshComponent* Targe
 
     if (!SkinWeightBuffer)
     {
-        UE_LOG(LogTemp, Warning, TEXT("DynamicWetClothesComponent: SkinWeightBuffer is null."));
+        UE_LOG(LogDWC, Warning, TEXT("DynamicWetClothesComponent: SkinWeightBuffer is null."));
         return false;
     }
 

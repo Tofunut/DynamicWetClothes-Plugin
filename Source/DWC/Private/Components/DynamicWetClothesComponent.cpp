@@ -1,5 +1,4 @@
 //Copyright 2026 Team Tofunut. All Rights Reserved.
-// Fill out your copyright notice in the Description page of Project Settings.
 
 #include "Components/DynamicWetClothesComponent.h"
 
@@ -109,9 +108,27 @@ UDynamicWetClothesComponent::UDynamicWetClothesComponent()
     LODCoordinator = MakeUnique<FDWCLodCoordinator>();
     LODVertexColorTransferCoordinator = MakeUnique<FDWCLODVertexColorTransferCoordinator>();
     LODCoordinator->NormalizeScreenSizeThresholds(QualityLODScreenSizeThresholds);
+
+#if WITH_EDITOR
+    if (!HasAnyFlags(RF_ClassDefaultObject))
+    {
+        ExternalMaterialPropertyChangedHandle = FCoreUObjectDelegates::OnObjectPropertyChanged.AddUObject(
+            this,
+            &UDynamicWetClothesComponent::HandleExternalMaterialPropertyChanged);
+    }
+#endif
 }
 
-UDynamicWetClothesComponent::~UDynamicWetClothesComponent() = default;
+UDynamicWetClothesComponent::~UDynamicWetClothesComponent()
+{
+#if WITH_EDITOR
+    if (ExternalMaterialPropertyChangedHandle.IsValid())
+    {
+        FCoreUObjectDelegates::OnObjectPropertyChanged.Remove(ExternalMaterialPropertyChangedHandle);
+        ExternalMaterialPropertyChangedHandle.Reset();
+    }
+#endif
+}
 
 int32 UDynamicWetClothesComponent::GetCurrentRenderLODLevel() const
 {
@@ -238,7 +255,7 @@ bool UDynamicWetClothesComponent::InitializeWetRuntime()
 
     if (Receivers.IsEmpty())
     {
-        UE_LOG(LogTemp, Error, TEXT("DynamicWetClothesComponent: No wet mesh receiver could be initialized on %s. Open the Wet Clothing Asset and save it to update precomputed simulation data."), *GetNameSafe(GetOwner()));
+        UE_LOG(LogDWC, Error, TEXT("DynamicWetClothesComponent: No wet mesh receiver could be initialized on %s. Open the Wet Clothing Asset and save it to update precomputed simulation data."), *GetNameSafe(GetOwner()));
         return false;
     }
 
@@ -598,7 +615,7 @@ void UDynamicWetClothesComponent::ApplyGeneratedWetMaterialOverrides()
             if (MaterialOverride.MaterialSlotIndex >= OverrideTargetMesh->GetNumMaterials())
             {
                 UE_LOG(
-                    LogTemp,
+                    LogDWC,
                     Warning,
                     TEXT("DynamicWetClothesComponent: Wet material override slot %d is out of range on %s."),
                     MaterialOverride.MaterialSlotIndex,
@@ -1247,6 +1264,97 @@ void UDynamicWetClothesComponent::TickComponent(float DeltaTime, ELevelTick Tick
 }
 
 #if WITH_EDITOR
+void UDynamicWetClothesComponent::HandleExternalMaterialPropertyChanged(
+    UObject* Object,
+    FPropertyChangedEvent&)
+{
+    if (Object == nullptr || bRebindingExternalMaterials || WetClothingAsset == nullptr)
+    {
+        return;
+    }
+
+    bool bAffectsWetMaterialOverride = false;
+    for (const FWetClothingGeneratedWetMaterialOverride& MaterialOverride :
+         WetClothingAsset->Derived.Inline.GeneratedWetMaterialOverrides)
+    {
+        UMaterialInterface* SourceMaterial = MaterialOverride.SourceMaterial.Get();
+        UMaterialInterface* GeneratedMaterialInstance = MaterialOverride.GeneratedMaterialInstance.Get();
+        UMaterial* SourceBaseMaterial = SourceMaterial != nullptr ? SourceMaterial->GetMaterial() : nullptr;
+        UMaterial* GeneratedMaterial = MaterialOverride.GeneratedMaterial.Get();
+        UMaterial* GeneratedInstanceBaseMaterial =
+            GeneratedMaterialInstance != nullptr ? GeneratedMaterialInstance->GetMaterial() : nullptr;
+
+        if (Object == SourceMaterial ||
+            Object == SourceBaseMaterial ||
+            Object == GeneratedMaterial ||
+            Object == GeneratedMaterialInstance ||
+            Object == GeneratedInstanceBaseMaterial)
+        {
+            bAffectsWetMaterialOverride = true;
+            break;
+        }
+    }
+
+    if (!bAffectsWetMaterialOverride)
+    {
+        return;
+    }
+
+    for (const TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver : Receivers)
+    {
+        if (Receiver.IsValid())
+        {
+            RebindMaterialsAfterExternalChange(Receiver->MeshComponent.Get());
+        }
+    }
+}
+
+void UDynamicWetClothesComponent::RebindMaterialsAfterExternalChange(USkeletalMeshComponent* MeshComponent)
+{
+    if (MeshComponent == nullptr || WetClothingAsset == nullptr || bRebindingExternalMaterials)
+    {
+        return;
+    }
+
+    TGuardValue<bool> RebindingGuard(bRebindingExternalMaterials, true);
+
+    for (const FWetClothingGeneratedWetMaterialOverride& MaterialOverride :
+         WetClothingAsset->Derived.Inline.GeneratedWetMaterialOverrides)
+    {
+        UMaterialInterface* WetMaterial = MaterialOverride.GeneratedMaterialInstance.Get();
+        if (MaterialOverride.MaterialSlotIndex == INDEX_NONE ||
+            WetMaterial == nullptr ||
+            !IsMaterialSlotWettableForRuntime(WetClothingAsset.Get(), MaterialOverride.MaterialSlotIndex) ||
+            MaterialOverride.MaterialSlotIndex >= MeshComponent->GetNumMaterials())
+        {
+            continue;
+        }
+
+        UMaterialInterface* CurrentMaterial = MeshComponent->GetMaterial(MaterialOverride.MaterialSlotIndex);
+        if (ShouldApplyGeneratedWetMaterialOverride(CurrentMaterial, MaterialOverride, WetMaterial))
+        {
+            MeshComponent->SetMaterial(MaterialOverride.MaterialSlotIndex, WetMaterial);
+        }
+    }
+
+    for (const TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver : Receivers)
+    {
+        if (!Receiver.IsValid() ||
+            Receiver->MeshComponent.Get() != MeshComponent ||
+            !Receiver->SharedRuntimeData.IsValid() ||
+            !Receiver->SimulationState.IsValid() ||
+            !Receiver->RenderStage.IsValid())
+        {
+            continue;
+        }
+
+        FWetRenderStageArgs RenderArgs = MakeWetRenderStageArgs(*Receiver);
+        Receiver->RenderStage->ApplyWetMaterialParameters(RenderArgs);
+        Receiver->bWetRenderDirty = true;
+    }
+    bWetRenderDirty = true;
+}
+
 void UDynamicWetClothesComponent::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
 {
     Super::PostEditChangeProperty(PropertyChangedEvent);

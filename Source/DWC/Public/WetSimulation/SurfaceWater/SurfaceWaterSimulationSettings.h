@@ -4,7 +4,7 @@
 #include "CoreMinimal.h"
 #include "SurfaceWaterSimulationSettings.generated.h"
 
-USTRUCT(BlueprintType)
+USTRUCT()
 struct DWC_API FSurfaceWaterMaterialSlotData
 {
     GENERATED_BODY()

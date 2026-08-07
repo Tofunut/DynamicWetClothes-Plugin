@@ -3045,7 +3045,7 @@ FText SWetWrinkleEditorPanel::GetDWCDataUVChannelText() const
         FText::AsNumber(DataUVChannelIndex));
 }
 
-// Reserved for a future authoring workflow. The generation code remains available but is intentionally hidden from the shipping UI.
+// Internal auto-generation workflow. The implementation is intentionally not exposed in the public editor UI.
 FReply SWetWrinkleEditorPanel::HandleAutoGenerateClicked()
 {
     UWetClothingAsset* Asset = WetClothingAsset.Get();
@@ -5986,14 +5986,6 @@ FWetWrinklePatchPlacement SWetWrinkleEditorPanel::MakeStampFromHit(const FWetWri
     Stamp.Strength = BrushSettings.Strength;
     Stamp.Falloff = BrushSettings.Falloff;
     Stamp.WrinkleNormalTexture = BrushSettings.WrinkleNormalTexture;
-    Stamp.AffectedWetPartID = INDEX_NONE;
-#if WITH_EDITORONLY_DATA
-    Stamp.bHasEditorSurface = true;
-    Stamp.EditorSurfaceLocalPosition = SurfaceHit.LocalPosition;
-    Stamp.EditorSurfaceLocalNormal = SurfaceHit.LocalNormal;
-    Stamp.EditorSurfaceLocalTangent = SurfaceHit.LocalTangent;
-    Stamp.EditorSurfaceLocalBitangent = SurfaceHit.LocalBitangent;
-#endif
     return Stamp;
 }
 

@@ -308,16 +308,6 @@ void FWetnessProfileDetailsCustomization::CustomizeDetails(IDetailLayoutBuilder&
         DetailBuilder.HideProperty(SurfaceStructHandle);
     }
 
-    // This is an editor workflow preference, not part of the physical/material
-    // profile contract, so keep it out of the dedicated profile editor.
-    const TSharedRef<IPropertyHandle> PreferredDirectoryHandle = DetailBuilder.GetProperty(
-        TEXT("PreferredSaveDirectory"),
-        UWetnessProfile::StaticClass());
-    if (PreferredDirectoryHandle->IsValidHandle())
-    {
-        DetailBuilder.HideProperty(PreferredDirectoryHandle);
-    }
-
     const TSharedRef<IPropertyHandle> PreviewSkeletalMeshHandle = DetailBuilder.GetProperty(
         TEXT("PreviewSkeletalMesh"),
         UWetnessProfile::StaticClass());
@@ -1383,7 +1373,7 @@ FText FWetnessProfileDetailsCustomization::GetValidationText() const
         return FText::GetEmpty();
     }
 
-    FString Message = TEXT("This profile contains legacy values that should be repaired before previewing, baking, or saving.\n");
+    FString Message = TEXT("This profile contains unsupported values that should be repaired before previewing, baking, or saving.\n");
     const int32 MaxDisplayedIssues = 5;
     for (int32 IssueIndex = 0; IssueIndex < FMath::Min(ValidationIssues.Num(), MaxDisplayedIssues); ++IssueIndex)
     {

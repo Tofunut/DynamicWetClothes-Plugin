@@ -1,5 +1,6 @@
 //Copyright 2026 Team Tofunut. All Rights Reserved.
 #include "WetnessProfilePreviewMaterial.h"
+#include "Utility/DWCLog.h"
 
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Editor.h"
@@ -532,7 +533,7 @@ UMaterialInterface* LoadOrCreateBaseMaterial()
         GEditor == nullptr || !FSlateApplication::IsInitialized())
     {
         UE_LOG(
-            LogTemp,
+            LogDWC,
             Warning,
             TEXT("DWC: Wetness Profile preview material creation was requested in an unsafe editor state."));
         PreviewMaterialCreationState = EPreviewMaterialCreationState::Failed;
@@ -546,7 +547,7 @@ UMaterialInterface* LoadOrCreateBaseMaterial()
     if (PackageName.IsEmpty() || ObjectPath.IsEmpty())
     {
         UE_LOG(
-            LogTemp,
+            LogDWC,
             Error,
             TEXT("DWC: Could not resolve the plugin mount path for the Wetness Profile preview material."));
         PreviewMaterialCreationState = EPreviewMaterialCreationState::Failed;
@@ -562,7 +563,7 @@ UMaterialInterface* LoadOrCreateBaseMaterial()
         }
 
         UE_LOG(
-            LogTemp,
+            LogDWC,
             Error,
             TEXT("DWC: Preview material path '%s' is occupied by '%s' (%s)."),
             *ObjectPath,
@@ -575,7 +576,7 @@ UMaterialInterface* LoadOrCreateBaseMaterial()
     UPackage* Package = CreatePackage(*PackageName);
     if (Package == nullptr)
     {
-        UE_LOG(LogTemp, Error, TEXT("DWC: Failed to create package '%s'."), *PackageName);
+        UE_LOG(LogDWC, Error, TEXT("DWC: Failed to create package '%s'."), *PackageName);
         PreviewMaterialCreationState = EPreviewMaterialCreationState::Failed;
         return nullptr;
     }
@@ -587,7 +588,7 @@ UMaterialInterface* LoadOrCreateBaseMaterial()
     if (Material == nullptr)
     {
         UE_LOG(
-            LogTemp,
+            LogDWC,
             Error,
             TEXT("DWC: Failed to create persistent Wetness Profile preview material '%s'."),
             *ObjectPath);
@@ -606,7 +607,7 @@ UMaterialInterface* LoadOrCreateBaseMaterial()
     if (!BuildMaterialGraph(Material))
     {
         UE_LOG(
-            LogTemp,
+            LogDWC,
             Error,
             TEXT("DWC: Failed to build one or more connections in '%s'."),
             *ObjectPath);
@@ -620,7 +621,7 @@ UMaterialInterface* LoadOrCreateBaseMaterial()
     if (!CompileErrors.IsEmpty())
     {
         UE_LOG(
-            LogTemp,
+            LogDWC,
             Error,
             TEXT("DWC: Failed to compile '%s':\n- %s"),
             *ObjectPath,
@@ -637,7 +638,7 @@ UMaterialInterface* LoadOrCreateBaseMaterial()
     if (!SaveMaterialAsset(Material))
     {
         UE_LOG(
-            LogTemp,
+            LogDWC,
             Warning,
             TEXT("DWC: Created '%s' in memory but could not save it. The viewport remains usable for this editor session."),
             *ObjectPath);

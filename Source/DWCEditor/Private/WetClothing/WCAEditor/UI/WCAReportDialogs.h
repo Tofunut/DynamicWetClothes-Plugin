@@ -11,7 +11,6 @@ struct FDWCLODRangeUpdateLODDetail
 {
     int32 LODIndex = INDEX_NONE;
     bool bSucceeded = false;
-    bool bHasNotes = false;
     bool bHasWarnings = false;
     FString Message;
 };

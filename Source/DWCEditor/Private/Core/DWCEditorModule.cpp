@@ -1,5 +1,6 @@
 //Copyright 2026 Team Tofunut. All Rights Reserved.
 #include "Core/DWCEditorStyle.h"
+#include "Utility/DWCLog.h"
 #include "Core/DWCGeneratedAssetRelocator.h"
 #include "Components/DynamicWetClothesComponentCustomization.h"
 #include "DataAssets/WetnessProfile.h"
@@ -67,7 +68,7 @@ class FDWCEditorModule : public IModuleInterface
                 ErrorMessage))
         {
             UE_LOG(
-                LogTemp,
+                LogDWC,
                 Warning,
                 TEXT("DWC could not prepare changed WP textures: profile='%s', error='%s'."),
                 *WetnessProfile.GetPathName(),

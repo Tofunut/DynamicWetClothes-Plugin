@@ -9,7 +9,7 @@
  * Serialized compatibility snapshot used by existing GPU runtime bulk data.
  * New runtime code should use FResolvedAbsorbedWaterSimulationParameters.
  */
-USTRUCT(BlueprintType)
+USTRUCT()
 struct DWC_API FDWCGPUProfileParameters
 {
     GENERATED_BODY()
@@ -61,7 +61,7 @@ struct DWC_API FDWCGPUProfileParameters
 };
 
 /** Static simulation-LOD triangle data shared by contact resolution and the GPU solver. */
-USTRUCT(BlueprintType)
+USTRUCT()
 struct DWC_API FDWCGPUBakedTriangle
 {
     GENERATED_BODY()
@@ -121,7 +121,7 @@ struct DWC_API FDWCGPUBakedTriangle
     }
 };
 
-USTRUCT(BlueprintType)
+USTRUCT()
 struct DWC_API FDWCGPUVertexIncidentTriangles
 {
     GENERATED_BODY()
@@ -135,7 +135,7 @@ struct DWC_API FDWCGPUVertexIncidentTriangles
 };
 
 /** One source contribution in a destination-oriented seam gather table. */
-USTRUCT(BlueprintType)
+USTRUCT()
 struct DWC_API FDWCGPUSeamIncoming
 {
     GENERATED_BODY()
@@ -148,7 +148,7 @@ struct DWC_API FDWCGPUSeamIncoming
 };
 
 /** Range into SeamIncoming for one destination texel. */
-USTRUCT(BlueprintType)
+USTRUCT()
 struct DWC_API FDWCGPUSeamDestination
 {
     GENERATED_BODY()
@@ -164,7 +164,7 @@ struct DWC_API FDWCGPUSeamDestination
 };
 
 /** CPU-baked lookup payload for one material slot's absorbed-wetness map and optional GPU Surface Water maps. */
-USTRUCT(BlueprintType)
+USTRUCT()
 struct DWC_API FDWCGPUMaterialSlotBakeData
 {
     GENERATED_BODY()
@@ -217,7 +217,7 @@ struct DWC_API FDWCGPUMaterialSlotBakeData
     TArray<FDWCGPUSeamIncoming> SeamIncoming;
 };
 
-USTRUCT(BlueprintType)
+USTRUCT()
 struct DWC_API FDWCGPULODBakeData
 {
     GENERATED_BODY()

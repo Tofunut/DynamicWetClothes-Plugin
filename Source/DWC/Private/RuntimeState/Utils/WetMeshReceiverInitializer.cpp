@@ -362,7 +362,7 @@ bool FWetMeshReceiverInitializer::InitializeReceiver(
         if (!Receiver.SkinningStaticData.IsValid())
         {
             UE_LOG(
-                LogTemp,
+                LogDWC,
                 Warning,
                 TEXT("DynamicWetClothesComponent: Failed to build CPU skinning static data on %s."),
                 *GetNameSafe(Context.Owner));

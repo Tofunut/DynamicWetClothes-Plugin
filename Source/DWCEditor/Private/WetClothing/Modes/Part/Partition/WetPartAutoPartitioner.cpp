@@ -4,6 +4,7 @@
  */
 
 #include "WetClothing/Modes/Part/Partition/WetPartAutoPartitioner.h"
+#include "Utility/DWCLog.h"
 
 #include "WetClothing/Foundation/MeshAnalysis/WetClothingAssetMeshAnalyzer.h"
 #include "WetClothing/Foundation/TextureAccess/WetClothingTextureReadback.h"
@@ -452,7 +453,7 @@ namespace
         OutStats.SampleWeight = SampleWeight;
         OutStats.RepresentativeColor = ComputeRepresentativeColor(Samples, WeightedColorSum, ColorMode);
         UE_LOG(
-            LogTemp,
+            LogDWC,
             Display,
             TEXT("DWC AutoPartition: Island=%d UVAddress RawBounds=(%.4f, %.4f)-(%.4f, %.4f) Center=(%.4f, %.4f) AddressedBounds=(%.4f, %.4f)-(%.4f, %.4f) Address=(%s,%s)"),
             Island.UVIslandID,
@@ -536,7 +537,7 @@ bool FWetPartAutoPartitioner::BuildClusters(
 
     const double TolerancePercentDouble = TolerancePercent;
     UE_LOG(
-        LogTemp,
+        LogDWC,
         Display,
         TEXT("DWC AutoPartition: BuildClusters Mode=%s DeltaE Tolerance=%.2f Islands=%d Texture=%dx%d"),
         GetColorModeDebugName(ColorMode),
@@ -569,7 +570,7 @@ bool FWetPartAutoPartitioner::BuildClusters(
         }
 
         UE_LOG(
-            LogTemp,
+            LogDWC,
             Display,
             TEXT("DWC AutoPartition: Island=%d Area=%.6f Samples=%.0f RepresentativeRGB=(%.4f, %.4f, %.4f) Lab=(%.2f, %.2f, %.2f) NearestIsland=%d NearestDeltaE=%.3f"),
             Stats.UVIslandID,
@@ -590,7 +591,7 @@ bool FWetPartAutoPartitioner::BuildClusters(
             const double       Distance = ComputeDeltaE(Stats.RepresentativeColor, ClusterColor);
             const FLabColor    ClusterLab = ConvertLinearRgbToLab(ClusterColor);
             UE_LOG(
-                LogTemp,
+                LogDWC,
                 Display,
                 TEXT("DWC AutoPartition:   Compare Island=%d -> Cluster=%d DeltaE=%.3f ClusterRGB=(%.4f, %.4f, %.4f) ClusterLab=(%.2f, %.2f, %.2f)"),
                 Stats.UVIslandID,
@@ -614,7 +615,7 @@ bool FWetPartAutoPartitioner::BuildClusters(
         {
             BestClusterIndex = OutClusters.AddDefaulted();
             UE_LOG(
-                LogTemp,
+                LogDWC,
                 Display,
                 TEXT("DWC AutoPartition:   Assign Island=%d -> New Cluster=%d"),
                 Stats.UVIslandID,
@@ -623,7 +624,7 @@ bool FWetPartAutoPartitioner::BuildClusters(
         else
         {
             UE_LOG(
-                LogTemp,
+                LogDWC,
                 Display,
                 TEXT("DWC AutoPartition:   Assign Island=%d -> Existing Cluster=%d DeltaE=%.3f"),
                 Stats.UVIslandID,
@@ -643,7 +644,7 @@ bool FWetPartAutoPartitioner::BuildClusters(
         const FLabColor    ClusterLab = ConvertLinearRgbToLab(ClusterColor);
         const FString      IslandIDList = BuildUVIslandIDListString(OutClusters[ClusterIndex].UVIslandIDs);
         UE_LOG(
-            LogTemp,
+            LogDWC,
             Display,
             TEXT("DWC AutoPartition: Final Cluster=%d Islands=%d UVIslandIDs=%s Samples=%.0f RGB=(%.4f, %.4f, %.4f) Lab=(%.2f, %.2f, %.2f)"),
             ClusterIndex + 1,

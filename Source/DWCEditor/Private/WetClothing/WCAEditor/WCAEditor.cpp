@@ -1,5 +1,6 @@
 //Copyright 2026 Team Tofunut. All Rights Reserved.
 #include "WCAEditor.h"
+#include "Utility/DWCLog.h"
 
 #include "Brushes/SlateRoundedBoxBrush.h"
 #include "Core/DWCEditorStyle.h"
@@ -3200,7 +3201,7 @@ void FWCAEditor::Initialize(const EToolkitMode::Type Mode, const TSharedPtr<IToo
 
     RegenerateMenusAndToolbars();
     UE_LOG(
-        LogTemp,
+        LogDWC,
         Display,
         TEXT("WCAEditor Initialize: '%s' completed in %.2f ms."),
         *GetNameSafe(InWetClothingAsset),
@@ -3663,8 +3664,6 @@ void FWCAEditor::HandleAssetSetupClicked()
                 FDWCLODRangeUpdateLODDetail& Detail = Report.LODDetails.AddDefaulted_GetRef();
                 Detail.LODIndex = LODIndex;
                 Detail.bSucceeded = bLODComplete;
-                Detail.bHasNotes = bLODComplete &&
-                    LODResult.ResultSeverity == EDWCDataUVResultSeverity::ReadyWithNotes;
                 Detail.bHasWarnings = bLODComplete &&
                     LODResult.ResultSeverity == EDWCDataUVResultSeverity::ReadyWithWarnings;
                 Detail.Message = LODResult.Message;
@@ -3709,7 +3708,7 @@ void FWCAEditor::HandleAssetSetupClicked()
         Report.LODDetails.RemoveAll(
             [](const FDWCLODRangeUpdateLODDetail& Detail)
             {
-                return Detail.bSucceeded && !Detail.bHasNotes && !Detail.bHasWarnings;
+                return Detail.bSucceeded && !Detail.bHasWarnings;
             });
         Report.GeneratedLODIndices = MoveTemp(GeneratedThisAttempt);
         Report.GeneratedLODIndices.Sort();

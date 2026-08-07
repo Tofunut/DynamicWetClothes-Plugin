@@ -1,7 +1,7 @@
 //Copyright 2026 Team Tofunut. All Rights Reserved.
-// Fill out your copyright notice in the Description page of Project Settings.
 
 #include "RuntimeState/Utils/WetRuntimeDataBuilder.h"
+#include "Utility/DWCLog.h"
 
 #include "RuntimeState/WetPrecomputedSimulationDataBridge.h"
 #include "RuntimeState/WetClothingRuntimeData.h"
@@ -54,7 +54,7 @@ namespace
             else
             {
                 UE_LOG(
-                    LogTemp,
+                    LogDWC,
                     Warning,
                     TEXT("DynamicWetClothesComponent: Failed to resolve Wetness Profile '%s' for WCA '%s' on '%s'. Using the WCA snapshot/fallback profile."),
                     *ProfileAssignment->GetSourceProfilePath().ToString(),
@@ -126,7 +126,7 @@ bool FWetRuntimeDataBuilder::InitializeWetPartVertexData(FWetRuntimeDataBuildArg
     if (!Receiver.WetClothingAsset || !Receiver.TargetSkeletalMesh)
     {
         UE_LOG(
-            LogTemp,
+            LogDWC,
             Error,
             TEXT("DynamicWetClothesComponent: Missing WetClothingAsset or target mesh on %s. Wet simulation disabled."),
             *GetNameSafe(Receiver.OwnerForLogs));
@@ -137,7 +137,7 @@ bool FWetRuntimeDataBuilder::InitializeWetPartVertexData(FWetRuntimeDataBuildArg
     if (Receiver.WetClothingAsset->GetDWCSkeletalMesh() && Receiver.WetClothingAsset->GetDWCSkeletalMesh() != SkeletalMesh)
     {
         UE_LOG(
-            LogTemp,
+            LogDWC,
             Warning,
             TEXT("DynamicWetClothesComponent: WetClothingAsset DWC Skeletal Mesh does not match the receiver mesh on %s."),
             *GetNameSafe(Receiver.OwnerForLogs));
@@ -146,7 +146,7 @@ bool FWetRuntimeDataBuilder::InitializeWetPartVertexData(FWetRuntimeDataBuildArg
     if (!Receiver.bUsePrecomputedSimulationData)
     {
         UE_LOG(
-            LogTemp,
+            LogDWC,
             Error,
             TEXT("DynamicWetClothesComponent: Runtime UV analysis fallback was removed. Precomputed simulation data is required for %s."),
             *GetNameSafe(Receiver.OwnerForLogs));
@@ -162,7 +162,7 @@ bool FWetRuntimeDataBuilder::InitializeWetPartVertexData(FWetRuntimeDataBuildArg
                                               ? Receiver.WetClothingAsset->GetPrecomputedSimulationDataValidationSummary(RuntimeMesh)
                                               : FString(TEXT("CPUPrecomputed{asset=null}"));
         UE_LOG(
-            LogTemp,
+            LogDWC,
             Error,
             TEXT("DynamicWetClothesComponent: Failed to initialize wet part vertex data from precomputed simulation data on %s. %s Open the Wet Clothing Asset and save it to update runtime-ready data."),
             *GetNameSafe(Receiver.OwnerForLogs),
@@ -191,7 +191,7 @@ bool FWetRuntimeDataBuilder::InitializeWetPartVertexDataFromPrecomputedData(
         if (Receiver.WetClothingAsset->GetPrecomputedSimulationData().bIsValid)
         {
             UE_LOG(
-                LogTemp,
+                LogDWC,
                 Warning,
                 TEXT("DynamicWetClothesComponent: WetClothingAsset precomputed simulation data is stale for %s. %s"),
                 *GetNameSafe(Receiver.OwnerForLogs),
@@ -200,7 +200,7 @@ bool FWetRuntimeDataBuilder::InitializeWetPartVertexDataFromPrecomputedData(
         else
         {
             UE_LOG(
-                LogTemp,
+                LogDWC,
                 Warning,
                 TEXT("DynamicWetClothesComponent: WetClothingAsset precomputed simulation data is unavailable for %s. %s"),
                 *GetNameSafe(Receiver.OwnerForLogs),
@@ -215,7 +215,7 @@ bool FWetRuntimeDataBuilder::InitializeWetPartVertexDataFromPrecomputedData(
         const FString ValidationSummary =
             Receiver.WetClothingAsset->GetPrecomputedSimulationDataValidationSummary(SkeletalMesh);
         UE_LOG(
-            LogTemp,
+            LogDWC,
             Warning,
             TEXT("DynamicWetClothesComponent: WetClothingAsset precomputed simulation data vertex count mismatch on %s. RuntimeVertexCount=%d, PrecomputedVertexCount=%d, PrecomputedVertices=%d. %s"),
             *GetNameSafe(Receiver.OwnerForLogs),
@@ -246,7 +246,7 @@ bool FWetRuntimeDataBuilder::InitializeWetPartVertexDataFromPrecomputedData(
         static_cast<int32>(FWetClothingRuntimeData::InvalidWetnessProfileIndex))
     {
         UE_LOG(
-            LogTemp,
+            LogDWC,
             Error,
             TEXT("DynamicWetClothesComponent: Too many authored wetness profiles for uint16 vertex mapping on %s."),
             *GetNameSafe(Receiver.OwnerForLogs));
@@ -290,7 +290,7 @@ bool FWetRuntimeDataBuilder::InitializeWetPartVertexDataFromPrecomputedData(
     if (PrecomputedWettableVertexCount == 0)
     {
         UE_LOG(
-            LogTemp,
+            LogDWC,
             Warning,
             TEXT("DynamicWetClothesComponent: Precomputed simulation data contains no wettable vertices on %s. Check wettable material slots and wet part assignments."),
             *GetNameSafe(Receiver.OwnerForLogs));
@@ -298,7 +298,7 @@ bool FWetRuntimeDataBuilder::InitializeWetPartVertexDataFromPrecomputedData(
     else if (RuntimeWettableVertexCount == 0)
     {
         UE_LOG(
-            LogTemp,
+            LogDWC,
             Warning,
             TEXT("DynamicWetClothesComponent: Runtime initialized 0 wettable vertices from %d precomputed wettable vertices on %s."),
             PrecomputedWettableVertexCount,
@@ -365,7 +365,7 @@ bool FWetRuntimeDataBuilder::InitializeWetPartVertexDataFromGPUData(
         static_cast<int32>(FWetClothingRuntimeData::InvalidWetnessProfileIndex))
     {
         UE_LOG(
-            LogTemp,
+            LogDWC,
             Error,
             TEXT("DynamicWetClothesComponent: Too many authored wetness profiles for GPU vertex mapping on %s."),
             *GetNameSafe(Receiver.OwnerForLogs));
@@ -450,7 +450,7 @@ bool FWetRuntimeDataBuilder::InitializeWetPartVertexDataFromGPUData(
     if (AssignedWettableVertexCount <= 0)
     {
         UE_LOG(
-            LogTemp,
+            LogDWC,
             Error,
             TEXT("DynamicWetClothesComponent: GPU runtime data initialized no wettable vertex bindings for WCA '%s' on %s."),
             *GetNameSafe(Receiver.WetClothingAsset),
@@ -489,7 +489,7 @@ bool FWetRuntimeDataBuilder::InitializeNeighborGraphFromPrecomputedData(FWetRunt
             &ErrorMessage))
     {
         UE_LOG(
-            LogTemp,
+            LogDWC,
             Error,
             TEXT("DynamicWetClothesComponent: Failed to initialize neighbor graph from precomputed simulation data on %s. %s Open the Wet Clothing Asset and save it to update runtime-ready data."),
             *GetNameSafe(Receiver.OwnerForLogs),
@@ -526,7 +526,7 @@ void FWetRuntimeDataBuilder::EnsureWetnessBufferSize(FWetRuntimeDataBuildArgs& R
     if (Receiver.RuntimeData != nullptr && Receiver.RuntimeData->VertexCount != VertexCount)
     {
         UE_LOG(
-            LogTemp,
+            LogDWC,
             Error,
             TEXT("DynamicWetClothesComponent: Shared runtime vertex count mismatch on %s. Shared=%d Runtime=%d."),
             *GetNameSafe(Receiver.OwnerForLogs),
@@ -619,7 +619,7 @@ void FWetRuntimeDataBuilder::EnsureWetnessBufferSize(FWetInputStageArgs& Receive
     if (Receiver.RuntimeData != nullptr && Receiver.RuntimeData->VertexCount != VertexCount)
     {
         UE_LOG(
-            LogTemp,
+            LogDWC,
             Error,
             TEXT("DynamicWetClothesComponent: Shared runtime vertex count changed after initialization. Shared=%d Runtime=%d."),
             Receiver.RuntimeData->VertexCount,
@@ -642,14 +642,14 @@ bool FWetRuntimeDataBuilder::GetLODRenderData(
     USkeletalMesh* SkeletalMesh = TargetSkeletalMesh->GetSkeletalMeshAsset();
     if (!SkeletalMesh)
     {
-        UE_LOG(LogTemp, Warning, TEXT("DynamicWetClothesComponent: SkeletalMeshAsset reference is null."));
+        UE_LOG(LogDWC, Warning, TEXT("DynamicWetClothesComponent: SkeletalMeshAsset reference is null."));
         return false;
     }
 
     FSkeletalMeshRenderData* RenderData = SkeletalMesh->GetResourceForRendering();
     if (!RenderData || !RenderData->LODRenderData.IsValidIndex(LODIndex))
     {
-        UE_LOG(LogTemp, Warning, TEXT("DynamicWetClothesComponent: RenderData reference is null."));
+        UE_LOG(LogDWC, Warning, TEXT("DynamicWetClothesComponent: RenderData reference is null."));
         return false;
     }
 

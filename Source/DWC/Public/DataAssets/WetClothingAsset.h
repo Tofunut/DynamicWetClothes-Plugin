@@ -16,7 +16,7 @@
 class USkeletalMesh;
 class UMaterialFunctionInterface;
 
-USTRUCT(BlueprintType)
+USTRUCT()
 struct DWC_API FWCAAuthoredData
 {
     GENERATED_BODY()
@@ -30,13 +30,9 @@ struct DWC_API FWCAAuthoredData
     UPROPERTY(EditAnywhere, Category = "Wet Clothing|Transparency")
     FWetClothingTransparencyData TransparencyData;
 
-#if WITH_EDITORONLY_DATA
-    UPROPERTY(EditAnywhere, Category = "Wet Clothing")
-    TArray<FString> AdditionalProfileSearchPaths;
-#endif
 };
 
-USTRUCT(BlueprintType)
+USTRUCT()
 struct DWC_API FWCALODVertexColorRuntimeData
 {
     GENERATED_BODY()
@@ -65,7 +61,7 @@ struct DWC_API FWCALODVertexColorRuntimeData
     }
 };
 
-USTRUCT(BlueprintType)
+USTRUCT()
 struct DWC_API FWCADerivedInlineData
 {
     GENERATED_BODY()
@@ -118,7 +114,7 @@ struct DWC_API FWCADerivedInlineData
 #endif
 };
 
-USTRUCT(BlueprintType)
+USTRUCT()
 struct DWC_API FWCADerivedBulkData
 {
     GENERATED_BODY()
@@ -133,7 +129,7 @@ struct DWC_API FWCADerivedBulkData
     TArray<FWCALODVertexColorRuntimeData> LODVertexColorRuntimeData;
 };
 
-USTRUCT(BlueprintType)
+USTRUCT()
 struct DWC_API FWCADerivedData
 {
     GENERATED_BODY()
@@ -146,7 +142,7 @@ struct DWC_API FWCADerivedData
     FWCADerivedBulkData Bulk;
 };
 
-USTRUCT(BlueprintType)
+USTRUCT()
 struct DWC_API FWCAMetadata
 {
     GENERATED_BODY()

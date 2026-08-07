@@ -916,9 +916,6 @@ bool FWetWrinkleNormalMapBaker::CommitComputedResult(
     BakedMap->BakedWrinkleMask = MaskTexture;
     BakedMap->Resolution = Snapshot.FinalTextureSize.X;
     BakedMap->PaddingPixels = Snapshot.PaddingPixels;
-    BakedMap->bHasCoverageAlpha = false;
-    BakedMap->AlphaSemantic = EDWCWrinkleAlphaSemantic::None;
-    BakedMap->AlphaBuildVersion = 0;
     BakedMap->BuildSignature = Snapshot.BuildSignature;
     BakedMap->BakeGuid = FGuid::NewGuid();
 

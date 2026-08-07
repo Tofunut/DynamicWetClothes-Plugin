@@ -1587,7 +1587,7 @@ void SWetClothingTransparencyBakePanel::RefreshMapGenerationSettings()
             SettingsIndex = 1;
             break;
         case EDWCTransparencySourceType::OtherSkeletalMeshComponents:
-            // Reserved for future development and intentionally hidden from the current shipping UI.
+            // Internal multi-component source path. Not exposed through the current editor workflow.
             SettingsIndex = 0;
             break;
         case EDWCTransparencySourceType::ManualColorOrTexture:
@@ -3108,7 +3108,6 @@ void SWetClothingTransparencyBakePanel::HandleLayerSelectionChanged(FLayerItemPt
                     NewLayer.TargetSurface.OuterMaterialSlotIndex = SlotIndex;
                     NewLayer.TargetSurface.OuterMaterialSlotName = SlotName;
                     NewLayer.SourceType = MutableAsset.Authored.TransparencyData.CharacterStructureType;
-                    NewLayer.bSourceTypeConfigured = true;
                     return true;
                 }).bChanged)
         {
@@ -3244,7 +3243,6 @@ FReply SWetClothingTransparencyBakePanel::HandleAddInnerSlotClicked()
     EditSelectedLayer(LOCTEXT("AddTransparencyInnerSlot", "Add Transparency Inner Material Slot"), [Item](auto& TargetLayer)
     {
         auto& Slot = TargetLayer.SameMeshSource.InnerSlotPriority.AddDefaulted_GetRef();
-        Slot.bEnabled = true;
         Slot.MaterialSlotIndex = Item->SlotIndex;
         Slot.MaterialSlotName = Item->SlotName;
     }, true);
@@ -3467,8 +3465,8 @@ TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildMapGenerationStage()
               [BuildGeneratePreviewMapCTA()];
     };
 
-    // Multi-component Transparency source support remains in the internal data model for future development.
-    // It is intentionally not exposed in the shipping editor UI in this release.
+    // Multi-component Transparency source support is retained in the internal data model.
+    // It is not exposed through the current editor workflow.
 
     const auto BuildManualSettings = [this, BuildGeneratePreviewMapCTA]()
     {

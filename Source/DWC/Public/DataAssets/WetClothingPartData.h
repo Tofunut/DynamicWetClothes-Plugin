@@ -13,14 +13,14 @@ class UMaterial;
 class UMaterialInstanceConstant;
 class UMaterialInterface;
 class UTexture;
-UENUM(BlueprintType)
+UENUM()
 enum class EWetPartProfileBlendMode : uint8
 {
     Standard UMETA(DisplayName = "Standard")
 };
 
 /** WCA-wide authored profile record. Wet Parts reference this table by index. */
-USTRUCT(BlueprintType)
+USTRUCT()
 struct DWC_API FWetPartProfileAssignment
 {
     GENERATED_BODY()
@@ -29,22 +29,16 @@ struct DWC_API FWetPartProfileAssignment
     UPROPERTY(VisibleAnywhere, Category = "Wetness Profile")
     TSoftObjectPtr<UWetnessProfile> SourceProfileAsset;
 
-    /** Legacy serialized path retained only so existing WCA assets migrate without data loss. */
-    UPROPERTY(meta = (DeprecatedProperty, DeprecationMessage = "Use SourceProfileAsset."))
-    FSoftObjectPath SourceProfile;
-
     UPROPERTY(EditAnywhere, Category = "Wetness Profile")
     EWetPartProfileBlendMode BlendMode = EWetPartProfileBlendMode::Standard;
 
-    /** Runtime-safe fallback used when SourceProfile cannot be loaded. */
+    /** Runtime-safe fallback used when SourceProfileAsset cannot be loaded. */
     UPROPERTY(EditAnywhere, Category = "Wetness Profile", meta = (ShowOnlyInnerProperties))
     FWetnessProfileParameters Parameters;
 
     FSoftObjectPath GetSourceProfilePath() const
     {
-        return !SourceProfileAsset.IsNull()
-            ? SourceProfileAsset.ToSoftObjectPath()
-            : SourceProfile;
+        return SourceProfileAsset.ToSoftObjectPath();
     }
 
     bool HasSourceProfile() const
@@ -55,24 +49,11 @@ struct DWC_API FWetPartProfileAssignment
     void SetSourceProfilePath(const FSoftObjectPath& InPath)
     {
         SourceProfileAsset = TSoftObjectPtr<UWetnessProfile>(InPath);
-        SourceProfile = InPath;
     }
 
     void SetSourceProfile(UWetnessProfile* InProfile)
     {
         SetSourceProfilePath(InProfile != nullptr ? FSoftObjectPath(InProfile) : FSoftObjectPath());
-    }
-
-    void MigrateLegacySoftReference()
-    {
-        if (SourceProfileAsset.IsNull() && SourceProfile.IsValid())
-        {
-            SourceProfileAsset = TSoftObjectPtr<UWetnessProfile>(SourceProfile);
-        }
-        else if (!SourceProfileAsset.IsNull())
-        {
-            SourceProfile = SourceProfileAsset.ToSoftObjectPath();
-        }
     }
 
     FString GetDisplayName() const
@@ -83,7 +64,7 @@ struct DWC_API FWetPartProfileAssignment
 };
 
 /** Part-local GPU Surface Water size overrides. */
-USTRUCT(BlueprintType)
+USTRUCT()
 struct DWC_API FWetPartSurfaceWaterSettings
 {
     GENERATED_BODY()
@@ -125,7 +106,7 @@ struct DWC_API FWetPartSurfaceWaterSettings
 };
 
 /** Part-local data. Material slot and UV channel are owned by the parent WCA/slot. */
-USTRUCT(BlueprintType)
+USTRUCT()
 struct DWC_API FWetClothingWetPartEntry
 {
     GENERATED_BODY()
@@ -154,7 +135,7 @@ struct DWC_API FWetClothingWetPartEntry
 };
 
 /** Authoritative data for one material slot. */
-USTRUCT(BlueprintType)
+USTRUCT()
 struct DWC_API FWetClothingAuthoredMaterialSlot
 {
     GENERATED_BODY()
@@ -201,7 +182,7 @@ struct DWC_API FWetClothingAuthoredMaterialSlot
     }
 };
 
-USTRUCT(BlueprintType)
+USTRUCT()
 struct DWC_API FWetClothingEditableWetPartData
 {
     GENERATED_BODY()
@@ -340,7 +321,7 @@ struct DWC_API FWetClothingEditableWetPartData
     }
 };
 
-USTRUCT(BlueprintType)
+USTRUCT()
 struct DWC_API FWetClothingGeneratedWetMaterialOverride
 {
     GENERATED_BODY()
@@ -369,7 +350,7 @@ struct DWC_API FWetClothingGeneratedWetMaterialOverride
 };
 
 
-USTRUCT(BlueprintType)
+USTRUCT()
 struct DWC_API FWetClothingLocalRenderProfile
 {
     GENERATED_BODY()
@@ -378,11 +359,7 @@ struct DWC_API FWetClothingLocalRenderProfile
     UPROPERTY(VisibleAnywhere, Category = "Wet Part Data Texture")
     TSoftObjectPtr<UWetnessProfile> SourceProfileAsset;
 
-    /** Legacy path retained for existing serialized WCA assets. */
-    UPROPERTY(meta = (DeprecatedProperty, DeprecationMessage = "Use SourceProfileAsset."))
-    FSoftObjectPath SourceProfile;
-
-    /** Authoritative non-editor snapshot; editor/PIE may temporarily override it from SourceProfile. */
+    /** Authoritative non-editor snapshot; editor/PIE may temporarily override it from SourceProfileAsset. */
     UPROPERTY(VisibleAnywhere, Category = "Wet Part Data Texture")
     FWetnessProfileParameters Parameters;
 
@@ -394,26 +371,14 @@ struct DWC_API FWetClothingLocalRenderProfile
     UPROPERTY(VisibleAnywhere, Category = "Wet Part Data Texture|Surface Texture")
     TSoftObjectPtr<UTexture2D> SourceDropletNormalTexture;
 
-    UPROPERTY(meta = (DeprecatedProperty, DeprecationMessage = "Use SourceDropletNormalTexture."))
-    FSoftObjectPath SourceDropletNormal;
-
     UPROPERTY(VisibleAnywhere, Category = "Wet Part Data Texture|Surface Texture")
     TSoftObjectPtr<UTexture2D> SourceDropletMaskTexture;
-
-    UPROPERTY(meta = (DeprecatedProperty, DeprecationMessage = "Use SourceDropletMaskTexture."))
-    FSoftObjectPath SourceDropletMask;
 
     UPROPERTY(VisibleAnywhere, Category = "Wet Part Data Texture|Surface Texture")
     TSoftObjectPtr<UTexture2D> SourceDropletFlowNormalTexture;
 
-    UPROPERTY(meta = (DeprecatedProperty, DeprecationMessage = "Use SourceDropletFlowNormalTexture."))
-    FSoftObjectPath SourceDropletFlowNormal;
-
     UPROPERTY(VisibleAnywhere, Category = "Wet Part Data Texture|Surface Texture")
     TSoftObjectPtr<UTexture2D> SourceDropletFlowMaskTexture;
-
-    UPROPERTY(meta = (DeprecatedProperty, DeprecationMessage = "Use SourceDropletFlowMaskTexture."))
-    FSoftObjectPath SourceDropletFlowMask;
 
     /** Array-compatible authored textures retained as hard references for runtime Texture2DArray upload. */
     UPROPERTY(VisibleAnywhere, Category = "Wet Part Data Texture|Surface Texture")
@@ -430,92 +395,57 @@ struct DWC_API FWetClothingLocalRenderProfile
 
     FSoftObjectPath GetSourceProfilePath() const
     {
-        return !SourceProfileAsset.IsNull() ? SourceProfileAsset.ToSoftObjectPath() : SourceProfile;
+        return SourceProfileAsset.ToSoftObjectPath();
     }
 
     void SetSourceProfilePath(const FSoftObjectPath& InPath)
     {
         SourceProfileAsset = TSoftObjectPtr<UWetnessProfile>(InPath);
-        SourceProfile = InPath;
     }
 
     FSoftObjectPath GetSourceDropletNormalPath() const
     {
-        return !SourceDropletNormalTexture.IsNull() ? SourceDropletNormalTexture.ToSoftObjectPath() : SourceDropletNormal;
+        return SourceDropletNormalTexture.ToSoftObjectPath();
     }
 
     FSoftObjectPath GetSourceDropletMaskPath() const
     {
-        return !SourceDropletMaskTexture.IsNull() ? SourceDropletMaskTexture.ToSoftObjectPath() : SourceDropletMask;
+        return SourceDropletMaskTexture.ToSoftObjectPath();
     }
 
     FSoftObjectPath GetSourceDropletFlowNormalPath() const
     {
-        return !SourceDropletFlowNormalTexture.IsNull() ? SourceDropletFlowNormalTexture.ToSoftObjectPath() : SourceDropletFlowNormal;
+        return SourceDropletFlowNormalTexture.ToSoftObjectPath();
     }
 
     FSoftObjectPath GetSourceDropletFlowMaskPath() const
     {
-        return !SourceDropletFlowMaskTexture.IsNull() ? SourceDropletFlowMaskTexture.ToSoftObjectPath() : SourceDropletFlowMask;
+        return SourceDropletFlowMaskTexture.ToSoftObjectPath();
     }
 
     void SetSourceDropletNormal(UTexture2D* Texture)
     {
         SourceDropletNormalTexture = Texture;
-        SourceDropletNormal = Texture != nullptr ? FSoftObjectPath(Texture) : FSoftObjectPath();
     }
 
     void SetSourceDropletMask(UTexture2D* Texture)
     {
         SourceDropletMaskTexture = Texture;
-        SourceDropletMask = Texture != nullptr ? FSoftObjectPath(Texture) : FSoftObjectPath();
     }
 
     void SetSourceDropletFlowNormal(UTexture2D* Texture)
     {
         SourceDropletFlowNormalTexture = Texture;
-        SourceDropletFlowNormal = Texture != nullptr ? FSoftObjectPath(Texture) : FSoftObjectPath();
     }
 
     void SetSourceDropletFlowMask(UTexture2D* Texture)
     {
         SourceDropletFlowMaskTexture = Texture;
-        SourceDropletFlowMask = Texture != nullptr ? FSoftObjectPath(Texture) : FSoftObjectPath();
-    }
-
-    void MigrateLegacySoftReferences()
-    {
-        if (SourceProfileAsset.IsNull() && SourceProfile.IsValid())
-        {
-            SourceProfileAsset = TSoftObjectPtr<UWetnessProfile>(SourceProfile);
-        }
-        if (SourceDropletNormalTexture.IsNull() && SourceDropletNormal.IsValid())
-        {
-            SourceDropletNormalTexture = TSoftObjectPtr<UTexture2D>(SourceDropletNormal);
-        }
-        if (SourceDropletMaskTexture.IsNull() && SourceDropletMask.IsValid())
-        {
-            SourceDropletMaskTexture = TSoftObjectPtr<UTexture2D>(SourceDropletMask);
-        }
-        if (SourceDropletFlowNormalTexture.IsNull() && SourceDropletFlowNormal.IsValid())
-        {
-            SourceDropletFlowNormalTexture = TSoftObjectPtr<UTexture2D>(SourceDropletFlowNormal);
-        }
-        if (SourceDropletFlowMaskTexture.IsNull() && SourceDropletFlowMask.IsValid())
-        {
-            SourceDropletFlowMaskTexture = TSoftObjectPtr<UTexture2D>(SourceDropletFlowMask);
-        }
-
-        SourceProfile = SourceProfileAsset.IsNull() ? SourceProfile : SourceProfileAsset.ToSoftObjectPath();
-        SourceDropletNormal = SourceDropletNormalTexture.IsNull() ? SourceDropletNormal : SourceDropletNormalTexture.ToSoftObjectPath();
-        SourceDropletMask = SourceDropletMaskTexture.IsNull() ? SourceDropletMask : SourceDropletMaskTexture.ToSoftObjectPath();
-        SourceDropletFlowNormal = SourceDropletFlowNormalTexture.IsNull() ? SourceDropletFlowNormal : SourceDropletFlowNormalTexture.ToSoftObjectPath();
-        SourceDropletFlowMask = SourceDropletFlowMaskTexture.IsNull() ? SourceDropletFlowMask : SourceDropletFlowMaskTexture.ToSoftObjectPath();
     }
 
 };
 
-USTRUCT(BlueprintType)
+USTRUCT()
 struct DWC_API FWetClothingBakedWetPartDataSlotTexture
 {
     GENERATED_BODY()
@@ -539,7 +469,7 @@ struct DWC_API FWetClothingBakedWetPartDataSlotTexture
     }
 };
 
-USTRUCT(BlueprintType)
+USTRUCT()
 struct DWC_API FWetClothingBakedWetPartData
 {
     GENERATED_BODY()
@@ -610,7 +540,7 @@ struct DWC_API FWetClothingBakedWetPartData
     }
 };
 
-USTRUCT(BlueprintType)
+USTRUCT()
 struct DWC_API FWetClothingPrecomputedVertexData
 {
     GENERATED_BODY()
@@ -632,7 +562,7 @@ struct DWC_API FWetClothingPrecomputedVertexData
     }
 };
 
-USTRUCT(BlueprintType)
+USTRUCT()
 struct DWC_API FWetClothingPrecomputedVertexNeighbors
 {
     GENERATED_BODY()
@@ -641,7 +571,7 @@ struct DWC_API FWetClothingPrecomputedVertexNeighbors
     TArray<int32> Neighbors;
 };
 
-USTRUCT(BlueprintType)
+USTRUCT()
 struct DWC_API FWetClothingPrecomputedSimulationData
 {
     GENERATED_BODY()
@@ -674,7 +604,7 @@ struct DWC_API FWetClothingPrecomputedSimulationData
     FWetClothingPrecomputedBoneOptimizationCache BoneOptimizationCache;
 };
 
-USTRUCT(BlueprintType)
+USTRUCT()
 struct DWC_API FWetClothingPartData
 {
     GENERATED_BODY()

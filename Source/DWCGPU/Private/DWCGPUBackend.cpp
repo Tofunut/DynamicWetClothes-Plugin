@@ -85,12 +85,12 @@ FWetnessProfileParameters ResolveRuntimeWetnessProfileParameters(
     }
 
 #if WITH_EDITOR
-    if (AuthoredProfile->SourceProfile.IsValid())
+    if (AuthoredProfile->GetSourceProfilePath().IsValid())
     {
-        UObject* SourceObject = AuthoredProfile->SourceProfile.ResolveObject();
+        UObject* SourceObject = AuthoredProfile->GetSourceProfilePath().ResolveObject();
         if (SourceObject == nullptr)
         {
-            SourceObject = AuthoredProfile->SourceProfile.TryLoad();
+            SourceObject = AuthoredProfile->GetSourceProfilePath().TryLoad();
         }
 
         if (const UWetnessProfile* SourceProfile =
@@ -104,7 +104,7 @@ FWetnessProfileParameters ResolveRuntimeWetnessProfileParameters(
                 LogDWCGPU,
                 Warning,
                 TEXT("DWCGPU: Failed to resolve Wetness Profile '%s' for WCA '%s'. Using the WCA snapshot/fallback profile."),
-                *AuthoredProfile->SourceProfile.ToString(),
+                *AuthoredProfile->GetSourceProfilePath().ToString(),
                 *GetNameSafe(&Asset));
         }
     }

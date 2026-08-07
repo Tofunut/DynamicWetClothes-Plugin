@@ -398,9 +398,6 @@ class DWC_API UWetnessProfile : public UDataAsset
     UPROPERTY()
     TObjectPtr<UTexture2D> PreparedDroplet2MaskTexture = nullptr;
 
-    UPROPERTY(EditAnywhere, Category = "Wetness Profile")
-    FString PreferredSaveDirectory = TEXT("/Game/WetnessProfiles");
-
     /** Editor preview mesh shown by default when this Wetness Profile is opened. */
     UPROPERTY(EditAnywhere, Category = "Wetness Profile|Preview")
     TObjectPtr<USkeletalMesh> PreviewSkeletalMesh = nullptr;

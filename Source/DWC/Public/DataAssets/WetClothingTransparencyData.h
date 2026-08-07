@@ -9,22 +9,22 @@ class AActor;
 class USkeletalMesh;
 class UTexture2D;
 
-UENUM(BlueprintType)
+UENUM()
 enum class EDWCTransparencySourceType : uint8
 {
-    SameMeshMaterialSlots UMETA(DisplayName = "Same Skeletal Mesh / Material Slots"),
-    OtherSkeletalMeshComponents UMETA(DisplayName = "Other Skeletal Mesh Components"),
-    ManualColorOrTexture UMETA(DisplayName = "Manual Color or Texture")
+    SameMeshMaterialSlots = 0 UMETA(DisplayName = "Same Skeletal Mesh / Material Slots"),
+    OtherSkeletalMeshComponents = 1 UMETA(DisplayName = "Other Skeletal Mesh Components"),
+    ManualColorOrTexture = 2 UMETA(DisplayName = "Manual Color or Texture")
 };
 
-UENUM(BlueprintType)
+UENUM()
 enum class EDWCTransparencyUVAddressMode : uint8
 {
     Clamp,
     Wrap
 };
 
-UENUM(BlueprintType)
+UENUM()
 enum class EDWCTransparencyBrushMode : uint8
 {
     Apply,
@@ -34,7 +34,7 @@ enum class EDWCTransparencyBrushMode : uint8
     ResetToAuto UMETA(DisplayName = "Reset to Auto")
 };
 
-UENUM(BlueprintType)
+UENUM()
 enum class EDWCTransparencyRevealColorBrushMode : uint8
 {
     Paint,
@@ -42,7 +42,7 @@ enum class EDWCTransparencyRevealColorBrushMode : uint8
     Smooth UMETA(DisplayName = "Smooth")
 };
 
-USTRUCT(BlueprintType)
+USTRUCT()
 struct DWC_API FDWCTransparencyBrushSample
 {
     GENERATED_BODY()
@@ -60,7 +60,7 @@ struct DWC_API FDWCTransparencyBrushSample
     float Strength = 1.0f;
 };
 
-USTRUCT(BlueprintType)
+USTRUCT()
 struct DWC_API FDWCTransparencyBrushStroke
 {
     GENERATED_BODY()
@@ -97,7 +97,7 @@ struct DWC_API FDWCTransparencyBrushStroke
 };
 
 /** RGB paint stored for the Type 3 procedural inner-mesh workflow. */
-USTRUCT(BlueprintType)
+USTRUCT()
 struct DWC_API FDWCTransparencyRevealColorStroke
 {
     GENERATED_BODY()
@@ -130,14 +130,10 @@ struct DWC_API FDWCTransparencyRevealColorStroke
     TArray<FDWCTransparencyBrushSample> Samples;
 };
 
-USTRUCT(BlueprintType)
+USTRUCT()
 struct DWC_API FWetClothingTransparencyInnerSlot
 {
     GENERATED_BODY()
-
-    // Legacy per-slot enable state. Type 1 now treats every listed slot as an active priority source.
-    UPROPERTY(meta = (DeprecatedProperty, DeprecationMessage = "Inner Source Parts are always active. Remove the entry to exclude it."))
-    bool bEnabled = true;
 
     UPROPERTY(EditAnywhere, Category = "Transparency Inner Slot")
     int32 MaterialSlotIndex = INDEX_NONE;
@@ -148,12 +144,9 @@ struct DWC_API FWetClothingTransparencyInnerSlot
     UPROPERTY(EditAnywhere, Category = "Transparency Inner Slot", meta = (ClampMin = "0"))
     int32 SourceUVChannel = 0;
 
-    // Legacy per-slot ray limit. Type 1 now uses RaySettings.MaxRayDistance for every source slot.
-    UPROPERTY(meta = (DeprecatedProperty, DeprecationMessage = "Use the global Maximum Ray Distance in Ray Settings."))
-    float MaxHitDistance = 10.0f;
 };
 
-USTRUCT(BlueprintType)
+USTRUCT()
 struct DWC_API FWetClothingTransparencyTargetSurface
 {
     GENERATED_BODY()
@@ -168,7 +161,7 @@ struct DWC_API FWetClothingTransparencyTargetSurface
     EDWCTransparencyUVAddressMode UVAddressMode = EDWCTransparencyUVAddressMode::Clamp;
 };
 
-USTRUCT(BlueprintType)
+USTRUCT()
 struct DWC_API FWetClothingTransparencyRaySettings
 {
     GENERATED_BODY()
@@ -189,7 +182,7 @@ struct DWC_API FWetClothingTransparencyRaySettings
     float MaxRayDistance = 10.0f;
 };
 
-USTRUCT(BlueprintType)
+USTRUCT()
 struct DWC_API FWetClothingTransparencySameMeshSource
 {
     GENERATED_BODY()
@@ -199,7 +192,7 @@ struct DWC_API FWetClothingTransparencySameMeshSource
     TArray<FWetClothingTransparencyInnerSlot> InnerSlotPriority;
 };
 
-USTRUCT(BlueprintType)
+USTRUCT()
 struct DWC_API FWetClothingTransparencyManualColorSource
 {
     GENERATED_BODY()
@@ -212,7 +205,7 @@ struct DWC_API FWetClothingTransparencyManualColorSource
 
 };
 
-USTRUCT(BlueprintType)
+USTRUCT()
 struct DWC_API FWetClothingTransparencyAutoBakeMetadata
 {
     GENERATED_BODY()
@@ -236,7 +229,7 @@ struct DWC_API FWetClothingTransparencyAutoBakeMetadata
     int32 NoHitCount = 0;
 };
 
-USTRUCT(BlueprintType)
+USTRUCT()
 struct DWC_API FWetClothingBakedTransparencyMap
 {
     GENERATED_BODY()
@@ -292,7 +285,7 @@ struct DWC_API FWetClothingBakedTransparencyMap
     }
 };
 
-USTRUCT(BlueprintType)
+USTRUCT()
 struct DWC_API FWetClothingTransparencyLayerData
 {
     GENERATED_BODY()
@@ -305,11 +298,6 @@ struct DWC_API FWetClothingTransparencyLayerData
 
     UPROPERTY(EditAnywhere, Category = "Transparency Layer")
     EDWCTransparencySourceType SourceType = EDWCTransparencySourceType::SameMeshMaterialSlots;
-
-    // Distinguishes a newly-added target part from an existing layer that uses
-    // the default source type. The editor uses this to choose Stage 1 or Stage 2.
-    UPROPERTY()
-    bool bSourceTypeConfigured = false;
 
     UPROPERTY(EditAnywhere, Category = "Transparency Layer")
     FWetClothingTransparencyRaySettings RaySettings;
@@ -337,7 +325,7 @@ struct DWC_API FWetClothingTransparencyLayerData
     void MarkFinalBakeStale();
 };
 
-USTRUCT(BlueprintType)
+USTRUCT()
 struct DWC_API FWetClothingTransparencyData
 {
     GENERATED_BODY()
@@ -367,18 +355,9 @@ struct DWC_API FWetClothingTransparencyData
     UPROPERTY(EditAnywhere, Category = "Transparency", meta = (ClampMin = "0.0", UIMin = "0.0", UIMax = "32.0"))
     float TransparencyEdgeFeatherPixels = 4.0f;
 
-    // Authoring strength baked into the final Transparency Map alpha. The legacy
-    // property name is retained so existing WCA assets keep their authored value.
+    // Authoring strength baked into the final Transparency Map alpha.
     UPROPERTY(EditAnywhere, Category = "Transparency Bake", meta = (DisplayName = "Transparency Strength", ClampMin = "0.0", UIMin = "0.0", UIMax = "2.0"))
     float TransparencyPreviewStrength = 0.4f;
-
-    // Legacy spatial expansion settings. Suppression now follows the baked
-    // wrinkle mask exactly and does not create coverage outside that mask.
-    UPROPERTY(meta = (DeprecatedProperty))
-    float WrinkleSuppressionRadiusPixels = 4.0f;
-
-    UPROPERTY(meta = (DeprecatedProperty))
-    float WrinkleSuppressionFeatherPixels = 16.0f;
 
     UPROPERTY(EditAnywhere, Category = "Transparency Bake|Wrinkle Suppression", meta = (ClampMin = "0.0", ClampMax = "1.0", UIMin = "0.0", UIMax = "1.0"))
     float WrinkleSuppressionCoverageThreshold = 0.15f;
@@ -391,8 +370,7 @@ struct DWC_API FWetClothingTransparencyData
     UPROPERTY(EditAnywhere, Category = "Transparency Bake|Wrinkle Suppression", meta = (ClampMin = "0.0", ClampMax = "5.0", UIMin = "0.0", UIMax = "5.0"))
     float WrinkleSuppressionStrength = 0.6f;
 
-    // Future multi-component generation uses this source configuration and the
-    // DWC Bake Component snapshot without producing legacy reveal assets.
+    // Internal configuration for the multi-component Transparency source path.
     UPROPERTY(EditAnywhere, Category = "Multi-Mesh Source")
     TSoftClassPtr<AActor> SourceBlueprintClass;
 

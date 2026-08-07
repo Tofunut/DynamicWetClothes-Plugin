@@ -245,10 +245,6 @@ TMap<int32, int32> FWetPartEditingService::BuildUVIslandWetPartIDMap(
         }
 
         const int32 EffectiveWetPartID = GetEffectiveWetPartIDForUVIsland(WetClothingAsset, Scope, IslandItem->UVIslandID);
-        // if (EffectiveWetPartID == 0)
-        // {
-        //     continue;
-        // }
 
         if (FindEntry(WetClothingAsset, Scope, EffectiveWetPartID) != nullptr)
         {

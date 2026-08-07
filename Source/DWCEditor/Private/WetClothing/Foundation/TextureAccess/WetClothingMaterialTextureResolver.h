@@ -1,6 +1,6 @@
 //Copyright 2026 Team Tofunut. All Rights Reserved.
 /*
- *  Material 텍스처 후보 검색, 대표 텍스처 선택, 미리보기 적합도 평가 인터페이스를 선언합니다.
+ * Declares material texture candidate discovery, representative texture selection, and preview suitability evaluation.
  */
 
 #pragma once

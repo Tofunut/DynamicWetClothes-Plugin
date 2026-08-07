@@ -1,6 +1,6 @@
 //Copyright 2026 Team Tofunut. All Rights Reserved.
 /*
- *  Wet Part Auto Partition 계산 함수와 클러스터 표시 색상 유틸리티를 선언합니다.
+ * Declares Wet Part Auto Partition calculations and cluster display-color helpers.
  */
 
 #pragma once

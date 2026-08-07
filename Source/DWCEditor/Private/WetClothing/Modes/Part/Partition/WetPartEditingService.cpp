@@ -1,6 +1,6 @@
 //Copyright 2026 Team Tofunut. All Rights Reserved.
 /*
- *  Wet Part 寃?? 湲곕낯 Part ?앹꽦, Island 留ㅽ븨, ?쒖떆 ?대쫫/?됱긽 怨꾩궛 ???몄쭛 ?쒕퉬??濡쒖쭅??援ы쁽?⑸땲??
+ * Implements Wet Part editing operations, including default-part creation, island mapping, and display metadata updates.
  */
 
 #include "WetClothing/Modes/Part/Partition/WetPartEditingService.h"

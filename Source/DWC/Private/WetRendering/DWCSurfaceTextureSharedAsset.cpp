@@ -1,5 +1,6 @@
 //Copyright 2026 Team Tofunut. All Rights Reserved.
 #include "WetRendering/DWCSurfaceTextureSharedAsset.h"
+#include "Core/DWCGeneratedAssetPaths.h"
 
 #include "Engine/Texture2D.h"
 #include "Misc/SecureHash.h"
@@ -8,7 +9,7 @@ namespace DWCSurfaceTextureSharedAsset
 {
     namespace
     {
-        constexpr const TCHAR* SharedFolder = TEXT("/Game/DWCGenerated/Shared/SurfaceTextures");
+        constexpr const TCHAR* SharedFolder = DWCGeneratedAssetPaths::SharedSurfaceTextureFolder;
 
         FString MakeStableSourceKey(
             const FString& SourceTexturePath,

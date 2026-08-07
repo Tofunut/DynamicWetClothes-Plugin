@@ -10,7 +10,6 @@
 #include "WetClothing/DerivedAssets/Textures/Transparency/DWCTransparencyEditedMapBaker.h"
 #include "WetClothing/DerivedAssets/Textures/WetnessProfile/WetClothingRenderProfileBakeService.h"
 #include "WetClothing/Foundation/Preview/Slots/DWCEditorPreviewSlotState.h"
-#include "WetClothing/Foundation/Preview/Diagnostics/DWCEditorPreviewDiagnostics.h"
 #include "WetClothing/Foundation/Bake/DWCEditorBakeCoordinator.h"
 #include "WetClothing/Modes/Transparency/AutoMap/DWCTransparencyAutoMapGenerator.h"
 #include "WetClothing/WCAEditor/WCAGeneratedDataInvalidator.h"
@@ -3427,13 +3426,6 @@ void FWCAEditor::FillAssetToolbar(FToolBarBuilder& ToolbarBuilder)
         LOCTEXT("BuildForRuntimeToolbarTooltip", "Build runtime data and generate the assets required by this Wet Clothing Asset. Up-to-date actions are disabled."),
         FSlateIcon(FDWCEditorStyle::GetStyleSetName(), TEXT("DWCEditor.BuildForRuntime"), TEXT("DWCEditor.BuildForRuntime.Small")),
         false);
-    ToolbarBuilder.AddComboButton(
-        FUIAction(),
-        FOnGetContent::CreateSP(this, &FWCAEditor::BuildPreviewDiagnosticsMenu),
-        LOCTEXT("PreviewDiagnosticsToolbarLabel", "Preview Diagnostics"),
-        LOCTEXT("PreviewDiagnosticsToolbarTooltip", "Write DWC editor preview CPU/GPU residency and upload-queue diagnostics to the Output Log."),
-        FSlateIcon(FAppStyle::GetAppStyleSetName(), TEXT("Icons.Info")),
-        false);
     FText ValidationLabel = LOCTEXT("ValidationToolbarLabel", "Validation");
     FText ValidationTooltip = LOCTEXT("ValidationToolbarTooltip", "Validation passed. Click to view the latest validation results.");
     FName ValidationIconStyleSet = FAppStyle::GetAppStyleSetName();
@@ -4228,34 +4220,6 @@ TSharedRef<SWidget> FWCAEditor::BuildRuntimeBuildMenu()
     Args.CanBakeWrinkleTextures = FCanExecuteAction::CreateSP(this, &FWCAEditor::CanBakeWrinkleMaps);
     Args.CanBakeTransparencyTextures = FCanExecuteAction::CreateSP(this, &FWCAEditor::CanBakeTransparencyMaps);
     return FWCAEditorWidgets::BuildRuntimeBuildMenu(Args);
-}
-
-TSharedRef<SWidget> FWCAEditor::BuildPreviewDiagnosticsMenu()
-{
-    FMenuBuilder MenuBuilder(true, nullptr);
-    MenuBuilder.BeginSection(TEXT("PreviewDiagnostics"), LOCTEXT("PreviewDiagnosticsMenuSection", "PREVIEW DIAGNOSTICS"));
-    MenuBuilder.AddMenuEntry(
-        LOCTEXT("DumpPreviewDiagnosticsMenuItem", "Dump GPU Residency"),
-        LOCTEXT("DumpPreviewDiagnosticsMenuItemTooltip", "Write active preview sessions, GPU Resident/Retiring texture bytes, and render upload queue state to the Output Log."),
-        FSlateIcon(FAppStyle::GetAppStyleSetName(), TEXT("Icons.Info")),
-        FUIAction(FExecuteAction::CreateSP(this, &FWCAEditor::HandleDumpPreviewDiagnostics)));
-    MenuBuilder.AddMenuEntry(
-        LOCTEXT("ResetPreviewDiagnosticsMenuItem", "Reset Preview Counters"),
-        LOCTEXT("ResetPreviewDiagnosticsMenuItemTooltip", "Reset preview cache, texture workspace, and render upload queue counters. Current residency becomes the new high-water baseline."),
-        FSlateIcon(FAppStyle::GetAppStyleSetName(), TEXT("Icons.Refresh")),
-        FUIAction(FExecuteAction::CreateSP(this, &FWCAEditor::HandleResetPreviewDiagnostics)));
-    MenuBuilder.EndSection();
-    return MenuBuilder.MakeWidget();
-}
-
-void FWCAEditor::HandleDumpPreviewDiagnostics()
-{
-    FDWCEditorPreviewDiagnostics::DumpAllSessions();
-}
-
-void FWCAEditor::HandleResetPreviewDiagnostics()
-{
-    FDWCEditorPreviewDiagnostics::ResetAllCounters();
 }
 
 FReply FWCAEditor::HandleBuildCPURuntimeDataClicked()

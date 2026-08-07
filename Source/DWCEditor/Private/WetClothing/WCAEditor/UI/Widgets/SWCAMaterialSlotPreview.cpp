@@ -1,6 +1,6 @@
 //Copyright 2026 Team Tofunut. All Rights Reserved.
 /*
- * Material Slot의 UV 삼각형과 대표 텍스처를 작은 썸네일로 그리는 Slate 위젯을 구현합니다.
+ * Implements the Slate thumbnail widget that draws a material slot's UV triangles and representative texture.
  */
 
 #include "SWCAMaterialSlotPreview.h"

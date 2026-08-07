@@ -1,6 +1,6 @@
 //Copyright 2026 Team Tofunut. All Rights Reserved.
 /*
- * Wet Clothing Asset의 Wet Part 편집 서비스 함수를 선언합니다.
+ * Declares editing services for Wet Parts in a Wet Clothing Asset.
  */
 
 #pragma once

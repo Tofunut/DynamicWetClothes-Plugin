@@ -1,5 +1,6 @@
 //Copyright 2026 Team Tofunut. All Rights Reserved.
 #include "DWCPreparedMeshResolver.h"
+#include "Core/DWCGeneratedAssetPaths.h"
 
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetToolsModule.h"
@@ -85,7 +86,7 @@ namespace DWCPreparedMeshResolverPrivate
         }
 
         const FString WCAFolder = FPackageName::GetLongPackagePath(AssetPackageName);
-        const FString GeneratedMeshFolder = WCAFolder / TEXT("Generated") / Asset.GetName() / TEXT("Mesh");
+        const FString GeneratedMeshFolder = DWCGeneratedAssetPaths::MakeAssetRoot(WCAFolder, Asset.GetName()) / TEXT("Mesh");
         const FString SourceAssetName = SourceMesh.GetName();
         OutPath.ObjectName = SourceAssetName.EndsWith(TEXT("_DWC"))
             ? SourceAssetName

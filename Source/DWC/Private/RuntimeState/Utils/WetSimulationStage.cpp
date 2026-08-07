@@ -462,8 +462,8 @@ int32 FWetSimulationStage::ProcessCurrentPendingWetness(FWetSimulationStageArgs&
 
         const float DesiredAbsorption = PendingWater * SafeImmediateAbsorptionFraction;
         const float AbsorbedWetness = AbsorbWetnessAtVertex(Receiver, VertexIndex, DesiredAbsorption, bDirty);
-        const float OverflowWetness = FMath::Max(0.0f, DesiredAbsorption - AbsorbedWetness); // MaxStored�??�어???�수?��? 못하�??�온 ??
-        const float CapillaryWetness = FMath::Max(0.0f, PendingWater - DesiredAbsorption);   // MaxStored�??��????�았지�??�수?�이 ?�려???�수?��? 못한 ??
+        const float OverflowWetness = FMath::Max(0.0f, DesiredAbsorption - AbsorbedWetness); // Portion requested for immediate absorption that could not be stored at this vertex.
+        const float CapillaryWetness = FMath::Max(0.0f, PendingWater - DesiredAbsorption);   // Portion intentionally left available for capillary spreading.
         const float SpreadableWetness = CapillaryWetness + OverflowWetness;
         const float VertexSpreadAlpha = FMath::Clamp(
             Receiver.GetSpreadRatePerSecondForVertex(VertexIndex) * Receiver.WetnessSettings->WetnessUpdateInterval,

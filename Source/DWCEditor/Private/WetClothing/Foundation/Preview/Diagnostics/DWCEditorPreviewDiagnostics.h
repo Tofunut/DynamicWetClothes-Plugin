@@ -36,7 +36,10 @@ using FDWCEditorPreviewOperationCollector =
     TFunction<void(TArray<FDWCEditorPreviewOperationCounter>&)>;
 using FDWCEditorPreviewDiagnosticResetter = TFunction<void()>;
 
-/** On-demand diagnostics for active editor preview sessions. */
+/**
+ * Internal preview instrumentation used by editor preview systems.
+ * This diagnostic layer is intentionally not exposed through shipping user UI or console commands.
+ */
 class FDWCEditorPreviewDiagnostics final
 {
   public:

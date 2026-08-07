@@ -1,5 +1,6 @@
 //Copyright 2026 Team Tofunut. All Rights Reserved.
 #include "WetClothing/DerivedAssets/Materials/WCAMaterialGenerator.h"
+#include "Core/DWCGeneratedAssetPaths.h"
 
 #include "WetClothing/Foundation/MaterialGraph/DWCSurfaceGraphBuilder.h"
 
@@ -1390,7 +1391,7 @@ namespace
         }
 
         const FString WcaFolder = FPackageName::GetLongPackagePath(WcaPackageName);
-        return WcaFolder / TEXT("Generated") / Options.OwningWetClothingAsset->GetName() / TEXT("Materials");
+        return DWCGeneratedAssetPaths::MakeAssetRoot(WcaFolder, Options.OwningWetClothingAsset->GetName()) / TEXT("Materials");
     }
 
     FString BuildUnifiedBaseMaterialPackageName(

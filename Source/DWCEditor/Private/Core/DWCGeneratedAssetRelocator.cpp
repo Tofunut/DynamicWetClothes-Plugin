@@ -1,5 +1,6 @@
 //Copyright 2026 Team Tofunut. All Rights Reserved.
 #include "Core/DWCGeneratedAssetRelocator.h"
+#include "Core/DWCGeneratedAssetPaths.h"
 
 #include "AssetToolsModule.h"
 #include "ContentBrowserMenuContexts.h"
@@ -88,7 +89,7 @@ bool FDWCGeneratedAssetRelocator::RelocateGeneratedAssets(
     }
 
     const FString WcaFolder = FPackageName::GetLongPackagePath(WcaPackage->GetName());
-    const FString TargetRoot = WcaFolder / TEXT("Generated") / Asset.GetName();
+    const FString TargetRoot = DWCGeneratedAssetPaths::MakeAssetRoot(WcaFolder, Asset.GetName());
     TArray<FAssetRenameData> RenameData;
     RenameData.Reserve(GeneratedAssets.Num());
 

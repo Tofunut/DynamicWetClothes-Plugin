@@ -1,5 +1,6 @@
 //Copyright 2026 Team Tofunut. All Rights Reserved.
 #include "WetClothing/Modes/Transparency/RevealBake/DWCRevealBakeUtilities.h"
+#include "Core/DWCGeneratedAssetPaths.h"
 
 #include "UObject/NameTypes.h"
 #include "Misc/PackageName.h"
@@ -13,7 +14,7 @@ FString FDWCRevealBakeUtilities::GetGeneratedPackagePath(const UObject& OwningAs
         return FString();
     }
 
-    FString Result = OwningFolder / TEXT("Generated") / OwningAsset.GetName();
+    FString Result = DWCGeneratedAssetPaths::MakeAssetRoot(OwningFolder, OwningAsset.GetName());
     if (!RelativePath.IsEmpty())
     {
         Result /= RelativePath;

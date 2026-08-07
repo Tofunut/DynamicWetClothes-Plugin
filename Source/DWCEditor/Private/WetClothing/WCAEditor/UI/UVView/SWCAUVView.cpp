@@ -1201,31 +1201,27 @@ int32 SWCAUVView::HitTestIslandAtUV(const FVector2D& UV) const
 
 bool SWCAUVView::IsIslandIntersectingRect(const FWetClothingAssetUVIsland& Island, const FBox2D& RectUV) const
 {
-    if (!Island.UVBounds.bIsValid || !RectUV.bIsValid)
+    if (!Island.UVBounds.bIsValid || !RectUV.bIsValid || !Island.UVBounds.Intersect(RectUV))
     {
         return false;
     }
 
-    if (!Island.UVBounds.Intersect(RectUV))
-    {
-        return false;
-    }
+    TArray<FVector2D> RectPolygon;
+    RectPolygon.Reserve(4);
+    RectPolygon.Add(FVector2D(RectUV.Min.X, RectUV.Min.Y));
+    RectPolygon.Add(FVector2D(RectUV.Max.X, RectUV.Min.Y));
+    RectPolygon.Add(FVector2D(RectUV.Max.X, RectUV.Max.Y));
+    RectPolygon.Add(FVector2D(RectUV.Min.X, RectUV.Max.Y));
 
     for (const FWetClothingAssetUVTriangle& Triangle : Island.UVTriangles)
     {
-        if (RectUV.IsInsideOrOn(Triangle.UVs[0]) || RectUV.IsInsideOrOn(Triangle.UVs[1]) || RectUV.IsInsideOrOn(Triangle.UVs[2]))
-        {
-            return true;
-        }
-
-        const FVector2D Center = (Triangle.UVs[0] + Triangle.UVs[1] + Triangle.UVs[2]) / 3.0f;
-        if (RectUV.IsInsideOrOn(Center))
+        if (IsTriangleIntersectingPolygon(Triangle, RectPolygon))
         {
             return true;
         }
     }
 
-    return true;
+    return false;
 }
 
 bool SWCAUVView::IsIslandIntersectingEllipse(const FWetClothingAssetUVIsland& Island, const FBox2D& RectUV) const

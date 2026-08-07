@@ -1,6 +1,6 @@
 //Copyright 2026 Team Tofunut. All Rights Reserved.
 /*
- *  색상 기반 Auto Partition Preview 계산에 필요한 통계, 클러스터, 미리보기 데이터 타입을 정의합니다.
+ * Defines statistics, cluster data, and preview types used by color-based Auto Partition calculations.
  */
 
 #pragma once

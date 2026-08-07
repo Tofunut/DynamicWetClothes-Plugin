@@ -13,14 +13,11 @@ class FAbsorbedWetnessSimulationState;
 struct FWetClothingSettings;
 
 /*
-WetRenderStage �행�요�자 묶음�다.
+Arguments required to execute WetRenderStage.
 
-�재멀�스�드 �업 �청�니 DynamicWetClothesComponent가 Game Thread�서
-�더 �현갱신�요참조�모� ��자
-��:
-- Wetness 값을 MaterialInstance parameter반영
-- Render profile lookup parameters
-- VertexColor 기반 debug / 1�wetness �현 갱신
+DynamicWetClothesComponent currently invokes this stage on the game thread with the references required to
+update visual wetness state, including material parameters, render-profile lookup data, and vertex-color-based
+debug or CPU wetness rendering.
 */
 struct DWC_API FWetRenderStageArgs
 {

@@ -1,6 +1,6 @@
 //Copyright 2026 Team Tofunut. All Rights Reserved.
 /*
- *  UV 선택 도구용 기하 판정 유틸리티 함수를 선언합니다.
+ * Declares geometry helpers used by the UV selection tools.
  */
 
 #pragma once

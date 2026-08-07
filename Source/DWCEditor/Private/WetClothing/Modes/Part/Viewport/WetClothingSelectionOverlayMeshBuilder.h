@@ -1,6 +1,6 @@
 //Copyright 2026 Team Tofunut. All Rights Reserved.
 /*
- *  선택 영역 경계선 Overlay Mesh 데이터 생성 함수를 선언합니다.
+ * Declares mesh-data generation for selection-boundary overlays.
  */
 
 #pragma once

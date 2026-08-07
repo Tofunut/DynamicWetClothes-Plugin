@@ -50,18 +50,6 @@ struct DWC_API FDWCGPUBackendStats
     uint64 GPUBytes = 0;
 };
 
-struct DWC_API FDWCGPURenderTargetDebugSnapshot
-{
-    FName ReceiverId = NAME_None;
-    int32 ReceiverGPUId = 0;
-    int32 MaterialSlotIndex = INDEX_NONE;
-    int32 WetnessMapResolution = 0;
-    int32 SurfaceWaterResolution = 0;
-    TWeakObjectPtr<UTextureRenderTarget2D> WetnessMap;
-    TWeakObjectPtr<UTextureRenderTarget2D> Droplet1Map;
-    TWeakObjectPtr<UTextureRenderTarget2D> Droplet2Map;
-};
-
 /** DWC-facing interface. It intentionally contains no RHI/RenderCore types. */
 class DWC_API IDWCGPUBackend
 {
@@ -76,7 +64,6 @@ public:
     virtual void ClearPendingWetnessMaps() = 0;
     virtual void Update(float DeltaSeconds) = 0;
     virtual FDWCGPUBackendStats GetStats() const = 0;
-    virtual void GetDebugRenderTargets(TArray<FDWCGPURenderTargetDebugSnapshot>& OutSnapshots) const = 0;
 
     virtual void Shutdown() = 0;
 };

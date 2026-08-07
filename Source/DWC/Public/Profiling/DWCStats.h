@@ -181,6 +181,7 @@ namespace DWCStats
 // `stat dwc mem` toggles all three memory sections together.
 DECLARE_STATS_GROUP(TEXT("DWC Memory"), STATGROUP_DWC, STATCAT_Advanced);
 DECLARE_STATS_GROUP(TEXT("DWC Instances"), STATGROUP_DWCInstances, STATCAT_Advanced);
+// Internal quality-LOD instrumentation retained for development; no public DWC LOD command exposes this group.
 DECLARE_STATS_GROUP(TEXT("DWC LOD"), STATGROUP_DWCLOD, STATCAT_Advanced);
 DECLARE_STATS_GROUP(TEXT("Memory Counters (CPU)"), STATGROUP_DWCCPUMemory, STATCAT_Advanced);
 DECLARE_STATS_GROUP(TEXT("Memory Counters (GPU)"), STATGROUP_DWCGPUMemory, STATCAT_Advanced);

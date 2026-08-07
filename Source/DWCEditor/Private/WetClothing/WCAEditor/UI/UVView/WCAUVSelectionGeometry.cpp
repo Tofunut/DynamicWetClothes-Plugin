@@ -1,6 +1,6 @@
 //Copyright 2026 Team Tofunut. All Rights Reserved.
 /*
- *  UV Island 선택 도구에서 사용하는 사각형, 타원, 라쏘 교차 판정 기하 함수를 구현합니다.
+ * Implements rectangle, ellipse, and lasso intersection tests used by the UV Island selection tools.
  */
 
 #include "WCAUVSelectionGeometry.h"
@@ -9,31 +9,27 @@
 
 bool FWCAUVSelectionGeometry::IsIslandIntersectingRect(const FWetClothingAssetUVIsland& Island, const FBox2D& RectUV)
 {
-    if (!Island.UVBounds.bIsValid || !RectUV.bIsValid)
+    if (!Island.UVBounds.bIsValid || !RectUV.bIsValid || !Island.UVBounds.Intersect(RectUV))
     {
         return false;
     }
 
-    if (!Island.UVBounds.Intersect(RectUV))
-    {
-        return false;
-    }
+    TArray<FVector2D> RectPolygon;
+    RectPolygon.Reserve(4);
+    RectPolygon.Add(FVector2D(RectUV.Min.X, RectUV.Min.Y));
+    RectPolygon.Add(FVector2D(RectUV.Max.X, RectUV.Min.Y));
+    RectPolygon.Add(FVector2D(RectUV.Max.X, RectUV.Max.Y));
+    RectPolygon.Add(FVector2D(RectUV.Min.X, RectUV.Max.Y));
 
     for (const FWetClothingAssetUVTriangle& Triangle : Island.UVTriangles)
     {
-        if (RectUV.IsInsideOrOn(Triangle.UVs[0]) || RectUV.IsInsideOrOn(Triangle.UVs[1]) || RectUV.IsInsideOrOn(Triangle.UVs[2]))
-        {
-            return true;
-        }
-
-        const FVector2D Center = (Triangle.UVs[0] + Triangle.UVs[1] + Triangle.UVs[2]) / 3.0f;
-        if (RectUV.IsInsideOrOn(Center))
+        if (IsTriangleIntersectingPolygon(Triangle, RectPolygon))
         {
             return true;
         }
     }
 
-    return true;
+    return false;
 }
 
 bool FWCAUVSelectionGeometry::IsIslandIntersectingEllipse(const FWetClothingAssetUVIsland& Island, const FBox2D& RectUV)

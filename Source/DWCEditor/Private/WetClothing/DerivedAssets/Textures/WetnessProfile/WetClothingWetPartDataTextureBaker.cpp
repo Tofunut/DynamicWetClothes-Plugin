@@ -1,5 +1,6 @@
 //Copyright 2026 Team Tofunut. All Rights Reserved.
 #include "WetClothing/DerivedAssets/Textures/WetnessProfile/WetClothingWetPartDataTextureBaker.h"
+#include "Core/DWCGeneratedAssetPaths.h"
 #include "WetClothing/DerivedAssets/Textures/WetnessProfile/WetClothingSurfaceTextureNormalizer.h"
 #include "WetnessProfile/Editor/WetnessProfileEditorPolicy.h"
 
@@ -333,7 +334,7 @@ UTexture2D* FWetClothingWetPartDataTextureBaker::CreateOrUpdateTextureAsset(
     const FString ObjectName = ObjectTools::SanitizeObjectName(
         FString::Printf(TEXT("T_%s_Slot%d_WetPartData"), *WetClothingAsset.GetName(), MaterialSlotIndex));
     const FString GeneratedFolder =
-        WcaFolder / TEXT("Generated") / WetClothingAsset.GetName() / TEXT("LUT") / TEXT("Profiles");
+        DWCGeneratedAssetPaths::MakeAssetRoot(WcaFolder, WetClothingAsset.GetName()) / TEXT("LUT") / TEXT("Profiles");
     const FString PackageName = GeneratedFolder / ObjectName;
     const FString ObjectPath = PackageName + TEXT(".") + ObjectName;
 

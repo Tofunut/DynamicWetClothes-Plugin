@@ -369,6 +369,42 @@ namespace
             Triangle.LocalPositions[0]);
     }
 
+    int32 ResolvePartPreviewOverlayUVChannelIndex(
+        const UWetClothingAsset* Asset,
+        const USkeletalMesh* PreviewMesh)
+    {
+        const int32 OriginalUVChannelIndex = Asset != nullptr
+            ? FMath::Clamp(Asset->GetOriginalUVChannelIndex(), 0, 7)
+            : 0;
+        if (Asset == nullptr || PreviewMesh == nullptr ||
+            Asset->GetRuntimeSkeletalMesh() != PreviewMesh)
+        {
+            return OriginalUVChannelIndex;
+        }
+
+        const int32 DataUVChannelIndex = Asset->GetDWCDataUVChannelIndex();
+        if (DataUVChannelIndex < 0 || DataUVChannelIndex >= 8)
+        {
+            return OriginalUVChannelIndex;
+        }
+
+        const FDWCDataUVLODMetadata* DataUVMetadata = Asset->FindDataUVMetadataForLOD(0);
+        if (DataUVMetadata == nullptr || !DataUVMetadata->bIsValid ||
+            DataUVMetadata->UVChannelIndex != DataUVChannelIndex)
+        {
+            return OriginalUVChannelIndex;
+        }
+
+        const FSkeletalMeshRenderData* RenderData = PreviewMesh->GetResourceForRendering();
+        if (RenderData == nullptr || RenderData->LODRenderData.IsEmpty() ||
+            DataUVChannelIndex >= static_cast<int32>(RenderData->LODRenderData[0].GetNumTexCoords()))
+        {
+            return OriginalUVChannelIndex;
+        }
+
+        return DataUVChannelIndex;
+    }
+
     bool ReadPartPreviewRenderTrianglesIncludingDegenerateUV(
         const USkeletalMesh* SkeletalMesh,
         const int32 UVChannelIndex,
@@ -1445,12 +1481,21 @@ bool SDWCPartViewport::BuildPartPreviewTextures()
         return false;
     }
 
+    const UWetClothingAsset* Asset = WetClothingAsset.Get();
+    const USkeletalMesh* PreviewMesh = PreviewMeshComponent->GetSkeletalMeshAsset();
+    const int32 PreviewOverlayUVChannelIndex = ResolvePartPreviewOverlayUVChannelIndex(
+        Asset,
+        PreviewMesh);
+
     // A material-slot transition used to re-run the complete render-triangle scan,
     // degenerate-UV ownership propagation and 1024x1024 rasterization every time.
     // Build a cheap visual-state signature first so revisiting an unchanged slot can
-    // reuse its already-rasterized preview pixels.
+    // reuse its already-rasterized preview pixels. Include the overlay UV channel so
+    // relocating DWC Data UV cannot reuse textures rasterized in the previous channel.
     uint32 TopologySignature = GetTypeHash(CurrentHighlightedMaterialSlot);
-    uint32 PreviewSignature = TopologySignature;
+    uint32 PreviewSignature = HashCombine(
+        TopologySignature,
+        GetTypeHash(PreviewOverlayUVChannelIndex));
     PreviewSignature = HashCombine(PreviewSignature, GetTypeHash(bShowWetPartColors));
     PreviewSignature = HashCombine(PreviewSignature, GetTypeHash(FMath::RoundToInt(WetPartColorIntensity * 1000.0f)));
     PreviewSignature = HashCombine(PreviewSignature, GetTypeHash(FMath::RoundToInt(SelectionOverlayThicknessScale * 1000.0f)));
@@ -1606,19 +1651,25 @@ bool SDWCPartViewport::BuildPartPreviewTextures()
     }
 
     TArray<FWetClothingAssetUVTriangle> RenderTriangles;
-    const UWetClothingAsset* Asset = WetClothingAsset.Get();
-    const int32 OriginalUVChannelIndex = Asset != nullptr
-        ? FMath::Clamp(Asset->GetOriginalUVChannelIndex(), 0, 7)
-        : 0;
     ReadPartPreviewRenderTrianglesIncludingDegenerateUV(
-        PreviewMeshComponent->GetSkeletalMeshAsset(),
-        OriginalUVChannelIndex,
+        PreviewMesh,
+        PreviewOverlayUVChannelIndex,
         CurrentHighlightedMaterialSlot,
         RenderTriangles);
 
-    // Fallback to the island-owned triangles if render data is temporarily unavailable.
+    // Island-owned triangles carry Original UVs, so they are a valid fallback only when
+    // the overlay is also sampling Original UV. Never rasterize those coordinates into a
+    // DWC Data-UV texture, because the material would sample a different location.
     if (RenderTriangles.IsEmpty())
     {
+        const int32 OriginalUVChannelIndex = Asset != nullptr
+            ? FMath::Clamp(Asset->GetOriginalUVChannelIndex(), 0, 7)
+            : 0;
+        if (PreviewOverlayUVChannelIndex != OriginalUVChannelIndex)
+        {
+            return false;
+        }
+
         for (const FWetClothingAssetUVIsland& Island : CurrentSelectableIslands)
         {
             RenderTriangles.Append(Island.UVTriangles);
@@ -1986,9 +2037,10 @@ bool SDWCPartViewport::BuildPartPreviewTextures()
     const bool bHasPartColor = !ResolvedColorByTriangleID.IsEmpty();
     const bool bHasSelection = !ResolvedSelectedTriangleIDs.IsEmpty();
 
-    // Original-UV preview textures are discontinuous data. Conservative rasterization
-    // guarantees thin triangles at least one touched texel; nearest-value dilation keeps
-    // point sampling stable at island edges without averaging adjacent Part IDs/colors.
+    // Preview overlay textures use the prepared DWC Data UV whenever it is available.
+    // Conservative rasterization guarantees thin triangles at least one touched texel;
+    // nearest-value dilation keeps point sampling stable at island edges without averaging
+    // adjacent Part IDs/colors. Original UV is retained only as a safe pre-build fallback.
     if (bHasPartColor)
     {
         DilateSurfacePreviewColors(PartPixels, Width, Height, 2);
@@ -3138,13 +3190,16 @@ void SDWCPartViewport::RestoreOriginalMaterials()
 UMaterialInterface* SDWCPartViewport::ResolveWetPartOverlayMaterial()
 {
     const UWetClothingAsset* Asset = WetClothingAsset.Get();
-    const int32 OriginalUVChannelIndex = Asset != nullptr
-        ? FMath::Clamp(Asset->GetOriginalUVChannelIndex(), 0, 7)
-        : 0;
+    const USkeletalMesh* PreviewMesh = PreviewMeshComponent != nullptr
+        ? PreviewMeshComponent->GetSkeletalMeshAsset()
+        : nullptr;
+    const int32 PreviewOverlayUVChannelIndex = ResolvePartPreviewOverlayUVChannelIndex(
+        Asset,
+        PreviewMesh);
 
     const FString MaterialName = FString::Printf(
         TEXT("M_DWC_PartPreviewOverlay_UV%d"),
-        OriginalUVChannelIndex);
+        PreviewOverlayUVChannelIndex);
     const FString MaterialObjectPath = FString::Printf(
         TEXT("/DynamicWetClothes/Editor/Materials/%s.%s"),
         *MaterialName,
@@ -3165,7 +3220,7 @@ UMaterialInterface* SDWCPartViewport::ResolveWetPartOverlayMaterial()
         UE_LOG(
             LogTemp,
             Error,
-            TEXT("DWC Original-UV Part Preview material is missing: %s. ")
+            TEXT("DWC Part Preview overlay material is missing: %s. ")
             TEXT("Run Scripts/Python/GenerateDWCPartOverlayMaterial.py and save all generated UV variants."),
             *MaterialObjectPath);
         return nullptr;

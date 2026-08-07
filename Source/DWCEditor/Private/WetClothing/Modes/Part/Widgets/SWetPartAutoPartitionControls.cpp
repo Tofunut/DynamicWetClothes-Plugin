@@ -1,6 +1,6 @@
 //Copyright 2026 Team Tofunut. All Rights Reserved.
 /*
- *  Auto Partitioning 버튼과 Color Tolerance 입력 UI를 구현합니다.
+ * Implements the Auto Partition button and Color Tolerance controls.
  */
 
 #include "WetClothing/Modes/Part/Widgets/SWetPartAutoPartitionControls.h"

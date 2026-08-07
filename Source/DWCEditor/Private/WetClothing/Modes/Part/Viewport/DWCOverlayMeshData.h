@@ -1,6 +1,6 @@
 //Copyright 2026 Team Tofunut. All Rights Reserved.
 /*
- *  Wet Part 및 선택 Overlay Mesh 생성을 위한 정점, 인덱스, 노멀, 색상 배열 데이터를 정의합니다.
+ * Defines vertex, index, normal, UV, color, and tangent arrays used to build Wet Part and selection overlays.
  */
 
 #pragma once

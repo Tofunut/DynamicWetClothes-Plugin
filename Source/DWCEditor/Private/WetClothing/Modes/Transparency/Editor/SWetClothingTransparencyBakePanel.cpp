@@ -1575,10 +1575,11 @@ void SWetClothingTransparencyBakePanel::RefreshMapGenerationSettings()
             SettingsIndex = 1;
             break;
         case EDWCTransparencySourceType::OtherSkeletalMeshComponents:
-            SettingsIndex = 2;
+            // Reserved for future development and intentionally hidden from the current shipping UI.
+            SettingsIndex = 0;
             break;
         case EDWCTransparencySourceType::ManualColorOrTexture:
-            SettingsIndex = 3;
+            SettingsIndex = 2;
             break;
         default:
             break;
@@ -3424,12 +3425,6 @@ TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildStructureSetupStage(
               LOCTEXT("SingleMeshStructure", "Single Skeletal Mesh / Inner Material Slots"),
               LOCTEXT("SingleMeshStructureDescription", "The target clothing and its inner body or garment surfaces are material slots of the same Skeletal Mesh."),
               LOCTEXT("StructureAvailable", "Available"))]
-        + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,6)
-          [BuildSourceTypeCard(
-              EDWCTransparencySourceType::OtherSkeletalMeshComponents,
-              LOCTEXT("MultiMeshStructure", "Blueprint / Multiple Skeletal Meshes"),
-              LOCTEXT("MultiMeshStructureDescription", "The target and inner surfaces are separate Skeletal Mesh Components in one character Blueprint."),
-              LOCTEXT("StructurePlanned", "Planned"))]
         + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,10)
           [BuildSourceTypeCard(
               EDWCTransparencySourceType::ManualColorOrTexture,
@@ -3466,13 +3461,8 @@ TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildMapGenerationStage()
                 .OnClicked(this, &SWetClothingTransparencyBakePanel::HandleGenerateTransparencyMapClicked)];
     };
 
-    const auto BuildOtherMeshSettings = [this]()
-    {
-        return SNew(SVerticalBox)
-            + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,10)[BuildOtherMeshSourceSection()]
-            + SVerticalBox::Slot().AutoHeight()
-              [BuildEmptyAssetRow(LOCTEXT("Stage2MultiMeshPlanned", "Multiple Skeletal Mesh generation will be implemented in a later step."))];
-    };
+    // Multi-component Transparency source support remains in the internal data model for future development.
+    // It is intentionally not exposed in the shipping editor UI in this release.
 
     const auto BuildManualSettings = [this]()
     {
@@ -3509,7 +3499,6 @@ TSharedRef<SWidget> SWetClothingTransparencyBakePanel::BuildMapGenerationStage()
                     + SWidgetSwitcher::Slot()
                       [BuildEmptyAssetRow(LOCTEXT("SelectTargetPartForGeneration", "Select a ready Wettable Transparency Target Part above to configure its source and generate a preview map."))]
                     + SWidgetSwitcher::Slot()[BuildSameMeshSettings()]
-                    + SWidgetSwitcher::Slot()[BuildOtherMeshSettings()]
                     + SWidgetSwitcher::Slot()[BuildManualSettings()]]];
 }
 

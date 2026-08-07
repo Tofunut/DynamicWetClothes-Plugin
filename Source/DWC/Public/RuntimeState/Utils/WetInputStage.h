@@ -13,15 +13,13 @@ class FWetClothingMeshSampler;
 class FAbsorbedWetnessSimulationState;
 
 /*
-WetInputStage 실행에 필요한 인자 묶음이다.
+Arguments required to execute WetInputStage.
 
-현재는 멀티스레드 작업 요청이 아니라, DynamicWetClothesComponent가 동기식으로
-InputStage를 호출할 때 필요한 객체 참조를 모은 내부용 인자다.
-역할:
-- 외부 wet contact / area / water surface 입력 처리
-- BoneOptimizationCache 기반 후보 vertex 탐색
-- MeshSampler를 통한 현재 pose 위치/노멀 검사
-- AbsorbedWetnessSimulationState의 pending wetness 누적
+This is currently an internal synchronous argument bundle used by DynamicWetClothesComponent. It handles:
+- External wet-contact, area, and water-surface input.
+- Candidate vertex lookup through the BoneOptimizationCache.
+- Current-pose position and normal tests through the mesh sampler.
+- Accumulation of pending wetness in AbsorbedWetnessSimulationState.
 */
 struct DWC_API FWetInputStageArgs
 {

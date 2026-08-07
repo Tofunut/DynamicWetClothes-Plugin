@@ -134,17 +134,14 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
     UFUNCTION(BlueprintPure, Category = "Wetness|GPU")
     int32 GetDWCReceiverGPUId(FName ReceiverId = NAME_None) const;
     void GetDWCReceiverGPUIds(TArray<int32>& OutReceiverGPUIds) const;
-    void GetGPUDebugRenderTargets(TArray<FDWCGPURenderTargetDebugSnapshot>& OutSnapshots) const;
-    // Debug and quality LOD API.
+    // User-facing debug API.
     UFUNCTION(BlueprintCallable, Category = "Wetness|Debug")
     void SetWetPartDebugColorsEnabled(bool bEnabled);
     UFUNCTION(BlueprintCallable, Category = "Wetness|Debug")
     void SetSurfaceWaterDebugColorsEnabled(bool bEnabled);
-    UFUNCTION(BlueprintCallable, Category = "Wetness|LOD")
+    // Reserved for future DWC quality LOD support. Intentionally not exposed to users in this release.
     void SetDWCQualityLOD(int32 InQualityLOD);
-    UFUNCTION(BlueprintCallable, Category = "Wetness|LOD")
     bool SetReceiverDWCQualityLOD(FName ReceiverId, int32 InQualityLOD);
-    UFUNCTION(BlueprintPure, Category = "Wetness|LOD")
     int32 GetDWCQualityLOD() const
     {
         return CurrentQualityLOD;
@@ -162,11 +159,8 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
 
     void GetResolvedWetMeshComponents(TArray<USkeletalMeshComponent*>& OutComponents) const;
 
-    // Current render LOD query API.
-    UFUNCTION(BlueprintPure, Category = "Wetness|LOD")
+    // Internal quality-LOD evaluation queries. These are not part of the current public feature set.
     int32 GetCurrentRenderLODLevel() const;
-
-    UFUNCTION(BlueprintPure, Category = "Wetness|LOD")
     float GetMergedReceiverScreenSize() const;
 
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
@@ -211,7 +205,7 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
     void                     ApplyQualityLODMaterialParameters(FDWCWetMeshReceiverRuntime& Receiver);
     void                     MarkCPUWetnessRenderingDirty(FDWCWetMeshReceiverRuntime& Receiver);
 
-    // Quality LOD and render LOD.
+    // Internal quality-LOD implementation retained for future development.
     void                     RefreshResolvedQualityLODPolicies();
     void                     UpdateRenderLOD();
 
@@ -257,19 +251,14 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|Surface", meta = (ClampMin = "2", ClampMax = "64", AllowPrivateAccess = "true", AdvancedDisplay))
     int32 WetSurfaceSampleResolution = 8;
 
-    // Component-level quality LOD policy.
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|LOD")
-    bool bEnableDWCQualityLOD = true;
+    // Reserved for future DWC quality LOD support. The implementation remains compiled for future development,
+    // but it is disabled by default and intentionally hidden from the current shipping UI and Blueprint API.
+    bool bEnableDWCQualityLOD = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|LOD", meta = (EditCondition = "bEnableDWCQualityLOD"))
+    UPROPERTY()
     TObjectPtr<UDWCQualityLODProfile> QualityLODProfile = nullptr;
 
-    /** Component-wide quality LOD thresholds. The array index is the LOD level. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|LOD", meta = (TitleProperty = "LODLevel"))
     TArray<FDWCQualityLODScreenSizeThreshold> QualityLODScreenSizeThresholds;
-
-    /** How often the merged receiver bounds are evaluated for component rendering LOD selection. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|LOD", meta = (ClampMin = "0.01", AdvancedDisplay))
     float RenderLODEvaluationInterval = 0.1f;
 
     // Visual appearance and optional rendering features.
@@ -330,10 +319,7 @@ class DWC_API UDynamicWetClothesComponent : public UActorComponent
     bool                   bPendingWetContactsApplyMaterial = false;
     bool                   bWetRenderDirty = false;
 
-    // Debug-only runtime values exposed to the editor.
-    UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Wetness|LOD", meta = (DisplayName = "Current Quality LOD", AllowPrivateAccess = "true"))
+    // Internal runtime state for future DWC quality LOD support. Not exposed in this release.
     int32 CurrentQualityLOD = 0;
-
-    UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Wetness|LOD", meta = (DisplayName = "Current Screen Size", AllowPrivateAccess = "true"))
     float CurrentRenderLODScreenSize = 0.0f;
 };

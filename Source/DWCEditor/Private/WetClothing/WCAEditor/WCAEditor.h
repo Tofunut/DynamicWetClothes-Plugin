@@ -53,9 +53,6 @@ class FWCAEditor : public FAssetEditorToolkit
     FReply               HandleValidationRefreshClicked(TWeakPtr<SWindow> DialogWindow);
     FReply               HandleValidationResolveClicked(TWeakPtr<SWindow> DialogWindow);
     TSharedRef<SWidget>  BuildRuntimeBuildMenu();
-    TSharedRef<SWidget>  BuildPreviewDiagnosticsMenu();
-    void                 HandleDumpPreviewDiagnostics();
-    void                 HandleResetPreviewDiagnostics();
     FReply               HandleBuildAllRequiredClicked();
     FReply               HandleBuildCPURuntimeDataClicked();
     FReply               HandleBuildGPURuntimeDataClicked();

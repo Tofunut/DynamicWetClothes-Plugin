@@ -230,7 +230,6 @@ namespace
         {TEXT("stat dwc mem"), TEXT("Toggle DWC CPU and GPU memory stats.")},
         {TEXT("stat dwc memory"), TEXT("Toggle DWC CPU and GPU memory stats.")},
         {TEXT("stat dwc workload"), TEXT("Toggle DWC workload rate stats.")},
-        {TEXT("stat dwc lod"), TEXT("Toggle DWC LOD stats.")},
         {TEXT("stat dwc instances"), TEXT("Toggle DWC instance/resource count stats.")},
         {TEXT("stat dwc cpu"), TEXT("Toggle DWC CPU memory stats.")},
         {TEXT("stat dwc gpu"), TEXT("Toggle DWC GPU memory stats.")},
@@ -306,7 +305,6 @@ namespace
         UE_LOG(LogDWC, Display, TEXT("  stat dwc"));
         UE_LOG(LogDWC, Display, TEXT("  stat dwc mem"));
         UE_LOG(LogDWC, Display, TEXT("  stat dwc workload"));
-        UE_LOG(LogDWC, Display, TEXT("  stat dwc lod"));
         UE_LOG(LogDWC, Display, TEXT("  stat dwc instances"));
         UE_LOG(LogDWC, Display, TEXT("  stat dwc cpu"));
         UE_LOG(LogDWC, Display, TEXT("  stat dwc gpu"));
@@ -340,12 +338,6 @@ namespace
         if (FParse::Command(&Cmd, TEXT("WORKLOAD")))
         {
             ExecuteDWCStatCommand(World, ViewportClient, TEXT("DWCWorkload"));
-            return true;
-        }
-
-        if (FParse::Command(&Cmd, TEXT("LOD")))
-        {
-            ExecuteDWCStatCommand(World, ViewportClient, TEXT("DWCLOD"));
             return true;
         }
 
@@ -405,16 +397,6 @@ namespace
             }),
         ECVF_Default);
 
-    FAutoConsoleCommandWithWorld GDWCLodStatAlias(
-        TEXT("stat dwc lod"),
-        TEXT("Toggle DWC LOD feature statistics."),
-        FConsoleCommandWithWorldDelegate::CreateLambda(
-            [](UWorld* World)
-            {
-                ExecuteDWCStatCommand(World, TEXT("DWCLOD"));
-            }),
-        ECVF_Default);
-
     FAutoConsoleCommandWithWorld GDWCInstancesStatAlias(
         TEXT("stat dwc instances"),
         TEXT("Toggle DWC instance/resource count statistics."),
@@ -436,7 +418,7 @@ void DWCStats::RegisterStatCommands()
     GEngine->AddEngineStat(
         TEXT("STAT_DWC"),
         TEXT("STATCAT_Advanced"),
-        FText::FromString(TEXT("Toggle DWC stats. Supports: mem, workload, lod, instances, cpu, gpu.")),
+        FText::FromString(TEXT("Toggle DWC stats. Supports: mem, workload, instances, cpu, gpu.")),
         UEngine::FEngineStatRender(),
         UEngine::FEngineStatToggle::CreateStatic(&ToggleDWCStatCommand));
 

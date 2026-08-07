@@ -12,11 +12,11 @@ struct FWetnessProfileParameters;
 struct FWetInputStageArgs;
 
 /*
-RuntimeData를 생성할 때 필요한 인자 묶음이다.
+Arguments required to build runtime data.
 
-현재 단계에서는 멀티스레드용 Request가 아니라, DynamicWetClothesComponent가
-동기식 초기화 과정에서 RuntimeDataBuilder에 넘기는 단순 인자 구조다.
-나중에 TaskQueue를 도입할 경우 이 Args를 기반으로 별도의 TaskRequest를 설계할 수 있다.
+This is currently a simple argument bundle passed by DynamicWetClothesComponent during synchronous
+initialization. If additional TaskQueue work is introduced later, a separate task request can be built from
+these values without changing the runtime data model.
 */
 struct DWC_API FWetRuntimeDataBuildArgs
 {

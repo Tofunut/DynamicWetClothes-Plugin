@@ -1,18 +1,13 @@
 //Copyright 2026 Team Tofunut. All Rights Reserved.
 #include "Core/DWCEditorStyle.h"
-#include "Core/DWCSkeletalMeshMaterialSlotExtractor.h"
-#include "Core/DWCSkeletalMeshMerger.h"
 #include "Core/DWCGeneratedAssetRelocator.h"
 #include "Components/DynamicWetClothesComponentCustomization.h"
 #include "DataAssets/WetnessProfile.h"
 #include "Editor.h"
 #include "Engine/SkeletalMesh.h"
-#include "HAL/IConsoleManager.h"
 #include "Modules/ModuleManager.h"
 #include "PropertyEditorModule.h"
-#include "WetClothing/DerivedAssets/Materials/WCAMaterialGenerator.h"
 #include "WetClothing/DerivedAssets/Textures/WetnessProfile/WetClothingSurfaceTextureNormalizer.h"
-#include "WetClothing/Foundation/Preview/Diagnostics/DWCEditorPreviewDiagnostics.h"
 #include "WetClothing/WCAEditor/UI/UVView/WCAUVIslandViewCache.h"
 #include "DataAssets/WetClothingAsset.h"
 #include "WetnessProfile/Editor/WetnessProfileDetailsCustomization.h"
@@ -25,7 +20,6 @@ class FDWCEditorModule : public IModuleInterface
     {
         FDWCEditorStyle::Initialize();
 
-
         FPropertyEditorModule& PropertyEditorModule = FModuleManager::LoadModuleChecked<FPropertyEditorModule>(TEXT("PropertyEditor"));
         PropertyEditorModule.RegisterCustomClassLayout(
             TEXT("DynamicWetClothesComponent"),
@@ -35,32 +29,6 @@ class FDWCEditorModule : public IModuleInterface
             FOnGetDetailCustomizationInstance::CreateStatic(&FWetnessProfileDetailsCustomization::MakeInstance));
         PropertyEditorModule.NotifyCustomizationModuleChanged();
 
-        ValidateSurfaceAppearanceFunctionsCommand = IConsoleManager::Get().RegisterConsoleCommand(
-            TEXT("DWC.ValidateSurfaceAppearanceFunctions"),
-            TEXT("Validates the manually authored DWC material-function set without modifying it."),
-            FConsoleCommandDelegate::CreateRaw(this, &FDWCEditorModule::ValidateSurfaceAppearanceFunctions),
-            ECVF_Default);
-
-        ExtractSkeletalMeshMaterialSlotCommand = IConsoleManager::Get().RegisterConsoleCommand(
-            TEXT("DWC.ExtractSkeletalMeshMaterialSlot"),
-            TEXT("Creates a skeletal mesh asset containing only one material slot. Args: <SkeletalMeshPath> <MaterialSlotIndex> [OutputPackagePath]"),
-            FConsoleCommandWithArgsDelegate::CreateRaw(this, &FDWCEditorModule::ExtractSkeletalMeshMaterialSlot),
-            ECVF_Default);
-
-        DumpEditorPreviewStatsCommand = IConsoleManager::Get().RegisterConsoleCommand(
-            TEXT("DWC.EditorPreview.DumpStats"),
-            TEXT("Dumps memory and cache statistics for active DWC editor preview sessions."),
-            FConsoleCommandDelegate::CreateStatic(&FDWCEditorPreviewDiagnostics::DumpAllSessions),
-            ECVF_Default);
-
-        ResetEditorPreviewStatsCommand = IConsoleManager::Get().RegisterConsoleCommand(
-            TEXT("DWC.EditorPreview.ResetStats"),
-            TEXT("Resets counters for active DWC editor preview sessions without clearing their caches."),
-            FConsoleCommandDelegate::CreateStatic(&FDWCEditorPreviewDiagnostics::ResetAllCounters),
-            ECVF_Default);
-
-        FDWCSkeletalMeshMaterialSlotExtractor::RegisterContentBrowserMenu(this);
-        FDWCSkeletalMeshMerger::RegisterContentBrowserMenu(this);
         FDWCGeneratedAssetRelocator::RegisterContentBrowserMenu(this);
         ObjectPropertyChangedHandle = FCoreUObjectDelegates::OnObjectPropertyChanged.AddRaw(
             this,
@@ -73,33 +41,6 @@ class FDWCEditorModule : public IModuleInterface
         {
             FCoreUObjectDelegates::OnObjectPropertyChanged.Remove(ObjectPropertyChangedHandle);
             ObjectPropertyChangedHandle.Reset();
-        }
-
-        FDWCSkeletalMeshMerger::UnregisterContentBrowserMenu(this);
-        FDWCSkeletalMeshMaterialSlotExtractor::UnregisterContentBrowserMenu(this);
-
-        if (ResetEditorPreviewStatsCommand != nullptr)
-        {
-            IConsoleManager::Get().UnregisterConsoleObject(ResetEditorPreviewStatsCommand);
-            ResetEditorPreviewStatsCommand = nullptr;
-        }
-
-        if (DumpEditorPreviewStatsCommand != nullptr)
-        {
-            IConsoleManager::Get().UnregisterConsoleObject(DumpEditorPreviewStatsCommand);
-            DumpEditorPreviewStatsCommand = nullptr;
-        }
-
-        if (ExtractSkeletalMeshMaterialSlotCommand != nullptr)
-        {
-            IConsoleManager::Get().UnregisterConsoleObject(ExtractSkeletalMeshMaterialSlotCommand);
-            ExtractSkeletalMeshMaterialSlotCommand = nullptr;
-        }
-
-        if (ValidateSurfaceAppearanceFunctionsCommand != nullptr)
-        {
-            IConsoleManager::Get().UnregisterConsoleObject(ValidateSurfaceAppearanceFunctionsCommand);
-            ValidateSurfaceAppearanceFunctionsCommand = nullptr;
         }
 
         if (FModuleManager::Get().IsModuleLoaded(TEXT("PropertyEditor")))
@@ -185,54 +126,7 @@ class FDWCEditorModule : public IModuleInterface
         PrepareWetnessProfileTextures(*WetnessProfile);
     }
 
-    void ValidateSurfaceAppearanceFunctions()
-    {
-        FString ErrorMessage;
-        if (!FWCAMaterialGenerator::ValidateSurfaceAppearanceFunctions(ErrorMessage))
-        {
-            UE_LOG(LogTemp, Error, TEXT("MF_DWC_EvaluateSurfaceAppearance validation failed:\n%s"), *ErrorMessage);
-            return;
-        }
-
-    }
-
-    void ExtractSkeletalMeshMaterialSlot(const TArray<FString>& Args)
-    {
-        if (Args.Num() < 2)
-        {
-            UE_LOG(LogTemp, Error, TEXT("Usage: DWC.ExtractSkeletalMeshMaterialSlot <SkeletalMeshPath> <MaterialSlotIndex> [OutputPackagePath]"));
-            return;
-        }
-
-        USkeletalMesh* SourceMesh = LoadObject<USkeletalMesh>(nullptr, *Args[0]);
-        if (SourceMesh == nullptr)
-        {
-            UE_LOG(LogTemp, Error, TEXT("Could not load skeletal mesh: %s"), *Args[0]);
-            return;
-        }
-
-        const int32 MaterialSlotIndex = FCString::Atoi(*Args[1]);
-        const FString OutputPackageName = Args.IsValidIndex(2) ? Args[2] : FString();
-
-        const FDWCSkeletalMeshMaterialSlotExtractionResult Result =
-            FDWCSkeletalMeshMaterialSlotExtractor::ExtractMaterialSlot(SourceMesh, MaterialSlotIndex, OutputPackageName);
-        if (Result.bSucceeded)
-        {
-            UE_LOG(LogTemp, Display, TEXT("%s"), *Result.Message);
-        }
-        else
-        {
-            UE_LOG(LogTemp, Error, TEXT("%s"), *Result.Message);
-        }
-    }
-
-
-    IConsoleObject* ValidateSurfaceAppearanceFunctionsCommand = nullptr;
-    IConsoleObject* ExtractSkeletalMeshMaterialSlotCommand = nullptr;
-    IConsoleObject* DumpEditorPreviewStatsCommand = nullptr;
-    IConsoleObject* ResetEditorPreviewStatsCommand = nullptr;
     FDelegateHandle ObjectPropertyChangedHandle;
-
 };
 
 IMPLEMENT_MODULE(FDWCEditorModule, DWCEditor)

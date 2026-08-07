@@ -1,6 +1,6 @@
 //Copyright 2026 Team Tofunut. All Rights Reserved.
 /*
- *  Material?먯꽌 誘몃━蹂닿린? Auto Partition???곹빀???띿뒪泥??꾨낫瑜??섏쭛?섍퀬 ?먯닔?뷀빀?덈떎.
+ * Collects and scores texture candidates from materials for preview and Auto Partition workflows.
  */
 
 #include "WetClothing/Foundation/TextureAccess/WetClothingMaterialTextureResolver.h"

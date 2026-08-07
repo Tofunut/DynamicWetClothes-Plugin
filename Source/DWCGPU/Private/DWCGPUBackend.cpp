@@ -52,7 +52,7 @@ constexpr int32 DWCMaxComputeGroupsPerDimension = 65535;
 static TAutoConsoleVariable<int32> CVarDWCGPUBinnedAbsorption(
     TEXT("r.DWC.GPU.BinnedAbsorption"),
     1,
-    TEXT("Use tile-binned GPU absorption for large positive wetness input batches. 0 disables the experimental path."),
+    TEXT("Use tile-binned GPU absorption for large positive wetness input batches. 0 disables the optimized tile-binned path."),
     ECVF_Default);
 
 static TAutoConsoleVariable<float> CVarDWCGPUWetAreaStampRadiusPixels(
@@ -3054,21 +3054,6 @@ FDWCGPUBackendStats FDWCGPUBackend::GetStats() const
     }
 
     return Stats;
-}
-
-void FDWCGPUBackend::GetDebugRenderTargets(TArray<FDWCGPURenderTargetDebugSnapshot>& OutSnapshots) const
-{
-    for (const FMaterialSlotRuntime& Slot : MaterialSlots)
-    {
-        FDWCGPURenderTargetDebugSnapshot& Snapshot = OutSnapshots.AddDefaulted_GetRef();
-        Snapshot.ReceiverGPUId = ReceiverGPUId;
-        Snapshot.MaterialSlotIndex = Slot.MaterialSlotIndex;
-        Snapshot.WetnessMapResolution = Slot.Resolution;
-        Snapshot.SurfaceWaterResolution = Slot.bUsesSurfaceWater ? Slot.SurfaceWaterResolution : 0;
-        Snapshot.WetnessMap = Slot.GetCurrentMap();
-        Snapshot.Droplet1Map = Slot.bUsesSurfaceWater ? Slot.SurfaceDroplet1RT.Get() : nullptr;
-        Snapshot.Droplet2Map = Slot.bUsesSurfaceWater ? Slot.SurfaceDroplet2RT.Get() : nullptr;
-    }
 }
 
 void FDWCGPUBackend::Shutdown()

@@ -6,37 +6,42 @@
 
 #include "DWCQualityLODProfile.generated.h"
 
-USTRUCT(BlueprintType)
+
+/**
+ * Internal data model reserved for future DWC quality LOD support.
+ * The feature is intentionally disabled and not exposed through the shipping component UI or Blueprint API.
+ */
+USTRUCT()
 struct DWC_API FDWCQualityLODPolicy
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD|Feature", meta = (DisplayName = "Update GPU Surface Water"))
+    UPROPERTY()
     bool bUpdateSurfaceWater = true;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD|Feature", meta = (DisplayName = "Update CPU Wetness Rendering"))
+    UPROPERTY()
     bool bUpdateWetRendering = true;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD|Feature")
+    UPROPERTY()
     bool bUpdateWrinkle = true;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD|Feature")
+    UPROPERTY()
     bool bUpdateTransparency = true;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD|Performance", meta = (ClampMin = "0.0", Units = "s", DisplayName = "CPU Wetness Render Update Interval"))
+    UPROPERTY()
     float RenderUpdateInterval = 0.0f;
 
 };
 
-USTRUCT(BlueprintType)
+USTRUCT()
 struct DWC_API FDWCQualityLODPolicyEntry
 {
     GENERATED_BODY()
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "LOD")
+    UPROPERTY()
     int32 LODLevel = 0;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LOD", meta = (ShowOnlyInnerProperties))
+    UPROPERTY()
     FDWCQualityLODPolicy Policy;
 };
 
@@ -47,16 +52,16 @@ struct DWC_API FDWCQualityLODRuntimeState
     float RenderUpdateAccumulator = 0.0f;
 };
 
-USTRUCT(BlueprintType)
+USTRUCT()
 struct DWC_API FDWCQualityLODScreenSizeThreshold
 {
     GENERATED_BODY()
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Wetness|LOD")
+    UPROPERTY()
     int32 LODLevel = 0;
 
     /** This LOD becomes active when the merged receiver bounds screen size is at or above this value. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wetness|LOD", meta = (ClampMin = "0.0", ClampMax = "1.0", DisplayName = "Screen Size"))
+    UPROPERTY()
     float ScreenSize = 0.0f;
 };
 
@@ -68,7 +73,7 @@ struct DWC_API FDWCQualityLODScreenSizeRuntimeState
     int32 ActiveLODLevel = INDEX_NONE;
 };
 
-UCLASS(BlueprintType)
+UCLASS(NotBlueprintable, HideDropdown)
 class DWC_API UDWCQualityLODProfile : public UDataAsset
 {
     GENERATED_BODY()
@@ -76,7 +81,7 @@ class DWC_API UDWCQualityLODProfile : public UDataAsset
   public:
     UDWCQualityLODProfile();
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "LOD", meta = (TitleProperty = "LODLevel"))
+    UPROPERTY()
     TArray<FDWCQualityLODPolicyEntry> Policies;
 
 #if WITH_EDITOR

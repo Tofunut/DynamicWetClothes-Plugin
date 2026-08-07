@@ -788,26 +788,6 @@ void UDynamicWetClothesComponent::GetDWCReceiverGPUIds(TArray<int32>& OutReceive
     }
 }
 
-void UDynamicWetClothesComponent::GetGPUDebugRenderTargets(
-    TArray<FDWCGPURenderTargetDebugSnapshot>& OutSnapshots) const
-{
-    OutSnapshots.Reset();
-    for (const TUniquePtr<FDWCWetMeshReceiverRuntime>& Receiver : Receivers)
-    {
-        if (!Receiver.IsValid() || !Receiver->GPUBackend.IsValid())
-        {
-            continue;
-        }
-
-        const int32 FirstNewIndex = OutSnapshots.Num();
-        Receiver->GPUBackend->GetDebugRenderTargets(OutSnapshots);
-        for (int32 Index = FirstNewIndex; Index < OutSnapshots.Num(); ++Index)
-        {
-            OutSnapshots[Index].ReceiverId = Receiver->ReceiverId;
-        }
-    }
-}
-
 int32 UDynamicWetClothesComponent::GetWetSurfaceSampleResolution() const
 {
     return FMath::Max(2, WetSurfaceSampleResolution);

@@ -1,6 +1,6 @@
 //Copyright 2026 Team Tofunut. All Rights Reserved.
 /*
- *  텍스처 색상 샘플링 결과를 바탕으로 UV Island를 자동 파티션 클러스터로 묶는 로직을 구현합니다.
+ * Groups UV Islands into automatic partition clusters using sampled texture colors.
  */
 
 #include "WetClothing/Modes/Part/Partition/WetPartAutoPartitioner.h"

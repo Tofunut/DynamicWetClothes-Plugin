@@ -1399,7 +1399,6 @@ void SWetClothingPartEditorPanel::RefreshSurfaceWaterTilingPreview()
     SurfaceWaterTilingPreviewViewport->SetSurfaceWaterTilingPreviewDisplayMode(SurfaceWaterPreviewDisplayMode);
     SurfaceWaterTilingPreviewViewport->SetPreviewWetness(0.0f, 1.0f);
     SurfaceWaterTilingPreviewViewport->SetSurfaceWaterPreviewDropletsEnabled(true);
-    SurfaceWaterTilingPreviewViewport->SetSurfaceWaterPreviewNormalFlip(false, false);
 
     // The tiling popup renders only the actual material result. Editor Part
     // boundaries remain exclusive to the main Part-edit viewport.

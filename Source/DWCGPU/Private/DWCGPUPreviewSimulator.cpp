@@ -10,6 +10,7 @@
 #include "RenderTargetPool.h"
 #include "RenderingThread.h"
 #include "TextureResource.h"
+#include "UObject/Package.h"
 
 namespace DWCGPUPreviewPrivate
 {

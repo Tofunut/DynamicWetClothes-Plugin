@@ -3,6 +3,7 @@
 
 #include "CoreMinimal.h"
 #include "DataAssets/WetClothingWrinkleData.h"
+#include "WetClothing/Foundation/Raster/DWCEditorRasterTypes.h"
 
 struct FWetProceduralRidgeRasterResult
 {
@@ -11,7 +12,6 @@ struct FWetProceduralRidgeRasterResult
     FIntRect DirtyRect = FIntRect(0, 0, 0, 0);
 };
 
-struct FDWCEditorNormalRasterSurface;
 class FDWCEditorCancellationToken;
 
 class FWetProceduralRidgeRasterizer

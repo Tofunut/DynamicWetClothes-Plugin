@@ -16,12 +16,12 @@
 #include "WetClothing/Foundation/Input/DWCEditorInteractiveToolsHost.h"
 #include "WetClothing/Foundation/Jobs/DWCEditorWorkerJobTypes.h"
 #include "WetClothing/Modes/Transparency/Brush/DWCTransparencyAlphaTileStore.h"
+#include "WetClothing/Modes/Transparency/Brush/DWCTransparencyLiveStrokeLayer.h"
 #include "WetClothing/Modes/Transparency/Brush/DWCTransparencyRevealColorTileStore.h"
 
 class AActor;
 class FAdvancedPreviewScene;
 class FDWCTransparencyAuthoringController;
-class FDWCTransparencyLiveStrokeLayer;
 class FDWCEditorWorkerJobScheduler;
 class FDWCEditorPreviewCommitCoordinator;
 class FDWCEditorSessionStore;

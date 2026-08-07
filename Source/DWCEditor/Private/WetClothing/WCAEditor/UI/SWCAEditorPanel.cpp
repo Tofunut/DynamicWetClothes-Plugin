@@ -10,6 +10,7 @@
 #include "WetClothing/Foundation/TextureWorkspace/DWCEditorRenderUploadQueue.h"
 #include "WetClothing/Foundation/TextureWorkspace/DWCEditorTextureWorkspace.h"
 #include "WetClothing/Foundation/Preview/Commit/DWCEditorPreviewCommitCoordinator.h"
+#include "WetClothing/Foundation/Preview/Session/DWCEditorPreviewSession.h"
 #include "WetClothing/Foundation/Authoring/State/DWCEditorSessionStore.h"
 #include "WetClothing/Foundation/Async/DWCEditorResourceGovernor.h"
 #include "WetClothing/Foundation/Jobs/DWCEditorWorkerJobScheduler.h"

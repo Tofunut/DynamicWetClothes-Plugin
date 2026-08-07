@@ -55,10 +55,10 @@ class DWCDEMO_API ADWCDemoRainWetAreaSource : public AActor
         UPrimitiveComponent* OtherComp,
         int32                OtherBodyIndex);
 
-    UPROPERTY(VisibleAnywhere)
+    UPROPERTY(VisibleAnywhere, Category = "DWC Demo|Rain Wet Area Source")
     UBoxComponent* RainBounds;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = "true"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "DWC Demo|Rain Wet Area Source", meta = (AllowPrivateAccess = "true"))
     UNiagaraComponent* RainNiagara;
 
     UPROPERTY(EditAnywhere, Category = "DWC Demo|Rain Wet Area Source", meta = (ClampMin = "0.0"))

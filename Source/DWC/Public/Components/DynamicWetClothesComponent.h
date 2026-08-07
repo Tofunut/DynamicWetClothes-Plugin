@@ -20,6 +20,8 @@
 #include "RuntimeState/Utils/WetSurfaceContactResolver.h"
 #include "WetRendering/WetRenderStage.h"
 #include "RuntimeState/Utils/WetSimulationStage.h"
+#include "RuntimeState/Utils/DWCLodCoordinator.h"
+#include "RuntimeState/Utils/DWCLODVertexColorTransferCoordinator.h"
 #include "WetSimulation/AbsorbedWetness/AbsorbedWetnessSimulationState.h"
 #include "Templates/UniquePtr.h"
 
@@ -27,8 +29,6 @@
 
 class USkeletalMeshComponent;
 class USkeletalMesh;
-class FDWCLodCoordinator;
-class FDWCLODVertexColorTransferCoordinator;
 class FDWCTaskQueue;
 class UDWCRuntimeDataSubsystem;
 class UDWCStatsSubsystem;

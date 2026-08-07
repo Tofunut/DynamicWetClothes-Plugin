@@ -2,6 +2,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "DataAssets/WetClothingTransparencyData.h"
 
 class UWetClothingAsset;
 class FDWCEditorCancellationToken;

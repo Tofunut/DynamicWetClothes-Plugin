@@ -2,11 +2,11 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Engine/TextureRenderTarget2D.h"
 #include "GPU/DWCGPUBackend.h"
 #include "UObject/StrongObjectPtr.h"
 
 class UMaterialInstanceDynamic;
-class UTextureRenderTarget2D;
 struct FDWCGPUStaticSlotResources;
 
 class FDWCGPUBackend final : public IDWCGPUBackend

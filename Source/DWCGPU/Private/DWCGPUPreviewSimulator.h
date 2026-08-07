@@ -2,11 +2,10 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Engine/TextureRenderTarget2D.h"
 #include "GPU/DWCGPUBackend.h"
 #include "DataAssets/WetnessProfile.h"
 #include "UObject/StrongObjectPtr.h"
-
-class UTextureRenderTarget2D;
 
 class FDWCGPUPreviewSimulator final : public IDWCGPUPreviewSimulator
 {

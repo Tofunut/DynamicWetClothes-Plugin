@@ -2,6 +2,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Engine/Texture2D.h"
 #include "UObject/SoftObjectPath.h"
 #include "DataAssets/WetnessProfile.h"
 #include "DataAssets/WetClothingPrecomputedBoneOptimizationCache.h"
@@ -12,8 +13,6 @@ class UMaterial;
 class UMaterialInstanceConstant;
 class UMaterialInterface;
 class UTexture;
-class UTexture2D;
-
 UENUM(BlueprintType)
 enum class EWetPartProfileBlendMode : uint8
 {

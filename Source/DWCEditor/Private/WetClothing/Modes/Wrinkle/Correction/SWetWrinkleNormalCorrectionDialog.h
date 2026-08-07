@@ -4,12 +4,12 @@
 #include "CoreMinimal.h"
 #include "DataAssets/WetClothingWrinkleData.h"
 #include "DataAssets/WetWrinkleNormalTextureData.h"
+#include "Engine/Texture2D.h"
 #include "Styling/SlateBrush.h"
 #include "UObject/StrongObjectPtr.h"
 #include "Widgets/SCompoundWidget.h"
 
 class SWindow;
-class UTexture2D;
 class UWetClothingAsset;
 
 DECLARE_DELEGATE_TwoParams(FOnWetWrinkleCorrectedTextureCreated, UTexture2D*, bool);

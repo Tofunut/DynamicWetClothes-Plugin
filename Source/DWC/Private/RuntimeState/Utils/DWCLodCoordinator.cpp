@@ -12,6 +12,7 @@
 #include "Runtime/Engine/Classes/Components/SkeletalMeshComponent.h"
 #include "ConvexVolume.h"
 #include "SceneManagement.h"
+#include "SceneView.h"
 #include "Slate/SceneViewport.h"
 #include "Utility/DWCLog.h"
 

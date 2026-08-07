@@ -3,13 +3,12 @@
 
 #include "CoreMinimal.h"
 #include "UObject/StrongObjectPtr.h"
+#include "WetClothing/Foundation/Input/DWCEditorSurfaceAuthoringTool.h"
 
 class FAssetEditorModeManager;
 class FEditorModeTools;
 class FPreviewScene;
 class IDWCEditorSurfaceToolTarget;
-class UDWCEditorSurfaceAuthoringToolBuilder;
-
 /** Owns an asset-viewport-local ITF context and one long-lived surface tool. */
 class FDWCEditorInteractiveToolsHost
 {

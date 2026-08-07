@@ -23,6 +23,14 @@ DEFINE_LOG_CATEGORY_STATIC(LogDWCWrinkleBake, Log, All);
 
 namespace
 {
+    FString BuildWrinkleGeneratedTextureAssetBaseName(const UWetClothingAsset& WetClothingAsset)
+    {
+        FString AssetToken = ObjectTools::SanitizeObjectName(WetClothingAsset.GetName());
+        AssetToken.ReplaceInline(TEXT("_Wrinkle_"), TEXT("_"));
+        AssetToken.RemoveFromEnd(TEXT("_Wrinkle"));
+        return FString::Printf(TEXT("T_%s"), *AssetToken);
+    }
+
     struct FWetWrinkleBakeSourceCacheEntry
     {
         FWetWrinkleTexturePixelBuffer Pixels;
@@ -694,10 +702,8 @@ bool FWetWrinkleNormalMapBaker::BuildGroupSnapshot(
     // in the session turns a 4096 all-slot bake into N additional 16 MiB masks.
     Session.Impl->IslandMasks.Remove(IslandKey);
     Snapshot.BaseSuffix = FString::Printf(
-        TEXT("Slot%d_UV%d_LOD%d"),
-        Group.MaterialSlotIndex,
-        Group.UVChannelIndex,
-        Group.LODIndex);
+        TEXT("Slot%d"),
+        Group.MaterialSlotIndex);
     Snapshot.BuildSignature = MakeBuildSignature(
         WetClothingAsset,
         Group,
@@ -879,7 +885,7 @@ bool FWetWrinkleNormalMapBaker::CommitComputedResult(
         Snapshot.FinalTextureSize.X,
         Snapshot.FinalTextureSize.Y,
         ComputedResult.NormalPixels,
-        ExistingBakedMap != nullptr ? ExistingBakedMap->BakedWrinkleNormalMap.Get() : nullptr,
+        nullptr,
         OutErrorMessage);
     if (NormalTexture == nullptr)
     {
@@ -892,7 +898,7 @@ bool FWetWrinkleNormalMapBaker::CommitComputedResult(
         Snapshot.FinalTextureSize.X,
         Snapshot.FinalTextureSize.Y,
         ComputedResult.MaskPixels,
-        ExistingBakedMap != nullptr ? ExistingBakedMap->BakedWrinkleMask.Get() : nullptr,
+        nullptr,
         OutErrorMessage);
     if (MaskTexture == nullptr)
     {
@@ -1069,8 +1075,9 @@ UTexture2D* FWetWrinkleNormalMapBaker::CreateOrUpdateNormalTextureAsset(
         return nullptr;
     }
 
+    const FString BaseName = BuildWrinkleGeneratedTextureAssetBaseName(WetClothingAsset);
     const FString ObjectName = ObjectTools::SanitizeObjectName(
-        FString::Printf(TEXT("T_%s_%s"), *WetClothingAsset.GetName(), *ObjectSuffix));
+        FString::Printf(TEXT("%s_%s"), *BaseName, *ObjectSuffix));
     const FString TexturePackageName = PackagePath / ObjectName;
     const FString TextureObjectPath = TexturePackageName + TEXT(".") + ObjectName;
 
@@ -1177,8 +1184,9 @@ UTexture2D* FWetWrinkleNormalMapBaker::CreateOrUpdateMaskTextureAsset(
         return nullptr;
     }
 
+    const FString BaseName = BuildWrinkleGeneratedTextureAssetBaseName(WetClothingAsset);
     const FString ObjectName = ObjectTools::SanitizeObjectName(
-        FString::Printf(TEXT("T_%s_%s"), *WetClothingAsset.GetName(), *ObjectSuffix));
+        FString::Printf(TEXT("%s_%s"), *BaseName, *ObjectSuffix));
     const FString TexturePackageName = PackagePath / ObjectName;
     const FString TextureObjectPath = TexturePackageName + TEXT(".") + ObjectName;
 

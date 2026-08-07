@@ -17,14 +17,21 @@
 
 namespace
 {
+    FString BuildTransparencyGeneratedTextureAssetBaseName(const UWetClothingAsset& Asset)
+    {
+        FString AssetToken = FDWCRevealBakeUtilities::SanitizeAssetToken(Asset.GetName());
+        AssetToken.ReplaceInline(TEXT("_Transparency_"), TEXT("_"));
+        AssetToken.RemoveFromEnd(TEXT("_Transparency"));
+        return FString::Printf(TEXT("T_%s"), *AssetToken);
+    }
+
     FString BuildTransparencyMapAssetName(const UWetClothingAsset& Asset, const FDWCTransparencyAutoBakeResult& AutoResult)
     {
+        const FString BaseName = BuildTransparencyGeneratedTextureAssetBaseName(Asset);
         return FString::Printf(
-            TEXT("T_%s_Slot%d_UV%d_LOD%d_TransparencyMap"),
-            *FDWCRevealBakeUtilities::SanitizeAssetToken(Asset.GetName()),
-            AutoResult.MaterialSlotIndex,
-            AutoResult.UVChannelIndex,
-            AutoResult.LODIndex);
+            TEXT("%s_Slot%d_TransparencyMap"),
+            *BaseName,
+            AutoResult.MaterialSlotIndex);
     }
 
     UTexture2D* CreateOrUpdateTransparencyMapAsset(

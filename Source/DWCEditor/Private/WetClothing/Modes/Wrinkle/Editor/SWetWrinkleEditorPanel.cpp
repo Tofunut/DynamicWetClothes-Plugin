@@ -1044,9 +1044,10 @@ TSharedRef<SWidget> SWetWrinkleEditorPanel::BuildPreviewDisplayPanel()
             .BorderImage(&PreviewControlsBackgroundBrush)
             .Padding(8.0f)
             [SNew(SVerticalBox)
-             + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 4.0f)
-               [SNew(SBorder).BorderImage(FAppStyle::Get().GetBrush(TEXT("Brushes.Header"))).Padding(FMargin(8.0f, 6.0f))
-                [SNew(STextBlock).Text(LOCTEXT("WrinklePreviewDisplayHeading", "Display")).Font(FAppStyle::GetFontStyle(TEXT("NormalFontBold")))]]
+             + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 6.0f)
+               [SNew(STextBlock)
+                    .Text(LOCTEXT("WrinklePreviewDisplayHeading", "Display"))
+                    .Font(FAppStyle::GetFontStyle(TEXT("NormalFontBold")))]
              + SVerticalBox::Slot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 4.0f)
                [SNew(SHorizontalBox)
                 + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)[SNew(SBox).WidthOverride(112.0f)[SNew(STextBlock).Text(LOCTEXT("WrinklePreviewWetnessShort", "Wetness"))]]
@@ -3699,6 +3700,7 @@ FText SWetWrinkleEditorPanel::GetWrinkleNormalTextureDisplayName() const
 TSharedRef<SWidget> SWetWrinkleEditorPanel::BuildWrinkleNormalTextureMenu()
 {
     RefreshBrushPresetOptions();
+    WrinkleNormalMenuThumbnails.Reset();
 
     TSharedRef<SVerticalBox> Menu = SNew(SVerticalBox);
     Menu->AddSlot()
@@ -3719,7 +3721,20 @@ TSharedRef<SWidget> SWetWrinkleEditorPanel::BuildWrinkleNormalTextureMenu()
     }
     else
     {
-        TSharedRef<SVerticalBox> PresetList = SNew(SVerticalBox);
+        TSharedRef<SUniformGridPanel> PresetGrid = SNew(SUniformGridPanel)
+            .SlotPadding(FMargin(3.0f));
+        FAssetThumbnailConfig ThumbnailConfig;
+        ThumbnailConfig.bAllowHintText = false;
+        ThumbnailConfig.AllowAssetSpecificThumbnailOverlay = false;
+        ThumbnailConfig.AllowAssetStatusThumbnailOverlay = false;
+        ThumbnailConfig.ShowAssetColor = false;
+        ThumbnailConfig.ShowAssetBorder = false;
+        ThumbnailConfig.BorderPadding = FMargin(0.0f);
+
+        constexpr int32 ColumnCount = 4;
+        int32 TileIndex = 0;
+        FAssetRegistryModule& AssetRegistryModule =
+            FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
         for (const TSharedPtr<FWetWrinkleBrushPresetOption>& Option : BrushPresetOptions)
         {
             if (!Option.IsValid())
@@ -3727,25 +3742,50 @@ TSharedRef<SWidget> SWetWrinkleEditorPanel::BuildWrinkleNormalTextureMenu()
                 continue;
             }
             const FSoftObjectPath TexturePath = Option->TexturePath;
-            PresetList->AddSlot()
-                .AutoHeight()
-                .Padding(2.0f, 1.0f)
+            const FAssetData AssetData = AssetRegistryModule.Get().GetAssetByObjectPath(TexturePath);
+            TSharedPtr<FAssetThumbnail> Thumbnail;
+            if (AssetData.IsValid())
+            {
+                Thumbnail = MakeShared<FAssetThumbnail>(AssetData, 72, 72, MaterialThumbnailPool);
+                WrinkleNormalMenuThumbnails.Add(Thumbnail);
+            }
+
+            PresetGrid->AddSlot(TileIndex % ColumnCount, TileIndex / ColumnCount)
                 [SNew(SButton)
                     .ButtonStyle(FAppStyle::Get(), TEXT("SimpleButton"))
-                    .HAlign(HAlign_Left)
-                    .ContentPadding(FMargin(8.0f, 5.0f))
-                    .Text(Option->DisplayName)
+                    .ContentPadding(FMargin(5.0f))
                     .ToolTipText(FText::FromString(TexturePath.ToString()))
-                    .OnClicked(this, &SWetWrinkleEditorPanel::HandleWrinkleNormalPresetClicked, TexturePath)];
+                    .OnClicked(this, &SWetWrinkleEditorPanel::HandleWrinkleNormalPresetClicked, TexturePath)
+                    [SNew(SBox)
+                        .WidthOverride(88.0f)
+                        .HeightOverride(104.0f)
+                        [SNew(SVerticalBox)
+                            + SVerticalBox::Slot()
+                                .AutoHeight()
+                                .HAlign(HAlign_Center)
+                                [SNew(SBox)
+                                    .WidthOverride(72.0f)
+                                    .HeightOverride(72.0f)
+                                    [Thumbnail.IsValid()
+                                        ? Thumbnail->MakeThumbnailWidget(ThumbnailConfig)
+                                        : SNullWidget::NullWidget]]
+                            + SVerticalBox::Slot()
+                                .AutoHeight()
+                                .Padding(0.0f, 4.0f, 0.0f, 0.0f)
+                                [SNew(STextBlock)
+                                    .Text(Option->DisplayName)
+                                    .Justification(ETextJustify::Center)
+                                    .OverflowPolicy(ETextOverflowPolicy::Ellipsis)]]]];
+            ++TileIndex;
         }
 
         Menu->AddSlot()
             .AutoHeight()
             [SNew(SBox)
-                .MaxDesiredHeight(300.0f)
+                .MaxDesiredHeight(340.0f)
                 [SNew(SScrollBox)
                     + SScrollBox::Slot()
-                    [PresetList]]];
+                    [PresetGrid]]];
     }
 
     Menu->AddSlot()
@@ -3767,11 +3807,17 @@ TSharedRef<SWidget> SWetWrinkleEditorPanel::BuildWrinkleNormalTextureMenu()
                 .AutoHeight()
                 [SNew(SObjectPropertyEntryBox)
                     .AllowedClass(UTexture2D::StaticClass())
+                    .AllowClear(true)
+                    .AllowCreate(false)
+                    .DisplayThumbnail(false)
+                    .DisplayUseSelected(true)
+                    .DisplayBrowse(true)
+                    .EnableContentPicker(true)
                     .ObjectPath(this, &SWetWrinkleEditorPanel::GetWrinkleNormalTextureObjectPath)
                     .OnObjectChanged(this, &SWetWrinkleEditorPanel::HandleWrinkleNormalTextureChanged)]];
 
     return SNew(SBox)
-        .WidthOverride(360.0f)
+        .WidthOverride(420.0f)
         [Menu];
 }
 

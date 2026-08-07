@@ -28,7 +28,6 @@ class FDWCEditorTextureWorkspace;
 using FDWCEditorWorkerJobSchedulerPtr = TSharedPtr<FDWCEditorWorkerJobScheduler, ESPMode::ThreadSafe>;
 class FPrimitiveDrawInterface;
 class FWetWrinkleViewportClient;
-class SRichTextBlock;
 class UMaterialInstanceDynamic;
 class USkeletalMesh;
 class USkeletalMeshComponent;
@@ -181,7 +180,6 @@ class SWetWrinkleViewport : public SEditorViewport, public FGCObject, public IDW
     FDWCEditorPreviewLayer BuildTransientPreviewLayer(int32 MaterialSlotIndex) const;
     FDWCEditorPreviewLayer BuildHoverPreviewLayer(int32 MaterialSlotIndex) const;
     float CalculateBrushCursorWorldRadius() const;
-    FText GetViewportHintText() const;
     const UWetClothingAsset* ResolveSourceWetClothingAsset() const;
     UTexture* ResolveSourceTextureForMaterialSlot(int32 MaterialSlotIndex) const;
     void InitializePreviewSession();
@@ -242,7 +240,6 @@ class SWetWrinkleViewport : public SEditorViewport, public FGCObject, public IDW
     TArray<FWetWrinkleAccumulatedPreviewState> AccumulatedPreviewStates;
     uint64 AccumulatedPreviewUseSerial = 0;
     FWetProceduralRidgeTransientPreviewState TransientProceduralPreviewState;
-    TSharedPtr<SRichTextBlock> OverlayText;
     FDWCEditorSpatialLease SpatialLease;
     FDWCEditorSpatialHandle SpatialHandle;
     uint64 PreviewMeshRefreshCount = 0;

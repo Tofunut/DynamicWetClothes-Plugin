@@ -42,8 +42,6 @@
 #include "WetClothing/Modes/Wrinkle/Viewport/WetWrinkleAccumulatedPreviewWorker.h"
 #include "WetClothing/Modes/Wrinkle/Viewport/WetWrinkleIncrementalPreviewWorker.h"
 #include "WetWrinkleViewportClient.h"
-#include "Widgets/Layout/SBorder.h"
-#include "Widgets/Text/SRichTextBlock.h"
 
 #define LOCTEXT_NAMESPACE "WetWrinkleViewport"
 
@@ -603,11 +601,6 @@ void SWetWrinkleViewport::RefreshPreviewMesh(const bool bForceMaterialRebuild)
     else
     {
         PreviewScene->SetFloorOffset(0.0f);
-    }
-
-    if (OverlayText.IsValid())
-    {
-        OverlayText->SetText(GetViewportHintText());
     }
 
     if (ViewportClient.IsValid())
@@ -1205,16 +1198,6 @@ TSharedPtr<SWidget> SWetWrinkleViewport::BuildViewportToolbar()
 void SWetWrinkleViewport::PopulateViewportOverlays(TSharedRef<SOverlay> Overlay)
 {
     SEditorViewport::PopulateViewportOverlays(Overlay);
-
-    Overlay->AddSlot()
-        .VAlign(VAlign_Top)
-        .HAlign(HAlign_Left)
-        .Padding(8.0f)
-            [SNew(SBorder)
-                 .BorderImage(FAppStyle::Get().GetBrush("FloatingBorder"))
-                 .Padding(6.0f)
-                     [SAssignNew(OverlayText, SRichTextBlock)
-                          .Text(GetViewportHintText())]];
 }
 
 void SWetWrinkleViewport::OnFocusViewportToSelection()
@@ -3086,45 +3069,6 @@ float SWetWrinkleViewport::CalculateBrushCursorWorldRadius() const
     const FBoxSphereBounds Bounds = PreviewMeshComponent->CalcBounds(PreviewMeshComponent->GetComponentTransform());
     const float MeshRadius = FMath::Max(1.0f, static_cast<float>(Bounds.SphereRadius));
     return FMath::Clamp(MeshRadius * BrushSettings.BrushRadiusUV, 0.25f, MeshRadius * 0.35f);
-}
-
-FText SWetWrinkleViewport::GetViewportHintText() const
-{
-    if (ResolveTargetMesh() == nullptr)
-    {
-        return LOCTEXT("NoTargetMeshHint", "Assign a Target Mesh or Source Wet Clothing Asset.");
-    }
-
-    if (!SpatialLease.IsValid() || !SpatialHandle.IsValid() || SpatialHandle->Triangles.IsEmpty())
-    {
-        return LOCTEXT("NoHitTrianglesHint", "No triangles available for the selected UV channel/material slot.");
-    }
-
-    if (BrushSettings.ToolMode == EWetWrinkleToolMode::ProceduralRidgeStroke)
-    {
-        if (BrushSettings.RidgeEditMode == EWetProceduralRidgeEditMode::Draw &&
-            (bTransientProceduralStartJunction || bTransientProceduralEndJunction))
-        {
-            if (bTransientProceduralStartJunction && bTransientProceduralEndJunction)
-            {
-                return LOCTEXT("RidgeBothJunctionCandidateHint", "Junction candidate: Start + End");
-            }
-            return bTransientProceduralStartJunction
-                ? LOCTEXT("RidgeStartJunctionCandidateHint", "Junction candidate: Start")
-                : LOCTEXT("RidgeEndJunctionCandidateHint", "Junction candidate: End");
-        }
-        if (BrushSettings.RidgeEditMode == EWetProceduralRidgeEditMode::Edit)
-        {
-            return BrushSettings.bRidgeJunctionModeEnabled
-                ? LOCTEXT("RidgeEditViewportHint", "Drag a selected ridge control point. Shift-click a segment to insert a point. Endpoints snap to nearby ridges.")
-                : LOCTEXT("RidgeEditNoJunctionViewportHint", "Drag a selected ridge control point. Shift-click a segment to insert a point. Junction snapping is off.");
-        }
-        return BrushSettings.bRidgeJunctionModeEnabled
-            ? LOCTEXT("RidgeDrawViewportHint", "Drag on the mesh to draw a ridge. Endpoints snap to nearby ridges to form junctions.")
-            : LOCTEXT("RidgeDrawNoJunctionViewportHint", "Drag on the mesh to draw a ridge. Junction snapping is off.");
-    }
-
-    return LOCTEXT("ViewportHint", "Move the cursor over the mesh to inspect wrinkle brush UV hits.");
 }
 
 void SWetWrinkleViewport::FindProjectedSurfacesAtUV(

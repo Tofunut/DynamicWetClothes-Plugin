@@ -360,6 +360,7 @@ class SWetWrinkleEditorPanel : public SCompoundWidget, public FEditorUndoClient
     TSharedPtr<SWetWrinklePalettePanel> WrinklePalettePanel;
     TSharedPtr<FAssetThumbnailPool> MaterialThumbnailPool;
     TArray<TSharedPtr<FAssetThumbnail>> MaterialSlotThumbnails;
+    TArray<TSharedPtr<FAssetThumbnail>> WrinkleNormalMenuThumbnails;
     FSlateBrush SelectedWrinkleNormalThumbnailBrush;
     TSharedPtr<class SEditableTextBox> WrinkleTextureSearchPathTextBox;
     FWetWrinkleBrushSettings BrushSettings;

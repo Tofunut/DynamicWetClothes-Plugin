@@ -53,6 +53,18 @@ namespace
             bNormalMap);
     }
 
+    void FinishTextureCompilation(UTexture2D* Texture)
+    {
+        if (Texture == nullptr)
+        {
+            return;
+        }
+
+        TArray<UTexture*> TexturesToFinish;
+        TexturesToFinish.Add(Texture);
+        FTextureCompilingManager::Get().FinishCompilation(TexturesToFinish);
+    }
+
     bool HasUsableBuiltMip0(const UTexture2D& Texture)
     {
         const FTexturePlatformData* PlatformData = Texture.GetPlatformData();
@@ -81,6 +93,8 @@ namespace
                 TextureRole != nullptr ? TextureRole : TEXT("Surface Water"));
             return false;
         }
+
+        FinishTextureCompilation(Texture);
 
         if (Texture->GetSizeX() != DWCSurfaceTextureNormalization::Resolution ||
             Texture->GetSizeY() != DWCSurfaceTextureNormalization::Resolution)
@@ -383,6 +397,12 @@ bool FWetClothingSurfaceTextureNormalizer::ValidateTexture(
         return true;
     }
 
+    // Asset assignment can arrive while Unreal is still compiling the texture.
+    // Built size/platform data queried before completion may temporarily look unusable
+    // (for example a placeholder size, missing mip-0, or PF_Unknown), which used to
+    // make an already-valid 512 texture fall through to generated 512 duplication.
+    FinishTextureCompilation(SourceTexture);
+
     if (SourceTexture->SRGB && !bAllowSourceConversion)
     {
         OutErrorMessage = FString::Printf(
@@ -618,6 +638,10 @@ bool FWetClothingSurfaceTextureNormalizer::IsPreparedTextureReferenceCurrent(
     {
         return PreparedTexture == nullptr;
     }
+
+    // This path bypasses ValidateTexture(), so make the same built-data decision
+    // only after any pending source texture compilation has completed.
+    FinishTextureCompilation(const_cast<UTexture2D*>(SourceTexture));
 
     const TextureCompressionSettings ExpectedCompression = bNormalMap
         ? TC_Normalmap

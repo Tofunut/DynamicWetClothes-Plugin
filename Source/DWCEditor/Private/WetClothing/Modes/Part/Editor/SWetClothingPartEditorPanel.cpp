@@ -1817,13 +1817,9 @@ FText SWetClothingPartEditorPanel::GetMaterialSlotStatusText(const int32 Materia
 
     if (IsMaterialSlotDataUVReadyForEditing(MaterialSlotIndex))
     {
-        if (DoesMaterialSlotHaveDataUVWarnings(MaterialSlotIndex))
-        {
-            return LOCTEXT("DataUVStatusReadyWithWarnings", "Ready with warnings");
-        }
-        return HasCompleteDataUVDiagnosticRecords(MaterialSlotIndex)
-            ? LOCTEXT("DataUVStatusReady", "Ready")
-            : LOCTEXT("DataUVStatusReadyDiagnosticsUnavailable", "Ready (diagnostics unavailable)");
+        // Keep the material-slot list focused on usability only. Warnings and
+        // diagnostic availability remain visible in the DWC UV Details dialog.
+        return LOCTEXT("DataUVStatusReady", "Ready");
     }
 
     if (IsMaterialSlotIncludedInDataUVLayout(MaterialSlotIndex))
@@ -1847,13 +1843,7 @@ FSlateColor SWetClothingPartEditorPanel::GetMaterialSlotStatusColor(const int32 
     }
     if (IsMaterialSlotDataUVReadyForEditing(MaterialSlotIndex))
     {
-        if (DoesMaterialSlotHaveDataUVWarnings(MaterialSlotIndex))
-        {
-            return FSlateColor(FLinearColor(1.0f, 0.78f, 0.18f, 1.0f));
-        }
-        return HasCompleteDataUVDiagnosticRecords(MaterialSlotIndex)
-            ? FSlateColor(FLinearColor(0.24f, 0.78f, 0.38f, 1.0f))
-            : FSlateColor(FLinearColor(0.45f, 0.72f, 0.95f, 1.0f));
+        return FSlateColor(FLinearColor(0.24f, 0.78f, 0.38f, 1.0f));
     }
     if (IsMaterialSlotIncludedInDataUVLayout(MaterialSlotIndex))
     {
@@ -1889,24 +1879,13 @@ FText SWetClothingPartEditorPanel::GetMaterialSlotStatusTooltip(const int32 Mate
         if (DoesMaterialSlotHaveDataUVWarnings(MaterialSlotIndex))
         {
             return LOCTEXT(
-                "DataUVReadyWithWarningsTooltip",
-                "Ready with warnings\nThe DWC UV is usable, but generation recorded a warning.\nClick to view details.");
+                "DataUVReadyWarningTooltip",
+                "Ready\nThe DWC UV is usable, but generation completed with warnings.\nClick to view generation details.");
         }
-        if (!HasCompleteDataUVDiagnosticRecords(MaterialSlotIndex))
-        {
-            return LOCTEXT(
-                "DataUVReadyDiagnosticsUnavailableTooltip",
-                "Ready (diagnostics unavailable)\nThe DWC UV is usable, but one or more generated LODs do not contain a recorded diagnostic result.\nUnknown values are shown as '-' in Details.");
-        }
-        if (DoesMaterialSlotHaveDataUVDiagnostics(MaterialSlotIndex))
-        {
-            return LOCTEXT(
-                "DataUVReadyWithDiagnosticsTooltip",
-                "Ready\nGeneration diagnostics are available.\nClick to view details.");
-        }
+
         return LOCTEXT(
             "DataUVReadyTooltip",
-            "Ready\nGeneration diagnostics were recorded and are clean.\nClick to view details.");
+            "Ready\nThe DWC UV is usable.\nClick to view generation details.");
     }
 
     if (IsMaterialSlotIncludedInDataUVLayout(MaterialSlotIndex))
@@ -1946,17 +1925,17 @@ const FSlateBrush* SWetClothingPartEditorPanel::GetMaterialSlotStatusInfoBrush(c
     {
         return FAppStyle::GetBrush(TEXT("Icons.ErrorWithColor"));
     }
-    if (DoesMaterialSlotHaveDataUVWarnings(MaterialSlotIndex))
+    if (IsMaterialSlotDataUVReadyForEditing(MaterialSlotIndex))
     {
-        return FAppStyle::GetBrush(TEXT("Icons.WarningWithColor"));
-    }
-    if (!HasCompleteDataUVDiagnosticRecords(MaterialSlotIndex) ||
-        DoesMaterialSlotHaveDataUVDiagnostics(MaterialSlotIndex))
-    {
-        return FAppStyle::GetBrush(TEXT("Icons.InfoWithColor"));
+        // Keep the text green "Ready" for every usable slot. Only the icon
+        // communicates that the completed generation has warnings.
+        return FAppStyle::GetBrush(
+            DoesMaterialSlotHaveDataUVWarnings(MaterialSlotIndex)
+                ? TEXT("Icons.WarningWithColor")
+                : TEXT("Icons.SuccessWithColor"));
     }
 
-    return FAppStyle::GetBrush(TEXT("Icons.SuccessWithColor"));
+    return FAppStyle::GetBrush(TEXT("Icons.InfoWithColor"));
 }
 
 FSlateColor SWetClothingPartEditorPanel::GetMaterialSlotStatusInfoColor(const int32 MaterialSlotIndex) const

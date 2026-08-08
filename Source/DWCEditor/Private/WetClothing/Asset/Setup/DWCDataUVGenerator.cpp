@@ -30,7 +30,6 @@ namespace DWCDataUVGeneratorInternal
     static constexpr double BorderPaddingUV =
         static_cast<double>(BorderPaddingTexels) / static_cast<double>(DataUVReferenceResolution);
     static constexpr double TransferDegenerateTriangleAreaTolerance = 1.0e-10;
-    static constexpr double VisibleExclusionFailureRatioThreshold = 0.005; // 0.5%
 
     struct FExcludedVisibleTriangle
     {
@@ -1206,7 +1205,7 @@ FDWCDataUVGenerationResult FDWCDataUVGenerator::GenerateForSkeletalMesh(
             // visible surface ratio. Connected-region size remains diagnostic detail,
             // but does not escalate a sub-0.5% result to Warning by itself.
             const bool bVisibleSurfaceLimitExceeded =
-                SlotDiagnostic.ExcludedVisible3DSurfaceRatio > VisibleExclusionFailureRatioThreshold;
+                SlotDiagnostic.ExcludedVisible3DSurfaceRatio > DWCDataUVSafetyLimits::VisibleExclusionRatio;
 
             if (bVisibleSurfaceLimitExceeded)
             {

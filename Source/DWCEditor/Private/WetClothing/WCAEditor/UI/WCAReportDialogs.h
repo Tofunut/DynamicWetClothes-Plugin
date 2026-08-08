@@ -36,17 +36,30 @@ struct FDWCLODRangeUpdateReport
 
 namespace WCAReportDialogs
 {
+    struct FDWCDataUVVisibleExclusionDecision
+    {
+        TSet<int32> AcceptedMaterialSlotIndices;
+        TSet<int32> SkippedMaterialSlotIndices;
+        bool bCancelBuild = false;
+        bool bInternalError = false;
+        FString ErrorMessage;
+
+        bool HasSlotDecisions() const
+        {
+            return !AcceptedMaterialSlotIndices.IsEmpty() || !SkippedMaterialSlotIndices.IsEmpty();
+        }
+    };
+
     void OpenDWCDataUVBuildResultDialog(
         const FDWCDataUVBuildResult& Result,
         const UWetClothingAsset* Asset,
         const USkeletalMesh* PreparedMesh,
         const TSet<int32>& IncludedMaterialSlotIndices);
 
-    /** Returns the affected material slots explicitly accepted as Ready with warnings. */
-    TSet<int32> ConfirmDWCDataUVVisibleExclusion(
+    /** Resolves one pending visible-surface warning as Accept / Skip / Cancel. */
+    FDWCDataUVVisibleExclusionDecision ConfirmDWCDataUVVisibleExclusion(
         const FDWCDataUVBuildResult& Result,
-        const USkeletalMesh* PreparedMesh,
-        const TSet<int32>& IncludedMaterialSlotIndices);
+        const USkeletalMesh* SlotIdentityMesh);
 
     void OpenDWCDataUVBuildFailureDialog(
         const FDWCDataUVBuildResult& Result,

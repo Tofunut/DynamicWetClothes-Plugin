@@ -126,53 +126,129 @@ namespace
     {
         FDWCDataUVBuildOptions RetryOptions =
             Options != nullptr ? *Options : FDWCDataUVBuildOptions();
-        const FDWCDataUVBuildOptions* OptionsToUse = Options;
+
+        // Confirmation decisions are scoped to this interactive build invocation only.
+        // Never inherit an approval/skip from an earlier build attempt through reused options;
+        // a new user-triggered generation must ask again when the safety limit is exceeded.
+        RetryOptions.ConfirmedVisibleExclusionMaterialSlotIndices.Reset();
+        RetryOptions.SkippedMaterialSlotIndices.Reset();
 
         FDWCDataUVBuildResult Result;
-        TSet<int32> AcceptedMaterialSlotIndices =
-            RetryOptions.ConfirmedVisibleExclusionMaterialSlotIndices;
-        const int32 MaxBuildAttempts = FMath::Max(IncludedMaterialSlotIndices.Num(), 1) + 2;
+        TSet<int32> AcceptedMaterialSlotIndices;
+        TSet<int32> SkippedMaterialSlotIndices;
+        const USkeletalMesh* ConfirmationMesh = Asset.GetSourceSkeletalMesh() != nullptr
+            ? Asset.GetSourceSkeletalMesh()
+            : Asset.GetRuntimeSkeletalMesh();
+        const int32 MaterialSlotCount = ConfirmationMesh != nullptr
+            ? ConfirmationMesh->GetMaterials().Num()
+            : IncludedMaterialSlotIndices.Num();
+        // One confirmation decision is consumed per retry pass. Allow one initial analysis,
+        // one pass per material slot, and a small guard margin.
+        const int32 MaxBuildAttempts = FMath::Max(MaterialSlotCount, 1) + 3;
 
         for (int32 PassIndex = 0; PassIndex < MaxBuildAttempts; ++PassIndex)
         {
+            RetryOptions.ConfirmedVisibleExclusionMaterialSlotIndices = AcceptedMaterialSlotIndices;
+            RetryOptions.SkippedMaterialSlotIndices = SkippedMaterialSlotIndices;
+
+            // Every interactive DWC UV entry point uses immutable Source Mesh analysis.
+            // A pristine Prepared-LOD rebuild is also the default so repeated builds do
+            // not analyze topology produced by an earlier DWC generation. The only
+            // exception is an explicitly skipped slot that already exists in the sealed
+            // layout: preserving that slot unchanged requires the merge path.
+            RetryOptions.bUseSourceMeshForSafetyPreflight = true;
+            bool bHasSkippedExistingDataUVSlot = false;
+            if (!SkippedMaterialSlotIndices.IsEmpty() && Asset.HasLockedDataUVLayout())
+            {
+                for (const FDWCDataUVLODMetadata& Metadata : Asset.GetDataUVMetadata())
+                {
+                    for (const int32 SkippedSlotIndex : SkippedMaterialSlotIndices)
+                    {
+                        if (Metadata.GeneratedMaterialSlotIndices.IsEmpty() ||
+                            Metadata.GeneratedMaterialSlotIndices.Contains(SkippedSlotIndex))
+                        {
+                            bHasSkippedExistingDataUVSlot = true;
+                            break;
+                        }
+                    }
+                    if (bHasSkippedExistingDataUVSlot)
+                    {
+                        break;
+                    }
+                }
+            }
+            RetryOptions.bRebuildPreparedLODsFromSource = !bHasSkippedExistingDataUVSlot;
+
             Result = FDWCDataUVBuildService::Generate(
                 Asset,
                 bForceNewAsset,
                 bAllowOverwriteExistingDataUVChannel,
                 bUsePreferredDataUVChannel,
-                OptionsToUse);
+                &RetryOptions);
 
-            if (!Result.bRequiresUserConfirmation ||
-                Result.ConfirmationRequiredMaterialSlotIndices.IsEmpty())
+            if (!Result.NeedsConfirmation())
             {
                 return Result;
             }
 
-            const TSet<int32> NewlyAcceptedMaterialSlotIndices =
+            const WCAReportDialogs::FDWCDataUVVisibleExclusionDecision Decision =
                 WCAReportDialogs::ConfirmDWCDataUVVisibleExclusion(
                     Result,
-                    Result.PreparedMesh != nullptr ? Result.PreparedMesh : Asset.GetRuntimeSkeletalMesh(),
-                    IncludedMaterialSlotIndices);
+                    Asset.GetSourceSkeletalMesh() != nullptr
+                        ? Asset.GetSourceSkeletalMesh()
+                        : (Result.PreparedMesh != nullptr ? Result.PreparedMesh : Asset.GetRuntimeSkeletalMesh()));
 
-            int32 AddedAcceptedSlotCount = 0;
-            for (const int32 MaterialSlotIndex : NewlyAcceptedMaterialSlotIndices)
+            if (Decision.bInternalError)
+            {
+                Result.BuildState = EDWCDataUVBuildState::Failed;
+                Result.bSucceeded = false;
+                Result.bRequiresUserConfirmation = false;
+                Result.ConfirmationRequiredMaterialSlotIndices.Reset();
+                Result.ResultSeverity = EDWCDataUVResultSeverity::Failed;
+                Result.Message = Decision.ErrorMessage.IsEmpty()
+                    ? TEXT("Internal DWC UV diagnostic mismatch while resolving material-slot confirmation.")
+                    : Decision.ErrorMessage;
+                return Result;
+            }
+
+            if (Decision.bCancelBuild)
+            {
+                Result.SkippedMaterialSlotIndices = SkippedMaterialSlotIndices;
+                Result.MarkCancelled(TEXT("DWC UV build was cancelled. No changes were made to the Prepared Mesh."));
+                return Result;
+            }
+
+            int32 AddedDecisionCount = 0;
+            for (const int32 MaterialSlotIndex : Decision.AcceptedMaterialSlotIndices)
             {
                 if (!AcceptedMaterialSlotIndices.Contains(MaterialSlotIndex))
                 {
                     AcceptedMaterialSlotIndices.Add(MaterialSlotIndex);
-                    ++AddedAcceptedSlotCount;
+                    ++AddedDecisionCount;
+                }
+            }
+            for (const int32 MaterialSlotIndex : Decision.SkippedMaterialSlotIndices)
+            {
+                if (!SkippedMaterialSlotIndices.Contains(MaterialSlotIndex))
+                {
+                    SkippedMaterialSlotIndices.Add(MaterialSlotIndex);
+                    ++AddedDecisionCount;
                 }
             }
 
-            if (AddedAcceptedSlotCount == 0)
+            if (AddedDecisionCount == 0)
             {
+                Result.SkippedMaterialSlotIndices = SkippedMaterialSlotIndices;
+                Result.MarkCancelled(TEXT("DWC UV build was cancelled because the pending material-slot warning was not resolved. No changes were made to the Prepared Mesh."));
                 return Result;
             }
-
-            RetryOptions.ConfirmedVisibleExclusionMaterialSlotIndices = AcceptedMaterialSlotIndices;
-            OptionsToUse = &RetryOptions;
         }
 
+        Result.BuildState = EDWCDataUVBuildState::Failed;
+        Result.bSucceeded = false;
+        Result.bRequiresUserConfirmation = false;
+        Result.ResultSeverity = EDWCDataUVResultSeverity::Failed;
+        Result.Message = TEXT("DWC UV generation stopped because material-slot confirmation could not be resolved within the retry limit.");
         return Result;
     }
 
@@ -3659,8 +3735,19 @@ void FWCAEditor::HandleAssetSetupClicked()
                         IncludedMaterialSlotIndices,
                         &BuildOptions);
 
+                if (LODResult.IsCancelled() || !LODResult.SkippedMaterialSlotIndices.IsEmpty())
+                {
+                    FString RevertSummary;
+                    Asset->ApplySetupSettings(PreviousSettings, &RevertSummary);
+                    Report.bApplied = false;
+                    Report.ActiveFirstLODIndex = PreviousSettings.FirstGeneratedLODIndex;
+                    Report.ActiveLastLODIndex = PreviousSettings.LastGeneratedLODIndex;
+                    RefreshAssetStateAndEditor();
+                    return;
+                }
+
                 const bool bLODComplete =
-                    LODResult.bSucceeded && LODResult.FailedMaterialSlotIndices.IsEmpty();
+                    LODResult.IsReady() && LODResult.bSucceeded && LODResult.FailedMaterialSlotIndices.IsEmpty();
                 FDWCLODRangeUpdateLODDetail& Detail = Report.LODDetails.AddDefaulted_GetRef();
                 Detail.LODIndex = LODIndex;
                 Detail.bSucceeded = bLODComplete;
@@ -3742,7 +3829,14 @@ void FWCAEditor::HandleAssetSetupClicked()
                 false,
                 IncludedMaterialSlotIndices,
                 &BuildOptions);
-        if (!RangeSyncResult.bSucceeded)
+        if (RangeSyncResult.IsCancelled() || !RangeSyncResult.SkippedMaterialSlotIndices.IsEmpty())
+        {
+            FString RevertSummary;
+            Asset->ApplySetupSettings(PreviousSettings, &RevertSummary);
+            RefreshAssetStateAndEditor();
+            return;
+        }
+        if (RangeSyncResult.IsFailed() || !RangeSyncResult.bSucceeded)
         {
             FString RevertSummary;
             Asset->ApplySetupSettings(PreviousSettings, &RevertSummary);
@@ -3902,7 +3996,12 @@ void FWCAEditor::InitializeGeneratedDataUV(
         bAllowOverwriteExistingDataUVChannel,
         bUsePreferredDataUVChannel,
         IncludedMaterialSlotIndices);
-    if (!Result.bSucceeded)
+    if (Result.IsCancelled())
+    {
+        RefreshAssetStateAndEditor();
+        return;
+    }
+    if (Result.IsFailed() || !Result.bSucceeded)
     {
         Asset->SetLastBakeFailure(Result.Message);
         // Generate() already invalidated transient derived data. Refresh the editor as well so
@@ -4915,7 +5014,16 @@ bool FWCAEditor::ResolveIssuesAndSave(FString& OutFailure, FString* OutSuccessSu
                 false,
                 true,
                 CollectWettableMaterialSlotIndices(*Asset));
-        if (!DataUVResult.bSucceeded)
+        if (DataUVResult.IsCancelled() || !DataUVResult.SkippedMaterialSlotIndices.IsEmpty())
+        {
+            OutFailure = DataUVResult.IsCancelled()
+                ? (DataUVResult.Message.IsEmpty()
+                    ? TEXT("DWC UV generation was cancelled.")
+                    : DataUVResult.Message)
+                : TEXT("DWC UV generation stopped before all required material slots were built because one or more slots were skipped.");
+            return false;
+        }
+        if (DataUVResult.IsFailed() || !DataUVResult.bSucceeded)
         {
             Asset->SetLastBakeFailure(DataUVResult.Message);
             OutFailure = DataUVResult.Message;

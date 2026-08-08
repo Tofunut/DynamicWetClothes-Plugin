@@ -4,6 +4,12 @@
 #include "CoreMinimal.h"
 #include "MeshDescription.h"
 
+namespace DWCDataUVSafetyLimits
+{
+    /** Maximum visible 3D surface ratio that may be excluded without explicit user approval. */
+    static constexpr double VisibleExclusionRatio = 0.005; // 0.5%
+}
+
 /** Transient triangle data read from one editable Skeletal Mesh LOD. */
 struct FDWCDataUVTriangle
 {

@@ -8,6 +8,14 @@
 class UWetClothingAsset;
 class USkeletalMesh;
 
+enum class EDWCDataUVBuildState : uint8
+{
+    Ready,
+    RequiresConfirmation,
+    Failed,
+    Cancelled
+};
+
 struct FDWCDataUVLODWarning
 {
     int32 LODIndex = INDEX_NONE;
@@ -29,10 +37,29 @@ struct FDWCDataUVBuildOptions
 
     /** Slots for which the user explicitly accepted visible-surface exclusion above the safety limit. */
     TSet<int32> ConfirmedVisibleExclusionMaterialSlotIndices;
+
+    /** Slots explicitly skipped by the user while resolving visible-surface exclusion warnings. */
+    TSet<int32> SkippedMaterialSlotIndices;
+
+    /**
+     * Run the safety/confirmation pass against the immutable Source Mesh before the
+     * Prepared Mesh is resolved or modified. This makes warning decisions repeatable
+     * across rebuilds and guarantees Cancel does not touch the Prepared Mesh.
+     */
+    bool bUseSourceMeshForSafetyPreflight = false;
+
+    /**
+     * Before the actual generation pass, restore the targeted Prepared Mesh LODs from
+     * the Source Mesh. Generation plans are then built/applied against pristine source
+     * topology instead of topology produced by a previous DWC UV build.
+     */
+    bool bRebuildPreparedLODsFromSource = false;
 };
 
 struct FDWCDataUVBuildResult
 {
+    /** Explicit lifecycle state. bSucceeded is retained as a compatibility/result-payload flag. */
+    EDWCDataUVBuildState BuildState = EDWCDataUVBuildState::Failed;
     bool bSucceeded = false;
     USkeletalMesh* PreparedMesh = nullptr;
     int32 DataUVChannelIndex = INDEX_NONE;
@@ -59,6 +86,7 @@ struct FDWCDataUVBuildResult
     TArray<FDWCDataUVSlotWarning> SlotWarnings;
     TSet<int32> GeneratedMaterialSlotIndices;
     TSet<int32> FailedMaterialSlotIndices;
+    TSet<int32> SkippedMaterialSlotIndices;
     /** Build was analyzed but not committed until the listed slots are explicitly accepted. */
     bool bRequiresUserConfirmation = false;
     TSet<int32> ConfirmationRequiredMaterialSlotIndices;
@@ -68,6 +96,20 @@ struct FDWCDataUVBuildResult
     int32 ChartBoundarySplitVertexInstanceCount = 0;
     FString TimingSummary;
     FString Message;
+
+    bool IsReady() const { return BuildState == EDWCDataUVBuildState::Ready; }
+    bool NeedsConfirmation() const { return BuildState == EDWCDataUVBuildState::RequiresConfirmation; }
+    bool IsFailed() const { return BuildState == EDWCDataUVBuildState::Failed; }
+    bool IsCancelled() const { return BuildState == EDWCDataUVBuildState::Cancelled; }
+
+    void MarkCancelled(const FString& InMessage)
+    {
+        BuildState = EDWCDataUVBuildState::Cancelled;
+        bSucceeded = false;
+        bRequiresUserConfirmation = false;
+        ConfirmationRequiredMaterialSlotIndices.Reset();
+        Message = InMessage;
+    }
 };
 
 class FDWCDataUVBuildService

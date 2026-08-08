@@ -143,6 +143,8 @@ class SWetClothingPartEditorPanel : public SCompoundWidget
     FSlateColor                                    GetMaterialSlotRowAccentColor(int32 MaterialSlotIndex) const;
     bool                                           IsMaterialSlotIncludedInDataUVLayout(int32 MaterialSlotIndex) const;
     bool                                           DoesMaterialSlotHaveDataUVWarnings(int32 MaterialSlotIndex) const;
+    bool                                           DoesMaterialSlotHaveDataUVDiagnostics(int32 MaterialSlotIndex) const;
+    bool                                           HasCompleteDataUVDiagnosticRecords(int32 MaterialSlotIndex) const;
     bool                                           IsMaterialSlotPartMapComplete(int32 MaterialSlotIndex) const;
     bool                                           DoesMaterialSlotNeedPartMapAttention(int32 MaterialSlotIndex) const;
     FText                                          GetMaterialSlotPartMapWarningText(int32 MaterialSlotIndex) const;
@@ -160,7 +162,8 @@ class SWetClothingPartEditorPanel : public SCompoundWidget
     void                                           SyncDataUVOperationSelection();
     FDWCDataUVBuildResult                          GenerateDataUVForTargetSlots(
                                                         const TSet<int32>& TargetMaterialSlotIndices,
-                                                        const TSet<int32>* ConfirmedVisibleExclusionMaterialSlotIndices = nullptr);
+                                                        const TSet<int32>* ConfirmedVisibleExclusionMaterialSlotIndices = nullptr,
+                                                        const TSet<int32>* SkippedMaterialSlotIndices = nullptr);
     void                                           RestorePersistedDataUVFailureState();
     void                                           PersistDataUVFailureState();
     EVisibility                                    GetDataUVUpdateBarVisibility() const;

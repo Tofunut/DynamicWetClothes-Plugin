@@ -370,7 +370,7 @@ struct DWC_API FDWCDataUVLODMetadata
     UPROPERTY(VisibleAnywhere, Category = "DWC UV Channel")
     TArray<int32> GeneratedMaterialSlotIndices;
 
-    /** Per-slot details for non-fatal DWC UV Channel warnings. Empty on legacy assets. */
+    /** Per-slot DWC UV diagnostic records. Empty on legacy assets; records may exist with zero counts for a clean analyzed slot. */
     UPROPERTY(VisibleAnywhere, Category = "DWC UV Channel")
     TArray<FDWCDataUVSlotWarning> SlotWarnings;
 
